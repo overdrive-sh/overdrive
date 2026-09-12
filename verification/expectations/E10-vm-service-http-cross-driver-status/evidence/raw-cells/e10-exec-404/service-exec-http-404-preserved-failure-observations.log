@@ -1,0 +1,32 @@
+observed_utc=2026-09-12T09:31:30Z state=Terminated
+Service 'service-exec-http-404' (kind: Service)
+Spec digest: c9a953b2681ae6913b2f4a4bbe1d5e5a234234714a2b10a166d9da6621a3d48f
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-404-0 Terminated   1          (c=5284,w=local)    
+    reason: stopped (by operator)
+    last terminated: Failed at (c=5278,w=local) — driver started
+    last terminated ran since: 1789205483.972857922
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-404-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205490303
+settled_utc=2026-09-12T09:31:33Z state=Terminated
+Service 'service-exec-http-404' (kind: Service)
+Spec digest: c9a953b2681ae6913b2f4a4bbe1d5e5a234234714a2b10a166d9da6621a3d48f
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-404-0 Terminated   1          (c=5292,w=local)    
+    reason: stopped
+    last terminated: Failed at (c=5278,w=local) — driver started
+    last terminated ran since: 1789205483.972857922
+Memory:        67108864
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 404) last_observed_at=1789205490303

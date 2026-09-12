@@ -1,0 +1,9 @@
+before_stop_allocation=alloc-service-vm-http-302-0
+before_stop_restart_count=1
+before_stop_prior_failure=    last terminated: Failed at (c=6012,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+before_stop_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205547686
+after_stop_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205553114
+after_cleanup_allocation=alloc-service-vm-http-302-0
+after_cleanup_restart_count=1
+after_cleanup_prior_failure=    last terminated: Failed at (c=6012,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+after_cleanup_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205553114

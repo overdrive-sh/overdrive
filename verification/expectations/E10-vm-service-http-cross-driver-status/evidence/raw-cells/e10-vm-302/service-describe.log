@@ -1,0 +1,22 @@
+Service 'service-vm-http-302' (kind: Service)
+Spec digest: e8296dee29f0330857c76c5835acdad8db80dd3ba6d4978bd4343c47f9ff971a
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-302-0 Running      1          (c=7884,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=6012,w=local) — driver internal error: bind beacon listener: Address already in use (os error 98)
+    last terminated ran since: 1789205543.483890732
+    last terminated detail: bind beacon listener: Address already in use (os error 98)
+Memory:        134217728
+Addresses:
+  alloc-service-vm-http-302-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        44194ca0e952b44aae8ab10254553c60
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-http-302/alloc/alloc-service-vm-http-302-0
+    issuer_serial: 55f0e4b0707d55fba71452a85332658d
+    not_after:     1789209088.951358706
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205547686

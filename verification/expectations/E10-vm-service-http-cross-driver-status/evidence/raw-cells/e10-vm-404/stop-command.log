@@ -1,0 +1,1 @@
+env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive job stop service-vm-http-404

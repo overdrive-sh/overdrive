@@ -1,0 +1,6 @@
+allocation_id=alloc-service-exec-http-204-0
+current_state=Running
+restart_count=0
+current_row=alloc-service-exec-http-204-0 Running 0 (c=2539,w=local)
+prior_failure=
+startup_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789205448684

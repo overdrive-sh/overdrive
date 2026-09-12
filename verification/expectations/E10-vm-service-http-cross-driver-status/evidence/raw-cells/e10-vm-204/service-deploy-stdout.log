@@ -1,0 +1,8 @@
+Accepted.
+Workload ID:   service-vm-http-204
+Intent key:    workloads/service-vm-http-204
+Spec digest:   be97fc02a9c33d866e3ce07cafdbe0193b423d2ef46b249ca4b3c364711be7ed
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-http-204
+Service 'service-vm-http-204' is stable (settled in 2210ms; witness: startup probe[0] (http /ready))

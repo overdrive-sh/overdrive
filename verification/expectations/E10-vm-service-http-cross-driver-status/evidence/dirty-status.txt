@@ -1,59 +1,22 @@
- M .config/nextest.toml
  M AGENTS.md
- M crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs
  M docs/feature/vm-lifecycle-latency/deliver/execution-log.json
+ M examples/service-kind-vm-workloads/README.md
  M examples/service-kind-vm-workloads/run-example.sh
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_after_stop.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_final.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_latest.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/execution_substrate.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_scopes.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/rootfs_staging.log
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/run.log
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/teardown_sweep.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
- M verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh
- M verification/expectations/E08-vm-service-guest-health/evidence/dirty-diff.patch
- M verification/expectations/E08-vm-service-guest-health/evidence/dirty-status.txt
- M verification/expectations/E08-vm-service-guest-health/evidence/product-run.meta
- M verification/expectations/E08-vm-service-guest-health/evidence/product-run.out
- M verification/expectations/E08-vm-service-guest-health/evidence/run.log
- M verification/expectations/E08-vm-service-guest-health/evidence/verification.yaml
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-diff.patch
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.meta
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.out
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/run.log
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/tcp-truthfulness-20.tsv
- M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/verification.yaml
+ M verification/expectations/E06-vm-job-deploy-reaches-running/README.md
  M verification/expectations/E10-vm-service-http-cross-driver-status/README.md
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-diff.patch
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-status.txt
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/http-status-cross-driver.tsv
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.meta
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.out
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/run.log
  M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/verification.yaml
  M verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-diff.patch
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-status.txt
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/product-run.meta
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/product-run.out
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/readiness-recovery.tsv
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/run.log
- M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/verification.yaml
  M verification/expectations/INDEX.md
+ M verification/harness/run-expectation.sh
+ M verification/harness/test-run-expectation.sh
+?? DETERMINISTIC-WORKFLOWS.md
+?? docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/evidence-pullback.out
+?? verification/expectations/E10-vm-service-http-cross-driver-status/evidence/raw-cells/
+?? verification/harness/test-e10-cleanup-oracle.sh

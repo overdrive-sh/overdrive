@@ -1,0 +1,65 @@
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-12 09:31:04+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/http-exec-302.toml" <not executed on terminal>]
+Error: workload 'service-exec-http-302' did not converge to stable.
+  reason: startup probe[0] failed after 3 attempts: HTTP 302 (redirect not followed)
+  reproducer: overdrive workload describe service-exec-http-302
+
+Hint: see workload describe for full context
+
+Script done on 2026-09-12 09:31:07+00:00 [COMMAND_EXIT_CODE="1"]
+Service 'service-exec-http-302' (kind: Service)
+Spec digest: 3619f0fb4ca328dda71abb24e41250e19798be7c3af94c2ccfb92c33f6f670f5
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-302-0 Running      1          (c=5958,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=5953,w=local) — driver started
+    last terminated ran since: 1789205464.441471879
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-302-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        74b1927bdb750d2ec500ef78aec0521e
+    spiffe_id:     spiffe://overdrive.local/workload/service-exec-http-302/alloc/alloc-service-exec-http-302-0
+    issuer_serial: 6253f19cfd9408033c4004b3fc69c96b
+    not_after:     1789209007.743013828
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205467487
+Stopped workload 'service-exec-http-302'.
+Endpoint: https://127.0.0.1:7644/
+Service 'service-exec-http-302' (kind: Service)
+Spec digest: 3619f0fb4ca328dda71abb24e41250e19798be7c3af94c2ccfb92c33f6f670f5
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-302-0 Terminated   1          (c=5959,w=local)    
+    reason: stopped (by operator)
+    last terminated: Failed at (c=5953,w=local) — driver started
+    last terminated ran since: 1789205464.441471879
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-302-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205470767
+Service 'service-exec-http-302' (kind: Service)
+Spec digest: 3619f0fb4ca328dda71abb24e41250e19798be7c3af94c2ccfb92c33f6f670f5
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-302-0 Terminated   1          (c=5967,w=local)    
+    reason: stopped
+    last terminated: Failed at (c=5953,w=local) — driver started
+    last terminated ran since: 1789205464.441471879
+Memory:        67108864
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 302 (redirect not followed)) last_observed_at=1789205470767
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E10 named cleanup: observed-before-stop=3 post-stop=absent serve=stopped preparation=absent

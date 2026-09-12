@@ -1,0 +1,4 @@
+after_stop_allocation=alloc-service-vm-http-204-0
+after_stop_restart_count=0
+after_cleanup_allocation=alloc-service-vm-http-204-0
+after_cleanup_restart_count=0

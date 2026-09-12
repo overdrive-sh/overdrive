@@ -1,0 +1,6 @@
+allocation_id=alloc-service-exec-http-503-0
+current_state=Running
+restart_count=1
+current_row=alloc-service-exec-http-503-0 Running 1 (c=6445,w=local)
+prior_failure=    last terminated: Failed at (c=6440,w=local) — driver started
+startup_probe=  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205506710

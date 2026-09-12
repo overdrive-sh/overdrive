@@ -77,9 +77,22 @@ make_expectation E09-v2 default 0
 git -C "$TEST_ROOT" add verification
 git -C "$TEST_ROOT" commit -qm 'test fixtures'
 
+# The receipt must include dirty source state while excluding every evidence
+# path, including its own output path. This makes the fixture exercise the
+# non-self-referential path rather than merely checking manifest branches.
+printf '\n# dirty source input\n' >>"$TEST_ROOT/verification/harness/run-expectation.sh"
+mkdir -p "$TEST_ROOT/verification/expectations/S01-fixture/evidence"
+printf 'dirty captured output\n' \
+  >"$TEST_ROOT/verification/expectations/S01-fixture/evidence/preexisting.out"
+
 run_case S01 zero
 assert_manifest "$TEST_ROOT/verification/expectations/S01-fixture/evidence/verification.yaml" \
   succeeded lima true
+receipt="$TEST_ROOT/verification/expectations/S01-fixture/evidence/dirty-diff.patch"
+grep -Fq 'verification/harness/run-expectation.sh' "$receipt" \
+  || fail "dirty receipt omitted modified source input"
+! grep -Fq 'verification/expectations/S01-fixture/evidence/' "$receipt" \
+  || fail "dirty receipt included excluded expectation evidence"
 
 run_case S02 zero
 assert_manifest "$TEST_ROOT/verification/expectations/S02-fixture/evidence/verification.yaml" \

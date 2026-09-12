@@ -1,819 +1,1390 @@
-diff --git a/.config/nextest.toml b/.config/nextest.toml
-index 968b0cf4..0e45175e 100644
---- a/.config/nextest.toml
-+++ b/.config/nextest.toml
-@@ -195,6 +195,15 @@ test-group = 'trybuild'
- [test-groups.host-kernel-shared]
- max-threads = 1
- 
-+# service-kind-vm-workloads quick-bind integration scenarios — both modules
-+# drive a real ExecDriver through the shared host cgroup hierarchy. Their
-+# `#[serial(workload_cgroup)]` annotations serialize only inside one nextest
-+# process; nextest launches each test in its own process, so keep both modules
-+# in the workspace-wide single-writer domain above.
-+[[profile.default.overrides]]
-+filter = 'package(overdrive-cli) & binary(integration) & (test(workload_describe_probes) | test(service_honest_stable))'
-+test-group = 'host-kernel-shared'
-+
- # NOTE (transparent-mtls 04-04): every real per-alloc-netns Tier-3 module joins
- # this single-writer group because the 04-04 adopt-on-restart boot pass — run by
- # the `serve_restart_*` adopt tests AND by the run_server mtls boot tests already
-@@ -459,6 +468,14 @@ test-group = 'host-kernel-shared'
- filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
- test-group = 'host-kernel-shared'
- 
-+# vm-lifecycle-latency S-VLL-11 (step 01-03) — one persistent in-process
-+# server drives 1,200 fresh native Cloud Hypervisor trials.  The complete
-+# population is intentionally long-running; keep the timeout scoped to this
-+# one test so its finite nextest liveness guard does not truncate the ledger.
-+[[profile.default.overrides]]
-+filter = 'package(overdrive-cli) & binary(integration) & test(native_lifecycle_profiles_meet_stage_targets_without_dropping_trials)'
-+slow-timeout = { period = "60s", terminate-after = 180 }
-+
- # guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
- # guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).
- # SAME two reasons as vm_walking_skeleton.rs immediately above: every S-GTI
 diff --git a/AGENTS.md b/AGENTS.md
-index 9721c1c7..7103df29 100644
+index 9721c1c7..fe2c4e16 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -287,7 +287,7 @@ directory listed above.
+@@ -287,38 +287,30 @@ directory listed above.
  <claude-mem-context>
  # Memory Context
  
 -# [helios/karachi-v1] recent context, 2026-09-10 8:04pm GMT+2
-+# [helios/karachi-v1] recent context, 2026-09-11 10:17pm GMT+2
++# [helios/karachi-v1] recent context, 2026-09-12 10:30am GMT+2
  
  Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
  Format: ID TIME TYPE TITLE
-diff --git a/crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs b/crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs
-index 0b0d0ea3..c182b6dc 100644
---- a/crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs
-+++ b/crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs
-@@ -2797,6 +2797,7 @@ struct NativeTrial {
-     alloc: AllocationId,
-     failed: Option<String>,
-     operator_stop_duration: Option<Duration>,
-+    stop_admission_after_stop_return: Option<Duration>,
-     terminal_after_stop_return: Option<Duration>,
-     observed_cleanup_at: std::time::Instant,
- }
-@@ -2824,6 +2825,37 @@ fn native_alloc_from(out: &WorkloadDescribeOutput) -> Option<AllocationId> {
-     out.snapshot.rows.first().and_then(|row| AllocationId::new(&row.alloc_id).ok())
- }
+ Fetch details: get_observations([IDs]) | Search: mem-search skill
  
-+// Public-stop-to-admission is a recorded distribution, not a product SLO.
-+// Await the required stage boundary without a fixture-local duration gate; the
-+// enclosing test-runner liveness boundary remains the finite guard if the event
-+// is genuinely absent.  Once admission is observed, the trial applies its
-+// independent terminal-observation bound and stage quantile contract.
-+async fn await_stop_admission(
-+    events: Option<&Arc<Mutex<Vec<CapturedLifecycleEvent>>>>,
-+    alloc: Option<&AllocationId>,
-+    public_stop_returned_at: std::time::Instant,
-+) -> Option<Duration> {
-+    let (Some(events), Some(alloc)) = (events, alloc) else { return Some(Duration::ZERO) };
-+    let alloc = alloc.to_string();
-+    loop {
-+        let observed_at = {
-+            events
-+                .lock()
-+                .expect("lifecycle-event mutex not poisoned")
-+                .iter()
-+                .find(|event| {
-+                    event.name == "vm.lifecycle.stop_enter"
-+                        && event.fields.get("alloc") == Some(&alloc)
-+                })
-+                .map(|event| event.at)
-+        };
-+        if let Some(observed_at) = observed_at {
-+            return Some(observed_at.saturating_duration_since(public_stop_returned_at));
-+        }
-+        tokio::time::sleep(Duration::from_millis(25)).await;
-+    }
-+}
-+
- #[allow(
-     clippy::too_many_arguments,
-     reason = "the retained trial record keeps fixture cleanup, timing and failure evidence together"
-@@ -2836,6 +2868,7 @@ async fn finish_native_trial(
-     rootfs: &Path,
-     data_dir: &Path,
-     operator_stop_duration: Option<Duration>,
-+    stop_admission_after_stop_return: Option<Duration>,
-     terminal_after_stop_return: Option<Duration>,
-     mut failures: Vec<String>,
- ) -> NativeTrial {
-@@ -2856,18 +2889,21 @@ async fn finish_native_trial(
-         alloc,
-         failed: (!failures.is_empty()).then(|| failures.join("; ")),
-         operator_stop_duration,
-+        stop_admission_after_stop_return,
-         terminal_after_stop_return,
-         observed_cleanup_at: std::time::Instant::now(),
-     }
- }
+-Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
++Stats: 50 obs (29,210t read) | 1,013,018t work | 97% savings
  
- #[allow(
-+    clippy::too_many_arguments,
-     clippy::too_many_lines,
--    reason = "one trial retains the complete three-profile result ledger instead of splitting failure accounting across helpers"
-+    reason = "one trial retains the complete three-profile result ledger and its shared stage-event oracle instead of splitting failure accounting across helpers"
- )]
- async fn exercise_native_trial(
-     profile: NativeLifecycleProfile,
-     ordinal: usize,
-+    events: Option<&Arc<Mutex<Vec<CapturedLifecycleEvent>>>>,
-     cfg: PathBuf,
-     spec_dir: PathBuf,
-     kernel: PathBuf,
-@@ -2899,6 +2935,7 @@ async fn exercise_native_trial(
-                 .expect("valid failed-trial allocation placeholder"),
-                 failed: Some(format!("deploy: {error}")),
-                 operator_stop_duration: None,
-+                stop_admission_after_stop_return: None,
-                 terminal_after_stop_return: None,
-                 observed_cleanup_at: std::time::Instant::now(),
-             };
-@@ -2931,6 +2968,8 @@ async fn exercise_native_trial(
-             if let Err(error) = stop_result {
-                 failures.push(format!("stop: {error}"));
-             }
-+            let stop_admission_after_stop_return =
-+                await_stop_admission(events, alloc.as_ref(), stop_returned_at).await;
-             let terminal =
-                 poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
-                     .await;
-@@ -2957,6 +2996,7 @@ async fn exercise_native_trial(
-                 &rootfs,
-                 &data_dir,
-                 Some(operator_stop_duration),
-+                stop_admission_after_stop_return,
-                 terminal_after_stop_return,
-                 failures,
-             )
-@@ -2970,10 +3010,21 @@ async fn exercise_native_trial(
-             let mut failures = Vec::new();
-             if terminal.reached {
-                 let row = terminal.last.snapshot.rows.first().expect("terminal trial row");
--                if row.state != AllocStateWire::Terminated || row.exit_code != Some(0) {
-+                let exit_projection_matches_terminal = matches!(
-+                    (&row.terminal, row.exit_code),
-+                    (None, None)
-+                        | (
-+                            Some(overdrive_core::TerminalCondition::Completed { exit_code: 0 }),
-+                            Some(0)
-+                        )
-+                );
-+                if row.state != AllocStateWire::Terminated
-+                    || row.reason != Some(TransitionReason::Stopped { by: StoppedBy::Process })
-+                    || !exit_projection_matches_terminal
-+                {
-                     failures.push(format!(
--                        "finite Job terminal was {:?}, exit {:?}, reason {:?}",
--                        row.state, row.exit_code, row.reason
-+                        "finite Job terminal was {:?}, exit {:?}, reason {:?}, terminal {:?}",
-+                        row.state, row.exit_code, row.reason, row.terminal
-                     ));
-                 }
-             } else {
-@@ -3010,6 +3061,7 @@ async fn exercise_native_trial(
-                 &data_dir,
-                 None,
-                 None,
-+                None,
-                 failures,
-             )
-             .await
-@@ -3067,6 +3119,8 @@ async fn exercise_native_trial(
-             if let Err(error) = stop_result {
-                 failures.push(format!("stop: {error}"));
-             }
-+            let stop_admission_after_stop_return =
-+                await_stop_admission(events, alloc.as_ref(), stop_returned_at).await;
-             let terminal =
-                 poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
-                     .await;
-@@ -3093,6 +3147,7 @@ async fn exercise_native_trial(
-                 &rootfs,
-                 &data_dir,
-                 Some(operator_stop_duration),
-+                stop_admission_after_stop_return,
-                 terminal_after_stop_return,
-                 failures,
-             )
-@@ -3591,7 +3646,6 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error()
- )]
- #[tokio::test]
- #[serial(cgroup)]
--#[ignore = "pending DELIVER step 01-03: 1200 fresh KVM guests on the pinned native metal fixture"]
- async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
-     let (events, trace_enabled) = install_lifecycle_trace();
-     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
-@@ -3665,6 +3719,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-         exercise_native_trial(
-             NativeLifecycleProfile::Ready,
-             0,
-+            Some(&events),
-             cfg.clone(),
-             server_tmp.path().to_path_buf(),
-             fixture.kernel_path.clone(),
-@@ -3690,6 +3745,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-     let uninstrumented_control = exercise_native_trial(
-         NativeLifecycleProfile::Ready,
-         9_999,
-+        None,
-         cfg.clone(),
-         server_tmp.path().to_path_buf(),
-         fixture.kernel_path.clone(),
-@@ -3714,6 +3770,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-             exercise_native_trial(
-                 NativeLifecycleProfile::Ready,
-                 ordinal,
-+                Some(&events),
-                 cfg.clone(),
-                 server_tmp.path().to_path_buf(),
-                 fixture.kernel_path.clone(),
-@@ -3729,6 +3786,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-                 exercise_native_trial(
-                     profile,
-                     ordinal,
-+                    Some(&events),
-                     cfg.clone(),
-                     server_tmp.path().to_path_buf(),
-                     fixture.kernel_path.clone(),
-@@ -3753,6 +3811,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-                 exercise_native_trial(
-                     profile,
-                     200 + cohort * 10 + worker,
-+                    Some(&events),
-                     cfg.clone(),
-                     server_tmp.path().to_path_buf(),
-                     fixture.kernel_path.clone(),
-@@ -3816,6 +3875,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-     let mut driver_cleanup_samples = Vec::with_capacity(800);
-     let mut reaper_to_cleanup_samples = Vec::with_capacity(1_200);
-     let mut operator_stop_samples = Vec::with_capacity(800);
-+    let mut stop_admission_after_stop_samples = Vec::with_capacity(800);
-     let mut terminal_after_stop_samples = Vec::with_capacity(800);
-     for trial in &ledger {
-         let target = format!("workload/{}", trial.workload_id);
-@@ -3886,6 +3946,11 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-                 driver_cleanup_samples.push(cleanup_calls.at.duration_since(stop_enter.at));
-                 operator_stop_samples
-                     .push(trial.operator_stop_duration.expect("READY records public stop return"));
-+                stop_admission_after_stop_samples.push(
-+                    trial
-+                        .stop_admission_after_stop_return
-+                        .expect("READY records stop admission after public return"),
-+                );
-                 terminal_after_stop_samples.push(
-                     trial
-                         .terminal_after_stop_return
-@@ -3915,6 +3980,11 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-                         .operator_stop_duration
-                         .expect("Service records public stop return separately"),
-                 );
-+                stop_admission_after_stop_samples.push(
-+                    trial
-+                        .stop_admission_after_stop_return
-+                        .expect("Service records stop admission after public return"),
-+                );
-                 terminal_after_stop_samples.push(
-                     trial
-                         .terminal_after_stop_return
-@@ -3972,10 +4042,14 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials()
-     let reaper_to_cleanup =
-         duration_distribution(&reaper_to_cleanup_samples, "reaper-to-driver-cleanup");
-     let operator_stop = duration_distribution(&operator_stop_samples, "public stop return");
-+    let stop_admission_after_stop = duration_distribution(
-+        &stop_admission_after_stop_samples,
-+        "stop admission after public stop return",
-+    );
-     let terminal_after_stop =
-         duration_distribution(&terminal_after_stop_samples, "terminal observation after stop");
-     eprintln!(
--        "S-VLL-11 separate stages: admission_queue={admission_queue:?}; driver_stop_to_cleanup={driver_cleanup:?}; reaper_to_driver_cleanup={reaper_to_cleanup:?}; public_stop_return={operator_stop:?}; terminal_after_public_stop={terminal_after_stop:?}"
-+        "S-VLL-11 separate stages: admission_queue={admission_queue:?}; stop_admission_after_public_stop={stop_admission_after_stop:?}; driver_stop_to_cleanup={driver_cleanup:?}; reaper_to_driver_cleanup={reaper_to_cleanup:?}; public_stop_return={operator_stop:?}; terminal_after_public_stop={terminal_after_stop:?}"
-     );
+ ### Jun 28, 2026
+-S9826 Create PR for dial-by-name-responder with investigation of pre-push test failure and examination of TCP prober implementation (Jun 28 at 6:13 PM)
+-S9824 Create pull request for dial-by-name-responder feature with investigation and resolution of pre-push test failure (Jun 28 at 6:37 PM)
+-S9825 Create pull request for completed dial-by-name-responder feature after investigating and resolving pre-push test gate failure (Jun 28 at 6:37 PM)
+ S9827 Complete root cause analysis of TCP probe test failure and propose fix for Lima networking incompatibility (Jun 28 at 6:38 PM)
+ S9831 Bug report investigation for missing nix time feature - verification phase completed (Jun 28 at 6:41 PM)
+ S9830 Investigation of whether 15-second bidirectional discovery time in dial-by-name PR #252 indicates slow platform performance (Jun 28 at 6:41 PM)
+ S9832 Bug report investigation concluded as false positive - draft PR response prepared (Jun 28 at 6:43 PM)
+ S9828 Investigated whether 15-second bidirectional discovery time in PR #252 represents slow platform performance (Jun 28 at 6:43 PM)
+ S9829 Bug report investigation claiming nix time feature missing for TimeVal usage in DNS responder (Jun 28 at 6:43 PM)
+-S9833 Fix TCP probe timeout test failure and push dial-by-name branch with clean test gates (Jun 28 at 6:54 PM)
++S9833 Fix TCP probe timeout test failure and push dial-by-name branch with clean test gates (Jun 28 at 6:44 PM)
++S13251 User asked about c=X notation meaning in E11 test output and investigated why counter increased from c=15 to c=1854 (Jun 28 at 6:54 PM)
+ ### Jul 29, 2026
+-57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
+-57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope
+-57744 5:22p 🔵 Stateright's Three Real Adopters: Microsoft CCF, Quickwit, PostHog All Recent Auxiliary Verification
+-57745 " 🔵 The Spec-Implementation Gap: Why TLA+ Alone Is Insufficient Industry Consensus 2025-2026
+-57746 " 🔵 TLC Model Checking State Space Explosion Concrete Numbers: MongoDB 16s→44min on One Extra Key
+ 57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
+ 57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
+ 57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
+ 57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
+ 57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
+ 57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
+-57753 " 🔵 Aurora DSQL Uses ONLY Simulation Testing, NOT Formal Methods: Marc Brooker Blog Debunks Potential AWS Universality Claim
+ 57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
+ 57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
+ 57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
+@@ -352,26 +344,35 @@ S9833 Fix TCP probe timeout test failure and push dial-by-name branch with clean
+ 57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
+ 57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
+ 57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
+-**57787** " 🔵 **Python Virtual Environment Created With websocket-client for CDP Automation**
+-The attempt to install websocket-client into the system Python environment failed due to PEP 668 protection which prevents package installations that could break OS-managed Python distributions. The workaround created an isolated Python virtual environment at /tmp/cdpvenv/ and successfully installed websocket-client version 1.9.0 within it. This provides the necessary WebSocket communication library for Chrome DevTools Protocol automation, enabling programmatic browser control via CDP's WebSocket interface. The venv approach maintains system Python integrity while providing the required dependencies for headless browser automation that could potentially bypass Cloudflare's bot detection better than simple --dump-dom mode.
+-~349t 🔍 1,337
++57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
++57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
++57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
++57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
++57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
++### Sep 12, 2026
++74120 9:42a 🔵 Overdrive Logical Timestamp Format Decoded
++**74121** " 🔵 **Overdrive LogicalTimestamp Field Names Confirmed**
++Code search clarified the exact structure of logical timestamps in Overdrive. The format "(c=X,nY)" represents a LogicalTimestamp with counter X and NodeId Y. The handlers.rs code constructs this from row.updated_at.counter and row.updated_at.n fields. The mtls_resolve_adapter.rs shows NodeId::new("local") creates the node identifier for local execution. The git diff of E11 evidence reveals the counter increments across workload lifecycle events: service allocation starts at c=1854, first client at c=1867, second client at c=1891, and final client at c=1912. This monotonic counter progression tracks distributed state updates, with the node field identifying which control plane node performed each update.
++~345t 🔍 9,675
  
-     server.shutdown().await.expect("shutdown persistent native profile server");
+-**57788** 5:57p 🔵 **Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333**
+-Verification of the Chrome DevTools Protocol infrastructure confirmed a Chrome instance was running with remote debugging enabled on port 9333 and properly exposing the CDP endpoint. The /json endpoint returned well-formed target information including WebSocket debugger URLs for programmatic browser control. The presence of two targets (a blank page and a service worker from a chrome-extension) indicates Chrome was fully initialized and ready for CDP commands. The WebSocket URLs follow the standard CDP format enabling connection for page navigation, DOM inspection, and JavaScript execution commands. This infrastructure was then cleaned up by killing the Chrome process, confirming the automation attempt had been made but presumably failed to bypass Cloudflare protection.
+-~404t 🔍 1,225
++**74122** 9:45a 🔵 **LogicalTimestamp Lamport Clock Semantics and Per-Key Versioning**
++Investigation into LogicalTimestamp implementation in observation_store.rs revealed the counter semantics underlying the (c=X,w=Y) notation in test output. The counter field is a per-LWW-key (Last-Write-Wins) version number, not a global scheduling counter. Each key maintains its own strictly increasing counter sequence. The dominating() method advances the counter by taking the maximum of a tick_floor and the prior counter plus one, using saturating_add to safely handle u64::MAX. The lexicographic ordering (counter, writer) implements a Lamport clock where the counter provides causal ordering and the writer NodeId breaks ties deterministically. This design ensures that concurrent writes from different nodes can be consistently ordered, with the higher counter always dominating regardless of which node wrote it. The E11 test evidence showing progression from c=1854 to c=1912 represents the LWW version counter incrementing across successive state transitions for the workload allocation key.
++~444t 🔍 7,962
+ 
+-**57789** " 🔵 **Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335**
+-The primary session successfully launched Chrome in headless mode with anti-bot-detection configuration including disabled automation control features and a fresh user data directory to avoid fingerprinting from previous sessions. The browser became operational within 2 seconds, exposing the Chrome DevTools Protocol endpoint on port 9335 with three targets ready for interaction. The configuration uses flags specifically designed to evade headless browser detection: --disable-blink-features=AutomationControlled prevents JavaScript from detecting automation mode, and a custom user-agent string mimics a future Chrome release. This represents the foundation for CDP-based navigation that could potentially bypass Cloudflare's JavaScript challenges by executing them in a real browser context rather than simple DOM dumping.
+-~447t 🔍 1,362
++**74123** " 🔵 **LogicalTimestamp tick_floor Sourced from Reconciliation Tick**
++Tracing LogicalTimestamp::ln() call sites across the control plane revealed how the tick_floor parameter is sourced in practice. The reconciliation loop provides its current tick value (tick.tick) as the floor parameter when constructing new timestamps for state updates. This ties the logical timestamp counter advancement to the reconciliation cadence - each reconciliation tick provides a minimum floor that the counter must exceed, ensuring forward progress even without prior values. The action_shim, dataplane_update_service, and reconciler_runtime all follow the pattern LogicalTimestamp::ln(tick.tick, node_id, prior_updated_at), where the tick comes from the reconciliation loop context. The exit_observer is notable for passing tick_floor=0, indicating a same-tick update that only needs to dominate the prior row's counter. This architecture ensures counter monotonicity is tied to the reconciliation loop's progression, not wall-clock time.
++~442t 🔍 4,275
+ 
+-**57790** " 🔵 **Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag**
+-The CDP automation debugging script successfully launched Chrome and retrieved the target list via HTTP, confirming the browser was operational with remote debugging enabled on port 9336. However, when attempting to establish a WebSocket connection to control the page, Chrome's security layer rejected the handshake with HTTP 403. The error message explicitly identifies the missing configuration: Chrome's recent security updates require the --remote-allow-origins flag to whitelist which origins can establish WebSocket CDP connections. Without this flag, all WebSocket upgrade requests from localhost are blocked despite the HTTP JSON endpoint remaining accessible. This represents a solvable configuration issue requiring one additional launch argument rather than a fundamental Cloudflare bypass problem.
+-~449t 🔍 2,595
++S13249 User asked what "c=X" notation means in E11 VM service readiness test output showing (c=1854,w=local) (Sep 12 at 9:45 AM)
++S13250 User investigated meaning of c=X notation in E11 test output and why counter values increased from c=15 to c=1854 between test runs (Sep 12 at 9:45 AM)
++**74124** 10:26a ⚖️ **Exploring Custom SDK for Deterministic Multi-Agent Workflows**
++The current multi-agent workflow system relies on Claude frontier models to make non-deterministic branching decisions, such as routing test features across 5 different testing approaches. A concrete example is the "distill wave for nwave" workflow, which spawns 4 subagents to determine whether features need e2e tests, verifications, benchmarks, or other testing types. This non-deterministic routing creates unpredictability in workflow execution. The proposed solution involves building a custom SDK that would codify workflow branching logic in a deterministic manner, potentially enabling smaller, more cost-effective LLMs to handle these routing decisions reliably and consistently.
++~328t ⚖️ 4,399
+ 
+-**57791** " 🔵 **CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving**
+-The CDP automation reached the furthest point yet by successfully establishing a WebSocket connection to Chrome after adding the required origin allowlist flag, then navigating to the ACM DOI page. Cloudflare's JavaScript challenge loaded and began executing in a real Chrome browser context with anti-automation flags enabled. However, the challenge never resolved over 90 seconds of continuous polling at 6-second intervals. The page remained frozen at the "Just a moment..." interstitial with exactly 27,412 bytes of HTML, indicating the JavaScript either detected the headless/automated environment despite the stealth flags, or requires additional browser fingerprinting signals (WebGL, canvas, audio context, etc.) that the headless Chrome configuration doesn't provide. This definitively demonstrates that even sophisticated CDP-based browser automation cannot bypass ACM's Cloudflare protection configuration for this resource.
+-~474t 🔍 3,320
++**74125** 10:28a 🔵 **Claude API Supports Structured Outputs via Zod Schemas**
++Research into Claude API documentation revealed built-in support for structured outputs using Zod schemas in the TypeScript SDK. The messages.parse method accepts an output_config parameter with zodOutputFormat helper, which converts Zod schemas into Claude's structured output format. The response includes a parsed_output field containing the typed result (or null on parsing failure). This capability could be leveraged for building deterministic workflow systems, as it ensures Claude responses conform to predefined schemas rather than free-form text requiring frontier model interpretation.
++~272t 🔍 1,611
+ 
+ 
+-Access 1367k tokens of past work via get_observations([IDs]) or mem-search skill.
++Access 1013k tokens of past work via get_observations([IDs]) or mem-search skill.
+ </claude-mem-context>
 diff --git a/docs/feature/vm-lifecycle-latency/deliver/execution-log.json b/docs/feature/vm-lifecycle-latency/deliver/execution-log.json
-index 7bd60adf..cef4e142 100644
+index 8e99bd9b..c7f898e9 100644
 --- a/docs/feature/vm-lifecycle-latency/deliver/execution-log.json
 +++ b/docs/feature/vm-lifecycle-latency/deliver/execution-log.json
-@@ -113,6 +113,13 @@
+@@ -134,6 +134,13 @@
        "s": "EXECUTED",
        "d": "PASS",
-       "t": "2026-09-11T13:54:54Z"
+       "t": "2026-09-12T08:06:37Z"
 +    },
 +    {
 +      "sid": "01-03",
-+      "p": "RED",
++      "p": "GREEN",
 +      "s": "EXECUTED",
-+      "d": "PASS",
-+      "t": "2026-09-11T15:10:20Z"
++      "d": "FAIL",
++      "t": "2026-09-12T09:01:21Z"
      }
    ]
  }
 \ No newline at end of file
+diff --git a/examples/service-kind-vm-workloads/README.md b/examples/service-kind-vm-workloads/README.md
+index 55af9f5e..e8b4aa8a 100644
+--- a/examples/service-kind-vm-workloads/README.md
++++ b/examples/service-kind-vm-workloads/README.md
+@@ -76,7 +76,16 @@ Modes and owners:
+ 
+ - `healthy` → E08, the sole walking skeleton;
+ - `tcp-truthfulness-100` → E09/K1, 100 isolated healthy/failing pairs;
+-- `http-status-cross-driver` → E10/K2, Exec/VM × 204/302/404/503;
++- `http-status-cross-driver` → E10/K2, Exec/VM × 204/302/404/503; each
++  isolated cell retains its public deploy command/output/exit, recovery and
++  stop observations, before/after describe rows, current-session resource
++  witness, and absolute named-resource cleanup complement before the eight-row
++  ledger is derived; a positive disappearance receipt is retained only for
++  resources observed before stop, while an already-clean observation still
++  passes only when every allocation-named resource remains absent; a
++  repeated failed-probe observation must preserve its identity, configuration,
++  status, and reason while its observation timestamp may advance but never
++  regress;
+ - `readiness-recovery` → E11/K3, peer traffic before/during/after withdrawal;
+ - `liveness-restart` → E12, describe-visible restart; and
+ - `zero-probes` → E13, inferred TCP success/failure compatibility.
 diff --git a/examples/service-kind-vm-workloads/run-example.sh b/examples/service-kind-vm-workloads/run-example.sh
-index 84887db1..ae53f241 100755
+index ae53f241..9647dd54 100755
 --- a/examples/service-kind-vm-workloads/run-example.sh
 +++ b/examples/service-kind-vm-workloads/run-example.sh
-@@ -132,55 +132,81 @@ request_stop_intent() {
-   }
+@@ -9,11 +9,11 @@ readonly OUTPUT_ROOT="${SVM_E08_OUTPUT_ROOT:-/srv/vm/overdrive-testing/svm-e08}"
+ readonly CONFIG_DIR="$OUTPUT_ROOT/config"
+ readonly DATA_DIR="$OUTPUT_ROOT/data"
+ readonly CREDS_DIR="$OUTPUT_ROOT/credentials"
+-readonly BIN="$(cd "$EXAMPLE_DIR/../.." && pwd)/target/debug/overdrive"
++BIN="$(cd "$EXAMPLE_DIR/../.." && pwd)/target/debug/overdrive"
++readonly BIN
+ readonly BIND="127.0.0.1:7644"
+ SERVICE_ID="service-vm-e08"
+ CLIENT_ID="service-vm-e08-client"
+-readonly KEK_DESCRIPTION="overdrive:ca:kek:overdrive-ca-root"
+ 
+ SERVE_PID=""
+ PREPARED=0
+@@ -81,6 +81,29 @@ probe_network() {
+   { ip -br link show; ip netns list; } 2>/dev/null | sort
  }
  
--preserve_failed_service() {
-+stop_recovered_service_after_startup_failure() {
-   local id="$1"
-+  local before="$OUTPUT_ROOT/service-describe.log"
-+  local before_state before_alloc before_restarts before_history before_probe
-+  before_state="$(first_service_alloc_state <"$before")"
-+  before_alloc="$(first_service_alloc_id <"$before")"
-+  before_restarts="$(first_service_restart_count <"$before")"
-+  before_history="$(first_service_last_terminated_line <"$before")"
-+  before_probe="$(first_service_startup_probe_line <"$before")"
-+  [[ -n "$before_alloc" && "$before_restarts" =~ ^[0-9]+$ ]] || return 1
-+  [[ -n "$before_probe" ]] || return 1
-+  [[ "$before_state" == "Running" ]] || return 1
-+  [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] || return 1
-+  has_prior_failed_snapshot <"$before" || return 1
-+
-   request_stop_intent "$id"
-   local stop_output="$OUTPUT_ROOT/${id}-preserve-stop.log"
-   local output="$OUTPUT_ROOT/${id}-preserved-failure.log"
-+  local settled="$OUTPUT_ROOT/${id}-preserved-failure-settled.log"
-+  local observations="$OUTPUT_ROOT/${id}-preserved-failure-observations.log"
-   local deadline=$((SECONDS + 45))
-+  : >"$observations"
-   while [[ "$SECONDS" -lt "$deadline" ]]; do
-     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-       "$BIN" workload describe "$id" >"$output" 2>&1 || true
-     local state
-     state="$(first_service_alloc_state <"$output")"
--    if [[ "$state" == "Failed" ]] \
--      && grep -Fq 'StartupProbeFailed' "$output" \
--      && owned_runtime_resources_released; then
--      cat "$stop_output"
--      cat "$output"
--      return 0
--    fi
--    if [[ "$state" == "Failed" ]] \
--      && grep -Fq 'reason: driver internal error:' "$output" \
--      && grep -Fq 'bind beacon listener: Address already in use' "$output" \
--      && owned_runtime_resources_released; then
--      # A VM replacement can be rejected before it creates a second VMM when
--      # the original accepted session still owns the allocation-derived beacon
--      # pathname. Preserve that typed start rejection as a distinct trajectory;
--      # it is not an arbitrary crash or a reclassification of the probe result.
--      cat "$stop_output"
-+    {
-+      printf 'observed_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}"
-       cat "$output"
--      return 0
--    fi
--    # If a replacement reached Running before the stop intent was observed,
--    # its ordinary operator stop may author Terminated. Accept that distinct
--    # trajectory only with public evidence of a replacement restart and an
--    # operator-attributed prior termination; a bare crash-shaped Terminated
--    # row is not an acceptable startup-failure outcome.
--    if [[ "$state" == "Terminated" ]] \
--      && [[ "$(first_service_restart_count <"$output")" =~ ^[1-9][0-9]*$ ]] \
--      && grep -Eqi 'last terminated: .*stopped \(by operator\)' "$output" \
--      && grep -Fq 'reason: stopped' "$output" \
--      && owned_runtime_resources_released; then
--      cat "$stop_output"
--      cat "$output"
--      return 0
-+    } >>"$observations"
-+
-+    local outcome_ok=1
-+    [[ "$state" == "Terminated" ]] \
-+      && [[ "$(first_service_alloc_id <"$output")" == "$before_alloc" ]] \
-+      && [[ "$(first_service_restart_count <"$output")" == "$before_restarts" ]] \
-+      && has_prior_failed_snapshot <"$output" \
-+      && [[ "$(first_service_last_terminated_line <"$output")" == "$before_history" ]] \
-+      && [[ "$(first_service_startup_probe_line <"$output")" == "$before_probe" ]] \
-+      && grep -Fq '    reason: stopped' "$output" \
-+      || outcome_ok=0
-+
-+    if [[ "$outcome_ok" -eq 1 ]] && owned_runtime_resources_released; then
-+      # Observe once more after the owned runtime is gone. A stale accepted-
-+      # session watcher must not replace the recovered incarnation's operator
-+      # termination or the retained failure snapshot after cleanup settles.
-+      bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-+        "$BIN" workload describe "$id" >"$settled" 2>&1 || true
-+      {
-+        printf 'settled_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-+          "$(first_service_alloc_state <"$settled")"
-+        cat "$settled"
-+      } >>"$observations"
-+      if [[ "$(first_service_alloc_state <"$settled")" == "$state" ]] \
-+        && [[ "$(first_service_alloc_id <"$settled")" == "$before_alloc" ]] \
-+        && [[ "$(first_service_restart_count <"$settled")" == "$before_restarts" ]] \
-+        && [[ "$(first_service_startup_probe_line <"$settled")" == "$before_probe" ]] \
-+        && has_prior_failed_snapshot <"$settled" \
-+        && [[ "$(first_service_last_terminated_line <"$settled")" == "$before_history" ]] \
-+        && grep -Fq '    reason: stopped' "$settled"; then
-+        cat "$stop_output"
-+        cat "$output"
-+        cat "$settled"
-+        return 0
-+      fi
-+      cat "$stop_output" >&2
-+      cat "$output" >&2
-+      cat "$settled" >&2
-+      echo "svm-e08 run: state changed after owned runtime cleanup: $id" >&2
-+      return 1
-     fi
--    sleep 1
-   done
-   cat "$stop_output" >&2
-   cat "$output" >&2
--  echo "svm-e08 run: startup-failed Service did not remain Failed after stop intent: $id" >&2
-+  echo "svm-e08 run: recovered startup-failure incarnation did not stop with preserved history: $id" >&2
-   return 1
- }
- 
-@@ -279,6 +305,27 @@ first_service_restart_count() {
-   '
- }
- 
-+has_prior_failed_snapshot() {
-+  awk '
-+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
-+    in_table && $1 ~ /^alloc-/ {
-+      if (seen) exit
-+      seen = 1
++probe_overdrive_network_names() {
++  probe_network | awk '
++    $1 ~ /^ovd-(hv|wl|tp|ns)-/ {
++      split($1, parts, "@")
++      print parts[1]
 +    }
-+    seen && /^Memory:/ { exit }
-+    seen && /last terminated:[^[:cntrl:]]*Failed/ { found = 1 }
-+    END { exit(found ? 0 : 1) }
-+  '
++  ' | sort -u
 +}
 +
-+first_service_last_terminated_line() {
-+  awk '/^    last terminated: / { print; exit }'
++probe_hypervisors_for_alloc() {
++  local alloc_id="$1"
++  local proc argv0
++  for proc in /proc/[0-9]*; do
++    [[ -r "$proc/cmdline" ]] || continue
++    argv0=''
++    IFS= read -r -d '' argv0 <"$proc/cmdline" || true
++    [[ "$(basename "$argv0" 2>/dev/null || true)" == "cloud-hypervisor" ]] \
++      || continue
++    grep -aFq "/run/overdrive/vm/$alloc_id/" "$proc/cmdline" \
++      && basename "$proc"
++  done | sort -n
 +}
 +
-+first_service_startup_probe_line() {
-+  awk '/^  startup probe\[0\] / { print; exit }'
+ probe_loops() {
+   losetup -j "$OUTPUT_ROOT/rootfs.ext4" 2>/dev/null || true
+ }
+@@ -90,16 +113,90 @@ probe_mounts() {
+     grep -F "$OUTPUT_ROOT" || true
+ }
+ 
++capture_resource_snapshot() {
++  echo '[hypervisors]'
++  probe_hypervisors
++  echo '[cgroup-scopes]'
++  probe_scopes
++  echo '[vm-run-directories]'
++  probe_run_dirs
++  echo '[network]'
++  probe_network
++  echo '[loop-devices]'
++  probe_loops
++  echo '[mounts]'
++  probe_mounts
++  printf '[materialization]\n%s\n' "$([[ -e "$OUTPUT_ROOT" ]] && printf present || printf absent)"
++}
++
++capture_e10_resource_snapshot() {
++  local id="$1"
++  capture_resource_snapshot
++  echo '[allocation-hypervisors]'
++  probe_hypervisors_for_alloc "alloc-$id-0"
++}
++
+ snapshot_before() {
+   SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/svm-e08-snapshot.XXXXXX")"
+   probe_hypervisors >"$SNAPSHOT_DIR/hypervisors"
+   probe_scopes >"$SNAPSHOT_DIR/scopes"
+   probe_run_dirs >"$SNAPSHOT_DIR/run-dirs"
+   probe_network >"$SNAPSHOT_DIR/network"
++  probe_overdrive_network_names >"$SNAPSHOT_DIR/network-names"
+   probe_loops >"$SNAPSHOT_DIR/loops"
+   probe_mounts >"$SNAPSHOT_DIR/mounts"
+ }
+ 
++capture_e10_current_owned_resources() {
++  local id="$1"
++  local alloc_id="alloc-$id-0"
++  printf 'allocation=%s\n' "$alloc_id"
++  grep -Fxq "$alloc_id.scope" <(probe_scopes) \
++    && printf 'cgroup=%s.scope\n' "$alloc_id" || true
++  grep -Fxq "$alloc_id" <(probe_run_dirs) \
++    && printf 'run-directory=%s\n' "$alloc_id" || true
++  probe_hypervisors_for_alloc "$alloc_id" \
++    | while IFS= read -r pid; do
++        [[ -z "$pid" ]] || printf 'hypervisor=%s\n' "$pid"
++      done
++  comm -13 "$SNAPSHOT_DIR/network-names" <(probe_overdrive_network_names) \
++    | while IFS= read -r name; do
++        [[ -z "$name" ]] || printf 'network=%s\n' "$name"
++      done
++}
++
++e10_named_runtime_resources_absent() {
++  local id="$1"
++  local observed="$2"
++  local alloc_id="alloc-$id-0"
++  local kind name
++
++  # These allocation-bearing resources have stable external names. Their
++  # absence is required even when cleanup won the race before the pre-stop
++  # resource observation and therefore no positive delta was captured.
++  ! grep -Fxq "$alloc_id.scope" <(probe_scopes) || return 1
++  ! grep -Fxq "$alloc_id" <(probe_run_dirs) || return 1
++  [[ -z "$(probe_hypervisors_for_alloc "$alloc_id")" ]] || return 1
++
++  # Network names are learned from the current-session snapshot because the
++  # slot is not part of the public allocation row. A name observed there must
++  # disappear; an already-clean snapshot does not have to invent a delta.
++  while IFS='=' read -r kind name; do
++    [[ "$kind" == "network" ]] || continue
++    ! grep -Fxq "$name" <(probe_overdrive_network_names) || return 1
++  done <"$observed"
++}
++
++wait_for_e10_named_runtime_cleanup() {
++  local id="$1"
++  local observed="$2"
++  local deadline=$((SECONDS + 45))
++  while [[ "$SECONDS" -lt "$deadline" ]]; do
++    e10_named_runtime_resources_absent "$id" "$observed" && return 0
++  done
++  return 1
++}
++
+ new_delta_count() {
+   local before="$1"
+   shift
+@@ -109,27 +206,79 @@ new_delta_count() {
+ stop_workload() {
+   local id="$1"
+   local output="$OUTPUT_ROOT/${id}-stop.log"
++  local stdout="$OUTPUT_ROOT/stop-stdout.log"
++  local stderr="$OUTPUT_ROOT/stop-stderr.log"
++  local exit_file="$OUTPUT_ROOT/stop-exit.log"
++  printf 'env OVERDRIVE_CONFIG_DIR=%q %q job stop %q\n' \
++    "$CONFIG_DIR" "$BIN" "$id" >"$OUTPUT_ROOT/stop-command.log"
++  local stop_rc
++  set +e
+   bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+-    "$BIN" job stop "$id" >"$output" 2>&1 || {
++    "$BIN" job stop "$id" >"$stdout" 2>"$stderr"
++  stop_rc=$?
++  set -e
++  printf '%s\n' "$stop_rc" >"$exit_file"
++  { cat "$stdout"; cat "$stderr"; } >"$output"
++  if [[ "$stop_rc" -ne 0 ]]; then
+       cat "$output" >&2
+       return 1
+-  }
++  fi
+   local describe="$OUTPUT_ROOT/${id}-stopped.log"
+   if ! wait_for_workload_stop "$id" "$describe"; then
+     cat "$describe" >&2
+     return 1
+   fi
++  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++    local settled="$OUTPUT_ROOT/${id}-stopped-settled.log"
++    local observed_resources="$OUTPUT_ROOT/current-session-owned-resources.log"
++    wait_for_e10_named_runtime_cleanup "$id" "$observed_resources" || return 1
++    capture_e10_resource_snapshot "$id" \
++      >"$OUTPUT_ROOT/post-runtime-cleanup-resources.log"
++    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
++      "$BIN" workload describe "$id" >"$settled" 2>&1 || return 1
++    [[ "$(first_service_alloc_state <"$settled")" == "Terminated" ]] \
++      && [[ "$(first_service_alloc_id <"$settled")" \
++        == "$(first_service_alloc_id <"$describe")" ]] \
++      && [[ "$(first_service_restart_count <"$settled")" \
++        == "$(first_service_restart_count <"$describe")" ]] \
++      && grep -Fq '    reason: stopped' "$settled" \
++      || return 1
++    cp -- "$describe" "$OUTPUT_ROOT/after-stop-describe.log"
++    cp -- "$settled" "$OUTPUT_ROOT/post-cleanup-describe.log"
++    {
++      printf 'after_stop_allocation=%s\n' \
++        "$(first_service_alloc_id <"$describe")"
++      printf 'after_stop_restart_count=%s\n' \
++        "$(first_service_restart_count <"$describe")"
++      printf 'after_cleanup_allocation=%s\n' \
++        "$(first_service_alloc_id <"$settled")"
++      printf 'after_cleanup_restart_count=%s\n' \
++        "$(first_service_restart_count <"$settled")"
++    } >"$OUTPUT_ROOT/stale-session-refusal.log"
++  fi
+   cat "$output"
+ }
+ 
+ request_stop_intent() {
+   local id="$1"
+   local stop_output="$OUTPUT_ROOT/${id}-preserve-stop.log"
++  local stdout="$OUTPUT_ROOT/stop-stdout.log"
++  local stderr="$OUTPUT_ROOT/stop-stderr.log"
++  local exit_file="$OUTPUT_ROOT/stop-exit.log"
++  printf 'env OVERDRIVE_CONFIG_DIR=%q %q job stop %q\n' \
++    "$CONFIG_DIR" "$BIN" "$id" >"$OUTPUT_ROOT/stop-command.log"
++  local stop_rc
++  set +e
+   bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+-    "$BIN" job stop "$id" >"$stop_output" 2>&1 || {
++    "$BIN" job stop "$id" >"$stdout" 2>"$stderr"
++  stop_rc=$?
++  set -e
++  printf '%s\n' "$stop_rc" >"$exit_file"
++  { cat "$stdout"; cat "$stderr"; } >"$stop_output"
++  if [[ "$stop_rc" -ne 0 ]]; then
+       cat "$stop_output" >&2
+       return 1
+-  }
++  fi
+ }
+ 
+ stop_recovered_service_after_startup_failure() {
+@@ -170,14 +319,19 @@ stop_recovered_service_after_startup_failure() {
+       && [[ "$(first_service_restart_count <"$output")" == "$before_restarts" ]] \
+       && has_prior_failed_snapshot <"$output" \
+       && [[ "$(first_service_last_terminated_line <"$output")" == "$before_history" ]] \
+-      && [[ "$(first_service_startup_probe_line <"$output")" == "$before_probe" ]] \
++      && e10_failed_probe_is_preserved \
++        "$before_probe" "$(first_service_startup_probe_line <"$output")" \
+       && grep -Fq '    reason: stopped' "$output" \
+       || outcome_ok=0
+ 
+-    if [[ "$outcome_ok" -eq 1 ]] && owned_runtime_resources_released; then
++    local observed_resources="$OUTPUT_ROOT/current-session-owned-resources.log"
++    if [[ "$outcome_ok" -eq 1 ]] \
++      && e10_named_runtime_resources_absent "$id" "$observed_resources"; then
+       # Observe once more after the owned runtime is gone. A stale accepted-
+       # session watcher must not replace the recovered incarnation's operator
+       # termination or the retained failure snapshot after cleanup settles.
++      capture_e10_resource_snapshot "$id" \
++        >"$OUTPUT_ROOT/post-runtime-cleanup-resources.log"
+       bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+         "$BIN" workload describe "$id" >"$settled" 2>&1 || true
+       {
+@@ -188,10 +342,31 @@ stop_recovered_service_after_startup_failure() {
+       if [[ "$(first_service_alloc_state <"$settled")" == "$state" ]] \
+         && [[ "$(first_service_alloc_id <"$settled")" == "$before_alloc" ]] \
+         && [[ "$(first_service_restart_count <"$settled")" == "$before_restarts" ]] \
+-        && [[ "$(first_service_startup_probe_line <"$settled")" == "$before_probe" ]] \
++        && e10_failed_probe_is_preserved \
++          "$(first_service_startup_probe_line <"$output")" \
++          "$(first_service_startup_probe_line <"$settled")" \
+         && has_prior_failed_snapshot <"$settled" \
+         && [[ "$(first_service_last_terminated_line <"$settled")" == "$before_history" ]] \
+         && grep -Fq '    reason: stopped' "$settled"; then
++        cp -- "$output" "$OUTPUT_ROOT/after-stop-describe.log"
++        cp -- "$settled" "$OUTPUT_ROOT/post-cleanup-describe.log"
++        cp -- "$observations" "$OUTPUT_ROOT/stop-observations.log"
++        {
++          printf 'before_stop_allocation=%s\n' "$before_alloc"
++          printf 'before_stop_restart_count=%s\n' "$before_restarts"
++          printf 'before_stop_prior_failure=%s\n' "$before_history"
++          printf 'before_stop_probe=%s\n' "$before_probe"
++          printf 'after_stop_probe=%s\n' \
++            "$(first_service_startup_probe_line <"$output")"
++          printf 'after_cleanup_allocation=%s\n' \
++            "$(first_service_alloc_id <"$settled")"
++          printf 'after_cleanup_restart_count=%s\n' \
++            "$(first_service_restart_count <"$settled")"
++          printf 'after_cleanup_prior_failure=%s\n' \
++            "$(first_service_last_terminated_line <"$settled")"
++          printf 'after_cleanup_probe=%s\n' \
++            "$(first_service_startup_probe_line <"$settled")"
++        } >"$OUTPUT_ROOT/stale-session-refusal.log"
+         cat "$stop_output"
+         cat "$output"
+         cat "$settled"
+@@ -273,6 +448,7 @@ wait_for_owned_runtime_cleanup() {
+ }
+ 
+ cleanup() {
++  # shellcheck disable=SC2320 # EXIT trap supplies the status being preserved.
+   local incoming_rc=$?
+   trap - EXIT HUP INT TERM
+   local failed=0
+@@ -326,6 +502,28 @@ first_service_startup_probe_line() {
+   awk '/^  startup probe\[0\] / { print; exit }'
+ }
+ 
++# E10 preserves the failure evidence carried by a ProbeResultRow, not the
++# byte rendering of its observation time. The probe role/index, mechanic,
++# method, target, failed status, and failure reason must be identical. The
++# LWW observation timestamp may stay equal or advance when the same failed
++# result is observed again, but it must never regress.
++e10_failed_probe_is_preserved() {
++  local before_line="$1"
++  local after_line="$2"
++  local pattern='^([[:space:]]*startup[[:space:]]+probe\[0\][[:space:]]+http[[:space:]]+GET[[:space:]]+[^[:space:]]+[[:space:]]+last=fail[[:space:]]+\(.*\))[[:space:]]+last_observed_at=([0-9]+)$'
++  local before_semantics before_observed_at after_semantics after_observed_at
++
++  [[ "$before_line" =~ $pattern ]] || return 1
++  before_semantics="${BASH_REMATCH[1]}"
++  before_observed_at="${BASH_REMATCH[2]}"
++  [[ "$after_line" =~ $pattern ]] || return 1
++  after_semantics="${BASH_REMATCH[1]}"
++  after_observed_at="${BASH_REMATCH[2]}"
++
++  [[ "$after_semantics" == "$before_semantics" ]] \
++    && [[ "$after_observed_at" -ge "$before_observed_at" ]]
 +}
 +
  first_service_terminal() {
    awk '
      /^    terminal: / {
-@@ -940,7 +987,7 @@ case_cleanup() {
-         stop_workload "$SERVICE_ID" || failed=1
-         ;;
-       preserve-startup-failure)
--        preserve_failed_service "$SERVICE_ID" || failed=1
-+        stop_recovered_service_after_startup_failure "$SERVICE_ID" || failed=1
-         ;;
-       *)
-         echo "svm-e08 run: unknown case cleanup policy: $CASE_CLEANUP_POLICY" >&2
-@@ -973,23 +1020,49 @@ wait_for_service_result() {
-       grep -Eq 'COMMAND_EXIT_CODE="[1-9][0-9]*"' "$stream"
-       grep -Fq 'StartupProbeFailed' "$stream"
-       grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$describe"
--      local state
--      state="$(first_service_alloc_state <"$describe")"
--      if [[ "$state" == "Failed" ]]; then
--        :
--      elif [[ "$state" == "Terminated" ]]; then
--        # WorkloadLifecycle may already have stopped a replacement attempt by
--        # the time the deploy command returns. That is distinct from a bare
--        # crash only when the public row attributes the stop to the operator.
--        grep -Eqi 'reason: stopped \(by operator\)' "$describe"
-+      if [[ "$CASE_CLEANUP_POLICY" == "preserve-startup-failure" ]]; then
-+        wait_for_e10_recovered_running "$SERVICE_ID" "$describe"
-       else
--        return 1
-+        [[ "$(first_service_alloc_state <"$describe")" == "Failed" ]]
-       fi
-       ;;
-     *) die "unknown expected Service result: $expected" ;;
-   esac
+@@ -972,7 +1170,9 @@ run_liveness_restart() {
+ 
+ copy_case_captures() {
+   [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]] || return 0
+-  install -d -m 0700 "$SVM_E08_CASE_CAPTURE_DIR"
++  local mode=0700
++  [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || mode=0755
++  install -d -m "$mode" "$SVM_E08_CASE_CAPTURE_DIR"
+   find "$OUTPUT_ROOT" -maxdepth 1 -type f -name '*.log' -exec cp -- {} "$SVM_E08_CASE_CAPTURE_DIR" \;
  }
  
-+wait_for_e10_recovered_running() {
-+  local id="$1"
-+  local output="$2"
-+  local observations="$OUTPUT_ROOT/${id}-recovery-observations.log"
-+  local alloc_id
-+  alloc_id="$(first_service_alloc_id <"$output")"
-+  [[ -n "$alloc_id" ]] || return 1
-+  local deadline=$((SECONDS + 45))
-+  : >"$observations"
-+  while [[ "$SECONDS" -lt "$deadline" ]]; do
-+    local state restarts
-+    state="$(first_service_alloc_state <"$output")"
-+    restarts="$(first_service_restart_count <"$output")"
-+    {
-+      printf 'observed_utc=%s state=%s restarts=%s\n' \
-+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}" "${restarts:-unrecognized}"
-+      cat "$output"
-+    } >>"$observations"
-+    if [[ "$state" == "Running" ]] \
-+      && [[ "$(first_service_alloc_id <"$output")" == "$alloc_id" ]] \
-+      && [[ "$restarts" =~ ^[1-9][0-9]*$ ]] \
-+      && has_prior_failed_snapshot <"$output" \
-+      && grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$output"; then
-+      return 0
+@@ -995,12 +1195,58 @@ case_cleanup() {
+         ;;
+     esac
+   fi
+-  wait_for_owned_runtime_cleanup || failed=1
++  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++    wait_for_e10_named_runtime_cleanup "$SERVICE_ID" \
++      "$OUTPUT_ROOT/current-session-owned-resources.log" || failed=1
++  else
++    wait_for_owned_runtime_cleanup || failed=1
++  fi
+   stop_serve || failed=1
+   copy_case_captures || failed=1
+   [[ "$PREPARED" -eq 0 ]] || bounded 45s "$PREPARE" cleanup || failed=1
+   if [[ -n "$SNAPSHOT_DIR" ]]; then
+-    report_cleanup_deltas || failed=1
++    if [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]]; then
++      if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++        capture_e10_resource_snapshot "$SERVICE_ID" \
++          >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"
++      else
++        capture_resource_snapshot >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"
++      fi
++      if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++        # Keep the whole-host delta as diagnostic context, but E10's oracle is
++        # the absolute absence of this cell's named resources. Unrelated host
++        # activity must not manufacture a cleanup failure for this allocation.
++        report_cleanup_deltas \
++          >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" 2>&1 || true
++        if e10_named_runtime_resources_absent "$SERVICE_ID" \
++          "$SVM_E08_CASE_CAPTURE_DIR/current-session-owned-resources.log" \
++          && [[ -z "$SERVE_PID" ]] \
++          && [[ -z "$(probe_loops)" ]] && [[ -z "$(probe_mounts)" ]] \
++          && grep -Fxq 'absent' \
++            "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"; then
++          local observed_count
++          observed_count="$(awk -F= '$1 != "allocation" { count++ } END { print count + 0 }' \
++            "$SVM_E08_CASE_CAPTURE_DIR/current-session-owned-resources.log")"
++          printf 'E10 named cleanup: observed-before-stop=%s post-stop=absent serve=stopped preparation=absent\n' \
++            "$observed_count" \
++            >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
++          cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
++        else
++          echo 'E10 named cleanup: residual owned resource' \
++            >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
++          cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log" >&2
++          failed=1
++        fi
++      elif ! report_cleanup_deltas \
++        >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" 2>&1; then
++        cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" >&2
++        failed=1
++      else
++        cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log"
++      fi
++    else
++      report_cleanup_deltas || failed=1
 +    fi
-+    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-+      "$BIN" workload describe "$id" >"$output" 2>&1 || true
-+  done
-+  cat "$observations" >&2
-+  echo "svm-e08 run: startup-failed Service did not settle on its recovered Running incarnation: $id" >&2
-+  return 1
-+}
-+
- run_case() {
-   local spec="$1"
-   local service_id="$2"
-@@ -1051,16 +1124,6 @@ run_case() {
+     rm -rf -- "$SNAPSHOT_DIR"
+   fi
+   [[ "$incoming_rc" -ne 0 || "$failed" -eq 0 ]] || exit 1
+@@ -1053,6 +1299,7 @@ wait_for_e10_recovered_running() {
+       && [[ "$restarts" =~ ^[1-9][0-9]*$ ]] \
+       && has_prior_failed_snapshot <"$output" \
+       && grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$output"; then
++      cp -- "$observations" "$OUTPUT_ROOT/recovery-observations.log"
+       return 0
+     fi
+     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+@@ -1084,6 +1331,14 @@ run_case() {
+   "$PREPARE" check-source
+   [[ ! -e "$OUTPUT_ROOT" ]] || die "refusing to overwrite pre-existing materialization: $OUTPUT_ROOT"
+   snapshot_before
++  if [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]]; then
++    local capture_mode=0700
++    [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || capture_mode=0755
++    install -d -m "$capture_mode" "$SVM_E08_CASE_CAPTURE_DIR"
++    capture_resource_snapshot >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-before.log"
++    printf '%s\n' "${SVM_E10_CAPTURE_TOKEN:-not-an-e10-capture}" \
++      >"$SVM_E08_CASE_CAPTURE_DIR/capture-token.log"
++  fi
+   trap case_cleanup EXIT
+   trap 'exit 130' HUP INT TERM
+ 
+@@ -1103,15 +1358,29 @@ run_case() {
+ 
+   SERVICE_ID="$service_id"
+   local service_stream="$OUTPUT_ROOT/service-stream.log"
++  local service_stdout="$OUTPUT_ROOT/service-deploy-stdout.log"
++  local service_stderr="$OUTPUT_ROOT/service-deploy-stderr.log"
++  local service_exit="$OUTPUT_ROOT/service-deploy-exit.log"
+   local service_command
+   printf -v service_command 'env OVERDRIVE_CONFIG_DIR=%q %q deploy %q' \
+     "$CONFIG_DIR" "$BIN" "$EXAMPLE_DIR/$spec"
++  printf '%s\n' "$service_command" >"$OUTPUT_ROOT/service-deploy-command.log"
+   SERVICE_DEPLOYED=1
+-  if ! bounded 150s script -q -e -c "$service_command" "$service_stream" >/dev/null; then
+-    [[ "$expected" == startup-failed ]] || {
++  local service_deploy_rc
++  set +e
++  bounded 150s script -q -e -c "$service_command" "$service_stream" \
++    >"$service_stdout" 2>"$service_stderr"
++  service_deploy_rc=$?
++  set -e
++  printf '%s\n' "$service_deploy_rc" >"$service_exit"
++  if [[ "$service_deploy_rc" -ne 0 ]]; then
++    if [[ "$expected" != startup-failed ]]; then
+       cat "$service_stream" >&2
+       die "healthy Service streaming deployment did not complete"
+-    }
++    fi
++  elif [[ "$expected" == startup-failed ]]; then
++    cat "$service_stream" >&2
++    die "startup-failed Service streaming deployment exited zero"
+   fi
+   local service_describe="$OUTPUT_ROOT/service-describe.log"
+   bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+@@ -1123,6 +1392,28 @@ run_case() {
+     cat "$OUTPUT_ROOT/serve.log" >&2
      die "Service did not reach expected result: $expected"
    }
++  cp -- "$service_describe" "$OUTPUT_ROOT/before-stop-describe.log"
++  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++    capture_e10_resource_snapshot "$SERVICE_ID" \
++      >"$OUTPUT_ROOT/current-session-resources.log"
++  else
++    capture_resource_snapshot >"$OUTPUT_ROOT/current-session-resources.log"
++  fi
++  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
++    capture_e10_current_owned_resources "$SERVICE_ID" \
++      >"$OUTPUT_ROOT/current-session-owned-resources.log"
++  fi
++  {
++    printf 'allocation_id=%s\n' "$(first_service_alloc_id <"$service_describe")"
++    printf 'current_state=%s\n' "$(first_service_alloc_state <"$service_describe")"
++    printf 'restart_count=%s\n' "$(first_service_restart_count <"$service_describe")"
++    printf 'current_row=%s\n' \
++      "$(awk '$1 ~ /^alloc-/ { print $1, $2, $3, $4; exit }' "$service_describe")"
++    printf 'prior_failure=%s\n' \
++      "$(first_service_last_terminated_line <"$service_describe")"
++    printf 'startup_probe=%s\n' \
++      "$(first_service_startup_probe_line <"$service_describe")"
++  } >"$OUTPUT_ROOT/current-session-observation.log"
    cat "$service_describe"
--  if [[ "$expected" == startup-failed \
--    && "$CASE_CLEANUP_POLICY" == preserve-startup-failure ]]; then
--    # The initial describe is captured before recording stop intent, proving
--    # that this cleanup branch starts from the authored startup failure. The
--    # case cleanup then waits for either that Failed row to survive reclamation
--    # or a witnessed replacement's ordinary operator stop.
--    request_stop_intent "$SERVICE_ID" \
--      || die "could not record stop intent for startup-failed Service"
--  fi
--
    if [[ -n "$client_spec" ]]; then
      CLIENT_ID="$client_id"
-     CLIENT_DEPLOYED=1
-@@ -1135,9 +1198,10 @@ run_http_status_cross_driver() {
-   require_matrix_capture_root
+@@ -1154,9 +1445,12 @@ capture_isolated_case() {
+   shift
+   local transcript="$SVM_E08_MATRIX_CAPTURE_ROOT/$label.transcript"
+   if ! run_isolated_case "$label" "$@" >"$transcript" 2>&1; then
++    install -d -m 0755 "$SVM_E08_MATRIX_CAPTURE_ROOT/$label"
++    cp -- "$transcript" "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/case-transcript.log"
+     cat "$transcript" >&2
+     return 1
+   fi
++  cp -- "$transcript" "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/case-transcript.log"
+ }
+ 
+ require_matrix_capture_root() {
+@@ -1165,7 +1459,9 @@ require_matrix_capture_root() {
+   fi
+   [[ -n "${SVM_E08_MATRIX_CAPTURE_ROOT:-}" ]] \
+     || die "matrix capture root is required"
+-  install -d -m 0700 "$SVM_E08_MATRIX_CAPTURE_ROOT"
++  local mode=0700
++  [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || mode=0755
++  install -d -m "$mode" "$SVM_E08_MATRIX_CAPTURE_ROOT"
+ }
+ 
+ run_tcp_truthfulness_100() {
+@@ -1199,9 +1495,11 @@ run_http_status_cross_driver() {
    bounded 600s cargo build -p overdrive-cli --bin overdrive
    local ledger="$SVM_E08_MATRIX_CAPTURE_ROOT/http-status-cross-driver.tsv"
--  printf 'driver\tstatus\tdeploy_exit\tterminal\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
-+  printf 'driver\tstatus\tdeploy_exit\tallocation_id\tbefore_stop\trestart_before\tfailure_surface\tafter_stop\trestart_after\tsettled_state\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
-   local driver status spec id expected label transcript describe bytes sentinel
--  local cleanup_policy final_describe terminal trajectory
-+  local cleanup_policy final_describe settled_describe terminal trajectory
-+  local alloc_id before_state before_restarts after_restarts settled_state failure_surface
+   printf 'driver\tstatus\tdeploy_exit\tallocation_id\tbefore_stop\trestart_before\tfailure_surface\tafter_stop\trestart_after\tsettled_state\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
+-  local driver status spec id expected label transcript describe bytes sentinel
++  local driver status spec id expected label transcript describe sentinel
+   local cleanup_policy final_describe settled_describe terminal trajectory
+   local alloc_id before_state before_restarts after_restarts settled_state failure_surface
++  local deploy_stdout deploy_stderr deploy_exit deploy_stdout_sentinel deploy_stderr_sentinel
++  local describe_sentinel probe_sentinel probe_line
    for driver in exec vm; do
      for status in 204 302 404 503; do
        spec="http-${driver}-${status}.toml"
-@@ -1147,35 +1211,62 @@ run_http_status_cross_driver() {
-       [[ "$status" == 204 ]] && expected=stable
-       [[ "$status" == 204 ]] && cleanup_policy=operator-stop
-       label="e10-${driver}-${status}"
-+      settled_describe=''
+@@ -1215,10 +1513,16 @@ run_http_status_cross_driver() {
        capture_isolated_case "$label" "$spec" "$id" "$expected" "" "" "$cleanup_policy"
        transcript="$SVM_E08_MATRIX_CAPTURE_ROOT/$label.transcript"
        describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-describe.log"
-+      alloc_id="$(first_service_alloc_id <"$describe")"
-+      before_state="$(first_service_alloc_state <"$describe")"
-+      before_restarts="$(first_service_restart_count <"$describe")"
++      deploy_stdout="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-stdout.log"
++      deploy_stderr="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-stderr.log"
++      deploy_exit="$(tr -d '[:space:]' \
++        <"$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-exit.log")"
+       alloc_id="$(first_service_alloc_id <"$describe")"
+       before_state="$(first_service_alloc_state <"$describe")"
+       before_restarts="$(first_service_restart_count <"$describe")"
        if [[ "$status" == 204 ]]; then
++        [[ "$deploy_exit" == 0 ]] \
++          || die "E10 healthy deploy did not exit zero: $driver/$status"
          grep -Fq ' is stable ' "$transcript"
-+        [[ "$before_state" == "Running" && "$before_restarts" == "0" ]] \
-+          || die "E10 healthy Service was not a first-incarnation Running allocation: $driver/$status"
-         final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-stopped.log"
-         [[ -f "$final_describe" ]] || die "E10 missing operator-stop describe for $driver/$status"
-         terminal="$(first_service_alloc_state <"$final_describe")"
-+        after_restarts="$(first_service_restart_count <"$final_describe")"
-         [[ "$terminal" == "Terminated" ]] \
-           || die "E10 running Service did not become Terminated after stop: $driver/$status"
-+        [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" \
-+          && "$after_restarts" == "$before_restarts" ]] \
-+          || die "E10 healthy Service stop changed allocation identity or restart count: $driver/$status"
-+        settled_state="$terminal"
-+        failure_surface=none
+         [[ "$before_state" == "Running" && "$before_restarts" == "0" ]] \
+           || die "E10 healthy Service was not a first-incarnation Running allocation: $driver/$status"
+@@ -1235,6 +1539,8 @@ run_http_status_cross_driver() {
+         failure_surface=none
          trajectory=operator-stop-running
        else
--        grep -Fq "${status}" "$transcript" "$describe"
--        ! grep -Eqi 'redirect.*followed|following.*redirect' "$transcript" "$describe"
-+        grep -Fq "HTTP ${status}" "$transcript" \
-+          || die "E10 deploy stream omitted HTTP status $status: $driver/$status"
-+        grep -Fq "HTTP ${status}" "$describe" \
-+          || die "E10 describe omitted HTTP status $status: $driver/$status"
-+        if [[ "$status" == 302 ]]; then
-+          grep -Fq 'HTTP 302 (redirect not followed)' "$transcript" \
-+            || die "E10 deploy stream did not classify the redirect without following it: $driver/$status"
-+          grep -Fq 'HTTP 302 (redirect not followed)' "$describe" \
-+            || die "E10 describe did not retain the redirect classification: $driver/$status"
-+        fi
-         final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure.log"
-+        settled_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure-settled.log"
-         [[ -f "$final_describe" ]] || die "E10 missing preserved-failure describe for $driver/$status"
-+        [[ -f "$settled_describe" ]] || die "E10 missing post-cleanup settled describe for $driver/$status"
-         terminal="$(first_service_alloc_state <"$final_describe")"
--        if [[ "$terminal" == "Failed" ]] \
--          && grep -Fq 'StartupProbeFailed' "$final_describe"; then
--          trajectory=preserved-startup-failure
--        elif [[ "$terminal" == "Failed" ]] \
--          && grep -Fq 'reason: driver internal error:' "$final_describe" \
--          && grep -Fq 'bind beacon listener: Address already in use' "$final_describe"; then
--          trajectory=replacement-start-rejected
--        elif [[ "$terminal" == "Terminated" ]] \
--          && [[ "$(first_service_restart_count <"$final_describe")" =~ ^[1-9][0-9]*$ ]] \
--          && grep -Eqi 'last terminated: .*stopped \(by operator\)' "$final_describe" \
--          && grep -Fq 'reason: stopped' "$final_describe"; then
--          trajectory=replacement-operator-stop
-+        after_restarts="$(first_service_restart_count <"$final_describe")"
-+        settled_state="$(first_service_alloc_state <"$settled_describe")"
-+        if [[ "$before_state" == "Running" ]] \
-+          && [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] \
-+          && has_prior_failed_snapshot <"$describe" \
-+          && [[ "$terminal" == "Terminated" && "$settled_state" == "Terminated" ]] \
-+          && [[ "$after_restarts" == "$before_restarts" ]] \
-+          && [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" ]] \
-+          && [[ "$(first_service_alloc_id <"$settled_describe")" == "$alloc_id" ]] \
-+          && [[ "$(first_service_last_terminated_line <"$final_describe")" \
-+            == "$(first_service_last_terminated_line <"$describe")" ]] \
-+          && [[ "$(first_service_last_terminated_line <"$settled_describe")" \
-+            == "$(first_service_last_terminated_line <"$describe")" ]] \
-+          && grep -Fq '    reason: stopped' "$final_describe" \
-+          && grep -Fq '    reason: stopped' "$settled_describe"; then
-+          failure_surface=deploy+prior-failed+probe
-+          trajectory=recovered-running-operator-stop
++        [[ "$deploy_exit" == 1 ]] \
++          || die "E10 startup-failed deploy did not exit one: $driver/$status"
+         grep -Fq "HTTP ${status}" "$transcript" \
+           || die "E10 deploy stream omitted HTTP status $status: $driver/$status"
+         grep -Fq "HTTP ${status}" "$describe" \
+@@ -1265,31 +1571,38 @@ run_http_status_cross_driver() {
+             == "$(first_service_last_terminated_line <"$describe")" ]] \
+           && grep -Fq '    reason: stopped' "$final_describe" \
+           && grep -Fq '    reason: stopped' "$settled_describe"; then
+-          failure_surface=deploy+prior-failed+probe
++          failure_surface=deploy-exit-1+prior-failed+probe
+           trajectory=recovered-running-operator-stop
          else
            die "E10 startup-failure cleanup followed an unrecognized trajectory: $driver/$status"
          fi
-@@ -1184,12 +1275,20 @@ run_http_status_cross_driver() {
-         "$transcript" \
-         || die "E10 nonzero cleanup delta for $driver/$status"
+       fi
+-      grep -Fq 'E08 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0' \
+-        "$transcript" \
+-        || die "E10 nonzero cleanup delta for $driver/$status"
++      grep -Eq '^E10 named cleanup: observed-before-stop=[0-9]+ post-stop=absent serve=stopped preparation=absent$' \
++        "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/cleanup-resource-complement.log" \
++        || die "E10 named cleanup complement failed for $driver/$status"
        sentinel='SVM-E10-FAILURE-BODY-MUST-NOT-LEAK'
--      sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" "$final_describe" || true; } | wc -l | tr -d ' ')"
-+      if [[ -n "$settled_describe" ]]; then
-+        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
-+          "$final_describe" "$settled_describe" || true; } | wc -l | tr -d ' ')"
-+      else
-+        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
-+          "$final_describe" || true; } | wc -l | tr -d ' ')"
-+      fi
-       [[ "$sentinel_count" -eq 0 ]] \
+-      if [[ -n "$settled_describe" ]]; then
+-        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
+-          "$final_describe" "$settled_describe" || true; } | wc -l | tr -d ' ')"
+-      else
+-        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
+-          "$final_describe" || true; } | wc -l | tr -d ' ')"
+-      fi
+-      [[ "$sentinel_count" -eq 0 ]] \
++      deploy_stdout_sentinel="$({ grep -Foh "$sentinel" "$deploy_stdout" || true; } \
++        | wc -l | tr -d ' ')"
++      deploy_stderr_sentinel="$({ grep -Foh "$sentinel" "$deploy_stderr" || true; } \
++        | wc -l | tr -d ' ')"
++      describe_sentinel="$({ grep -Foh "$sentinel" "$describe" "$final_describe" \
++        "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/post-cleanup-describe.log" || true; } \
++        | wc -l | tr -d ' ')"
++      probe_line="$(first_service_startup_probe_line <"$describe")"
++      probe_sentinel="$({ grep -Foh "$sentinel" <<<"$probe_line" || true; } \
++        | wc -l | tr -d ' ')"
++      [[ "$deploy_stdout_sentinel" -eq 0 && "$deploy_stderr_sentinel" -eq 0 \
++        && "$describe_sentinel" -eq 0 && "$probe_sentinel" -eq 0 ]] \
          || die "E10 sentinel leaked for $driver/$status"
-       bytes="$(wc -c <"$transcript" | tr -d ' ')"
--      printf '%s\t%s\t0\t%s\t%s\tstatus-%s\t%s\t0\t%s\t0\t0\t0\t0\tzero-delta\n' \
--        "$driver" "$status" "$terminal" "$trajectory" "$status" "$bytes" \
-+      printf '%s\t%s\t0\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tstatus-%s\t%s\t0\t%s\t0\t0\t0\t0\tzero-delta\n' \
-+        "$driver" "$status" "$alloc_id" "$before_state" "$before_restarts" \
-+        "$failure_surface" "$terminal" "$after_restarts" "$settled_state" \
-+        "$trajectory" "$status" "$bytes" \
-         "$(wc -c <"$describe" | tr -d ' ')" >>"$ledger"
+-      bytes="$(wc -c <"$transcript" | tr -d ' ')"
+-      printf '%s\t%s\t0\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tstatus-%s\t%s\t0\t%s\t0\t0\t0\t0\tzero-delta\n' \
+-        "$driver" "$status" "$alloc_id" "$before_state" "$before_restarts" \
++      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tstatus-%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tnamed-absent\n' \
++        "$driver" "$status" "$deploy_exit" "$alloc_id" "$before_state" "$before_restarts" \
+         "$failure_surface" "$terminal" "$after_restarts" "$settled_state" \
+-        "$trajectory" "$status" "$bytes" \
+-        "$(wc -c <"$describe" | tr -d ' ')" >>"$ledger"
++        "$trajectory" "$status" \
++        "$(wc -c <"$deploy_stdout" | tr -d ' ')" \
++        "$(wc -c <"$deploy_stderr" | tr -d ' ')" \
++        "$(wc -c <"$describe" | tr -d ' ')" \
++        "$deploy_stdout_sentinel" "$deploy_stderr_sentinel" \
++        "$describe_sentinel" "$probe_sentinel" >>"$ledger"
      done
    done
-diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh b/verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh
-index ea0556f4..a82515db 100755
---- a/verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh
-+++ b/verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh
-@@ -39,6 +39,12 @@ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
+   [[ "$(($(wc -l <"$ledger") - 1))" -eq 8 ]] || die "E10 ledger does not contain all eight cells"
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/README.md b/verification/expectations/E06-vm-job-deploy-reaches-running/README.md
+index 61ff3a67..3769de34 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/README.md
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/README.md
+@@ -2,7 +2,7 @@
  
- set -uo pipefail
+ **Surface:** E (end-to-end) · **KPI:** K4 · **Status:** `satisfied`
  
-+# Native preflight requires the selected guest artifacts in the environment;
-+# keep the exact expectation invocation executable without requiring callers
-+# to source the workspace .env themselves.
-+export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
-+export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
-+
- EXPECTATION_SLUG="$(basename "$EXPECTATION_DIR")"
- REMOTE_EVIDENCE="verification/expectations/$EXPECTATION_SLUG/evidence"
+-<!-- Status rationale — CURRENT CAPTURE (2026-08-19, SHA fff9fe16, SEED=1,
++<!-- Status rationale — CURRENT CAPTURE (2026-09-12, SHA 111d404c17f778067d197a07d1acbbc044cd6eaa, SEED=1,
+ executed on the bare-metal KVM box — NOT Lima — runner_exit_code: 0).
+ `satisfied` was rendered by a DIFFERENT-FOX adversarial audit of the captured
+ evidence (2026-08-19), not self-stamped by the runner's author — see the end
+@@ -27,8 +27,9 @@ Three captures now exist; the arc matters because it is the K4 story:
+      runner reached Running unmodified. At that revision this file argued
+      "runner.sh was NOT modified — load-bearing"; that argument no longer
+      holds and is corrected below.
+-  3. SHA fff9fe16 — GREEN, POST-confinement (this capture). Between capture 2
+-     and HEAD the confinement work landed (ADR-0082 fourth amendment): each
++  3. SHA 111d404c17f778067d197a07d1acbbc044cd6eaa (dirty working tree) — GREEN,
++     POST-confinement (this capture). Between capture 2
++     and this capture the confinement work landed (ADR-0082 fourth amendment): each
+      launch FICLONE-clones the operator rootfs into `<data_dir>/vm/clone-
+      staging` and runs cloud-hypervisor uid-dropped to OVERDRIVE_VMM_UID=4200.
+      That imposes two create-time preconditions on the operator's data-dir
+@@ -44,8 +45,9 @@ Three captures now exist; the arc matters because it is the K4 story:
+            0700 (root-only), which blocked uid 4200 and made CH exit 1 before
+            the guest reported ready.
  
+-`runner.sh` WAS modified for capture 3 (commit fff9fe16): serve's --data-dir is
+-co-located under the rootfs master's partition and granted 0711 traverse — it
++`runner.sh` WAS modified for capture 3 (working-tree blob `a82515db`): serve's
++--data-dir is co-located under the rootfs master's partition and granted 0711
++traverse — it
+ models the appliance's single VM data partition. This is NOT the "implementation
+ diverged to make the test green" hazard the prior revision warned against, for
+ two independently-checkable reasons:
+@@ -64,13 +66,14 @@ two independently-checkable reasons:
+ Both preconditions (a) and (b) are TEMPORARY: overdrive-fs (GH #97) supersedes
+ the same-filesystem requirement. No new issue is invented here.
+ 
+-`working_tree_dirty: true` in the manifest is benign: `dirty-status.txt` lists
+-only files under this expectation's own `evidence/` — the in-flight capture
+-recording its own output. No `crates/**` and no `runner.sh` delta is present
+-(runner.sh is committed at the pinned SHA fff9fe16); `dirty-diff.patch` shows
+-the delta is the evidence writes alone.
++`working_tree_dirty: true` in the manifest records the actual source state at
++the capture. `dirty-status.txt` retains the workspace's dirty paths, including
++the E06 runner correction and the in-flight evidence writes. The receipt's
++runner hunk identifies blob `a82515db`; this is intentional substrate fallout,
++not a claim that the runner was already present at SHA `111d404c`.
+ 
+-Different-fox audit (2026-08-19): a separate agent read ONLY the `evidence/`
++Different-fox audit (2026-09-12): see the [step 01-03 evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md),
++where a separate agent read ONLY the `evidence/`
+ files and this expectation's claim — never `runner.sh`, never `crates/**` —
+ prompted to REFUTE and to default to refuted on any narration, dodged
+ sub-claim, or number that did not add up. It independently confirmed
+@@ -272,15 +275,18 @@ not asserted here, since no evidence in this capture pins the mechanism.
+ ## Evidence
+ 
+ Captured under `evidence/` by `harness/run-expectation.sh E06` — SHA
+-`fff9fe16` (the runner-fix commit), `SEED=1`, `runner_exit_code: 0`, executed
++`111d404c17f778067d197a07d1acbbc044cd6eaa` with `working_tree_dirty: true`,
++`SEED=1`, `runner_exit_code: 0`, executed
+ on the metal KVM box (see `evidence/execution_substrate.txt`). `runner.sh` was
+ modified for this capture (co-locate serve's `--data-dir` on the rootfs
+ master's VM data partition + a `0711` traverse grant, so the post-`6b6ffb12`
+ confinement preconditions are met — see the rationale block at the top); the
+-change is committed at the pinned SHA, and the black-box operator surface is
++change was uncommitted in the recorded dirty tree and is now retained in the
++step-owned implementation commit, while this capture remains pinned to SHA
++`111d404c17f778067d197a07d1acbbc044cd6eaa` plus its dirty-state receipt. The black-box operator surface is
+ unchanged.
+ 
+-### Per-sub-claim verdict — CURRENT capture (SHA `fff9fe16`)
++### Per-sub-claim verdict — CURRENT capture (SHA `111d404c17f778067d197a07d1acbbc044cd6eaa`, dirty runner)
+ 
+ | # | Sub-claim | Verdict | Reason |
+ |---|---|---|---|
 diff --git a/verification/expectations/E10-vm-service-http-cross-driver-status/README.md b/verification/expectations/E10-vm-service-http-cross-driver-status/README.md
-index b630f8d3..b964e73b 100644
+index b964e73b..dc4203a1 100644
 --- a/verification/expectations/E10-vm-service-http-cross-driver-status/README.md
 +++ b/verification/expectations/E10-vm-service-http-cross-driver-status/README.md
-@@ -1,9 +1,12 @@
- # E10 — HTTP startup status classes agree for Exec and VM Services
+@@ -19,8 +19,12 @@ appear zero times in operator-visible output.
  
--Status: `satisfied` (native capture and independent evidence audit complete; see [final audit](../../../docs/analysis/review-02-04-final-evidence.md))
-+Status: `pending` (the corrected incarnation-aware contract requires a fresh
-+native capture and independent evidence audit)
- Surface: E — built-product end to end
- Execution substrate: `native-metal`
- Walking skeleton: no; bounded cross-driver mechanic matrix
-+Contract shape: `bounded-change` (current allocation state plus the retained
-+depth-one failure snapshot, restart count, probe result, and owned-resource complement)
- 
- ## Expectation
- 
-@@ -14,33 +17,43 @@ followed. Both 503 cells return the nonempty bounded response-body sentinel
- `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK`; that deletion-sensitive fixture must
- appear zero times in operator-visible output.
- 
--The cleanup trajectory is state-specific: a 204 Service is running when the
--example issues its operator stop and must finish `Terminated`. For 302/404/503,
--the deploy stream must first report the startup failure and the public describe
--must show the failed probe. The example then records stop intent. The authored
--failure may remain `Failed` with `StartupProbeFailed` while its owned runtime
--resources are removed. If an already-queued replacement reached `Running`
--before that intent was reconciled, its ordinary operator stop may finish
--`Terminated`; that alternate row is accepted only with public evidence of a
--replacement restart and an operator-attributed prior termination. A bare
--crash-shaped `Terminated` row is not accepted. A VM replacement rejected
--before creating a second VMM may instead leave a `Failed` row with the public
--`bind beacon listener` start error; that exact typed rejection is recorded as a
--separate trajectory, not silently treated as the original startup failure.
-+The cleanup trajectory is incarnation-aware. A 204 Service is `Running` when
-+the example issues its operator stop and must finish `Terminated`. For
-+302/404/503, the nonzero deploy stream is the occurrence surface for the typed
-+startup failure and the public describe retains the exact failed probe. Run
-+intent is still present, so the existing WorkloadLifecycle policy authorizes a
-+same-allocation recovery. The example polls through the old incarnation's
-+transient terminal row until public describe shows that same allocation
-+`Running` with a positive restart count, a depth-one prior `Failed` snapshot,
-+and the failed startup probe. A transient `Failed` or `Terminated` row is not a
-+settled no-recovery result and does not authorize a blanket terminal union.
+ The cleanup trajectory is incarnation-aware. A 204 Service is `Running` when
+ the example issues its operator stop and must finish `Terminated`. For
+-302/404/503, the nonzero deploy stream is the occurrence surface for the typed
+-startup failure and the public describe retains the exact failed probe. Run
++302/404/503, the streaming command first receives the existing asynchronous
++`Accepted` acknowledgement, then receives the typed `Failed` terminal event and
++exits exactly 1. Acceptance of the submission does not turn the terminal
++startup failure into exit 0: ADR-0032 section 9 and ADR-0059 keep every Service
++`Failed` terminal nonzero. The public describe independently retains the failed
++probe's identity, configuration, status, and reason. Run
+ intent is still present, so the existing WorkloadLifecycle policy authorizes a
+ same-allocation recovery. The example polls through the old incarnation's
+ transient terminal row until public describe shows that same allocation
+@@ -31,10 +35,23 @@ settled no-recovery result and does not authorize a blanket terminal union.
+ Only after that recovered `Running` incarnation is observable does the example
+ record operator stop intent. Its current state must become `Terminated` with a
+ stopped reason, while the allocation ID, restart count, prior `Failed` snapshot,
+-and failed probe remain unchanged in a second observation after the owned
+-runtime resources are gone. The accepted current session may advance the
+-stopped observation during teardown; a stale earlier session must not replace
+-the settled result with a crash-shaped observation.
++and failed probe evidence remain preserved in a second observation after every
++named allocation resource is absent. For that probe, preservation means the same
++Startup/index-0 identity, HTTP method and target, failed status, and exact
++failure reason; its `last_observed_at` may stay equal or advance when the same
++failure is observed again, but must not regress. The accepted current session
++may advance the stopped observation during teardown; a stale earlier session
++must not replace the settled result with a crash-shaped observation.
 +
-+Only after that recovered `Running` incarnation is observable does the example
-+record operator stop intent. Its current state must become `Terminated` with a
-+stopped reason, while the allocation ID, restart count, prior `Failed` snapshot,
-+and failed probe remain unchanged in a second observation after the owned
-+runtime resources are gone. The accepted current session may advance the
-+stopped observation during teardown; a stale earlier session must not replace
-+the settled result with a crash-shaped observation.
++Cleanup is an absolute complement, not a required positive delta. The post-stop
++and final snapshots must contain no allocation cgroup, VM run directory,
++allocation-owned hypervisor, or network name observed for the current session;
++the final snapshot must also show the fixed materialization absent. When the
++current-session snapshot observed a named resource, its disappearance is kept
++as additional evidence. When cleanup won the observation race and that snapshot
++was already clean, the same absolute absence remains sufficient and no synthetic
++before-to-after delta is required. Whole-host deltas remain diagnostic only so
++unrelated concurrent host activity cannot decide this allocation's result.
  
  - Anchor: S-SVM-26 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
  - Anchor: US-SVM-2 and K2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.
- - Anchor: ADR-0090 explicit/default HTTP target semantics.
-+- Anchor: ADR-0078 depth-one `last_terminated` plus monotone `restart_count` occurrence semantics.
-+- Anchor: ADR-0099 accepted Running publication before restart release.
-+- Anchor: ADR-0100 accepted-session ownership and stale-watcher refusal.
- 
+@@ -46,11 +63,37 @@ the settled result with a crash-shaped observation.
  ## Verification
  
  The activated `http-status-cross-driver` mode runs all eight checked-in specs
- against isolated built-product instances and emits an eight-cell ledger. Every
--cell records driver, status, deploy exit, terminal state, observed cleanup
-+cell records driver, status, allocation ID, state and restart count before and
-+after stop, the failure surface, a post-cleanup settled state, the exact
- trajectory, rendered probe result, stdout/stderr/describe byte counts, sentinel
- occurrence counts for each operator surface, and cleanup delta. Passing
--requires the expected result and state-specific cleanup trajectory in all 8/8
--cells, byte-equal status policy between the two drivers, and zero
-+requires the recovered-current/prior-failure pairing above in every failing
-+cell and the healthy first-incarnation pairing in both 204 cells, the same HTTP
-+status policy for both drivers, and zero
- occurrences of `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK` in deploy stdout, deploy
- stderr, workload describe output, and the rendered probe-result field. The
- ledger itself records only those zero counts, never the response body.
+-against isolated built-product instances and emits an eight-cell ledger. Every
+-cell records driver, status, allocation ID, state and restart count before and
+-after stop, the failure surface, a post-cleanup settled state, the exact
+-trajectory, rendered probe result, stdout/stderr/describe byte counts, sentinel
+-occurrence counts for each operator surface, and cleanup delta. Passing
++against isolated built-product instances and retains
++`raw-cells/e10-<driver>-<status>/` for every cell before deriving the eight-cell
++ledger. Each raw directory keeps:
++
++- the exact deploy command, PTY-visible stdout, wrapper stderr, PTY transcript,
++  and process exit (0 for 204; 1 for 302/404/503);
++- the before-stop public describe row, current externally observable row
++  identity (`allocation_id`, current row stamp, restart count), failed-probe
++  line, recovery observation trail, active kernel/resource snapshot, and any
++  allocation-owned resource names actually observed before stop;
++- the exact stop command, stdout, stderr, and exit, plus after-stop and
++  post-runtime-cleanup public describe rows; and
++- before/post-stop/final raw resource snapshots, the absolute named-resource
++  complement, the whole-host diagnostic delta, the stop observation trail, and
++  a comparison receipt derived from the retained public rows.
++
++The accepted session's private `Arc<BeaconWriter>` identity is deliberately not
++a public field (ADR-0100 D1/D2), so E10 does not invent one. Its black-box
++session witness is the current allocation row plus its active owned resources.
++Stale-session refusal is observed externally after those resources disappear:
++the second public describe must still carry the same allocation ID, restart
++count, depth-one prior `Failed`, the same failed probe semantics with a
++non-regressive observation timestamp, and operator-stopped state. The seeded
++and source-local ADR-0100 tests remain the independent proof of the private
++pointer-identity comparison itself.
++
++The derived ledger records driver, status, allocation ID, state and restart
++count before and after stop, the failure surface, a post-cleanup settled state,
++the exact trajectory, rendered probe result, raw stdout/stderr/describe byte
++counts, sentinel occurrence counts for each operator surface, and named-resource
++cleanup complement. Passing
+ requires the recovered-current/prior-failure pairing above in every failing
+ cell and the healthy first-incarnation pairing in both 204 cells, the same HTTP
+ status policy for both drivers, and zero
 diff --git a/verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh b/verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
-index fcba1333..c60c0cbe 100755
+index c60c0cbe..49fbab19 100755
 --- a/verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
 +++ b/verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh
-@@ -34,15 +34,19 @@ awk '/^--- E10 ledger begin ---$/ { keep=1; next } /^--- E10 ledger end ---$/ {
-   || { echo 'E10 runner: expected exactly eight ledger rows' >&2; exit 1; }
- awk -F '\t' '
-   NR == 1 { next }
--  NF != 14 || ($1 != "exec" && $1 != "vm") \
-+  NF != 20 || ($1 != "exec" && $1 != "vm") \
-     || $2 !~ /^(204|302|404|503)$/ || $3 != "0" \
--    || ($2 == "204" && ($4 != "Terminated" || $5 != "operator-stop-running")) \
--    || ($2 != "204" && $4 == "Failed" && $5 != "preserved-startup-failure" \
--        && $5 != "replacement-start-rejected") \
--    || ($2 != "204" && $4 == "Terminated" && $5 != "replacement-operator-stop") \
--    || ($2 != "204" && $4 != "Failed" && $4 != "Terminated") \
--    || $6 != ("status-" $2) || $10 != "0" || $11 != "0" \
--    || $12 != "0" || $13 != "0" || $14 != "zero-delta" { exit 1 }
-+    || $4 != ("alloc-service-" $1 "-http-" $2 "-0") \
-+    || $6 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ \
-+    || ($2 == "204" && ($5 != "Running" || $6 != "0" || $7 != "none" \
-+        || $8 != "Terminated" || $9 != "0" || $10 != "Terminated" \
-+        || $11 != "operator-stop-running")) \
-+    || ($2 != "204" && ($5 != "Running" || $6 !~ /^[1-9][0-9]*$/ \
-+        || $7 != "deploy+prior-failed+probe" || $8 != "Terminated" \
-+        || $9 != $6 || $10 != "Terminated" \
-+        || $11 != "recovered-running-operator-stop")) \
-+    || $12 != ("status-" $2) || $16 != "0" || $17 != "0" \
-+    || $18 != "0" || $19 != "0" || $20 != "zero-delta" { exit 1 }
-   seen[$1 SUBSEP $2]++
-   rows++
-   END {
+@@ -2,64 +2,374 @@
+ set -euo pipefail
+ 
+ readonly EXAMPLE="examples/service-kind-vm-workloads/run-example.sh"
+-readonly RAW_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/svm-e10-metal.XXXXXX")"
++EXPECTATION_SLUG="$(basename "$EXPECTATION_DIR")"
++readonly EXPECTATION_SLUG
++readonly REMOTE_CAPTURE_ROOT="verification/expectations/$EXPECTATION_SLUG/evidence/raw-cells"
++readonly LOCAL_CAPTURE_ROOT="$EVIDENCE_DIR/raw-cells"
++readonly E10_OUTPUT_ROOT="/srv/vm/overdrive-testing/svm-e08"
++CAPTURE_TOKEN="e10-$(date -u +%Y%m%dT%H%M%SZ)-$$"
++readonly CAPTURE_TOKEN
++RAW_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/svm-e10-metal.XXXXXX")"
++readonly RAW_OUTPUT
++RAW_PULL="$(mktemp "${TMPDIR:-/tmp}/svm-e10-pull.XXXXXX")"
++readonly RAW_PULL
+ export OVERDRIVE_METAL_KERNEL="${OVERDRIVE_METAL_KERNEL:-/srv/vm/overdrive-testing/kernel}"
+ export OVERDRIVE_METAL_ROOTFS="${OVERDRIVE_METAL_ROOTFS:-/srv/vm/overdrive-testing/rootfs.ext4}"
+ 
+-cleanup() { rm -f -- "$RAW_OUTPUT"; }
++cleanup() { rm -f -- "$RAW_OUTPUT" "$RAW_PULL"; }
+ trap cleanup EXIT HUP INT TERM
+ 
++resolve_metal_target() {
++  if [[ -n "${OVERDRIVE_METAL_TARGET:-}" ]]; then
++    printf '%s' "$OVERDRIVE_METAL_TARGET"
++    return 0
++  fi
++  if [[ -f "$REPO_ROOT/.env" ]]; then
++    sed -n 's/^OVERDRIVE_METAL_TARGET=//p' "$REPO_ROOT/.env" | tail -1
++  fi
++}
++
++require_file() {
++  local path="$1"
++  [[ -f "$path" ]] || {
++    echo "E10 runner: required raw evidence is missing: $path" >&2
++    return 1
++  }
++}
++
++first_alloc_row() {
++  awk '$1 ~ /^alloc-/ { print $1, $2, $3, $4; exit }' "$1"
++}
++
++e10_failed_probe_is_preserved() {
++  local before_line="$1"
++  local after_line="$2"
++  local pattern='^([[:space:]]*startup[[:space:]]+probe\[0\][[:space:]]+http[[:space:]]+GET[[:space:]]+[^[:space:]]+[[:space:]]+last=fail[[:space:]]+\(.*\))[[:space:]]+last_observed_at=([0-9]+)$'
++  local before_semantics before_observed_at after_semantics after_observed_at
++
++  [[ "$before_line" =~ $pattern ]] || return 1
++  before_semantics="${BASH_REMATCH[1]}"
++  before_observed_at="${BASH_REMATCH[2]}"
++  [[ "$after_line" =~ $pattern ]] || return 1
++  after_semantics="${BASH_REMATCH[1]}"
++  after_observed_at="${BASH_REMATCH[2]}"
++
++  [[ "$after_semantics" == "$before_semantics" ]] \
++    && [[ "$after_observed_at" -ge "$before_observed_at" ]]
++}
++
++snapshot_network_names() {
++  awk '
++    /^\[network\]$/ { in_network = 1; next }
++    in_network && /^\[/ { exit }
++    in_network && $1 ~ /^ovd-(hv|wl|tp|ns)-/ {
++      split($1, parts, "@")
++      print parts[1]
++    }
++  ' "$1" | sort -u
++}
++
++snapshot_materialization() {
++  awk '
++    /^\[materialization\]$/ { getline; print; exit }
++  ' "$1"
++}
++
++snapshot_allocation_hypervisors() {
++  awk '
++    /^\[allocation-hypervisors\]$/ { in_hypervisors = 1; next }
++    in_hypervisors && /^\[/ { exit }
++    in_hypervisors && NF { print }
++  ' "$1"
++}
++
++validate_e10_named_cleanup() {
++  local cell="$1"
++  local driver="$2"
++  local status="$3"
++  local alloc_id="alloc-service-$driver-http-$status-0"
++  local observed="$cell/current-session-owned-resources.log"
++  local current="$cell/current-session-resources.log"
++  local runtime_after="$cell/post-runtime-cleanup-resources.log"
++  local final_after="$cell/cleanup-resources-after.log"
++  local complement="$cell/cleanup-resource-complement.log"
++  local kind name observed_count recorded_count
++
++  for name in "$observed" "$current" "$runtime_after" "$final_after" "$complement"; do
++    require_file "$name" || return 1
++  done
++  grep -Fxq "allocation=$alloc_id" "$observed" || return 1
++  for name in "$runtime_after" "$final_after"; do
++    grep -Fq '[hypervisors]' "$name" || return 1
++    grep -Fq '[cgroup-scopes]' "$name" || return 1
++    grep -Fq '[vm-run-directories]' "$name" || return 1
++    grep -Fq '[network]' "$name" || return 1
++    grep -Fq '[loop-devices]' "$name" || return 1
++    grep -Fq '[mounts]' "$name" || return 1
++    grep -Fq '[allocation-hypervisors]' "$name" || return 1
++    [[ -z "$(snapshot_allocation_hypervisors "$name")" ]] || return 1
++    if grep -Fq "$alloc_id" "$name"; then
++      echo "E10 runner: residual allocation resource in $name" >&2
++      return 1
++    fi
++  done
++  [[ "$(snapshot_materialization "$final_after")" == absent ]] || return 1
++  if grep -Fq "$E10_OUTPUT_ROOT" "$final_after"; then
++    echo "E10 runner: residual mount or loop resource in $final_after" >&2
++    return 1
++  fi
++
++  observed_count=0
++  while IFS='=' read -r kind name; do
++    [[ "$kind" != allocation ]] || continue
++    [[ -n "$kind" && -n "$name" ]] || return 1
++    observed_count=$((observed_count + 1))
++    case "$kind" in
++      network)
++        grep -Fxq "$name" <(snapshot_network_names "$current") || return 1
++        ! grep -Fxq "$name" <(snapshot_network_names "$runtime_after") || return 1
++        ! grep -Fxq "$name" <(snapshot_network_names "$final_after") || return 1
++        ;;
++      hypervisor)
++        grep -Fxq "$name" <(snapshot_allocation_hypervisors "$current") || return 1
++        ! grep -Fxq "$name" <(snapshot_allocation_hypervisors "$runtime_after") || return 1
++        ! grep -Fxq "$name" <(snapshot_allocation_hypervisors "$final_after") || return 1
++        ;;
++      cgroup|run-directory)
++        grep -Fq "$name" "$current" || return 1
++        ! grep -Fq "$name" "$runtime_after" || return 1
++        ! grep -Fq "$name" "$final_after" || return 1
++        ;;
++      *)
++        echo "E10 runner: unknown named-resource kind: $kind" >&2
++        return 1
++        ;;
++    esac
++  done <"$observed"
++
++  recorded_count="$(sed -n -E \
++    's/^E10 named cleanup: observed-before-stop=([0-9]+) post-stop=absent serve=stopped preparation=absent$/\1/p' \
++    "$complement")"
++  [[ "$recorded_count" =~ ^[0-9]+$ && "$recorded_count" -eq "$observed_count" ]]
++}
++
++validate_e10_capture() {
++  local capture_root="$1"
++  local ledger="$2"
++  local expected_token="$3"
++  local row_count
++  row_count="$(awk -F '\t' 'NR > 1 { count++ } END { print count + 0 }' "$ledger")"
++  [[ "$row_count" -eq 8 ]] || {
++    echo "E10 runner: expected exactly eight ledger rows, observed $row_count" >&2
++    return 1
++  }
++
++  local driver status cell expected_exit name
++  local before_probe after_probe settled_probe
++  local -a required=(
++    capture-token.log case-transcript.log
++    service-deploy-command.log service-deploy-stdout.log
++    service-deploy-stderr.log service-deploy-exit.log service-stream.log
++    before-stop-describe.log current-session-observation.log
++    current-session-resources.log current-session-owned-resources.log
++    post-runtime-cleanup-resources.log stop-command.log stop-stdout.log
++    stop-stderr.log stop-exit.log after-stop-describe.log
++    post-cleanup-describe.log stale-session-refusal.log
++    cleanup-resources-before.log cleanup-resources-after.log
++    cleanup-resource-delta.log cleanup-resource-complement.log
++  )
++  for driver in exec vm; do
++    for status in 204 302 404 503; do
++      cell="$capture_root/e10-$driver-$status"
++      for name in "${required[@]}"; do
++        require_file "$cell/$name" || return 1
++      done
++      [[ "$(tr -d '\r\n' <"$cell/capture-token.log")" == "$expected_token" ]] || {
++        echo "E10 runner: stale raw evidence token for $driver/$status" >&2
++        return 1
++      }
++      grep -Fq ' deploy ' "$cell/service-deploy-command.log" || return 1
++      grep -Fq ' job stop ' "$cell/stop-command.log" || return 1
++      [[ "$(tr -d '[:space:]' <"$cell/stop-exit.log")" == 0 ]] || return 1
++      grep -Fq "Stopped workload 'service-$driver-http-$status'." \
++        "$cell/stop-stdout.log" || return 1
++      [[ "$(first_alloc_row "$cell/before-stop-describe.log")" \
++        == "$(grep '^current_row=' "$cell/current-session-observation.log" \
++          | sed 's/^current_row=//')" ]] || return 1
++      grep -Eq '^allocation_id=alloc-service-(exec|vm)-http-(204|302|404|503)-0$' \
++        "$cell/current-session-observation.log" || return 1
++      validate_e10_named_cleanup "$cell" "$driver" "$status" || return 1
++      grep -Fq 'Terminated' "$cell/after-stop-describe.log" || return 1
++      grep -Fq '    reason: stopped' "$cell/after-stop-describe.log" || return 1
++      grep -Fq 'Terminated' "$cell/post-cleanup-describe.log" || return 1
++      grep -Fq '    reason: stopped' "$cell/post-cleanup-describe.log" || return 1
++      [[ "$(awk '$1 ~ /^alloc-/ { print $1, $2, $3; exit }' \
++        "$cell/after-stop-describe.log")" == \
++        "$(awk '$1 ~ /^alloc-/ { print $1, $2, $3; exit }' \
++        "$cell/post-cleanup-describe.log")" ]] || return 1
++      expected_exit=1
++      if [[ "$status" == 204 ]]; then
++        expected_exit=0
++        grep -Fq "Service 'service-$driver-http-204' is stable" \
++          "$cell/service-deploy-stdout.log" || return 1
++        grep -Eq '^current_state=Running$' "$cell/current-session-observation.log" || return 1
++        grep -Eq '^restart_count=0$' "$cell/current-session-observation.log" || return 1
++      else
++        require_file "$cell/recovery-observations.log" || return 1
++        require_file "$cell/stop-observations.log" || return 1
++        grep -Fq 'Error:' "$cell/service-deploy-stdout.log" || return 1
++        grep -Fq "HTTP $status" "$cell/service-deploy-stdout.log" || return 1
++        grep -Eq '^current_state=Running$' "$cell/current-session-observation.log" || return 1
++        grep -Eq '^restart_count=[1-9][0-9]*$' "$cell/current-session-observation.log" || return 1
++        grep -Eq '^prior_failure=.*Failed' "$cell/current-session-observation.log" || return 1
++        grep -Eq "^startup_probe=.*HTTP $status" \
++          "$cell/current-session-observation.log" || return 1
++        grep -Fq 'before_stop_prior_failure=' "$cell/stale-session-refusal.log" || return 1
++        grep -Fq 'after_cleanup_prior_failure=' "$cell/stale-session-refusal.log" || return 1
++        [[ "$(awk '/^    last terminated: / { print; exit }' \
++          "$cell/before-stop-describe.log")" == \
++          "$(awk '/^    last terminated: / { print; exit }' \
++          "$cell/post-cleanup-describe.log")" ]] || return 1
++        before_probe="$(awk '/^  startup probe\[0\] / { print; exit }' \
++          "$cell/before-stop-describe.log")"
++        after_probe="$(awk '/^  startup probe\[0\] / { print; exit }' \
++          "$cell/after-stop-describe.log")"
++        settled_probe="$(awk '/^  startup probe\[0\] / { print; exit }' \
++          "$cell/post-cleanup-describe.log")"
++        e10_failed_probe_is_preserved "$before_probe" "$after_probe" || {
++          echo "E10 runner: failed probe changed or regressed after stop for $driver/$status" >&2
++          return 1
++        }
++        e10_failed_probe_is_preserved "$after_probe" "$settled_probe" || {
++          echo "E10 runner: failed probe changed or regressed after cleanup for $driver/$status" >&2
++          return 1
++        }
++      fi
++      [[ "$(tr -d '[:space:]' <"$cell/service-deploy-exit.log")" \
++        == "$expected_exit" ]] || {
++        echo "E10 runner: deploy exit mismatch for $driver/$status" >&2
++        return 1
++      }
++      if grep -Fq 'SVM-E10-FAILURE-BODY-MUST-NOT-LEAK' \
++        "$cell/service-deploy-stdout.log" "$cell/service-deploy-stderr.log" \
++        "$cell/before-stop-describe.log" "$cell/after-stop-describe.log" \
++        "$cell/post-cleanup-describe.log"; then
++        echo "E10 runner: failure-body sentinel leaked for $driver/$status" >&2
++        return 1
++      fi
++    done
++  done
++
++  awk -F '\t' '
++    NR == 1 { next }
++    NF != 20 || ($1 != "exec" && $1 != "vm") ||
++      $2 !~ /^(204|302|404|503)$/ ||
++      $4 != ("alloc-service-" $1 "-http-" $2 "-0") ||
++      $6 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ ||
++      ($2 == "204" && ($3 != "0" || $5 != "Running" || $6 != "0" ||
++          $7 != "none" || $8 != "Terminated" || $9 != "0" ||
++          $10 != "Terminated" || $11 != "operator-stop-running")) ||
++      ($2 != "204" && ($3 != "1" || $5 != "Running" ||
++          $6 !~ /^[1-9][0-9]*$/ ||
++          $7 != "deploy-exit-1+prior-failed+probe" ||
++          $8 != "Terminated" || $9 != $6 || $10 != "Terminated" ||
++          $11 != "recovered-running-operator-stop")) ||
++      $12 != ("status-" $2) || $13 !~ /^[0-9]+$/ || $14 !~ /^[0-9]+$/ ||
++      $15 !~ /^[0-9]+$/ || $16 != "0" || $17 != "0" ||
++      $18 != "0" || $19 != "0" || $20 != "named-absent" { exit 1 }
++    { seen[$1 SUBSEP $2]++; rows++ }
++    END {
++      if (rows != 8) exit 1
++      for (driver in drivers) for (status in statuses)
++        if (seen[driver SUBSEP status] != 1) exit 1
++    }
++    BEGIN {
++      drivers["exec"] = 1; drivers["vm"] = 1
++      statuses["204"] = 1; statuses["302"] = 1
++      statuses["404"] = 1; statuses["503"] = 1
++    }
++  ' "$ledger" || {
++    echo 'E10 runner: raw-backed ledger oracle failed' >&2
++    return 1
++  }
++}
++
++if [[ "${E10_VALIDATE_ONLY:-0}" == 1 ]]; then
++  validate_e10_capture "${E10_CAPTURE_ROOT:?}" "${E10_LEDGER:?}" \
++    "${E10_CAPTURE_TOKEN:?}"
++  exit
++fi
++
++if [[ "${E10_VALIDATE_RESOURCE_ONLY:-0}" == 1 ]]; then
++  validate_e10_named_cleanup "${E10_CELL:?}" \
++    "${E10_DRIVER:?}" "${E10_STATUS:?}"
++  exit
++fi
++
++if [[ "${E10_VALIDATE_PROBE_ONLY:-0}" == 1 ]]; then
++  e10_failed_probe_is_preserved "${E10_PROBE_BEFORE:?}" \
++    "${E10_PROBE_AFTER:?}"
++  exit
++fi
++
+ "$REPO_ROOT/$EXAMPLE" check-source
++TARGET="$(resolve_metal_target)"
++readonly TARGET
++[[ -n "$TARGET" ]] || {
++  echo 'E10 runner: OVERDRIVE_METAL_TARGET is not configured' >&2
++  exit 1
++}
++
+ {
+   echo '# E10 invocation'
+   echo "command: cargo xtask metal run -- $EXAMPLE run http-status-cross-driver"
++  echo "remote_capture_root: $REMOTE_CAPTURE_ROOT"
++  echo "capture_token: $CAPTURE_TOKEN"
+   echo "started_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+ } >"$EVIDENCE_DIR/product-run.meta"
+ 
+ set +e
+ timeout 1800s cargo xtask metal run -- bash -lc \
+-  "SVM_E08_MATRIX_CAPTURE_ROOT=/tmp/svm-e10-matrix $EXAMPLE run http-status-cross-driver" \
++  "SVM_E08_MATRIX_CAPTURE_ROOT=$REMOTE_CAPTURE_ROOT SVM_E10_CAPTURE_TOKEN=$CAPTURE_TOKEN $EXAMPLE run http-status-cross-driver" \
+   >"$RAW_OUTPUT" 2>&1
+ run_rc=$?
+ set -e
+-sed -E 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' <"$RAW_OUTPUT" >"$EVIDENCE_DIR/product-run.out"
++sed -E 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' \
++  <"$RAW_OUTPUT" >"$EVIDENCE_DIR/product-run.out"
+ {
+   echo "finished_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   echo "exit: $run_rc"
+ } >>"$EVIDENCE_DIR/product-run.meta"
+-[[ "$run_rc" -eq 0 ]] || { cat "$EVIDENCE_DIR/product-run.out" >&2; exit "$run_rc"; }
+-awk '/^--- E10 ledger begin ---$/ { keep=1; next } /^--- E10 ledger end ---$/ { keep=0 } keep' \
+-  "$EVIDENCE_DIR/product-run.out" >"$EVIDENCE_DIR/http-status-cross-driver.tsv"
+-[[ "$(($(wc -l <"$EVIDENCE_DIR/http-status-cross-driver.tsv") - 1))" -eq 8 ]] \
+-  || { echo 'E10 runner: expected exactly eight ledger rows' >&2; exit 1; }
+-awk -F '\t' '
+-  NR == 1 { next }
+-  NF != 20 || ($1 != "exec" && $1 != "vm") \
+-    || $2 !~ /^(204|302|404|503)$/ || $3 != "0" \
+-    || $4 != ("alloc-service-" $1 "-http-" $2 "-0") \
+-    || $6 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ \
+-    || ($2 == "204" && ($5 != "Running" || $6 != "0" || $7 != "none" \
+-        || $8 != "Terminated" || $9 != "0" || $10 != "Terminated" \
+-        || $11 != "operator-stop-running")) \
+-    || ($2 != "204" && ($5 != "Running" || $6 !~ /^[1-9][0-9]*$/ \
+-        || $7 != "deploy+prior-failed+probe" || $8 != "Terminated" \
+-        || $9 != $6 || $10 != "Terminated" \
+-        || $11 != "recovered-running-operator-stop")) \
+-    || $12 != ("status-" $2) || $16 != "0" || $17 != "0" \
+-    || $18 != "0" || $19 != "0" || $20 != "zero-delta" { exit 1 }
+-  seen[$1 SUBSEP $2]++
+-  rows++
+-  END {
+-    if (rows != 8) exit 1
+-    for (driver in drivers) for (status in statuses) \
+-      if (seen[driver SUBSEP status] != 1) exit 1
+-  }
+-  BEGIN {
+-    drivers["exec"] = 1; drivers["vm"] = 1
+-    statuses["204"] = 1; statuses["302"] = 1
+-    statuses["404"] = 1; statuses["503"] = 1
+-  }
+-' "$EVIDENCE_DIR/http-status-cross-driver.tsv" \
+-  || { echo 'E10 runner: terminal trajectory or cleanup audit failed' >&2; exit 1; }
++
++# Pull raw files after either a completed or partial run. The capture token
++# prevents a prior remote file from satisfying this run's evidence oracle.
++readonly -a SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 \
++  -o ConnectTimeout=15 -o BatchMode=yes)
++install -d -m 0700 "$LOCAL_CAPTURE_ROOT"
++set +e
++rsync -az -e "ssh ${SSH_OPTS[*]}" \
++  "$TARGET:overdrive/$REMOTE_CAPTURE_ROOT/" "$LOCAL_CAPTURE_ROOT/" \
++  >"$RAW_PULL" 2>&1
++pull_rc=$?
++set -e
++sed -E 's/@[A-Za-z0-9._-]+/@<metal-host-redacted>/g' \
++  <"$RAW_PULL" >"$EVIDENCE_DIR/evidence-pullback.out"
++printf 'exit: %s\n' "$pull_rc" >>"$EVIDENCE_DIR/evidence-pullback.out"
++[[ "$pull_rc" -eq 0 ]] || {
++  cat "$EVIDENCE_DIR/evidence-pullback.out" >&2
++  exit "$pull_rc"
++}
++
++awk '/^--- E10 ledger begin ---$/ { keep=1; next }
++  /^--- E10 ledger end ---$/ { keep=0 }
++  keep' "$EVIDENCE_DIR/product-run.out" \
++  >"$EVIDENCE_DIR/http-status-cross-driver.tsv"
++
++[[ "$run_rc" -eq 0 ]] || {
++  cat "$EVIDENCE_DIR/product-run.out" >&2
++  exit "$run_rc"
++}
++validate_e10_capture "$LOCAL_CAPTURE_ROOT" \
++  "$EVIDENCE_DIR/http-status-cross-driver.tsv" "$CAPTURE_TOKEN"
+ grep -Fq 'E10 PASS: 8/8 Exec/VM HTTP status cells with zero failure-body sentinel exposure' \
+   "$EVIDENCE_DIR/product-run.out"
 diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
-index 9b53c687..3f469b75 100644
+index 3f469b75..0ecb31d0 100644
 --- a/verification/expectations/INDEX.md
 +++ b/verification/expectations/INDEX.md
 @@ -22,7 +22,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
  | [E08](E08-vm-service-guest-health/) | E | a VM Service reaches Stable from guest HTTP/TCP results and serves its exact reply to a VM client Job through the built product | K1/K2 | S-SVM-01, US-SVM-1/2, ADR-0090/0091, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md) |
  | [E09](E09-vm-service-tcp-truthfulness-100/) | E | 100 paired VM TCP success/failure journeys are truthful to VM peer Jobs | K1 | S-SVM-25, US-SVM-1, ADR-0090, GH #257 | `pending` |
  | [E09-v2](E09-v2-vm-service-tcp-truthfulness-20/) | E | 20 paired VM TCP journeys at concurrency 10 cycle through one persistent control-plane process with bounded overlap and scoped cleanup | K1 | S-SVM-25, US-SVM-1, ADR-0090/0083, GH #257/283, S-VLL-12 | `pending` |
--| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0090, GH #257 | `satisfied` |
-+| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with same-allocation recovery stopped only after durable prior-failure evidence and nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0078/0090/0099/0100, GH #257 | `pending` |
+-| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes, with same-allocation recovery stopped only after durable prior-failure evidence and nonempty failure-body leakage audited | K2 | S-SVM-26, US-SVM-2, ADR-0078/0090/0099/0100, GH #257 | `pending` |
++| [E10](E10-vm-service-http-cross-driver-status/) | E | Exec and VM Services agree for HTTP 204/302/404/503 startup outcomes; failure streams exit 1, same-allocation recovery retains prior failure and failed-probe semantics through cleanup, and nonempty failure-body leakage is audited from raw per-cell evidence | K2 | S-SVM-26, US-SVM-2, ADR-0032/0059/0078/0090/0099/0100, GH #257 | `pending` |
  | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
  | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
  | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
-@@ -199,8 +199,9 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+@@ -199,7 +199,10 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
    the byte-exact VM guest reply through the Service frontend. E10's four
    `[service] + [exec]` fixtures remain cross-driver controls, never client
    Jobs. A direct host request to `workload_addr` is not accepted as traffic
--  evidence. E10 and E13 are `satisfied` following native execution
--  and the [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
-+  evidence. E10 is `pending` after its same-allocation recovery-settlement contract correction;
-+  E13 remains `satisfied` following native execution and the
-+  [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
+-  evidence. E10 is `pending` after its same-allocation recovery-settlement contract correction;
++  evidence. E10 is `pending` until one fresh capture records exit 1 for all six
++  startup-failure streams and retains the raw per-cell recovery, stop,
++  stale-session-refusal, and cleanup observations required by its corrected
++  same-allocation settlement contract;
+   E13 remains `satisfied` following native execution and the
+   [independent final evidence audit](../../docs/analysis/review-02-04-final-evidence.md);
    step 02-04 is [APPROVED](../../docs/feature/service-kind-vm-workloads/deliver/review-02-04.md).
-   E08 is `satisfied` following its native-metal capture and
-   [independent evidence audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e08-evidence.md).
+diff --git a/verification/harness/run-expectation.sh b/verification/harness/run-expectation.sh
+index 2c8af373..731dae47 100755
+--- a/verification/harness/run-expectation.sh
++++ b/verification/harness/run-expectation.sh
+@@ -91,7 +91,14 @@ DIRTY="false"
+ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+   DIRTY="true"
+   git -C "$REPO_ROOT" status --porcelain >"$EVIDENCE_DIR/dirty-status.txt"
+-  git -C "$REPO_ROOT" diff HEAD >"$EVIDENCE_DIR/dirty-diff.patch"
++  # Evidence is captured after this receipt is written. Exclude the
++  # repository's tracked evidence trees so the receipt cannot contain a
++  # self-hunk or recursively embed prior raw captures, while retaining every
++  # dirty production/example/runner/config input that is part of the source
++  # state under verification.
++  git -C "$REPO_ROOT" diff HEAD -- \
++    . ':(exclude)verification/expectations/**/evidence/**' \
++    >"$EVIDENCE_DIR/dirty-diff.patch"
+ fi
+ 
+ echo "=== expectation $ID ==="
+diff --git a/verification/harness/test-run-expectation.sh b/verification/harness/test-run-expectation.sh
+index 5cd7e795..38eb2f1a 100755
+--- a/verification/harness/test-run-expectation.sh
++++ b/verification/harness/test-run-expectation.sh
+@@ -77,9 +77,22 @@ make_expectation E09-v2 default 0
+ git -C "$TEST_ROOT" add verification
+ git -C "$TEST_ROOT" commit -qm 'test fixtures'
+ 
++# The receipt must include dirty source state while excluding every evidence
++# path, including its own output path. This makes the fixture exercise the
++# non-self-referential path rather than merely checking manifest branches.
++printf '\n# dirty source input\n' >>"$TEST_ROOT/verification/harness/run-expectation.sh"
++mkdir -p "$TEST_ROOT/verification/expectations/S01-fixture/evidence"
++printf 'dirty captured output\n' \
++  >"$TEST_ROOT/verification/expectations/S01-fixture/evidence/preexisting.out"
++
+ run_case S01 zero
+ assert_manifest "$TEST_ROOT/verification/expectations/S01-fixture/evidence/verification.yaml" \
+   succeeded lima true
++receipt="$TEST_ROOT/verification/expectations/S01-fixture/evidence/dirty-diff.patch"
++grep -Fq 'verification/harness/run-expectation.sh' "$receipt" \
++  || fail "dirty receipt omitted modified source input"
++! grep -Fq 'verification/expectations/S01-fixture/evidence/' "$receipt" \
++  || fail "dirty receipt included excluded expectation evidence"
+ 
+ run_case S02 zero
+ assert_manifest "$TEST_ROOT/verification/expectations/S02-fixture/evidence/verification.yaml" \

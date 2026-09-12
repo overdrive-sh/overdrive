@@ -1,5 +1,7 @@
 # E10 invocation
 command: cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run http-status-cross-driver
-started_utc: 2026-09-12T08:02:51Z
-finished_utc: 2026-09-12T08:05:09Z
+remote_capture_root: verification/expectations/E10-vm-service-http-cross-driver-status/evidence/raw-cells
+capture_token: e10-20260912T093028Z-98294
+started_utc: 2026-09-12T09:30:29Z
+finished_utc: 2026-09-12T09:33:32Z
 exit: 0

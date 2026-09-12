@@ -1,0 +1,65 @@
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-12 09:31:43+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/http-exec-503.toml" <not executed on terminal>]
+Error: workload 'service-exec-http-503' did not converge to stable.
+  reason: startup probe[0] failed after 3 attempts: HTTP 503
+  reproducer: overdrive workload describe service-exec-http-503
+
+Hint: see workload describe for full context
+
+Script done on 2026-09-12 09:31:46+00:00 [COMMAND_EXIT_CODE="1"]
+Service 'service-exec-http-503' (kind: Service)
+Spec digest: 6552779f0b40305385a42263ca44ba57ade6da35d6b3e96aca08e4b4323309f7
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-503-0 Running      1          (c=6445,w=local)    
+    reason: driver started
+    last terminated: Failed at (c=6440,w=local) — driver started
+    last terminated ran since: 1789205503.656291675
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-503-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        d27ef78d81c925814929194c4517cb8e
+    spiffe_id:     spiffe://overdrive.local/workload/service-exec-http-503/alloc/alloc-service-exec-http-503-0
+    issuer_serial: 8e2478fedb7ff81bdba4877e84a36f62
+    not_after:     1789209046.957517419
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205506710
+Stopped workload 'service-exec-http-503'.
+Endpoint: https://127.0.0.1:7644/
+Service 'service-exec-http-503' (kind: Service)
+Spec digest: 6552779f0b40305385a42263ca44ba57ade6da35d6b3e96aca08e4b4323309f7
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-503-0 Terminated   1          (c=6446,w=local)    
+    reason: stopped (by operator)
+    last terminated: Failed at (c=6440,w=local) — driver started
+    last terminated ran since: 1789205503.656291675
+Memory:        67108864
+Addresses:
+  alloc-service-exec-http-503-0: 10.99.0.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205509977
+Service 'service-exec-http-503' (kind: Service)
+Spec digest: 6552779f0b40305385a42263ca44ba57ade6da35d6b3e96aca08e4b4323309f7
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-exec-http-503-0 Terminated   1          (c=6454,w=local)    
+    reason: stopped
+    last terminated: Failed at (c=6440,w=local) — driver started
+    last terminated ran since: 1789205503.656291675
+Memory:        67108864
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789205509977
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E10 named cleanup: observed-before-stop=3 post-stop=absent serve=stopped preparation=absent

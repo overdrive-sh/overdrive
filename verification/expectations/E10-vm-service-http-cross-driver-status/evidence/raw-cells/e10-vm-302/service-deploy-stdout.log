@@ -1,0 +1,5 @@
+Error: workload 'service-vm-http-302' did not converge to stable.
+  reason: startup probe[0] failed after 3 attempts: HTTP 302 (redirect not followed)
+  reproducer: overdrive workload describe service-vm-http-302
+
+Hint: see workload describe for full context

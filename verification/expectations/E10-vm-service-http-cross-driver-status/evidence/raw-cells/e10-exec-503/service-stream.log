@@ -1,0 +1,8 @@
+Script started on 2026-09-12 09:31:43+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/http-exec-503.toml" <not executed on terminal>]
+Error: workload 'service-exec-http-503' did not converge to stable.
+  reason: startup probe[0] failed after 3 attempts: HTTP 503
+  reproducer: overdrive workload describe service-exec-http-503
+
+Hint: see workload describe for full context
+
+Script done on 2026-09-12 09:31:46+00:00 [COMMAND_EXIT_CODE="1"]

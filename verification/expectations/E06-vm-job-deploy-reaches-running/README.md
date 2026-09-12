@@ -2,7 +2,7 @@
 
 **Surface:** E (end-to-end) · **KPI:** K4 · **Status:** `satisfied`
 
-<!-- Status rationale — CURRENT CAPTURE (2026-08-19, SHA fff9fe16, SEED=1,
+<!-- Status rationale — CURRENT CAPTURE (2026-09-12, SHA 111d404c17f778067d197a07d1acbbc044cd6eaa, SEED=1,
 executed on the bare-metal KVM box — NOT Lima — runner_exit_code: 0).
 `satisfied` was rendered by a DIFFERENT-FOX adversarial audit of the captured
 evidence (2026-08-19), not self-stamped by the runner's author — see the end
@@ -27,8 +27,9 @@ Three captures now exist; the arc matters because it is the K4 story:
      runner reached Running unmodified. At that revision this file argued
      "runner.sh was NOT modified — load-bearing"; that argument no longer
      holds and is corrected below.
-  3. SHA fff9fe16 — GREEN, POST-confinement (this capture). Between capture 2
-     and HEAD the confinement work landed (ADR-0082 fourth amendment): each
+  3. SHA 111d404c17f778067d197a07d1acbbc044cd6eaa (dirty working tree) — GREEN,
+     POST-confinement (this capture). Between capture 2
+     and this capture the confinement work landed (ADR-0082 fourth amendment): each
      launch FICLONE-clones the operator rootfs into `<data_dir>/vm/clone-
      staging` and runs cloud-hypervisor uid-dropped to OVERDRIVE_VMM_UID=4200.
      That imposes two create-time preconditions on the operator's data-dir
@@ -44,8 +45,9 @@ Three captures now exist; the arc matters because it is the K4 story:
            0700 (root-only), which blocked uid 4200 and made CH exit 1 before
            the guest reported ready.
 
-`runner.sh` WAS modified for capture 3 (commit fff9fe16): serve's --data-dir is
-co-located under the rootfs master's partition and granted 0711 traverse — it
+`runner.sh` WAS modified for capture 3 (working-tree blob `a82515db`): serve's
+--data-dir is co-located under the rootfs master's partition and granted 0711
+traverse — it
 models the appliance's single VM data partition. This is NOT the "implementation
 diverged to make the test green" hazard the prior revision warned against, for
 two independently-checkable reasons:
@@ -64,13 +66,14 @@ two independently-checkable reasons:
 Both preconditions (a) and (b) are TEMPORARY: overdrive-fs (GH #97) supersedes
 the same-filesystem requirement. No new issue is invented here.
 
-`working_tree_dirty: true` in the manifest is benign: `dirty-status.txt` lists
-only files under this expectation's own `evidence/` — the in-flight capture
-recording its own output. No `crates/**` and no `runner.sh` delta is present
-(runner.sh is committed at the pinned SHA fff9fe16); `dirty-diff.patch` shows
-the delta is the evidence writes alone.
+`working_tree_dirty: true` in the manifest records the actual source state at
+the capture. `dirty-status.txt` retains the workspace's dirty paths, including
+the E06 runner correction and the in-flight evidence writes. The receipt's
+runner hunk identifies blob `a82515db`; this is intentional substrate fallout,
+not a claim that the runner was already present at SHA `111d404c`.
 
-Different-fox audit (2026-08-19): a separate agent read ONLY the `evidence/`
+Different-fox audit (2026-09-12): see the [step 01-03 evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md),
+where a separate agent read ONLY the `evidence/`
 files and this expectation's claim — never `runner.sh`, never `crates/**` —
 prompted to REFUTE and to default to refuted on any narration, dodged
 sub-claim, or number that did not add up. It independently confirmed
@@ -272,15 +275,18 @@ not asserted here, since no evidence in this capture pins the mechanism.
 ## Evidence
 
 Captured under `evidence/` by `harness/run-expectation.sh E06` — SHA
-`fff9fe16` (the runner-fix commit), `SEED=1`, `runner_exit_code: 0`, executed
+`111d404c17f778067d197a07d1acbbc044cd6eaa` with `working_tree_dirty: true`,
+`SEED=1`, `runner_exit_code: 0`, executed
 on the metal KVM box (see `evidence/execution_substrate.txt`). `runner.sh` was
 modified for this capture (co-locate serve's `--data-dir` on the rootfs
 master's VM data partition + a `0711` traverse grant, so the post-`6b6ffb12`
 confinement preconditions are met — see the rationale block at the top); the
-change is committed at the pinned SHA, and the black-box operator surface is
+change was uncommitted in the recorded dirty tree and is now retained in the
+step-owned implementation commit, while this capture remains pinned to SHA
+`111d404c17f778067d197a07d1acbbc044cd6eaa` plus its dirty-state receipt. The black-box operator surface is
 unchanged.
 
-### Per-sub-claim verdict — CURRENT capture (SHA `fff9fe16`)
+### Per-sub-claim verdict — CURRENT capture (SHA `111d404c17f778067d197a07d1acbbc044cd6eaa`, dirty runner)
 
 | # | Sub-claim | Verdict | Reason |
 |---|---|---|---|

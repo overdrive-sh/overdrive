@@ -1,0 +1,20 @@
+Service 'service-vm-http-204' (kind: Service)
+Spec digest: be97fc02a9c33d866e3ce07cafdbe0193b423d2ef46b249ca4b3c364711be7ed
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-http-204-0 Running      0          (c=1814,w=local)    
+    terminal: Stable
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-http-204-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+Issued certificates:
+  serial:        5fa4437e2c764fe72108328ab134166c
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-http-204/alloc/alloc-service-vm-http-204-0
+    issuer_serial: 18a7c3bfa2ef9148e4ac4bf2a64ea490
+    not_after:     1789209063.752482465
+Probes:
+  startup probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789205525904

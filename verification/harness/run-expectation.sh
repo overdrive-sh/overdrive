@@ -91,7 +91,14 @@ DIRTY="false"
 if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
   DIRTY="true"
   git -C "$REPO_ROOT" status --porcelain >"$EVIDENCE_DIR/dirty-status.txt"
-  git -C "$REPO_ROOT" diff HEAD >"$EVIDENCE_DIR/dirty-diff.patch"
+  # Evidence is captured after this receipt is written. Exclude the
+  # repository's tracked evidence trees so the receipt cannot contain a
+  # self-hunk or recursively embed prior raw captures, while retaining every
+  # dirty production/example/runner/config input that is part of the source
+  # state under verification.
+  git -C "$REPO_ROOT" diff HEAD -- \
+    . ':(exclude)verification/expectations/**/evidence/**' \
+    >"$EVIDENCE_DIR/dirty-diff.patch"
 fi
 
 echo "=== expectation $ID ==="
