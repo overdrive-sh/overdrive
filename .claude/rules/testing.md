@@ -12,6 +12,32 @@ Tier 4  Verifier + perf gates     verifier-regress, xdp-bench, PREVAIL (§22)
 
 ---
 
+## Classify external execution before writing it
+
+The fact that a command starts the assembled product does not make it an EDD
+expectation. Classify the work by the question it answers and keep the
+artifacts separate:
+
+| Artifact | Question | Execution shape | Retention and rerun rule |
+|---|---|---|---|
+| **EDD verification expectation** | “What did this feature claim, and what did we actually observe when it was delivered?” | One point-in-time capture with one or a small number of deliberately contrasting feature cases. | Retained SHA-pinned evidence; **not** a CI regression test and not meant to be rerun. |
+| **E2E / conformance test** | “Does the assembled system continue to satisfy this deterministic contract?” | The smallest repeatable production composition and fixture matrix that proves the contract. | Automated, deterministic, and rerun in the appropriate test lane. |
+| **Stress / soak test** | “Does the system preserve a contract through a repeated cohort or fault/load matrix?” | Bounded repeated trials with a deterministic oracle, failure accounting, and cleanup. | Rerunnable test infrastructure; never an expectation capture. |
+| **Benchmark** | “How fast, how much, or how variable is this system under a declared profile?” | Repeated samples on a controlled substrate, with warm/cold state, workload/concurrency profile, raw measurements, and statistical method. | Benchmark report/baseline; distinct from correctness tests and never an expectation. |
+
+Launching hundreds or thousands of microVMs is never an EDD expectation. If
+the purpose is to prove every run satisfies a contract, it is an E2E,
+conformance, stress, or soak test. If the purpose is latency, throughput,
+resource cost, or a distribution, it is a benchmark. Do not place either in
+`verification/expectations/` to avoid the test or benchmark discipline.
+
+Tier 4 names the repository's current gated verifier/performance checks; it
+does not turn every future benchmark into a per-PR test gate. A new benchmark
+needs its own approved methodology and baseline/promotion policy before it can
+become a gate.
+
+---
+
 ## Testing
 
 **No `.feature` files anywhere.** All acceptance and integration tests are
