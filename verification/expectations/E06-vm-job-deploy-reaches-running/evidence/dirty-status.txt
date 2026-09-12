@@ -1,3 +1,6 @@
+ M AGENTS.md
+ M crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs
+ M docs/feature/vm-lifecycle-latency/deliver/execution-log.json
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/binary_under_test.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/build.log
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/deploy_vm_job.meta
@@ -8,9 +11,9 @@
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/describe_poll_trail.out
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-diff.patch
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/execution_substrate.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/metal_run.out
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/observed_states.txt
- M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_run_dirs.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_before_scopes.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_post_teardown_scopes.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/probe_running_hypervisors.txt
@@ -20,4 +23,32 @@
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve.log
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/serve_no_kek.log
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/spec_render.toml
+ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/teardown_sweep.txt
  M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/verification.yaml
+ M verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh
+ M verification/expectations/E08-vm-service-guest-health/evidence/dirty-diff.patch
+ M verification/expectations/E08-vm-service-guest-health/evidence/dirty-status.txt
+ M verification/expectations/E08-vm-service-guest-health/evidence/product-run.meta
+ M verification/expectations/E08-vm-service-guest-health/evidence/product-run.out
+ M verification/expectations/E08-vm-service-guest-health/evidence/run.log
+ M verification/expectations/E08-vm-service-guest-health/evidence/verification.yaml
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-diff.patch
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/dirty-status.txt
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.meta
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/product-run.out
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/run.log
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/tcp-truthfulness-20.tsv
+ M verification/expectations/E09-v2-vm-service-tcp-truthfulness-20/evidence/verification.yaml
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-diff.patch
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/dirty-status.txt
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.meta
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/product-run.out
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/run.log
+ M verification/expectations/E10-vm-service-http-cross-driver-status/evidence/verification.yaml
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-diff.patch
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/dirty-status.txt
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/product-run.meta
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/product-run.out
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/readiness-recovery.tsv
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/run.log
+ M verification/expectations/E11-vm-service-readiness-traffic-recovery/evidence/verification.yaml

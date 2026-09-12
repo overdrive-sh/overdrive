@@ -1,9 +1,12 @@
 # E10 — HTTP startup status classes agree for Exec and VM Services
 
-Status: `satisfied` (native capture and independent evidence audit complete; see [final audit](../../../docs/analysis/review-02-04-final-evidence.md))
+Status: `pending` (the corrected incarnation-aware contract requires a fresh
+native capture and independent evidence audit)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: no; bounded cross-driver mechanic matrix
+Contract shape: `bounded-change` (current allocation state plus the retained
+depth-one failure snapshot, restart count, probe result, and owned-resource complement)
 
 ## Expectation
 
@@ -14,33 +17,43 @@ followed. Both 503 cells return the nonempty bounded response-body sentinel
 `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK`; that deletion-sensitive fixture must
 appear zero times in operator-visible output.
 
-The cleanup trajectory is state-specific: a 204 Service is running when the
-example issues its operator stop and must finish `Terminated`. For 302/404/503,
-the deploy stream must first report the startup failure and the public describe
-must show the failed probe. The example then records stop intent. The authored
-failure may remain `Failed` with `StartupProbeFailed` while its owned runtime
-resources are removed. If an already-queued replacement reached `Running`
-before that intent was reconciled, its ordinary operator stop may finish
-`Terminated`; that alternate row is accepted only with public evidence of a
-replacement restart and an operator-attributed prior termination. A bare
-crash-shaped `Terminated` row is not accepted. A VM replacement rejected
-before creating a second VMM may instead leave a `Failed` row with the public
-`bind beacon listener` start error; that exact typed rejection is recorded as a
-separate trajectory, not silently treated as the original startup failure.
+The cleanup trajectory is incarnation-aware. A 204 Service is `Running` when
+the example issues its operator stop and must finish `Terminated`. For
+302/404/503, the nonzero deploy stream is the occurrence surface for the typed
+startup failure and the public describe retains the exact failed probe. Run
+intent is still present, so the existing WorkloadLifecycle policy authorizes a
+same-allocation recovery. The example polls through the old incarnation's
+transient terminal row until public describe shows that same allocation
+`Running` with a positive restart count, a depth-one prior `Failed` snapshot,
+and the failed startup probe. A transient `Failed` or `Terminated` row is not a
+settled no-recovery result and does not authorize a blanket terminal union.
+
+Only after that recovered `Running` incarnation is observable does the example
+record operator stop intent. Its current state must become `Terminated` with a
+stopped reason, while the allocation ID, restart count, prior `Failed` snapshot,
+and failed probe remain unchanged in a second observation after the owned
+runtime resources are gone. The accepted current session may advance the
+stopped observation during teardown; a stale earlier session must not replace
+the settled result with a crash-shaped observation.
 
 - Anchor: S-SVM-26 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.
 - Anchor: US-SVM-2 and K2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.
 - Anchor: ADR-0090 explicit/default HTTP target semantics.
+- Anchor: ADR-0078 depth-one `last_terminated` plus monotone `restart_count` occurrence semantics.
+- Anchor: ADR-0099 accepted Running publication before restart release.
+- Anchor: ADR-0100 accepted-session ownership and stale-watcher refusal.
 
 ## Verification
 
 The activated `http-status-cross-driver` mode runs all eight checked-in specs
 against isolated built-product instances and emits an eight-cell ledger. Every
-cell records driver, status, deploy exit, terminal state, observed cleanup
+cell records driver, status, allocation ID, state and restart count before and
+after stop, the failure surface, a post-cleanup settled state, the exact
 trajectory, rendered probe result, stdout/stderr/describe byte counts, sentinel
 occurrence counts for each operator surface, and cleanup delta. Passing
-requires the expected result and state-specific cleanup trajectory in all 8/8
-cells, byte-equal status policy between the two drivers, and zero
+requires the recovered-current/prior-failure pairing above in every failing
+cell and the healthy first-incarnation pairing in both 204 cells, the same HTTP
+status policy for both drivers, and zero
 occurrences of `SVM-E10-FAILURE-BODY-MUST-NOT-LEAK` in deploy stdout, deploy
 stderr, workload describe output, and the rendered probe-result field. The
 ledger itself records only those zero counts, never the response body.

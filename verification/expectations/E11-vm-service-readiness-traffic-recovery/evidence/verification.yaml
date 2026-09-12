@@ -1,9 +1,9 @@
 expectation_id: "E11"
-date_utc: "2026-09-09T18:15:25Z"
-overdrive_sha: "f1b4e900cff8b3aeab4c934b89ce720911a9dd8e"
+date_utc: "2026-09-12T00:46:44Z"
+overdrive_sha: "111d404c17f778067d197a07d1acbbc044cd6eaa"
 working_tree_dirty: true
-dst_seed: 25717
-harness_sha: "f1b4e900cff8b3aeab4c934b89ce720911a9dd8e"
+dst_seed: 1
+harness_sha: "b27d526a0b3dd510bea848890dc3e2204a8b6229"
 harness_invocation: "verification/harness/run-expectation.sh E11"
 runner_invoked: true
 execution_status: "succeeded"

@@ -195,6 +195,15 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# service-kind-vm-workloads quick-bind integration scenarios — both modules
+# drive a real ExecDriver through the shared host cgroup hierarchy. Their
+# `#[serial(workload_cgroup)]` annotations serialize only inside one nextest
+# process; nextest launches each test in its own process, so keep both modules
+# in the workspace-wide single-writer domain above.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & (test(workload_describe_probes) | test(service_honest_stable))'
+test-group = 'host-kernel-shared'
+
 # NOTE (transparent-mtls 04-04): every real per-alloc-netns Tier-3 module joins
 # this single-writer group because the 04-04 adopt-on-restart boot pass — run by
 # the `serve_restart_*` adopt tests AND by the run_server mtls boot tests already
@@ -458,6 +467,14 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
+
+# vm-lifecycle-latency S-VLL-11 (step 01-03) — one persistent in-process
+# server drives 1,200 fresh native Cloud Hypervisor trials.  The complete
+# population is intentionally long-running; keep the timeout scoped to this
+# one test so its finite nextest liveness guard does not truncate the ledger.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(native_lifecycle_profiles_meet_stage_targets_without_dropping_trials)'
+slow-timeout = { period = "60s", terminate-after = 180 }
 
 # guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
 # guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).

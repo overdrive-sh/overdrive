@@ -8,20 +8,18 @@ xtask: running metal run (one bootstrap lease session)
 ########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
 
 ########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
-OVERDRIVE_METAL_LEASE_ACQUIRED token=aa93243ee4f6d4431020b1d7 pid=4060667
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0519e88e52f0f1f44feb8a91 pid=1393483
 
-########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/accra -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/karachi-v1 -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-sent 4,030,504 bytes  received 103,751 bytes  2,756,170.00 bytes/sec
-total size is 292,350,190  speedup is 70.71
+sent 10,089,663 bytes  received 171,909 bytes  2,280,349.33 bytes/sec
+total size is 3,805,119,157  speedup is 370.81
 
 ########## [bootstrap] fail-closed native x86_64/KVM preflight
-   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
-   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.70s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
 prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
 verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
-Script started on 2026-09-09 18:15:43+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/readiness-recovery.toml" <not executed on terminal>]
+Script started on 2026-09-12 00:47:32+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/readiness-recovery.toml" <not executed on terminal>]
 Accepted.
 Workload ID:   service-vm-readiness-recovery
 Intent key:    workloads/service-vm-readiness-recovery
@@ -29,14 +27,14 @@ Spec digest:   cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Outcome:       created
 Endpoint:      https://127.0.0.1:7644/
 Next: overdrive workload describe service-vm-readiness-recovery
-Service 'service-vm-readiness-recovery' is stable (settled in 2198ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+Service 'service-vm-readiness-recovery' is stable (settled in 2213ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
 
-Script done on 2026-09-09 18:15:45+00:00 [COMMAND_EXIT_CODE="0"]
+Script done on 2026-09-12 00:47:35+00:00 [COMMAND_EXIT_CODE="0"]
 Service 'service-vm-readiness-recovery' (kind: Service)
 Spec digest: cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Replicas (desired/running): 1/1
 Alloc                    State        Restarts   Since               
-alloc-service-vm-readiness-recovery-0 Running      0          (c=15,w=local)      
+alloc-service-vm-readiness-recovery-0 Running      0          (c=1854,w=local)    
     terminal: Stable
     reason: driver started
 Memory:        134217728
@@ -46,13 +44,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        60d48c2f8e06bca1d5b49f1b61fd1b27
+  serial:        d191738377d00718f1f95276a1933b64
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 4db30afad786663cb52995ae3f7b18d7
-    not_after:     1788981283.661322842
+    issuer_serial: 9c34e437f29da41ef489fd5d7e53baff
+    not_after:     1789177592.952707503
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788977745794
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788977745795
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1789174055102
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789174055103
 Accepted.
 Workload ID:   service-vm-readiness-client-before
 Intent key:    workloads/service-vm-readiness-client-before
@@ -65,7 +63,7 @@ Spec digest: 0ca879b068205bd46ebe448be4f5fda159290f69122a83729d2d33a826f50db2
 Verdict: Succeeded
 
 Attempt  State        Exit   Started              Duration  
-1        Terminated   0      (c=21,w=local)       —         
+1        Terminated   0      (c=1867,w=local)     —         
 Memory:        134217728
 Stopped workload 'service-vm-readiness-client-before'.
 Endpoint: https://127.0.0.1:7644/
@@ -73,7 +71,7 @@ Service 'service-vm-readiness-recovery' (kind: Service)
 Spec digest: cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Replicas (desired/running): 1/1
 Alloc                    State        Restarts   Since               
-alloc-service-vm-readiness-recovery-0 Running      0          (c=15,w=local)      
+alloc-service-vm-readiness-recovery-0 Running      0          (c=1854,w=local)    
     terminal: Stable
     reason: driver started
 Memory:        134217728
@@ -83,13 +81,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        60d48c2f8e06bca1d5b49f1b61fd1b27
+  serial:        d191738377d00718f1f95276a1933b64
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 4db30afad786663cb52995ae3f7b18d7
-    not_after:     1788981283.661322842
+    issuer_serial: 9c34e437f29da41ef489fd5d7e53baff
+    not_after:     1789177592.952707503
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788977745794
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1788977754820
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1789174055102
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=fail (HTTP 503) last_observed_at=1789174064126
 Accepted.
 Workload ID:   service-vm-readiness-client-during
 Intent key:    workloads/service-vm-readiness-client-during
@@ -102,7 +100,7 @@ Spec digest: 6f6b4cde99123c22883a9072e58e29394ff601c724614d87fa6bcdf091304b1d
 Verdict: Succeeded
 
 Attempt  State        Exit   Started              Duration  
-1        Terminated   0      (c=109,w=local)      —         
+1        Terminated   0      (c=1891,w=local)     —         
 Memory:        134217728
 Stopped workload 'service-vm-readiness-client-during'.
 Endpoint: https://127.0.0.1:7644/
@@ -110,7 +108,7 @@ Service 'service-vm-readiness-recovery' (kind: Service)
 Spec digest: cd9a754e84c5a294a13e0f149852ec12c60e2bc49a636d299139f55c8eb6b8f4
 Replicas (desired/running): 1/1
 Alloc                    State        Restarts   Since               
-alloc-service-vm-readiness-recovery-0 Running      0          (c=15,w=local)      
+alloc-service-vm-readiness-recovery-0 Running      0          (c=1854,w=local)    
     terminal: Stable
     reason: driver started
 Memory:        134217728
@@ -120,13 +118,13 @@ VIP:           10.96.0.2
 Listeners:
   18080/tcp
 Issued certificates:
-  serial:        60d48c2f8e06bca1d5b49f1b61fd1b27
+  serial:        d191738377d00718f1f95276a1933b64
     spiffe_id:     spiffe://overdrive.local/workload/service-vm-readiness-recovery/alloc/alloc-service-vm-readiness-recovery-0
-    issuer_serial: 4db30afad786663cb52995ae3f7b18d7
-    not_after:     1788981283.661322842
+    issuer_serial: 9c34e437f29da41ef489fd5d7e53baff
+    not_after:     1789177592.952707503
 Probes:
-  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1788977745794
-  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1788977764847
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1789174055102
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789174074152
 Accepted.
 Workload ID:   service-vm-readiness-client-after
 Intent key:    workloads/service-vm-readiness-client-after
@@ -139,15 +137,15 @@ Spec digest: 1b10caed35d1946a49033800e06580956096a8e13235cfbd74f7b91694ad3c2f
 Verdict: Succeeded
 
 Attempt  State        Exit   Started              Duration  
-1        Terminated   0      (c=182,w=local)      —         
+1        Terminated   0      (c=1912,w=local)     —         
 Memory:        134217728
 Stopped workload 'service-vm-readiness-client-after'.
 Endpoint: https://127.0.0.1:7644/
 --- E11 ledger begin ---
 phase	readiness	terminal	observed_at_ms	detected_at_ms	transition_latency_ms	client_started_at_ms	client_elapsed_ms	lifecycle	restarts	peer_result
-before	pass	Stable	1788977745795	1788977746154	359	1788977746174	2453	Running	0	exact-reply
-during	fail	Stable	1788977754820	1788977755042	222	1788977755064	3567	Running	0	unreachable-no-exact-reply
-after	pass	Stable	1788977764847	1788977765046	199	1788977765067	2450	Running	0	exact-reply
+before	pass	Stable	1789174055103	1789174055437	334	1789174055450	2451	Running	0	exact-reply
+during	fail	Stable	1789174064126	1789174064312	186	1789174064337	3566	Running	0	unreachable-no-exact-reply
+after	pass	Stable	1789174074152	1789174074309	157	1789174074328	2453	Running	0	exact-reply
 --- E11 ledger end ---
 E11 PASS: 2/2 readiness transitions within two seconds; exact peer replies before/after and no failed-window reply
 Stopped workload 'service-vm-readiness-recovery'.

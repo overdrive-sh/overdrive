@@ -2797,6 +2797,7 @@ struct NativeTrial {
     alloc: AllocationId,
     failed: Option<String>,
     operator_stop_duration: Option<Duration>,
+    stop_admission_after_stop_return: Option<Duration>,
     terminal_after_stop_return: Option<Duration>,
     observed_cleanup_at: std::time::Instant,
 }
@@ -2824,6 +2825,37 @@ fn native_alloc_from(out: &WorkloadDescribeOutput) -> Option<AllocationId> {
     out.snapshot.rows.first().and_then(|row| AllocationId::new(&row.alloc_id).ok())
 }
 
+// Public-stop-to-admission is a recorded distribution, not a product SLO.
+// Await the required stage boundary without a fixture-local duration gate; the
+// enclosing test-runner liveness boundary remains the finite guard if the event
+// is genuinely absent.  Once admission is observed, the trial applies its
+// independent terminal-observation bound and stage quantile contract.
+async fn await_stop_admission(
+    events: Option<&Arc<Mutex<Vec<CapturedLifecycleEvent>>>>,
+    alloc: Option<&AllocationId>,
+    public_stop_returned_at: std::time::Instant,
+) -> Option<Duration> {
+    let (Some(events), Some(alloc)) = (events, alloc) else { return Some(Duration::ZERO) };
+    let alloc = alloc.to_string();
+    loop {
+        let observed_at = {
+            events
+                .lock()
+                .expect("lifecycle-event mutex not poisoned")
+                .iter()
+                .find(|event| {
+                    event.name == "vm.lifecycle.stop_enter"
+                        && event.fields.get("alloc") == Some(&alloc)
+                })
+                .map(|event| event.at)
+        };
+        if let Some(observed_at) = observed_at {
+            return Some(observed_at.saturating_duration_since(public_stop_returned_at));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the retained trial record keeps fixture cleanup, timing and failure evidence together"
@@ -2836,6 +2868,7 @@ async fn finish_native_trial(
     rootfs: &Path,
     data_dir: &Path,
     operator_stop_duration: Option<Duration>,
+    stop_admission_after_stop_return: Option<Duration>,
     terminal_after_stop_return: Option<Duration>,
     mut failures: Vec<String>,
 ) -> NativeTrial {
@@ -2856,18 +2889,21 @@ async fn finish_native_trial(
         alloc,
         failed: (!failures.is_empty()).then(|| failures.join("; ")),
         operator_stop_duration,
+        stop_admission_after_stop_return,
         terminal_after_stop_return,
         observed_cleanup_at: std::time::Instant::now(),
     }
 }
 
 #[allow(
+    clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "one trial retains the complete three-profile result ledger instead of splitting failure accounting across helpers"
+    reason = "one trial retains the complete three-profile result ledger and its shared stage-event oracle instead of splitting failure accounting across helpers"
 )]
 async fn exercise_native_trial(
     profile: NativeLifecycleProfile,
     ordinal: usize,
+    events: Option<&Arc<Mutex<Vec<CapturedLifecycleEvent>>>>,
     cfg: PathBuf,
     spec_dir: PathBuf,
     kernel: PathBuf,
@@ -2899,6 +2935,7 @@ async fn exercise_native_trial(
                 .expect("valid failed-trial allocation placeholder"),
                 failed: Some(format!("deploy: {error}")),
                 operator_stop_duration: None,
+                stop_admission_after_stop_return: None,
                 terminal_after_stop_return: None,
                 observed_cleanup_at: std::time::Instant::now(),
             };
@@ -2931,6 +2968,8 @@ async fn exercise_native_trial(
             if let Err(error) = stop_result {
                 failures.push(format!("stop: {error}"));
             }
+            let stop_admission_after_stop_return =
+                await_stop_admission(events, alloc.as_ref(), stop_returned_at).await;
             let terminal =
                 poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
                     .await;
@@ -2957,6 +2996,7 @@ async fn exercise_native_trial(
                 &rootfs,
                 &data_dir,
                 Some(operator_stop_duration),
+                stop_admission_after_stop_return,
                 terminal_after_stop_return,
                 failures,
             )
@@ -2970,10 +3010,21 @@ async fn exercise_native_trial(
             let mut failures = Vec::new();
             if terminal.reached {
                 let row = terminal.last.snapshot.rows.first().expect("terminal trial row");
-                if row.state != AllocStateWire::Terminated || row.exit_code != Some(0) {
+                let exit_projection_matches_terminal = matches!(
+                    (&row.terminal, row.exit_code),
+                    (None, None)
+                        | (
+                            Some(overdrive_core::TerminalCondition::Completed { exit_code: 0 }),
+                            Some(0)
+                        )
+                );
+                if row.state != AllocStateWire::Terminated
+                    || row.reason != Some(TransitionReason::Stopped { by: StoppedBy::Process })
+                    || !exit_projection_matches_terminal
+                {
                     failures.push(format!(
-                        "finite Job terminal was {:?}, exit {:?}, reason {:?}",
-                        row.state, row.exit_code, row.reason
+                        "finite Job terminal was {:?}, exit {:?}, reason {:?}, terminal {:?}",
+                        row.state, row.exit_code, row.reason, row.terminal
                     ));
                 }
             } else {
@@ -3008,6 +3059,7 @@ async fn exercise_native_trial(
                 alloc,
                 &rootfs,
                 &data_dir,
+                None,
                 None,
                 None,
                 failures,
@@ -3067,6 +3119,8 @@ async fn exercise_native_trial(
             if let Err(error) = stop_result {
                 failures.push(format!("stop: {error}"));
             }
+            let stop_admission_after_stop_return =
+                await_stop_admission(events, alloc.as_ref(), stop_returned_at).await;
             let terminal =
                 poll_until_terminal_outcome(&cfg, &submitted.workload_id, Duration::from_secs(30))
                     .await;
@@ -3093,6 +3147,7 @@ async fn exercise_native_trial(
                 &rootfs,
                 &data_dir,
                 Some(operator_stop_duration),
+                stop_admission_after_stop_return,
                 terminal_after_stop_return,
                 failures,
             )
@@ -3591,7 +3646,6 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03: 1200 fresh KVM guests on the pinned native metal fixture"]
 async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
     let (events, trace_enabled) = install_lifecycle_trace();
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
@@ -3665,6 +3719,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
         exercise_native_trial(
             NativeLifecycleProfile::Ready,
             0,
+            Some(&events),
             cfg.clone(),
             server_tmp.path().to_path_buf(),
             fixture.kernel_path.clone(),
@@ -3690,6 +3745,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
     let uninstrumented_control = exercise_native_trial(
         NativeLifecycleProfile::Ready,
         9_999,
+        None,
         cfg.clone(),
         server_tmp.path().to_path_buf(),
         fixture.kernel_path.clone(),
@@ -3714,6 +3770,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
             exercise_native_trial(
                 NativeLifecycleProfile::Ready,
                 ordinal,
+                Some(&events),
                 cfg.clone(),
                 server_tmp.path().to_path_buf(),
                 fixture.kernel_path.clone(),
@@ -3729,6 +3786,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
                 exercise_native_trial(
                     profile,
                     ordinal,
+                    Some(&events),
                     cfg.clone(),
                     server_tmp.path().to_path_buf(),
                     fixture.kernel_path.clone(),
@@ -3753,6 +3811,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
                 exercise_native_trial(
                     profile,
                     200 + cohort * 10 + worker,
+                    Some(&events),
                     cfg.clone(),
                     server_tmp.path().to_path_buf(),
                     fixture.kernel_path.clone(),
@@ -3816,6 +3875,7 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
     let mut driver_cleanup_samples = Vec::with_capacity(800);
     let mut reaper_to_cleanup_samples = Vec::with_capacity(1_200);
     let mut operator_stop_samples = Vec::with_capacity(800);
+    let mut stop_admission_after_stop_samples = Vec::with_capacity(800);
     let mut terminal_after_stop_samples = Vec::with_capacity(800);
     for trial in &ledger {
         let target = format!("workload/{}", trial.workload_id);
@@ -3886,6 +3946,11 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
                 driver_cleanup_samples.push(cleanup_calls.at.duration_since(stop_enter.at));
                 operator_stop_samples
                     .push(trial.operator_stop_duration.expect("READY records public stop return"));
+                stop_admission_after_stop_samples.push(
+                    trial
+                        .stop_admission_after_stop_return
+                        .expect("READY records stop admission after public return"),
+                );
                 terminal_after_stop_samples.push(
                     trial
                         .terminal_after_stop_return
@@ -3914,6 +3979,11 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
                     trial
                         .operator_stop_duration
                         .expect("Service records public stop return separately"),
+                );
+                stop_admission_after_stop_samples.push(
+                    trial
+                        .stop_admission_after_stop_return
+                        .expect("Service records stop admission after public return"),
                 );
                 terminal_after_stop_samples.push(
                     trial
@@ -3972,10 +4042,14 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
     let reaper_to_cleanup =
         duration_distribution(&reaper_to_cleanup_samples, "reaper-to-driver-cleanup");
     let operator_stop = duration_distribution(&operator_stop_samples, "public stop return");
+    let stop_admission_after_stop = duration_distribution(
+        &stop_admission_after_stop_samples,
+        "stop admission after public stop return",
+    );
     let terminal_after_stop =
         duration_distribution(&terminal_after_stop_samples, "terminal observation after stop");
     eprintln!(
-        "S-VLL-11 separate stages: admission_queue={admission_queue:?}; driver_stop_to_cleanup={driver_cleanup:?}; reaper_to_driver_cleanup={reaper_to_cleanup:?}; public_stop_return={operator_stop:?}; terminal_after_public_stop={terminal_after_stop:?}"
+        "S-VLL-11 separate stages: admission_queue={admission_queue:?}; stop_admission_after_public_stop={stop_admission_after_stop:?}; driver_stop_to_cleanup={driver_cleanup:?}; reaper_to_driver_cleanup={reaper_to_cleanup:?}; public_stop_return={operator_stop:?}; terminal_after_public_stop={terminal_after_stop:?}"
     );
 
     server.shutdown().await.expect("shutdown persistent native profile server");

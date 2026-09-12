@@ -34,15 +34,19 @@ awk '/^--- E10 ledger begin ---$/ { keep=1; next } /^--- E10 ledger end ---$/ { 
   || { echo 'E10 runner: expected exactly eight ledger rows' >&2; exit 1; }
 awk -F '\t' '
   NR == 1 { next }
-  NF != 14 || ($1 != "exec" && $1 != "vm") \
+  NF != 20 || ($1 != "exec" && $1 != "vm") \
     || $2 !~ /^(204|302|404|503)$/ || $3 != "0" \
-    || ($2 == "204" && ($4 != "Terminated" || $5 != "operator-stop-running")) \
-    || ($2 != "204" && $4 == "Failed" && $5 != "preserved-startup-failure" \
-        && $5 != "replacement-start-rejected") \
-    || ($2 != "204" && $4 == "Terminated" && $5 != "replacement-operator-stop") \
-    || ($2 != "204" && $4 != "Failed" && $4 != "Terminated") \
-    || $6 != ("status-" $2) || $10 != "0" || $11 != "0" \
-    || $12 != "0" || $13 != "0" || $14 != "zero-delta" { exit 1 }
+    || $4 != ("alloc-service-" $1 "-http-" $2 "-0") \
+    || $6 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ \
+    || ($2 == "204" && ($5 != "Running" || $6 != "0" || $7 != "none" \
+        || $8 != "Terminated" || $9 != "0" || $10 != "Terminated" \
+        || $11 != "operator-stop-running")) \
+    || ($2 != "204" && ($5 != "Running" || $6 !~ /^[1-9][0-9]*$/ \
+        || $7 != "deploy+prior-failed+probe" || $8 != "Terminated" \
+        || $9 != $6 || $10 != "Terminated" \
+        || $11 != "recovered-running-operator-stop")) \
+    || $12 != ("status-" $2) || $16 != "0" || $17 != "0" \
+    || $18 != "0" || $19 != "0" || $20 != "zero-delta" { exit 1 }
   seen[$1 SUBSEP $2]++
   rows++
   END {

@@ -132,55 +132,81 @@ request_stop_intent() {
   }
 }
 
-preserve_failed_service() {
+stop_recovered_service_after_startup_failure() {
   local id="$1"
+  local before="$OUTPUT_ROOT/service-describe.log"
+  local before_state before_alloc before_restarts before_history before_probe
+  before_state="$(first_service_alloc_state <"$before")"
+  before_alloc="$(first_service_alloc_id <"$before")"
+  before_restarts="$(first_service_restart_count <"$before")"
+  before_history="$(first_service_last_terminated_line <"$before")"
+  before_probe="$(first_service_startup_probe_line <"$before")"
+  [[ -n "$before_alloc" && "$before_restarts" =~ ^[0-9]+$ ]] || return 1
+  [[ -n "$before_probe" ]] || return 1
+  [[ "$before_state" == "Running" ]] || return 1
+  [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] || return 1
+  has_prior_failed_snapshot <"$before" || return 1
+
   request_stop_intent "$id"
   local stop_output="$OUTPUT_ROOT/${id}-preserve-stop.log"
   local output="$OUTPUT_ROOT/${id}-preserved-failure.log"
+  local settled="$OUTPUT_ROOT/${id}-preserved-failure-settled.log"
+  local observations="$OUTPUT_ROOT/${id}-preserved-failure-observations.log"
   local deadline=$((SECONDS + 45))
+  : >"$observations"
   while [[ "$SECONDS" -lt "$deadline" ]]; do
     bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
       "$BIN" workload describe "$id" >"$output" 2>&1 || true
     local state
     state="$(first_service_alloc_state <"$output")"
-    if [[ "$state" == "Failed" ]] \
-      && grep -Fq 'StartupProbeFailed' "$output" \
-      && owned_runtime_resources_released; then
-      cat "$stop_output"
+    {
+      printf 'observed_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}"
       cat "$output"
-      return 0
+    } >>"$observations"
+
+    local outcome_ok=1
+    [[ "$state" == "Terminated" ]] \
+      && [[ "$(first_service_alloc_id <"$output")" == "$before_alloc" ]] \
+      && [[ "$(first_service_restart_count <"$output")" == "$before_restarts" ]] \
+      && has_prior_failed_snapshot <"$output" \
+      && [[ "$(first_service_last_terminated_line <"$output")" == "$before_history" ]] \
+      && [[ "$(first_service_startup_probe_line <"$output")" == "$before_probe" ]] \
+      && grep -Fq '    reason: stopped' "$output" \
+      || outcome_ok=0
+
+    if [[ "$outcome_ok" -eq 1 ]] && owned_runtime_resources_released; then
+      # Observe once more after the owned runtime is gone. A stale accepted-
+      # session watcher must not replace the recovered incarnation's operator
+      # termination or the retained failure snapshot after cleanup settles.
+      bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+        "$BIN" workload describe "$id" >"$settled" 2>&1 || true
+      {
+        printf 'settled_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          "$(first_service_alloc_state <"$settled")"
+        cat "$settled"
+      } >>"$observations"
+      if [[ "$(first_service_alloc_state <"$settled")" == "$state" ]] \
+        && [[ "$(first_service_alloc_id <"$settled")" == "$before_alloc" ]] \
+        && [[ "$(first_service_restart_count <"$settled")" == "$before_restarts" ]] \
+        && [[ "$(first_service_startup_probe_line <"$settled")" == "$before_probe" ]] \
+        && has_prior_failed_snapshot <"$settled" \
+        && [[ "$(first_service_last_terminated_line <"$settled")" == "$before_history" ]] \
+        && grep -Fq '    reason: stopped' "$settled"; then
+        cat "$stop_output"
+        cat "$output"
+        cat "$settled"
+        return 0
+      fi
+      cat "$stop_output" >&2
+      cat "$output" >&2
+      cat "$settled" >&2
+      echo "svm-e08 run: state changed after owned runtime cleanup: $id" >&2
+      return 1
     fi
-    if [[ "$state" == "Failed" ]] \
-      && grep -Fq 'reason: driver internal error:' "$output" \
-      && grep -Fq 'bind beacon listener: Address already in use' "$output" \
-      && owned_runtime_resources_released; then
-      # A VM replacement can be rejected before it creates a second VMM when
-      # the original accepted session still owns the allocation-derived beacon
-      # pathname. Preserve that typed start rejection as a distinct trajectory;
-      # it is not an arbitrary crash or a reclassification of the probe result.
-      cat "$stop_output"
-      cat "$output"
-      return 0
-    fi
-    # If a replacement reached Running before the stop intent was observed,
-    # its ordinary operator stop may author Terminated. Accept that distinct
-    # trajectory only with public evidence of a replacement restart and an
-    # operator-attributed prior termination; a bare crash-shaped Terminated
-    # row is not an acceptable startup-failure outcome.
-    if [[ "$state" == "Terminated" ]] \
-      && [[ "$(first_service_restart_count <"$output")" =~ ^[1-9][0-9]*$ ]] \
-      && grep -Eqi 'last terminated: .*stopped \(by operator\)' "$output" \
-      && grep -Fq 'reason: stopped' "$output" \
-      && owned_runtime_resources_released; then
-      cat "$stop_output"
-      cat "$output"
-      return 0
-    fi
-    sleep 1
   done
   cat "$stop_output" >&2
   cat "$output" >&2
-  echo "svm-e08 run: startup-failed Service did not remain Failed after stop intent: $id" >&2
+  echo "svm-e08 run: recovered startup-failure incarnation did not stop with preserved history: $id" >&2
   return 1
 }
 
@@ -277,6 +303,27 @@ first_service_restart_count() {
     in_table && /^[-[:space:]]+$/ { next }
     in_table && $1 ~ /^alloc-/ { print $3; exit }
   '
+}
+
+has_prior_failed_snapshot() {
+  awk '
+    /^Alloc[[:space:]]+State[[:space:]]+/ { in_table = 1; next }
+    in_table && $1 ~ /^alloc-/ {
+      if (seen) exit
+      seen = 1
+    }
+    seen && /^Memory:/ { exit }
+    seen && /last terminated:[^[:cntrl:]]*Failed/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
+first_service_last_terminated_line() {
+  awk '/^    last terminated: / { print; exit }'
+}
+
+first_service_startup_probe_line() {
+  awk '/^  startup probe\[0\] / { print; exit }'
 }
 
 first_service_terminal() {
@@ -940,7 +987,7 @@ case_cleanup() {
         stop_workload "$SERVICE_ID" || failed=1
         ;;
       preserve-startup-failure)
-        preserve_failed_service "$SERVICE_ID" || failed=1
+        stop_recovered_service_after_startup_failure "$SERVICE_ID" || failed=1
         ;;
       *)
         echo "svm-e08 run: unknown case cleanup policy: $CASE_CLEANUP_POLICY" >&2
@@ -973,21 +1020,47 @@ wait_for_service_result() {
       grep -Eq 'COMMAND_EXIT_CODE="[1-9][0-9]*"' "$stream"
       grep -Fq 'StartupProbeFailed' "$stream"
       grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$describe"
-      local state
-      state="$(first_service_alloc_state <"$describe")"
-      if [[ "$state" == "Failed" ]]; then
-        :
-      elif [[ "$state" == "Terminated" ]]; then
-        # WorkloadLifecycle may already have stopped a replacement attempt by
-        # the time the deploy command returns. That is distinct from a bare
-        # crash only when the public row attributes the stop to the operator.
-        grep -Eqi 'reason: stopped \(by operator\)' "$describe"
+      if [[ "$CASE_CLEANUP_POLICY" == "preserve-startup-failure" ]]; then
+        wait_for_e10_recovered_running "$SERVICE_ID" "$describe"
       else
-        return 1
+        [[ "$(first_service_alloc_state <"$describe")" == "Failed" ]]
       fi
       ;;
     *) die "unknown expected Service result: $expected" ;;
   esac
+}
+
+wait_for_e10_recovered_running() {
+  local id="$1"
+  local output="$2"
+  local observations="$OUTPUT_ROOT/${id}-recovery-observations.log"
+  local alloc_id
+  alloc_id="$(first_service_alloc_id <"$output")"
+  [[ -n "$alloc_id" ]] || return 1
+  local deadline=$((SECONDS + 45))
+  : >"$observations"
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    local state restarts
+    state="$(first_service_alloc_state <"$output")"
+    restarts="$(first_service_restart_count <"$output")"
+    {
+      printf 'observed_utc=%s state=%s restarts=%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}" "${restarts:-unrecognized}"
+      cat "$output"
+    } >>"$observations"
+    if [[ "$state" == "Running" ]] \
+      && [[ "$(first_service_alloc_id <"$output")" == "$alloc_id" ]] \
+      && [[ "$restarts" =~ ^[1-9][0-9]*$ ]] \
+      && has_prior_failed_snapshot <"$output" \
+      && grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$output"; then
+      return 0
+    fi
+    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
+      "$BIN" workload describe "$id" >"$output" 2>&1 || true
+  done
+  cat "$observations" >&2
+  echo "svm-e08 run: startup-failed Service did not settle on its recovered Running incarnation: $id" >&2
+  return 1
 }
 
 run_case() {
@@ -1051,16 +1124,6 @@ run_case() {
     die "Service did not reach expected result: $expected"
   }
   cat "$service_describe"
-  if [[ "$expected" == startup-failed \
-    && "$CASE_CLEANUP_POLICY" == preserve-startup-failure ]]; then
-    # The initial describe is captured before recording stop intent, proving
-    # that this cleanup branch starts from the authored startup failure. The
-    # case cleanup then waits for either that Failed row to survive reclamation
-    # or a witnessed replacement's ordinary operator stop.
-    request_stop_intent "$SERVICE_ID" \
-      || die "could not record stop intent for startup-failed Service"
-  fi
-
   if [[ -n "$client_spec" ]]; then
     CLIENT_ID="$client_id"
     CLIENT_DEPLOYED=1
@@ -1135,9 +1198,10 @@ run_http_status_cross_driver() {
   require_matrix_capture_root
   bounded 600s cargo build -p overdrive-cli --bin overdrive
   local ledger="$SVM_E08_MATRIX_CAPTURE_ROOT/http-status-cross-driver.tsv"
-  printf 'driver\tstatus\tdeploy_exit\tterminal\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
+  printf 'driver\tstatus\tdeploy_exit\tallocation_id\tbefore_stop\trestart_before\tfailure_surface\tafter_stop\trestart_after\tsettled_state\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
   local driver status spec id expected label transcript describe bytes sentinel
-  local cleanup_policy final_describe terminal trajectory
+  local cleanup_policy final_describe settled_describe terminal trajectory
+  local alloc_id before_state before_restarts after_restarts settled_state failure_surface
   for driver in exec vm; do
     for status in 204 302 404 503; do
       spec="http-${driver}-${status}.toml"
@@ -1147,35 +1211,62 @@ run_http_status_cross_driver() {
       [[ "$status" == 204 ]] && expected=stable
       [[ "$status" == 204 ]] && cleanup_policy=operator-stop
       label="e10-${driver}-${status}"
+      settled_describe=''
       capture_isolated_case "$label" "$spec" "$id" "$expected" "" "" "$cleanup_policy"
       transcript="$SVM_E08_MATRIX_CAPTURE_ROOT/$label.transcript"
       describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-describe.log"
+      alloc_id="$(first_service_alloc_id <"$describe")"
+      before_state="$(first_service_alloc_state <"$describe")"
+      before_restarts="$(first_service_restart_count <"$describe")"
       if [[ "$status" == 204 ]]; then
         grep -Fq ' is stable ' "$transcript"
+        [[ "$before_state" == "Running" && "$before_restarts" == "0" ]] \
+          || die "E10 healthy Service was not a first-incarnation Running allocation: $driver/$status"
         final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-stopped.log"
         [[ -f "$final_describe" ]] || die "E10 missing operator-stop describe for $driver/$status"
         terminal="$(first_service_alloc_state <"$final_describe")"
+        after_restarts="$(first_service_restart_count <"$final_describe")"
         [[ "$terminal" == "Terminated" ]] \
           || die "E10 running Service did not become Terminated after stop: $driver/$status"
+        [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" \
+          && "$after_restarts" == "$before_restarts" ]] \
+          || die "E10 healthy Service stop changed allocation identity or restart count: $driver/$status"
+        settled_state="$terminal"
+        failure_surface=none
         trajectory=operator-stop-running
       else
-        grep -Fq "${status}" "$transcript" "$describe"
-        ! grep -Eqi 'redirect.*followed|following.*redirect' "$transcript" "$describe"
+        grep -Fq "HTTP ${status}" "$transcript" \
+          || die "E10 deploy stream omitted HTTP status $status: $driver/$status"
+        grep -Fq "HTTP ${status}" "$describe" \
+          || die "E10 describe omitted HTTP status $status: $driver/$status"
+        if [[ "$status" == 302 ]]; then
+          grep -Fq 'HTTP 302 (redirect not followed)' "$transcript" \
+            || die "E10 deploy stream did not classify the redirect without following it: $driver/$status"
+          grep -Fq 'HTTP 302 (redirect not followed)' "$describe" \
+            || die "E10 describe did not retain the redirect classification: $driver/$status"
+        fi
         final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure.log"
+        settled_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure-settled.log"
         [[ -f "$final_describe" ]] || die "E10 missing preserved-failure describe for $driver/$status"
+        [[ -f "$settled_describe" ]] || die "E10 missing post-cleanup settled describe for $driver/$status"
         terminal="$(first_service_alloc_state <"$final_describe")"
-        if [[ "$terminal" == "Failed" ]] \
-          && grep -Fq 'StartupProbeFailed' "$final_describe"; then
-          trajectory=preserved-startup-failure
-        elif [[ "$terminal" == "Failed" ]] \
-          && grep -Fq 'reason: driver internal error:' "$final_describe" \
-          && grep -Fq 'bind beacon listener: Address already in use' "$final_describe"; then
-          trajectory=replacement-start-rejected
-        elif [[ "$terminal" == "Terminated" ]] \
-          && [[ "$(first_service_restart_count <"$final_describe")" =~ ^[1-9][0-9]*$ ]] \
-          && grep -Eqi 'last terminated: .*stopped \(by operator\)' "$final_describe" \
-          && grep -Fq 'reason: stopped' "$final_describe"; then
-          trajectory=replacement-operator-stop
+        after_restarts="$(first_service_restart_count <"$final_describe")"
+        settled_state="$(first_service_alloc_state <"$settled_describe")"
+        if [[ "$before_state" == "Running" ]] \
+          && [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] \
+          && has_prior_failed_snapshot <"$describe" \
+          && [[ "$terminal" == "Terminated" && "$settled_state" == "Terminated" ]] \
+          && [[ "$after_restarts" == "$before_restarts" ]] \
+          && [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" ]] \
+          && [[ "$(first_service_alloc_id <"$settled_describe")" == "$alloc_id" ]] \
+          && [[ "$(first_service_last_terminated_line <"$final_describe")" \
+            == "$(first_service_last_terminated_line <"$describe")" ]] \
+          && [[ "$(first_service_last_terminated_line <"$settled_describe")" \
+            == "$(first_service_last_terminated_line <"$describe")" ]] \
+          && grep -Fq '    reason: stopped' "$final_describe" \
+          && grep -Fq '    reason: stopped' "$settled_describe"; then
+          failure_surface=deploy+prior-failed+probe
+          trajectory=recovered-running-operator-stop
         else
           die "E10 startup-failure cleanup followed an unrecognized trajectory: $driver/$status"
         fi
@@ -1184,12 +1275,20 @@ run_http_status_cross_driver() {
         "$transcript" \
         || die "E10 nonzero cleanup delta for $driver/$status"
       sentinel='SVM-E10-FAILURE-BODY-MUST-NOT-LEAK'
-      sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" "$final_describe" || true; } | wc -l | tr -d ' ')"
+      if [[ -n "$settled_describe" ]]; then
+        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
+          "$final_describe" "$settled_describe" || true; } | wc -l | tr -d ' ')"
+      else
+        sentinel_count="$({ grep -Foh "$sentinel" "$transcript" "$describe" \
+          "$final_describe" || true; } | wc -l | tr -d ' ')"
+      fi
       [[ "$sentinel_count" -eq 0 ]] \
         || die "E10 sentinel leaked for $driver/$status"
       bytes="$(wc -c <"$transcript" | tr -d ' ')"
-      printf '%s\t%s\t0\t%s\t%s\tstatus-%s\t%s\t0\t%s\t0\t0\t0\t0\tzero-delta\n' \
-        "$driver" "$status" "$terminal" "$trajectory" "$status" "$bytes" \
+      printf '%s\t%s\t0\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tstatus-%s\t%s\t0\t%s\t0\t0\t0\t0\tzero-delta\n' \
+        "$driver" "$status" "$alloc_id" "$before_state" "$before_restarts" \
+        "$failure_surface" "$terminal" "$after_restarts" "$settled_state" \
+        "$trajectory" "$status" "$bytes" \
         "$(wc -c <"$describe" | tr -d ' ')" >>"$ledger"
     done
   done

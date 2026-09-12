@@ -1,9 +1,9 @@
-driver	status	deploy_exit	terminal	trajectory	probe_result	stdout_bytes	stderr_bytes	describe_bytes	sentinel_deploy_stdout	sentinel_deploy_stderr	sentinel_describe	sentinel_probe	cleanup
-exec	204	0	Terminated	operator-stop-running	status-204	1989	0	834	0	0	0	0	zero-delta
-exec	302	0	Terminated	replacement-operator-stop	status-302	2250	0	548	0	0	0	0	zero-delta
-exec	404	0	Terminated	replacement-operator-stop	status-404	2239	0	517	0	0	0	0	zero-delta
-exec	503	0	Terminated	replacement-operator-stop	status-503	2178	0	524	0	0	0	0	zero-delta
-vm	204	0	Terminated	operator-stop-running	status-204	1970	0	827	0	0	0	0	zero-delta
-vm	302	0	Failed	replacement-start-rejected	status-302	2245	0	538	0	0	0	0	zero-delta
-vm	404	0	Failed	replacement-start-rejected	status-404	2173	0	514	0	0	0	0	zero-delta
-vm	503	0	Failed	replacement-start-rejected	status-503	2371	0	514	0	0	0	0	zero-delta
+driver	status	deploy_exit	allocation_id	before_stop	restart_before	failure_surface	after_stop	restart_after	settled_state	trajectory	probe_result	stdout_bytes	stderr_bytes	describe_bytes	sentinel_deploy_stdout	sentinel_deploy_stderr	sentinel_describe	sentinel_probe	cleanup
+exec	204	0	alloc-service-exec-http-204-0	Running	0	none	Terminated	0	Terminated	operator-stop-running	status-204	2010	0	855	0	0	0	0	zero-delta
+exec	302	0	alloc-service-exec-http-302-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-302	3382	0	988	0	0	0	0	zero-delta
+exec	404	0	alloc-service-exec-http-404-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-404	3286	0	964	0	0	0	0	zero-delta
+exec	503	0	alloc-service-exec-http-503-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-503	3286	0	964	0	0	0	0	zero-delta
+vm	204	0	alloc-service-vm-http-204-0	Running	0	none	Terminated	0	Terminated	operator-stop-running	status-204	1991	0	848	0	0	0	0	zero-delta
+vm	302	0	alloc-service-vm-http-302-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-302	3755	0	1135	0	0	0	0	zero-delta
+vm	404	0	alloc-service-vm-http-404-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-404	3659	0	1111	0	0	0	0	zero-delta
+vm	503	0	alloc-service-vm-http-503-0	Running	1	deploy+prior-failed+probe	Terminated	1	Terminated	recovered-running-operator-stop	status-503	3659	0	1111	0	0	0	0	zero-delta

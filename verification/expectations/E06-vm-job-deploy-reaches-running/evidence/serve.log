@@ -1,3 +1,30 @@
-[2m2026-08-19T12:50:10.428525Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
-[2m2026-08-19T12:50:10.504580Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
-[2m2026-08-19T12:50:10.505126Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+[2m2026-09-12T00:07:11.095947Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-09-12T00:07:11.129838Z[0m [32m INFO[0m adopt-on-restart §5: swept 0 surviving per-workload nft-TPROXY rule(s) from the shared chain (shared infra left intact) [3mswept[0m[2m=[0m0
+[2m2026-09-12T00:07:11.130397Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7643/
+[2m2026-09-12T00:07:11.635517Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m0 [3mqueue_ms[0m[2m=[0m95 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:11.695794Z[0m [32m INFO[0m creating VMM [3malloc[0m[2m=[0malloc-e06-vm-job-0
+[2m2026-09-12T00:07:11.705932Z[0m [32m INFO[0m VMM created [3malloc[0m[2m=[0malloc-e06-vm-job-0 [3mpid[0m[2m=[0m1258526
+[2m2026-09-12T00:07:12.833428Z[0m [32m INFO[0m VM READY accepted [3malloc[0m[2m=[0malloc-e06-vm-job-0
+[2m2026-09-12T00:07:12.836098Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-e06-vm-job-0 [3mdriver[0m[2m=[0mVm
+[2m2026-09-12T00:07:12.836236Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-e06-vm-job-0
+[2m2026-09-12T00:07:12.836393Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m0 [3melapsed_ms[0m[2m=[0m1200 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:12.836455Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m1 [3mqueue_ms[0m[2m=[0m2 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:12.836904Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m1 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:12.836965Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m2 [3mqueue_ms[0m[2m=[0m2 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:12.837398Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m2 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:12.837432Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m3 [3mqueue_ms[0m[2m=[0m3 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:12.837902Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m3 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.123062Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m4 [3mqueue_ms[0m[2m=[0m22 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:20.123636Z[0m [32m INFO[0m VM stop claimed Live supervision [3malloc[0m[2m=[0malloc-e06-vm-job-0 [3mpid[0m[2m=[0m1258526
+[2m2026-09-12T00:07:20.123751Z[0m [32m INFO[0m VM beacon writer consumed [3malloc[0m[2m=[0malloc-e06-vm-job-0 [3mdisposition[0m[2m=[0m"completed"
+[2m2026-09-12T00:07:20.155447Z[0m [32m INFO[0m VMM process reaped [3mpid[0m[2m=[0m1258526 [3mexit_code[0m[2m=[0mSome(0) [3msignal[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.155921Z[0m [32m INFO[0m VM cleanup calls finished [3malloc[0m[2m=[0malloc-e06-vm-job-0
+[2m2026-09-12T00:07:20.250199Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m4 [3melapsed_ms[0m[2m=[0m127 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.250289Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m5 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:20.250763Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m5 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.250819Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m6 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:20.251036Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m6 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.251060Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m7 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:20.251513Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m7 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-09-12T00:07:20.251567Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m8 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-09-12T00:07:20.251779Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/e06-vm-job [3mtick[0m[2m=[0m8 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone

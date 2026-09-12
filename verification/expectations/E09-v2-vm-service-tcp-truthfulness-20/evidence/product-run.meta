@@ -1,9 +1,9 @@
 # E09 v2 invocation
 command: cargo xtask metal run -- examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20
-remote_command: timeout --signal=TERM --kill-after=60s 1200s env SVM_E09_V2_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08-v2 SVM_E09_V2_CONCURRENCY=10 examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20
-remote_timeout: 1200s setup-and-trials + 60s cleanup grace
-transport_timeout: 1320s
+remote_command: timeout --signal=TERM --kill-after=60s 600s env SVM_E09_V2_OUTPUT_ROOT=/srv/vm/overdrive-testing/svm-e08-v2 SVM_E09_V2_CONCURRENCY=10 examples/service-kind-vm-workloads-v2/run-example.sh run tcp-truthfulness-20
+remote_timeout: 600s setup-and-trials + 60s cleanup grace
+transport_timeout: 720s
 output_root: /srv/vm/overdrive-testing/svm-e08-v2
-started_utc: 2026-09-08T23:34:23Z
-finished_utc: 2026-09-08T23:46:05Z
+started_utc: 2026-09-12T00:42:55Z
+finished_utc: 2026-09-12T00:44:55Z
 exit: 0
