@@ -647,15 +647,11 @@ mod retry_eligibility_contract {
         );
         assert_eq!(broker.counters(), before);
 
-        let admitted = broker.drain_pending(
-            8,
-            &BTreeSet::new(),
-            base + Duration::from_millis(1_000),
-            wall(1_000),
-        );
+        let admitted =
+            broker.drain_pending(8, &BTreeSet::new(), base + Duration::from_secs(1), wall(1_000));
         assert_eq!(admitted.len(), 1);
         assert_eq!(admitted[0].0, eval);
-        assert_eq!(admitted[0].1, Duration::from_millis(1_000));
+        assert_eq!(admitted[0].1, Duration::from_secs(1));
         assert_eq!(broker.counters().dispatched, 1);
     }
 
@@ -701,14 +697,14 @@ mod retry_eligibility_contract {
         broker.submit(other.clone(), base, EvaluationEligibility::Immediate);
         broker.submit(independent.clone(), base, EvaluationEligibility::Immediate);
 
-        let blocked = BTreeSet::from([other.target.clone()]);
+        let blocked = BTreeSet::from([other.target]);
         assert_eq!(broker.next_eligible_at(&blocked), None);
         let admitted = broker.drain_pending(8, &blocked, base, wall(0));
         assert_eq!(admitted.len(), 1);
         assert_eq!(admitted[0].0, independent);
         assert_eq!(broker.counters().queued, 2);
 
-        let active = BTreeSet::from([deferred.target.clone()]);
+        let active = BTreeSet::from([deferred.target]);
         assert_eq!(broker.next_eligible_at(&active), None);
         assert_eq!(broker.next_eligible_at(&BTreeSet::new()), Some(wall(1_000)));
     }
