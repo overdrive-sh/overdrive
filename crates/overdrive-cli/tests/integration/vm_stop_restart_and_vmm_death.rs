@@ -1976,7 +1976,11 @@ async fn poll_exact_allocation_state_advancing_clock(
         );
         clock.tick(Duration::from_secs(1));
         tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        // ServerConfig advances on the injected SimClock, while the production
+        // ProbeRunner owns a separate SystemClock. Permit one real probe
+        // interval per logical tick so three attempts can author the terminal
+        // fact without changing either production clock owner.
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     unreachable!("bounded loop returns or asserts")
 }
@@ -2010,6 +2014,20 @@ fn assert_execution_artifacts_present(evidence: &VmCreationEvidence, data_dir: &
         evidence.alloc,
     );
     assert!(Path::new(&format!("/proc/{}", evidence.pid)).exists(), "VMM {} is live", evidence.pid);
+}
+
+fn assert_terminal_predecessor_artifacts_present(evidence: &VmCreationEvidence, data_dir: &Path) {
+    let vsock = evidence.run_dir.vsock_socket();
+    let mut paths = evidence_artifacts(evidence, data_dir);
+    let index_root = paths.pop().expect("index root sentinel");
+    assert!(index_root.starts_with(data_dir));
+    let missing =
+        paths.into_iter().filter(|path| path != &vsock && !path.exists()).collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "terminal predecessor {} must retain every artifact except its already-closed vsock; missing={missing:?}",
+        evidence.alloc,
+    );
 }
 
 async fn wait_execution_artifacts_present(evidence: &VmCreationEvidence, data_dir: &Path) {
@@ -2220,6 +2238,14 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
         Duration::from_secs(30),
     )
     .await;
+    let predecessor_running = creations
+        .lock()
+        .expect("creation evidence mutex not poisoned")
+        .first()
+        .cloned()
+        .expect("predecessor real VMM creation evidence at Running");
+    assert_eq!(predecessor_running.alloc, predecessor_id);
+    wait_execution_artifacts_present(&predecessor_running, &data_dir).await;
     // Three startup attempts require bounded interval wakes. Ten logical
     // seconds plus the initial 1s convergence wake stays below
     // VmReclamation's 30s cadence while the production probe owner authors
@@ -2318,8 +2344,14 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
         (snapshot[0].clone(), snapshot[1].clone())
     };
     assert_eq!(old.alloc, predecessor_id);
+    assert_eq!(old.pid, predecessor_running.pid);
     assert_ne!(old.alloc, replacement.alloc, "each real VM execution has a fresh ID");
-    wait_execution_artifacts_present(&old, &data_dir).await;
+    // The production terminal transition closes the predecessor's vsock
+    // pathname and may reap its VMM before replacement creation. Its complete
+    // family and live PID were asserted at Running above; every other old
+    // artifact must still overlap the paused replacement until exact-old
+    // cleanup begins, and the final complement below still proves PID absence.
+    assert_terminal_predecessor_artifacts_present(&old, &data_dir);
     wait_execution_artifacts_present(&replacement, &data_dir).await;
 
     // Replacement bind/create is now observed while the predecessor still
