@@ -364,9 +364,9 @@ mod tests {
         };
         assert!(plan_reclamation(&claimed_desired, &claimed_actual).is_empty());
 
-        // The standing intent consumes that one platform claim exactly once
-        // in this boot epoch: one same-id redrive, then the returned view
-        // suppresses an identical second evaluation.
+        // The standing intent consumes that one platform claim exactly once.
+        // Each lifecycle evaluation reserves a distinct successor; re-driving
+        // the unchanged predecessor advances above the prior reservation.
         let lifecycle_desired = WorkloadLifecycleState {
             workload_id,
             job: Some(job),
@@ -396,23 +396,37 @@ mod tests {
         let lifecycle = WorkloadLifecycle::canonical();
         let (first_actions, next_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
+        let successor_one =
+            AllocationId::new("alloc-vm-boot-desired-workload-1").expect("valid successor");
         assert_eq!(
             first_actions
                 .iter()
                 .filter(|action| matches!(
                     action,
-                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+                    Action::RestartAllocation { alloc_id, spec, .. }
+                        if alloc_id == &alloc && spec.alloc == successor_one
                 ))
                 .count(),
             1,
         );
+        assert_eq!(next_view.restart_counts.get(&successor_one), Some(&0));
         let (repeated_actions, repeated_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
-        assert!(repeated_actions.iter().all(|action| !matches!(
-            action,
-            Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-        )));
-        assert_eq!(repeated_view, next_view);
+        let successor_two =
+            AllocationId::new("alloc-vm-boot-desired-workload-2").expect("valid successor");
+        assert_eq!(
+            repeated_actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::RestartAllocation { alloc_id, spec, .. }
+                        if alloc_id == &alloc && spec.alloc == successor_two
+                ))
+                .count(),
+            1,
+        );
+        assert_eq!(repeated_view.restart_counts.get(&successor_one), Some(&0));
+        assert_eq!(repeated_view.restart_counts.get(&successor_two), Some(&0));
     }
 
     /// Step 02-03 completion — the desired-side join makes
@@ -432,7 +446,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[allow(
         clippy::too_many_lines,
-        reason = "one boot-to-lifecycle scenario keeps the reclaim and same-id redrive evidence joined"
+        reason = "one boot-to-lifecycle scenario keeps the reclaim and fresh-successor redrive evidence joined"
     )]
     #[tokio::test]
     async fn boot_reclamation_executor_persists_one_platform_claim_and_one_lifecycle_redrive() {
@@ -531,9 +545,9 @@ mod tests {
         );
 
         // Join the boot claim to the standing-intent lifecycle boundary. The
-        // first evaluation owes exactly one same-id re-drive; re-evaluating
-        // the identical reclaimed row with the returned private view must not
-        // emit a second RestartAllocation in this boot epoch.
+        // first evaluation reserves one fresh successor; re-evaluating the
+        // identical reclaimed row with the returned private view advances to
+        // a second fresh reservation rather than reusing an issued ID.
         let lifecycle = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
         let target =
             TargetResource::new(&format!("workload/{workload_id}")).expect("valid workload target");
@@ -555,29 +569,43 @@ mod tests {
         };
         let (first_actions, next_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
+        let successor_one =
+            AllocationId::new("alloc-vm-boot-desired-workload-1").expect("valid successor");
         let first_redrives = first_actions
             .iter()
             .filter(|action| {
                 matches!(
                     action,
-                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
+                    Action::RestartAllocation { alloc_id, spec, .. }
+                        if alloc_id == &alloc && spec.alloc == successor_one
                 )
             })
             .count();
         assert_eq!(
             first_redrives, 1,
-            "one Platform Reclamation claim emits exactly one same-id lifecycle re-drive: {first_actions:#?}"
+            "one Platform Reclamation claim emits exactly one fresh-successor lifecycle re-drive: {first_actions:#?}"
         );
         let (repeated_actions, repeated_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
-        assert!(
-            repeated_actions.iter().all(|action| !matches!(
-                action,
-                Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-            )),
-            "same boot epoch must not emit a second same-id re-drive: {repeated_actions:#?}"
+        let successor_two =
+            AllocationId::new("alloc-vm-boot-desired-workload-2").expect("valid successor");
+        assert_eq!(
+            repeated_actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::RestartAllocation { alloc_id, spec, .. }
+                        if alloc_id == &alloc && spec.alloc == successor_two
+                ))
+                .count(),
+            1,
+            "same boot re-drive must advance above the issued successor: {repeated_actions:#?}"
         );
-        assert_eq!(repeated_view, next_view, "the no-op evaluation preserves its exact view");
+        let AnyReconcilerView::WorkloadLifecycle(repeated_view) = repeated_view else {
+            panic!("workload lifecycle returned the wrong View variant")
+        };
+        assert_eq!(repeated_view.restart_counts.get(&successor_one), Some(&0));
+        assert_eq!(repeated_view.restart_counts.get(&successor_two), Some(&0));
 
         converge(&state).await.expect("a repeated same-boot convergence is a no-op");
         let repeated = state

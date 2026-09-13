@@ -86,6 +86,23 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     )
 }
 
+async fn numeric_current_candidate(
+    obs: &dyn ObservationStore,
+    workload: &WorkloadId,
+) -> Option<AllocationId> {
+    obs.alloc_status_rows()
+        .await
+        .expect("read allocation candidates")
+        .into_iter()
+        .filter(|row| &row.workload_id == workload)
+        .filter_map(|row| {
+            let attempt = row.alloc_id.as_str().rsplit_once('-')?.1.parse::<u32>().ok()?;
+            Some((attempt, row.alloc_id))
+        })
+        .max_by_key(|(attempt, _)| *attempt)
+        .map(|(_, alloc_id)| alloc_id)
+}
+
 /// RED — drive the runtime convergence loop end-to-end against a fully
 /// converged target. After the initial edge-triggered submit is drained
 /// at tick 0, no further dispatches must occur for any reconciler whose
@@ -478,6 +495,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      dispatched_at_stop_submit <= 2` (the stop converges in 1-2
 ///      ticks; pre-fix this hits ≥5 from the `RESTART_BACKOFF_CEILING`
 ///      hot spin).
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 // DST harness setup (build sim AppState, preload IntentStore, drive warm-up
 // ticks until Failed-mid-backoff state, submit stop intent, drive post-stop
@@ -609,10 +627,12 @@ async fn stop_after_failed_alloc_drains_broker() {
         // Check whether the cached view shows the desired
         // Failed-mid-backoff state.
         let view = state.runtime.view_for_workload_lifecycle(&setup_target);
-        let alloc_id = AllocationId::new(&format!("alloc-{}-0", workload_id.as_str()))
-            .expect("derived alloc id");
-        let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-        let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
+        let Some(candidate) = numeric_current_candidate(state.obs.as_ref(), &workload_id).await
+        else {
+            continue;
+        };
+        let count = view.restart_counts.get(&candidate).copied().unwrap_or(0);
+        let has_deadline = view.last_failure_seen_at.contains_key(&candidate);
         if count >= 1 && has_deadline {
             break;
         }
@@ -776,6 +796,7 @@ async fn stop_after_failed_alloc_drains_broker() {
 /// (libSQL → fresh view → reconcile) is indistinguishable from a
 /// continuous in-memory tick when the underlying inputs and policy
 /// are unchanged.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart() {
@@ -874,8 +895,6 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     `RESTART_BACKOFF_DURATION = 1 s`, so the alloc stays mid-backoff
     //     across the warm-up.
     let workload_id = job.id.clone();
-    let alloc_id =
-        AllocationId::new(&format!("alloc-{}-0", workload_id.as_str())).expect("derived alloc id");
     let mut warm_up_ticks = 0_u64;
     while warm_up_ticks < 30 {
         let now = sim_clock.now();
@@ -905,8 +924,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         warm_up_ticks += 1;
 
         let view = state.runtime.view_for_workload_lifecycle(&target);
-        let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-        let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
+        let Some(candidate) = numeric_current_candidate(state.obs.as_ref(), &workload_id).await
+        else {
+            continue;
+        };
+        let count = view.restart_counts.get(&candidate).copied().unwrap_or(0);
+        let has_seen_at = view.last_failure_seen_at.contains_key(&candidate);
         if count >= 1 && has_seen_at {
             break;
         }

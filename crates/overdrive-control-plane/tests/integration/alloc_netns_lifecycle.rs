@@ -348,6 +348,24 @@ async fn latest_row(obs: &dyn ObservationStore, alloc: &AllocationId) -> Option<
     rows.into_iter().filter(|r| &r.alloc_id == alloc).max_by_key(|r| r.updated_at.counter)
 }
 
+async fn mark_restart_predecessor(obs: &dyn ObservationStore, alloc: &AllocationId) {
+    let mut row = latest_row(obs, alloc).await.expect("accepted allocation row");
+    row.state = AllocState::Failed;
+    row.updated_at.counter = row.updated_at.counter.saturating_add(1);
+    row.reason = Some(TransitionReason::WorkloadCrashedImmediately {
+        exit_code: Some(17),
+        signal: None,
+        stderr_tail: None,
+    });
+    row.terminal = None;
+    obs.write_alloc_lifecycle(
+        row,
+        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+    )
+    .await
+    .expect("publish eligible terminal predecessor");
+}
+
 /// Drive a single `Action` through the production `action_shim::dispatch` with
 /// the supplied `driver` + `net_slot_allocator` + a REAL `MtlsInterceptWorker`
 /// (so the C3 seam is ARMED). Every orthogonal port is a sim double.
@@ -665,10 +683,10 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
 /// slot's netns, veth, persistent TAP, namespace IPv4 forwarding, TAP gateway
 /// address, and host guest-return route only). The Sim VM driver proves the
 /// pre-start C3 seam without booting a guest; every assertion reads real Linux
-/// kernel state. A restart replaces the old structural network before
-/// converging the replacement plan, deliberate address/sysctl/route drift is
-/// repaired, and terminal teardown leaves no slot-derived kernel resource
-/// behind.
+/// kernel state. Each terminal predecessor is replaced by a fresh successor
+/// before exact-old structural teardown; deliberate address/sysctl/route/TAP
+/// drift is absent from the fresh plan, and final teardown leaves no
+/// slot-derived kernel resource behind.
 pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     if !is_root() {
         eprintln!(
@@ -692,7 +710,7 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     };
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let allocator = NetSlotAllocator::new();
-    let alloc = AllocationId::new("anl-vm-tap").expect("valid alloc id");
+    let alloc = AllocationId::new("anl-vm-tap-0").expect("valid alloc id");
     let slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(3);
     allocator.adopt(alloc.clone(), slot).expect("adopt VM test slot");
     let workload = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
@@ -746,10 +764,12 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     );
 
     let prior_netns = workload.netns.clone();
+    let successor_one = AllocationId::new("anl-vm-tap-1").expect("valid successor id");
+    mark_restart_predecessor(obs.as_ref(), &alloc).await;
     dispatch_one(
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
-            spec: build_vm_spec(&alloc),
+            spec: build_vm_spec(&successor_one),
             kind: WorkloadKind::Service,
         },
         &drivers,
@@ -760,20 +780,20 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
         &allocator,
     )
     .await
-    .expect("clean VM restart must replace and converge the guest wire");
+    .expect("fresh VM successor must converge before exact-old teardown");
     assert!(
         !netns_present(prior_netns.as_str()),
-        "BTR-3 restart must tear down the prior structural netns before replacement provision",
+        "exact-old teardown removes only the predecessor structural netns",
     );
 
     let replacement_slot = *allocator
         .snapshot()
-        .get(&alloc)
+        .get(&successor_one)
         .expect("replacement VM allocation must own a structural slot");
     let workload =
         derive_workload_netns_plan(replacement_slot, responder_addr_for_slot(replacement_slot));
     let tap = derive_vm_tap_plan(replacement_slot, workload.responder_addr);
-    let _replacement_guard = NetnsGuard { plan: workload.clone() };
+    let _successor_one_guard = NetnsGuard { plan: workload.clone() };
     assert!(
         netns_persistent_tap_present(workload.netns.as_str(), &tap.tap),
         "replacement C3 plan must create a persistent type-TAP device",
@@ -843,10 +863,13 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
         "test precondition: remove the guest return route",
     );
 
+    let drifted_workload = workload.clone();
+    let successor_two = AllocationId::new("anl-vm-tap-2").expect("valid successor id");
+    mark_restart_predecessor(obs.as_ref(), &successor_one).await;
     dispatch_one(
         Action::RestartAllocation {
-            alloc_id: alloc.clone(),
-            spec: build_vm_spec(&alloc),
+            alloc_id: successor_one.clone(),
+            spec: build_vm_spec(&successor_two),
             kind: WorkloadKind::Service,
         },
         &drivers,
@@ -857,7 +880,15 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
         &allocator,
     )
     .await
-    .expect("VM restart must repair independently drifted guest-wire facts");
+    .expect("fresh successor must replace independently drifted guest-wire facts");
+
+    assert!(!netns_present(drifted_workload.netns.as_str()));
+    let successor_two_slot =
+        *allocator.snapshot().get(&successor_two).expect("second successor owns a structural slot");
+    let workload =
+        derive_workload_netns_plan(successor_two_slot, responder_addr_for_slot(successor_two_slot));
+    let tap = derive_vm_tap_plan(successor_two_slot, workload.responder_addr);
+    let _successor_two_guard = NetnsGuard { plan: workload.clone() };
 
     assert!(
         netns_iface_has_exact_addr(
@@ -866,7 +897,7 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
             tap.tap_gateway,
             tap.guest_network.prefix_len(),
         ),
-        "wrong-prefix gateway drift must be repaired to the exact /30",
+        "fresh successor gateway uses the exact /30",
     );
     assert!(
         !netns_iface_has_exact_addr(workload.netns.as_str(), &tap.tap, tap.tap_gateway, 32),
@@ -887,10 +918,13 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     );
     assert!(!netns_persistent_tap_present(workload.netns.as_str(), &tap.tap));
 
+    let missing_tap_workload = workload.clone();
+    let successor_three = AllocationId::new("anl-vm-tap-3").expect("valid successor id");
+    mark_restart_predecessor(obs.as_ref(), &successor_two).await;
     dispatch_one(
         Action::RestartAllocation {
-            alloc_id: alloc.clone(),
-            spec: build_vm_spec(&alloc),
+            alloc_id: successor_two.clone(),
+            spec: build_vm_spec(&successor_three),
             kind: WorkloadKind::Service,
         },
         &drivers,
@@ -901,12 +935,23 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
         &allocator,
     )
     .await
-    .expect("VM restart must recreate a missing persistent TAP");
+    .expect("fresh successor must replace a predecessor with a missing TAP");
+    assert!(!netns_present(missing_tap_workload.netns.as_str()));
+    let successor_three_slot = *allocator
+        .snapshot()
+        .get(&successor_three)
+        .expect("third successor owns a structural slot");
+    let workload = derive_workload_netns_plan(
+        successor_three_slot,
+        responder_addr_for_slot(successor_three_slot),
+    );
+    let tap = derive_vm_tap_plan(successor_three_slot, workload.responder_addr);
+    let _successor_three_guard = NetnsGuard { plan: workload.clone() };
     assert!(netns_persistent_tap_present(workload.netns.as_str(), &tap.tap));
     assert_ne!(
         netns_link_index(workload.netns.as_str(), &tap.tap),
         Some(repaired_ifindex),
-        "missing-TAP repair must materialise a new kernel link",
+        "fresh successor must materialise a new kernel link",
     );
     assert!(netns_iface_has_exact_addr(
         workload.netns.as_str(),
@@ -918,7 +963,7 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
     assert!(host_guest_return_route_present(&workload, &tap));
 
     dispatch_one(
-        Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
+        Action::StopAllocation { alloc_id: successor_three.clone(), terminal: None },
         &drivers,
         &alloc_drivers,
         obs.as_ref(),
@@ -948,7 +993,10 @@ pub(super) async fn run_c3_restart_replaces_and_converges_vm_network_plan() {
         "terminal teardown must leave the expected TAP name absent from the host namespace",
     );
     assert!(!host_guest_return_route_present(&workload, &tap));
-    assert!(!allocator.snapshot().contains_key(&alloc));
+    let final_slots = allocator.snapshot();
+    for released in [&alloc, &successor_one, &successor_two, &successor_three] {
+        assert!(!final_slots.contains_key(released));
+    }
     eprintln!("EXECUTED c3_restart_replaces_and_converges_vm_network_plan");
 }
 
