@@ -1580,7 +1580,6 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -1977,7 +1976,10 @@ async fn poll_exact_allocation_state_advancing_clock(
         );
         clock.tick(Duration::from_secs(1));
         tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        // `run_server` composes the production probe owner with its own
+        // `SystemClock`, so each logical reconciliation wake must also allow
+        // one real probe interval to elapse.
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     unreachable!("bounded loop returns or asserts")
 }
@@ -2168,7 +2170,6 @@ fn assert_strace_ownership(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; requires native non-virtualized x86_64 KVM via cargo xtask metal run --"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -2222,6 +2223,14 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
         Duration::from_secs(30),
     )
     .await;
+    let old = creations
+        .lock()
+        .expect("creation evidence mutex not poisoned")
+        .first()
+        .cloned()
+        .expect("predecessor real VMM creation evidence");
+    assert_eq!(old.alloc, predecessor_id);
+    wait_execution_artifacts_present(&old, &data_dir).await;
     // Three startup attempts require bounded interval wakes. Ten logical
     // seconds plus the initial 1s convergence wake stays below
     // VmReclamation's 30s cadence while the production probe owner authors
@@ -2314,14 +2323,13 @@ async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
         );
     }
 
-    let (old, replacement) = {
+    let replacement = {
         let snapshot = creations.lock().expect("creation evidence mutex not poisoned").clone();
         assert_eq!(snapshot.len(), 2, "exactly two real VMM creations before release");
-        (snapshot[0].clone(), snapshot[1].clone())
+        assert_eq!(snapshot[0].alloc, old.alloc);
+        snapshot[1].clone()
     };
-    assert_eq!(old.alloc, predecessor_id);
     assert_ne!(old.alloc, replacement.alloc, "each real VM execution has a fresh ID");
-    wait_execution_artifacts_present(&old, &data_dir).await;
     wait_execution_artifacts_present(&replacement, &data_dir).await;
 
     // Replacement bind/create is now observed while the predecessor still
