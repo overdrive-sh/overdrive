@@ -116,10 +116,6 @@ pub mod terminal_contention;
 // failure. It pins durable Failed classification, structural teardown,
 // zero-residue cleanup, and smallest-free slot reuse by a successor.
 pub mod provision_failure_cleanup;
-// guest-stack-transparent-mtls-intercept BTR-3. The same-ID restart
-// evaluator drives the real action shim with a socket-free lifecycle adapter
-// and verifies the lifecycle/network/identity/driver completion order.
-pub mod same_id_restart_lifecycle;
 // workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
 // pinning the GC reconciler arm convergence + resubmit-after-GC
 // race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
@@ -426,13 +422,6 @@ pub enum Invariant {
     /// `crate::invariants::provision_failure_cleanup`.
     VmProvisionFailureCleansNetworkAndReusesSlot,
 
-    /// guest-stack-transparent-mtls-intercept BTR-3 — a real action-shim
-    /// same-ID restart reaches lifecycle stop completion before old network
-    /// ownership is released, then provisions, proves held identity at driver
-    /// start, and completes lifecycle start. Transient failure cuts converge
-    /// on one retry.
-    SameIdRestartRemovesPriorProtectionBeforeReplacementProvision,
-
     /// workload-gc-absent-stale-allocs step 01-03 — eventually
     /// invariant. After `IntentStore::delete("jobs/X")` removes
     /// the desired Job, every non-terminal `AllocStatusRow` for
@@ -709,7 +698,6 @@ impl Invariant {
         // lives in `crate::invariants::provision_failure_cleanup` and carries
         // a negative control that removes one observed artifact-removal fact.
         Self::VmProvisionFailureCleansNetworkAndReusesSlot,
-        Self::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision,
         // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
         // Evaluator bodies live in
         // `crate::invariants::workload_gc_absent_intent`. Both
@@ -815,9 +803,6 @@ impl Invariant {
             Self::TerminalContentionConverges => "terminal-contention-converges",
             Self::VmProvisionFailureCleansNetworkAndReusesSlot => {
                 "vm-provision-failure-cleans-network-and-reuses-slot"
-            }
-            Self::SameIdRestartRemovesPriorProtectionBeforeReplacementProvision => {
-                "same-id-restart-removes-prior-protection-before-replacement-provision"
             }
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",

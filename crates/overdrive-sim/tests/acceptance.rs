@@ -59,10 +59,6 @@ mod acceptance {
     // guest-stack-transparent-mtls-intercept BTR-1 — fixed-seed catalogue pin
     // for the registered Stop/exit-observer contention invariant.
     mod terminal_contention;
-    // guest-stack-transparent-mtls-intercept ADR-0089 §7 — DISTILL RED
-    // scaffold for the same-ID restart lifecycle invariant. DELIVER replaces
-    // it after the exact lifecycle port and socket-free Sim adapter exist.
-    mod same_id_restart_lifecycle;
     // service-kind-vm-workloads S-SVM-17 — seeded terminal-authority
     // invariant. It observes only that terminal state wins and a dead backend
     // never becomes eligible again; it does not prescribe ProbeRunner drain,

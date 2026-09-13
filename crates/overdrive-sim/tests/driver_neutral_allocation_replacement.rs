@@ -15,7 +15,7 @@
     reason = "seed diagnostics and exact Contract Shape lines are required acceptance evidence"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
@@ -33,6 +33,7 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    derive_workload_netns_plan, responder_addr_for_slot,
 };
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::view_store::{
@@ -41,9 +42,10 @@ use overdrive_control_plane::view_store::{
 use overdrive_control_plane::{AppState, workload_lifecycle};
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput, WorkloadIntent,
+    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
     WorkloadKind,
 };
+use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{
@@ -51,6 +53,7 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::ProbeResultRow;
 use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
     DriverStartClass, DriverStartFailure, DriverType, ExecPayload, Resources, VmPayload,
@@ -75,6 +78,9 @@ use overdrive_sim::adapters::{
 };
 use overdrive_store_local::LocalIntentStore;
 use parking_lot::Mutex;
+use tracing::{Event, Subscriber, subscriber::set_default};
+use tracing_subscriber::layer::{Context, SubscriberExt as _};
+use tracing_subscriber::{Layer, Registry};
 
 const SEED: u64 = 284_105_106;
 
@@ -86,11 +92,263 @@ enum TraceEvent {
     Teardown(String),
 }
 
+fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
+    let driver = match driver_type {
+        DriverType::Exec => DriverInput::Exec(ExecInput {
+            command: "/bin/workload".to_owned(),
+            args: vec!["--serve".to_owned()],
+        }),
+        DriverType::Vm => DriverInput::Vm(VmInput {
+            command: "/sbin/workload".to_owned(),
+            args: vec!["--serve".to_owned()],
+            kernel: "/srv/vm/kernel".to_owned(),
+            rootfs: "/srv/vm/rootfs.ext4".to_owned(),
+        }),
+        other => panic!("fixture covers Exec and VM, got {other:?}"),
+    };
+    WorkloadIntent::Service(
+        ServiceV2::from_submit(ServiceSpecInput {
+            id: workload.to_owned(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver,
+            listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+            startup_probes: Vec::new(),
+            readiness_probes: Vec::new(),
+            liveness_probes: Vec::new(),
+        })
+        .expect("valid Service intent"),
+    )
+}
+
+/// S-284-SIM-05 — the full production owner path for both composed drivers:
+/// registered WorkloadLifecycle authors the initial StartRejected predecessor,
+/// the runtime fsyncs a fresh successor reservation before dispatch, rejected
+/// successor publication fully unwinds, and runtime reopen re-drives above the
+/// consumed ID. No row or replacement Action is seeded by the test.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending corrective re-DELIVER roadmap: full production-owner replacement and reopen"]
+async fn production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm() {
+    eprintln!(
+        "seed={SEED}; reproduce: cargo xtask lima run -- cargo nextest run -p overdrive-sim \
+         --features integration-tests,overdrive-control-plane/integration-tests \
+         --test driver_neutral_allocation_replacement --run-ignored ignored-only \
+         -E 'test(production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm)' \
+         --no-capture"
+    );
+
+    let exec = tokio::spawn(production_owner_replacement_case(DriverType::Exec));
+    let vm = tokio::spawn(production_owner_replacement_case(DriverType::Vm));
+    let (exec, vm) = tokio::join!(exec, vm);
+    assert!(
+        exec.is_ok() && vm.is_ok(),
+        "MISSING_CORRECTED_BEHAVIOR: both production driver compositions must complete; exec={exec:?}, vm={vm:?}"
+    );
+}
+
+async fn production_owner_replacement_case(driver_type: DriverType) {
+    let temp = tempfile::tempdir().expect("temporary owner-path data directory");
+    let workload = format!("{}-owner-path", driver_type.as_str());
+    let predecessor = aid(&format!("alloc-{workload}-0"));
+    let rejected = aid(&format!("alloc-{workload}-1"));
+    let accepted = aid(&format!("alloc-{workload}-2"));
+    let persisted = Arc::new(AtomicBool::new(false));
+    let driver = Arc::new(OwnerPathDriver::new(driver_type, Arc::clone(&persisted)));
+    let inner = Arc::new(SimObservationStore::single_peer(nid("local"), SEED));
+    let observations = Arc::new(RejectFreshPublication {
+        inner: Arc::clone(&inner),
+        successor: rejected.clone(),
+        running_attempts: AtomicUsize::new(0),
+    });
+    let intent_path = temp.path().join("intent.redb");
+    let intent = Arc::new(LocalIntentStore::open(&intent_path).expect("open intent store"));
+    let recording_view = RecordingRedbViewStore {
+        inner: RedbViewStore::open(temp.path()).expect("open durable ViewStore"),
+        persisted: Arc::clone(&persisted),
+    };
+    let mut runtime =
+        ReconcilerRuntime::new(temp.path(), Arc::new(recording_view)).expect("runtime");
+    runtime.register(workload_lifecycle()).await.expect("register WorkloadLifecycle");
+    let allocator = overdrive_control_plane::test_default_allocator(
+        Arc::clone(&intent) as Arc<dyn IntentStore>
+    );
+    let clock = Arc::new(SimClock::new());
+    let mut state = AppState::new(
+        Arc::clone(&intent),
+        intent_path,
+        Arc::clone(&observations) as Arc<dyn ObservationStore>,
+        Arc::new(runtime),
+        Arc::clone(&driver) as Arc<dyn Driver>,
+        Arc::clone(&clock) as Arc<dyn overdrive_core::traits::clock::Clock>,
+        Arc::new(SimDataplane::new()),
+        Arc::new(SimCa::new(Arc::new(SimEntropy::new(SEED)))),
+        Arc::new(IdentityMgr::new(None)),
+        nid("local"),
+        allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+    );
+    let desired = service_intent(driver_type, &workload);
+    let workload_id = wid(&workload);
+    state
+        .store
+        .put(
+            IntentKey::for_workload(&workload_id).as_bytes(),
+            desired.archive_for_store().expect("archive Service intent").as_ref(),
+        )
+        .await
+        .expect("persist Service intent");
+    state
+        .store
+        .put(
+            IntentKey::for_workload_kind(&workload_id).as_bytes(),
+            &[WorkloadKind::Service.discriminator_byte()],
+        )
+        .await
+        .expect("persist Service kind");
+    let target = TargetResource::new(&format!("workload/{workload}")).expect("target");
+    let owner = ReconcilerName::new("workload-lifecycle").expect("owner name");
+    let network = RecordingNetwork::default();
+
+    persisted.store(false, Ordering::SeqCst);
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &owner,
+        &target,
+        clock.now(),
+        1,
+        clock.now() + Duration::from_secs(2),
+        &network,
+    )
+    .await
+    .expect("production owner publishes the initial rejected predecessor");
+    let predecessor_row = inner
+        .alloc_status_row(&predecessor)
+        .await
+        .expect("read predecessor")
+        .expect("initial StartRejected becomes an accepted Failed predecessor");
+    assert_eq!(predecessor_row.state, AllocState::Failed);
+    let predecessor_history =
+        inner.alloc_lifecycle_occurrences(&predecessor).await.expect("read predecessor history");
+
+    persisted.store(false, Ordering::SeqCst);
+    clock.tick(Duration::from_secs(2));
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &owner,
+        &target,
+        clock.now(),
+        2,
+        clock.now() + Duration::from_secs(2),
+        &network,
+    )
+    .await
+    .expect("rejected successor publication fully unwinds without another proposal");
+
+    let placeholder =
+        ReconcilerRuntime::new(&temp.path().join("placeholder"), Arc::new(SimViewStore::new()))
+            .expect("placeholder runtime while closing redb");
+    let closed = std::mem::replace(&mut state.runtime, Arc::new(placeholder));
+    drop(closed);
+    let reopened_view = RecordingRedbViewStore {
+        inner: RedbViewStore::open(temp.path()).expect("reopen durable ViewStore"),
+        persisted: Arc::clone(&persisted),
+    };
+    let mut reopened =
+        ReconcilerRuntime::new(temp.path(), Arc::new(reopened_view)).expect("reopen runtime");
+    reopened.register(workload_lifecycle()).await.expect("bulk-load WorkloadLifecycle");
+    let restored = reopened.view_for_workload_lifecycle(&target);
+    let restored_predecessor = restored.restart_counts.contains_key(&predecessor);
+    let restored_rejected = restored.restart_counts.contains_key(&rejected);
+    state.runtime = Arc::new(reopened);
+
+    persisted.store(false, Ordering::SeqCst);
+    clock.tick(Duration::from_secs(2));
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &owner,
+        &target,
+        clock.now(),
+        3,
+        clock.now() + Duration::from_secs(2),
+        &network,
+    )
+    .await
+    .expect("reopened owner re-drives above the consumed rejected successor");
+
+    assert_eq!(
+        driver.starts.lock().as_slice(),
+        &[predecessor.clone(), rejected.clone(), accepted.clone()],
+        "MISSING_CORRECTED_BEHAVIOR: production owners must create three distinct physical attempts"
+    );
+    assert_eq!(driver.persistence_at_start.lock().as_slice(), &[true, true, true]);
+    assert!(restored_predecessor, "reopen restores the initial issued-ID reservation");
+    assert!(restored_rejected, "reopen restores the rejected successor reservation");
+    assert_eq!(observations.running_attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(inner.alloc_status_row(&predecessor).await.unwrap(), Some(predecessor_row));
+    assert_eq!(inner.alloc_lifecycle_occurrences(&predecessor).await.unwrap(), predecessor_history);
+    assert!(inner.alloc_status_row(&rejected).await.unwrap().is_none());
+    let accepted_row =
+        inner.alloc_status_row(&accepted).await.unwrap().expect("higher successor Running row");
+    assert_eq!(accepted_row.state, AllocState::Running);
+    assert_eq!(accepted_row.restart_count, 0);
+    assert!(accepted_row.last_terminated.is_none());
+    let final_view = state.runtime.view_for_workload_lifecycle(&target);
+    assert!(final_view.restart_counts.contains_key(&predecessor));
+    assert!(final_view.restart_counts.contains_key(&rejected));
+    assert!(final_view.restart_counts.contains_key(&accepted));
+    assert_eq!(
+        driver.stops.lock().as_slice(),
+        &[rejected, predecessor.clone(), predecessor],
+        "successor unwind and both post-successor predecessor cleanups use exact IDs"
+    );
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StartBehavior {
     Success,
     IoFailure,
     Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CleanupFailure {
+    None,
+    Driver,
+    Mtls,
+    Network,
+}
+
+#[derive(Clone, Default)]
+struct CapturedEvents {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl CapturedEvents {
+    fn snapshot(&self) -> Vec<String> {
+        self.events.lock().clone()
+    }
+}
+
+struct EventVisitor<'a>(&'a mut String);
+
+impl tracing::field::Visit for EventVisitor<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        use std::fmt::Write as _;
+        let _ = write!(self.0, " {}={value:?}", field.name());
+    }
+}
+
+impl<S> Layer<S> for CapturedEvents
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut rendered = event.metadata().name().to_owned();
+        event.record(&mut EventVisitor(&mut rendered));
+        self.events.lock().push(rendered);
+    }
 }
 
 struct RecordingDriver {
@@ -105,7 +363,6 @@ struct RecordingDriver {
     block_predecessor_stop: AtomicBool,
     fail_predecessor_stop: AtomicBool,
     predecessor: AllocationId,
-    view_persisted: Option<Arc<AtomicBool>>,
 }
 
 impl RecordingDriver {
@@ -122,7 +379,6 @@ impl RecordingDriver {
             block_predecessor_stop: AtomicBool::new(false),
             fail_predecessor_stop: AtomicBool::new(false),
             predecessor,
-            view_persisted: None,
         }
     }
 
@@ -140,11 +396,6 @@ impl RecordingDriver {
         self.fail_predecessor_stop.store(true, Ordering::SeqCst);
         self
     }
-
-    fn with_view_persisted(mut self, persisted: Arc<AtomicBool>) -> Self {
-        self.view_persisted = Some(persisted);
-        self
-    }
 }
 
 #[async_trait]
@@ -154,12 +405,6 @@ impl Driver for RecordingDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        if let Some(persisted) = &self.view_persisted {
-            assert!(
-                persisted.load(Ordering::SeqCst),
-                "successor effects must not start before the View write completes"
-            );
-        }
         self.starts.lock().push(spec.alloc.clone());
         self.trace.lock().push(TraceEvent::Start(spec.alloc.clone()));
         self.start_entered.notify_waiters();
@@ -209,9 +454,84 @@ impl Driver for RecordingDriver {
     }
 }
 
+struct OwnerPathDriver {
+    driver_type: DriverType,
+    behaviors: Mutex<VecDeque<StartBehavior>>,
+    starts: Mutex<Vec<AllocationId>>,
+    stops: Mutex<Vec<AllocationId>>,
+    view_persisted: Arc<AtomicBool>,
+    persistence_at_start: Mutex<Vec<bool>>,
+}
+
+impl OwnerPathDriver {
+    fn new(driver_type: DriverType, view_persisted: Arc<AtomicBool>) -> Self {
+        Self {
+            driver_type,
+            behaviors: Mutex::new(VecDeque::from([
+                StartBehavior::Rejected,
+                StartBehavior::Success,
+                StartBehavior::Success,
+            ])),
+            starts: Mutex::new(Vec::new()),
+            stops: Mutex::new(Vec::new()),
+            view_persisted,
+            persistence_at_start: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl Driver for OwnerPathDriver {
+    fn r#type(&self) -> DriverType {
+        self.driver_type
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.starts.lock().push(spec.alloc.clone());
+        self.persistence_at_start.lock().push(self.view_persisted.load(Ordering::SeqCst));
+        let behavior = self.behaviors.lock().pop_front();
+        match behavior.expect("three owner-path starts are bounded") {
+            StartBehavior::Success => {
+                Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(84) })
+            }
+            StartBehavior::Rejected => Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Unclassified { driver: self.driver_type },
+                    detail: "seeded initial predecessor rejection".to_owned(),
+                },
+            }),
+            StartBehavior::IoFailure => unreachable!("owner-path sequence has no I/O failure"),
+        }
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.stops.lock().push(handle.alloc.clone());
+        Ok(())
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+    }
+
+    async fn resize(
+        &self,
+        _handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct RecordingNetwork {
     trace: Arc<Mutex<Vec<TraceEvent>>>,
+    fail_teardown: Mutex<Option<String>>,
+}
+
+impl RecordingNetwork {
+    const fn with_failed_teardown(trace: Arc<Mutex<Vec<TraceEvent>>>, netns: String) -> Self {
+        Self { trace, fail_teardown: Mutex::new(Some(netns)) }
+    }
 }
 
 impl WorkloadNetworkProvisioner for RecordingNetwork {
@@ -226,6 +546,14 @@ impl WorkloadNetworkProvisioner for RecordingNetwork {
 
     fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.trace.lock().push(TraceEvent::Teardown(workload.netns.as_str().to_owned()));
+        if self.fail_teardown.lock().as_deref() == Some(workload.netns.as_str()) {
+            return Err(VethProvisionError::SysctlSetFailed {
+                key: "net.ipv4.ip_forward".to_owned(),
+                value: "1".to_owned(),
+                path: format!("/sim/{}", workload.netns.as_str()),
+                source: io::Error::other("injected predecessor network cleanup failure"),
+            });
+        }
         Ok(())
     }
 }
@@ -434,7 +762,7 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         slots
             .adopt(predecessor.clone(), NetSlot::new(7).expect("valid old slot"))
             .expect("old slot is owned");
-        let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
+        let network = RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() };
         let mtls = SimMtlsInterceptLifecycle::new();
         mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
             .await
@@ -533,76 +861,206 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
     }
 }
 
-/// S-284-SIM-02 — the four successor/cleanup outcome partitions keep the
-/// successor error primary when both fail and attempt exact-old cleanup once.
+/// S-284-SIM-02 — every driver/mTLS/network exact-old cleanup failure stage is
+/// exercised after both successful and failed successor outcomes for Exec and
+/// VM. Each stage short-circuits later old-cleanup stages, preserves an
+/// accepted successor, and reports a both-fail cleanup error only as secondary
+/// structured tracing.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending corrective re-DELIVER roadmap: successor and cleanup failure precedence"]
 async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
     eprintln!("seed={SEED}: successor/cleanup precedence table");
-    for (start_behavior, cleanup_fails) in [
-        (StartBehavior::Success, false),
-        (StartBehavior::Success, true),
-        (StartBehavior::IoFailure, false),
-        (StartBehavior::IoFailure, true),
-    ] {
-        let (obs, predecessor, successor, workload) = seeded_predecessor(DriverType::Exec).await;
-        let mut driver = RecordingDriver::new(DriverType::Exec, predecessor.clone())
-            .with_behavior(start_behavior);
-        if cleanup_fails {
-            driver = driver.with_failed_predecessor_stop();
-        }
-        let driver = Arc::new(driver);
-        let slots = NetSlotAllocator::new();
-        let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
-        let index = AllocDriverIndex::default();
-        index.lock().insert(predecessor.clone(), DriverType::Exec);
+    let captured = CapturedEvents::default();
+    let _capture = set_default(Registry::default().with(captured.clone()));
 
-        let result = dispatch_one(
-            Action::RestartAllocation {
-                alloc_id: predecessor.clone(),
-                spec: successor_spec(DriverType::Exec, &workload, &successor),
-                kind: WorkloadKind::Service,
-            },
-            Arc::clone(&driver),
-            obs.as_ref(),
-            &index,
-            &slots,
-            &network,
-            None,
-        )
-        .await;
+    for driver_type in [DriverType::Exec, DriverType::Vm] {
+        for start_behavior in [StartBehavior::Success, StartBehavior::IoFailure] {
+            for cleanup_failure in [
+                CleanupFailure::None,
+                CleanupFailure::Driver,
+                CleanupFailure::Mtls,
+                CleanupFailure::Network,
+            ] {
+                let (obs, predecessor, successor, workload) = seeded_predecessor(driver_type).await;
+                let before = obs.alloc_status_row(&predecessor).await.unwrap().unwrap();
+                let mut configured_driver = RecordingDriver::new(driver_type, predecessor.clone())
+                    .with_behavior(start_behavior);
+                if cleanup_failure == CleanupFailure::Driver {
+                    configured_driver = configured_driver.with_failed_predecessor_stop();
+                }
+                let driver = Arc::new(configured_driver);
+                let slots = NetSlotAllocator::new();
+                let old_slot = NetSlot::new(7).expect("valid predecessor slot");
+                slots
+                    .adopt(predecessor.clone(), old_slot)
+                    .expect("predecessor owns its exact slot");
+                let old_plan =
+                    derive_workload_netns_plan(old_slot, responder_addr_for_slot(old_slot));
+                let network = if cleanup_failure == CleanupFailure::Network {
+                    RecordingNetwork::with_failed_teardown(
+                        Arc::clone(&driver.trace),
+                        old_plan.netns.as_str().to_owned(),
+                    )
+                } else {
+                    RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() }
+                };
+                let mtls = SimMtlsInterceptLifecycle::new();
+                mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
+                    .await
+                    .expect("predecessor mTLS is live");
+                if cleanup_failure == CleanupFailure::Mtls {
+                    mtls.inject_stop_failure_once(
+                        predecessor.clone(),
+                        "injected predecessor mTLS cleanup failure",
+                    );
+                }
+                let index = AllocDriverIndex::default();
+                index.lock().insert(predecessor.clone(), driver_type);
+                let event_start = captured.snapshot().len();
 
-        match (start_behavior, cleanup_fails, result) {
-            (StartBehavior::Success, false, Ok(())) => {}
-            (StartBehavior::Success, true, Err(ShimError::Driver(DriverError::Io(error)))) => {
-                assert!(error.to_string().contains("predecessor cleanup"));
+                let result = dispatch_one(
+                    Action::RestartAllocation {
+                        alloc_id: predecessor.clone(),
+                        spec: successor_spec(driver_type, &workload, &successor),
+                        kind: WorkloadKind::Service,
+                    },
+                    Arc::clone(&driver),
+                    obs.as_ref(),
+                    &index,
+                    &slots,
+                    &network,
+                    Some(&mtls),
+                )
+                .await;
+
+                match (start_behavior, cleanup_failure, result) {
+                    (StartBehavior::Success, CleanupFailure::None, Ok(()))
+                    | (StartBehavior::Success, CleanupFailure::Mtls, Err(ShimError::MtlsStop(_)))
+                    | (
+                        StartBehavior::Success,
+                        CleanupFailure::Network,
+                        Err(ShimError::WorkloadNetnsProvision(_)),
+                    ) => {}
+                    (
+                        StartBehavior::Success,
+                        CleanupFailure::Driver,
+                        Err(ShimError::Driver(DriverError::Io(error))),
+                    ) => assert!(error.to_string().contains("predecessor cleanup")),
+                    (
+                        StartBehavior::IoFailure,
+                        _,
+                        Err(ShimError::Driver(DriverError::Io(error))),
+                    ) => assert!(
+                        error.to_string().contains("successor start"),
+                        "successor failure remains primary when both fail: {error}"
+                    ),
+                    partition => {
+                        panic!("MISSING_CORRECTED_BEHAVIOR: wrong precedence {partition:?}")
+                    }
+                }
+
+                let trace = driver.trace.lock().clone();
+                assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&successor));
+                assert_eq!(driver.stops.lock().as_slice(), std::slice::from_ref(&predecessor));
+                let start = trace
+                    .iter()
+                    .position(|event| event == &TraceEvent::Start(successor.clone()))
+                    .expect("successor attempt");
+                let stop = trace
+                    .iter()
+                    .position(|event| event == &TraceEvent::Stop(predecessor.clone()))
+                    .expect("one exact predecessor driver cleanup attempt");
+                assert!(start < stop, "successor outcome precedes cleanup: {trace:?}");
+
+                let old_teardown_attempted = trace.iter().any(|event| {
+                    event == &TraceEvent::Teardown(old_plan.netns.as_str().to_owned())
+                });
+                let old_teardown_count = trace
+                    .iter()
+                    .filter(|event| {
+                        *event == &TraceEvent::Teardown(old_plan.netns.as_str().to_owned())
+                    })
+                    .count();
+                let lifecycle = mtls.snapshot();
+                match cleanup_failure {
+                    CleanupFailure::None => {
+                        assert!(!lifecycle.allocations.contains_key(&predecessor));
+                        assert!(old_teardown_attempted);
+                        assert_eq!(old_teardown_count, 1);
+                        assert!(!slots.snapshot().contains_key(&predecessor));
+                        assert!(!index.lock().contains_key(&predecessor));
+                    }
+                    CleanupFailure::Driver => {
+                        assert_eq!(
+                            lifecycle.allocations.get(&predecessor),
+                            Some(&SimMtlsInterceptLifecycleState::Live)
+                        );
+                        assert!(!old_teardown_attempted);
+                        assert_eq!(old_teardown_count, 0);
+                        assert!(slots.snapshot().contains_key(&predecessor));
+                        assert_eq!(index.lock().get(&predecessor), Some(&driver_type));
+                    }
+                    CleanupFailure::Mtls => {
+                        assert_eq!(
+                            lifecycle.allocations.get(&predecessor),
+                            Some(&SimMtlsInterceptLifecycleState::TeardownPending)
+                        );
+                        assert!(!old_teardown_attempted);
+                        assert_eq!(old_teardown_count, 0);
+                        assert!(slots.snapshot().contains_key(&predecessor));
+                        assert_eq!(index.lock().get(&predecessor), Some(&driver_type));
+                    }
+                    CleanupFailure::Network => {
+                        assert!(!lifecycle.allocations.contains_key(&predecessor));
+                        assert!(old_teardown_attempted);
+                        assert_eq!(old_teardown_count, 1);
+                        assert!(slots.snapshot().contains_key(&predecessor));
+                        assert_eq!(index.lock().get(&predecessor), Some(&driver_type));
+                    }
+                }
+
+                if start_behavior == StartBehavior::Success {
+                    let accepted = obs
+                        .alloc_status_row(&successor)
+                        .await
+                        .unwrap()
+                        .expect("accepted successor survives old cleanup outcome");
+                    assert_eq!(accepted.state, AllocState::Running);
+                    assert_eq!(accepted.restart_count, 0);
+                    assert!(accepted.last_terminated.is_none());
+                    assert_eq!(index.lock().get(&successor), Some(&driver_type));
+                    assert_eq!(
+                        lifecycle.allocations.get(&successor),
+                        Some(&SimMtlsInterceptLifecycleState::Live)
+                    );
+                } else {
+                    assert!(obs.alloc_status_row(&successor).await.unwrap().is_none());
+                    assert!(!index.lock().contains_key(&successor));
+                    assert!(!lifecycle.allocations.contains_key(&successor));
+                    assert!(!slots.snapshot().contains_key(&successor));
+                }
+                assert_eq!(obs.alloc_status_row(&predecessor).await.unwrap(), Some(before));
+
+                if start_behavior == StartBehavior::IoFailure
+                    && cleanup_failure != CleanupFailure::None
+                {
+                    let cleanup_detail = match cleanup_failure {
+                        CleanupFailure::Driver => "injected predecessor cleanup failure",
+                        CleanupFailure::Mtls => "injected predecessor mTLS cleanup failure",
+                        CleanupFailure::Network => "injected predecessor network cleanup failure",
+                        CleanupFailure::None => unreachable!(),
+                    };
+                    assert!(
+                        captured.snapshot()[event_start..].iter().any(|event| {
+                            event.contains("injected successor start failure")
+                                && event.contains(cleanup_detail)
+                        }),
+                        "both-fail partition reports cleanup only through secondary structured tracing"
+                    );
+                }
             }
-            (StartBehavior::IoFailure, _, Err(ShimError::Driver(DriverError::Io(error)))) => {
-                assert!(
-                    error.to_string().contains("successor start"),
-                    "successor failure remains primary when both fail: {error}"
-                );
-            }
-            partition => panic!("MISSING_CORRECTED_BEHAVIOR: wrong precedence {partition:?}"),
         }
-        assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&successor));
-        assert_eq!(driver.stops.lock().as_slice(), std::slice::from_ref(&predecessor));
-        let trace = driver.trace.lock().clone();
-        assert_eq!(
-            trace.iter().filter(|event| event == &&TraceEvent::Stop(predecessor.clone())).count(),
-            1,
-            "one predecessor cleanup attempt per action"
-        );
-        let start = trace
-            .iter()
-            .position(|event| event == &TraceEvent::Start(successor.clone()))
-            .expect("successor attempt");
-        let stop = trace
-            .iter()
-            .position(|event| event == &TraceEvent::Stop(predecessor.clone()))
-            .expect("old cleanup attempt");
-        assert!(start < stop, "successor outcome precedes cleanup: {trace:?}");
     }
 }
 
@@ -803,154 +1261,4 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         "successor unwind and later predecessor cleanup remain exact-ID complements"
     );
     assert!(!index.lock().contains_key(&successor));
-}
-
-fn intent_for(driver_type: DriverType, workload: &str) -> WorkloadIntent {
-    let driver = match driver_type {
-        DriverType::Exec => DriverInput::Exec(ExecInput {
-            command: "/bin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-        }),
-        DriverType::Vm => DriverInput::Vm(VmInput {
-            command: "/sbin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-            kernel: "/srv/vm/kernel".to_owned(),
-            rootfs: "/srv/vm/rootfs.ext4".to_owned(),
-        }),
-        other => panic!("fixture covers Exec and VM, got {other:?}"),
-    };
-    WorkloadIntent::Job(
-        Job::from_submit(JobSpecInput {
-            id: workload.to_owned(),
-            replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver,
-        })
-        .expect("valid workload intent"),
-    )
-}
-
-/// S-284-SIM-05 — the redb-backed runtime durably reserves before the first
-/// successor effect. A successor-owned launch error leaves no row; after
-/// runtime reopen, both Exec and VM skip the consumed ID and start higher.
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: durable reservation before effects and reopen"]
-async fn durable_reservation_precedes_effect_and_reopen_skips_unrowed_identity_for_every_driver() {
-    eprintln!("seed={SEED}: durable reservation and reopen");
-    for driver_type in [DriverType::Exec, DriverType::Vm] {
-        let tmp = tempfile::tempdir().expect("temporary data directory");
-        let persisted = Arc::new(AtomicBool::new(false));
-        let store_path = tmp.path().join("intent.redb");
-        let intent_store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent"));
-        let workload = format!("{}-reservation", driver_type.as_str());
-        let first = aid(&format!("alloc-{workload}-0"));
-        let second = aid(&format!("alloc-{workload}-1"));
-        let driver = Arc::new(
-            RecordingDriver::new(driver_type, first.clone())
-                .with_behavior(StartBehavior::IoFailure)
-                .with_view_persisted(Arc::clone(&persisted)),
-        );
-        let recording_store = RecordingRedbViewStore {
-            inner: RedbViewStore::open(tmp.path()).expect("open redb ViewStore"),
-            persisted: Arc::clone(&persisted),
-        };
-        let mut runtime =
-            ReconcilerRuntime::new(tmp.path(), Arc::new(recording_store)).expect("runtime");
-        runtime.register(workload_lifecycle()).await.expect("register WorkloadLifecycle");
-        let allocator = overdrive_control_plane::test_default_allocator(
-            Arc::clone(&intent_store) as Arc<dyn IntentStore>
-        );
-        let mut state = AppState::new(
-            Arc::clone(&intent_store),
-            store_path,
-            Arc::new(SimObservationStore::single_peer(nid("local"), SEED)),
-            Arc::new(runtime),
-            Arc::clone(&driver) as Arc<dyn Driver>,
-            Arc::new(SimClock::new()),
-            Arc::new(SimDataplane::new()),
-            Arc::new(SimCa::new(Arc::new(SimEntropy::new(SEED)))),
-            Arc::new(IdentityMgr::new(None)),
-            nid("local"),
-            allocator,
-            overdrive_control_plane::test_empty_listener_facts(),
-            std::net::Ipv4Addr::LOCALHOST,
-        );
-        let intent = intent_for(driver_type, &workload);
-        let key = IntentKey::for_workload(&wid(&workload));
-        let bytes = intent.archive_for_store().expect("archive intent");
-        state.store.put(key.as_bytes(), bytes.as_ref()).await.expect("persist intent");
-        state
-            .store
-            .put(
-                IntentKey::for_workload_kind(&wid(&workload)).as_bytes(),
-                &[WorkloadKind::Job.discriminator_byte()],
-            )
-            .await
-            .expect("persist workload kind");
-        let target = TargetResource::new(&format!("workload/{workload}")).expect("target");
-        let name = ReconcilerName::new("workload-lifecycle").expect("reconciler name");
-        let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
-
-        let first_result = run_convergence_tick_with_network_provisioner_for_test(
-            &state,
-            &name,
-            &target,
-            Instant::now(),
-            1,
-            Instant::now() + Duration::from_secs(2),
-            &network,
-        )
-        .await;
-        assert!(first_result.is_err(), "injected successor start error remains typed");
-        assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&first));
-        assert!(
-            state.runtime.view_for_workload_lifecycle(&target).restart_counts.contains_key(&first),
-            "the returned View consumed the first identity before driver.start"
-        );
-        assert!(state.obs.alloc_status_row(&first).await.unwrap().is_none());
-
-        let placeholder =
-            ReconcilerRuntime::new(&tmp.path().join("placeholder"), Arc::new(SimViewStore::new()))
-                .expect("placeholder runtime");
-        let closed = std::mem::replace(&mut state.runtime, Arc::new(placeholder));
-        drop(closed);
-        let mut reopened =
-            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("reopen");
-        reopened.register(workload_lifecycle()).await.expect("bulk-load WorkloadLifecycle");
-        assert!(
-            reopened.view_for_workload_lifecycle(&target).restart_counts.contains_key(&first),
-            "redb bulk-load restores the unrowed consumed identity"
-        );
-        state.runtime = Arc::new(reopened);
-
-        // Replace only the driven driver behavior; the same type and trace
-        // remain. AppState exposes the existing registry, so install a second
-        // test driver of the same kind for the re-driven evaluation.
-        let succeeding = Arc::new(
-            RecordingDriver::new(driver_type, first.clone())
-                .with_view_persisted(Arc::clone(&persisted)),
-        );
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(Arc::clone(&succeeding) as Arc<dyn Driver>);
-        state.drivers = Arc::new(registry);
-
-        run_convergence_tick_with_network_provisioner_for_test(
-            &state,
-            &name,
-            &target,
-            Instant::now(),
-            2,
-            Instant::now() + Duration::from_secs(2),
-            &RecordingNetwork { trace: Arc::clone(&succeeding.trace) },
-        )
-        .await
-        .expect("reopened runtime re-drives above the consumed gap");
-        assert_eq!(succeeding.starts.lock().as_slice(), std::slice::from_ref(&second));
-        assert!(state.obs.alloc_status_row(&first).await.unwrap().is_none());
-        assert_eq!(
-            state.obs.alloc_status_row(&second).await.unwrap().map(|row| row.state),
-            Some(AllocState::Running)
-        );
-    }
 }

@@ -6,9 +6,10 @@
 //! State model: submitted/no allocation -> Running/no startup decision ->
 //! Stable OR terminal startup failure. Readiness independently follows
 //! unobserved -> Pass threshold -> Fail -> Pass recovery. WorkloadLifecycle may
-//! restart the same allocation identity after Failed; ServiceLifecycle's existing
-//! terminal veto remains. A rejected row write leaves observation unchanged,
-//! although dispatch drains terminal publication and persists the policy View.
+//! replace a Failed predecessor with a fresh allocation identity;
+//! ServiceLifecycle's terminal veto remains scoped to that predecessor. A
+//! rejected row write leaves observation unchanged, although dispatch drains
+//! terminal publication and persists the policy View.
 //! Subsequent reconciliation repairs observation; consumer convergence follows
 //! asynchronously. Repeated ticks are self-loops except readiness Pass counting.
 
@@ -560,10 +561,12 @@ fn assert_service_and_svid_wakes(world: &World) {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// Real liveness failure retains the normal Stop -> WorkloadLifecycle Restart
-/// budget, then that owner's FinalizeFailed also wakes ServiceLifecycle. No
-/// retry count, terminal row, or restart view is seeded to reach exhaustion.
+/// Real liveness failure retains the normal Stop -> WorkloadLifecycle
+/// predecessor-to-fresh-successor budget, then that owner's FinalizeFailed
+/// also wakes ServiceLifecycle. No retry count, terminal row, restart view, or
+/// replacement Action is seeded to reach exhaustion.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending corrective re-DELIVER roadmap: liveness projection follows fresh successors"]
 async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
     let mut spec = input(&[(18081, "tcp")], 1);
@@ -580,6 +583,7 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, true);
     let original = world.obs.alloc_status_rows().await.unwrap().remove(0).alloc_id;
+    let mut current = original.clone();
     let mut restarts = 0;
     for _ in 0..12 {
         world.advance_probes().await;
@@ -592,9 +596,27 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
         );
         world.clock.tick(Duration::from_secs(60));
         world.run("workload-lifecycle").await;
-        let row = world.obs.alloc_status_rows().await.unwrap().remove(0);
-        assert_eq!(row.alloc_id, original, "normal same-ID restart contract");
+        let rows = world.obs.alloc_status_rows().await.unwrap();
+        let row = rows
+            .iter()
+            .max_by_key(|row| {
+                row.alloc_id
+                    .as_str()
+                    .rsplit_once('-')
+                    .and_then(|(_, suffix)| suffix.parse::<u32>().ok())
+            })
+            .expect("at least the accepted predecessor row remains")
+            .clone();
         if row.state == AllocState::Running {
+            assert_ne!(
+                row.alloc_id, current,
+                "every liveness replacement receives a fresh physical allocation identity"
+            );
+            assert!(
+                rows.iter().any(|candidate| candidate.alloc_id == current),
+                "the predecessor row remains immutable history"
+            );
+            current = row.alloc_id.clone();
             restarts += 1;
             assert_service_and_svid_wakes(&world);
         } else if matches!(
@@ -604,6 +626,7 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
             })
         ) {
             assert_eq!(restarts, 5, "the existing WorkloadLifecycle restart budget remains five");
+            assert_ne!(row.alloc_id, original, "budget follows the fresh successor lineage");
             assert_service_and_svid_wakes(&world);
             world.run("service-lifecycle").await;
             world.assert_shape(&world.rows().await, 0, false);
@@ -706,9 +729,11 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
 
 /// CONTRACT_SHAPE: bounded-change.
 /// A failed deciding withdrawal does not prevent terminal publication, and the
-/// normally reloaded policy View still vetoes a same-ID restart. A subsequent
-/// reconciliation repairs the rejected row from observation, not emit memory.
+/// normally reloaded policy View retains the predecessor-scoped veto without
+/// attaching it to a fresh successor. A subsequent reconciliation repairs the
+/// rejected row from observation, not emit memory.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending corrective re-DELIVER roadmap: terminal veto remains predecessor-scoped across fresh successor"]
 async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
@@ -768,8 +793,26 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
         before
     );
     world.run("workload-lifecycle").await;
-    let restarted = world.obs.alloc_status_rows().await.unwrap().remove(0);
-    assert_eq!((restarted.state, restarted.alloc_id), (AllocState::Running, ended.alloc_id));
+    let allocations = world.obs.alloc_status_rows().await.unwrap();
+    let restarted = allocations
+        .iter()
+        .find(|row| row.state == AllocState::Running)
+        .expect("fresh successor is Running");
+    assert_ne!(
+        restarted.alloc_id, ended.alloc_id,
+        "replacement must not reuse the predecessor physical identity"
+    );
+    assert!(
+        allocations.iter().any(|row| row == &ended),
+        "terminal predecessor remains immutable observation history"
+    );
+    let service_views = world
+        .state
+        .runtime
+        .loaded_service_lifecycle_views_for_test(&ReconcilerName::new("service-lifecycle").unwrap())
+        .unwrap();
+    assert!(service_views[&world.target].terminal_announced.contains(&ended.alloc_id));
+    assert!(!service_views[&world.target].terminal_announced.contains(&restarted.alloc_id));
     let publication_start = world.history.len();
     for _ in 0..3 {
         world.run("service-lifecycle").await;
@@ -903,10 +946,12 @@ async fn rejected_first_publication_is_repaired_from_observed_state() {
 
 /// CONTRACT_SHAPE: bounded-change.
 /// Startup exhaustion is caused by ProbeRunner. Failure publication is not a
-/// consumer acknowledgement; empty membership and same-ID restart must both
-/// preserve the policy owner's retained veto through bounded reconciliation.
+/// consumer acknowledgement; empty membership and a fresh successor with no
+/// startup decision preserve the policy owner's predecessor-scoped veto
+/// through bounded reconciliation.
 #[tokio::test(flavor = "current_thread")]
-async fn startup_failure_withdraws_then_same_id_restart_remains_ineligible() {
+#[ignore = "pending corrective re-DELIVER roadmap: startup replacement uses fresh successor without inherited veto"]
+async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
     for seed in [257_209, 257_216] {
         let mut spec = input(&[(18081, "tcp")], 1);
         spec.startup_probes = vec![startup()];
@@ -934,11 +979,16 @@ async fn startup_failure_withdraws_then_same_id_restart_remains_ineligible() {
         world.run("service-lifecycle").await;
         world.assert_shape(&world.rows().await, 0, false);
         world.run("workload-lifecycle").await;
-        let restarted = world.obs.alloc_status_rows().await.unwrap().remove(0);
-        assert_eq!(
-            (restarted.state, restarted.alloc_id),
-            (AllocState::Running, original.alloc_id.clone())
+        let allocations = world.obs.alloc_status_rows().await.unwrap();
+        let restarted = allocations
+            .iter()
+            .find(|row| row.state == AllocState::Running)
+            .expect("fresh successor is Running");
+        assert_ne!(
+            restarted.alloc_id, original.alloc_id,
+            "startup replacement must use a fresh physical identity"
         );
+        assert!(allocations.iter().any(|row| row == &ended));
         for _ in 0..6 {
             world.run("service-lifecycle").await;
             world.assert_shape(&world.rows().await, 1, false);
@@ -951,6 +1001,7 @@ async fn startup_failure_withdraws_then_same_id_restart_remains_ineligible() {
             )
             .unwrap();
         assert!(views[&world.target].terminal_announced.contains(&original.alloc_id));
+        assert!(!views[&world.target].terminal_announced.contains(&restarted.alloc_id));
     }
 }
 

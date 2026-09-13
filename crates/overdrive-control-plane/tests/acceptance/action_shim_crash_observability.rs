@@ -1,23 +1,18 @@
-//! T-C + T-G + T-H (ADR-0078 § D6) — the action shim writes the
-//! crash-observability facts, at the real call sites, against a real
-//! observation store.
+//! T-H and adjacent terminal-write cases (ADR-0078 § D6) — the action shim
+//! writes crash-observability facts at real call sites against a real
+//! observation store. Fresh `StartAllocation` rejection and terminal
+//! forward-carry remain in scope here.
 //!
 //! WHY-NEW-FILE: crates/overdrive-control-plane/tests/acceptance/action_shim_crash_observability.rs
 //!   CLOSEST-EXISTING: crates/overdrive-control-plane/tests/acceptance/finalize_failed_forward_carries_workload_addr.rs
 //!   EXTENSION-COST: that file's module doc, filename and mutation
 //!     rationale all scope it to ONE branch — the `workload_addr`
-//!     forward-carry in the `FinalizeFailed` arm — and it drives only
-//!     `Action::FinalizeFailed`. Three of the four scenarios here drive
-//!     `Action::RestartAllocation` against a terminal prior, which that
-//!     file's whole `finalize_and_read_successor` harness (an
-//!     `InertDriver` whose `start` deliberately errors) structurally
-//!     cannot express.
-//!   PARALLEL-RATIONALE: different action under test
-//!     (`RestartAllocation`, which requires a driver that actually
-//!     STARTS), a different driven-port shape (a driver double whose
-//!     accept/reject behaviour is the variable under test), and a
-//!     different assertion surface (`last_terminated` / `restart_count`
-//!     rather than `workload_addr`).
+//!     forward-carry in the `FinalizeFailed` arm. This file also owns the
+//!     observation-acceptance, terminal-contention, and structural cleanup
+//!     fixtures needed by the adjacent action-shim call sites.
+//!   PARALLEL-RATIONALE: different action branches and driven-port outcomes,
+//!     with assertions over lifecycle occurrence, forward-carry, release, and
+//!     cleanup boundaries rather than only `workload_addr`.
 //!
 //! # PORT-TO-PORT litmus
 //!
@@ -37,20 +32,14 @@
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
-#[cfg(feature = "integration-tests")]
-use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "integration-tests")]
-use overdrive_control_plane::action_shim::MtlsInterceptLifecycle;
 use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
-#[cfg(feature = "integration-tests")]
-use overdrive_control_plane::veth_provisioner::NetSlot;
 use overdrive_control_plane::veth_provisioner::{
     NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
 };
@@ -67,11 +56,6 @@ use overdrive_core::traits::driver::{
     DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
-#[cfg(feature = "integration-tests")]
-use overdrive_core::traits::mtls_enforcement::{
-    EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
-    MtlsEnforcementError, PumpLiveness,
-};
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
     LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError,
@@ -83,12 +67,6 @@ use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-#[cfg(feature = "integration-tests")]
-use overdrive_worker::mtls_intercept::{InterceptError, Result as InterceptResult};
-#[cfg(feature = "integration-tests")]
-use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
-#[cfg(feature = "integration-tests")]
-use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
 use tokio::sync::{Semaphore, oneshot};
 
@@ -434,18 +412,11 @@ struct RejectedStartResult {
     terminal_calls: usize,
 }
 
-#[derive(Clone, Copy)]
-enum RejectedStartArm {
-    Start,
-    Restart,
-}
-
 #[allow(
     clippy::too_many_lines,
-    reason = "the shared fresh/restart composition returns one complete observation, occurrence, release, and network-cleanup result"
+    reason = "the fresh-start composition returns one complete observation, occurrence, release, and network-cleanup result"
 )]
 async fn drive_rejected_start(
-    arm: RejectedStartArm,
     network: &CountingNetworkProvisioner,
     dispatch_count: usize,
 ) -> RejectedStartResult {
@@ -454,33 +425,6 @@ async fn drive_rejected_start(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
     );
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    if matches!(arm, RejectedStartArm::Restart) {
-        obs.write_alloc_lifecycle(
-            AllocStatusRow {
-                alloc_id: alloc_id(),
-                workload_id: workload_id(),
-                node_id: node_id(),
-                state: AllocState::Running,
-                updated_at: LogicalTimestamp { counter: 0, writer: node_id() },
-                reason: Some(TransitionReason::Started),
-                detail: None,
-                terminal: None,
-                stderr_tail: None,
-                kind: WorkloadKind::Service,
-                listeners: Vec::new(),
-                started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
-                    1_700_000_000,
-                ))),
-                workload_addr: None,
-                last_terminated: None,
-                restart_count: 0,
-            },
-            TransitionSource::Reconciler,
-        )
-        .await
-        .expect("seed prior Running row");
-    }
-
     let terminal_calls = Arc::new(AtomicUsize::new(0));
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
         outcome: StartOutcome::Reject,
@@ -509,19 +453,12 @@ async fn drive_rejected_start(
         tick: 0,
         deadline: now + Duration::from_secs(2),
     };
-    let action = match arm {
-        RejectedStartArm::Start => Action::StartAllocation {
-            alloc_id: alloc_id(),
-            workload_id: workload_id(),
-            node_id: node_id(),
-            spec: vm_spec(),
-            kind: WorkloadKind::Service,
-        },
-        RejectedStartArm::Restart => Action::RestartAllocation {
-            alloc_id: alloc_id(),
-            spec: vm_spec(),
-            kind: WorkloadKind::Service,
-        },
+    let action = Action::StartAllocation {
+        alloc_id: alloc_id(),
+        workload_id: workload_id(),
+        node_id: node_id(),
+        spec: vm_spec(),
+        kind: WorkloadKind::Service,
     };
     let mut dispatches = Vec::with_capacity(dispatch_count);
     for _ in 0..dispatch_count {
@@ -579,7 +516,7 @@ async fn drive_rejected_start(
 #[tokio::test]
 async fn driver_rejected_start_persists_failed_occurrence_before_release() {
     let network = CountingNetworkProvisioner::succeed();
-    let mut outcome = drive_rejected_start(RejectedStartArm::Start, &network, 1).await;
+    let mut outcome = drive_rejected_start(&network, 1).await;
 
     outcome
         .dispatches
@@ -597,36 +534,11 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
     assert_eq!(outcome.teardown_completions, 1);
 }
 
-/// CONTRACT_SHAPE: bounded-change (cleanup failure cannot erase typed rejection evidence).
-#[tokio::test]
-#[ignore = "retired same-key rejected-restart occurrence; superseded by pending fresh-key Failed successor"]
-async fn driver_rejected_restart_persists_failed_occurrence_before_release() {
-    let network = CountingNetworkProvisioner::succeed();
-    let mut outcome = drive_rejected_start(RejectedStartArm::Restart, &network, 1).await;
-
-    outcome
-        .dispatches
-        .pop()
-        .expect("one dispatch")
-        .expect("successful structural teardown closes the rejected restart");
-    assert_eq!(outcome.row.state, AllocState::Failed);
-    assert_eq!(outcome.occurrence.alloc_id, outcome.row.alloc_id);
-    assert_eq!(outcome.occurrence.to, outcome.row.state);
-    assert!(matches!(
-        outcome.occurrence.from,
-        AllocLifecyclePredecessor::State(AllocState::Running)
-    ));
-    assert_eq!(outcome.terminal_calls, 1, "the rejected claim releases after Failed is durable");
-    assert!(!outcome.slot_held);
-    assert_eq!(outcome.teardown_attempts, 1);
-    assert_eq!(outcome.teardown_completions, 1);
-}
-
 /// CONTRACT_SHAPE: bounded-change (cleanup replay cannot be suppressed by duplicate ownership).
 #[tokio::test]
 async fn rejected_start_teardown_failure_replays_after_failed_closure() {
     let network = CountingNetworkProvisioner::fail_first_teardown();
-    let outcome = drive_rejected_start(RejectedStartArm::Start, &network, 2).await;
+    let outcome = drive_rejected_start(&network, 2).await;
 
     assert!(
         outcome.dispatches[0].is_err(),
@@ -699,12 +611,7 @@ async fn dispatch_against_seed(seed: AllocStatusRow, action: Action) -> AllocSta
     .await
     .expect("seed prior row");
 
-    let start_outcome = if matches!(action, Action::RestartAllocation { .. }) {
-        StartOutcome::Accept
-    } else {
-        StartOutcome::Reject
-    };
-    dispatch_with_driver(obs.as_ref(), store, action, start_outcome).await;
+    dispatch_with_driver(obs.as_ref(), store, action, StartOutcome::Reject).await;
 
     obs.alloc_status_row(&alloc_id())
         .await
@@ -776,44 +683,6 @@ async fn dispatch_with_driver(
     .expect("dispatch must succeed");
 }
 
-/// Dispatch a `RestartAllocation` against `seed`, with the driver's
-/// `start` outcome as the variable.
-async fn restart_against(seed: AllocStatusRow, outcome: StartOutcome) -> AllocStatusRow {
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-
-    obs.write_alloc_lifecycle(
-        seed,
-        overdrive_core::traits::observation_store::TransitionSource::Reconciler,
-    )
-    .await
-    .expect("seed prior row");
-
-    dispatch_with_driver(
-        obs.as_ref(),
-        store,
-        Action::RestartAllocation {
-            alloc_id: alloc_id(),
-            spec: spec(),
-            kind: WorkloadKind::Service,
-            // `None` is the crash-loop restart pathway — the restart cause
-            // is implicit in the prior alloc's terminal, which is exactly
-            // the shape under test.
-        },
-        outcome,
-    )
-    .await;
-
-    obs.alloc_status_row(&alloc_id())
-        .await
-        .expect("read alloc row")
-        .expect("a successor row must exist after dispatch")
-}
-
 #[derive(Debug, Clone, Copy)]
 enum TerminalWriteOutcome {
     Accepted,
@@ -827,7 +696,7 @@ enum TerminalWriteOutcome {
 /// Observation-store boundary double that parks exactly the terminal compound
 /// write while delegating every other operation to the real simulation
 /// adapter. This exposes the interval in which VM supervision must remain the
-/// exclusive reclamation/same-id ownership fence.
+/// exclusive reclamation ownership fence.
 struct PendingTerminalObservationStore {
     inner: Arc<SimObservationStore>,
     target: AllocationId,
@@ -838,7 +707,6 @@ struct PendingTerminalObservationStore {
     resume: Semaphore,
     terminal_proposals: AtomicUsize,
     point_reads: AtomicUsize,
-    competing_state: Option<AllocState>,
 }
 
 impl PendingTerminalObservationStore {
@@ -859,7 +727,6 @@ impl PendingTerminalObservationStore {
                 resume: Semaphore::new(0),
                 terminal_proposals: AtomicUsize::new(0),
                 point_reads: AtomicUsize::new(0),
-                competing_state: None,
             },
             entered_rx,
         )
@@ -876,11 +743,6 @@ impl PendingTerminalObservationStore {
 
     fn with_write_hook(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
         self.write_hook = Some(Arc::new(hook));
-        self
-    }
-
-    const fn with_competing_state(mut self, state: AllocState) -> Self {
-        self.competing_state = Some(state);
         self
     }
 
@@ -937,9 +799,6 @@ impl ObservationStore for PendingTerminalObservationStore {
             }
             if proposal < rejection_limit {
                 let mut exit_observation = current.clone();
-                if let Some(state) = self.competing_state {
-                    exit_observation.state = state;
-                }
                 exit_observation.reason = Some(TransitionReason::Stopped {
                     by: overdrive_core::transition_reason::StoppedBy::Operator,
                 });
@@ -1306,19 +1165,6 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
             !driver.try_begin_reclamation(&alloc),
             "the real reclamation-lease primitive cannot acquire the VM supervision slot while the terminal write is pending",
         );
-        assert!(
-            matches!(
-                driver.start(&vm_spec()).await,
-                Err(DriverError::StartRejected {
-                    failure: DriverStartFailure {
-                        class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned { .. }),
-                        ..
-                    }
-                })
-            ),
-            "a same-id start cannot acquire the VM supervision slot while the terminal write is pending",
-        );
-
         pending_store.resolve();
     }
     let result = dispatch.await;
@@ -1339,19 +1185,10 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         1,
         "both accepted and failed terminal writes release supervision exactly once after resolution",
     );
-    match outcome {
-        TerminalWriteOutcome::Accepted
-        | TerminalWriteOutcome::RejectedByConcurrentExit
-        | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
-        | TerminalWriteOutcome::ExactRequestedTerminal => assert!(
-            driver.try_begin_reclamation(&alloc),
-            "the reclamation lease becomes available only after the terminal write resolves",
-        ),
-        TerminalWriteOutcome::Failed | TerminalWriteOutcome::PointReadFailed => assert!(
-            driver.start(&vm_spec()).await.is_ok(),
-            "a same-id start becomes possible only after failed-write abandonment resolves",
-        ),
-    }
+    assert!(
+        driver.try_begin_reclamation(&alloc),
+        "the exact-allocation reclamation lease becomes available only after terminal-write ownership resolves",
+    );
 
     let expected_proposals = match outcome {
         TerminalWriteOutcome::Accepted | TerminalWriteOutcome::Failed => 1,
@@ -1605,85 +1442,6 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
     assert_eq!(driver.releases.load(Ordering::SeqCst), 1);
 }
 
-// ---------------------------------------------------------------------------
-// T-C — the shim writes the facts on a successful restart
-// ---------------------------------------------------------------------------
-
-/// T-C: seed a `Failed` row at counter `K` carrying
-/// `WorkloadCrashedImmediately`; dispatch `Action::RestartAllocation`;
-/// the stored row is `Running`, `restart_count == 1`, and
-/// `last_terminated` snapshots the seeded row.
-///
-/// This is § D2 site 5 — the crash-observability site — exercised
-/// end-to-end through the real dispatcher.
-#[tokio::test]
-#[ignore = "retired same-key restart history; corrective GH #284 publishes fresh zero/None successor history"]
-async fn restart_allocation_snapshots_the_crash_and_counts_the_restart() {
-    let seed = seeded_failed_row(7, 0, None);
-    let row = restart_against(seed.clone(), StartOutcome::Accept).await;
-
-    assert_eq!(row.state, AllocState::Running, "a successful restart lands Running");
-    assert_eq!(row.restart_count, 1, "the observed restart is counted");
-
-    let lt = row.last_terminated.as_ref().expect("the recovered row must carry last_terminated");
-    assert_eq!(lt.state, AllocState::Failed, "the snapshot describes the terminal it superseded");
-    assert_eq!(lt.reason, seed.reason, "the typed cause-class rides the snapshot verbatim");
-    assert_eq!(lt.detail, seed.detail, "the verbatim driver text rides the snapshot");
-    assert_eq!(lt.stderr_tail, seed.stderr_tail, "the workload's dying words ride the snapshot");
-    assert_eq!(lt.started_at, seed.started_at, "the dead generation's start wall-clock rides it");
-    assert_eq!(
-        lt.terminated_at, seed.updated_at,
-        "the snapshot identifies exactly WHICH durable observation it summarises",
-    );
-
-    assert!(
-        row.updated_at.dominates(&lt.terminated_at),
-        "the recovered row must strictly dominate the terminal it snapshots",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// T-G — a driver-REJECTED restart forwards; it neither counts nor overwrites
-// ---------------------------------------------------------------------------
-
-/// T-G: seed a `Failed` row already carrying crash history; dispatch
-/// `RestartAllocation` against a driver returning `StartRejected`. The
-/// successor row stays `Failed`, `restart_count` is UNCHANGED, and
-/// `last_terminated` is the FORWARDED prior value — not a snapshot of
-/// the rejected row.
-///
-/// Pins § D1's `terminal → terminal` edge case at a real call site.
-/// Nothing restarted, so nothing is counted; the prior crash's facts are
-/// lost to the accepted depth-1 limit, and the *attempt* is counted
-/// separately by the reconciler's own budget.
-#[tokio::test]
-#[ignore = "retired same-key rejected-restart history; superseded by pending fresh-key successor publication"]
-async fn driver_rejected_restart_forwards_and_does_not_count() {
-    let earlier = overdrive_core::traits::observation_store::LastTerminated {
-        state: AllocState::Terminated,
-        reason: Some(TransitionReason::Stopped {
-            by: overdrive_core::transition_reason::StoppedBy::Process,
-        }),
-        detail: Some("an earlier, unrelated terminal".to_owned()),
-        terminal: Some(TerminalCondition::Completed { exit_code: 0 }),
-        stderr_tail: None,
-        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_600_000_000))),
-        terminated_at: LogicalTimestamp { counter: 3, writer: node_id() },
-    };
-    let seed = seeded_failed_row(7, 2, Some(earlier.clone()));
-
-    let row = restart_against(seed, StartOutcome::Reject).await;
-
-    assert_eq!(row.state, AllocState::Failed, "a rejected restart lands Failed");
-    assert_eq!(row.restart_count, 2, "nothing restarted — the count is UNCHANGED");
-    assert_eq!(
-        row.last_terminated,
-        Some(earlier),
-        "the prior's snapshot is FORWARDED, not overwritten with the rejected row",
-    );
-}
-
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // T-H — `FinalizeFailed` does not self-duplicate
 // ---------------------------------------------------------------------------
@@ -2022,57 +1780,6 @@ where
     }
 }
 
-/// The event FIRES on the write that observes a restart landing, and carries
-/// the alloc, the workload, the new count, and the state it recovered from.
-#[tokio::test(flavor = "current_thread")]
-#[ignore = "retired same-key restart telemetry fixture; corrective GH #284 starts per-key zero history"]
-async fn restart_landing_emits_the_structured_alloc_restart_observed_event() {
-    let captured = CapturedEvents::default();
-    let _guard = set_default(Registry::default().with(captured.clone()));
-
-    let seed = seeded_failed_row(7, 4, None);
-    let row = restart_against(seed, StartOutcome::Accept).await;
-    assert_eq!(row.restart_count, 5, "precondition: the restart was counted");
-
-    let events = captured.restart_observed();
-    assert_eq!(
-        events.len(),
-        1,
-        "exactly one alloc.restart.observed event per observed restart; got {events:?}",
-    );
-    let event = &events[0];
-    assert!(event.contains("restart_count=5"), "the event carries the NEW count; got {event:?}");
-    assert!(event.contains("alloc-crashobs-0"), "and the alloc; got {event:?}");
-    assert!(event.contains("crashobs"), "and the workload; got {event:?}");
-    assert!(
-        event.contains("prior_state=failed"),
-        "and the terminal state it recovered from; got {event:?}",
-    );
-}
-
-/// The event does NOT fire when no restart landed — a driver-rejected restart
-/// against the same terminal prior. An alert that fires on a non-event is
-/// noise, not signal.
-///
-/// Together with the test above this pins the `>` gate exactly: `>=` and `==`
-/// both fire here (the counter is unchanged), and `<` fails to fire above.
-#[tokio::test(flavor = "current_thread")]
-#[ignore = "retired same-key rejected-restart fixture; superseded by pending fresh-key publication contract"]
-async fn a_rejected_restart_emits_no_alloc_restart_observed_event() {
-    let captured = CapturedEvents::default();
-    let _guard = set_default(Registry::default().with(captured.clone()));
-
-    let seed = seeded_failed_row(7, 4, None);
-    let row = restart_against(seed, StartOutcome::Reject).await;
-    assert_eq!(row.restart_count, 4, "precondition: nothing restarted, nothing counted");
-
-    assert!(
-        captured.restart_observed().is_empty(),
-        "no restart landed — the event must stay silent; got {:?}",
-        captured.restart_observed(),
-    );
-}
-
 /// A forward-carry write (a `StopAllocation` against a `Running` prior that
 /// already carries a non-zero count) emits nothing either. Kills the `>=`
 /// mutant on a path where the counter is carried rather than incremented.
@@ -2098,12 +1805,11 @@ async fn a_forward_carry_write_emits_no_alloc_restart_observed_event() {
 }
 
 // ---------------------------------------------------------------------------
-// BTR-1..3 — bounded lifecycle/network correction executable evidence.
+// BTR-1/BTR-2 — bounded lifecycle/network correction executable evidence.
 //
 // BTR-1/BTR-2 retain focused edge/error tables complementary to their
-// registered seeded invariants. BTR-3's cross-port state machine moves to the
-// socket-free Tier-1 lifecycle invariant; the integration fixture below keeps
-// only real worker/listener/guard evidence.
+// registered seeded invariants. GH #284 corrective replacement ordering and
+// exact-old cleanup now live in `driver_neutral_allocation_replacement.rs`.
 // ---------------------------------------------------------------------------
 
 /// S-GTI-BTR-01 / `@contract-shape:bounded-change` `@in-memory` `@error` —
@@ -2135,64 +1841,6 @@ async fn stop_allocation_second_lww_rejection_completes_without_event() {
     }
 }
 
-/// CONTRACT_SHAPE: bounded-change.
-/// ADR-0099's exhausted-publication partition: two rejected Running proposals
-/// leave the competing terminal observation authoritative, make no third
-/// proposal, and complete the existing restart unwind without inventing an
-/// occurrence for the replacement.
-#[tokio::test]
-#[ignore = "retired same-key publication fixture; superseded by pending fresh-key rejected publication unwind"]
-async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal() {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
-    let inner =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    inner
-        .write_alloc_lifecycle(seeded_failed_row(7, 0, None), TransitionSource::Reconciler)
-        .await
-        .expect("seed failed predecessor");
-
-    let (pending, _entered) = PendingTerminalObservationStore::new(
-        Arc::clone(&inner),
-        alloc_id(),
-        TerminalWriteOutcome::RejectedTwiceByConcurrentExit,
-    );
-    // The competing old-attempt observations are terminal; a live Running
-    // result would not prove that the replacement's publication was refused.
-    let pending = pending.with_competing_state(AllocState::Terminated);
-    pending.resolve();
-
-    dispatch_with_driver(
-        &pending,
-        store,
-        Action::RestartAllocation {
-            alloc_id: alloc_id(),
-            spec: spec(),
-            kind: WorkloadKind::Service,
-        },
-        StartOutcome::Accept,
-    )
-    .await;
-
-    assert_eq!(
-        pending.terminal_proposal_count(),
-        2,
-        "ADR-0099 bounds the rejected Running publication to its initial and one refreshed proposal"
-    );
-    let current = inner
-        .alloc_status_row(&alloc_id())
-        .await
-        .expect("read current row")
-        .expect("the competing terminal observation remains present");
-    assert_eq!(
-        current.state,
-        AllocState::Terminated,
-        "a rejected replacement must not publish a synthetic Running observation"
-    );
-}
-
 /// S-GTI-BTR-02 / `@contract-shape:bounded-change` `@in-memory` `@error` —
 /// every provision error after successful slot assignment runs the existing
 /// allocation-keyed structural teardown before the Failed disposition.
@@ -2200,10 +1848,9 @@ async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal
 /// This preserved test drives `StartAllocation` through
 /// [`dispatch_with_network_provisioner`]. Corrective GH #284 replacement
 /// provisioning is separately specified by the pending driver-neutral Sim
-/// contract; this active test no longer sends the rejected same-ID
-/// `RestartAllocation` fixture. A test-owned [`WorkloadNetworkProvisioner`]
-/// records `provision -> teardown`
-/// and fails provisioning after the production allocator has assigned a slot.
+/// contract; this active test sends no replacement action. A test-owned
+/// [`WorkloadNetworkProvisioner`] records `provision -> teardown` and fails
+/// provisioning after the production allocator has assigned a slot.
 /// Successful teardown must release that slot; teardown failure must retain
 /// it. In both partitions the durable row keeps the original
 /// `WorkloadNetnsProvisionFailed` cause. A store-write failure keeps its
@@ -2285,333 +1932,4 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
         Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
             if stage == "net_slot_assign"
     ));
-}
-
-#[cfg(feature = "integration-tests")]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReplacementPartition {
-    MtlsError,
-    Success,
-}
-
-#[cfg(feature = "integration-tests")]
-struct TraceGuard(Arc<parking_lot::Mutex<Vec<&'static str>>>);
-
-#[cfg(feature = "integration-tests")]
-impl Drop for TraceGuard {
-    fn drop(&mut self) {
-        self.0.lock().push("mtls-rule-drop");
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-impl InterceptGuard for TraceGuard {}
-
-#[cfg(feature = "integration-tests")]
-struct RecordingIntercept {
-    listeners: parking_lot::Mutex<Vec<SocketAddrV4>>,
-    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
-}
-
-#[cfg(feature = "integration-tests")]
-impl RecordingIntercept {
-    fn inbound_addr(&self) -> SocketAddrV4 {
-        self.listeners.lock()[1]
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-impl MtlsIntercept for RecordingIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
-        let listener = std::net::TcpListener::bind(addr)
-            .map_err(|source| InterceptError::TransparentListener { addr, source })?;
-        let local_addr = listener
-            .local_addr()
-            .map_err(|source| InterceptError::TransparentListener { addr, source })?;
-        let std::net::SocketAddr::V4(local_addr) = local_addr else {
-            unreachable!("the IPv4 bind request must return an IPv4 listener address")
-        };
-        self.listeners.lock().push(local_addr);
-        Ok(listener)
-    }
-
-    fn install_outbound(
-        &self,
-        _host_veth: &str,
-        _agent_leg_f_port: u16,
-    ) -> InterceptResult<Box<dyn InterceptGuard>> {
-        Ok(Box::new(TraceGuard(Arc::clone(&self.trace))))
-    }
-
-    fn install_inbound(
-        &self,
-        _virt: SocketAddrV4,
-        _agent_leg_c_port: u16,
-    ) -> InterceptResult<Box<dyn InterceptGuard>> {
-        Ok(Box::new(TraceGuard(Arc::clone(&self.trace))))
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-struct GatedReplacementEnforcement {
-    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
-    enforced: tokio::sync::Notify,
-    stop_entered: tokio::sync::Notify,
-    stop_release: tokio::sync::Notify,
-    block_first_stop: AtomicBool,
-    fail_first_stop: AtomicBool,
-}
-
-#[cfg(feature = "integration-tests")]
-#[async_trait::async_trait]
-impl MtlsEnforcement for GatedReplacementEnforcement {
-    async fn probe(&self) -> Result<(), MtlsEnforcementError> {
-        Ok(())
-    }
-
-    async fn enforce(
-        &self,
-        connection: InterceptedConnection,
-    ) -> Result<EnforcedConnection, MtlsEnforcementError> {
-        drop(connection.leg);
-        self.enforced.notify_one();
-        Ok(EnforcedConnection::new(EnforcedConnectionId::new(connection.alloc, 0)))
-    }
-
-    fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
-        PumpLiveness::Running
-    }
-
-    async fn teardown(&self, handle: EnforcedConnection) -> Result<(), MtlsEnforcementError> {
-        self.stop_entered.notify_one();
-        if self.block_first_stop.swap(false, Ordering::SeqCst) {
-            self.stop_release.notified().await;
-        }
-        self.trace.lock().push("mtls-stop-complete");
-        if self.fail_first_stop.swap(false, Ordering::SeqCst) {
-            return Err(MtlsEnforcementError::TeardownFailed {
-                id: handle.id().clone(),
-                source: std::io::Error::other("injected prior mTLS teardown failure"),
-            });
-        }
-        Ok(())
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-struct ReplacementDriver {
-    driver_type: DriverType,
-}
-
-#[cfg(feature = "integration-tests")]
-#[async_trait::async_trait]
-impl Driver for ReplacementDriver {
-    fn r#type(&self) -> DriverType {
-        self.driver_type
-    }
-
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(42) })
-    }
-
-    async fn stop(&self, _handle: &AllocationHandle) -> Result<(), DriverError> {
-        Ok(())
-    }
-
-    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
-        Err(DriverError::NotFound { alloc: handle.alloc.clone() })
-    }
-
-    async fn resize(
-        &self,
-        _handle: &AllocationHandle,
-        _resources: Resources,
-    ) -> Result<(), DriverError> {
-        Ok(())
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-struct ReplacementNetwork;
-
-#[cfg(feature = "integration-tests")]
-impl WorkloadNetworkProvisioner for ReplacementNetwork {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
-    ) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
-
-#[cfg(feature = "integration-tests")]
-struct ReplacementOutcome {
-    result: Result<(), ShimError>,
-    trace: Vec<&'static str>,
-}
-
-#[cfg(feature = "integration-tests")]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the real worker/listener fixture needs the complete action-shim composition"
-)]
-async fn drive_same_id_replacement(partition: ReplacementPartition) -> ReplacementOutcome {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
-    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let alloc = alloc_id();
-    let mut prior = seeded_failed_row(0, 0, None);
-    prior.state = AllocState::Running;
-    prior.reason = Some(TransitionReason::Started);
-    prior.terminal = None;
-    obs.write_alloc_lifecycle(prior, TransitionSource::Reconciler)
-        .await
-        .expect("seed running prior");
-
-    let trace = Arc::new(parking_lot::Mutex::new(Vec::new()));
-    let enforcement = Arc::new(GatedReplacementEnforcement {
-        trace: Arc::clone(&trace),
-        enforced: tokio::sync::Notify::new(),
-        stop_entered: tokio::sync::Notify::new(),
-        stop_release: tokio::sync::Notify::new(),
-        block_first_stop: AtomicBool::new(true),
-        fail_first_stop: AtomicBool::new(partition == ReplacementPartition::MtlsError),
-    });
-    let intercept = Arc::new(RecordingIntercept {
-        listeners: parking_lot::Mutex::new(Vec::new()),
-        trace: Arc::clone(&trace),
-    });
-    let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
-        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-            std::collections::BTreeMap::new(),
-            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-        ));
-    let worker = Arc::new(MtlsInterceptWorker::new(
-        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-        resolve,
-        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-        Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
-    ));
-    let mut prior_spec = spec();
-    prior_spec.host_veth = Some("ovd-hv-prior".to_owned());
-    worker.start_alloc(&prior_spec).await.expect("prior interception installs");
-    let _prior_connection =
-        std::net::TcpStream::connect(intercept.inbound_addr()).expect("connect prior inbound leg");
-    tokio::time::timeout(Duration::from_secs(2), enforcement.enforced.notified())
-        .await
-        .expect("prior mTLS connection reaches the existing enforcement port");
-
-    let net_slots = NetSlotAllocator::new();
-    let prior_slot = NetSlot::new(7).expect("valid non-minimal prior slot");
-    net_slots
-        .adopt(alloc.clone(), prior_slot)
-        .expect("prior allocation owns a non-minimal structural slot");
-    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        for driver_type in [DriverType::Exec, DriverType::Vm] {
-            registry.insert(Arc::new(ReplacementDriver { driver_type }));
-        }
-        registry
-    };
-    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-        overdrive_sim::adapters::entropy::SimEntropy::new(0),
-    ));
-    let network = ReplacementNetwork;
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
-    let clock = overdrive_sim::adapters::clock::SimClock::new();
-    let writer_node = NodeId::new("writer-1").expect("writer node");
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let host = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
-    let now = Instant::now();
-    let tick = TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
-        tick: 1,
-        deadline: now + Duration::from_secs(2),
-    };
-    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
-    let result = dispatch_with_network_provisioner(
-        vec![Action::RestartAllocation {
-            alloc_id: alloc.clone(),
-            spec: spec(),
-            kind: WorkloadKind::Service,
-        }],
-        &drivers,
-        &alloc_drivers,
-        obs.as_ref(),
-        &dataplane,
-        &ca,
-        &clock,
-        &identity,
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-            VipRange::default(),
-            store,
-        ))),
-        &broker,
-        None,
-        Some(mtls_lifecycle),
-        &net_slots,
-        &network,
-        &host,
-    );
-    tokio::pin!(result);
-
-    let release_prior_mtls_stop = async {
-        tokio::time::timeout(Duration::from_secs(2), enforcement.stop_entered.notified())
-            .await
-            .expect("same-id replacement reaches the prior mTLS stop");
-        assert!(
-            std::net::TcpStream::connect(intercept.inbound_addr()).is_err(),
-            "the real prior listener must be closed before connection teardown completes"
-        );
-        enforcement.stop_release.notify_one();
-    };
-    tokio::pin!(release_prior_mtls_stop);
-    let result = tokio::select! {
-        result = &mut result => panic!("same-id replacement completed before prior mTLS teardown was released: {result:?}"),
-        () = &mut release_prior_mtls_stop => result.await,
-    };
-    ReplacementOutcome { result, trace: trace.lock().clone() }
-}
-
-#[cfg(feature = "integration-tests")]
-fn assert_real_worker_stop_trace(trace: &[&'static str]) {
-    assert_eq!(
-        trace,
-        ["mtls-rule-drop", "mtls-stop-complete"],
-        "the worker must drop its real-listener task guard before the awaited enforcement teardown returns"
-    );
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-/// S-GTI-BTR-03 integration-lane complement. This test owns only the facts a
-/// socket-free lifecycle Sim cannot observe: a real loopback listener closes,
-/// and the worker-held intercept guard drops before the awaited stop returns.
-/// Cross-port driver/network/identity ordering, retry convergence, and slot
-/// ownership belong exclusively to the seeded Tier-1 lifecycle invariant.
-#[cfg(feature = "integration-tests")]
-#[tokio::test]
-#[ignore = "retired same-ID cleanup-first contract; GH #284 host evidence remains in the qualified-metal ownership regression"]
-async fn same_id_restart_real_worker_closes_prior_listener_and_drops_guard_before_stop_completion()
-{
-    let mtls_error = drive_same_id_replacement(ReplacementPartition::MtlsError).await;
-    assert!(matches!(mtls_error.result, Err(ShimError::MtlsStop(_))));
-    assert_real_worker_stop_trace(&mtls_error.trace);
-
-    let success = drive_same_id_replacement(ReplacementPartition::Success).await;
-    success.result.expect("successful real-worker teardown permits replacement");
-    assert_real_worker_stop_trace(&success.trace);
 }
