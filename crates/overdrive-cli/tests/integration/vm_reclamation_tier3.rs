@@ -48,7 +48,7 @@
 //!   over (no production surface exposes `IdentityMgr` state to a
 //!   real-serve test; the four-evaluations claim IS fully proven,
 //!   executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
-//! - S-VM-28 (transitioned by ADR-0104): [`reclaim_then_fresh_start_retains_predecessor_and_resets_history`]
+//! - S-VM-28 (preserved by the GH #284 corrective design): [`reclaim_then_fresh_start_retains_predecessor_and_resets_history`]
 //!   — the SAME boot-epoch-reclaim fixture shape as S-VM-81, but the
 //!   workload is never `stop()`-ed: its intent still stands, so the SAME
 //!   live `serve` session's `WorkloadLifecycle` reconcile loop re-drives
@@ -1198,7 +1198,7 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[ignore = "pending corrective re-DELIVER roadmap: fresh VM successor preserves predecessor history"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -1313,7 +1313,7 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-28 transitioned by ADR-0104 -- PlatformReclaimed predecessor history
+// S-VM-28 corrective preservation -- PlatformReclaimed predecessor history
 // and a fresh replacement row are both retained.
 // ---------------------------------------------------------------------
 
@@ -1332,7 +1332,7 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[ignore = "pending corrective re-DELIVER roadmap: fresh VM successor preserves current SVID coverage"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

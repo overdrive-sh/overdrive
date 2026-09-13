@@ -9,7 +9,9 @@
 //! actually receives.
 //!
 //! Test shape: a recording fake `Driver` captures every spec passed to
-//! `start()`. The shim is invoked with a `RestartAllocation` carrying
+//! `start()`. The shim is invoked with the corrected driver-neutral
+//! `RestartAllocation` shape: predecessor `alloc_id`, distinct successor
+//! `spec.alloc`, and
 //! `command = "/opt/x/y"` + `args = ["--mode=fast"]`. The captured
 //! spec must equal what the action carried — NOT the deleted
 //! `/bin/sleep` + `["60"]` baseline.
@@ -82,6 +84,7 @@ impl Driver for RecordingDriver {
     }
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[allow(
     clippy::too_many_lines,
@@ -135,14 +138,15 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
 
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.
+    let successor_id = AllocationId::new("alloc-payments-1").expect("successor alloc id");
     let identity = SpiffeId::new(&format!(
         "spiffe://overdrive.local/workload/{}/alloc/{}",
         workload_id.as_str(),
-        alloc_id.as_str(),
+        successor_id.as_str(),
     ))
     .expect("spiffe id");
     let restart_spec = AllocationSpec {
-        alloc: alloc_id.clone(),
+        alloc: successor_id,
         identity,
         driver: overdrive_core::traits::driver::DriverPayload::Exec(
             overdrive_core::traits::driver::ExecPayload {

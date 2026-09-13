@@ -253,12 +253,6 @@ impl WorkloadNetworkProvisioner for ProvisionFailureNetwork {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ProvisionFailureArm {
-    Start,
-    Restart,
-}
-
 struct ProvisionFailureResult {
     result: Result<(), ShimError>,
     row: Option<AllocStatusRow>,
@@ -273,7 +267,6 @@ struct ProvisionFailureResult {
     reason = "the accepted C3 composition needs all real action-shim ports to observe one post-assignment failure"
 )]
 async fn drive_post_assignment_provision_failure(
-    arm: ProvisionFailureArm,
     teardown_fails: bool,
     failed_write: bool,
     exhaust_slots: bool,
@@ -284,17 +277,6 @@ async fn drive_post_assignment_provision_failure(
     );
     let inner =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    if matches!(arm, ProvisionFailureArm::Restart) {
-        let mut prior = seeded_failed_row(0, 0, None);
-        prior.state = AllocState::Running;
-        prior.reason = Some(TransitionReason::Started);
-        prior.terminal = None;
-        inner
-            .write_alloc_lifecycle(prior, TransitionSource::Reconciler)
-            .await
-            .expect("seed prior Running row");
-    }
-
     let net_slots = Arc::new(NetSlotAllocator::new());
     let trace = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let slot_released_at_failed_write = Arc::new(AtomicBool::new(false));
@@ -342,19 +324,12 @@ async fn drive_post_assignment_provision_failure(
         }
     }
 
-    let action = match arm {
-        ProvisionFailureArm::Start => Action::StartAllocation {
-            alloc_id: alloc_id(),
-            workload_id: workload_id(),
-            node_id: node_id(),
-            spec: vm_spec(),
-            kind: WorkloadKind::Service,
-        },
-        ProvisionFailureArm::Restart => Action::RestartAllocation {
-            alloc_id: alloc_id(),
-            spec: vm_spec(),
-            kind: WorkloadKind::Service,
-        },
+    let action = Action::StartAllocation {
+        alloc_id: alloc_id(),
+        workload_id: workload_id(),
+        node_id: node_id(),
+        spec: vm_spec(),
+        kind: WorkloadKind::Service,
     };
     let network = ProvisionFailureNetwork { trace: Arc::clone(&trace), teardown_fails };
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
@@ -624,6 +599,7 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
 
 /// CONTRACT_SHAPE: bounded-change (cleanup failure cannot erase typed rejection evidence).
 #[tokio::test]
+#[ignore = "retired same-key rejected-restart occurrence; superseded by pending fresh-key Failed successor"]
 async fn driver_rejected_restart_persists_failed_occurrence_before_release() {
     let network = CountingNetworkProvisioner::succeed();
     let mut outcome = drive_rejected_start(RejectedStartArm::Restart, &network, 1).await;
@@ -1641,6 +1617,7 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
 /// This is § D2 site 5 — the crash-observability site — exercised
 /// end-to-end through the real dispatcher.
 #[tokio::test]
+#[ignore = "retired same-key restart history; corrective GH #284 publishes fresh zero/None successor history"]
 async fn restart_allocation_snapshots_the_crash_and_counts_the_restart() {
     let seed = seeded_failed_row(7, 0, None);
     let row = restart_against(seed.clone(), StartOutcome::Accept).await;
@@ -1680,6 +1657,7 @@ async fn restart_allocation_snapshots_the_crash_and_counts_the_restart() {
 /// lost to the accepted depth-1 limit, and the *attempt* is counted
 /// separately by the reconciler's own budget.
 #[tokio::test]
+#[ignore = "retired same-key rejected-restart history; superseded by pending fresh-key successor publication"]
 async fn driver_rejected_restart_forwards_and_does_not_count() {
     let earlier = overdrive_core::traits::observation_store::LastTerminated {
         state: AllocState::Terminated,
@@ -2047,6 +2025,7 @@ where
 /// The event FIRES on the write that observes a restart landing, and carries
 /// the alloc, the workload, the new count, and the state it recovered from.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "retired same-key restart telemetry fixture; corrective GH #284 starts per-key zero history"]
 async fn restart_landing_emits_the_structured_alloc_restart_observed_event() {
     let captured = CapturedEvents::default();
     let _guard = set_default(Registry::default().with(captured.clone()));
@@ -2078,6 +2057,7 @@ async fn restart_landing_emits_the_structured_alloc_restart_observed_event() {
 /// Together with the test above this pins the `>` gate exactly: `>=` and `==`
 /// both fire here (the counter is unchanged), and `<` fails to fire above.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "retired same-key rejected-restart fixture; superseded by pending fresh-key publication contract"]
 async fn a_rejected_restart_emits_no_alloc_restart_observed_event() {
     let captured = CapturedEvents::default();
     let _guard = set_default(Registry::default().with(captured.clone()));
@@ -2161,6 +2141,7 @@ async fn stop_allocation_second_lww_rejection_completes_without_event() {
 /// proposal, and complete the existing restart unwind without inventing an
 /// occurrence for the replacement.
 #[tokio::test]
+#[ignore = "retired same-key publication fixture; superseded by pending fresh-key rejected publication unwind"]
 async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal() {
     let tmp = TempDir::new().expect("tempdir");
     let store: Arc<dyn IntentStore> = Arc::new(
@@ -2216,9 +2197,12 @@ async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal
 /// every provision error after successful slot assignment runs the existing
 /// allocation-keyed structural teardown before the Failed disposition.
 ///
-/// The activated table drives both `StartAllocation` and
-/// `RestartAllocation` through [`dispatch_with_network_provisioner`]. A
-/// test-owned [`WorkloadNetworkProvisioner`] records `provision -> teardown`
+/// This preserved test drives `StartAllocation` through
+/// [`dispatch_with_network_provisioner`]. Corrective GH #284 replacement
+/// provisioning is separately specified by the pending driver-neutral Sim
+/// contract; this active test no longer sends the rejected same-ID
+/// `RestartAllocation` fixture. A test-owned [`WorkloadNetworkProvisioner`]
+/// records `provision -> teardown`
 /// and fails provisioning after the production allocator has assigned a slot.
 /// Successful teardown must release that slot; teardown failure must retain
 /// it. In both partitions the durable row keeps the original
@@ -2228,8 +2212,8 @@ async fn restart_running_write_second_rejection_unwinds_without_a_third_proposal
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn post_assignment_provision_failure_tears_down_before_slot_release() {
-    for arm in [ProvisionFailureArm::Start, ProvisionFailureArm::Restart] {
-        let outcome = drive_post_assignment_provision_failure(arm, false, false, false).await;
+    {
+        let outcome = drive_post_assignment_provision_failure(false, false, false).await;
 
         outcome.result.expect("successful teardown and Failed write resolve the action");
         assert_eq!(
@@ -2252,8 +2236,8 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
         ));
     }
 
-    for arm in [ProvisionFailureArm::Start, ProvisionFailureArm::Restart] {
-        let outcome = drive_post_assignment_provision_failure(arm, true, false, false).await;
+    {
+        let outcome = drive_post_assignment_provision_failure(true, false, false).await;
 
         assert!(matches!(outcome.result, Err(ShimError::WorkloadNetnsProvision(_))));
         assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
@@ -2270,9 +2254,7 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
         ));
     }
 
-    let outcome =
-        drive_post_assignment_provision_failure(ProvisionFailureArm::Start, true, true, false)
-            .await;
+    let outcome = drive_post_assignment_provision_failure(true, true, false).await;
     assert!(matches!(outcome.result, Err(ShimError::Observation(_))), "the store error wins");
     assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
     assert!(
@@ -2285,9 +2267,7 @@ async fn post_assignment_provision_failure_tears_down_before_slot_release() {
     );
     assert!(outcome.row.is_none(), "the rejected Failed write leaves no fresh row");
 
-    let outcome =
-        drive_post_assignment_provision_failure(ProvisionFailureArm::Start, false, false, true)
-            .await;
+    let outcome = drive_post_assignment_provision_failure(false, false, true).await;
     outcome.result.expect("pre-assignment exhaustion still writes the existing Failed disposition");
     assert_eq!(
         outcome.trace,
@@ -2624,6 +2604,7 @@ fn assert_real_worker_stop_trace(trace: &[&'static str]) {
 /// ownership belong exclusively to the seeded Tier-1 lifecycle invariant.
 #[cfg(feature = "integration-tests")]
 #[tokio::test]
+#[ignore = "retired same-ID cleanup-first contract; GH #284 host evidence remains in the qualified-metal ownership regression"]
 async fn same_id_restart_real_worker_closes_prior_listener_and_drops_guard_before_stop_completion()
 {
     let mtls_error = drive_same_id_replacement(ReplacementPartition::MtlsError).await;

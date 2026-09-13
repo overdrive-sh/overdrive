@@ -121,7 +121,7 @@
 //!   Job-kind VM, whose natural exit is final under its run-once contract.
 //!   Therefore the replacement trigger is Platform Reclamation, not natural
 //!   exit. The scenario proves the same observable invariant through Platform
-//!   Reclamation followed by ADR-0104's fresh `StartAllocation`: a reclaimed
+//!   Reclamation followed by the corrective fresh-successor replacement: a reclaimed
 //!   Job whose intent still stands is re-driven by `WorkloadLifecycle`, re-invoking
 //!   `CloudHypervisorVmm::create`, whose per-launch `ficlone_rootfs` clones
 //!   the read-only master afresh and never mutates it. A PROOF of that
@@ -1547,8 +1547,8 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 ///
 /// This scenario exercises a Job-kind VM, whose natural exit is final under its
 /// run-once contract. It proves the same observable invariant through Platform
-/// Reclamation of the predecessor followed by ADR-0104's fresh
-/// `StartAllocation` (DD-1) — the exact boot-epoch sequence
+/// Reclamation of the predecessor followed by ADR-0105's fresh successor in
+/// the existing `RestartAllocation` (DD-1) — the exact boot-epoch sequence
 /// `vm_reclamation_tier3.rs`'s transitioned S-VM-28 drives. That replacement
 /// re-invokes `CloudHypervisorVmm::create`, whose per-launch
 /// `ficlone_rootfs` clones the read-only master afresh (removing any prior
@@ -1580,7 +1580,7 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[ignore = "pending corrective re-DELIVER roadmap: fresh VM successor boots from a clean rootfs clone"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -1714,7 +1714,7 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
 }
 
 // ---------------------------------------------------------------------------
-// GH #284 / ADR-0104 — allocation-scoped VM artifact ownership.
+// GH #284 corrective preservation — allocation-scoped VM artifact ownership.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -2168,7 +2168,7 @@ fn assert_strace_ownership(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; requires native non-virtualized x86_64 KVM via cargo xtask metal run --"]
+#[ignore = "pending corrective re-DELIVER roadmap: qualified-metal exact-old artifact non-interference"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

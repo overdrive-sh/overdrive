@@ -4105,7 +4105,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
 > {
     if cut.config.alloc.as_str() == predecessor_id {
         return Err(format!(
-            "ADR-0104 fresh replacement reused predecessor AllocationId {predecessor_id}: {}",
+            "GH #284 fresh successor reused predecessor AllocationId {predecessor_id}: {}",
             cut.config.alloc
         ));
     }
@@ -4380,7 +4380,7 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[ignore = "pending corrective re-DELIVER roadmap: fresh VM successor preserves mesh re-enrollment"]
 async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()
@@ -4547,7 +4547,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
+#[ignore = "pending corrective re-DELIVER roadmap: fresh VM successor preserves fail-closed re-enrollment"]
 async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()

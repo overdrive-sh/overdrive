@@ -1,14 +1,13 @@
-//! Bounded production-owner simulation of the GH #284 VM recreation state
-//! machine; no observation rows are seeded. Registered WorkloadLifecycle,
-//! ServiceLifecycle and VmReclamation drive the real VmDriver from an initial
-//! Running VM through startup failure, a rejected fresh Running publication,
-//! redb-backed runtime close/reopen and View bulk-load, a higher fresh Running
-//! allocation, predecessor disposal, and final operator stop. The Unix beacon
-//! is real. The fixture couples completed driver cleanup to Sim host facts and
-//! cgroup.kill to SimVmm death. The invariant is that retained
-//! allocation identity is the cleanup and authorship capability: neither a
-//! predecessor nor an unpublished reservation can become or mutate the current
-//! accepted execution.
+//! Bounded production-owner preservation control for GH #284. Registered
+//! WorkloadLifecycle, ServiceLifecycle, and VmReclamation drive the real
+//! VmDriver from an initial Running VM through startup failure and exact
+//! terminal-unclaimed disposal with no intervening replacement. No observation
+//! row is seeded. The Unix beacon is real, completed driver cleanup is coupled
+//! to Sim host facts, and cgroup.kill is coupled to SimVmm death.
+//!
+//! The rejected ADR-0104 VM-only restart scenario was removed during
+//! corrective re-DISTILL. Driver-neutral predecessor-to-fresh-successor
+//! behavior now lives exclusively in `driver_neutral_allocation_replacement.rs`.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 #![expect(
@@ -823,17 +822,6 @@ async fn drive(seed: u64, restart: bool) {
             "seed={seed}: registered reclamation control passed; terminal and occurrences unchanged"
         );
     }
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-/// Universe: one stable workload target; old/rejected/fresh allocation rows
-/// and occurrences; fsynced WorkloadLifecycle reservations; VMM liveness;
-/// exact host-artifact sets; stop/reclamation calls. The deterministic owner
-/// path proves safety, liveness and convergence without fabricating a row.
-#[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 01-02"]
-async fn vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids() {
-    drive(257_205, true).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.

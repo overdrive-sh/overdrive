@@ -16,10 +16,12 @@ mod acceptance {
     // split. RED scaffolds only; the reconcilers are reused unchanged.
     mod service_kind_vm_workloads;
 
-    // vm-recreation-allocation-id-reuse (GH #284 / ADR-0104) — pure
-    // WorkloadLifecycle acceptance properties for VM fresh-ID reservation,
-    // accepted-row current selection, candidate-keyed retry memory, checked
-    // exhaustion, and the unchanged Exec same-ID path. Complete DISTILL
-    // bodies remain pending for DELIVER step 01-01.
+    // vm-recreation-allocation-id-reuse corrective re-DISTILL (GH #284 /
+    // ADR-0105/0108/0109) — driver-neutral WorkloadLifecycle acceptance
+    // properties for predecessor→fresh-successor RestartAllocation,
+    // accepted-row current selection, candidate-keyed retry memory, durable
+    // issued-ID reservations, terminal handoff, and checked exhaustion.
+    // Complete bodies carry reasoned markers owned by the future re-DELIVER
+    // roadmap; the rejected VM/Exec action split is not retained.
     mod vm_recreation_allocation_identity;
 }
