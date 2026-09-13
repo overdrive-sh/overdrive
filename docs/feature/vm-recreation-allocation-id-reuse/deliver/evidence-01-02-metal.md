@@ -11,6 +11,11 @@
 | Kernel | `/srv/vm/overdrive-testing/kernel` |
 | Rootfs | `/srv/vm/overdrive-testing/rootfs.ext4` |
 
+This is the current qualified-metal receipt for the corrective driver-neutral
+delivery. Commit `b295d973de2167124f8cf6be0bea64660cbac078` retained the
+receipt; the archived VM-only evidence under `superseded-vm-only/` is not used
+to establish this result.
+
 ## Command
 
 ```text
