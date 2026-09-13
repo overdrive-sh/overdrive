@@ -229,7 +229,6 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: Exec predecessor-to-fresh-successor spec projection"]
 fn restart_action_carries_full_alloc_spec_from_live_job() {
     // Given a Job whose command is /opt/x/y and args are ["--mode=fast"]
     let job_resources = Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 };

@@ -265,7 +265,6 @@ fn assert_restart_identity(
 /// predecessor and successor for every currently composed driver.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral allocation replacement"]
 fn replacement_identity_is_driver_neutral_for_exec_and_vm() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -291,7 +290,6 @@ fn replacement_identity_is_driver_neutral_for_exec_and_vm() {
 /// immutable.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral allocation replacement"]
 fn workload_failure_charges_only_the_fresh_successor_candidate() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -322,7 +320,6 @@ fn workload_failure_charges_only_the_fresh_successor_candidate() {
 /// restamping it, independent of the execution adapter.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral allocation replacement"]
 fn platform_reclamation_carries_policy_without_failure_charge_for_every_driver() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -352,7 +349,6 @@ fn platform_reclamation_carries_policy_without_failure_charge_for_every_driver()
 /// Workload Failure.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral allocation replacement"]
 fn desired_generation_replacement_carries_policy_without_failure_charge() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -384,7 +380,6 @@ fn desired_generation_replacement_carries_policy_without_failure_charge() {
 /// hand off replacement ownership.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: terminal predecessor handoff"]
 fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
     for driver in ComposedDriver::ALL {
         let prefix = match driver {
@@ -413,7 +408,6 @@ fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
 /// `StartAllocation` placement because no eligible predecessor exists.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral issued-ID ledger"]
 fn initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement() {
     for driver in ComposedDriver::ALL {
         let initial_workload = match driver {
@@ -449,7 +443,6 @@ fn initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement(
 /// predecessor or policy candidate.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: accepted-row current projection"]
 fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -488,7 +481,6 @@ fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
 /// candidate, independent of driver and unrelated historical/View-only values.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: driver-neutral candidate policy"]
 fn retry_deadline_is_derived_only_from_numeric_current_accepted_candidate() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -522,7 +514,6 @@ fn retry_deadline_is_derived_only_from_numeric_current_accepted_candidate() {
 /// participate in the numeric allocator; the first canonical suffix is zero.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: checked driver-neutral allocator"]
 fn unparseable_attempts_do_not_participate_in_allocation() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -552,7 +543,6 @@ fn unparseable_attempts_do_not_participate_in_allocation() {
 /// driver.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 01-01: checked driver-neutral allocator"]
 fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
     for driver in ComposedDriver::ALL {
         let workload = match driver {
@@ -590,7 +580,6 @@ proptest! {
     /// issued-reservation suffix and retain the accepted row as predecessor.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 01-01: checked driver-neutral allocator"]
     fn identity_advances_above_rows_and_reservations_for_every_driver(
         accepted_suffix in 0_u32..100_000,
         reservation_gap in 0_u32..100_000,
