@@ -509,8 +509,10 @@ async fn drive(seed: u64, restart: bool) {
         vec![true],
         "seed={seed}: startup network teardown did not terminate the original VMM"
     );
-    assert_eq!(network.provisions.lock().len(), 1);
-    assert_eq!(network.teardowns.lock().as_slice(), &[network.provisions.lock()[0].0.clone()]);
+    let initial_network_provisions = network.provisions.lock().clone();
+    let initial_network_teardowns = network.teardowns.lock().clone();
+    assert_eq!(initial_network_provisions.len(), 1);
+    assert_eq!(initial_network_teardowns.as_slice(), &[initial_network_provisions[0].0.clone()]);
     assert!(beacon_path.exists(), "seed={seed}: first attempt leaves its real beacon pathname");
     eprintln!("seed={seed}: finalized row={finalized:?}");
 
@@ -579,10 +581,12 @@ async fn drive(seed: u64, restart: bool) {
             "seed={seed}: the rejected start's awaited driver.stop must complete host cleanup \
              before any VmReclamation tick"
         );
-        assert_eq!(network.provisions.lock().len(), 2);
+        let rejected_network_provisions = network.provisions.lock().clone();
+        let rejected_network_teardowns = network.teardowns.lock().clone();
+        assert_eq!(rejected_network_provisions.len(), 2);
         assert_eq!(
-            network.teardowns.lock().as_slice(),
-            &[network.provisions.lock()[0].0.clone(), network.provisions.lock()[1].0.clone(),],
+            rejected_network_teardowns.as_slice(),
+            &[rejected_network_provisions[0].0.clone(), rejected_network_provisions[1].0.clone(),],
             "seed={seed}: every existing C3/TAP teardown targets exactly its own provisioned plan"
         );
         let reserved = state.runtime.view_for_workload_lifecycle(&target);
@@ -831,7 +835,6 @@ async fn drive(seed: u64, restart: bool) {
 /// exact host-artifact sets; stop/reclamation calls. The deterministic owner
 /// path proves safety, liveness and convergence without fabricating a row.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 01-02"]
 async fn vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids() {
     drive(257_205, true).await;
 }
