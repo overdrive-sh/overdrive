@@ -9,7 +9,7 @@
 | Commit | `a0f19ebe8008f85136e8f619cb909de1243672f6` |
 | Reviewer | Fresh isolated `nw-software-crafter-reviewer` |
 | Review date | 2026-09-13 |
-| Latest iteration | 2 |
+| Latest iteration | 3 |
 | Current verdict | **APPROVED** |
 | Iteration 1 verdict | **CHANGES_REQUESTED**; R01 subsequently rejected as out of scope |
 
@@ -197,7 +197,7 @@ public or persistence surface is present.
 | 1 | `a0f19ebe8008f85136e8f619cb909de1243672f6` | **CHANGES_REQUESTED** | R01 | Returned for policy adjudication; no code remediation. |
 | 2 | `a0f19ebe8008f85136e8f619cb909de1243672f6` | **APPROVED** | 0 open | R01 rejected as out of scope and unproven; no remediation. |
 
-## Final verdict after iteration 2
+## Final verdict after iteration 2 (superseded by post-push re-review)
 
 **APPROVED.** No proven, reachable, in-scope implementation, API-shape,
 test-integrity, scope, or verification defect remains for step `01-01`.
@@ -207,3 +207,123 @@ roadmap scenarios pass with their required pure-function Contract Shape
 declarations; DES and commit evidence are complete; and the reviewed code
 passes the focused and affected acceptance gates. Step `01-01` may advance to
 the next roadmap step.
+
+## Review iteration 3 — post-push fixture remediation
+
+### Metadata
+
+| Field | Value |
+|---|---|
+| Feature | `vm-recreation-allocation-id-reuse` |
+| Step | `01-01` — Reserve fresh VM execution identities |
+| Original implementation | `a0f19ebe8008f85136e8f619cb909de1243672f6` |
+| Remediation commits | `f049c06fbf42b7931844ef29991016f31e78c7c6`; `d7d3ab123139a39ec57618cb3748496d5fc417d2` |
+| Remediation scope | `crates/overdrive-control-plane/src/vm_reclamation_boot.rs` tests and DES execution log only |
+| Reviewer | Same step-specific implementation reviewer |
+| Review date | 2026-09-13 |
+| Prior status | Iteration 2 **APPROVED**; post-push stale-assertion failures reopened the step for this bounded re-review |
+| Current verdict | **APPROVED** |
+
+### Post-push failure and remediation disposition
+
+The second actual `01-01` RED phase is recorded in
+`deliver/execution-log.json` at `2026-09-13T09:54:52Z`, followed by GREEN PASS
+at `10:02:43Z` and COMMIT PASS at `10:03:03Z`. The two reported failures were
+the pre-feature same-ID assertions in the existing boot-reclamation tests:
+`same_boot_epoch_claims_each_unsupervised_allocation_once` and
+`boot_reclamation_executor_persists_one_platform_claim_and_one_lifecycle_redrive`.
+Their expected `Action::RestartAllocation`/predecessor-ID checks were stale
+for a VM workload after ADR-0104; no production failure or new architecture
+gap was reported.
+
+The original step crafter's remediation is **accepted as necessary and
+bounded**:
+
+- `f049c06f` changes only the `#[cfg(test)]` module in
+  `vm_reclamation_boot.rs` plus the DES log. It adds the local
+  `assert_fresh_vm_start` assertion helper at `:240-260`, which requires one
+  existing `StartAllocation`, the expected fresh `AllocationId`, the stable
+  `WorkloadId`, `spec.alloc == action.alloc_id`,
+  `SpiffeId::for_allocation(workload_id, alloc_id)`, a VM payload, and no
+  `RestartAllocation`.
+- The first boot test still proves exactly one Platform Reclamation claim:
+  `plan_reclamation` returns one `ReclaimAllocation` at
+  `vm_reclamation_boot.rs:353-356`, and the exact reclaimed postcondition
+  returns no second claim at `:378-389`. Its lifecycle decision now emits
+  fresh IDs `...-1` and, when a second decision is explicitly evaluated
+  against the still-unpublished predecessor row, `...-2` at `:421-431`.
+  The latter is a fresh retry decision above the View reservation, not a
+  second Platform Reclamation claim; it is required by ADR-0104's
+  “reservation keys are consumed and never current” rule.
+- The composed boot test still drives the real `converge` owner and observes
+  the old row as `Terminated / Stopped { by: PlatformReclaimed }` at
+  `:530-547`. It asserts one fresh identity re-drive with matching action,
+  spec, VM payload, and SVID identity at `:572-586`, and the repeated
+  `converge` pass still leaves the old terminal row byte-equal at `:597-607`.
+  The second pure lifecycle evaluation uses the next fresh ID
+  (`:587-595`) so a consumed predecessor identity cannot be reused.
+- `d7d3ab12` adds only the second `01-01` COMMIT PASS event to the DES log.
+
+The remediation does not alter `ServiceLifecycle`, `SvidLifecycle`, their
+handoff producers, or any production action-shim/reclamation code. The
+affected boot test file had no independent ServiceLifecycle/SvidLifecycle
+handoff assertion to remove; the separate handoff suites remain unchanged.
+No acceptance assertion, fixture precondition, Contract Shape classification,
+or proptest sidecar was weakened. Both remediation commits retain Marcus
+Schack Abildskov as author and committer, exactly one
+`Co-Authored-By: Codex <codex@openai.com>` trailer, and `Step-Id: 01-01`.
+
+### Iteration 3 design-contract re-check
+
+| Contract | Result | Evidence |
+|---|---|---|
+| Platform Reclamation remains owned by the existing boot executor | PASS | The remediation leaves `converge`, `plan_reclamation`, `execute_reclaim_allocation`, and the old-row observation path unchanged. |
+| VM re-drive uses existing fresh `StartAllocation` | PASS | `assert_fresh_vm_start` matches only `Action::StartAllocation` and validates action/spec/SVID identity agreement. |
+| VM never emits same-ID `RestartAllocation` | PASS | The helper asserts no `RestartAllocation` in both changed VM lifecycle checks. |
+| Exec semantics remain unchanged | PASS | No Exec fixture or production code changed; the existing `RestartAllocation` branch in `workload_lifecycle.rs:1073-1088` remains untouched by the remediation. |
+| One claim and exact old-row cleanup remain intact | PASS | Both tests retain the one-claim planner postcondition and the repeated boot `converge` old-row equality assertion. |
+| Independent ServiceLifecycle/SvidLifecycle handoffs remain intact | PASS | No producer, consumer, action-dispatch, or handoff test outside the two stale VM assertions changed. |
+| Public/API/persistence boundary | PASS | The remediation adds no public method, type, field, variant, trait, parameter, persistence mechanism, retry, sleep, lock, or compatibility branch. |
+
+The second pure lifecycle evaluation is not a hidden idempotency claim: an
+unaccepted `StartAllocation` has consumed its reserved identity, so a later
+decision must choose above that reservation. The actual production owner path
+handles successful publication by changing the accepted-row current
+projection; the already-reviewed seeded owner test handles rejected
+publication and its higher-ID retry. No ordering or concurrency defect is
+being inferred from the fixture.
+
+### Iteration 3 verification
+
+| Command / evidence | Result |
+|---|---|
+| Lima-routed focused boot-reclamation selection for `same_boot_epoch_claims_each_unsupervised_allocation_once` and `boot_reclamation_executor_persists_one_platform_claim_and_one_lifecycle_redrive` | PASS — 2/2 (nextest run `ba28a716-a9d3-4f46-91aa-b8c33402c1e0`) |
+| Lima-routed `overdrive-reconcilers` + `overdrive-core` acceptance selection | PASS — 576/576 (nextest run `4733a11b-8144-495e-9854-effc370f6d7e`) |
+| Orchestrator-reported full `overdrive-control-plane` post-push suite | PASS — 565/565 |
+| Lima-routed extended `overdrive-control-plane --features integration-tests` run | PASS — 810/810 executed; nextest reported one leaky test but no failure, outside the remediation diff |
+| Lima-routed workspace `cargo check --workspace --all-targets --features integration-tests` | PASS |
+| Lima-routed workspace `cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` | PASS |
+| `cargo fmt --all -- --check` | PASS |
+| `PYTHONPATH=/Users/marcus/.claude/lib/python cargo xtask dst-lint` | PASS |
+| Mutation testing | Not run, as expressly skipped for individual steps and by the user-directed final disposition |
+
+### Iteration 3 finding disposition and history
+
+| Finding / iteration | Status | Disposition |
+|---|---|---|
+| R01 from iteration 1 — outcome-anchor metadata | **REJECTED** | No repository/design mandate; feature has no DISCUSS artifacts; no remediation authorized. |
+| Iteration 2 | **APPROVED** | Exact ADR-0104 implementation and 14/14 pure scenarios passed. |
+| Post-push remediation review | **APPROVED** | Two stale same-ID assertions were replaced by exact fresh VM action/spec/SVID checks; one Platform Reclamation claim, old-row idempotence, and independent handoffs remain intact. |
+
+## Final verdict after iteration 3
+
+**APPROVED.** The post-push failures were stale same-ID expectations in two
+existing VM boot-reclamation tests, not a production or design defect. The
+original crafter's test-only remediation now checks the exact existing fresh
+`StartAllocation` contract, proves matching `AllocationId`/`AllocationSpec`/
+`SpiffeId` identity, rejects VM `RestartAllocation`, preserves the one
+Platform Reclamation claim and old terminal-row complement, and leaves Exec,
+ServiceLifecycle, and SvidLifecycle behavior untouched. The second actual
+`01-01` RED → GREEN → COMMIT trace is complete, all independent verification
+commands are green, and no in-scope finding remains. Step `01-01` is approved
+to remain complete.

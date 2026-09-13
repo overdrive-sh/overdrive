@@ -38,7 +38,7 @@ architecture or persistence decision.
 
 | Step | Commit | Activated scenarios | Delivered outcome |
 |---|---|---:|---|
-| 01-01 — Reserve fresh VM execution identities | `a0f19ebe8008f85136e8f619cb909de1243672f6` | 14 | Fresh VM ID selection and pre-dispatch reservation across initial, generation, Workload Failure, and Platform Reclamation paths; candidate-keyed policy carry; numeric-current/history isolation; checked attempt exhaustion; unchanged Exec same-ID recovery. |
+| 01-01 — Reserve fresh VM execution identities | `a0f19ebe8008f85136e8f619cb909de1243672f6`; post-push fixture remediation `f049c06fbf42b7931844ef29991016f31e78c7c6`; DES closure `d7d3ab123139a39ec57618cb3748496d5fc417d2` | 14 | Fresh VM ID selection and pre-dispatch reservation across initial, generation, Workload Failure, and Platform Reclamation paths; candidate-keyed policy carry; numeric-current/history isolation; checked attempt exhaustion; unchanged Exec same-ID recovery. The remediation corrected two stale same-ID VM boot-reclamation test assertions without changing production. |
 | 01-02 — Prove production-owner restart isolation | `e7fd61c74e227be7ea0e9e12eff18ce9b1b40b48` | 1 | Seed 257205 crosses rejected Running publication, awaited cleanup, redb runtime close/reopen, restored reservation, higher-ID recovery, delayed predecessor disposal, repeated reclamation, and final cleanup through registered production owners. |
 | 01-03 — Prove native artifact ownership | `d4db67f6f34b52244ae3a5f215bfc08ef03f4ecc` | 6 | Qualified-metal regressions cover retained predecessor history, zero/None replacement history, clean rootfs clone, SVID and mesh re-enrolment, typed fail-closed re-enrolment, disjoint beacon/artifact/process ownership, and exact final cleanup. |
 
@@ -60,6 +60,14 @@ The step reviews approved two bounded corrections to pre-authored fixtures:
   Running boundary before the terminal transition removes its vsock. No
   expected artifact, ordering, row, strace, replacement-survival, or final
   cleanup assertion was weakened.
+- Post-push step 01-01 remediation replaces two pre-feature, same-ID VM
+  Platform Reclamation assertions in `vm_reclamation_boot.rs`. The shared
+  test-only assertion now requires the existing fresh `StartAllocation`,
+  matching action/spec/SVID identity, a VM payload, and no
+  `RestartAllocation`. The tests still prove one Platform Reclamation claim,
+  retained old terminal-row equality, and a higher fresh decision above an
+  unpublished View reservation. Exec and the independent ServiceLifecycle and
+  SvidLifecycle handoffs remain unchanged.
 
 These are test-fixture corrections only; neither adds or changes production
 behavior.
@@ -71,6 +79,12 @@ behavior.
   proptest replays with novel generation disabled.
 - Step 01-02 passed its 2/2 focused seeded owner-path selection and 13/13
   affected control-plane preservation tests.
+- The post-push 01-01 remediation passed its focused boot-reclamation
+  selection 2/2, the reconciler/core acceptance selection 576/576, the full
+  control-plane suite 565/565, and an extended control-plane integration run
+  with 810/810 executed and no failure. Nextest reported one leaky test outside
+  the remediation diff in that extended run. Workspace check, clippy with
+  `-D warnings`, formatting, and `dst-lint` also passed.
 - Lima-routed workspace or owning-crate compile, clippy with `-D warnings`,
   formatting, and `dst-lint` checks passed as recorded by the step reviews.
 - The exact six-test step 01-03 selection passed **6/6** on a qualified native,
@@ -84,7 +98,9 @@ behavior.
 - `des-verify-integrity` passed for
   `docs/feature/vm-recreation-allocation-id-reuse/deliver/`; all three steps
   have complete RED → GREEN → COMMIT traces, including recorded failed GREEN
-  attempts before their passing retries where applicable.
+  attempts before their passing retries where applicable. The post-push
+  remediation adds a second actual 01-01 RED failure, GREEN pass, and COMMIT
+  pass; `d7d3ab12` records the closing COMMIT event.
 
 The independent native-Markdown reviews are all final `APPROVED`:
 [01-01](../feature/vm-recreation-allocation-id-reuse/deliver/review-01-01.md),
@@ -92,7 +108,10 @@ The independent native-Markdown reviews are all final `APPROVED`:
 and [01-03](../feature/vm-recreation-allocation-id-reuse/deliver/review-01-03.md).
 The first 01-01 iteration's proposed reviewer-only outcome-anchor finding was
 rejected on re-review as out of scope and unsupported by repository policy;
-no test or production remediation was authorized.
+no test or production remediation was authorized for that finding. After the
+post-push stale-assertion failures, the same step-specific reviewer completed
+iteration 3 and approved the bounded test-only remediation with no open
+finding, production defect, API divergence, or design gap.
 
 Mutation testing was **skipped by explicit user direction** at the final
 DELIVER gate. No mutant ran, no kill rate was measured, and this disposition
