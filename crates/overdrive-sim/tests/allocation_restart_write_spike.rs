@@ -1,4 +1,5 @@
-//! Bounded DESIGN spike: an old Exec attempt exits during same-ID restart.
+//! Bounded acceptance case: an old Exec attempt exits while its distinct
+//! successor is Running and exact-old cleanup is in flight.
 //! No allocation observation is authored by this fixture. Registered production
 //! reconcilers, the action shim, and the exit observer author every such row.
 //! The existing Driver port supplies stop latency; no production seam is added.
@@ -190,6 +191,7 @@ async fn drive(seed: u64, contend: bool) {
     let bytes = WorkloadIntent::Service(svc).archive_for_store().unwrap();
     state.store.put(key.as_bytes(), bytes.as_ref()).await.unwrap();
     let alloc = AllocationId::new("alloc-restart-write-spike-0").unwrap();
+    let successor = AllocationId::new("alloc-restart-write-spike-1").unwrap();
     let target = TargetResource::new("workload/restart-write-spike").unwrap();
     let workload = ReconcilerName::new("workload-lifecycle").unwrap();
     let service = ReconcilerName::new("service-lifecycle").unwrap();
@@ -215,44 +217,54 @@ async fn drive(seed: u64, contend: bool) {
     driver.armed.store(contend, Ordering::SeqCst);
     let result = run_convergence_tick(&state, &workload, &target, clock.now(), 33, deadline).await;
     let current = obs.alloc_status_rows().await.unwrap();
-    let occurrences = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
-    let handle = AllocationHandle { alloc: alloc.clone(), pid: None };
+    let predecessor_occurrences = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
+    let successor_occurrences = obs.alloc_lifecycle_occurrences(&successor).await.unwrap();
+    let handle = AllocationHandle { alloc: successor.clone(), pid: None };
     let driver_state = driver.status(&handle).await;
     let hooks = driver.running_hooks.load(Ordering::SeqCst);
     eprintln!(
-        "seed={seed} initial={:?} finalized={:?} result={result:?} current={current:?} driver={driver_state:?} running_hooks={hooks} occurrences={occurrences:?}",
+        "seed={seed} initial={:?} finalized={:?} result={result:?} current={current:?} driver={driver_state:?} running_hooks={hooks} predecessor_occurrences={predecessor_occurrences:?} successor_occurrences={successor_occurrences:?}",
         started[0].updated_at, finalized[0].updated_at
     );
-    assert_eq!(current.len(), 1, "seed={seed}: exactly one allocation current row");
-    assert_eq!(current[0].state, AllocState::Running, "seed={seed}: replacement Running commits");
+    assert!(result.is_ok(), "seed={seed}: successor and exact-old cleanup complete: {result:?}");
+    assert_eq!(current.len(), 2, "seed={seed}: predecessor and successor rows stay distinct");
+    let predecessor_row = current
+        .iter()
+        .find(|row| row.alloc_id == alloc)
+        .expect("accepted predecessor remains as history");
+    let successor_row = current
+        .iter()
+        .find(|row| row.alloc_id == successor)
+        .expect("fresh successor row is accepted");
+    assert_eq!(successor_row.state, AllocState::Running, "seed={seed}: successor Running commits");
     assert!(
         matches!(driver_state, Ok(AllocationState::Running)),
-        "seed={seed}: replacement remains live; got {driver_state:?}"
+        "seed={seed}: distinct successor remains live; got {driver_state:?}"
     );
     assert_eq!(hooks, 2, "seed={seed}: each accepted attempt releases its Running hook once");
+    assert_eq!(successor_row.restart_count, 0, "fresh successor starts per-key history at zero");
+    assert!(successor_row.last_terminated.is_none());
+    assert_eq!(successor_occurrences.len(), 1, "one accepted successor Running occurrence");
     assert_eq!(
-        current[0].restart_count, 1,
-        "seed={seed}: publication re-proposal is not a second restart decision"
+        successor_occurrences.last().map(|occurrence| occurrence.to),
+        Some(AllocState::Running)
     );
-    assert_eq!(occurrences.last().map(|occurrence| occurrence.to), Some(AllocState::Running));
     if contend {
         assert_eq!(
-            current[0].updated_at.counter, 37,
-            "seed={seed}: the fresh proposal dominates the old attempt's Terminated(36) winner"
+            predecessor_row.state,
+            AllocState::Terminated,
+            "seed={seed}: late exit updates only the predecessor key"
         );
-        assert_eq!(occurrences.len(), 4, "seed={seed}: only the fresh replacement Running occurs");
         assert_eq!(
-            current[0].last_terminated.as_ref().map(|terminal| terminal.state),
+            predecessor_occurrences.last().map(|occurrence| occurrence.to),
             Some(AllocState::Terminated),
-            "seed={seed}: crash facts derive from the fresh accepted predecessor"
+            "seed={seed}: predecessor exit remains on predecessor history"
         );
     } else {
-        assert_eq!(current[0].updated_at.counter, 36, "seed={seed}: no contender needs no refresh");
-        assert_eq!(occurrences.len(), 3, "seed={seed}: one ordinary replacement Running occurs");
         assert_eq!(
-            current[0].last_terminated.as_ref().map(|terminal| terminal.state),
-            Some(AllocState::Failed),
-            "seed={seed}: ordinary restart snapshots its direct predecessor"
+            predecessor_row.state,
+            AllocState::Failed,
+            "seed={seed}: no exit leaves the predecessor terminal unchanged"
         );
     }
 }
@@ -263,7 +275,8 @@ async fn drive(seed: u64, contend: bool) {
     reason = "the test intentionally awaits the complete seeded production composition"
 )]
 #[tokio::test(flavor = "current_thread")]
-async fn restart_write_acknowledgement_seeded_safety() {
+#[ignore = "pending corrective re-DELIVER roadmap: predecessor exit is isolated from fresh successor publication"]
+async fn predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication() {
     drive(257_203, true).await;
 }
 
@@ -273,6 +286,7 @@ async fn restart_write_acknowledgement_seeded_safety() {
     reason = "the test intentionally awaits the complete seeded production composition"
 )]
 #[tokio::test(flavor = "current_thread")]
-async fn restart_write_acknowledgement_no_contender_control() {
+#[ignore = "pending corrective re-DELIVER roadmap: fresh successor control without predecessor exit"]
+async fn fresh_successor_publication_without_predecessor_exit_control() {
     drive(257_203, false).await;
 }

@@ -77,6 +77,7 @@ use overdrive_sim::adapters::{
     SimMtlsInterceptLifecycle, SimMtlsInterceptLifecycleState, SimVmHostState,
 };
 use overdrive_store_local::LocalIntentStore;
+use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptStopError};
 use parking_lot::Mutex;
 use tracing::{Event, Subscriber, subscriber::set_default};
 use tracing_subscriber::layer::{Context, SubscriberExt as _};
@@ -88,6 +89,8 @@ const SEED: u64 = 284_105_106;
 enum TraceEvent {
     Start(AllocationId),
     Stop(AllocationId),
+    MtlsStart(AllocationId),
+    MtlsStop(AllocationId),
     Provision(String),
     Teardown(String),
 }
@@ -285,7 +288,7 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
     assert_eq!(driver.persistence_at_start.lock().as_slice(), &[true, true, true]);
     assert!(restored_predecessor, "reopen restores the initial issued-ID reservation");
     assert!(restored_rejected, "reopen restores the rejected successor reservation");
-    assert_eq!(observations.running_attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(observations.running_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(inner.alloc_status_row(&predecessor).await.unwrap(), Some(predecessor_row));
     assert_eq!(inner.alloc_lifecycle_occurrences(&predecessor).await.unwrap(), predecessor_history);
     assert!(inner.alloc_status_row(&rejected).await.unwrap().is_none());
@@ -528,6 +531,38 @@ struct RecordingNetwork {
     fail_teardown: Mutex<Option<String>>,
 }
 
+struct RecordingMtlsLifecycle {
+    inner: SimMtlsInterceptLifecycle,
+    trace: Arc<Mutex<Vec<TraceEvent>>>,
+}
+
+impl RecordingMtlsLifecycle {
+    fn new(trace: Arc<Mutex<Vec<TraceEvent>>>) -> Self {
+        Self { inner: SimMtlsInterceptLifecycle::new(), trace }
+    }
+
+    fn snapshot(&self) -> overdrive_sim::adapters::SimMtlsInterceptLifecycleSnapshot {
+        self.inner.snapshot()
+    }
+
+    fn inject_stop_failure_once(&self, alloc_id: AllocationId, detail: impl Into<String>) {
+        self.inner.inject_stop_failure_once(alloc_id, detail);
+    }
+}
+
+#[async_trait]
+impl MtlsInterceptLifecycle for RecordingMtlsLifecycle {
+    async fn start_alloc(&self, spec: &AllocationSpec) -> Result<(), MtlsInterceptInstallError> {
+        self.trace.lock().push(TraceEvent::MtlsStart(spec.alloc.clone()));
+        self.inner.start_alloc(spec).await
+    }
+
+    async fn stop_alloc(&self, alloc_id: &AllocationId) -> Result<(), MtlsInterceptStopError> {
+        self.trace.lock().push(TraceEvent::MtlsStop(alloc_id.clone()));
+        self.inner.stop_alloc(alloc_id).await
+    }
+}
+
 impl RecordingNetwork {
     const fn with_failed_teardown(trace: Arc<Mutex<Vec<TraceEvent>>>, netns: String) -> Self {
         Self { trace, fail_teardown: Mutex::new(Some(netns)) }
@@ -763,10 +798,11 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
             .adopt(predecessor.clone(), NetSlot::new(7).expect("valid old slot"))
             .expect("old slot is owned");
         let network = RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() };
-        let mtls = SimMtlsInterceptLifecycle::new();
+        let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
         mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
             .await
             .expect("predecessor mTLS lifecycle is live");
+        driver.trace.lock().clear();
         let alloc_drivers = AllocDriverIndex::default();
         alloc_drivers.lock().insert(predecessor.clone(), driver_type);
         let action = Action::RestartAllocation {
@@ -875,7 +911,7 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
     let _capture = set_default(Registry::default().with(captured.clone()));
 
     for driver_type in [DriverType::Exec, DriverType::Vm] {
-        for start_behavior in [StartBehavior::Success, StartBehavior::IoFailure] {
+        for start_behavior in [StartBehavior::IoFailure, StartBehavior::Success] {
             for cleanup_failure in [
                 CleanupFailure::None,
                 CleanupFailure::Driver,
@@ -897,6 +933,11 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     .expect("predecessor owns its exact slot");
                 let old_plan =
                     derive_workload_netns_plan(old_slot, responder_addr_for_slot(old_slot));
+                let successor_slot = NetSlot::new(0).expect("valid successor slot");
+                let successor_plan = derive_workload_netns_plan(
+                    successor_slot,
+                    responder_addr_for_slot(successor_slot),
+                );
                 let network = if cleanup_failure == CleanupFailure::Network {
                     RecordingNetwork::with_failed_teardown(
                         Arc::clone(&driver.trace),
@@ -905,10 +946,11 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                 } else {
                     RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() }
                 };
-                let mtls = SimMtlsInterceptLifecycle::new();
+                let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
                 mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
                     .await
                     .expect("predecessor mTLS is live");
+                driver.trace.lock().clear();
                 if cleanup_failure == CleanupFailure::Mtls {
                     mtls.inject_stop_failure_once(
                         predecessor.clone(),
@@ -971,7 +1013,50 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     .iter()
                     .position(|event| event == &TraceEvent::Stop(predecessor.clone()))
                     .expect("one exact predecessor driver cleanup attempt");
-                assert!(start < stop, "successor outcome precedes cleanup: {trace:?}");
+                let successor_network_provision = trace
+                    .iter()
+                    .position(|event| {
+                        event == &TraceEvent::Provision(successor_plan.netns.as_str().to_owned())
+                    })
+                    .expect("successor structural network provision");
+                if start_behavior == StartBehavior::IoFailure {
+                    assert!(
+                        !trace.contains(&TraceEvent::Stop(successor.clone())),
+                        "a failed launch yields no successor handle for driver stop: {trace:?}"
+                    );
+                    assert!(
+                        !trace.contains(&TraceEvent::MtlsStart(successor.clone())),
+                        "mTLS never becomes live for a successor whose driver launch failed"
+                    );
+                    let successor_mtls_unwind = trace
+                        .iter()
+                        .position(|event| event == &TraceEvent::MtlsStop(successor.clone()))
+                        .expect("failed launch attempts exact successor mTLS unwind");
+                    let successor_network_unwind = trace
+                        .iter()
+                        .position(|event| {
+                            event == &TraceEvent::Teardown(successor_plan.netns.as_str().to_owned())
+                        })
+                        .expect("failed launch completes exact successor network unwind");
+                    assert!(
+                        successor_network_provision < start
+                            && start < successor_mtls_unwind
+                            && successor_mtls_unwind < successor_network_unwind
+                            && successor_network_unwind < stop,
+                        "failed successor launch unwind must complete before predecessor driver cleanup: {trace:?}"
+                    );
+                } else {
+                    let successor_mtls_start = trace
+                        .iter()
+                        .position(|event| event == &TraceEvent::MtlsStart(successor.clone()))
+                        .expect("accepted successor mTLS start");
+                    assert!(
+                        successor_network_provision < start
+                            && start < successor_mtls_start
+                            && successor_mtls_start < stop,
+                        "accepted successor completes before predecessor driver cleanup: {trace:?}"
+                    );
+                }
 
                 let old_teardown_attempted = trace.iter().any(|event| {
                     event == &TraceEvent::Teardown(old_plan.netns.as_str().to_owned())
@@ -1217,8 +1302,9 @@ impl ObservationStore for RejectFreshPublication {
     }
 }
 
-/// S-284-SIM-04 — two rejected fresh-key Running publications fully unwind
-/// the successor, publish no row, preserve predecessor history, and do not
+/// S-284-SIM-04 — one rejected fresh-key Running publication fully unwinds
+/// the successor driver/mTLS/network ownership before predecessor driver
+/// cleanup begins, publish no row, preserve predecessor history, and do not
 /// invent a second allocation proposal inside the shim.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
@@ -1234,6 +1320,20 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
     let driver = Arc::new(RecordingDriver::new(DriverType::Exec, predecessor.clone()));
     let index = AllocDriverIndex::default();
     index.lock().insert(predecessor.clone(), DriverType::Exec);
+    let slots = NetSlotAllocator::new();
+    let predecessor_slot = NetSlot::new(7).expect("valid predecessor slot");
+    slots.adopt(predecessor.clone(), predecessor_slot).expect("predecessor slot ownership");
+    let successor_slot = NetSlot::new(0).expect("valid successor slot");
+    let successor_plan =
+        derive_workload_netns_plan(successor_slot, responder_addr_for_slot(successor_slot));
+    let predecessor_plan =
+        derive_workload_netns_plan(predecessor_slot, responder_addr_for_slot(predecessor_slot));
+    let network = RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() };
+    let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
+    mtls.start_alloc(&successor_spec(DriverType::Exec, &workload, &predecessor))
+        .await
+        .expect("predecessor mTLS is live");
+    driver.trace.lock().clear();
 
     dispatch_one(
         Action::RestartAllocation {
@@ -1244,14 +1344,63 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         Arc::clone(&driver),
         &obs,
         &index,
-        &NetSlotAllocator::new(),
-        &RecordingNetwork::default(),
-        None,
+        &slots,
+        &network,
+        Some(&mtls),
     )
     .await
-    .expect("a twice-rejected Running proposal unwinds and returns without another action");
+    .expect("a rejected Running proposal unwinds without a second proposal or action");
 
-    assert_eq!(obs.running_attempts.load(Ordering::SeqCst), 2);
+    let trace = driver.trace.lock().clone();
+    let successor_network_provision = trace
+        .iter()
+        .position(|event| event == &TraceEvent::Provision(successor_plan.netns.as_str().to_owned()))
+        .expect("successor owns its structural network before launch");
+    let successor_start = trace
+        .iter()
+        .position(|event| event == &TraceEvent::Start(successor.clone()))
+        .expect("one exact successor driver start");
+    let successor_driver_unwind = trace
+        .iter()
+        .position(|event| event == &TraceEvent::Stop(successor.clone()))
+        .expect("rejected publication stops exact successor driver ownership");
+    let successor_mtls_unwind = trace
+        .iter()
+        .position(|event| event == &TraceEvent::MtlsStop(successor.clone()))
+        .expect("rejected publication stops exact successor mTLS ownership");
+    let successor_network_unwind = trace
+        .iter()
+        .position(|event| event == &TraceEvent::Teardown(successor_plan.netns.as_str().to_owned()))
+        .expect("rejected publication tears down exact successor network ownership");
+    let predecessor_driver_cleanup = trace
+        .iter()
+        .position(|event| event == &TraceEvent::Stop(predecessor.clone()))
+        .expect("one exact predecessor driver cleanup");
+    let predecessor_mtls_cleanup = trace
+        .iter()
+        .position(|event| event == &TraceEvent::MtlsStop(predecessor.clone()))
+        .expect("one exact predecessor mTLS cleanup");
+    let predecessor_network_cleanup = trace
+        .iter()
+        .position(|event| {
+            event == &TraceEvent::Teardown(predecessor_plan.netns.as_str().to_owned())
+        })
+        .expect("one exact predecessor network cleanup");
+    assert!(
+        successor_network_provision < successor_start
+            && successor_start < successor_driver_unwind
+            && successor_driver_unwind < successor_mtls_unwind
+            && successor_mtls_unwind < successor_network_unwind
+            && successor_network_unwind < predecessor_driver_cleanup
+            && predecessor_driver_cleanup < predecessor_mtls_cleanup
+            && predecessor_mtls_cleanup < predecessor_network_cleanup,
+        "rejected-publication successor unwind must finish before exact predecessor cleanup: {trace:?}"
+    );
+    assert!(
+        !trace.contains(&TraceEvent::MtlsStart(successor.clone())),
+        "rejected Running publication cannot make successor mTLS live"
+    );
+    assert_eq!(obs.running_attempts.load(Ordering::SeqCst), 1);
     assert!(obs.alloc_status_row(&successor).await.unwrap().is_none());
     assert_eq!(obs.alloc_status_row(&predecessor).await.unwrap(), Some(before));
     assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&successor));
@@ -1260,5 +1409,11 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         &[successor.clone(), predecessor.clone()],
         "successor unwind and later predecessor cleanup remain exact-ID complements"
     );
+    let lifecycle = mtls.snapshot();
+    assert!(!lifecycle.allocations.contains_key(&successor));
+    assert!(!lifecycle.allocations.contains_key(&predecessor));
+    assert!(!slots.snapshot().contains_key(&successor));
+    assert!(!slots.snapshot().contains_key(&predecessor));
     assert!(!index.lock().contains_key(&successor));
+    assert!(!index.lock().contains_key(&predecessor));
 }

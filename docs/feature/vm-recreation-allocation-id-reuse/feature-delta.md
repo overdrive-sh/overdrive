@@ -732,19 +732,24 @@ DISTILL adds no new typed product outcome requiring an outcomes-registry row.
 | S-VM-27 | `six_consecutive_reclamations_never_trip_restart_budget_exhausted` | `@property @in-memory @platform-reclamation @boundary @pending:future-roadmap` | `pure-function` | Reclamation remains replaceable above the failure ceiling while carrying, not charging, policy into the fresh successor. |
 | S-284-CORE-P1 | `restart_action_carries_full_alloc_spec_from_live_job` | `@in-memory @exec @projection @pending:future-roadmap` | `pure-function` | The existing Exec spec-projection contract retains command, arguments and resources while changing only the replacement relationship to predecessor→fresh successor, successor SVID, and successor policy reservation. |
 | S-284-SIM-01 | `successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver` | `@seeded-sim @exec @vm @ordering @mtls @network @pending:future-roadmap` | `bounded-change` | Seed 284105106 observes successor start, fresh Running row/index/mTLS, then one blocked exact-old driver→mTLS→network cleanup; successor stays live. |
-| S-284-SIM-02 | `successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` | `@seeded-sim @exec @vm @error @decision-table @mtls @network @pending:future-roadmap` | `bounded-change` | The 16-cell driver × successor outcome × cleanup-stage matrix proves successor-first ordering, driver/mTLS/network short-circuiting, exact predecessor identity, preserved accepted successor, typed cleanup-only errors, and successor-primary/secondary-traced both-fail errors. |
+| S-284-SIM-02 | `successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` | `@seeded-sim @exec @vm @error @decision-table @mtls @network @pending:future-roadmap` | `bounded-change` | The 16-cell driver × successor outcome × cleanup-stage matrix proves successor-first ordering, failed-launch successor mTLS/network unwind before predecessor driver cleanup, driver/mTLS/network short-circuiting, exact identities, preserved accepted successor, typed cleanup-only errors, and successor-primary/secondary-traced both-fail errors. |
 | S-284-SIM-03 | `accepted_failed_successor_publishes_at_fresh_key_with_zero_history` | `@seeded-sim @start-rejected @history @pending:future-roadmap` | `bounded-change` | StartRejected writes fresh Failed zero/None, preserves predecessor, and cleans old exactly once. |
-| S-284-SIM-04 | `rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` | `@seeded-sim @publication-rejected @error @pending:future-roadmap` | `bounded-change` | Two LWW rejections produce no fresh row/index, one successor start, exact successor unwind, then exact predecessor cleanup; no second allocation is proposed. |
+| S-284-SIM-04 | `rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` | `@seeded-sim @publication-rejected @error @mtls @network @pending:future-roadmap` | `bounded-change` | One rejected Running proposal produces no fresh row/index and one successor start; exact successor driver→mTLS→network unwind completes before exact predecessor driver→mTLS→network cleanup, with no second row proposal or allocation action. |
 | S-284-SIM-05 | `production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm` | `@seeded-sim @redb @process-restart @publication-rejected @exec @vm @pending:future-roadmap` | `bounded-change` | For both drivers, registered `WorkloadLifecycle` and the action shim author an accepted Failed predecessor, fsynced fresh-successor reservation, rejected Running publication/unwind, redb close/reopen, and a later accepted successor above the consumed gap; the test seeds no row or replacement action. |
 | S-284-SIM-P1 | `liveness_restart_budget_and_finalization_keep_projection_handoffs` | `@seeded-sim @service @liveness @history @pending:future-roadmap` | `bounded-change` | Repeated production-owned liveness replacements keep every predecessor row and move the five-charge workload budget through distinct fresh successors before finalization. |
 | S-284-SIM-P2 | `failed_withdrawal_drains_terminal_and_repairs_after_view_reload` | `@seeded-sim @service @view-reopen @preservation @pending:future-roadmap` | `bounded-change` | A reloaded Service policy View retains the terminal veto only for the immutable predecessor; the fresh Running successor does not inherit it and remains unhealthy only while startup is unobserved. |
 | S-284-SIM-P3 | `startup_failure_withdraws_then_fresh_successor_starts_unobserved` | `@seeded-sim @service @startup @preservation @pending:future-roadmap` | `bounded-change` | Startup exhaustion withdraws the predecessor; replacement creates a distinct Running successor whose unobserved startup state and policy key remain separate from predecessor terminal history. |
+| S-284-SIM-P4 | `predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication` | `@seeded-sim @exec @exit-observer @ordering @pending:future-roadmap` | `bounded-change` | A real exit-observer write during exact-old cleanup changes only the predecessor key; the already accepted fresh successor remains Running with zero/None history. |
+| S-284-SIM-P5 | `fresh_successor_publication_without_predecessor_exit_control` | `@seeded-sim @exec @control @pending:future-roadmap` | `bounded-change` | Without the competing predecessor exit, replacement still retains immutable Failed predecessor history and one distinct Running successor. |
+| S-284-SIM-P6 | `overlapping_healthy_stops_preserve_e09_startup_failure_result` | `@seeded-sim @service-stream @overlap @pending:future-roadmap` | `bounded-change` | Nine overlapping unrelated stops cannot change the original Service stream's StartupProbeFailed result; its replacement is a fresh zero/None successor and the failed predecessor remains immutable. |
+| S-284-SIM-P7 | `completed_healthy_stops_control_reports_startup_failure` | `@seeded-sim @service-stream @control @pending:future-roadmap` | `bounded-change` | The completed-stop control proves the same stream and fresh-successor contract without overlap. |
+| S-284-SIM-P8 | `terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility` | `@seeded-sim @vm @service @preservation` | `unbounded-preservation` | A terminal predecessor remains vetoed while a distinct healthy successor is eligible under its own SVID; late evaluation cannot revive the dead predecessor or contaminate the successor key. |
 | S-284-METAL-P1 | `predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts` | `@qualified-metal @real-io @strace @preservation @pending:future-roadmap` | `bounded-change` | Retained #284 host proof: distinct beacon/run-dir/clone/index/cgroup/process families survive delayed exact-old disposal with no EADDRINUSE/ENOENT alias. |
 | S-284-METAL-P2 | S-VM-28/48/81 and S-GTI-06a/b existing functions | `@qualified-metal @real-io @history @svid @rootfs @preservation @pending:future-roadmap` | `bounded-change` | Fresh VM row/history, clean rootfs, SVID/mTLS reinstall, typed failure, and final host cleanup remain required host complements but do not define the action family. |
 
-The new/transitioned corrective contract has 22 focused/property/simulation
-tests. Fifteen are adverse, boundary, interruption, or failure partitions
-(68%). The qualified-metal preservation cases stay fixed examples; no
+The new/transitioned corrective contract has 27 focused/property/simulation
+tests, including explicit adverse, boundary, interruption, and failure
+partitions. The qualified-metal preservation cases stay fixed examples; no
 generated real-I/O case duplicates the pure allocator or Sim ordering oracle.
 
 ## Wave: DISTILL / [REF] Walking-skeleton strategy
@@ -772,7 +777,8 @@ DESIGN divergence.
 | `SimObservationStore` and rejecting observation-port wrapper | S-284-SIM-01..04 | Fresh accepted Running/Failed keys, immutable predecessor, zero/None history, and `Ok(None)` no-row behavior through the existing trait. |
 | `SimMtlsInterceptLifecycle` | S-284-SIM-01/02 | Successor mTLS is Live before old cleanup; every driver/mTLS/network old-cleanup failure cut preserves exact ordering, state, and short-circuit complements. |
 | `NetSlotAllocator` + logical `WorkloadNetworkProvisioner` | S-284-SIM-01/02 | VM successor gets its own slot/plan; exact-old teardown/release cannot remove successor ownership; structural teardown failure and earlier driver/mTLS failures retain the correct old slot. Exec follows the same replacement policy without inventing driver-specific identity rules. |
-| `ServiceLifecycle` + probe/service-backend projection | S-284-SIM-P1..P3 | Fresh successor lineage retains workload-level budget/finalization and keeps predecessor terminal policy/history scoped to the predecessor key. |
+| `ServiceLifecycle` + probe/service-backend projection | S-284-SIM-P1..P3, P8 | Fresh successor lineage retains workload-level budget/finalization and keeps predecessor terminal policy/history scoped to the predecessor key while allowing an unrelated fresh successor its own eligibility. |
+| production exit observer + Service stream | S-284-SIM-P4..P7 | A late predecessor exit cannot rewrite a fresh successor, and unrelated stop overlap cannot replace the original typed Service stream failure. |
 | `CloudHypervisorVmm`, `RealVmHostState`, cgroupfs/filesystem/Unix sockets, strace | S-284-METAL-P1/P2 | Real VM beacon/bind, run-dir children, clone/index, cgroup, process, rootfs and SVID effects remain allocation-key-disjoint and clean exactly at the host boundary. |
 
 Every changed driven-port claim has a production-owner or real-I/O scenario.
@@ -790,6 +796,10 @@ consumer/provider contract; Pact-style machinery is inapplicable.
 | Same-key restart/history/publication and cleanup-first tests in `action_shim_crash_observability.rs` | Seven explicitly contradictory bodies deleted: successful/rejected same-key history, rejected-restart occurrence, restart telemetry pair, second-rejection same-key publication, and real-worker cleanup-first ordering. The post-assignment provision-failure preservation case now drives only valid `StartAllocation`; its invalid same-ID Restart partition was removed. | No retired ignored bodies remain. SIM-01..04 and qualified-metal host evidence replace their obsolete contract. |
 | `same_id_restart_lifecycle` registered invariant, catalogue pins and acceptance pin | Deleted rather than disabled because its cleanup-first same-ID event sequence is the rejected contract. Harness/catalogue smoke expectations and the ATDD policy now identify S-284-SIM-05 as the driver-neutral production-owner replacement proof. | No pending marker: the obsolete invariant and pin have no future DELIVER owner. |
 | `exec_reconciler_purity.rs` and `service_backend_projection.rs` restart projections | Still-valid Exec spec, liveness budget/finalization, terminal-view reload and startup-withdrawal coverage transitioned to distinct successor IDs while retaining their original payload and Service-policy obligations. | Reasoned corrective-roadmap markers keep the restored same-ID baseline semantic RED; no old identity assertion remains in those transitioned bodies. |
+| `crates/overdrive-sim/tests/allocation_restart_write_spike.rs` | Both production-owner/exit-observer cases transitioned from one overwritten key to immutable predecessor plus fresh zero/None successor; the competing exit may update only the predecessor. | Two reasoned corrective-roadmap markers; the complete bodies remain seeded semantic RED until driver-neutral replacement lands. |
+| `crates/overdrive-sim/tests/e09_v2_failed_service_reachability_spike.rs` | Deleted: its terminal-veto/same-ID witness is obsolete and its valid fresh-successor Service projection is already covered by S-284-SIM-P2/P3. | No pending marker or future owner; retaining a duplicate diagnostic would preserve the rejected contract. |
+| `crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs` | Preserved its unique unrelated-stop/typed-stream result, but transitioned recovery to a distinct zero/None successor with immutable failed predecessor history. | Two reasoned corrective-roadmap markers keep the restored same-ID implementation RED. |
+| `crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs` S-SVM-17 | Transitioned in place and remains active green: the terminal veto stays on the dead VM predecessor while a distinct healthy successor is eligible under its own SVID. | No pending marker because existing `ServiceLifecycle` already satisfies the driver-neutral key-isolation preservation contract. |
 | `action_shim_restart_uses_spec_from_action.rs` | Active preservation test now supplies distinct predecessor/successor IDs and proves only unchanged action-spec forwarding. | No pending marker: it does not claim to prove identity selection/publication and is already valid under both implementations. |
 | S-VM-28/48/81, S-GTI-06a/b, S-284-METAL-P1 | Qualified-metal preservation bodies remain complete but return to pending against the restored same-ID production baseline. | Corrective future-roadmap markers replace the obsolete ADR-0104 step markers; the tests activate only after driver-neutral replacement lands. |
 
@@ -815,6 +825,9 @@ Placement follows existing Rust crate ownership:
 | `WorkloadLifecycle::reconcile` / `next_evaluation_at` | S-284-PURE-01..10, PROP-01, S-VM-26/27. |
 | `run_convergence_tick_with_network_provisioner_for_test` using registered production `WorkloadLifecycle` | S-284-SIM-05. |
 | `action_shim::dispatch_with_network_provisioner` | S-284-SIM-01..04 and the active action-spec forwarding preservation case. |
+| registered convergence runtime + production exit observer | S-284-SIM-P4/P5. |
+| registered convergence runtime + production Service stream | S-284-SIM-P6/P7. |
+| `ServiceLifecycleReconciler::reconcile` + `SimObservationStore` | S-284-SIM-P8. |
 | existing `overdrive deploy`/`workload describe` handler path with real `Vmm::create` | S-284-METAL-P1/P2. |
 
 Rust tests remain independent from `verification/expectations`: no Rust test
@@ -830,9 +843,10 @@ already supply maintained, failing evidence for the claim.
 - Pure tests are default-lane in-memory properties. Every live property carries
   the exact rustdoc line `/// CONTRACT_SHAPE: pure-function.`.
 - Sim tests require `overdrive-sim/integration-tests` plus
-  `overdrive-control-plane/integration-tests`, use seed `284105106`, run on the
-  current-thread Tokio flavor, and print the seed and exact nextest rerun on
-  the full production-owner reopen path.
+  `overdrive-control-plane/integration-tests`, run on the current-thread Tokio
+  flavor, and print their fixed seeds (`284105106`, `257203`, `257210`, or
+  `25717`). The full production-owner reopen path also prints its exact nextest
+  rerun command.
 - The redb scenario uses a per-test temporary data directory, closes the first
   runtime/database handle before reopen, and never substitutes an in-memory
   read for the durable bulk-load assertion.
@@ -855,8 +869,10 @@ there were no import, fixture, compilation, or setup failures.
 | `cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --test acceptance --run-ignored ignored-only -E 'test(vm_recreation_allocation_identity)' --no-fail-fast` | `11 run; 11 failed` | `MISSING_FUNCTIONALITY` against restored pre-delivery production: both drivers retain same-ID replacement behavior, Draining is admitted, initial placement omits the generic reservation, and Exec ignores reservation/max boundaries. Proptest shrank to `accepted_suffix=0, reservation_gap=0`. |
 | `cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance --run-ignored ignored-only -E 'test(job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero) | test(six_consecutive_reclamations_never_trip_restart_budget_exhausted)' --no-fail-fast` | `2 run; 2 failed` | `MISSING_FUNCTIONALITY`: both reached real `WorkloadLifecycle::reconcile` and received same-ID VM `RestartAllocation` instead of predecessor→fresh-successor Restart. Persisted sidecars supplied the minimized cases. |
 | `cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance --run-ignored ignored-only -E 'test(exec_reconciler_purity::restart_action_carries_full_alloc_spec_from_live_job)' --no-capture` | `1 run; 1 failed` | `MISSING_FUNCTIONALITY`: the still-valid Exec payload projection reached `WorkloadLifecycle::reconcile`; command/argument/resource setup succeeded and the first corrected oracle observed `spec.alloc = alloc-payments-0` instead of fresh `alloc-payments-1`. |
-| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test driver_neutral_allocation_replacement --run-ignored ignored-only --no-fail-fast --no-capture` | `5 run; 5 failed` | `MISSING_FUNCTIONALITY`: exact failures were old cleanup before Exec successor start; the 16-cell matrix's first trace was old stop/teardown before successor provision/start; successor publication targeted the predecessor key (`0` fresh rejections); StartRejected produced no fresh Failed row; and the full registered owner path produced `[0,0]` rather than `[0,1,2]` for **both Exec and VM** after redb reopen. Seed `284105106` and the exact rerun command were printed. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test driver_neutral_allocation_replacement --run-ignored ignored-only --no-fail-fast --no-capture` | `5 run; 5 failed` | `MISSING_FUNCTIONALITY`: exact failures were old cleanup before Exec successor start; failed launch performed no exact-successor mTLS unwind before predecessor cleanup; same-key publication produced no exact-successor driver unwind; StartRejected produced no fresh Failed row; and the full registered owner path produced `[0,0]` rather than `[0,1,2]` for **both Exec and VM** after redb reopen. Seed `284105106` and the exact rerun command were printed. |
 | `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test integration --run-ignored ignored-only -E 'test(service_backend_projection::liveness_restart_budget_and_finalization_keep_projection_handoffs) \| test(service_backend_projection::failed_withdrawal_drains_terminal_and_repairs_after_view_reload) \| test(service_backend_projection::startup_failure_withdraws_then_fresh_successor_starts_unobserved)' --no-fail-fast --no-capture` | `3 run; 3 failed` | `MISSING_FUNCTIONALITY`: all three production Service paths reached real startup/liveness termination and replacement, then observed the same predecessor identity Running instead of a distinct successor. Seeds `257227`, `257224`, and `257209` were printed; no row or action was seeded. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test allocation_restart_write_spike --run-ignored ignored-only --no-fail-fast --no-capture` | `2 run; 2 failed` | `MISSING_FUNCTIONALITY`: both production-owner/exit-observer schedules completed without fixture error, then exposed one overwritten `alloc-…-0` row, no `alloc-…-1` row or occurrences, and a missing successor driver handle instead of immutable predecessor plus fresh Running successor. Seed `257203` was printed. |
+| `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test e09_v2_failure_stream_overlap_spike --run-ignored ignored-only --no-fail-fast --no-capture` | `2 run; 2 failed` | `MISSING_FUNCTIONALITY`: both the nine-stop overlap and completed-stop control reached the real StartupProbeFailed terminal and replacement path, then observed the predecessor allocation ID reused for Running. Seed `257210` was printed. |
 | `cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests` | clean | `COMPILES`: every pending body, port wrapper, fixture, qualified-metal body, and assertion resolves against the accepted existing API. |
 | `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings` | clean | `LINTS`: the complete pending and preservation surfaces satisfy the workspace lint gate. |
 | `cargo xtask lima run -- cargo nextest run -p overdrive-core -p overdrive-reconcilers -p overdrive-control-plane --test acceptance --no-fail-fast` | `896 passed; 17 skipped` | `PRESERVATION_GREEN`: corrected scenarios remain pending, deleted contracts are absent, and the valid active acceptance surface stays green. |
@@ -879,11 +895,12 @@ the future roadmap.
   reservation each have a distinct oracle.
 - **Policy partitions:** Workload Failure, generation, reclamation, backoff,
   initial placement, and exhaustion assert exact candidate maps/timestamps.
-- **Ordering/concurrency:** a seeded blocked-old-cleanup sequence proves the
-  successor Running/index/mTLS state before old cleanup, then exact driver,
-  mTLS, network, slot, row, and index complements.
+- **Ordering/concurrency:** seeded blocked-cleanup, failed-launch,
+  rejected-publication and exit-observer sequences prove the successor
+  Running/index/mTLS state or exact successor unwind before old cleanup, then
+  exact driver, mTLS, network, slot, row, and index complements.
 - **Error closure:** all four successor/cleanup results, StartRejected,
-  `Ok(None)` twice-rejected publication, typed launch error, and durable reopen
+  one `Ok(None)` rejected publication with no immediate re-proposal, typed launch error, and durable reopen
   are covered without a catch-all or new error.
 - **Adapter modes:** Exec and VM appear in the generic action, allocation,
   policy, handoff, ordering, and reopen contracts. VM-only host effects remain
@@ -895,12 +912,10 @@ the future roadmap.
   pure-function rustdoc; every stateful Sim/metal case is declared
   bounded-change.
 
-No exact design/API blocker remains. Independent acceptance review is the next
-gate. Iteration-1 remediation deleted the obsolete same-ID invariant and seven
-retired bodies, transitioned the remaining listed projections, expanded the
-exact-old cleanup matrix, and replaced the direct reservation fixture with the
-registered production-owner/reopen path. The same acceptance reviewer must
-perform iteration 2. This artifact does not authorize a roadmap or DELIVER;
-after approval, a fresh DELIVER roadmap must own every pending-marker
-activation and the legacy same-key test fallout without reviving ADR-0104's
-rejected action split.
+No exact design/API blocker remains. The explicitly authorized final targeted
+remediation transitioned or deleted every iteration-2 same-ID artifact,
+removed the deferral, and completed the failed-launch/rejected-publication
+successor-unwind oracle. The same acceptance reviewer must perform one final
+re-review. This artifact does not authorize a roadmap or DELIVER; after
+approval, a fresh DELIVER roadmap must own every pending-marker activation
+without reviving ADR-0104's rejected action split.

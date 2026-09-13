@@ -49,7 +49,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
-use overdrive_core::{AllocationId, SpiffeId};
+use overdrive_core::{AllocationId, SpiffeId, WorkloadId};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
     ServiceLifecycleView,
@@ -72,6 +72,11 @@ fn alloc_id() -> AllocationId {
     AllocationId::new("alloc-service-vm-terminal-25717").expect("static allocation ID is valid")
 }
 
+fn successor_alloc_id() -> AllocationId {
+    AllocationId::new("alloc-service-vm-terminal-25718")
+        .expect("static successor allocation ID is valid")
+}
+
 fn tick(number: u64, seconds: u64) -> TickContext {
     TickContext {
         now: Instant::now(),
@@ -91,8 +96,18 @@ fn service_dataplane() -> ServiceDataplaneIdentity {
 }
 
 fn fact(state: AllocState, startup: ProbeStatus, readiness: ProbeStatus) -> ServiceAllocFact {
+    fact_for(&alloc_id(), state, startup, readiness)
+}
+
+fn fact_for(
+    alloc_id: &AllocationId,
+    state: AllocState,
+    startup: ProbeStatus,
+    readiness: ProbeStatus,
+) -> ServiceAllocFact {
+    let workload = WorkloadId::new("service-vm-terminal-25717").expect("static workload ID");
     ServiceAllocFact {
-        alloc_id: alloc_id(),
+        alloc_id: alloc_id.clone(),
         state,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: Some(1).filter(|_| state == AllocState::Failed),
@@ -108,10 +123,7 @@ fn fact(state: AllocState, startup: ProbeStatus, readiness: ProbeStatus) -> Serv
         latest_readiness_probe: Some(readiness),
         has_readiness_probe: true,
         readiness_success_threshold: 1,
-        backend_spiffe: SpiffeId::new(
-            "spiffe://overdrive.local/workload/service-vm-terminal-25717/alloc/0",
-        )
-        .expect("static backend SPIFFE ID is valid"),
+        backend_spiffe: SpiffeId::for_allocation(&workload, alloc_id),
         backend_ip: Ipv4Addr::new(192, 0, 2, 17),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -218,17 +230,26 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     apply_backend_writes(&store, &terminal_actions).await;
     hydrate_backend(&mut in_flight, &store).await;
 
-    // A same-ID replacement may be observed Running and healthy, but the
-    // retained terminal veto keeps it out of eligibility. A subsequent late
-    // Pass is a no-op against the persisted unhealthy projection.
-    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").state = AllocState::Running;
-    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").latest_startup_probe =
-        Some(ProbeStatus::Pass);
+    // A distinct successor may be Running and healthy while the retained
+    // terminal veto remains scoped to the predecessor. The dead predecessor
+    // never returns to eligibility; the successor owns its own projection.
+    let successor = successor_alloc_id();
+    let successor_identity = SpiffeId::for_allocation(
+        &WorkloadId::new("service-vm-terminal-25717").expect("static workload ID"),
+        &successor,
+    );
+    in_flight.allocs.insert(
+        successor.clone(),
+        fact_for(&successor, AllocState::Running, ProbeStatus::Pass, ProbeStatus::Pass),
+    );
     let (replacement_actions, replacement_view) =
         reconciler.reconcile(&in_flight, &in_flight, &terminal_view, &tick(3, 4));
     let replacement_row = backend_row(&replacement_actions);
-    assert!(!replacement_row.backends[0].healthy);
+    assert_eq!(replacement_row.backends.len(), 1);
+    assert_eq!(replacement_row.backends[0].alloc, successor_identity);
+    assert!(replacement_row.backends[0].healthy);
     assert!(replacement_view.terminal_announced.contains(&alloc_id));
+    assert!(!replacement_view.terminal_announced.contains(&successor));
     assert!(
         !replacement_actions
             .iter()
@@ -239,14 +260,17 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
 
     let (late_actions, late_view) =
         reconciler.reconcile(&in_flight, &in_flight, &replacement_view, &tick(4, 5));
-    assert!(late_actions.is_empty(), "a late readiness Pass cannot revive terminal eligibility");
+    assert!(late_actions.is_empty(), "stable fresh-successor projection is idempotent");
     assert!(late_view.terminal_announced.contains(&alloc_id));
+    assert!(!late_view.terminal_announced.contains(&successor));
     let persisted = store
         .service_backends_rows(&ServiceId::new(42).expect("service id"))
         .await
         .expect("sim backend observation read");
     assert_eq!(persisted.len(), 1);
-    assert!(!persisted[0].backends[0].healthy);
+    assert_eq!(persisted[0].backends.len(), 1);
+    assert_eq!(persisted[0].backends[0].alloc, successor_identity);
+    assert!(persisted[0].backends[0].healthy);
 }
 
 /// Driver wrapper used only to keep the production allocation hook and the
