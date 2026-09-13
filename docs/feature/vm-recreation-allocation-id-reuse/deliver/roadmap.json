@@ -2,330 +2,225 @@
   "roadmap": {
     "project_id": "vm-recreation-allocation-id-reuse",
     "feature_id": "vm-recreation-allocation-id-reuse",
-    "created_at": "2026-09-12T23:43:15Z",
-    "goal": "Give every physical VM execution a fresh AllocationId while retaining its stable WorkloadId owner and exact existing cleanup authorities.",
-    "total_steps": 3,
-    "total_estimate_hours": 17,
-    "estimate_basis": "Five hours for one bounded WorkloadLifecycle/action-contract cut plus fourteen pure/property activations; four hours for the seeded runtime close/reopen owner path; eight hours for six native Cloud Hypervisor scenarios and retained strace evidence.",
+    "created_at": "2026-09-13T16:27:38Z",
+    "goal": "Replace every eligible allocation through the approved driver-neutral predecessor-to-fresh-successor lifecycle while preserving stable WorkloadId policy ownership and exact existing effect owners.",
+    "total_steps": 2,
+    "total_estimate_hours": 31,
+    "estimate_basis": "Seven hours for the WorkloadLifecycle identity/ledger cut; twenty-four for the one action-shim production cut plus its direct, composed, reopen, Service, exit, stream, and qualified-metal evidence.",
     "baseline": {
-      "distill_scenarios": 21,
-      "step_01_01": "Twelve focused reconciler cases include eleven semantic RED cases and one intentional preservation control; two transitioned reclamation properties are semantic RED.",
-      "step_01_02": "Seed 257205 reaches registered production owners and fails because replacement still completes under the predecessor AllocationId before the fresh beacon exists.",
-      "step_01_03": "Six qualified-metal bodies compile; current same-ID behavior cannot satisfy their distinct-row, disjoint-artifact, SVID, and second-VMM oracles.",
-      "native_failures": "GH #284 retains both EADDRINUSE on replacement beacon bind and ENOENT after predecessor cleanup removes replacement staging."
+      "distill_scenario_ids": 29,
+      "executable_rust_bodies": 33,
+      "pending_bodies": 32,
+      "active_preservation_bodies": 1,
+      "semantic_red_bodies": 26,
+      "qualified_metal_pending_bodies": 6,
+      "rejected_baseline": "The restored pre-delivery implementation reuses suffix zero; the registered owner path observes [0,0], not [0,1,2], for Exec and VM.",
+      "impact_ranking": [
+        "WorkloadLifecycle owns 14 pending pure/property bodies for identity selection, returned-View reservation, handoff, policy carry, placement, SystemGc, and allocation bounds.",
+        "The RestartAllocation action-shim arm owns the remaining 18 pending bodies because it currently conflates predecessor/successor identities and cleans the predecessor first.",
+        "The active Service terminal-preservation body remains a same-step regression control and receives no activation marker."
+      ],
+      "target_validation": "Commit d00b1658 records semantic RED through real reconciler/runtime/shim owner paths and clean compilation; 730b7a removes only the obsolete same-ID bridge claim."
     },
     "design_refs": [
-      "docs/product/architecture/adr-0104-vm-recreation-fresh-allocation-identity.md",
       "docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md",
-      "https://github.com/overdrive-sh/overdrive/issues/284"
+      "docs/product/architecture/adr-0105-driver-neutral-allocation-replacement-identity.md",
+      "docs/product/architecture/adr-0106-successor-creation-does-not-wait-for-predecessor-cleanup.md",
+      "docs/product/architecture/adr-0108-durable-reservation-consumes-successor-allocation-identity.md",
+      "docs/product/architecture/adr-0109-replacement-requires-terminal-predecessor-handoff.md"
     ],
     "delivery_protocol": [
-      "Execute 01-01, 01-02, then 01-03. Each step uses a fresh isolated nw-software-crafter on GPT-5.6 Luna/max for RED-GREEN-COMMIT and a fresh isolated reviewer on GPT-5.6 Luna/max.",
-      "The original step crafter remediates every finding; the same step reviewer re-reviews without an iteration cap until APPROVED and writes deliver/review-<step-id>.md before the next step starts.",
-      "Crafters remove only their step's reasoned pending markers. They never author, replace, weaken, or bypass an acceptance body, oracle, retained proptest replay, Contract Shape declaration, or qualified-metal substrate gate.",
-      "ADR-0104 is the exact API and persistence contract. Any required public method, type, field, action variant, trait, parameter, or unsanctioned persistence mechanism is a blocking DESIGN gap, not implementation latitude.",
-      "Rust tests remain in-process and never spawn the built Overdrive binary or emit expectation evidence. Sim owns ordering/safety/liveness; qualified metal owns real process, Unix-socket, filesystem, clone/index, and cgroup effects."
+      "Execute in dependency order with a fresh isolated GPT-5.6 Luna/max crafter and reviewer per step; remediation returns only to that step's original agents.",
+      "Once these step IDs are finalized, the acceptance designer applies pending_body_activation_mappings before DELIVER; crafters then remove only their step-owned markers and preserve every authored body and oracle.",
+      "The feature delta pins the exact public/private contract. Any new action, API, port, store, schema, owner, retry, lock, driver policy, cleanup owner, or network mechanism is a blocker.",
+      "Each reviewer writes deliver/review-<step-id>.md with APPROVED before advancement. Rust tests never spawn the Overdrive binary or emit expectation evidence.",
+      "Mutation testing is excluded from every step and the final DELIVER gate by explicit user direction; do not run it or edit exclusions."
     ],
     "decomposition": {
-      "steps": 3,
-      "production_files": 2,
-      "ratio": 1.5,
+      "steps": 2,
+      "production_files": 3,
+      "ratio": 0.67,
       "threshold": 2.5,
       "production_files_counted": [
         "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
-        "crates/overdrive-core/src/reconcilers/mod.rs"
+        "crates/overdrive-core/src/reconcilers/mod.rs",
+        "crates/overdrive-control-plane/src/action_shim/mod.rs"
       ],
-      "rationale": "The fixed three-step DISTILL activation boundary separates pure policy, seeded owner composition, and native host effects; the two production files hold the behavior and its unchanged public action-contract rustdoc."
+      "rationale": "The accepted design exposes exactly two production cuts. Splitting later evidence would create validation-only steps; splitting the shim would land a rejected cleanup-first intermediate contract."
     },
-    "final_mutation_gate": {
-      "after": "After all three step reviews are APPROVED and qualified-metal evidence is green; run once for the feature, never inside a step.",
-      "command": "cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-reconcilers --file crates/overdrive-reconcilers/src/workload_lifecycle.rs --test-whole-workspace",
-      "result": "target/xtask/mutants-summary.json",
-      "pass": "Wrapper status passes, kill rate is at least 80%, baseline drift is no worse than minus two percentage points, and timeout/unviable outcomes are investigated.",
-      "discipline": "Do not edit mutation exclusions for this feature."
-    }
+    "rejected_simple_alternatives": [
+      {
+        "alternative": "Retain the reverted VM-only delivery",
+        "expected_impact": "Prevents only the reproduced VM artifact alias.",
+        "why_insufficient": "It leaves Exec on same-ID replacement and makes WorkloadLifecycle identity policy driver-specific, contradicting ADR-0105."
+      },
+      {
+        "alternative": "Change only WorkloadLifecycle",
+        "expected_impact": "Produces fresh successor identities in returned actions and Views.",
+        "why_insufficient": "The current shim still cleans first and addresses successor work with the predecessor ID, failing ordering, publication, unwind, reopen composition, and host ownership."
+      }
+    ]
   },
   "phases": [
     {
       "id": "01",
-      "name": "Fresh VM execution identity",
-      "description": "Land the exact VM-only allocation reservation decision, prove it through seeded production owners, then activate qualified-metal artifact and mesh ownership evidence.",
+      "name": "Driver-neutral allocation replacement",
+      "description": "Land the two accepted production cuts: driver-neutral WorkloadLifecycle identity/reservation policy, then exact successor-first action-shim ownership with all dependent evidence.",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
       "depends_on": [],
       "steps": [
         {
           "id": "01-01",
-          "name": "Reserve fresh VM execution identities",
-          "description": "Change WorkloadLifecycle's VM decision and existing View semantics while preserving every Exec, action-shim, lifecycle, observation, network, and public API contract.",
+          "name": "Reserve driver-neutral successor identities",
+          "description": "Make WorkloadLifecycle return one fresh successor reservation for every eligible Exec or VM predecessor while preserving action shape, policy ownership, SystemGc placement, and checked exhaustion.",
           "agent": "nw-software-crafter",
           "deps": [],
-          "estimate_hours": 5,
+          "estimate_hours": 7,
           "criteria": [
-            "Every initial, generation, Workload Failure, and Platform Reclamation VM start reserves a fresh ID above retained rows and View reservations before dispatch.",
-            "VM replacements emit existing StartAllocation with matching action, spec, and SVID identity; Exec retains byte-equivalent same-ID RestartAllocation behavior.",
-            "Workload Failure advances candidate budget/time once; generation and Platform Reclamation carry them without increment or restamp; retry deadlines remain current-candidate-only.",
-            "View-only reservations never become current; numeric-current history stays immutable; malformed suffixes start canonical minting, MAX-1 issues MAX once, and MAX exhaustion emits no execution.",
-            "All fourteen 01-01 scenarios pass with retained proptest replays and exact pure-function Contract Shape declarations; no public shape, persistence field, retry, sleep, lock, or compatibility path appears."
+            "Eligible Exec and VM replacements emit RestartAllocation with numeric-current predecessor, distinct successor, matching successor SVID, and unchanged driver payload projection.",
+            "Only accepted numeric-current Failed or Terminated hands off replacement; Draining, historical terminal rows, and View-only reservations cannot become predecessors.",
+            "Workload Failure charges once; generation and Platform Reclamation carry policy; initial placement reserves zero and SystemGc remains fresh StartAllocation.",
+            "Allocation selects checked maximum-plus-one across accepted rows and returned-View ledger keys, ignores malformed suffixes, preserves gaps, issues MAX once, and never wraps.",
+            "Returned next View records each selected successor; later pure reconciliation advances above supplied ledger keys. Runtime fsync, reopen, and effect ordering remain step 01-02 obligations."
           ],
           "test_file": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-          "scenario_name": "vm_failure_reserves_fresh_execution_and_preserves_predecessor",
-          "scenario_ids": [
-            "S-284-PURE-01",
-            "S-284-PURE-02",
-            "S-284-PURE-03",
-            "S-284-PURE-04",
-            "S-284-PURE-05",
-            "S-284-PURE-06",
-            "S-284-PURE-07",
-            "S-284-PURE-08",
-            "S-284-PURE-09",
-            "S-284-PURE-10",
-            "S-284-PURE-11",
-            "S-284-PROP-01",
-            "S-VM-26",
-            "S-VM-27"
-          ],
+          "scenario_name": "replacement_identity_is_driver_neutral_for_exec_and_vm",
+          "scenario_ids": ["S-284-PURE-01", "S-284-PURE-02", "S-284-PURE-03", "S-284-PURE-04", "S-284-PURE-05", "S-284-PURE-06", "S-284-PURE-07", "S-284-PURE-08", "S-284-PURE-09", "S-284-PURE-10", "S-284-PROP-01", "S-VM-26", "S-VM-27", "S-284-CORE-P1"],
           "files_to_modify": [
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
             "crates/overdrive-core/src/reconcilers/mod.rs",
             "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-            "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs"
+            "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+            "crates/overdrive-core/tests/acceptance/exec_reconciler_purity.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers -p overdrive-core --test acceptance -E 'test(vm_recreation_allocation_identity) or test(job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero) or test(six_consecutive_reclamations_never_trip_restart_budget_exhausted)' --no-fail-fast",
-            "cargo xtask lima run -- env PROPTEST_CASES=0 cargo nextest run -p overdrive-reconcilers -p overdrive-core --test acceptance -E 'test(vm_identity_advances_above_rows_and_reservations) or test(job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero) or test(six_consecutive_reclamations_never_trip_restart_budget_exhausted)' --no-fail-fast",
-            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
-            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+            "cargo xtask lima run -- cargo nextest run -p overdrive-reconcilers --test acceptance -E 'test(vm_recreation_allocation_identity)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-reconcilers -p overdrive-core --test acceptance -E 'test(identity_advances_above_rows_and_reservations_for_every_driver) or test(job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero) or test(six_consecutive_reclamations_never_trip_restart_budget_exhausted) or test(exec_reconciler_purity::restart_action_carries_full_alloc_spec_from_live_job)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance -E 'test(workload_lifecycle_enqueues_bridge_on_alloc_transitions)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings"
           ],
-          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): activate only these fourteen pre-authored tests; retain every exact `/// CONTRACT_SHAPE: pure-function.` line and Direct proptest replay sidecar. ADR-0104's public actions, ports, View fields, and pinned private helper signatures are exact. The core action edit is semantic rustdoc only; do not change enum shape. File lists are necessary-scope guidance, with tightly bounded compiler fallout allowed. No mutation testing in this step. Advance only after review-01-01.md records APPROVED."
+          "implementation_notes": "Activate exactly the fourteen mapped pending bodies. Preserve every exact `/// CONTRACT_SHAPE: pure-function.` line and the proptest replay sidecar. Preserve feature-delta helper signatures and RestartAllocation fields; update rustdoc semantics without changing enum shape. Driver matching may only project payload. No action-shim edits or mutation testing."
         },
         {
           "id": "01-02",
-          "name": "Prove production-owner restart isolation",
-          "description": "Activate the fixed-seed in-process composition that crosses rejected publication, runtime restart, higher-ID recovery, delayed predecessor disposal, and final cleanup.",
+          "name": "Complete successor-first exact-ID ownership",
+          "description": "Correct the existing RestartAllocation shim arm so distinct successor work completes before one exact-old cleanup attempt, then prove durable reopen and every dependent Sim and host boundary.",
           "agent": "nw-software-crafter",
-          "deps": [
-            "01-01"
-          ],
-          "estimate_hours": 4,
+          "deps": ["01-01"],
+          "estimate_hours": 24,
           "criteria": [
-            "Seed 257205 drives registered WorkloadLifecycle, ServiceLifecycle, VmReclamation, action shim, VmDriver, ObservationStore, and redb ViewStore without fabricated rows or private state.",
-            "Rejected fresh Running publication creates no row, completes its own awaited cleanup, preserves its reservation across runtime close/reopen, and forces the next accepted VM ID higher.",
-            "The accepted fresh row becomes numeric current with zero physical history while the predecessor row and occurrences remain byte-equal and the rejected reservation remains non-current.",
-            "Delayed predecessor disposal cannot signal, remove, or author the replacement; repeat reclamation is a no-op; final operator stop removes all three execution artifact sets.",
-            "Every provisioned C3/TAP plan has its unchanged teardown pair; the test prints seed and rerun command and remains in-process with no expectation evidence."
+            "After fencing accepted Failed or Terminated predecessor state, complete successor provision, launch, publication or unwind precedes one exact-old driver→mTLS→network cleanup attempt.",
+            "View fsync precedes successor effects; rejected publication consumes its reservation, fully unwinds, survives redb reopen, and later allocation advances above the gap for both drivers.",
+            "Fresh Running or Failed publication preserves predecessor rows/history, zeroes successor history, releases hooks/index only after accepted Running, and obeys the four-result precedence table.",
+            "Seeded Service, late-exit, and stream schedules preserve workload budgets, predecessor-scoped veto/history, fresh successor state, typed stream outcomes, and unrelated-allocation complements.",
+            "Qualified-metal execution proves exact-old cleanup cannot bind, remove, signal, or corrupt successor VM artifacts, rootfs, SVID/mTLS, process, cgroup, socket, or final cleanup."
           ],
-          "test_file": "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs",
-          "scenario_name": "vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids",
-          "scenario_ids": [
-            "S-284-SIM-01"
-          ],
+          "test_file": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs",
+          "scenario_name": "successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver",
+          "scenario_ids": ["S-284-SIM-01", "S-284-SIM-02", "S-284-SIM-03", "S-284-SIM-04", "S-284-SIM-05", "S-284-SIM-P1", "S-284-SIM-P2", "S-284-SIM-P3", "S-284-SIM-P4", "S-284-SIM-P5", "S-284-SIM-P6", "S-284-SIM-P7", "S-284-SIM-P8", "S-284-METAL-P1", "S-284-METAL-P2"],
           "files_to_modify": [
-            "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs"
-          ],
-          "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test e10_vm_early_exit_spike -E 'test(vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids) or test(no_intervening_restart_reclamation_preserves_authored_ending_control)' --no-capture --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(reconciler_runtime_view_store) or test(vm_reclamation_claim_lifecycle)' --no-fail-fast",
-            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
-            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
-          ],
-          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): this seeded state-machine integration is a fixed example, not proptest. Remove only its exact 01-02 ignore; never change its fixture, assertions, seed, rerun command, or bounded-change universe. It must exercise production owners in-process and must not spawn the Overdrive binary or emit expectation evidence. If 01-01 already makes it green, a marker-only step is valid; do not invent a Sim seam or production mechanism. No mutation testing. Advance only after review-01-02.md records APPROVED."
-        },
-        {
-          "id": "01-03",
-          "name": "Prove native artifact ownership",
-          "description": "Activate six qualified-metal regressions for retained predecessor history, clean clones, SVID re-enrolment, disjoint VM artifacts, syscall ordering, and final cleanup.",
-          "agent": "nw-software-crafter",
-          "deps": [
-            "01-02"
-          ],
-          "estimate_hours": 8,
-          "criteria": [
-            "S-VM-28 and S-VM-81 retain PlatformReclaimed predecessors while distinct fresh rows reach Running with zero/None history and replacement SVID coverage.",
-            "S-VM-48 boots the fresh allocation from an unmodified clone and leaves the operator rootfs byte-identical while retaining predecessor history.",
-            "S-GTI-06a reinstalls fresh SVID and exact mesh guard before EXEC, completes authenticated flow naturally, and leaves predecessor and replacement processes absent.",
-            "S-GTI-06b retains the typed INPUT-hook reinstall failure under a fresh zero/None row, releases no EXEC or guest frame, and cleans both processes.",
-            "S-284-METAL-01 observes distinct successful beacon binds, second VMM Running, new-create-before-old-cleanup strace ordering, replacement survival, and final absence of both exact artifact families and PIDs."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
-          "scenario_name": "predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts",
-          "scenario_ids": [
-            "S-VM-81",
-            "S-VM-28",
-            "S-VM-48",
-            "S-GTI-06a",
-            "S-GTI-06b",
-            "S-284-METAL-01"
-          ],
-          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs",
+            "crates/overdrive-sim/tests/integration/service_backend_projection.rs",
+            "crates/overdrive-sim/tests/allocation_restart_write_spike.rs",
+            "crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs",
             "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
             "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
             "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo check -p overdrive-cli --all-targets --features integration-tests,kvm-tests",
-            "cargo xtask lima run -- cargo clippy -p overdrive-cli --all-targets --features integration-tests,kvm-tests -- -D warnings",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test driver_neutral_allocation_replacement --no-capture --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test integration -E 'test(service_backend_projection::liveness_restart_budget_and_finalization_keep_projection_handoffs) or test(service_backend_projection::failed_withdrawal_drains_terminal_and_repairs_after_view_reload) or test(service_backend_projection::startup_failure_withdraws_then_fresh_successor_starts_unobserved)' --no-capture --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test acceptance -E 'test(service_kind_vm_terminal_invariant::terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility)' --no-capture",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test allocation_restart_write_spike --no-capture --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests,overdrive-control-plane/integration-tests --test e09_v2_failure_stream_overlap_spike --no-capture --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings",
             "cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --test integration -E 'test(reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation) or test(reclaim_then_fresh_start_retains_predecessor_and_resets_history) or test(restarted_vm_boots_from_a_clean_unmodified_rootfs_copy) or test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again) or test(failed_re_enrolment_after_platform_reclamation_stays_closed) or test(predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts)' --no-capture --no-fail-fast"
           ],
-          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): these are fixed real-I/O Tier-3 examples; adjacent 01-01 proptests own input amplification. Remove only the six exact 01-03 ignores; never weaken or replace their bounded-change oracles. Lima is compile/clippy-only and non-signal for kvm-tests; execution must use `cargo xtask metal run` on qualified native non-virtualized x86_64 KVM. Rust tests drive in-process production composition; Cloud Hypervisor/guest/strace are legitimate external fixtures. No expectations, generalized TAP/cgroup/clone/Landlock hardening, or per-step mutation. Advance only after review-01-03.md records APPROVED."
+          "implementation_notes": "Activate exactly eighteen mapped pending bodies; SIM-P8 stays active as preservation evidence. Preserve all exact bounded-change/unbounded-preservation declarations, seeds, bodies, fixtures, oracles, redb close/reopen, substrate gates, and strace. Reuse existing actions, runtime persistence, ports, errors, index, allocator, and cleanup owners. No new mechanism or mutation testing."
         }
       ]
     }
   ],
   "scenario_mappings": [
+    {"id": "S-284-PURE-01", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "replacement_identity_is_driver_neutral_for_exec_and_vm", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-02", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "workload_failure_charges_only_the_fresh_successor_candidate", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-03", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "platform_reclamation_carries_policy_without_failure_charge_for_every_driver", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-04", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "desired_generation_replacement_carries_policy_without_failure_charge", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-05", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "only_numeric_current_failed_or_terminated_predecessor_is_eligible", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-06", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-07", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "accepted_failed_successor_is_current_while_view_only_reservation_is_not", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-08", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "retry_deadline_is_derived_only_from_numeric_current_accepted_candidate", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-09", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "unparseable_attempts_do_not_participate_in_allocation", "contract_shape": "pure-function"},
+    {"id": "S-284-PURE-10", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "allocator_issues_final_u32_identity_once_then_stops_without_wrap", "contract_shape": "pure-function"},
+    {"id": "S-284-PROP-01", "step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "identity_advances_above_rows_and_reservations_for_every_driver", "contract_shape": "pure-function"},
+    {"id": "S-VM-26", "step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs", "executable": "job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero", "contract_shape": "pure-function"},
+    {"id": "S-VM-27", "step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs", "executable": "six_consecutive_reclamations_never_trip_restart_budget_exhausted", "contract_shape": "pure-function"},
+    {"id": "S-284-CORE-P1", "step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/exec_reconciler_purity.rs", "executable": "restart_action_carries_full_alloc_spec_from_live_job", "contract_shape": "pure-function"},
+    {"id": "S-284-SIM-01", "step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-02", "step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "successor_and_cleanup_outcomes_follow_the_ratified_precedence_table", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-03", "step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "accepted_failed_successor_publishes_at_fresh_key_with_zero_history", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-04", "step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "rejected_successor_publication_fully_unwinds_without_immediate_second_proposal", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-05", "step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P1", "step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "liveness_restart_budget_and_finalization_keep_projection_handoffs", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P2", "step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "failed_withdrawal_drains_terminal_and_repairs_after_view_reload", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P3", "step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "startup_failure_withdraws_then_fresh_successor_starts_unobserved", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P4", "step": "01-02", "artifact": "crates/overdrive-sim/tests/allocation_restart_write_spike.rs", "executable": "predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P5", "step": "01-02", "artifact": "crates/overdrive-sim/tests/allocation_restart_write_spike.rs", "executable": "fresh_successor_publication_without_predecessor_exit_control", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P6", "step": "01-02", "artifact": "crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs", "executable": "overlapping_healthy_stops_preserve_e09_startup_failure_result", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P7", "step": "01-02", "artifact": "crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs", "executable": "completed_healthy_stops_control_reports_startup_failure", "contract_shape": "bounded-change"},
+    {"id": "S-284-SIM-P8", "step": "01-02", "artifact": "crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs", "executable": "terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility", "contract_shape": "unbounded-preservation", "activation": "active-preservation-control"},
+    {"id": "S-284-METAL-P1", "step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs", "executable": "predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts", "contract_shape": "bounded-change"},
     {
-      "id": "S-284-PURE-01",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "vm_failure_reserves_fresh_execution_and_preserves_predecessor",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-02",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "vm_reclamation_carries_policy_without_charging_failure_budget",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-03",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "unpublished_reservation_is_skipped_without_becoming_current",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-04",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "retry_deadline_is_derived_only_from_current_accepted_candidate",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-05",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "numeric_current_row_owns_replacement_and_history_stays_isolated",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-06",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "vm_uses_fresh_start_while_exec_keeps_same_id_restart",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-07",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "exhausted_vm_attempt_domain_emits_no_execution_action",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-08",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "vm_max_minus_one_issues_the_final_attempt_identity",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-09",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "malformed_attempt_suffix_is_not_silently_reused",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-10",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "initial_vm_placement_reserves_zero_before_dispatch",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PURE-11",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "generation_replacement_reserves_fresh_id_without_failure_increment",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-PROP-01",
-      "step": "01-01",
-      "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
-      "executable": "vm_identity_advances_above_rows_and_reservations",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-VM-26",
-      "step": "01-01",
-      "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
-      "executable": "job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-VM-27",
-      "step": "01-01",
-      "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
-      "executable": "six_consecutive_reclamations_never_trip_restart_budget_exhausted",
-      "contract_shape": "pure-function"
-    },
-    {
-      "id": "S-284-SIM-01",
+      "id": "S-284-METAL-P2",
       "step": "01-02",
-      "artifact": "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs",
-      "executable": "vm_recreation_reserves_each_execution_and_old_cleanup_cannot_cross_ids",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-VM-81",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
-      "executable": "reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-VM-28",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
-      "executable": "reclaim_then_fresh_start_retains_predecessor_and_resets_history",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-VM-48",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
-      "executable": "restarted_vm_boots_from_a_clean_unmodified_rootfs_copy",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-GTI-06a",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-      "executable": "a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-GTI-06b",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-      "executable": "failed_re_enrolment_after_platform_reclamation_stays_closed",
-      "contract_shape": "bounded-change"
-    },
-    {
-      "id": "S-284-METAL-01",
-      "step": "01-03",
-      "artifact": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
-      "executable": "predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts",
+      "artifacts": ["crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs", "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs", "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"],
+      "executables": ["reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation", "reclaim_then_fresh_start_retains_predecessor_and_resets_history", "restarted_vm_boots_from_a_clean_unmodified_rootfs_copy", "a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again", "failed_re_enrolment_after_platform_reclamation_stays_closed"],
       "contract_shape": "bounded-change"
     }
+  ],
+  "pending_body_activation_mappings": [
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "replacement_identity_is_driver_neutral_for_exec_and_vm", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "workload_failure_charges_only_the_fresh_successor_candidate", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "platform_reclamation_carries_policy_without_failure_charge_for_every_driver", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "desired_generation_replacement_carries_policy_without_failure_charge", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "only_numeric_current_failed_or_terminated_predecessor_is_eligible", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "accepted_failed_successor_is_current_while_view_only_reservation_is_not", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "retry_deadline_is_derived_only_from_numeric_current_accepted_candidate", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "unparseable_attempts_do_not_participate_in_allocation", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "allocator_issues_final_u32_identity_once_then_stops_without_wrap", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs", "executable": "identity_advances_above_rows_and_reservations_for_every_driver", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs", "executable": "job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs", "executable": "six_consecutive_reclamations_never_trip_restart_budget_exhausted", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-01", "artifact": "crates/overdrive-core/tests/acceptance/exec_reconciler_purity.rs", "executable": "restart_action_carries_full_alloc_spec_from_live_job", "intended_ignore_reason": "pending DELIVER step 01-01"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "successor_and_cleanup_outcomes_follow_the_ratified_precedence_table", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "accepted_failed_successor_publishes_at_fresh_key_with_zero_history", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs", "executable": "rejected_successor_publication_fully_unwinds_without_immediate_second_proposal", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "liveness_restart_budget_and_finalization_keep_projection_handoffs", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "failed_withdrawal_drains_terminal_and_repairs_after_view_reload", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/integration/service_backend_projection.rs", "executable": "startup_failure_withdraws_then_fresh_successor_starts_unobserved", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/allocation_restart_write_spike.rs", "executable": "predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/allocation_restart_write_spike.rs", "executable": "fresh_successor_publication_without_predecessor_exit_control", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs", "executable": "overlapping_healthy_stops_preserve_e09_startup_failure_result", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-sim/tests/e09_v2_failure_stream_overlap_spike.rs", "executable": "completed_healthy_stops_control_reports_startup_failure", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs", "executable": "reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs", "executable": "reclaim_then_fresh_start_retains_predecessor_and_resets_history", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs", "executable": "restarted_vm_boots_from_a_clean_unmodified_rootfs_copy", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs", "executable": "predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs", "executable": "a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again", "intended_ignore_reason": "pending DELIVER step 01-02"},
+    {"step": "01-02", "artifact": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs", "executable": "failed_re_enrolment_after_platform_reclamation_stays_closed", "intended_ignore_reason": "pending DELIVER step 01-02"}
   ],
   "implementation_scope": {
     "source_directories": [
       "crates/overdrive-reconcilers/src/",
-      "crates/overdrive-core/src/reconcilers/"
+      "crates/overdrive-core/src/reconcilers/",
+      "crates/overdrive-control-plane/src/action_shim/"
     ],
     "test_directories": [
       "crates/overdrive-reconcilers/tests/acceptance/",
@@ -336,20 +231,20 @@
     "excluded_patterns": [
       "docs/product/architecture/**",
       "docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md",
+      "docs/feature/vm-recreation-allocation-id-reuse/deliver/execution-log.json",
+      "docs/feature/vm-recreation-allocation-id-reuse/deliver/superseded-vm-only/**",
       "verification/expectations/**",
       "examples/**",
-      "VmIncarnationId",
-      "same-ID VM compatibility",
-      "blind unlink/retry/sleep/global lock",
-      "generalized TAP/cgroup/clone/Landlock hardening",
-      "per-step mutation testing"
+      "new action/API/port/store/schema/driver policy/cleanup owner/retry/lock/network subsystem",
+      "same-ID compatibility or VM-only identity branch",
+      "per-step or final mutation testing"
     ],
-    "scope_rule": "These paths are necessary-scope guidance, not restrictive allowlists. Only acceptance-required production, test, harness, configuration, and compiler fallout may expand them, with the reason documented and no adjacent hardening."
+    "scope_rule": "Paths are necessary-scope guidance, not restrictive allowlists. Only acceptance-required compiler fallout may expand them, with the reason recorded and no adjacent hardening."
   },
   "validation": {
     "status": "approved",
-    "reviewer": "nw-solution-architect-reviewer (GPT-5.6 Sol/xhigh)",
-    "approved_at": "2026-09-13T00:40:36Z",
-    "notes": "Independent roadmap review APPROVED with 0 blockers, 0 high findings, 0 low findings, and exact 21/21 DISTILL scenario mapping."
+    "reviewer": "independent driver-neutral roadmap reviewer (GPT-5.6 Sol/xhigh)",
+    "approved_at": "2026-09-13T17:10:56Z",
+    "notes": "Iteration-1 F-01/F-02/F-03 are remediated: two production-changing steps own all 32 pending bodies, S-284-SIM-05 belongs only to 01-02, and all 29 scenario IDs map exactly once. Independent re-review APPROVED."
   }
 }
