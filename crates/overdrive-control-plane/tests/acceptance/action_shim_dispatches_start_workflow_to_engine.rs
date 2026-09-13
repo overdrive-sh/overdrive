@@ -142,6 +142,8 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &bus,
         &tick,
         &node,

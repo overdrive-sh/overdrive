@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -55,7 +55,8 @@ Eligibility and BPF Hydrated are unaffected.
 
 - [Domain identity aggregate/lifecycle](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-aggregate-contracts)
 - [Exact Application identity contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-identity-and-lifecycle-integration)
-- [Application gateway-SVID decision](adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md)
+- [Application Gateway SVID lifecycle](adr-0109-dedicated-gateway-svid-identity-lifecycle.md)
+- [Application exact-peer mTLS](adr-0126-exact-peer-gateway-client-mtls.md)
 - [System trust-boundary decision](adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)
 - ADR-0063 and ADR-0067

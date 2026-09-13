@@ -29,7 +29,12 @@
 //! `Harness::run` here is synchronous so the xtask binary can call it
 //! without imposing an async boundary on CI.
 
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::large_futures,
+    reason = "mandatory gateway AppState composition increases existing owner futures"
+)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -735,6 +740,15 @@ impl Harness {
             }
             Invariant::EndingInFlightIsNeverReclaimed => {
                 crate::invariants::vm_reclamation::evaluate_ending_in_flight_is_never_reclaimed()
+            }
+            Invariant::GatewayApplicationGenerationLifecycleIsSafe => {
+                crate::invariants::gateway_application::evaluate_generation_lifecycle_is_safe(
+                    seed,
+                )
+                .await
+            }
+            Invariant::GatewayApplicationShutdownConverges => {
+                crate::invariants::gateway_application::evaluate_shutdown_converges(seed).await
             }
         }
     }

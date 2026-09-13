@@ -162,7 +162,15 @@ async fn serve_refuses_to_start_when_cgroup_fs_probe_fails() {
     std::fs::create_dir_all(&config_dir).expect("mkdir conf");
 
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind");
-    let args = ServeArgs { bind, data_dir, config_dir };
+    let args = ServeArgs {
+        bind,
+        data_dir,
+        config_dir,
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
 
     let result = serve::run(args).await;
 

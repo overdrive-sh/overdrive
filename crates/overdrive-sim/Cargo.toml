@@ -44,6 +44,13 @@ overdrive-core = { workspace = true, features = ["test-utils"] }
 # already depends on adapter surfaces for its harness; the edge from
 # adapter-sim to adapter-host `overdrive-reconcilers` is acyclic.
 overdrive-reconcilers.workspace = true
+# Public-ingress Sim adapters implement the exact gateway-owned ports. This is
+# the DESIGN-pinned adapter-sim -> adapter-host edge; production binaries never
+# depend on overdrive-sim. The pending Gateway Application invariant driver
+# constructs the real builder's host-owned certified-key/socket dependencies,
+# while rcgen/rustls/tokio-rustls drive its retained public TLS connection.
+overdrive-gateway.workspace = true
+overdrive-host.path = "../overdrive-host"
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true
@@ -78,6 +85,9 @@ serde_json.workspace     = true
 # Consumes the existing `[workspace.dependencies]` entry per
 # `.claude/rules/development.md` § Dependencies — no new workspace dep.
 tracing.workspace        = true
+rcgen.workspace          = true
+rustls.workspace         = true
+tokio-rustls.workspace   = true
 # Used by the `ExitEventObservableOutcome` invariant evaluator
 # (fix-exit-observer-running-gate step 01-05 — Solution 4) to
 # archive a `Job` aggregate into the in-process `LocalIntentStore`
@@ -124,13 +134,9 @@ proptest.workspace = true
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
 # Dev-dep ONLY — the `sim_ca_fixture_cert_key_match` integration test parses
-# the `SimCa` fixture leaf key/cert bytes to prove cert↔key correspondence
-# (mirrors the host adapter's `rcgen_svid_returns_matching_leaf_private_key`
-# proof, ported to the sim consts). `overdrive-sim` MUST NOT gain these in
-# `[dependencies]` — the sim treats fixture material as opaque bytes and never
-# parses real crypto on its production path (the dst-lint discipline applies to
-# `[dependencies]`, not the test-only graph). Gated behind `integration-tests`.
-rcgen.workspace        = true
+# the `SimCa` fixture leaf certificate to prove cert/key correspondence. The
+# public-ingress invariant's rcgen/rustls dependencies above are separate: they
+# exercise the real GatewayBuilder and a retained public TLS connection.
 x509-parser.workspace  = true
 # Dev-dep ONLY — the `SimMtlsIntercept` contract tests (GH #250, S-MIF-06/07)
 # arm faults in the REAL error shapes the production substrate produces, which

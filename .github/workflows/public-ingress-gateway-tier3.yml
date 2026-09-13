@@ -1,0 +1,52 @@
+name: Public ingress Tier 3
+
+on:
+  schedule:
+    - cron: '41 2 * * 2,5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-ingress-gateway-tier3-tcp443
+  cancel-in-progress: false
+
+jobs:
+  real-kernel-public-ingress:
+    name: built binary / cgroup-v2 / BPF / TCP-443
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host-safe cleartext-guard regression
+        run: tests/tier3/public-ingress-gateway/runner-regression.sh
+      - uses: lima-vm/lima-actions/setup@v1
+      - name: Start canonical Linux VM
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+      - name: Build the default-feature product once and run AT-PIG-E2E-1
+        run: |
+          # Expansion belongs to the guest bash -lc, not the host shell.
+          # shellcheck disable=SC2016
+          limactl shell overdrive bash -lc '
+            set -euo pipefail
+            cargo xtask bpf-build
+            cargo build -p overdrive-cli --bin overdrive
+            target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c "import json,sys; print(json.load(sys.stdin)[\"target_directory\"])")"
+            product="$(readlink -f "${target_dir}/debug/overdrive")"
+            scratch_parent="$(pwd)/target/tier3"
+            mkdir -p "$scratch_parent"
+            scratch="${scratch_parent}/public-ingress-${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-1}"
+            sudo flock /var/lock/overdrive-public-ingress-tcp443.lock \
+              tests/tier3/public-ingress-gateway/runner.sh "$product" "$scratch"
+          '
+      - name: Upload append-only Tier-3 observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-ingress-gateway-tier3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/tier3/
+          if-no-files-found: warn
+      - name: Stop VM
+        if: always()
+        run: limactl stop --force overdrive || true

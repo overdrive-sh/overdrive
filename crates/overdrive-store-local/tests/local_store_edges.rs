@@ -13,17 +13,57 @@
 //! Per `.claude/rules/testing.md` Tier 3, all four use real redb backed
 //! by `tempfile::TempDir`.
 
-#![allow(clippy::expect_used)]
+#![allow(clippy::doc_markdown, clippy::expect_used)]
 
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use overdrive_core::traits::intent_store::{IntentStore, TxnOutcome};
+use overdrive_core::traits::intent_store::{IntentStore, IntentSubscriptionEvent, TxnOutcome};
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn watch_preserves_the_exact_nonzero_broadcast_lag_count_then_continues() {
+    let tmp = TempDir::new().expect("temp dir");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
+    let mut watch = store.watch(b"lag/").await.expect("watch");
+    for index in 0..=1024_u16 {
+        let key = format!("lag/{index:04}");
+        store.put(key.as_bytes(), b"value").await.expect("committed put");
+    }
+    let lag = timeout(Duration::from_secs(2), watch.next())
+        .await
+        .expect("lag event arrives")
+        .expect("stream remains open");
+    assert!(matches!(
+        lag,
+        IntentSubscriptionEvent::Lagged { skipped } if skipped.get() == 1
+    ));
+
+    store.put(b"lag/after", b"after").await.expect("post-lag put");
+    let mut observed_after = false;
+    for _ in 0..=1024 {
+        let event = timeout(Duration::from_secs(2), watch.next())
+            .await
+            .expect("watch continues")
+            .expect("stream remains open");
+        if event
+            == (IntentSubscriptionEvent::Changed {
+                key: Bytes::from_static(b"lag/after"),
+                value: Some(Bytes::from_static(b"after")),
+            })
+        {
+            observed_after = true;
+            break;
+        }
+    }
+    assert!(observed_after, "watch continues after reporting exact loss");
+}
+
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn watch_fires_on_delete_with_empty_value() {
     let tmp = TempDir::new().expect("temp dir");
@@ -43,8 +83,13 @@ async fn watch_fires_on_delete_with_empty_value() {
 
     // Key matches; value is empty to signal a delete per the trait
     // docstring.
-    assert_eq!(event.0, Bytes::copy_from_slice(b"kv/payments"));
-    assert!(event.1.is_empty(), "delete event carries an empty value");
+    assert_eq!(
+        event,
+        IntentSubscriptionEvent::Changed {
+            key: Bytes::copy_from_slice(b"kv/payments"),
+            value: None,
+        }
+    );
 }
 
 #[tokio::test]

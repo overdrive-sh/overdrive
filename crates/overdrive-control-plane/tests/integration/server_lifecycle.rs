@@ -148,7 +148,10 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
         .shutdown(Duration::from_secs(2))
         .await
         .expect_err("typed worker teardown failure reaches the server caller");
-    assert_eq!(failure.teardown_failure().failures.len(), 1);
+    assert_eq!(
+        failure.teardown_failure().expect("fixture induces mTLS teardown failure").failures.len(),
+        1,
+    );
     assert_eq!(
         worker
             .shutdown_owner()
@@ -176,7 +179,10 @@ async fn abrupt_shutdown_propagates_worker_failure_without_a_retry_capability() 
         .abort_for_test()
         .await
         .expect_err("abrupt owner loss cannot discard typed worker teardown failure");
-    assert_eq!(failure.teardown_failure().failures.len(), 1);
+    assert_eq!(
+        failure.teardown_failure().expect("fixture induces mTLS teardown failure").failures.len(),
+        1,
+    );
     assert_eq!(
         worker
             .shutdown_owner()

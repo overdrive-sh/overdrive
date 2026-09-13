@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 

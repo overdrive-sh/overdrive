@@ -71,6 +71,7 @@ async fn production_boot_spawns_the_interest_router() {
         dns_probe_fault: None,
         mtls_identity_override: None,
         vmm_override: None,
+        gateway: None,
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

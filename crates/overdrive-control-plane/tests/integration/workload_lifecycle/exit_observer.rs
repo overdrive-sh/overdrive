@@ -24,6 +24,11 @@
 //! kernel — so this file gates only on `#[cfg(feature =
 //! "integration-tests")]` (no `target_os = "linux"`).
 
+#![allow(
+    clippy::large_futures,
+    reason = "mandatory gateway AppState composition increases existing owner futures"
+)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

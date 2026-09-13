@@ -13,6 +13,8 @@
 //! # Durability shape
 //!
 //! Two redb tables:
+
+#![expect(clippy::todo, reason = "public-ingress DISTILL RED observation adapters")]
 //!
 //! * `alloc_status` — keyed by canonical `AllocationId` bytes, value is
 //!   the rkyv-archived `AllocStatusRow`. Overwrite semantics on the key
@@ -78,8 +80,11 @@ use futures::Stream;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
+use overdrive_core::id::{AllocationId, IssuanceOrdinal, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow,
     AllocLifecycleOccurrenceRowEnvelope, AllocLifecyclePredecessor, AllocLifecycleUnreadable,
@@ -576,6 +581,20 @@ fn write_alloc_lifecycle_transaction(
 
 #[async_trait]
 impl ObservationStore for LocalObservationStore {
+    async fn public_certified_key_status_row(
+        &self,
+        _id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: real redb public-certified-key status point read")
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        _node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: real redb Gateway Application status point read")
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         let row: ObservationRow = row.into();
         let inner = Arc::clone(&self.inner);
@@ -639,6 +658,10 @@ impl ObservationStore for LocalObservationStore {
                 }
                 ObservationRow::ProbeResult(_) => {
                     unreachable!("probe-result rows use write_probe_result")
+                }
+                ObservationRow::PublicCertifiedKeyStatus(_)
+                | ObservationRow::GatewayApplicationStatus(_) => {
+                    todo!("SCAFFOLD: persist public-ingress LWW status row")
                 }
             };
             // Commit unconditionally — a rejected write performed only

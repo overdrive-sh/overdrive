@@ -182,6 +182,8 @@ async fn dispatch_action(
         &SimCa::new(Arc::new(SimEntropy::new(0))),
         &SimClock::new(),
         &IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &lifecycle_tx,
         &tick,
         &writer_node,

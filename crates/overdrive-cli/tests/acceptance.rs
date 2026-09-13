@@ -18,7 +18,9 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // public-ingress-gateway — exact serve argv and all-or-none configuration.
     mod insecure_rejected;
+    mod public_ingress_gateway;
     mod render_cluster_and_node;
     mod render_workload_describe;
     mod render_workload_stop;

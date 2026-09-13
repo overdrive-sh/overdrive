@@ -55,6 +55,7 @@ use overdrive_core::reconcilers::{
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
 
+pub mod gateway_svid_lifecycle;
 pub mod noop_heartbeat;
 pub mod service_lifecycle;
 pub mod service_map_hydrator;
@@ -66,6 +67,9 @@ pub mod workload_lifecycle;
 // Flat re-exports so importers spell `overdrive_reconcilers::<Symbol>` for the
 // moved impls / State / View / helpers (mirrors the ergonomic top-level access
 // the impls had inside `overdrive_core::reconcilers` before the move).
+pub use gateway_svid_lifecycle::{
+    GatewaySvidLifecycle, GatewaySvidLifecycleState, GatewaySvidLifecycleView,
+};
 pub use noop_heartbeat::NoopHeartbeat;
 pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
@@ -130,6 +134,8 @@ pub enum AnyState {
     /// [`vm_reclamation::VmReclamationState`] (SD-1's Bar-2 reconciler,
     /// ADR-0083 §D7 / `brief.md` §105a).
     VmReclamation(vm_reclamation::VmReclamationState),
+    /// Dedicated node gateway-SVID lifecycle projection.
+    GatewaySvidLifecycle(GatewaySvidLifecycleState),
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +166,8 @@ pub enum AnyReconciler {
     /// `ReclaimAllocation` / `DiscardStrandedArtifacts`. See
     /// [`vm_reclamation::VmReclamation`].
     VmReclamation(vm_reclamation::VmReclamation),
+    /// Dedicated gateway-SVID lifecycle.
+    GatewaySvidLifecycle(GatewaySvidLifecycle),
 }
 
 impl AnyReconciler {
@@ -174,6 +182,7 @@ impl AnyReconciler {
             Self::ServiceLifecycle(r) => r.name(),
             Self::SvidLifecycle(r) => r.name(),
             Self::VmReclamation(r) => r.name(),
+            Self::GatewaySvidLifecycle(r) => r.name(),
         }
     }
 
@@ -189,6 +198,7 @@ impl AnyReconciler {
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
             Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
             Self::VmReclamation(_) => <vm_reclamation::VmReclamation as Reconciler>::NAME,
+            Self::GatewaySvidLifecycle(_) => <GatewaySvidLifecycle as Reconciler>::NAME,
         }
     }
 
@@ -206,6 +216,7 @@ impl AnyReconciler {
             Self::ServiceLifecycle(r) => r.resync_schedule(),
             Self::SvidLifecycle(r) => r.resync_schedule(),
             Self::VmReclamation(r) => r.resync_schedule(),
+            Self::GatewaySvidLifecycle(r) => r.resync_schedule(),
         }
     }
 
@@ -224,6 +235,7 @@ impl AnyReconciler {
             Self::ServiceLifecycle(r) => r.interests(),
             Self::SvidLifecycle(r) => r.interests(),
             Self::VmReclamation(r) => r.interests(),
+            Self::GatewaySvidLifecycle(r) => r.interests(),
         }
     }
 
@@ -296,6 +308,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::VmReclamation(next_view))
             }
+            (
+                Self::GatewaySvidLifecycle(r),
+                AnyState::GatewaySvidLifecycle(desired),
+                AnyState::GatewaySvidLifecycle(actual),
+                AnyReconcilerView::GatewaySvidLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::GatewaySvidLifecycle(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -357,6 +378,12 @@ impl AnyReconciler {
                 AnyState::VmReclamation(actual),
                 AnyReconcilerView::VmReclamation(view),
             ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
+                Self::GatewaySvidLifecycle(r),
+                AnyState::GatewaySvidLifecycle(desired),
+                AnyState::GatewaySvidLifecycle(actual),
+                AnyReconcilerView::GatewaySvidLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
             _ => {
                 panic!(
                     "AnyReconciler::next_evaluation_at dispatch mismatch — \
@@ -402,6 +429,9 @@ impl AnyReconciler {
             Self::VmReclamation(r) => {
                 Ok(AnyState::VmReclamation(r.hydrate_desired(ctx, target).await?))
             }
+            Self::GatewaySvidLifecycle(r) => {
+                Ok(AnyState::GatewaySvidLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
         }
     }
 
@@ -436,6 +466,9 @@ impl AnyReconciler {
             }
             Self::VmReclamation(r) => {
                 Ok(AnyState::VmReclamation(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::GatewaySvidLifecycle(r) => {
+                Ok(AnyState::GatewaySvidLifecycle(r.hydrate_actual(ctx, target).await?))
             }
         }
     }
@@ -494,4 +527,6 @@ pub enum AnyReconcilerView {
     /// ever consulted, so retry falls out of the runtime's `has_work`
     /// self-re-enqueue.
     VmReclamation(vm_reclamation::VmReclamationView),
+    /// Dedicated gateway-SVID retry-memory view.
+    GatewaySvidLifecycle(GatewaySvidLifecycleView),
 }

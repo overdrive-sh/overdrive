@@ -308,6 +308,8 @@ impl Fixture {
                 &self.ca,
                 self.clock.as_ref(),
                 &self.identity,
+                &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+                None,
                 &self.events,
                 &tick,
                 &self.node,

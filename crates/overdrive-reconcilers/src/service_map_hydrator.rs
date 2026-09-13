@@ -417,6 +417,7 @@ impl Reconciler for ServiceMapHydrator {
                     port: desired_svc.port,
                     proto: desired_svc.proto,
                     backends: remote_survivors.clone(),
+                    gateway_demand: None,
                     correlation: CorrelationKey::derive(&target_str, &spec_hash, "update-service"),
                 });
 

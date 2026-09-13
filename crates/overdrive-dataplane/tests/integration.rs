@@ -67,6 +67,9 @@ mod integration {
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
+    /// Public-ingress exact-peer real-rustls negative: selected identity A,
+    /// valid peer B, one attempt, no body/fallback.
+    mod public_ingress_gateway_mtls;
     /// phase-2-xdp-service-map Slice 09 step 09-03 (S-2.2-33;
     /// ADR-0045 § Operational) — loader attach topology under
     /// `bpf_redirect`-on-XDP datapath. Verifies dual-XDP attach

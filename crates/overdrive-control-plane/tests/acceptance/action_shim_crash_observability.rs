@@ -330,6 +330,8 @@ async fn drive_post_assignment_provision_failure(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &lifecycle_tx,
         &tick,
         &NodeId::new("writer-1").expect("writer node"),
@@ -474,6 +476,8 @@ async fn drive_rejected_start(
                 )),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
                 &lifecycle_tx,
                 &tick,
                 &NodeId::new("writer-1").expect("writer node"),
@@ -669,6 +673,8 @@ async fn dispatch_with_driver(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -753,6 +759,25 @@ impl PendingTerminalObservationStore {
 
 #[async_trait::async_trait]
 impl ObservationStore for PendingTerminalObservationStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &overdrive_core::public_ingress::PublicCertifiedKeyId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.public_certified_key_status_row(id).await
+    }
+    async fn gateway_application_status_row(
+        &self,
+        node: &NodeId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.gateway_application_status_row(node).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }
@@ -1119,6 +1144,8 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         deadline: now + Duration::from_secs(2),
     };
 
+    let gateway_identity =
+        overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled();
     let dispatch = dispatch(
         vec![arm.action(alloc.clone())],
         &drivers,
@@ -1128,6 +1155,8 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         &ca,
         &clock,
         &identity,
+        &gateway_identity,
+        None,
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -1372,6 +1401,8 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         by: overdrive_core::transition_reason::StoppedBy::Operator,
     });
 
+    let gateway_identity =
+        overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled();
     let dispatch = dispatch(
         vec![Action::StopAllocation { alloc_id: alloc.clone(), terminal: terminal.clone() }],
         &drivers,
@@ -1381,6 +1412,8 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         &ca,
         &clock,
         &identity,
+        &gateway_identity,
+        None,
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -1627,6 +1660,8 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             )),
             &overdrive_sim::adapters::clock::SimClock::new(),
             &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
             &lifecycle_tx,
             &tick,
             &NodeId::new("writer-1").expect("writer node"),

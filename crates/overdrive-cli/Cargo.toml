@@ -62,6 +62,7 @@ kvm-tests = []
 
 [dependencies]
 overdrive-core.workspace           = true
+overdrive-gateway.workspace        = true
 # `service_lifecycle::DEFAULT_STARTUP_DEADLINE` moved out of core into
 # `overdrive-reconcilers` per ADR-0086 D3 (step 02-02); `deploy.rs` reads
 # the constant to render the default startup deadline.
@@ -117,6 +118,7 @@ async-trait.workspace         = true
 overdrive-control-plane.path = "../overdrive-control-plane"
 tempfile.workspace           = true
 base64.workspace             = true
+rcgen.workspace              = true
 # Per ADR-0019 the operator config is TOML; the `toml` runtime dep
 # above covers both the `deploy` spec loader and the integration
 # tests that round-trip the trust triple. No YAML serde backend

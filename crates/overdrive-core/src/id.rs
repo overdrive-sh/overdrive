@@ -333,6 +333,14 @@ impl SpiffeId {
             )
         })
     }
+
+    /// Derive the dedicated non-allocation gateway identity:
+    /// `spiffe://overdrive.local/gateway/<node-id>`.
+    #[must_use]
+    #[expect(clippy::todo, reason = "public-ingress DISTILL RED scaffold")]
+    pub fn for_gateway(_node: &NodeId) -> Self {
+        todo!("SCAFFOLD: SpiffeId::for_gateway")
+    }
 }
 
 impl Display for SpiffeId {
@@ -719,7 +727,20 @@ impl From<IssuanceOrdinal> for String {
 /// reconcile iteration finds the prior call's response by looking up the
 /// same key in the `ObservationStore` — decoupling cause from transient
 /// request IDs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct CorrelationKey(String);
 

@@ -21,6 +21,11 @@
 //! `async fn` that tests call directly — no subprocess, no `println!`.
 //! Rendering lives in `crate::render::workload_submit_accepted`.
 
+#![allow(
+    clippy::result_large_err,
+    reason = "exact ServerShutdownError enum carries the typed gateway report"
+)]
+
 use std::path::PathBuf;
 
 use bytes::BytesMut;
@@ -35,6 +40,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
+use overdrive_core::public_ingress::{PublicRouteSpecInput, RouteApplyOutcome};
 use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
@@ -164,6 +170,39 @@ pub struct DeployOutput {
     /// Next-command hint the operator can run to inspect allocation
     /// status — `overdrive workload describe <workload_id>`.
     pub next_command: String,
+}
+
+/// Top-level parser result; Route never enters workload aggregate input.
+#[derive(Debug, Clone)]
+pub enum DeploySpecInput {
+    Workload(WorkloadSpecInput),
+    Route(PublicRouteSpecInput),
+}
+
+/// One-shot deploy output shared by detach and non-detach Route calls.
+#[derive(Debug, Clone)]
+pub enum DeployResourceOutput {
+    WorkloadDetached(DeployOutput),
+    WorkloadStreaming(DeployStreamingOutput),
+    Route(RouteDeployOutput),
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteDeployOutput {
+    pub route_id: String,
+    pub route_generation: String,
+    pub outcome: RouteApplyOutcome,
+    pub endpoint: Url,
+}
+
+/// Parse the spec once, then dispatch workload or one-shot Route semantics.
+#[expect(clippy::todo, reason = "public-ingress DISTILL RED deploy scaffold")]
+#[expect(clippy::unused_async, reason = "exact deploy_resource contract is async")]
+pub async fn deploy_resource(
+    _args: DeployArgs,
+    _stream_workloads: bool,
+) -> Result<DeployResourceOutput, CliError> {
+    todo!("SCAFFOLD: deploy_resource Route/workload dispatch")
 }
 
 /// Submit a job spec to the control plane.

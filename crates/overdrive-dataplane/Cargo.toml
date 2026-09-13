@@ -50,6 +50,7 @@ integration-tests = []
 
 [dependencies]
 overdrive-core.workspace = true
+overdrive-gateway = { path = "../overdrive-gateway" }
 async-trait.workspace    = true
 thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
@@ -165,6 +166,9 @@ hex.workspace                   = true
 # `probe`'s throwaway self-test sentinel (SD-5 / D-MTLS-12); the test PKI consumes
 # the same production `rcgen` dep — no separate dev-dep entry needed.
 ktls.workspace  = true
+tokio-rustls.workspace = true
+overdrive-sim.path = "../overdrive-sim"
+overdrive-host.path = "../overdrive-host"
 
 [lints]
 workspace = true

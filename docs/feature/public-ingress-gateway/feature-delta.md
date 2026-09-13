@@ -1,9 +1,12 @@
 # Feature Delta — `public-ingress-gateway`
 
 > **DESIGN status:** Stages 1–3 of full-stack DESIGN — SYSTEM architecture,
-> DOMAIN model and APPLICATION architecture — are documented as Proposed on
-> 2026-09-13. Application adversarial re-review is in remediation; full-stack
-> handoff remains pending until its exact contracts receive APPROVED.
+> DOMAIN model and APPLICATION architecture — are **APPROVED — user ratification
+> APPROVED, 2026-09-13**. The user explicitly approved the complete
+> `public-ingress-gateway` DESIGN; the former application-review/design-approval
+> gate is closed and the full-stack DESIGN handoff is approved. DISTILL remains
+> **ACCEPTABLE_WITH_DOCUMENTED_GAPS — 12/15 passing** because its separate C4a/C6
+> high-only acceptance gaps remain; DISTILL is not marked approved.
 > Interaction mode: PROPOSE. Density: lean, Tier-1 `[REF]` only
 > (`explicit_override`; optional expansions were not emitted). Stage 3 pins the
 > public/config/persistence/application surfaces that current evidence supports.
@@ -11,8 +14,8 @@
 > node-embedded placement, acquisition-neutral certificate consumption,
 > demand-gated cgroup-BPF Service forwarding, independent Gateway/BPF
 > generations, the public-TLS→gateway-SVID-mTLS trust transition and narrow
-> public-listener gates. Route ADR-0105, Domain ADR-0112–0116 and Application
-> ADR-0106–0111 pin the compatible downstream choices; exact API
+> public-listener gates. Route ADR-0105, Domain ADR-0112–0116/0133 and Application
+> ADR-0106–0111/0122–0132 pin the compatible downstream choices; exact API
 > contracts live only in the Application `[REF]` sections below. The complete cross-owner flow remains
 > `AT-PIG-E2E-1`, a production Tier-3 acceptance boundary—not a spike.
 
@@ -90,7 +93,7 @@ prose:
 | **Implemented fact** | The gateway surfaces are absent, but accepted foundations exist: ServiceMapHydrator partitions Path-A to neither map, same-host non-mesh to LOCAL_BACKEND_MAP and remote to SERVICE_MAP; `cgroup_connect4_service` fires for Path-A; shared Service maps and rustls chain/single-SPIFFE-SAN verification exist; the reserved `expected_peer`/mismatch contract is not exercised because current production always supplies `None`; allocation-keyed identity cannot represent the gateway unchanged. |
 | **Whitepaper** | Historical illustration only. It establishes no binding API, owner, ordering or traffic-path contract. |
 | **This SYSTEM proposal** | One `serve`-owned working gateway: IPv4-A/TCP/443 public TLS/HTTP; Public Route Set resolves exact Service Frontend; the gateway connector registers that frontend against its socket cookie with the Dataplane owner, then its `connect(2)` enters the already-attached `cgroup_connect4_service` hook; the hook selects from the existing `SERVICE_MAP` Maglev inner table and `BACKEND_MAP`, rewrites the destination, and records the actual `BackendId`; Dataplane joins that receipt to the exact applied `Backend.alloc`; gateway-held SVID mTLS pins that identity; no userspace selection. |
-| **Later DESIGN resolution** | Route ADR-0105 owns only the singleton Public Route Set. Domain ADR-0112–0116 own custody/identity/dataplane/demand/state-model decisions. Application ADR-0106–0111 own Route/application owner, custody, BPF selection/identity, gateway SVID/mTLS, public TLS/HTTP and operator status choices. Exact schemas, signatures, config, records/codecs, errors and crate/module contracts live only in the Application `[REF]` sections below. SYSTEM copies use those names without redefining them. |
+| **Later DESIGN resolution** | Route ADR-0105 owns only the singleton Public Route Set. Domain ADR-0112–0116/0133 own custody/identity/receipt/applied-identity/demand/state-model decisions. Application ADR-0106–0111/0122–0132 separately own Route/application admission, custody, preserve-old replacement, demand, BPF selection, receipt, identity publication, Gateway SVID, exact-peer mTLS, public TLS/HTTP/routing/header/limit/streaming/attempt policy and operator status. Exact schemas, signatures, config, records/codecs, errors and crate/module contracts live only in the Application `[REF]` sections below. SYSTEM copies use those names without redefining them. |
 
 The research's operator-supplied-certificate recommendation is restored by the
 latest explicit scope ruling. Its userspace `ServiceBackendRow` selection
@@ -280,8 +283,9 @@ acquisition-neutral custody boundary.
   separately exposes active application/custody and
   relevant BPF hydration status as `GatewayStatusResponse` over operator-mTLS
   `GET /v1/gateway/status` (200 when readable, 500 on observation read error).
-  [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md)
-  and the Application HTTP contract own the exact receipt/error mapping.
+  receipt [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
+  selected identity [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md)
+  and the Application HTTP contract own the exact cause/error mapping.
 - **D-SYS-11 — Restart/drain:** boot rebuilds ServiceMapHydrator state and the
   Dataplane applied-id association, then may run the sentinel-ServiceKey
   `NoBackend` receipt probe before Gateway Identity is Current; that probe proves
@@ -608,7 +612,7 @@ These are responsibilities, not approved Rust types or module names.
 | Public TLS/HTTP | rustls/hyper | TLS 1.3 + bounded HTTP/1.1 |
 | Gateway SVID lifecycle/hold/use | `GatewaySvidLifecycle` + action executor + `GatewayIdentitySlot` | `ensure_current` before bind, restart/near-expiry reissue, and `disable_after_drain`; no public/private-material getter |
 | Selected-peer mTLS | `HostGatewayClientMtls` implementing `GatewayClientMtls` | Present `GatewayIdentitySlot` SVID and require exact receipt-selected workload SAN; transparent kTLS/`MtlsEnforcement` is not this L7 client's API |
-| Clock/entropy | Existing injected `Clock` plus `PublicCertifiedKeyAeadCodec` ring `SystemRandom` | ADR-0107/0109/0110 own the custody, SVID and public-runtime choices; exact clock/entropy contracts are in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction), [Gateway Application/status/HTTP](#wave-design--ref-gateway-application-status-and-http-contract), and [gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration) |
+| Clock/entropy | Existing injected `Clock` plus `PublicCertifiedKeyAeadCodec` ring `SystemRandom` | ADR-0107/0122, ADR-0109/0126 and ADR-0110/0127–0132 own the custody, SVID/mTLS and public-runtime choices; exact clock/entropy contracts are in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction), [Gateway Application/status/HTTP](#wave-design--ref-gateway-application-status-and-http-contract), and [gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration) |
 
 ## Wave: DESIGN / [REF] Technology choices
 
@@ -650,7 +654,7 @@ that justifies them.
 | Existing component | File / accepted record | Overlap | Decision | Justification |
 |---|---|---|---|---|
 | `run_server_with_obs_and_drivers` / `ServerHandle` | `crates/overdrive-control-plane/src/lib.rs` | Composition, probes, task ownership, bounded shutdown | **EXTEND** | The gateway is node infrastructure in the same process/failure domain; a second supervisor duplicates lifecycle ownership. |
-| `Kek`/typed-codec protection pattern | ADR-0063/0048, `overdrive-host::ca` | Protect canonical secret input | **EXTEND per [ADR-0107](../../product/architecture/adr-0107-public-certified-key-custody-and-preserve-old-replacement.md)** | Exact `PublicCertifiedKeyAeadCodec`/record contracts live in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction); the private AEAD engine is reused with distinct KEK/HKDF/AAD and public Web-PKI remains separate from both private CAs. |
+| `Kek`/typed-codec protection pattern | ADR-0063/0048, `overdrive-host::ca` | Protect canonical secret input | **EXTEND per [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md)** | Exact `PublicCertifiedKeyAeadCodec`/record contracts live in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction); the private AEAD engine is reused with distinct KEK/HKDF/AAD and public Web-PKI remains separate from both private CAs. |
 | `IdentityMgr` / `IdentityRead` | ADR-0067 | Allocation-keyed holder pattern | **REUSE PATTERN, CREATE SEPARATE GATEWAY SLOT** | Avoids corrupting AllocationId API while reusing locking/redaction/bundle discipline |
 | `ServiceLifecycle` / `ServiceBackendRow` | ADR-0101, `service_lifecycle.rs` | Backend membership and eligibility | **REUSE AS INDIRECT AUTHORITY** | Sole health publisher; gateway is not a backend-row consumer. |
 | `ServiceMapHydrator` | ADR-0042/0101/0053 | Sole backend application owner | **EXTEND DEMAND-GATED TEACH** | Replace Path-A GATE only for exact live gateway frontend demand; apply its Path-A set to `SERVICE_MAP` plus Dataplane identity association; other Path-A remains gated and gateway still does not consume rows |
@@ -670,30 +674,30 @@ IntentStore/ObservationStore.
 |---|---|---|
 | D-SYS-1 | `serve` owns working in-process gateway, connector, listener and drain | [ADR-0104](../../product/architecture/adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md) |
 | D-SYS-2 | IPv4-A/TCP/443 binds after initial application/BPF/identity prerequisites | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) |
-| D-SYS-3 | `PublicCertifiedKeyCustody` validates/builds+seals, persists complete `PublicCertifiedKeyV1`, atomically publishes the opaque Current/Usable snapshot, then writes `PublicCertifiedKeyStatusRowV1`; `GatewayApplicationOwner` atomically publishes Route/frontend/resolver admission and writes `GatewayApplicationStatusRowV1`; ACME #57 later uses the same install boundary | System boundary [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md); custody [ADR-0107](../../product/architecture/adr-0107-public-certified-key-custody-and-preserve-old-replacement.md) |
+| D-SYS-3 | `PublicCertifiedKeyCustody` validates/builds+seals, persists complete `PublicCertifiedKeyV1`, atomically publishes the opaque Current/Usable snapshot, then writes `PublicCertifiedKeyStatusRowV1`; `GatewayApplicationOwner` atomically publishes Route/frontend/resolver admission and writes `GatewayApplicationStatusRowV1`; ACME #57 later uses the same install boundary | System boundary [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md); custody [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md); replacement [ADR-0122](../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md) |
 | D-SYS-4 | Public Web-PKI certified key, operator HTTPS CA, and internal workload/gateway SPIFFE CA remain three distinct credential domains | [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md), [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md) |
-| D-SYS-5 | Dedicated gateway identity lifecycle/holder owns non-allocation SVID issue/hold/use/reissue/drop | System trust [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md); realization [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md) |
-| D-SYS-6 | Connector registers `(SO_COOKIE, ServiceKey)` with Dataplane, then the already-attached cgroup BPF hook selects/rewrites through `SERVICE_MAP` Maglev inner + `BACKEND_MAP` and records actual BackendId | System packet entry [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md); realization [ADR-0108](../../product/architecture/adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md) |
-| D-SYS-7 | Gateway Application publishes only exact live-frontend demand; ServiceLifecycle publishes eligibility; ServiceMapHydrator demand-gates Path-A TEACH; under the Dataplane guard identity is Reserved before BPF work, the outer swap commits selection, then identity becomes Applied; gateway has no backend watch/cursor | [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md), [ADR-0108](../../product/architecture/adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md) |
+| D-SYS-5 | Dedicated gateway identity lifecycle/holder owns non-allocation SVID issue/hold/use/reissue/drop | System trust [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md); realization [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md) |
+| D-SYS-6 | Connector registers `(SO_COOKIE, ServiceKey)` with Dataplane, then the already-attached cgroup BPF hook selects/rewrites through `SERVICE_MAP` Maglev inner + `BACKEND_MAP` and records actual BackendId | System packet entry [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md); selection [ADR-0108](../../product/architecture/adr-0108-existing-cgroup-bpf-gateway-backend-selection.md); receipt [ADR-0124](../../product/architecture/adr-0124-gateway-connect-selected-backend-receipt.md) |
+| D-SYS-7 | Gateway Application publishes only exact live-frontend demand; ServiceLifecycle publishes eligibility; ServiceMapHydrator demand-gates Path-A TEACH; under the Dataplane guard identity is Reserved before BPF work, the outer swap commits selection, then identity becomes Applied; gateway has no backend watch/cursor | [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md), [ADR-0123](../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md), [ADR-0125](../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md) |
 | D-SYS-8 | Gateway Applied and BPF applied generations remain independent; the transient receipt pins actual BackendId and its identity read blocks on the commit guard until the process-lifetime association is Applied | [ADR-0119](../../product/architecture/adr-0119-keep-gateway-and-service-dataplane-generations-independent.md) |
-| D-SYS-9 | Strict HTTP/1.1; one BPF-owned frontend handoff; no retry/replay/userspace LB | [ADR-0110](../../product/architecture/adr-0110-bounded-public-tls13-http11-runtime.md), [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) |
-| D-SYS-10 | Public 404 Route miss; only `NoBackend`, including an empty eligible set/no selectable BPF backend, is 503; selected-receipt identity missing/mismatch and connect/receipt/mTLS/upstream failures are 502; separate operator-mTLS `GatewayControl` status reads active application/custody/hydration observations as `GatewayStatusResponse` 200/500 | HTTP [ADR-0110](../../product/architecture/adr-0110-bounded-public-tls13-http11-runtime.md); status [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md); receipt identity [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md) |
+| D-SYS-9 | Strict HTTP/1.1; one BPF-owned frontend handoff; no retry/replay/userspace LB | HTTP [ADR-0127](../../product/architecture/adr-0127-public-http11-only.md); single attempt [ADR-0132](../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md); packet entry [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) |
+| D-SYS-10 | Public 404 Route miss; only `NoBackend`, including an empty eligible set/no selectable BPF backend, is 503; selected-receipt identity missing/mismatch and connect/receipt/mTLS/upstream failures are 502; separate operator-mTLS `GatewayControl` status reads active application/custody/hydration observations as `GatewayStatusResponse` 200/500 | Route [ADR-0128](../../product/architecture/adr-0128-canonical-public-route-match-key.md); attempt/error [ADR-0132](../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md); status [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md); receipt [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md); applied identity [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md) |
 | D-SYS-11 | Boot sentinel `NoBackend` may prove connect/receipt capability before Gateway Identity Current; actual-frontend `NoBackend` is bind-valid/503-capable, while `Selected` waits for Gateway Identity Current and exact-peer mTLS; graceful drain joins connector/listener and clears receipts | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) |
 
 ## Wave: DESIGN / [REF] System traceability
 
 | System obligation | Current authority/evidence | Status |
 |---|---|---|
-| Node-agent-embedded `hyper` + `rustls`, in-process BPF access | GH #54 (no comments) + [ADR-0104](../../product/architecture/adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md) | Feature intent plus Proposed single-node/process placement; gateway absent in current production |
-| Production public trust from manual Public Certified Key producer | Explicit user ruling + [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md) + [ADR-0107](../../product/architecture/adr-0107-public-certified-key-custody-and-preserve-old-replacement.md) | `ManualCertifiedKeySource` → `PublicCertifiedKeyCustodyHandle::install` → validate/build+seal → persisted `PublicCertifiedKeyV1` → Current/Usable opaque resolver publication → redacted status |
+| Node-agent-embedded `hyper` + `rustls`, in-process BPF access | GH #54 (no comments) + [ADR-0104](../../product/architecture/adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md) | Feature intent plus approved single-node/process placement; gateway absent in current production |
+| Production public trust from manual Public Certified Key producer | Explicit user ruling + [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md) + [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md) + [ADR-0122](../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md) | `ManualCertifiedKeySource` → `PublicCertifiedKeyCustodyHandle::install` → validate/build+seal → persisted `PublicCertifiedKeyV1` → Current/Usable opaque resolver publication → redacted status |
 | Gateway observability | [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md) | `GatewayControl` uses the [exact Application status contract](#wave-design--ref-gateway-application-status-and-http-contract) for ObservationStore point reads of `GatewayApplicationStatusRowV1`/`PublicCertifiedKeyStatusRowV1` and relevant hydration; 200/500, secrets/raw dataplane failure strings omitted |
 | ACME acquisition/renewal | Existing GH #57 | Excluded from first slice; additive producer only |
-| Route resolves exact Service frontend | ADR-0049/0060/0062 + Route [ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md) + Application [ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md) | Existing inputs; Route/application resolution boundary Proposed |
+| Route resolves exact Service frontend | ADR-0049/0060/0062 + Route [ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md) + Application [ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md) | Existing inputs; approved Route/application resolution boundary (2026-09-13) |
 | Backend Eligibility publication | ADR-0101 / ServiceLifecycle | Existing sole owner; unchanged |
-| Backend-set application | ADR-0042/0101/0053 + [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) + [ADR-0108](../../product/architecture/adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md) | ServiceMapHydrator remains sole owner; exact Gateway Application live-frontend demand triggers Path-A TEACH while undemanded Path-A stays gated; Dataplane records exact applied identity association |
+| Backend-set application | ADR-0042/0101/0053 + [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) + [ADR-0123](../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md) + [ADR-0125](../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md) | ServiceMapHydrator remains sole owner; exact Gateway Application live-frontend demand triggers Path-A TEACH while undemanded Path-A stays gated; Dataplane records exact applied identity association |
 | Backend selection/DNAT | ADR-0053 cgroup hook + ADR-0040 maps + [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) | Existing ancestor hook gains a registered gateway-connect arm over the existing Maglev table and a cookie-keyed outcome; XDP wire path remains unchanged |
 | Gateway/BPF consistency | [ADR-0119](../../product/architecture/adr-0119-keep-gateway-and-service-dataplane-generations-independent.md) | Gateway Applied and BPF Hydrated remain independently owned; one connect receipt correlates actual selection without a unified generation |
-| Gateway SVID and selected-peer verification | ADR-0063/0067/0069/0071 + [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md) + [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md) | `GatewaySvidLifecycle`/`GatewayIdentitySlot` + Dataplane selected-id owner + `HostGatewayClientMtls`; exact signatures live in [Application gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration), with SAN equality and no fabricated Allocation identity/private-material getter |
+| Gateway SVID and selected-peer verification | ADR-0063/0067/0069/0071 + [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md) + [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md) + [ADR-0126](../../product/architecture/adr-0126-exact-peer-gateway-client-mtls.md) | `GatewaySvidLifecycle`/`GatewayIdentitySlot` + Dataplane selected-id owner + `HostGatewayClientMtls`; exact signatures live in [Application gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration), with SAN equality and no fabricated Allocation identity/private-material getter |
 | Public listener gates | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) | Gateway-owned bind/admission prerequisites never redefine Allocation Running, Service Stable, Backend Eligibility, BPF Hydrated or operator HTTPS readiness |
 | Whitepaper §11 | Historical prose | Context only; non-authoritative |
 
@@ -814,10 +818,11 @@ Stage 2 preserves D-SYS-1…D-SYS-11 and records the Route choice in
 plus independently reversible Domain choices in
 [ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md),
 [ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md),
-[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md),
-[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md)
-and [ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md),
-all **Proposed**. GitHub issue #54 plus the user's corrections govern; the
+[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
+[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md),
+[ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md)
+and [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md),
+all **Approved — user ratification 2026-09-13**. GitHub issue #54 plus the user's corrections govern; the
 whitepaper is contextual, the missing DISCUSS/SPIKE artifacts are not invented,
 and no absent story, KPI or capacity claim is inferred.
 
@@ -827,13 +832,13 @@ and no absent story, KPI or capacity claim is inferred.
 | **D-DOM-2** | A Route has one exact Public Hostname, one exact-or-segment-prefix Path Match, one exact TCP Service Listener Reference and one Public Certified-Key Reference. |
 | **D-DOM-3** | Route intent references the stable Service listener as `(WorkloadId, port, tcp)`. Resolution yields the exact existing Service Frontend `(ServiceVip, port, tcp)`; the Route never stores derived `ServiceId`, VIP, backend address, Allocation ID or SPIFFE ID. |
 | **D-DOM-4** | [ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md): the singleton Public Route Set makes first-slice one-Route cardinality/ownership atomic on one aggregate key. A different Route ID cannot claim an occupied slot; it is rejected rather than last-write-wins. |
-| **D-DOM-5** | [ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md): create **Public Certified-Key Custody** with a state-based **Public Certified Key** aggregate. It owns protected, producer-neutral current certificate-chain/private-key material and atomic replacement. Manual operator input is the only first-slice producer. |
+| **D-DOM-5** | [ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md): create the distinct **Public Certified-Key Custody** context and **Public Certified Key** aggregate so Route, operator HTTPS, internal SPIFFE and allocation `IdentityMgr` remain non-owners. Protection/replacement/currentness mechanics belong to their decision-specific System/Application records and exact feature contract. |
 | **D-DOM-6** | Manual operator input is the sole first-slice Certified Key producer. ACME account/order/challenge/renewal and TCP/80 are absent; GH #57 may later invoke the same custody command without changing runtime consumption. |
 | **D-DOM-7** | [ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md): Workload Identity owns a dedicated single-slot **Gateway Identity Slot** and **Gateway Identity Lifecycle** for `spiffe://overdrive.local/gateway/<node-id>`. It reuses issue/audit/profile policy, renews/restarts/drops explicitly, permits only gateway-client mTLS use and never fabricates `AllocationId`. |
 | **D-DOM-8** | [ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md): `GatewayApplicationOwner` atomically publishes one Route/frontend/opaque-resolver generation and derives exact **Staged**, **Current** and **Draining Gateway Frontend Demand**. Demand is not persisted and carries no backend rows/candidates. |
-| **D-DOM-9** | [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md): ServiceLifecycle remains sole Backend Eligibility publisher. ServiceMapHydrator demand-gates ADR-0053 TEACH; Service Dataplane owns BPF application, registered cgroup-BPF selection, BPF Selection Receipt and the immutable `BackendId → Backend.alloc` identity association. The gateway never selects or reads backend rows/maps. |
+| **D-DOM-9** | ServiceLifecycle remains sole Backend Eligibility publisher and existing Service Dataplane/BPF remains the backend selector. [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md) assigns only the transient BPF Selection Receipt to Service Dataplane. The gateway never selects or reads backend rows/maps. |
 | **D-DOM-10** | A Gateway Connect Intent is exactly `(Socket Cookie, ServiceKey)`. `cgroup_connect4_service` chooses through existing `SERVICE_MAP` Maglev + `BACKEND_MAP`; its receipt is `Selected(BackendId)` or `NoBackend`. This host-connect path is distinct from unchanged XDP wire forwarding. |
-| **D-DOM-11** | Selected Backend Identity is the receipt's `BackendId` resolved through Dataplane's exact applied association. Gateway-client rustls presents the Gateway SVID and requires exact peer SPIFFE SAN equality before body delivery. |
+| **D-DOM-11** | [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md): Selected Backend Identity is the receipt's `BackendId` resolved through Service Dataplane's exact Applied association. Gateway-client rustls presents the Gateway SVID and requires exact peer SPIFFE SAN equality before body delivery. |
 | **D-DOM-12** | `Route Accepted`, `References Resolved`, `Certified Key Usable`, `Gateway Identity Current`, `Gateway Frontend Demand Applied`, `Gateway Applied Generation`, `BPF Hydrated`, `Public Listener Bound` and `Selected Peer Authenticated` are distinct owned promises; none is shorthand for `Ready`/`Healthy`/`Programmed`. |
 | **D-DOM-13** | [ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md): Public Route Set, Public Certified Key and Gateway Identity Slot are state-based; frontend demand, BackendId identity association and connect receipts are derived/process-local state. No Event Sourcing, CQRS subsystem, ACME workflow, new deployed process or userspace load balancer is introduced. |
 
@@ -1111,9 +1116,10 @@ Detailed decision-specific trade-offs are in Route
 and Domain
 [ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md),
 [ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md),
-[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md),
-[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md)
-and [ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md).
+[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
+[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md),
+[ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md)
+and [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md).
 None changes manual certificate first, later GH #57 ACME, BPF-owned selection,
 exact-peer mTLS or the active walking skeleton.
 
@@ -1167,14 +1173,9 @@ No roadmap is produced in DESIGN.
 
 ## Wave: DESIGN / [REF] Application decisions
 
-Stage 3 preserves D-SYS-1…11 and D-DOM-1…13. Six independently reversible
-Application choices are Proposed in
-[ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md),
-[ADR-0107](../../product/architecture/adr-0107-public-certified-key-custody-and-preserve-old-replacement.md),
-[ADR-0108](../../product/architecture/adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md),
-[ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md),
-[ADR-0110](../../product/architecture/adr-0110-bounded-public-tls13-http11-runtime.md),
-and [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md).
+Stage 3 preserves D-SYS-1…11 and D-DOM-1…13. Seventeen independently
+reversible Application choices are Approved in ADR-0106–0111 and
+ADR-0122–0132; the table below links every decision to its one-decision record.
 This feature delta—not those decision records—is the implementation-contract
 SSOT for every exact Rust signature, variant, persistence key, lifecycle
 ordering, error and verification handoff. System ADR-0104/0117–0121 resolve the
@@ -1186,17 +1187,17 @@ placeholder seam.
 | **D-APP-1** | [ADR-0106] creates one non-deployable `overdrive-gateway` adapter-host library; `overdrive-control-plane` remains sole `serve` composition/ServerHandle owner and activates the real GatewayApplicationOwner/listener. |
 | **D-APP-2** | Add parser-side `DeploySpecInput = Workload(WorkloadSpecInput) | Route(PublicRouteSpecInput)`, distinct HTTP `PublicRouteInput`, and persisted `Route`; never add Route to workload `SubmitSpecInput`, `WorkloadIntent`, `WorkloadKind`, `/v1/workloads`, or workload streaming. |
 | **D-APP-3** | Persist the singleton `PublicRouteSetEnvelope::V1` at exact key `public-ingress/route-set`; persist even the empty Route set. A bounded `PublicRouteSetOwner` is the sole serialized writer. |
-| **D-APP-4** | A Route carries exact validated `RouteId`, deterministic `RouteGeneration`, `PublicHostname`, `PathMatch`, `ServiceListenerReference(WorkloadId, NonZeroU16, Proto::Tcp)` and `PublicCertifiedKeyId`. |
+| **D-APP-4** | A Route carries exact validated `RouteId`, deterministic `RouteGeneration`, `PublicHostname`, `PathMatch`, `ServiceListenerReference(service: WorkloadId, NonZeroU16, Proto::Tcp)` and `PublicCertifiedKeyId`. The public target member is `service`; the internal identifier type remains `WorkloadId`, never allocator-derived `ServiceId`. |
 | **D-APP-5** | A new read-only `ServiceFrontendResolve` port reads current Service intent plus the already-probed `ServiceVipView` and returns the exact existing `ServiceFrontend`; control-plane wraps its existing mutex-held allocator in a private read adapter. It never reads backend/health/BPF state. |
 | **D-APP-6** | `ServerConfig.gateway: Option<GatewayConfig>` is the only enablement gate. CLI `--gateway-address`, `--gateway-certified-key-id`, `--gateway-certificate-chain` and `--gateway-private-key` construct IPv4 TCP/443 only as an all-present set; all absent means disabled. Public bind occurs only after connect/mTLS/identity/demand/application gates. |
 | **D-APP-7** | Manual certificate/key paths are host-local `serve` configuration, like VM kernel/rootfs references only at the artifact boundary. The source validates then installs through producer-neutral custody; paths/raw PEM never enter Route, status or request state. |
-| **D-APP-8** | [ADR-0107] makes Public Certified-Key Custody the one configured-ID owner, with validate/build/seal/persist/publish/status ordering that never replaces the last usable generation with an unusable candidate. Its ID-free `install` accepts `Manual | Workflow { correlation }` provenance and is #57's future producer boundary. |
+| **D-APP-8** | [ADR-0107] makes Public Certified-Key Custody the one configured-ID producer-neutral owner; [ADR-0122] makes replacement validate/build/seal/persist/publish/status ordered so an unusable candidate never replaces the last usable generation. Its ID-free `install` accepts `Manual | Workflow { correlation }` provenance and is #57's future producer boundary. |
 | **D-APP-9** | One active `GatewayApplicationOwner` atomically owns staged/current/draining demand, one ArcSwap Current generation, dynamic TCP/443 bind/unbind, RAII connection/request leases, the join set and application status. Shutdown force-joins leases before demand/SVID release. |
 | **D-APP-10** | `IntentStore::watch` changes in one cut to `Changed|Lagged`; owner subscribes-before-list and clears admission before gap/closure recovery. |
-| **D-APP-11** | Add dedicated non-allocation Gateway Identity Slot + `GatewaySvidLifecycle`, Issue/Drop actions and exact-current control. The slot atomically owns a checked desired epoch so a stale Issue cannot re-hold after disable; gateway-client mTLS alone constructs the private access token and receives mandatory Clock injection. No fake AllocationId. |
-| **D-APP-12** | Extend ServiceMapHydrator with exact frontend demand read/ack and the existing `ServiceId::derive(...,"service-map")`; a pre-effect exact-revision guard prevents stale Path-A TEACH while BPF Hydrated remains independent. |
-| **D-APP-13** | [ADR-0108] adds registered `(SocketCookie, ServiceKey)` Dataplane intent, BPF `Selected(BackendId)|NoBackend` receipt, and commit-guarded immutable BackendId→applied `Backend.alloc` publication with cleanup on every return. |
-| **D-APP-14** | [ADR-0109/0110] activates dedicated gateway-SVID exact-peer mTLS and strict rustls TLS1.3 + hyper HTTP/1.1 with finite bounded streaming/backpressure, 404 Route miss, 503 NoBackend, 502 internal/upstream failure and no retry/replay/alternate backend. |
+| **D-APP-11** | [ADR-0109] adds the dedicated non-allocation Gateway Identity Slot + `GatewaySvidLifecycle`, Issue/Drop actions and exact-current control. The slot atomically owns a checked desired epoch so a stale Issue cannot re-hold after disable; [ADR-0126] gives gateway-client mTLS alone the private access token and exact receipt-selected peer check. No fake AllocationId. |
+| **D-APP-12** | [ADR-0123] extends ServiceMapHydrator with exact frontend demand read/ack and the existing `ServiceId::derive(...,"service-map")`; a pre-effect exact-revision guard prevents stale Path-A TEACH while BPF Hydrated remains independent. |
+| **D-APP-13** | [ADR-0108] keeps BPF as the gateway backend selector; [ADR-0124] adds registered `(SocketCookie, ServiceKey)` intent plus `Selected(BackendId)|NoBackend` receipt and cleanup; [ADR-0125] commit-gates immutable BackendId→applied `Backend.alloc` identity publication. |
+| **D-APP-14** | [ADR-0110], [ADR-0127], [ADR-0128], [ADR-0129], [ADR-0130], [ADR-0131] and [ADR-0132] activate strict rustls TLS1.3, Hyper HTTP/1.1, exact authority/raw-path routing, proxy-header policy, finite limits, streaming/backpressure and one upstream attempt; [ADR-0126] requires exact-peer mTLS. Existing 404 Route miss, 503 NoBackend and 502 internal/upstream mappings remain exact. |
 | **D-APP-15** | Full composition is `AT-PIG-E2E-1`, a recurring built-binary Tier-3 walking skeleton, not an expectation or spike; it hand-installs no map, rule, identity, snapshot or credential outside production inputs. |
 | **D-APP-16** | [ADR-0111] keeps operator-mTLS `GET /v1/gateway/status` as a separate redacted projection of application/custody and relevant independent hydration rows; public request status, receipts, secrets and a unified generation never enter it. |
 
@@ -1206,11 +1207,22 @@ certificate-validity ordering are more directly verified through pure
 properties and seeded DST.
 
 [ADR-0106]: ../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md
-[ADR-0107]: ../../product/architecture/adr-0107-public-certified-key-custody-and-preserve-old-replacement.md
-[ADR-0108]: ../../product/architecture/adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md
-[ADR-0109]: ../../product/architecture/adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md
-[ADR-0110]: ../../product/architecture/adr-0110-bounded-public-tls13-http11-runtime.md
+[ADR-0107]: ../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md
+[ADR-0108]: ../../product/architecture/adr-0108-existing-cgroup-bpf-gateway-backend-selection.md
+[ADR-0109]: ../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md
+[ADR-0110]: ../../product/architecture/adr-0110-public-listener-tls13-only.md
 [ADR-0111]: ../../product/architecture/adr-0111-redacted-operator-gateway-status.md
+[ADR-0122]: ../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md
+[ADR-0123]: ../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md
+[ADR-0124]: ../../product/architecture/adr-0124-gateway-connect-selected-backend-receipt.md
+[ADR-0125]: ../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md
+[ADR-0126]: ../../product/architecture/adr-0126-exact-peer-gateway-client-mtls.md
+[ADR-0127]: ../../product/architecture/adr-0127-public-http11-only.md
+[ADR-0128]: ../../product/architecture/adr-0128-canonical-public-route-match-key.md
+[ADR-0129]: ../../product/architecture/adr-0129-public-proxy-header-policy.md
+[ADR-0130]: ../../product/architecture/adr-0130-fixed-finite-public-runtime-limits.md
+[ADR-0131]: ../../product/architecture/adr-0131-stream-public-proxy-bodies-with-backpressure.md
+[ADR-0132]: ../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md
 
 ## Wave: DESIGN / [REF] Application component decomposition
 
@@ -1416,21 +1428,29 @@ key. They are paths, not inline PEM, and project unchanged into the manual
 source boundary specified below. No ACME/account/order argument or environment
 fallback exists.
 
-Exact Route TOML:
+Exact checked-in `examples/public-ingress-gateway/route.toml.template`:
 
 ```toml
 [route]
 id = "public-api"
-hostname = "api.example.com"
+hostname = "__PUBLIC_HOSTNAME__"
 path = "/"
 path_match = "segment_prefix"
 certified_key = "api-origin"
 
 [route.target]
-workload = "api"
+service = "api"
 port = 8080
 protocol = "tcp"
 ```
+
+`__PUBLIC_HOSTNAME__` occurs exactly once. The checked-in `run-example.sh`
+materializes only this template to `<absolute-scratch-dir>/specs/route.toml`
+using its `--public-hostname` argv value; the Tier-3 and E14 runners invoke the
+example and never construct an inline Route document. The rendered value is
+validated by the same production `PublicHostname::new` path as every other
+Route deploy. Missing/multiple placeholders or an invalid rendered TOML/Route
+fail the example before any Route is accepted.
 
 Operator HTTP additions are `POST /v1/routes`,
 `DELETE /v1/routes/{id}` and `GET /v1/gateway/status`; all remain on the
@@ -1503,7 +1523,7 @@ pub struct PublicRouteInput {
     pub target: ServiceListenerReferenceInput,
 }
 pub struct ServiceListenerReferenceInput {
-    pub workload: String,
+    pub service: String,
     pub port: u16,
     pub protocol: String,
 }
@@ -1566,23 +1586,23 @@ pub enum PublicPathError {
 
 pub enum PathMatch { Exact(PublicPath), SegmentPrefix(PublicPath) }
 pub struct ServiceListenerReference {
-    workload_id: WorkloadId,
+    service: WorkloadId,
     port: NonZeroU16,
     protocol: Proto,
 }
 impl ServiceListenerReference {
     pub fn new(
-        workload_id: WorkloadId,
+        service: WorkloadId,
         port: NonZeroU16,
         protocol: Proto,
     ) -> Result<Self, RouteValidationError>; // accepts only Proto::Tcp
-    pub fn workload_id(&self) -> &WorkloadId;
+    pub fn service(&self) -> &WorkloadId;
     pub const fn port(&self) -> NonZeroU16;
     pub const fn protocol(&self) -> Proto;
 }
 pub enum RouteValidationError {
     RouteId(IdParseError), CertifiedKeyId(IdParseError),
-    WorkloadId(IdParseError), Hostname(PublicHostnameError),
+    Service(IdParseError), Hostname(PublicHostnameError),
     Path(PublicPathError), UnknownPathMatch, PortZero,
     UnknownProtocol, ProtocolNotTcp,
 }
@@ -1727,13 +1747,24 @@ disabled", field: None }`. Apply maps Declared to 201 and Replaced/Unchanged to
 200; DELETE maps Withdrawn/Unchanged to 200, invalid ID to 400, different live
 ID to 409, and store error to 500.
 
+Both parser/wire inputs require exactly `target.service`; `target.workload` is
+an unknown field and there is no serde/TOML alias. `Route::from_submit` parses
+that string through the existing `WorkloadId` grammar and reports
+`RouteValidationError::Service` at public field `route.target.service`.
+`ServiceListenerReference::service()` deliberately returns `&WorkloadId`:
+Service intent is keyed by the existing logical-workload identifier, whereas
+allocator-derived `ServiceId` names the resolved `(VIP, port, protocol)`
+Dataplane projection only after `ServiceFrontendResolve` succeeds. These types
+must not be renamed, converted or conflated.
+
 Every field on `Route`, `GatewayConfig` and `ManualCertifiedKeyConfig` has only
 the accessor shown above; their `Debug` implementations redact manual paths.
 `RouteGeneration::from_route_fields` SHA-256 hashes
 `b"overdrive/gateway/route-generation/v1\0"`, then each string-like field as
 `u32::to_be_bytes(len) || bytes` in this order: Route ID, hostname, path-match
-tag (`0` exact / `1` segment-prefix), raw path, workload ID, then the two-byte
-big-endian port, one-byte `Proto::as_u8`, and length-framed certified-key ID.
+tag (`0` exact / `1` segment-prefix), raw path, the target Service's canonical
+`WorkloadId`, then the two-byte big-endian port, one-byte `Proto::as_u8`, and
+length-framed certified-key ID.
 No archive layout, map iteration or platform endianness enters the digest.
 `PublicHostname::new` and
 `PublicPath::new` plus their complete errors/accessors follow the validation
@@ -1766,10 +1797,10 @@ pub trait ServiceFrontendResolve: Send + Sync {
     ) -> Result<ServiceFrontend, ServiceFrontendResolveError>;
 }
 pub enum ServiceFrontendResolveError {
-    WorkloadAbsent { workload_id: WorkloadId },
-    WorkloadIntent(IntentStoreError),
-    WorkloadIntentDecode,
-    WorkloadNotService { workload_id: WorkloadId },
+    ServiceAbsent { service: WorkloadId },
+    ServiceIntent(IntentStoreError),
+    ServiceIntentDecode,
+    TargetNotService { service: WorkloadId },
     ListenerAbsent { port: NonZeroU16, protocol: Proto },
     ServiceVipUnavailable,
     InvalidServiceFrontend(IdParseError),
@@ -2124,11 +2155,17 @@ count methods enumerate their distinct maps after cleanup; failure to enumerate
 is typed and never treated as zero.
 
 `IntentServiceFrontendResolver::new(intent, vip_view)` is crate-private and the
-only adapter constructor; `UnboundGatewayBuilder::new` is its only caller. The resolver
-probe and `resolve` calls from `GatewayApplicationOwner` are the only production
-calls through the public port. `GatewayFrontendDemandHandle` is crate-private
-and held only by that owner; no handler receives it. The cross-crate surface is
-only the read/ack/wake ports above. Every demanded frontend, including an
+only adapter constructor; `UnboundGatewayBuilder::new` is its only caller. The
+resolver probe and `resolve` calls from `GatewayApplicationOwner` are the only
+production calls through the public port. It reads the Service-keyed
+`WorkloadIntent` using `reference.service()`: missing intent is
+`ServiceAbsent`, an intent-store read failure is `ServiceIntent`, decode failure
+is `ServiceIntentDecode`, and any resolved kind other than
+`WorkloadKind::Service` is `TargetNotService { service }`. No Job or Schedule
+kind is a valid Route target; the Service's driver axis remains orthogonal.
+`GatewayFrontendDemandHandle` is crate-private and held only by that owner; no
+handler receives it. The cross-crate surface is only the read/ack/wake ports
+above. Every demanded frontend, including an
 empty-backend purge, carries `Some(GatewayFrontendDemandApply)` on
 `Action::DataplaneUpdateService`; genuinely undemanded actions carry `None`.
 The action shim re-reads the exact revision/key before the Dataplane call,
@@ -4149,6 +4186,91 @@ closed-category counts into its
 report. The connector never enumerates, chooses, retries or replays a
 backend.
 
+The real `GatewayUpstreamConnector` is also the sole producer of one
+structured, non-secret receipt occurrence. It emits at `DEBUG` with tracing
+metadata name and explicit field `event` both equal to
+`gateway.upstream.receipt.validated`, target
+`overdrive::gateway_connector`, and message
+`"validated gateway upstream BPF selection receipt"`. The existing tracing
+subscriber/filter is reused; no port, status row, ring buffer or observer task
+is added.
+
+| Structured field | `Selected` occurrence | `NoBackend` occurrence | Exact type/rule |
+|---|---|---|---|
+| `event` | `gateway.upstream.receipt.validated` | same | Static string, always present so compact text output retains the metadata name semantically even with target rendering disabled |
+| `operation` | `probe` or `request` | `probe` or `request` | Static string supplied by the connector's existing `probe`/`connect` caller; no generated operation ID |
+| `socket_cookie` | Receipt/intent cookie | Receipt/intent cookie | Nonzero `u64` from `SocketCookie::get().get()`, recorded as decimal |
+| `service_key_vip` | Receipt/intent Service VIP | Receipt/intent Service VIP | Canonical `ServiceVip` Display string; IPv4 in this slice |
+| `service_key_port` | Receipt/intent port | Receipt/intent port | Nonzero `u16` numeric value |
+| `service_key_protocol` | `tcp` | `tcp` | Canonical `Proto::as_str()` static string |
+| `receipt_outcome` | `selected` | `no_backend` | Closed static string |
+| `backend_id` | Selected BackendId | omitted | `u32` from `BackendId::get()`; omission is structural, never zero/null/empty sentinel |
+| `expected_peer_spiffe_id` | Resolved applied workload identity | omitted | Canonical `SpiffeId` Display string; omission is structural, never zero/null/empty sentinel |
+
+The two branch call sites have this exact shape; `operation: &'static str` is
+the private caller label and is exactly `"probe"` or `"request"`:
+
+```rust
+// Selected, after selected_backend_identity succeeds and before mTLS.
+tracing::debug!(
+    name: "gateway.upstream.receipt.validated",
+    target: "overdrive::gateway_connector",
+    event = "gateway.upstream.receipt.validated",
+    operation = operation,
+    socket_cookie = intent.socket_cookie.get().get(),
+    service_key_vip = %intent.service_key.vip(),
+    service_key_port = intent.service_key.port().get(),
+    service_key_protocol = intent.service_key.protocol().as_str(),
+    receipt_outcome = "selected",
+    backend_id = backend_id.get(),
+    expected_peer_spiffe_id = %expected_peer,
+    "validated gateway upstream BPF selection receipt",
+);
+
+// NoBackend, after receipt validation and before result mapping.
+tracing::debug!(
+    name: "gateway.upstream.receipt.validated",
+    target: "overdrive::gateway_connector",
+    event = "gateway.upstream.receipt.validated",
+    operation = operation,
+    socket_cookie = intent.socket_cookie.get().get(),
+    service_key_vip = %intent.service_key.vip(),
+    service_key_port = intent.service_key.port().get(),
+    service_key_protocol = intent.service_key.protocol().as_str(),
+    receipt_outcome = "no_backend",
+    "validated gateway upstream BPF selection receipt",
+);
+```
+
+Emission order is load-bearing. `take_receipt(intent)` must first remove the
+receipt and the connector must validate that its cookie and ServiceKey equal
+the registered intent. A missing, malformed, duplicate, cookie-mismatched or
+ServiceKey-mismatched receipt emits no occurrence. For `NoBackend`, the
+connector emits immediately after that validation, performs no identity lookup
+or mTLS, then returns its existing probe/request result. For `Selected`, it
+must successfully resolve `backend_id` through
+`selected_backend_identity`; only then does it emit, immediately before
+`GatewayClientMtls::authenticate`. Identity absence/error emits no occurrence.
+The Selected occurrence remains valid if the subsequent mTLS handshake fails:
+it proves only validated BPF selection and the expected peer passed to mTLS,
+not peer authentication or request success.
+
+The connector's existing RAII cleanup reservation remains live across the
+occurrence and executes afterward on every Selected/NoBackend return path,
+including mTLS failure. Cleanup success/failure cannot retract or rewrite the
+already-emitted occurrence, and emission never waits for, retries or delays
+cleanup. Exactly one occurrence is emitted per validated receipt consumed by
+one connector operation; neither the BPF/Dataplane adapter nor a Sim adapter
+emits a duplicate.
+
+All fields are process-local correlation or non-secret routing/identity facts.
+The occurrence contains no certificate/key bytes, Gateway SVID material,
+public-certified-key path, request headers/body, client address, raw error
+string or credential-derived fingerprint. It is not persisted to IntentStore/
+ObservationStore, exposed by status/API, read by production logic or used to
+gate lifecycle. It is append-only observability evidence of an occurrence, not
+a second receipt, source of truth, current-state projection or audit ledger.
+
 `GatewayApplicationOwner` calls crate-private `probe(frontend, deadline)` after
 exact demand acknowledgment and gateway identity currentness but before
 promotion/bind. Probe and request `connect` share one private socket/register/
@@ -4450,8 +4572,8 @@ SPIFFE ID/serial/expiry only.
 
 This epoch is the Application concurrency realization of DDD's existing
 Ensure/Reissue/Drop commands, not a new domain identity or persisted fact;
-[ADR-0109] supersedes any unguarded Application shorthand while D-DOM-1…13's
-semantic owner/invariants remain unchanged.
+[ADR-0109] and [ADR-0126] supersede any unguarded Application shorthand while
+D-DOM-1…13's semantic owner/invariants remain unchanged.
 
 Gateway-client mTLS accepts a connected fd plus the receipt-selected exact
 SpiffeId, presents `[gateway leaf, node intermediate]` (never root), anchors
@@ -4583,6 +4705,7 @@ only mutation set; everything else is complement-equal):
 | BackendIdAllocator | **bounded-change**: read-only `existing_id`; allocator state unchanged by preflight | allocator snapshot PBT + conflict no-mutation integration |
 | KEK/AEAD mechanism | **bounded-change**: distinct public-key HKDF/AAD/record; CA records preserved | tamper/fault integration + domain-separation golden |
 | rustls/hyper | **bounded-change** per public/upstream connection and its finite budget | protocol matrix, wrong-peer integration and wire AT |
+| tracing + CLI compact `EnvFilter` subscriber | **unbounded-preservation** of runtime state with one connector-owned DEBUG occurrence after validated receipt/identity resolution | append-only existing Tier-3 process log; no status/store/ring-buffer state |
 | CA issue/audit + IdentityMgr | **bounded-change**: one gateway-subject audit output; allocation holder untouched | audit-before-hold integration + allocation-held-set complement |
 | SvidLifecycle | **pure-function** sibling inputs -> gateway Actions/View only | paired lifecycle PBT + existing workload reconciler byte equality |
 | arc-swap/tokio-rustls/async-trait/rustix/zeroize/x509-parser | **bounded-change** inside the owning snapshot/connection/syscall/secret values | API/trybuild guards, parser/syscall fault matrix and drain tests |
@@ -4635,7 +4758,8 @@ the table is the final dormant-surface gate:
 | `GatewayIdentitySlot` constructor/non-secret reads plus ActionHandle, LifecycleHandle and client-access capabilities | `run_server_with_obs_and_drivers` | lifecycle-control adapter, Gateway SVID action executor and `HostGatewayClientMtls`; slot mutators/access closure are crate-private and only the matching opaque handle/adapter can reach them |
 | `GatewaySvidLifecycle::canonical`, factory, Any* variants and Issue/Drop actions | control-plane canonical registration | existing reconciler runtime/broker/exhaustive dispatch and action shim only |
 | `GatewayClientMtls::authenticate`, opaque `GatewayUpstream`, Host/Sim mTLS constructors | `run_server_with_obs_and_drivers` / Sim composition | private connector readiness probe and request path; only successful exact-peer adapters hold the unforgeable seal needed to construct the authenticated stream |
-| `Invariant::{GatewayApplicationGenerationLifecycleIsSafe,GatewayApplicationShutdownConverges}` and evaluator functions | `Invariant::ALL` plus existing `cargo dst --only` parser | exhaustive `Harness::evaluate` calls the crate-private evaluators with the run seed; no production or test-only gateway API is added |
+| `gateway.upstream.receipt.validated` tracing occurrence | real `GatewayUpstreamConnector` only, after exact receipt validation and selected-identity resolution when applicable | existing tracing subscriber plus append-only `AT-PIG-E2E-1` process-log capture; no production reader, state/status projection or duplicate adapter emitter |
+| `Invariant::{GatewayApplicationGenerationLifecycleIsSafe,GatewayApplicationShutdownConverges}` and evaluator functions | DISTILL scaffolds enum/canonical/evaluator/exhaustive-dispatch shapes plus ignored direct bodies; pending variants are absent from `Invariant::ALL` | typed ignored bodies alone call `Harness::only(variant)` until DELIVER activation; after real owners are GREEN, activation key `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` makes direct tests GREEN before adding both variants to the default catalogue |
 
 The same audit removes the two previously dormant proposals:
 `PublicCertifiedKeyCustodyHandle::withdraw` does not exist, and
@@ -4663,6 +4787,7 @@ source.
 | async-trait | workspace 0.1 | Apache-2.0/MIT; object-safe async driven ports used as `Arc<dyn ...>` |
 | hyper / hyper-util | lock 1.9.0 / 0.1.20 | MIT; strict HTTP/1.1 parser/client and Tokio IO adapter |
 | rustls / tokio-rustls | lock 0.23.39 / 0.26.4 | Apache-2.0/MIT; public TLS 1.3, exact-SNI config per connection |
+| tracing / tracing-subscriber | existing workspace pins and CLI compact `EnvFilter` subscriber | Existing structured occurrence path; one DEBUG connector event, no new logging backend/sidecar |
 | ring | workspace 0.17 | ISC/OpenSSL; honest current provider for key match/AEAD; no FIPS claim |
 | rustix | workspace 1; add safe `net` beside existing `std,fs` | Apache-2.0/MIT; `rustix::net::sockopt::socket_cookie`, preserving `overdrive-host`'s `#![forbid(unsafe_code)]` |
 | arc-swap | already locked, promote direct | Apache-2.0/MIT; atomic whole admission pointer |
@@ -4731,10 +4856,10 @@ existing exhaustive match in `crates/overdrive-sim/src/harness.rs`.
 
 `Invariant::as_canonical` maps the variants respectively to
 `gateway-application-generation-lifecycle-is-safe` and
-`gateway-application-shutdown-converges`; both variants are appended exactly
-once to `Invariant::ALL`. The existing exhaustive `Harness::evaluate` adds the
-two arms below, so existing `Display`, `FromStr`, `Harness::only` and report
-rendering require no parallel registration surface:
+`gateway-application-shutdown-converges`. DISTILL adds both enum variants,
+canonical arms, evaluator signatures and the two exhaustive
+`Harness::evaluate` arms below, so the crate compiles with closed matches while
+the complete real-owner drivers remain pending activation:
 
 ```rust
 Invariant::GatewayApplicationGenerationLifecycleIsSafe =>
@@ -4743,7 +4868,68 @@ Invariant::GatewayApplicationShutdownConverges =>
     gateway_application::evaluate_shutdown_converges(seed).await,
 ```
 
-The only CLI inputs remain the existing `--seed <u64>` and `--only <NAME>`:
+Pending registration is exact:
+
+- Neither variant appears in `Invariant::ALL`, the expected-name arrays in
+  `crates/overdrive-sim/tests/integration/{dst_harness_smoke.rs,dst_clean_clone_green.rs}`
+  or any other default catalogue during DISTILL.
+- `Harness::run(seed)` without `.only(...)` therefore cannot execute either
+  evaluator. `Invariant::from_str` continues scanning `Invariant::ALL`, so
+  `cargo dst --only <pending-name>` returns the existing unknown-invariant
+  parse error until activation; there is no hidden CLI route.
+- The exhaustive `as_canonical` and `Harness::evaluate` arms are present from
+  the scaffold commit. Omitting a new arm is a compile failure; omission from
+  `ALL` is deliberate reachability state, not an exhaustiveness exception.
+- `crates/overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs`
+  may name the variants directly and call
+  `Harness::new().only(Invariant::<variant>).run(seed)`. Its four complete
+  acceptance bodies use exactly
+  `#[ignore = "pending DELIVER activation DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS"]`.
+  Removing that marker while any production owner is still a scaffold produces
+  a real RED through `GatewayBuilder`, `GatewayControl`, or `GatewayHandle`.
+- DISTILL authors both evaluator bodies completely. They apply and withdraw
+  Route through `GatewayControl`, retain/release a real public TLS connection,
+  recompose the owner through `GatewayBuilder`, and consume
+  `GatewayHandle::shutdown`. Held/released completion uses only the approved
+  exact-revision demand port. The ordered trace contains only redacted
+  application status, demand snapshots, non-secret identity reads and typed
+  shutdown projections. It cannot fabricate an `ObservableTracePoint`, encode
+  a parallel owner model or return a handcrafted pass. `InvariantStatus`
+  remains the existing `Pass | Fail`; no `Pending`, expected-fail result or
+  default-DST exception is added.
+
+The four direct body names are
+`stale_completion_withdrawal_restart_and_retained_demand_are_safe`,
+`shutdown_joins_users_before_demand_and_gateway_identity_retire`,
+`twin_generation_runs_at_one_seed_have_identical_ordered_observation_traces`
+and `twin_shutdown_runs_at_one_seed_have_identical_ordered_observation_traces`;
+no second activation test file is introduced.
+
+The exact DELIVER activation step is
+`DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` (“Activate real Gateway
+Application lifecycle invariants”). It starts only after the real
+`GatewayApplicationOwner`, demand/current/draining retention owner, listener/
+connection owner and `GatewayHandle` shutdown composition are GREEN through
+their preceding production-owner acceptance slices. Within that one step the
+order is fixed:
+
+1. Remove the exact pending markers from the four direct acceptance bodies;
+   do not edit `Invariant::ALL` yet and do not rewrite their DISTILL-authored
+   drivers or oracles.
+2. Run the direct typed bodies and record semantic RED at any still-incomplete
+   real Gateway Application owner call.
+3. Complete only the DESIGN-pinned production owners needed to make all direct
+   bodies GREEN, including twin-seed ordered-trace identity; no parallel
+   simulation state machine or preauthored passing trace is permitted.
+4. Append both variants exactly once to `Invariant::ALL` and to the two
+   existing default-catalogue expected-name arrays. That existing `ALL` change
+   simultaneously enables `FromStr`, both `cargo dst --only` spellings and
+   default `Harness::run` execution.
+5. Run the default catalogue GREEN. The activation step lands no intermediate
+   state in which a pending/failing variant is default-reachable.
+
+After step 5, the only CLI inputs remain the existing `--seed <u64>` and
+`--only <NAME>`; these spellings become valid without a second parser:
 
 ```text
 cargo dst --seed <N> --only gateway-application-generation-lifecycle-is-safe
@@ -4802,11 +4988,11 @@ replacement state machine.
 | Evidence lane | Required contract |
 |---|---|
 | Pure/PBT | `PathMatch::matches_raw_path`, `runtime::routing::normalize_route_authority` and both `runtime::proxy_headers::rewrite_*_headers` functions own the Route-path/authority/header properties; Route/hash laws, demand phase/union/revision, receipt matching/cleanup, immutable BackendId identity, gateway SVID lifecycle and finite limit ordering remain in their owning source modules. Every live property carries `/// CONTRACT_SHAPE: pure-function.` |
-| DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. Existing demand TEACH, registered/unregistered isolation, connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
+| DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. DISTILL scaffolds their typed ignored direct paths but excludes both from `Invariant::ALL`; `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` activates them only after real owners are GREEN and direct bodies pass. Existing demand TEACH, registered/unregistered isolation, connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
 | In-process integration | Real stores/Route/custody/application/status; Hydrator/action demand guard+ack; Sim connect/identity/mTLS equivalence; typed boot/shutdown and concurrent retained generations; production `ServerHandle` ordering. Rust tests do not spawn the product binary. |
-| `AT-PIG-E2E-1` recurring Tier-3 production composition | `tests/tier3/public-ingress-gateway/runner.sh` drives the built default-feature binary plus the checked-in root example through real serve/Service/Route/external test-CA TLS; it proves demand TEACH -> registered cgroup-BPF Maglev/rewrite -> BackendId receipt/identity -> gateway-SVID exact-peer mTLS -> streamed workload response. It is not an expectation or Rust test. |
-| Tier 3 | Real-kernel cookie equality, Selected/NoBackend receipt, identity association, unchanged unregistered LOCAL/XDP behavior, Path-A nft-TPROXY, wrong-valid-peer and cleanup. |
-| Point-in-time EDD `E14-PIG-OPERATOR-JOURNEY` | `verification/expectations/E14-public-ingress-operator-journey/runner.sh` independently drives the checked-in example through one SHA-pinned built binary and a publicly trusted operator-supplied chain, recording stakeholder-visible evidence only. It neither calls nor replaces `AT-PIG-E2E-1`. |
+| `AT-PIG-E2E-1` recurring Tier-3 production composition | `tests/tier3/public-ingress-gateway/runner.sh` drives the built default-feature binary plus the checked-in root example through real serve/Service/Route/external test-CA TLS. Per completed request it consumes the append-only `gateway.upstream.receipt.validated` suffix: Selected proves the exact socket cookie, ServiceKey components, BackendId and resolved expected-peer SpiffeId before the existing exact-peer mTLS/streamed-response evidence; NoBackend proves the same cookie/ServiceKey with structurally absent selected-only fields before the 503. It is not an expectation or Rust test. |
+| Tier 3 | The production connector occurrence replaces timing-based receipt-map polling and strace as the transient receipt/identity oracle. Existing real-kernel attachment, unregistered LOCAL/XDP nonmutation, Path-A nft-TPROXY, wrong-valid-peer and final cleanup complements remain; stable map/attachment cleanup checks may continue but cannot claim a consumed receipt's values. |
+| Point-in-time EDD `E14-PIG-OPERATOR-JOURNEY` | `verification/expectations/E14-public-ingress-operator-journey/runner.sh` requires a clean harness-captured HEAD, runs the exact `cargo xtask bpf-build` path, hashes that BPF object, builds and hashes that checkout's default-feature binary inside verified Lima/root, and proves the binary embeds that exact object before independently driving the checked-in example with the operator hostname/public chain/key and normal system trust. It records build provenance plus stakeholder-visible status/TLS/response evidence only and neither calls nor replaces `AT-PIG-E2E-1`. |
 
 ### Artifact-boundary handoff to DISTILL
 
@@ -4815,28 +5001,148 @@ cannot collapse the evidence layers:
 
 | Artifact | Exact planned path and role |
 |---|---|
-| Operator-runnable journey | `examples/public-ingress-gateway/README.md`, `service.toml`, `route.toml`, `workload.py`, `prepare-test-ca.sh`, and `run-example.sh`. The README/run script invoke a supplied built `overdrive` binary, use caller-supplied chain/key/CA paths when all are present or otherwise generate a bounded test CA/cert/key in a caller-provided scratch directory, run real `serve`, deploy the checked-in Service and Route specs, and make the external TLS1.3/HTTP1.1 request. It is explanatory/operator-runnable and owns no regression oracle. |
-| Recurring production-composition test | `tests/tier3/public-ingress-gateway/runner.sh <absolute-overdrive-binary> <scratch-dir>`. The shell runner requires a default-feature binary built before invocation, calls the checked-in example rather than recreating specs/workload, and asserts the public response plus kernel/wire/cleanup facts with external tools. It imports/links no crate and invokes neither `cargo test`, a Rust test binary nor `verification/expectations`. This is the sole artifact carrying ID `AT-PIG-E2E-1`. |
-| Point-in-time expectation | `verification/expectations/E14-public-ingress-operator-journey/{README.md,runner.sh}`. It invokes the same root example with a SHA-pinned built default-feature binary and operator-supplied publicly trusted chain, captures only stakeholder-visible command/status/TLS/response output, and has no recurring-regression or internal/kernel oracle role. |
+| Operator-runnable journey | `examples/public-ingress-gateway/README.md`, `service.toml`, `route.toml.template`, `workload.py`, `prepare-test-ca.sh`, and `run-example.sh`. The script accepts the exact argv contract below, materializes the checked-in Route template under the caller's scratch directory, drives real `serve` plus Service/Route deploy, and makes the external TLS1.3/HTTP1.1 request. It owns no regression oracle. |
+| Recurring production-composition test | `tests/tier3/public-ingress-gateway/runner.sh <absolute-overdrive-binary> <scratch-dir>`. The shell runner requires a default-feature binary built before invocation, sets the existing filter `RUST_LOG=info,overdrive::gateway_connector=debug`, calls the checked-in example rather than recreating specs/workload, and uses the append-only connector occurrence plus existing public/kernel/wire/cleanup surfaces. It imports/links no crate and invokes neither `cargo test`, a Rust test binary nor `verification/expectations`. This remains the sole artifact carrying ID `AT-PIG-E2E-1`; no new gate is created. |
+| Point-in-time expectation | `verification/expectations/E14-public-ingress-operator-journey/{README.md,runner.sh}`. Its operator input set is exactly `PIG_E14_GATEWAY_ADDRESS`, `PIG_E14_PUBLIC_HOSTNAME`, `PIG_E14_CERTIFICATE_CHAIN` and `PIG_E14_PRIVATE_KEY`. The verified Lima/root runner produces the BPF object with the exact `cargo xtask bpf-build` path from the harness-captured clean HEAD, records its command/output/status/digest, builds the default-feature product, externally proves exact-object embedding, records source/product provenance, invokes the same root example in production-trust mode, and captures stakeholder-visible output. It accepts neither a product-binary nor public-CA input and has no recurring-regression role. |
 
-The checked-in `run-example.sh` starts the supplied product binary with this
-exact gateway argv shape (its local variable/positional-argument plumbing may
-not rename or omit a flag):
+For `AT-PIG-E2E-1`, `<scratch-dir>/serve.log` is created only in the runner's
+already-required fresh scratch tree, opened once for append before `serve`
+starts, and never truncated or replaced during the run. Before each gated
+public request/NoBackend operation, the runner records the current byte offset;
+after that operation reaches its existing bounded public outcome it reads only
+the newly appended suffix. That suffix must contain exactly one
+occurrence whose structured `event` field is
+`gateway.upstream.receipt.validated` and whose `operation` field is `request`;
+it must satisfy the Selected/NoBackend field rules above. Raw
+suffixes and offsets are appended to the run's observation history even when a
+later assertion or cleanup fails; retry/cleanup output never overwrites the
+first occurrence. Probe occurrences remain distinguishable by structured
+`operation = "probe"`.
 
-```sh
-"$overdrive_bin" serve \
-  --gateway-address "$gateway_address" \
-  --gateway-certified-key-id api-origin \
-  --gateway-certificate-chain "$certificate_chain_path" \
-  --gateway-private-key "$private_key_path"
+The runner does not poll the transient receipt map, install a cleanup delay or
+infer receipt values from strace: the receipt has already been consumed before
+either tool can observe those semantics. `bpftool` may still prove stable
+post-operation cleanup/attachment facts, and strace may still diagnose syscall
+reachability, but neither is an oracle for cookie/ServiceKey/outcome/
+BackendId/expected-peer fields.
+
+The root example has one argv-only input contract; no environment variable may
+override its gateway address, Public Hostname, certificate paths or trust mode:
+
+```text
+examples/public-ingress-gateway/run-example.sh \
+  <absolute-overdrive-binary> \
+  <absolute-scratch-dir> \
+  <gateway-ipv4> \
+  [--public-hostname <PUBLIC_HOSTNAME> \
+   --certificate-chain <absolute-chain-path> \
+   --private-key <absolute-key-path>]
 ```
 
-`route.toml`'s `certified_key = "api-origin"` is byte-equal to the flag value.
-When the example creates its bounded test CA, it passes the generated
-leaf-first chain file and PKCS#8 key file through these same two flags; when an
-operator supplies files, it substitutes only the path values. Neither mode
-creates an alternate config file, environment-only credential channel or ACME
-producer.
+The first three positionals are mandatory. The three named options are
+all-or-none and each occurs once; partial, repeated or unknown options exit 2
+before startup. With no named options, hermetic mode uses
+`api.example.com` as its only default, creates a bounded test CA/certificate/key
+under the scratch directory, and the example's public curl trusts that generated
+CA with `--cacert`. With all three options, production-trust mode uses the
+operator-supplied `PublicHostname`, leaf-first public chain and matching PKCS#8
+key. It uses normal system trust for the public request and permits neither
+`--cacert` nor an insecure verification bypass.
+
+In both modes the script replaces the one `__PUBLIC_HOSTNAME__` token in the
+checked-in template, writes `<absolute-scratch-dir>/specs/route.toml`, and
+deploys that materialized file. The same hostname drives Route `hostname`,
+curl URL, TLS SNI, HTTP Host and certificate validation. The Route's
+`certified_key = "api-origin"` remains byte-equal to
+`--gateway-certified-key-id api-origin`; `[route.target].service = "api"`
+remains byte-equal to the checked-in Service's logical `WorkloadId`. The
+example passes `<gateway-ipv4>` only to `--gateway-address` and curl
+`--resolve`; it never writes that address or a derived `ServiceId` into Route.
+
+E14's four operator environment variables are inputs to the expectation runner,
+not alternate inputs to the root example. `PIG_E14_OVERDRIVE_BIN` and
+`PIG_E14_PUBLIC_CA` are absent inputs: setting either does not select an
+artifact and is rejected as stale configuration. The exact outer invocation is
+`cargo xtask lima run -- verification/harness/run-expectation.sh E14`, which
+must enter Linux as uid 0 with the existing cgroup-v2/bpffs substrate checks.
+
+Before creating or updating E14 evidence, the generic expectation harness
+captures `git rev-parse HEAD` and
+`git status --porcelain --untracked-files=all`. E14 requires the status result
+to be empty, exports that SHA as `EXPECTATION_SOURCE_SHA` and exports
+`EXPECTATION_SOURCE_DIRTY=false` beside the existing `REPO_ROOT` and
+`EVIDENCE_DIR` boundary. The E14 runner re-reads HEAD and requires byte-equality
+with `EXPECTATION_SOURCE_SHA`; it also rechecks the tree excluding only the
+harness-owned `verification/expectations/**/evidence/**` outputs written after
+the clean capture. Dirty source, an absent/invalid captured SHA or either SHA/
+dirty-state mismatch fails before build.
+
+Before the product build, the runner runs exactly `cargo xtask bpf-build` from
+the same captured clean HEAD. It captures the literal command, complete
+stdout/stderr, exit status, resolved
+`<REPO_ROOT>/target/bpf/overdrive_bpf.o` path and SHA-256, then rechecks HEAD
+and clean source state. Only after that succeeds does the runner create a
+private temporary product-build root and run exactly:
+
+```text
+cargo build --locked --package overdrive-cli --bin overdrive \
+  --target-dir <runner-build-root>/target
+```
+
+Omitting `--features`, `--all-features` and `--no-default-features` is
+load-bearing: this is the package's default-feature binary. The resolved
+artifact is exactly `<runner-build-root>/target/debug/overdrive`; it must be a
+regular executable file. The runner records in E14 evidence the captured source
+SHA, the empty dirty-state result, literal build command, build exit, resolved
+artifact path, `rustc -Vv`, `cargo -V` and
+`sha256sum <resolved-binary>`. It then externally finds the complete captured
+BPF-object byte sequence exactly once in the built binary, recording its byte
+offset and digest. Immediately before invoking the example it recomputes both
+SHA-256 values and requires equality with the recorded digests. HEAD mismatch,
+dirty checkout, either build failure, missing/non-executable artifact,
+binary/BPF digest mismatch or absent/duplicate exact-object embedding fails
+closed. These are ordinary E14 evidence files; no attestation API, process,
+service or sidecar is introduced.
+
+The evidence paths are fixed under
+`<EVIDENCE_DIR>/build-provenance/`: `source.txt` contains
+`source_sha=<EXPECTATION_SOURCE_SHA>` and `dirty=false`; `build-command.txt`
+contains the normalized command above with `<runner-build-root>` replaced by
+the actual absolute path; `build.out` contains complete stdout/stderr plus
+`exit=<code>`; `toolchain.txt` contains the complete cargo/rustc outputs;
+`artifact.txt` contains the resolved absolute binary path; and
+`overdrive.sha256` contains the GNU `sha256sum` line. The sibling
+`bpf-build-command.txt`, `bpf-build.out`, `bpf-object.txt`,
+`overdrive_bpf.sha256`, `source-after-bpf-build.txt` and
+`bpf-consumption.txt` records capture the exact BPF producer, clean source,
+object and product-consumption proof. The generic
+`verification.yaml` records the same source SHA and `working_tree_dirty: false`.
+
+Only after provenance succeeds does the runner map its four operator inputs to
+the root example's argv contract:
+
+```text
+run-example.sh <runner-build-root>/target/debug/overdrive \
+  <runner-scratch>/product <PIG_E14_GATEWAY_ADDRESS> \
+  --public-hostname <PIG_E14_PUBLIC_HOSTNAME> \
+  --certificate-chain <PIG_E14_CERTIFICATE_CHAIN> \
+  --private-key <PIG_E14_PRIVATE_KEY>
+```
+
+The production-trust public request uses
+`curl --resolve "<PIG_E14_PUBLIC_HOSTNAME>:443:<PIG_E14_GATEWAY_ADDRESS>"`
+with URL `https://<PIG_E14_PUBLIC_HOSTNAME>/stream`. `--resolve` changes only
+that curl process's address selection; it preserves the runtime hostname for
+SNI, Host and system-trust certificate verification. E14 never accepts or uses
+`--cacert` or `--insecure` for this public request.
+`api.example.com` is therefore confined to hermetic test-CA mode and is never
+the E14 production hostname.
+
+Production reachability requires the operator to provision an IPv4 A record
+from the chosen Public Hostname to the configured gateway IPv4 before serving
+real users. Overdrive has no public-DNS provider/API, does not edit
+`/etc/hosts`, and does not use curl `--resolve` outside the checked-in example
+and its black-box consumers.
 
 Both external runners supply the public certified key only through the real
 `overdrive serve` arguments. Neither may hand-program a BPF map, install a
@@ -4846,22 +5152,25 @@ its process/cgroup/socket state even on assertion failure. DISTILL owns the
 executable scenarios and matrices; this section fixes only their architecture
 boundary, production composition and non-substitution rule.
 
-### Full-stack handoff
+### Full-stack handoff status
 
-System ADR-0104/0117–0121, Route ADR-0105, Domain ADR-0112–0116 and
-Application ADR-0106–0111 now
-form one working contract. The cgroup-BPF hook—not XDP—
+System ADR-0104/0117–0121, Route ADR-0105, Domain ADR-0112–0116/0133 and
+Application ADR-0106–0111/0122–0132 document one approved integrated contract
+and constitute the approved full-stack DESIGN handoff. The user explicitly
+approved the complete DESIGN on 2026-09-13; no pending design-approval gate
+remains. The cgroup-BPF hook—not XDP—
 selects the host-originated gateway socket; XDP wire ingress remains unchanged.
 Gateway Application supplies frontend demand only, never backend state or
 selection. Public 404, NoBackend 503 and internal 502 are active exact
 mappings. Manual Public Certified Key is the only producer; #57 ACME remains
 later and additive.
 
-`AT-PIG-E2E-1` is the first recurring production-composition acceptance
-boundary, not an expectation or spike. No
-isolated scratch mechanism or roadmap is introduced in DESIGN. Application
-open questions: none; DISTILL receives the exact interfaces, lifecycle/error
-semantics and evidence lanes above.
+`AT-PIG-E2E-1` is the approved first recurring production-composition
+acceptance boundary, not an expectation or spike. No isolated scratch
+mechanism or roadmap is introduced in DESIGN. DISTILL may author draft
+scaffolds against the exact approved interfaces, lifecycle/error semantics and
+evidence lanes above. Handoff to DELIVER remains gated only by the separate
+documented C4a/C6 acceptance gaps; DESIGN approval is recorded in the header.
 
 ## Wave: DESIGN / [REF] Application outcomes
 
@@ -4877,3 +5186,329 @@ Post-Reuse-Analysis collision gate:
 `nwave-ai outcomes check-delta docs/feature/public-ingress-gateway/feature-delta.md`
 reports **11 outcomes checked, 0 collisions**. The checked set is nonzero; no
 unresolved outcome collision is carried into DISTILL.
+
+## Wave: DISTILL / [REF] Reconciliation and warnings
+
+Reconciliation found 0 contradictions among the available approved DESIGN
+sections. DESIGN approval is recorded in the header. The DISCUSS user stories,
+story map and wave decisions are absent, so these draft scenarios derive from
+the approved DESIGN contract and have no story-ID traceability. SPIKE findings and a
+promotion decision are absent; DISTILL neither invented nor ran a spike.
+DEVOPS wave decisions are absent, so the project ATDD infrastructure policy and
+the clean / stale-config / interrupted-operation defaults govern environment
+coverage.
+
+Language mode is Rust. Deliverable type is application. Density is lean with
+Tier-1 reference sections only. Repository rules override generic nWave
+examples: this DISTILL creates no feature files or Python step definitions;
+scenario specification and executable Rust test bodies remain distinct
+artifacts.
+
+The approved DESIGN pins draft testability boundaries for the four serve
+arguments and `ServeArgs` fields, the `PathMatch`/authority/header pure
+functions, the exact Gateway Application invariant activation boundary, the
+operator-controlled E14 hostname/build provenance, and the structured
+`gateway.upstream.receipt.validated` occurrence all have exact names, owners
+and signatures. The one-decision ADR split through ADR-0133 changes no
+behavior or API shape; DISTILL re-read those records and retained this feature
+delta as the approved implementation-contract SSOT. DISTILL-to-DELIVER
+handoff remains blocked by the documented C4a/C6 acceptance gaps; DESIGN
+approval is recorded above and is not a remaining gate.
+
+## Wave: DISTILL / [REF] Scenario list and tags
+
+| ID | Scenario contract | Tags | Executable owner |
+|---|---|---|---|
+| S-PIG-01 | An external user receives the api workload streamed response through the public Route | @walking_skeleton @driving_port @real-io @contract-shape:bounded-change | tests/tier3/public-ingress-gateway/runner.sh |
+| S-PIG-02 | A sound listener with no selectable backend returns public 503 and no fallback | @error @security @real-io @contract-shape:bounded-change | tests/tier3/public-ingress-gateway/runner.sh |
+| S-PIG-03 | Exact raw paths match only byte-equal request paths | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-04 | Segment prefixes match a segment but never an adjacent prefix | @property @edge @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-05 | Wildcard, IP, terminal-dot, empty-label and malformed paths are rejected distinctly | @error @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-06 | Public hostname label boundaries accept 62/63 octets and reject 64 | @boundary @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-07 | Every Route input channel rejects one malformed value before intent | @error @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-08 | Route generation is deterministic and changes with any Route field | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-09 | Certified-key generation is sensitive to certificate-chain order | @property @security @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-10 | Gateway Application generation changes when its exact frontend changes | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-11 | Demand revisions are nonzero, monotone and refuse wrap | @error @boundary @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
+| S-PIG-12 | Canonical Host accepts ASCII case and optional port 443 while preserving typed SNI | @property @in-memory @contract-shape:pure-function | gateway runtime routing source-local properties |
+| S-PIG-13 | Missing, duplicate, malformed, wrong-port and SNI-mismatched authority remain distinct | @error @security @in-memory @contract-shape:pure-function | gateway runtime routing source-local properties |
+| S-PIG-14 | Request rewriting preserves every un-nominated end-to-end header and replaces forwarding claims | @property @security @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
+| S-PIG-15 | Response rewriting preserves prior Via order and appends Overdrive last | @property @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
+| S-PIG-16 | Fixed and Connection-nominated hop-by-hop headers are removed in both directions | @error @security @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
+| S-PIG-17 | The first-slice limit set is exact, finite and internally ordered | @boundary @in-memory @contract-shape:pure-function | gateway limits source-local property |
+| S-PIG-18 | The operator can provide the exact four public-gateway values on serve | @driving_adapter @in-memory @contract-shape:pure-function | overdrive-cli acceptance |
+| S-PIG-19 | A repeated scalar gateway argument is rejected as an argument conflict | @error @driving_adapter @in-memory @contract-shape:pure-function | overdrive-cli acceptance |
+| S-PIG-20 | All fourteen partial enablement combinations name exactly their missing fields | @error @property @config-disabled @contract-shape:pure-function | overdrive-cli acceptance |
+| S-PIG-21 | Declare, exact replay, same-ID replacement and withdrawal form one atomic Route lifecycle | @real-io @adapter-integration @contract-shape:bounded-change | overdrive-gateway integration |
+| S-PIG-22 | A competing Route ID cannot replace the current singleton Route | @error @real-io @contract-shape:bounded-change | overdrive-gateway integration |
+| S-PIG-23 | Withdrawal by another Route ID has an empty Route-state delta | @error @real-io @contract-shape:bounded-change | overdrive-gateway integration |
+| S-PIG-24 | Two concurrent Route claims yield one declaration and one conflict | @error @concurrency @real-io @contract-shape:bounded-change | overdrive-gateway integration |
+| S-PIG-25 | Operator gateway status contains no manual path, key, ciphertext, nonce or salt | @security @adapter-integration @contract-shape:unbounded-preservation | overdrive-gateway integration plus example status capture |
+| S-PIG-26 | Clean shutdown leaves gateway identity empty and no connect residue | @lifecycle @real-io @contract-shape:bounded-change | overdrive-gateway integration and Tier-3 runner |
+| S-PIG-27 | Unreadable manual certified-key files refuse boot without Route mutation | @error @degraded-resource @real-io @contract-shape:unbounded-preservation | overdrive-gateway integration |
+| S-PIG-28 | A missing BPF selection receipt fails closed and cleans the registered intent | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
+| S-PIG-29 | A receipt for another ServiceKey fails before internal mTLS | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
+| S-PIG-30 | A wrong-but-valid selected workload peer fails closed without alternate-backend retry | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
+| S-PIG-31 | Stale completion, replacement, withdrawal, retained demand and restart preserve generation safety | @property @seeded-sim @lifecycle @contract-shape:bounded-change | overdrive-sim typed direct invariant, pending activation |
+| S-PIG-32 | Shutdown joins admitted users before demand and gateway identity retire | @property @seeded-sim @interruption @contract-shape:bounded-change | overdrive-sim typed direct invariant, pending activation |
+| S-PIG-33 | Withdrawing from Empty is Unchanged and the persisted empty Route Set survives reopen | @edge @crud @real-io @contract-shape:bounded-change | overdrive-gateway real-redb integration |
+| S-PIG-34 | Route deploy is one-shot for both detach modes and never enters workload NDJSON | @mode @orthogonality @driving-adapter @contract-shape:bounded-change | overdrive-cli in-process production-server integration |
+| S-PIG-35 | Real Route POST/DELETE handlers map declaration, replay, replacement, validation and singleton conflict | @driving-port @error @real-io @contract-shape:bounded-change | overdrive-cli ApiClient + production run_server integration |
+| S-PIG-36 | Disabled production composition rejects malformed Route JSON with 409 before parse and leaves existing serve/status live | @config-disabled @error @security @contract-shape:bounded-change | overdrive-cli production run_server integration |
+| S-PIG-37 | Cleanup ledger accepts 0/1/128 reservations and refuses 129 before BPF registration | @boundary @degraded-resource @contract-shape:bounded-change | gateway application source-local acceptance |
+| S-PIG-38 | Real HostGatewayClientMtls rejects valid workload certificate B when receipt-selected identity is A before body bytes | @security @error @real-io @contract-shape:bounded-change | overdrive-dataplane real-rustls integration |
+| S-PIG-39 | External TLS request outside a narrow replacement Route returns 404 | @error @real-io @public-https @contract-shape:bounded-change | recurring Tier-3 runner using the materialized checked-in `route-narrow.toml.template` |
+| S-PIG-40 | One selected upstream that closes before response maps to 502 exactly once without retry/replay | @error @real-io @single-attempt @contract-shape:bounded-change | recurring Tier-3 runner and workload request-count marker |
+| S-PIG-41 | An unregistered cgroup socket retains non-service behavior while LOCAL_BACKEND_MAP and XDP attachments remain unchanged | @security @real-kernel @contract-shape:unbounded-preservation | recurring Tier-3 runner |
+| S-PIG-42 | A gateway-status ObservationStore point-read failure returns 500 without credential detail | @error @degraded-resource @operator-mtls @contract-shape:unbounded-preservation | overdrive-cli production run_server with typed SimObservationStore read fault |
+| S-PIG-43 | A valid selected peer observes the dedicated non-allocation gateway SVID as the client identity | @security @real-io @identity @contract-shape:bounded-change | overdrive-dataplane HostGatewayClientMtls real-rustls integration |
+| S-PIG-44 | Every gateway numeric/digest newtype round-trips Display, FromStr, TryFrom, string-serde and required rkyv while rejecting each noncanonical partition | @property @error @codec @contract-shape:pure-function | overdrive-core source-local PBT |
+| S-PIG-45 | Public certificate chains at cardinalities zero, one, many (leaf plus issuer) and over-limit nine have exact rejected/accepted/accepted/rejected outcomes inside one explicit validity interval | @boundary @error @security @contract-shape:bounded-change | overdrive-gateway certified-key source-local acceptance |
+| S-PIG-46 | Certified-key install replay, valid replacement, invalid replacement and expiry preserve the exact protected/current state deltas | @lifecycle @error @real-io @contract-shape:bounded-change | overdrive-gateway real GatewayBuilder/custody owner with real-redb intent and redacted status integration |
+| S-PIG-47 | Ciphertext/tag/AAD tamper and CSPRNG failure expose no plaintext or protected record | @security @error @degraded-resource @contract-shape:bounded-change | overdrive-host production-codec tamper acceptance plus CSPRNG fault through real GatewayBuilder custody boot with intent/status snapshots |
+| S-PIG-48 | A lagged IntentStore subscription preserves the exact missed count and resumes with the next committed Changed event | @interruption @error @real-io @contract-shape:bounded-change | already-delivered active prerequisite in overdrive-store-local real-redb integration; not pending DELIVER activation |
+| S-PIG-49 | Frontend resolution triggers every closed error and rejects real persisted Job/Schedule targets without mutating intent | @error @adapter-integration @contract-shape:unbounded-preservation | overdrive-gateway frontend source-local adapter acceptance |
+| S-PIG-50 | Every GatewayConnectDataplane failure is emitted by its exact probe/register/receipt/cleanup/identity/count port operation | @error @adapter-contract @contract-shape:bounded-change | documented AT gap: connector bodies cover receipt mismatch/missing, selected identity and cleanup through the real consumer, but probe/count and both registration variants do not yet have real-owner observable bodies; the removed scripted port echo is not evidence |
+| S-PIG-51 | Gateway identity desired/actual hydration, reconciliation, audit-before-hold, stale epoch, replay and every lifecycle-control failure remain cause-distinct | @error @lifecycle @security @contract-shape:bounded-change | documented AT gap: audit-before-hold and shutdown DropFailed mapping drive real owners, but the full ensure/disable error set has no complete real-owner matrix; the removed scripted lifecycle echo is not evidence |
+| S-PIG-52 | HostGatewayClientMtls rejects absent/expired/malformed held identity, non-peer fds, elapsed handshakes, malformed URI-SAN shape and wrong-valid peers without plaintext fallback | @error @security @real-io @contract-shape:bounded-change | overdrive-dataplane real-rustls integration plus overdrive-gateway production-connector mapping/cleanup matrix |
+| S-PIG-53 | A failed connector cleanup is retained and retried without a second registration, connection or mTLS attempt | @error @degraded-resource @lifecycle @contract-shape:bounded-change | overdrive-gateway connector source-local integration |
+| S-PIG-54 | Repeating the same custody, demand and identity application has an empty second observable delta | @idempotency @contract-shape:bounded-change | documented AT gap: custody replay uses the real owner/store and identity hold is source-local; demand apply-twice has no real-owner snapshot body after removal of the scripted acknowledgment echo |
+| S-PIG-55 | Route parsers require exactly `target.service`; legacy `target.workload` has no JSON/TOML alias | @error @security @parser @contract-shape:pure-function | already-delivered active prerequisite in overdrive-core source-local acceptance; not pending DELIVER activation |
+
+Error/edge/boundary/security/degraded-resource/lifecycle/interruption/concurrency
+scenarios are 45 of 55 (81.8%), above the 40% gate. Tier A is S-PIG-01
+through the built production surface. Rust's Tier-B equivalent is the two
+typed seeded state-machine invariants S-PIG-31/32. DISTILL compiles their real
+`GatewayBuilder`/`GatewayControl`/`GatewayHandle` direct acceptance paths and
+mandatory stimulus/fault case constructors, but DESIGN deliberately excludes
+them from `Invariant::ALL` while their completed evaluator bodies remain
+ignored and reach RED production owner scaffolds when activated. The single
+`DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` activation removes the ignores,
+drives the real owners through approved Sim ports, proves public
+status/demand/identity/shutdown traces including twin-seed and deletion
+controls, and only then adds both variants to the default catalogue. DISTILL
+does not fabricate a passing trace or parallel replacement owner.
+
+The walking-skeleton specification is:
+
+    Given overdrive serve has a complete manual Public Certified Key
+      and the operator has deployed the checked-in api Service and public-api Route
+    When an external user requests https://api.example.com/stream over TLS 1.3
+      using the Route hostname as SNI and Host
+    Then the user receives status 200, X-Workload api, and the streamed body
+      and the peer-facing upstream capture contains TLS records with no body cleartext
+      and Route, Service, gateway intent, receipt, network and identity cleanup converge
+
+## Wave: DISTILL / [REF] Strategy and project-policy mapping
+
+The Architecture-of-Reference treatment is inherited without a per-feature
+A/B/C/D strategy. Driving surfaces use their real protocols. Driven internal
+state uses LocalIntentStore, SimObservationStore for deterministic focused
+composition, and the real EbpfDataplane/kernel path for Tier 3. Clock and
+scriptable external outcomes use existing Sim ports in Tier 1/2. Layer 3 and
+above remain example-based; generative coverage is confined to pure,
+source-local or in-memory properties.
+
+No acceptance test hand-installs a map, rule, identity, application snapshot,
+certificate, or protected record that production should install. The only
+test-supplied credential is an operator input accepted by the production serve
+flags. The walking skeleton is initially active as the external Tier-3 runner.
+Future Rust bodies carry reasoned pending-DELIVER ignore markers; S-PIG-48 and
+S-PIG-55 are explicitly active, already-delivered prerequisite checks and are
+not part of the future-pending inventory.
+
+## Wave: DISTILL / [REF] Adapter coverage
+
+| Driven adapter/effect | Real-I/O or contract scenario | Coverage boundary |
+|---|---|---|
+| LocalIntentStore / Public Route Set | S-PIG-21–24/27/33/35/48 | Real redb before/after state deltas, persisted empty set, same-file reopen, singleton lifecycle, HTTP mapping, concurrency and exact lag preservation |
+| ManualCertifiedKeySource | S-PIG-27 and S-PIG-01 | Real files, full source path, unreadable failure, test-CA or operator-supplied material |
+| PublicCertifiedKeyAeadCodec / KEK / protected redb record | S-PIG-01/25/45–47/54 | Production codec/custody composition; 0/1/N chain, replay/replacement/expiry, tamper/AAD/CSPRNG faults, and secret-free status/artifacts |
+| ObservationStore / gateway status | S-PIG-25/35/36/42 | Populated real JSON, exact active fields, typed point reads, disabled response and 500 fault mapping |
+| ServiceFrontendResolve | S-PIG-01/49 | Existing Service intent plus platform VIP resolves one exact frontend; all closed failures and real persisted Job/Schedule rejection preserve the intent universe |
+| Gateway Frontend Demand / ServiceMapHydrator | S-PIG-01/02/31/50/54 | Staged/current/draining demand, empty eligible set and stale completion are driven by the real application owner; apply-twice and the complete Dataplane error dispatch remain documented C4a/C6 gaps and are not credited to a scripted port |
+| EbpfDataplane / cgroup connect maps | S-PIG-01/02/28/29/37/41/50/53 | Tier-3 uses the production connector's operation-bracketed structured receipt occurrences—not transient map polling—to prove cookie/ServiceKey, Selected BackendId/applied SPIFFE identity and NoBackend before stable cleanup. Closed Dataplane failures, cleanup capacity/retry and unregistered LOCAL/XDP preservation are focused complements. |
+| SocketCookieReader | S-PIG-01/28–30/44 | The structured validated-receipt occurrence carries the nonzero SO_COOKIE-derived intent cookie after BPF receipt equality validation; the production syscall trace is a reachability complement, not the receipt oracle |
+| Gateway identity issuance/audit/slot | S-PIG-01/25/26/32/43/51/52/54 | Dedicated non-allocation gateway subject, issue/audit-before-hold, epoch idempotency/staleness, real peer-observed client identity, absent/expired fail-closed, redacted status and drain-ordered empty; the full lifecycle error set remains the documented C6 gap |
+| HostGatewayClientMtls / rustls | S-PIG-01/30/38/43/52 | Exact selected peer plus real happy client-identity observation, same-CA A/B mismatch, absent/expired identity, peer-address/deadline and zero/multiple URI-SAN errors; failure precedes body with no plaintext, retry or alternate peer |
+| Hyper public HTTP runtime | S-PIG-01/02/12–17/39/40 | TLS1.3/HTTP1.1 200/404/502/503, authority/path/header/limit policy and single-attempt failure |
+| ServerHandle / GatewayHandle lifecycle | S-PIG-26/32 and S-PIG-01 | Stop accepts, join, sweep, retire demand, empty identity, preserve typed residue |
+
+Public DNS is not an Overdrive adapter. Production requires an
+operator-managed IPv4 A record from the Route's public hostname to the
+configured gateway address. The hermetic S-PIG-01 run uses
+`curl --resolve "api.example.com:443:${gateway_address}" --cacert <test-ca>`.
+E14 uses the same client-local address override with its operator-controlled
+public hostname but the normal system trust store and no `--cacert`. Neither
+depends on ambient DNS or edits `/etc/hosts`; the configured hostname remains
+the SNI, HTTP Host and certificate identity.
+
+## Wave: DISTILL / [REF] Scaffolds
+
+| RED-ready scaffold | Marker / activation |
+|---|---|
+| crates/overdrive-core/src/public_ingress.rs plus tests/schema_evolution/public_* and gateway_application_status_row | SCAFFOLD marker; exact VersionedEnvelope/store-codec signatures, four generated V1 golden fixtures, and Route/value/generation/path properties ignored by named DELIVER steps |
+| crates/overdrive-core/src/gateway_identity.rs | SCAFFOLD marker; exact epoch Display/FromStr/TryFrom/string-serde/rkyv/checked-next contracts and rejection PBT ignored |
+| crates/overdrive-gateway/ | New exact adapter-host crate; owner/port/runtime/connector/limit plus demand-handle and IntentServiceFrontendResolver methods are RED scaffolds |
+| crates/overdrive-host/src/socket_cookie.rs | SCAFFOLD marker; safe SO_COOKIE probe/read bodies remain RED |
+| crates/overdrive-host/src/ca/public_certified_key.rs | Exact new/seal/open/test-random-fill codec surface over core protection context/record |
+| crates/overdrive-dataplane/src/{gateway_connect.rs,mtls/gateway_identity.rs} and overdrive-bpf gateway map module | Exact Dataplane port, POD ABI, slot/access handles and HostGatewayClientMtls scaffolds; real-rustls A/B body compiled |
+| crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs plus every Any* dispatch | Canonical reconciler/state/view and persistence dispatch scaffolds; HydrationContext carries the three mandatory ports |
+| crates/overdrive-control-plane gateway composition/handlers/action shim/ServerHandle | Mandatory Disabled/Enabled demand+identity composition, real HTTP/OpenAPI routes, gateway action dispatch and typed combined shutdown surface |
+| api/openapi.yaml | Regenerated live schema for Route POST/DELETE and gateway-status GET plus every exact request/response DTO |
+| crates/overdrive-cli/src/{cli.rs,commands/serve.rs,commands/deploy.rs,http_client.rs} | Exact clap fields, first-operation RED gateway_config, typed Route deploy/client surfaces and production-composition bodies |
+| crates/overdrive-sim/src/{adapters/gateway.rs,invariants/gateway_application.rs} | Exact Sim gateway identity-lifecycle/client-mTLS adapters plus typed pending invariant variants and mandatory case constructors. DISTILL-authored evaluators drive real GatewayBuilder/GatewayControl/GatewayHandle owners and assert only public status/demand/identity/shutdown traces; direct tests stay ignored and variants stay outside every default catalogue until the DESIGN-pinned DELIVER activation. |
+| examples/public-ingress-gateway/ | Exact DESIGN-pinned operator journey and client-local hostname override |
+| tests/tier3/public-ingress-gateway/ | Active AT-PIG-E2E-1 plus host-safe cleartext-guard regression; black-box built binary only |
+| .github/workflows/public-ingress-gateway-tier3.yml | Twice-weekly/manual real-kernel lane; builds the default-feature binary once and serializes TCP/443/BPF state |
+| verification/expectations/E14-public-ingress-operator-journey/ | Pending point-in-time public-system-trust expectation; Linux/root fail-closed and distinct from recurring test |
+
+Each present Rust test body compiles. Pending bodies are executable assertions
+through the named production contract; none is a panic-only test placeholder.
+The C4a/C6 audit rows explicitly identify the three scenario obligations that
+remain gaps after scripted echo bodies were removed; they are not represented
+as passing scaffolds. Production scaffold panics carry SCAFFOLD text so
+activation is semantic RED, not import/setup BROKEN.
+
+The example and Tier-3 runner retain append-only, per-run numbered observation
+directories. Every retry of a request, status read, workload read and cleanup
+poll carries sanitized command, status, start and end timestamps; live
+convenience files are copies, never the only evidence. The Tier-3
+runner brackets each request by an append-only `serve.log` byte offset and
+parses only the completed request's structured
+`gateway.upstream.receipt.validated` suffix. Transient intent/receipt maps are
+never polled as an occurrence oracle; stable post-request/final emptiness and
+every external `bpftool`/`ip`/`nft`/`ss` probe retain stdout, stderr, status and
+timestamps.
+
+## Wave: DISTILL / [REF] Test placement
+
+Pure Route/value properties are source-local in overdrive-core because their
+public signatures are the driving ports. Authority/header/limit and connector
+properties are source-local in overdrive-gateway because DESIGN keeps those
+functions crate-private. CLI parsing/config tests use the existing
+overdrive-cli acceptance entrypoint. Real redb/application composition uses
+the integration-tests-gated overdrive-gateway integration binary. Ordering,
+late completion, restart and shutdown use the existing overdrive-sim
+catalogue. The built product is driven only by the repository-root example,
+Tier-3 runner and distinct E14 expectation.
+
+## Wave: DISTILL / [REF] Driving-adapter coverage
+
+| Driving surface | Scenario / mechanism |
+|---|---|
+| overdrive serve with exact four gateway flags | S-PIG-01, S-PIG-18–20; external example plus in-process clap/config |
+| overdrive deploy SERVICE_SPEC | S-PIG-01/35; checked-in `service.toml` and production API deployment precede Route application; handler acceptance and bounded frontend convergence are observed separately |
+| overdrive deploy ROUTE_SPEC | S-PIG-01/21–24/34/35/55; ApiClient/production handler plus materialized checked-in `route.toml.template`/`route-narrow.toml.template`, each using exactly `target.service` |
+| DELETE /v1/routes/{id} | S-PIG-21/23/33/35/36; real operator-mTLS handler, persisted empty set and disabled pre-parse branch |
+| GET /v1/gateway/status | S-PIG-25/35/36/42; populated/redacted production JSON plus typed read-error 500 |
+| Public TLS 1.3 / HTTP/1.1 | S-PIG-01/02/38–40/43/52; `curl --resolve` preserves the configured hostname as SNI/Host/certificate identity and proves 200/404/502/503; real-rustls bodies prove dedicated gateway client identity and wrong-valid/absent/expired/malformed-peer failure before body bytes |
+| Serve shutdown | S-PIG-26/32 and Tier-3 cleanup complement |
+| E14 point-in-time public trust | E14 accepts the operator-controlled public hostname, produces and hashes the BPF object with `cargo xtask bpf-build` from clean harness-captured HEAD, builds default features, proves the binary embeds that exact object, records source/toolchain/BPF/binary provenance, and uses `curl --resolve "${public_hostname}:443:${gateway_address}"` for address selection only. It preserves that hostname as SNI/Host/certificate identity and requires the normal system trust store (`--cacert` and external-binary inputs are forbidden). |
+
+## Wave: DISTILL / [REF] Prerequisites
+
+- The recurring lane builds the default-feature overdrive binary exactly once
+  and passes its absolute path to AT-PIG-E2E-1. E14 accepts no binary input: it
+  requires a harness-captured clean HEAD, runs the exact BPF build, hashes its
+  object, builds that default-feature binary inside the verified substrate,
+  proves exact-object embedding, hashes the product, and executes that exact
+  artifact.
+- Linux root/cgroup-v2/BPF/netns/nft/rustls substrate through Lima or the
+  repository Tier-3 kernel harness; pinned appliance kernel remains the merge
+  authority.
+- openssl, python3, curl, tcpdump, bpftool, ip, nft, ss, strace, systemd-run,
+  timeout, cmp and diff available to the external
+  runner.
+- Operator supplies a complete leaf-first publicly trusted chain and matching
+  mode-0600 PKCS#8 key for E14, or the root example creates its bounded
+  hermetic test CA and uses `--cacert` only in that hermetic mode.
+- Production public reachability uses an operator-managed IPv4 A record.
+  Hermetic execution substitutes only client-local name resolution with
+  curl --resolve; Overdrive owns no DNS provider/API and mutates no host file.
+- The existing workload-identity CA, Service deploy, Path-A network/TPROXY and
+  Service-map production owners are composed by serve; tests do not substitute
+  their effects.
+
+## Wave: DISTILL / [REF] Outcome registration
+
+No new outcome row is introduced. All 55 scenarios refine the existing eleven
+gateway/reused typed contracts:
+OUT-PIG-CERTIFIED-KEY-CUSTODY, OUT-PIG-GATEWAY-APPLICATION,
+OUT-PIG-BPF-SELECTION-IDENTITY, OUT-PIG-GATEWAY-EXACT-PEER,
+OUT-PIG-PUBLIC-REQUEST, OUT-CA-SVID, OUT-WIM-SVID-LIFECYCLE,
+OUT-MTLS-HANDSHAKE-FAIL-CLOSED, OUT-MTLS-COMPOSED-PROXY-SKELETON,
+OUT-MTLS-INBOUND-SERVER-MTLS and OUT-MTLS-WIRE-TLS13.
+The nonzero collision gate remains the registry verification mechanism.
+
+## Wave: DISTILL / [REF] Completeness audit
+
+| Check | Result | Evidence / documented gap |
+|---|---|---|
+| C1a empty/zero/minimum | PASS | Disabled all-absent config, empty withdrawal, empty headers/demand/backend set, zero-chain rejection and one-chain acceptance |
+| C1b partition boundaries | PASS | Host labels 62/63/64, zero/nonzero/max revisions and epochs, chain empty/valid/over-limit, cleanup ledger 0/1/128/129 and fixed runtime limits |
+| C2a state machine documented | PASS | Module narratives and DESIGN gates cover Route Empty/Occupied, key Absent/Usable/Unusable, application Staged/Current/Draining and identity Empty/Held/disable states |
+| C2b illegal event from each state | PASS | Empty inverse, competing apply/wrong-ID withdrawal, unusable replacement preservation, stale demand/identity completion, restart and shutdown inputs are complete executable bodies; pending real-owner invariant paths remain ignored until their one activation step |
+| C3 zero/one/many collections | PASS | S-PIG-45 covers chain 0/1/N; header PBT covers 0..N; Route covers 0/1/N refusal; ledger covers 0/1/limit/+1; demand covers staged/current/draining union |
+| C4a apply twice | FAIL — documented AT gap | Route/withdrawal, custody candidate and identity hold have repeat coverage, but demand apply-twice lacks a real-owner snapshot body; the former preconstructed acknowledgment echo was removed rather than counted |
+| C4b inverse without prerequisite | PASS | Already-empty withdrawal returns Unchanged |
+| C5a material mode combinations | PASS | All sixteen gateway enablement masks, exact/prefix Route modes, hermetic-test-CA versus E14 system-trust modes, and every material detach behavior |
+| C5b orthogonality | PASS | S-PIG-34 drives both Route detach decisions through deploy_resource and proves both return Route rather than NDJSON/workload output |
+| C6a malformed input parameters | PASS | Every Route field, `target.service`/legacy alias, authority, path, hostname, canonical newtype, repeated argv, missing key file and malformed/tampered certificate input is driven through its SUT parser/adapter |
+| C6b every declared error | FAIL — documented AT gap | Route/authority/config/newtype/frontend and mTLS errors have real parser/adapter or connector-consumer bodies; custody CSPRNG now enters through GatewayBuilder and identity DropFailed through GatewayHandle, but the complete Dataplane and identity-lifecycle sets are not yet driven through real owners. Scripted ports returning their input error were removed and are not counted. |
+| C6c closed error set | FAIL — documented AT gap | Exact enum/nested-cause assertions exist for covered production consumers, but without complete real-owner Dataplane and identity-lifecycle matrices the closed sets cannot honestly be claimed exhaustive |
+| C7a degraded resource | PASS | Unreadable key source, CSPRNG and observation-store faults, NoBackend, missing receipt/identity, cleanup failure and full cleanup ledger |
+| C7b interruption | PASS | Exact lag count/resubscription, held demand completion, withdrawal/restart, handshake deadline, retained connection and in-flight joined shutdown schedules |
+| C7c concurrent actors | PASS | Two concurrent singleton Route claims |
+
+Verdict: **ACCEPTABLE_WITH_DOCUMENTED_GAPS — 12/15 passing**. The three
+failures are deliberately retained rather than filled with scripted error
+echoes or expanded into the high-only coverage work excluded from this
+remediation. Taxonomy telemetry: public-ingress-gateway C1=0/LOW, C2=0/LOW,
+C3=0/LOW, C4=1/HIGH, C5=0/LOW, C6=2/HIGH, C7=0/LOW.
+
+Mandate evidence: every present executable scenario has a Contract Shape declaration;
+every live source-local pure property uses the exact required rustdoc line.
+PBT is confined to pure/in-memory layers and Tier 3 is example-based. State
+delta assertions name public Route/status/demand/receipt/cleanup surfaces, not
+private owner fields. Rust domain nouns reuse the exact DESIGN types and test
+helpers delegate to production builders/ports. Adapted Mandate-12
+step-reuse-ratio is informational: 55 scenario contracts / 16 unique driving
+families = 3.44x, the natural ceiling for this cross-layer security journey;
+no ratio-driven vocabulary collapse was applied.
+
+Because C4a/C6 retain documented AT gaps, this audit does not authorize a
+DISTILL-to-DELIVER handoff. DESIGN approval is recorded above and is not a
+remaining gate.
+
+## Wave: DISTILL / [REF] Pre-DELIVER RED classification
+
+Classification: **RED / MISSING_FUNCTIONALITY**.
+
+This is a draft execution signal only. DESIGN is approved; the signal does not
+override the documented C4a/C6 acceptance gaps, so handoff remains blocked by
+those separate gaps.
+
+- Lima cargo check over the workspace, all targets and integration-tests
+  feature compiled every inactive Rust body successfully; workspace Clippy
+  passed with warnings denied. Targeted nextest ran the live
+  `target.service` parser and exact IntentStore lag-preservation tests: 2/2
+  passed.
+- Default `cargo dst --seed 54104` passed all 43 active invariants. Neither
+  pending Gateway Application invariant was default-reachable, exactly as the
+  DESIGN activation boundary requires. `cargo xtask bpf-build`, `dst-lint`,
+  OpenAPI drift check, shellcheck, actionlint, the large-output/tool-failure
+  cleartext-guard regression, certificate verification and the nonzero outcome
+  collision check all passed.
+- A default-feature overdrive binary was built, then AT-PIG-E2E-1 was invoked
+  inside Lima as root with an absent scratch path.
+- The checked-in test CA was created successfully and the built product reached
+  its real typed serve argv boundary. Clap accepted all four exact gateway
+  flags, then `PublicCertifiedKeyId::from_str` reached the production
+  `PublicCertifiedKeyId::new` RED scaffold and failed with `SCAFFOLD:
+  public-ingress label constructor`. The runner exited 1.
+- The failure is not import, fixture, certificate-generation, privilege or
+  environment setup failure. It is the intended first missing production
+  behavior. Every later Rust scenario remains inactive behind a reasoned
+  pending-DELIVER ignore marker except the explicitly active, already-delivered
+  prerequisite checks S-PIG-48 and S-PIG-55.

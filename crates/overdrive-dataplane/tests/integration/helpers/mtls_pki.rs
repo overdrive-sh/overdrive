@@ -67,6 +67,15 @@ pub struct TestPki {
     /// matches a SAN) succeeds. Used by `OutboundPeer` (the test-side mTLS server
     /// the agent's leg B dials), NOT read through `IdentityRead`.
     pub peer_leaf: Leaf,
+    /// Two valid same-CA server leaves with distinct SPIFFE URI SANs and the
+    /// loopback IP SAN used by the public-ingress exact-peer negative.
+    pub gateway_peer_a: Leaf,
+    pub gateway_peer_b: Leaf,
+    /// Valid same-CA/IP server leaf with no URI SAN.
+    pub gateway_peer_without_spiffe: Leaf,
+    /// Valid same-CA/IP server leaf with two URI SANs.
+    pub gateway_peer_with_two_spiffes: Leaf,
+    pub gateway_client: Leaf,
     pub client_alloc: AllocationId,
     pub server_alloc: AllocationId,
 }
@@ -103,6 +112,25 @@ impl TestPki {
             Some(Self::PEER_SNI),
             false,
         );
+        let gateway_peer_a = intermediate.mint_leaf_ip(
+            "spiffe://overdrive.local/workload/api/alloc/api-a",
+            "127.0.0.1".parse().expect("loopback IP"),
+        );
+        let gateway_peer_b = intermediate.mint_leaf_ip(
+            "spiffe://overdrive.local/workload/api/alloc/api-b",
+            "127.0.0.1".parse().expect("loopback IP"),
+        );
+        let gateway_peer_without_spiffe =
+            intermediate.mint_leaf_ip_with_spiffes(&[], "127.0.0.1".parse().expect("loopback IP"));
+        let gateway_peer_with_two_spiffes = intermediate.mint_leaf_ip_with_spiffes(
+            &[
+                "spiffe://overdrive.local/workload/api/alloc/api-a",
+                "spiffe://overdrive.local/workload/api/alloc/api-b",
+            ],
+            "127.0.0.1".parse().expect("loopback IP"),
+        );
+        let gateway_client =
+            intermediate.mint_leaf("spiffe://overdrive.local/gateway/gateway-node", None, true);
 
         Self {
             ca_cert_pem: root.cert_pem,
@@ -111,6 +139,11 @@ impl TestPki {
             client_leaf,
             server_leaf,
             peer_leaf,
+            gateway_peer_a,
+            gateway_peer_b,
+            gateway_peer_without_spiffe,
+            gateway_peer_with_two_spiffes,
+            gateway_client,
             client_alloc: AllocationId::new("alloc-mtls-client").expect("valid alloc"),
             server_alloc: AllocationId::new("alloc-mtls-server").expect("valid alloc"),
         }
@@ -150,6 +183,11 @@ impl TestPki {
     #[must_use]
     pub fn server_svid_material(&self) -> SvidMaterial {
         svid_from_leaf(&self.server_leaf)
+    }
+
+    #[must_use]
+    pub fn gateway_client_svid_material(&self) -> SvidMaterial {
+        svid_from_leaf(&self.gateway_client)
     }
 
     /// Mint a fresh, UNTRUSTED client leaf (a different CA) — for the fail-closed
@@ -243,6 +281,37 @@ impl MintedCa {
             key_der,
             spiffe: spiffe.parse().expect("valid spiffe id"),
             serial: CertSerial::new("0a0b0c0d").expect("valid serial"),
+        }
+    }
+
+    fn mint_leaf_ip(&self, spiffe: &str, ip: std::net::IpAddr) -> Leaf {
+        self.mint_leaf_ip_with_spiffes(&[spiffe], ip)
+    }
+
+    fn mint_leaf_ip_with_spiffes(&self, spiffes: &[&str], ip: std::net::IpAddr) -> Leaf {
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.subject_alt_names = spiffes
+            .iter()
+            .map(|spiffe| SanType::URI(Ia5String::try_from(*spiffe).expect("SPIFFE URI")))
+            .chain(std::iter::once(SanType::IpAddress(ip)))
+            .collect();
+        let fixture_identity = spiffes
+            .first()
+            .copied()
+            .unwrap_or("spiffe://overdrive.local/workload/fixture/alloc/no-uri");
+        params.distinguished_name.push(rcgen::DnType::CommonName, fixture_identity);
+        params.use_authority_key_identifier_extension = true;
+        params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+        let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&self.params, &self.key);
+        let cert = params.signed_by(&leaf_key, &issuer).unwrap();
+        Leaf {
+            cert_pem: cert.pem(),
+            key_pem: leaf_key.serialize_pem(),
+            cert_der: CertificateDer::from(cert.der().to_vec()),
+            key_der: PrivateKeyDer::from(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
+            spiffe: fixture_identity.parse().expect("valid fixture SPIFFE ID"),
+            serial: CertSerial::new("0f0e0d0c").expect("valid serial"),
         }
     }
 }

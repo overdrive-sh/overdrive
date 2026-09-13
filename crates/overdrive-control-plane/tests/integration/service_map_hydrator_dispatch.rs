@@ -121,6 +121,7 @@ async fn dispatch_writes_completed_row_on_dataplane_ok() {
         port: std::num::NonZeroU16::new(8080).expect("non-zero"),
         proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         backends: backends.clone(),
+        gateway_demand: None,
         correlation,
     };
     let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
@@ -135,6 +136,7 @@ async fn dispatch_writes_completed_row_on_dataplane_ok() {
         obs.as_ref(),
         &tick,
         &writer_node,
+        None,
     )
     .await
     .expect("dispatch returns Ok on Dataplane::update_service success");
@@ -165,6 +167,7 @@ async fn dispatch_writes_failed_row_on_dataplane_err() {
         port: std::num::NonZeroU16::new(8080).expect("non-zero"),
         proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         backends: backends.clone(),
+        gateway_demand: None,
         correlation,
     };
     let dataplane: Arc<dyn Dataplane> = Arc::new(FailingUpdateService);
@@ -179,6 +182,7 @@ async fn dispatch_writes_failed_row_on_dataplane_err() {
         obs.as_ref(),
         &tick,
         &writer_node,
+        None,
     )
     .await
     .expect("dispatch returns Ok even on Dataplane::update_service Err — outcome is Failed");
@@ -232,6 +236,7 @@ async fn dispatch_rejects_ipv6_vip_with_failed_row() {
         port: std::num::NonZeroU16::new(8080).expect("non-zero"),
         proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
         backends: backends.clone(),
+        gateway_demand: None,
         correlation,
     };
 
@@ -247,6 +252,7 @@ async fn dispatch_rejects_ipv6_vip_with_failed_row() {
         obs.as_ref(),
         &tick,
         &writer_node,
+        None,
     )
     .await
     .expect("dispatch returns Ok (IPv6 rejection is Failed, not Err)");

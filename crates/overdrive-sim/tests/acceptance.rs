@@ -59,6 +59,8 @@ mod acceptance {
     // guest-stack-transparent-mtls-intercept BTR-1 — fixed-seed catalogue pin
     // for the registered Stop/exit-observer contention invariant.
     mod terminal_contention;
+    // public-ingress-gateway — exact registered seeded owner invariants.
+    mod gateway_application_lifecycle;
     // service-kind-vm-workloads S-SVM-17 — seeded terminal-authority
     // invariant. It observes only that terminal state wins and a dead backend
     // never becomes eligible again; it does not prescribe ProbeRunner drain,

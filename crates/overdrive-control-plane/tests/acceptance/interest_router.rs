@@ -120,6 +120,25 @@ impl PointReadFailureStore {
 
 #[async_trait::async_trait]
 impl ObservationStore for PointReadFailureStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &overdrive_core::public_ingress::PublicCertifiedKeyId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.public_certified_key_status_row(id).await
+    }
+    async fn gateway_application_status_row(
+        &self,
+        node: &NodeId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.gateway_application_status_row(node).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }

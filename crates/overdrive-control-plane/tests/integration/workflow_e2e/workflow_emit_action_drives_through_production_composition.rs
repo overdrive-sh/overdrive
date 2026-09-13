@@ -290,6 +290,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         // responder; this fixture never exercises dial-by-name).
         overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(
         ),
+        overdrive_control_plane::gateway_composition::GatewayAppStateComposition::disabled(),
     );
 
     // === Spawn the PRODUCTION emit-drain task — the genuine mechanism

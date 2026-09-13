@@ -184,6 +184,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // ADR-0083 §D8 step 01-09: this fixture does not exercise the
         // `[vm]` driver at all — no Vmm override.
         vmm_override: None,
+        gateway: None,
     };
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))

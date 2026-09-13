@@ -102,6 +102,10 @@ async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
         data_dir,
         config_dir,
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
     };
     let handle = overdrive_cli::commands::serve::run_with_kek(
         args,
@@ -177,6 +181,10 @@ async fn spawn_capture_observed_mtls_server_at(
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
         data_dir: data_dir.to_path_buf(),
         config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let vmm =
@@ -346,6 +354,10 @@ async fn spawn_failure_observed_mtls_server_at(
         bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
         data_dir: data_dir.to_path_buf(),
         config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
     };
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let (created_tx, created) = std::sync::mpsc::channel();

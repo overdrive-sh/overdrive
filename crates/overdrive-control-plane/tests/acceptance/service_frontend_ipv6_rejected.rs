@@ -107,6 +107,7 @@ async fn ipv6_vip_rejected_at_action_shim_as_operator_visible_failed() {
         port: std::num::NonZeroU16::new(5353).expect("non-zero"),
         proto: overdrive_core::dataplane::backend_key::Proto::Udp,
         backends: backends.clone(),
+        gateway_demand: None,
         correlation,
     };
 
@@ -123,6 +124,7 @@ async fn ipv6_vip_rejected_at_action_shim_as_operator_visible_failed() {
         obs.as_ref(),
         &tick,
         &writer_node,
+        None,
     )
     .await
     .expect("dispatch returns Ok (IPv6 rejection is an operator-visible Failed row, not Err)");

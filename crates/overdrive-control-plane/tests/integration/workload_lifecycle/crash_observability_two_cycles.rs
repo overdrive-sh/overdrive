@@ -401,6 +401,8 @@ async fn dispatch_one(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         events,
         &tick,
         &writer_node,

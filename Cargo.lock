@@ -2129,6 +2129,7 @@ dependencies = [
  "libc",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-gateway",
  "overdrive-host",
  "overdrive-netlink",
  "overdrive-reconcilers",
@@ -2137,6 +2138,7 @@ dependencies = [
  "overdrive-testing",
  "overdrive-worker",
  "proptest",
+ "rcgen",
  "reqwest",
  "rkyv",
  "rustls",
@@ -2177,6 +2179,7 @@ dependencies = [
  "nix 0.30.1",
  "overdrive-core",
  "overdrive-dataplane",
+ "overdrive-gateway",
  "overdrive-host",
  "overdrive-netlink",
  "overdrive-reconcilers",
@@ -2256,6 +2259,9 @@ dependencies = [
  "libc",
  "nix 0.30.1",
  "overdrive-core",
+ "overdrive-gateway",
+ "overdrive-host",
+ "overdrive-sim",
  "overdrive-store-local",
  "overdrive-testing",
  "parking_lot",
@@ -2269,9 +2275,31 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "tracing-subscriber",
  "x509-parser",
+]
+
+[[package]]
+name = "overdrive-gateway"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "hyper",
+ "overdrive-core",
+ "overdrive-host",
+ "overdrive-sim",
+ "overdrive-store-local",
+ "proptest",
+ "rcgen",
+ "rustls",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -2292,10 +2320,12 @@ dependencies = [
  "rustix 1.1.4",
  "serial_test",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]
@@ -2352,6 +2382,8 @@ dependencies = [
  "libc",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-gateway",
+ "overdrive-host",
  "overdrive-reconcilers",
  "overdrive-store-local",
  "overdrive-worker",
@@ -2361,11 +2393,13 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rkyv",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-util",
  "toml",
@@ -3075,6 +3109,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c2c118cb077cca2822033836dfb1b975355dfb784b5e8da48f7b6c5db74e60e"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",

@@ -80,6 +80,12 @@ fn audit_every_read_surface_is_represented(ctx: &HydrationContext<'_>) {
     let _vip: &dyn ServiceVipView = ctx.service_vip_view;
     let _workflow: &dyn WorkflowLiveSet = ctx.workflow_live_set;
     let _held: &dyn HeldSvidView = ctx.held_svid_view;
+    let _gateway_demand: &dyn overdrive_core::public_ingress::GatewayFrontendDemandRead =
+        ctx.gateway_frontend_demand;
+    let _gateway_desired: &dyn overdrive_core::gateway_identity::GatewayIdentityDesiredRead =
+        ctx.gateway_identity_desired;
+    let _gateway_current: &dyn overdrive_core::gateway_identity::GatewayIdentityCurrentRead =
+        ctx.gateway_identity_current;
     let _node: &NodeId = ctx.node_id;
     let _host_ipv4: Ipv4Addr = ctx.host_ipv4;
     let _redb: &Path = ctx.intent_redb_path;
@@ -99,6 +105,9 @@ fn audit_field_set_is_exactly_the_read_surfaces(ctx: HydrationContext<'_>) {
         service_vip_view: _,
         workflow_live_set: _,
         held_svid_view: _,
+        gateway_frontend_demand: _,
+        gateway_identity_desired: _,
+        gateway_identity_current: _,
         node_id: _,
         host_ipv4: _,
         intent_redb_path: _,

@@ -93,11 +93,15 @@ pub mod maglev;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ProbeResultRow` observation row + envelope per ADR-0054 §5.
 // Lands GREEN in slice 01.
+/// Dedicated non-allocation gateway identity values and read ports.
+pub mod gateway_identity;
 /// Core workload-identity value types shared across the reconciler contract
 /// and its adapters (ADR-0086 D6 — `HeldSvidFacts` relocated here because it
 /// crosses the `HeldSvidView` core read-port signature).
 pub mod identity;
 pub mod observation;
+/// Public-ingress Route, demand, receipt, and generation values.
+pub mod public_ingress;
 /// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
 /// instead of discarding it. Reusable concurrency helper; peer of
 /// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must

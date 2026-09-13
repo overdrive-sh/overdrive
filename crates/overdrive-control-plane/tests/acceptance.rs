@@ -512,4 +512,7 @@ mod acceptance {
     // B-01/B-03 equivalence bars have after the single-cut S3 deletion. Captured
     // BEFORE 02-04 removes the free fns (hard sequencing gate).
     mod hydration_characterization_golden;
+
+    #[cfg(feature = "integration-tests")]
+    mod public_ingress_gateway_hydration;
 }

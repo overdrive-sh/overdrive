@@ -186,7 +186,14 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::node_list(&out));
             Ok(())
         }
-        Command::Serve { bind, data_dir } => {
+        Command::Serve {
+            bind,
+            data_dir,
+            gateway_address,
+            gateway_certified_key_id,
+            gateway_certificate_chain,
+            gateway_private_key,
+        } => {
             let bind_addr = bind
                 .parse()
                 .map_err(|e| color_eyre::eyre::eyre!("invalid --bind address `{bind}`: {e}"))?;
@@ -196,8 +203,15 @@ async fn run(cli: Cli) -> Result<()> {
             // resolves to on the read side, so `serve` and `deploy`
             // share the same file (`fix-cli-cannot-reach-control-plane`).
             let config_dir = overdrive_cli::commands::cluster::default_operator_config_dir();
-            let args =
-                overdrive_cli::commands::serve::ServeArgs { bind: bind_addr, data_dir, config_dir };
+            let args = overdrive_cli::commands::serve::ServeArgs {
+                bind: bind_addr,
+                data_dir,
+                config_dir,
+                gateway_address,
+                gateway_certified_key_id,
+                gateway_certificate_chain,
+                gateway_private_key,
+            };
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 

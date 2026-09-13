@@ -107,6 +107,7 @@ fn variant_name(s: &AnyState) -> &'static str {
         AnyState::ServiceLifecycle(_) => "ServiceLifecycle",
         AnyState::SvidLifecycle(_) => "SvidLifecycle",
         AnyState::VmReclamation(_) => "VmReclamation",
+        AnyState::GatewaySvidLifecycle(_) => "GatewaySvidLifecycle",
     }
 }
 

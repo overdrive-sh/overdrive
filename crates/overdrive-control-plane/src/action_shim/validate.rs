@@ -405,6 +405,7 @@ mod tests {
             port: std::num::NonZeroU16::new(port).expect("non-zero"),
             proto,
             backends: vec![],
+            gateway_demand: None,
             correlation: correlation("update-service"),
         }
     }

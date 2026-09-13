@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13. The filename is retained for link compatibility after
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN. The filename is retained for link compatibility after
 the original domain-model bucket was split under `.claude/rules/design.md`.
 
 ## Context

@@ -113,6 +113,8 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
     let service_vip_view = SimServiceVipView::new(BTreeMap::new());
     let workflow_live_set = SimWorkflowLiveSet::new(BTreeSet::new());
     let held_svid_view = SimHeldSvidView::new(BTreeMap::new());
+    let gateway =
+        overdrive_control_plane::gateway_composition::GatewayAppStateComposition::disabled();
     let node = node_id("local");
 
     let ctx = HydrationContext {
@@ -124,6 +126,9 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
         service_vip_view: &service_vip_view,
         workflow_live_set: &workflow_live_set,
         held_svid_view: &held_svid_view,
+        gateway_frontend_demand: gateway.demand().read(),
+        gateway_identity_desired: gateway.identity_desired(),
+        gateway_identity_current: gateway.identity_current(),
         node_id: &node,
         host_ipv4: std::net::Ipv4Addr::LOCALHOST,
         intent_redb_path: &intent_path,

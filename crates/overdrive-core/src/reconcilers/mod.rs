@@ -523,6 +523,8 @@ pub enum Action {
         proto: crate::dataplane::backend_key::Proto,
         /// Backend set, in deterministic iteration order.
         backends: Vec<crate::traits::dataplane::Backend>,
+        /// Exact live Gateway Frontend Demand revision/key authorization.
+        gateway_demand: Option<crate::public_ingress::GatewayFrontendDemandApply>,
         /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },
@@ -630,6 +632,26 @@ pub enum Action {
         /// Cause-to-response linkage. Derived via
         /// `CorrelationKey::derive("svid-lifecycle/<alloc>", spec_hash,
         /// "drop-svid")` — NOT a per-attempt request id.
+        correlation: CorrelationKey,
+    },
+
+    /// Issue or reissue the dedicated non-allocation gateway SVID.
+    IssueGatewaySvid {
+        /// Desired checked epoch; stale actions cannot re-hold material.
+        epoch: crate::gateway_identity::GatewayIdentityEpoch,
+        /// Exact gateway SPIFFE subject.
+        spiffe_id: SpiffeId,
+        /// Issuing node and audit owner.
+        node_id: NodeId,
+        /// Cause-to-response linkage.
+        correlation: CorrelationKey,
+    },
+
+    /// Drop the dedicated gateway SVID after admitted work has drained.
+    DropGatewaySvid {
+        /// Desired checked epoch; stale actions are no-ops.
+        epoch: crate::gateway_identity::GatewayIdentityEpoch,
+        /// Cause-to-response linkage.
         correlation: CorrelationKey,
     },
 

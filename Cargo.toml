@@ -6,6 +6,7 @@ members = [
     "crates/overdrive-cli",
     "crates/overdrive-control-plane",
     "crates/overdrive-dataplane",
+    "crates/overdrive-gateway",
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
@@ -27,6 +28,7 @@ default-members = [
     "crates/overdrive-cli",
     "crates/overdrive-control-plane",
     "crates/overdrive-dataplane",
+    "crates/overdrive-gateway",
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
@@ -79,6 +81,7 @@ clap            = { version = "4", features = ["derive", "env"] }
 sha2            = "0.10"
 blake3          = "1"
 ring            = "0.17"
+zeroize         = "1.8"
 aws-lc-rs       = "1"
 # `linux-keyutils` — pure-Rust (no libkeyutils C dependency) safe wrapper
 # over the Linux kernel key-management facility (`add_key`/`keyctl`).
@@ -90,6 +93,7 @@ aws-lc-rs       = "1"
 linux-keyutils  = "0.2"
 rcgen           = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rustls          = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
+tokio-rustls    = "0.26"
 # `ktls` — the kTLS control-record loop + arm seam for the transparent-mTLS
 # proxy (ADR-0069, GH #26). `findings.md` #4: NewSessionTicket/KeyUpdate → EIO on
 # raw kTLS RX; `ktls::CorkStream` + `config_ktls_*` run the control-message loop.
@@ -229,6 +233,7 @@ http-body-util    = "0.1"
 
 # --- Internal workspace crates -------------------------------------------
 overdrive-core        = { path = "crates/overdrive-core" }
+overdrive-gateway     = { path = "crates/overdrive-gateway" }
 overdrive-reconcilers = { path = "crates/overdrive-reconcilers" }
 overdrive-store-local = { path = "crates/overdrive-store-local" }
 overdrive-testing     = { path = "crates/overdrive-testing" }

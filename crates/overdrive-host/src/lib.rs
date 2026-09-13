@@ -30,6 +30,8 @@ pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod entropy;
+/// Safe SO_COOKIE reader for gateway-owned upstream sockets.
+pub mod socket_cookie;
 pub mod transport;
 // microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `CloudHypervisorVmm`,
 // the production `overdrive_core::traits::vmm::Vmm` binding: real process

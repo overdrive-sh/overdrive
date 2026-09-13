@@ -56,6 +56,11 @@
 //! + `ObservationStore::alloc_status_rows` driven-port boundaries. No
 //! reconciler / executor internals are exercised directly.
 
+#![allow(
+    clippy::large_futures,
+    reason = "mandatory gateway AppState composition increases existing owner futures"
+)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

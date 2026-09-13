@@ -1724,6 +1724,25 @@ mod tests {
 
     #[async_trait]
     impl ObservationStore for ScriptableStore {
+        async fn public_certified_key_status_row(
+            &self,
+            id: &overdrive_core::public_ingress::PublicCertifiedKeyId,
+        ) -> std::result::Result<
+            Option<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>,
+            ObservationStoreError,
+        > {
+            self.inner.public_certified_key_status_row(id).await
+        }
+        async fn gateway_application_status_row(
+            &self,
+            node: &overdrive_core::id::NodeId,
+        ) -> std::result::Result<
+            Option<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>,
+            ObservationStoreError,
+        > {
+            self.inner.gateway_application_status_row(node).await
+        }
+
         async fn all_service_backends_rows(
             &self,
         ) -> std::result::Result<Vec<ServiceBackendRow>, ObservationStoreError> {

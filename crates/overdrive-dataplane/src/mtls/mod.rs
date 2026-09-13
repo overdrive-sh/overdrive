@@ -66,6 +66,7 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use parking_lot::Mutex;
 
+pub mod gateway_identity;
 mod inbound;
 mod ktls;
 mod limits;

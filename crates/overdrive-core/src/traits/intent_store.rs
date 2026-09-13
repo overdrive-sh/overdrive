@@ -8,6 +8,7 @@
 //! Every mutation from a reconciler or workflow arrives here as a typed
 //! action; this trait does not expose a raw `put(key, value)` surface.
 
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -16,6 +17,12 @@ use futures::Stream;
 use thiserror::Error;
 
 use crate::codec::EnvelopeError;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntentSubscriptionEvent {
+    Changed { key: Bytes, value: Option<Bytes> },
+    Lagged { skipped: NonZeroU64 },
+}
 
 #[derive(Debug, Error)]
 pub enum IntentStoreError {
@@ -315,8 +322,7 @@ pub trait IntentStore: Send + Sync + 'static {
     ///   committed increment is lost; the value never goes backwards.
     async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError>;
 
-    /// Watch for changes under a key prefix. Each item is `(key, value)`;
-    /// deletes are reported as empty `value`.
+    /// Watch for committed changes or explicit loss under a key prefix.
     ///
     /// `value` is the **caller-provided bytes** as passed to [`put`],
     /// [`put_if_absent`], or [`TxnOp::Put`]. Subscribers that
@@ -329,7 +335,7 @@ pub trait IntentStore: Send + Sync + 'static {
     async fn watch(
         &self,
         prefix: &[u8],
-    ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError>;
+    ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>;
 
     /// Scan every `(key, value)` pair whose `key` begins with
     /// `prefix`, returning them as an owned `Vec` in ascending

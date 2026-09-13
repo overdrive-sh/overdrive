@@ -153,6 +153,26 @@ impl ContentionStore {
 
 #[async_trait]
 impl ObservationStore for ContentionStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &overdrive_core::public_ingress::PublicCertifiedKeyId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }
@@ -476,6 +496,8 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let requested_terminal = TerminalCondition::Stopped { by: StoppedBy::Operator };
 
     {
+        let gateway_identity =
+            overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled();
         let dispatch = dispatch(
             vec![Action::StopAllocation {
                 alloc_id: alloc.clone(),
@@ -488,6 +510,8 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
             &ca,
             clock.as_ref(),
             &identity,
+            &gateway_identity,
+            None,
             &events_tx,
             &tick,
             &writer_node,

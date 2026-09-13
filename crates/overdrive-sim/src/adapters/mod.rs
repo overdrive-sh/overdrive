@@ -40,6 +40,7 @@ pub mod kek;
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+pub mod gateway;
 pub mod identity_read;
 pub mod llm;
 // transparent-mtls-host-socket step 02-02 — `SimMtlsEnforcement`, the in-memory
@@ -101,6 +102,9 @@ pub mod vm_host_state;
 pub use ca::SimCa;
 pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
+pub use gateway::{
+    SimGatewayClientMtls, SimGatewayIdentityActionTarget, SimGatewayIdentityLifecycleControl,
+};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};

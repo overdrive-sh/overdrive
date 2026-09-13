@@ -175,6 +175,9 @@ pub mod svid_running_set;
 // `SimVmHostState`; the evaluator bodies live in
 // `crate::invariants::vm_reclamation`.
 pub mod vm_reclamation;
+// public-ingress-gateway — exact seeded owner-lifecycle evaluators.
+// SCAFFOLD: true. DELIVER activates each variant in ALL one at a time.
+pub mod gateway_application;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -636,6 +639,12 @@ pub enum Invariant {
     /// this invariant exists to catch would live. The evaluator body
     /// lives in `crate::invariants::vm_reclamation`. Closes S-VM-89.
     EndingInFlightIsNeverReclaimed,
+    /// Staged/current/draining generation safety, stale completion rejection,
+    /// withdrawal, retained demand, and restart relist.
+    GatewayApplicationGenerationLifecycleIsSafe,
+    /// Joined shutdown convergence across admission, leases, cleanup, demand,
+    /// gateway identity, and the final typed shutdown report.
+    GatewayApplicationShutdownConverges,
 }
 
 impl Invariant {
@@ -851,6 +860,10 @@ impl Invariant {
             Self::VmReclamationIdempotentSteadyState => "vm-reclamation-idempotent-steady-state",
             Self::VmReclamationConverges => "vm-reclamation-converges",
             Self::EndingInFlightIsNeverReclaimed => "ending-in-flight-is-never-reclaimed",
+            Self::GatewayApplicationGenerationLifecycleIsSafe => {
+                "gateway-application-generation-lifecycle-is-safe"
+            }
+            Self::GatewayApplicationShutdownConverges => "gateway-application-shutdown-converges",
         }
     }
 }

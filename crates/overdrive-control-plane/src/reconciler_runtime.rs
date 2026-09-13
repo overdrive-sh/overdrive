@@ -50,8 +50,8 @@ use overdrive_core::traits::observation_store::{
 use overdrive_reconcilers::ServiceMapHydrator;
 use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 use overdrive_reconcilers::{
-    AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydratorView, SvidLifecycleView,
-    WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView,
+    AnyReconciler, AnyReconcilerView, AnyState, GatewaySvidLifecycleView, ServiceMapHydratorView,
+    SvidLifecycleView, WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView,
 };
 use parking_lot::Mutex;
 
@@ -120,6 +120,8 @@ enum AnyViewMap {
                   AnyViewMap::WorkflowLifecycle above."
     )]
     VmReclamation(BTreeMap<TargetResource, overdrive_reconcilers::VmReclamationView>),
+    /// `GatewaySvidLifecycle` carries one optional retry-memory value per node.
+    GatewaySvidLifecycle(BTreeMap<TargetResource, GatewaySvidLifecycleView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -359,6 +361,16 @@ impl ReconcilerRuntime {
                 })?;
                 AnyViewMap::VmReclamation(loaded)
             }
+            AnyReconciler::GatewaySvidLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, GatewaySvidLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::GatewaySvidLifecycle(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -443,7 +455,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::VmReclamation(_)
+            | AnyViewMap::GatewaySvidLifecycle(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -509,6 +522,9 @@ impl ReconcilerRuntime {
             AnyViewMap::VmReclamation(map) => {
                 AnyReconcilerView::VmReclamation(map.get(target).cloned().unwrap_or_default())
             }
+            AnyViewMap::GatewaySvidLifecycle(map) => AnyReconcilerView::GatewaySvidLifecycle(
+                map.get(target).cloned().unwrap_or_default(),
+            ),
         })
     }
 
@@ -594,7 +610,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::VmReclamation(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -646,7 +663,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => WorkflowLifecycleView::default(),
+                        | AnyViewMap::VmReclamation(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => WorkflowLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -687,7 +705,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceLifecycle(_)
                         | AnyViewMap::SvidLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => ServiceMapHydratorView::default(),
+                        | AnyViewMap::VmReclamation(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -730,7 +749,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::SvidLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => ServiceLifecycleView::default(),
+                        | AnyViewMap::VmReclamation(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => ServiceLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -777,7 +797,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::VmReclamation(_) => SvidLifecycleView::default(),
+                        | AnyViewMap::VmReclamation(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => SvidLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -824,7 +845,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => {
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::GatewaySvidLifecycle(_) => {
                             overdrive_reconcilers::VmReclamationView::default()
                         }
                     }
@@ -852,6 +874,37 @@ impl ReconcilerRuntime {
                         map.insert(target.clone(), view);
                     }
                 }
+                Ok(())
+            }
+            AnyReconcilerView::GatewaySvidLifecycle(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::GatewaySvidLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        _ => GatewaySvidLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                let mut guard = entry.views.lock();
+                if let AnyViewMap::GatewaySvidLifecycle(map) = &mut *guard {
+                    map.insert(target.clone(), view);
+                }
+                drop(guard);
                 Ok(())
             }
         }
@@ -907,7 +960,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => None,
+            | AnyViewMap::VmReclamation(_)
+            | AnyViewMap::GatewaySvidLifecycle(_) => None,
         }
     }
 
@@ -984,7 +1038,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceLifecycle(_)
             | AnyViewMap::SvidLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => None,
+            | AnyViewMap::VmReclamation(_)
+            | AnyViewMap::GatewaySvidLifecycle(_) => None,
         }
     }
 
@@ -1043,7 +1098,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::SvidLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => None,
+            | AnyViewMap::VmReclamation(_)
+            | AnyViewMap::GatewaySvidLifecycle(_) => None,
         }
     }
 
@@ -1099,7 +1155,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::VmReclamation(_) => None,
+            | AnyViewMap::VmReclamation(_)
+            | AnyViewMap::GatewaySvidLifecycle(_) => None,
         }
     }
 
@@ -1635,6 +1692,9 @@ pub(crate) fn build_hydration_context<'a>(
         service_vip_view: allocator,
         workflow_live_set: state.workflow_engine.as_ref(),
         held_svid_view: state.identity.as_ref(),
+        gateway_frontend_demand: state.gateway.demand().read(),
+        gateway_identity_desired: state.gateway.identity_desired(),
+        gateway_identity_current: state.gateway.identity_current(),
         node_id: &state.node_id,
         host_ipv4: state.host_ipv4,
         intent_redb_path: &state.intent_redb_path,

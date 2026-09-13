@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -20,9 +20,9 @@ the selected frontend's Path-A backends eligible. BPF selects and rewrites the
 destination; the gateway never reads `ServiceBackendRow`, enumerates candidates,
 selects a backend or mutates raw maps. Existing XDP wire ingress stays unchanged.
 
-This ADR decides only the System packet-entry topology. ADR-0108 owns the
-Application/Dataplane selection-receipt and committed identity-publication
-decision.
+This ADR decides only the System packet-entry topology. ADR-0108 owns
+Application backend selection; ADR-0123 owns demand-gated teaching; ADR-0124
+owns the transient receipt; ADR-0125 owns committed identity publication.
 
 ## Alternatives considered
 
@@ -43,8 +43,12 @@ decision.
 
 ## Links
 
-- [ADR-0108](adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md)
-- [ADR-0114](adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md)
+- [ADR-0108](adr-0108-existing-cgroup-bpf-gateway-backend-selection.md)
+- [ADR-0123](adr-0123-demand-gated-path-a-service-map-teach.md)
+- [ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md)
+- [ADR-0125](adr-0125-commit-gated-backend-identity-publication.md)
+- [Receipt ownership ADR-0114](adr-0114-dataplane-selection-receipt-ownership.md)
+- [Applied-identity ownership ADR-0133](adr-0133-dataplane-applied-backend-identity-association.md)
 - [Exact Application dataplane contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)
 - ADR-0040, ADR-0042 and ADR-0053

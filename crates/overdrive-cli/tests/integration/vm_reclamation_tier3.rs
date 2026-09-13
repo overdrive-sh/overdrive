@@ -231,8 +231,15 @@ async fn spawn_vm_server(data_dir: &Path, config_dir: &Path) -> ServeHandle {
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args = ServeArgs {
+        bind,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
     overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -252,8 +259,15 @@ async fn spawn_vm_server_mtls_composed(
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args = ServeArgs {
+        bind,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
     overdrive_cli::commands::serve::run_with_kek(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
@@ -306,8 +320,15 @@ async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeH
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args = ServeArgs {
+        bind,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
 
     let original_path = std::env::var_os("PATH");
     let broken_path = path_without_cloud_hypervisor();

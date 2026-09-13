@@ -975,6 +975,8 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
+        state.gateway.demand().dispatch_ports().as_ref(),
         &state.lifecycle_events,
         &tick,
         &state.node_id,

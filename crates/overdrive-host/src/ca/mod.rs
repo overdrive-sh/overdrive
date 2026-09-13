@@ -8,8 +8,11 @@
 
 pub mod aead_codec;
 pub mod keyring;
+/// Protected public-origin key codec.
+pub mod public_certified_key;
 pub mod rcgen_ca;
 
 pub use aead_codec::RootKeyAeadCodec;
 pub use keyring::SystemdCredsKeyring;
+pub use public_certified_key::PublicCertifiedKeyAeadCodec;
 pub use rcgen_ca::RcgenCa;

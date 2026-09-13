@@ -88,6 +88,14 @@ pub enum Command {
         /// `dirs::data_dir()/overdrive` per ADR-0013 §5.
         #[arg(long)]
         data_dir: Option<std::path::PathBuf>,
+        #[arg(long = "gateway-address", value_name = "IPV4")]
+        gateway_address: Option<std::net::Ipv4Addr>,
+        #[arg(long = "gateway-certified-key-id", value_name = "ID")]
+        gateway_certified_key_id: Option<overdrive_core::public_ingress::PublicCertifiedKeyId>,
+        #[arg(long = "gateway-certificate-chain", value_name = "PATH")]
+        gateway_certificate_chain: Option<std::path::PathBuf>,
+        #[arg(long = "gateway-private-key", value_name = "PATH")]
+        gateway_private_key: Option<std::path::PathBuf>,
     },
 }
 

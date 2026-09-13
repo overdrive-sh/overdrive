@@ -13,6 +13,8 @@
 //! Step 03-01 lands the `submit_workload` body; the other four remain RED
 //! scaffolds owned by subsequent deliver steps.
 
+#![expect(clippy::todo, reason = "public-ingress DISTILL RED handler scaffolds")]
+
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -41,6 +43,61 @@ use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
 use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
+
+/// Declare or replace the singleton public Route through the enabled gateway
+/// control capability. The enabled check precedes JSON parsing.
+#[utoipa::path(
+    post,
+    path = "/v1/routes",
+    request_body = overdrive_core::public_ingress::PublicRouteInput,
+    responses(
+        (status = 201, body = crate::api::SubmitRouteResponse),
+        (status = 200, body = crate::api::SubmitRouteResponse),
+        (status = 400, body = crate::api::ErrorBody),
+        (status = 409, body = crate::api::ErrorBody),
+        (status = 500, body = crate::api::ErrorBody),
+    )
+)]
+pub async fn submit_route(
+    State(_state): State<AppState>,
+    _body: Bytes,
+) -> Result<Response, ControlPlaneError> {
+    todo!("SCAFFOLD: production Route POST handler")
+}
+
+/// Withdraw the same-ID singleton Route; already-empty is successful.
+#[utoipa::path(
+    delete,
+    path = "/v1/routes/{id}",
+    params(("id" = String, Path, description = "Route ID")),
+    responses(
+        (status = 200, body = crate::api::WithdrawRouteResponse),
+        (status = 400, body = crate::api::ErrorBody),
+        (status = 409, body = crate::api::ErrorBody),
+        (status = 500, body = crate::api::ErrorBody),
+    )
+)]
+pub async fn withdraw_route(
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
+) -> Result<Json<crate::api::WithdrawRouteResponse>, ControlPlaneError> {
+    todo!("SCAFFOLD: production Route DELETE handler")
+}
+
+/// Read the exact redacted gateway status projection over operator mTLS.
+#[utoipa::path(
+    get,
+    path = "/v1/gateway/status",
+    responses(
+        (status = 200, body = crate::api::GatewayStatusResponse),
+        (status = 500, body = crate::api::ErrorBody),
+    )
+)]
+pub async fn gateway_status(
+    State(_state): State<AppState>,
+) -> Result<Json<crate::api::GatewayStatusResponse>, ControlPlaneError> {
+    todo!("SCAFFOLD: production gateway-status handler")
+}
 
 /// Enqueue a `(workload-lifecycle, workload/<id>)` evaluation onto the runtime
 /// broker. Called from `submit_workload` and `stop_workload` after the

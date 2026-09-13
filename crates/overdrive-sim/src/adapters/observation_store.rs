@@ -62,6 +62,9 @@ use overdrive_core::id::{
     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor,
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
@@ -144,6 +147,9 @@ struct PeerState {
     /// deterministic iteration across seeds
     /// (`.claude/rules/development.md` § "Ordered-collection choice").
     by_issued_certificate: Mutex<BTreeMap<CertSerial, IssuedCertificateRow>>,
+    by_public_certified_key_status:
+        Mutex<BTreeMap<PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1>>,
+    by_gateway_application_status: Mutex<BTreeMap<NodeId, GatewayApplicationStatusRowV1>>,
     /// `workflow_signal` index — keyed by [`SignalKey`] per ADR-0064 §4.
     /// One current value per key; a re-write replaces it (the value is
     /// opaque to the primitive). The LIVE surface a `ctx.wait_for_signal`
@@ -177,6 +183,8 @@ struct PeerState {
     /// [`SimObservationStore::inject_alloc_status_rows_failure`] for the
     /// public surface and queue semantics.
     pending_alloc_status_rows_failures: Mutex<VecDeque<ObservationStoreError>>,
+    /// Test-only next gateway-status point-read failure.
+    pending_gateway_status_failures: Mutex<VecDeque<ObservationStoreError>>,
 }
 
 #[derive(Default)]
@@ -186,6 +194,7 @@ struct AllocationLifecycleState {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant, reason = "exact ObservationWrite variants remain unboxed")]
 enum ObservationDelivery {
     Generic(ObservationWrite),
     AllocLifecycle { current: Box<AllocStatusRow>, source: TransitionSource },
@@ -252,12 +261,15 @@ impl PeerState {
             by_reconcile_conflict: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
+            by_public_certified_key_status: Mutex::new(BTreeMap::new()),
+            by_gateway_application_status: Mutex::new(BTreeMap::new()),
             by_signal: Mutex::new(BTreeMap::new()),
             // Fresh store: the first allocation returns 0.
             next_issuance_ordinal: Mutex::new(0),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
             pending_alloc_status_rows_failures: Mutex::new(VecDeque::new()),
+            pending_gateway_status_failures: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -295,6 +307,12 @@ impl PeerState {
             }
             ObservationRow::ProbeResult(_) => {
                 unreachable!("probe-result rows use write_probe_result")
+            }
+            ObservationRow::PublicCertifiedKeyStatus(incoming) => {
+                apply_public_certified_key_status(&self.by_public_certified_key_status, incoming)
+            }
+            ObservationRow::GatewayApplicationStatus(incoming) => {
+                apply_gateway_application_status(&self.by_gateway_application_status, incoming)
             }
         };
 
@@ -588,6 +606,42 @@ impl PeerState {
     }
 }
 
+fn apply_public_certified_key_status(
+    index: &Mutex<BTreeMap<PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1>>,
+    incoming: &PublicCertifiedKeyStatusRowV1,
+) -> bool {
+    let mut index = index.lock();
+    match index.get(&incoming.certified_key_id) {
+        None => {
+            index.insert(incoming.certified_key_id.clone(), incoming.clone());
+            true
+        }
+        Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
+            index.insert(incoming.certified_key_id.clone(), incoming.clone());
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+fn apply_gateway_application_status(
+    index: &Mutex<BTreeMap<NodeId, GatewayApplicationStatusRowV1>>,
+    incoming: &GatewayApplicationStatusRowV1,
+) -> bool {
+    let mut index = index.lock();
+    match index.get(&incoming.node_id) {
+        None => {
+            index.insert(incoming.node_id.clone(), incoming.clone());
+            true
+        }
+        Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
+            index.insert(incoming.node_id.clone(), incoming.clone());
+            true
+        }
+        Some(_) => false,
+    }
+}
+
 impl SimObservationStore {
     /// Construct a single-peer store for the given node identity and
     /// seed. Backwards-compatible with step 04-01's acceptance test.
@@ -677,10 +731,39 @@ impl SimObservationStore {
     pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError) {
         self.inner.pending_alloc_status_rows_failures.lock().push_back(error);
     }
+
+    /// Queue a typed failure for the next Gateway Application/custody status
+    /// point read. The DELIVER point-read implementations consume this FIFO
+    /// before consulting their independent indexes.
+    pub fn inject_gateway_status_read_failure(&self, error: ObservationStoreError) {
+        self.inner.pending_gateway_status_failures.lock().push_back(error);
+    }
 }
 
 #[async_trait]
 impl ObservationStore for SimObservationStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        let injected = self.inner.pending_gateway_status_failures.lock().pop_front();
+        if let Some(error) = injected {
+            return Err(error);
+        }
+        Ok(self.inner.by_public_certified_key_status.lock().get(id).cloned())
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        let injected = self.inner.pending_gateway_status_failures.lock().pop_front();
+        if let Some(error) = injected {
+            return Err(error);
+        }
+        Ok(self.inner.by_gateway_application_status.lock().get(node_id).cloned())
+    }
+
     async fn write(&self, write: ObservationWrite) -> Result<(), ObservationStoreError> {
         // Test-only injection: if a failure has been queued via
         // `inject_write_failure`, consume the front entry and return

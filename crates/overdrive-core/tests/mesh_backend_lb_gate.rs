@@ -867,6 +867,7 @@ proptest! {
                     let mut expected_actions = vec![Action::DataplaneUpdateService {
                         service_id: sid, vip: svc.vip, port: svc.port, proto,
                         backends: remote_backends.clone(),
+                        gateway_demand: None,
                         correlation: CorrelationKey::derive(&target, &hash, "update-service"),
                     }];
                     if local {

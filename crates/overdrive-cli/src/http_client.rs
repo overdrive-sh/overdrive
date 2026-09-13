@@ -17,14 +17,21 @@
 //!   operator-readable messages — no raw `reqwest::Error` Debug
 //!   format, no low-level transport tokens like `ECONNREFUSED`.
 
+#![allow(
+    clippy::result_large_err,
+    reason = "exact ServerShutdownError enum carries the typed gateway report"
+)]
+
 use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
     AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, RestartWorkloadResponse,
-    StopWorkloadResponse, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
+    StopWorkloadResponse, SubmitRouteResponse, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
+use overdrive_core::public_ingress::PublicRouteInput;
 use reqwest::StatusCode;
 use thiserror::Error;
 use url::Url;
@@ -38,6 +45,11 @@ use url::Url;
 /// failure mode (retry, rewrite, abort) match on the variant.
 #[derive(Debug, Error)]
 pub enum CliError {
+    #[error("invalid public ingress gateway configuration: {source}")]
+    GatewayConfiguration {
+        #[source]
+        source: overdrive_gateway::GatewayConfigError,
+    },
     /// The server listener drained, but the one-shot authoritative userspace
     /// mTLS teardown failed. The nested error retains exact diagnostics.
     #[error("server shutdown failed: {source}")]
@@ -214,6 +226,16 @@ impl ApiClient {
             .await
             .map_err(|e| self.transport_err(&e))?;
         self.decode_typed(resp).await
+    }
+
+    /// One-shot `POST /v1/routes`; this method never opens an NDJSON stream.
+    #[expect(clippy::todo, reason = "public-ingress DISTILL RED client scaffold")]
+    #[expect(clippy::unused_async, reason = "exact ApiClient contract is async")]
+    pub async fn submit_route(
+        &self,
+        _input: PublicRouteInput,
+    ) -> Result<SubmitRouteResponse, CliError> {
+        todo!("SCAFFOLD: ApiClient::submit_route")
     }
 
     /// `POST /v1/workloads` with `Accept: application/x-ndjson` — drives the

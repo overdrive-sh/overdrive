@@ -40,6 +40,9 @@ use crate::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, Region, ServiceId, WorkloadId,
 };
 use crate::observation::ProbeResultRow;
+use crate::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use crate::traits::dataplane::Backend;
 use crate::traits::driver::DriverType;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
@@ -713,6 +716,7 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// generic allocation writer or conversion from `ObservationRow` back to
 /// [`ObservationWrite`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant, reason = "exact DESIGN-pinned unboxed status-row variants")]
 pub enum ObservationRow {
     AllocStatus(Box<AllocStatusRow>),
     NodeHealth(NodeHealthRow),
@@ -798,10 +802,15 @@ pub enum ObservationRow {
     /// [`ObservationStore::write_probe_result`] table/read surface; this
     /// projection is event-only and is not part of [`ObservationWrite`].
     ProbeResult(ProbeResultRow),
+    /// Redacted Public Certified-Key Custody LWW status.
+    PublicCertifiedKeyStatus(PublicCertifiedKeyStatusRowV1),
+    /// Redacted Gateway Application LWW status.
+    GatewayApplicationStatus(GatewayApplicationStatusRowV1),
 }
 
 /// Non-allocation observation rows accepted by the generic write path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant, reason = "exact DESIGN-pinned unboxed status-row variants")]
 pub enum ObservationWrite {
     NodeHealth(NodeHealthRow),
     ServiceHydration(ServiceHydrationResultRow),
@@ -810,6 +819,8 @@ pub enum ObservationWrite {
     IssuedCertificate(IssuedCertificateRow),
     WorkflowTerminal { correlation: CorrelationKey, status: crate::workflow::WorkflowStatus },
     Signal { key: crate::workflow::SignalKey, value: crate::workflow::SignalValue },
+    PublicCertifiedKeyStatus(PublicCertifiedKeyStatusRowV1),
+    GatewayApplicationStatus(GatewayApplicationStatusRowV1),
 }
 
 impl From<ObservationWrite> for ObservationRow {
@@ -824,6 +835,8 @@ impl From<ObservationWrite> for ObservationRow {
                 Self::WorkflowTerminal { correlation, status }
             }
             ObservationWrite::Signal { key, value } => Self::Signal { key, value },
+            ObservationWrite::PublicCertifiedKeyStatus(row) => Self::PublicCertifiedKeyStatus(row),
+            ObservationWrite::GatewayApplicationStatus(row) => Self::GatewayApplicationStatus(row),
         }
     }
 }
@@ -849,7 +862,7 @@ impl From<ObservationWrite> for ObservationRow {
 /// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
 /// existing closed enum is NOT speculative surface** — every variant already
 /// exists on [`ObservationRow`], so enumerating them is a total projection,
-/// not a forward bet. All nine variants are listed. Current Phase 1 allocation
+/// not a forward bet. All eleven variants are listed. Current Phase 1 allocation
 /// consumers declare the kinds they consume: `ServiceLifecycle` declares
 /// `[AllocStatus, ProbeResult]`, while `WorkloadLifecycle` and
 /// `SvidLifecycle` retain `[AllocStatus]`.
@@ -875,6 +888,8 @@ pub enum ObservationRowKind {
     Signal,
     /// [`ObservationRow::ProbeResult`] — accepted probe-result live events.
     ProbeResult,
+    PublicCertifiedKeyStatus,
+    GatewayApplicationStatus,
 }
 
 impl ObservationRowKind {
@@ -893,6 +908,8 @@ impl ObservationRowKind {
             Self::WorkflowTerminal => "workflow-terminal",
             Self::Signal => "signal",
             Self::ProbeResult => "probe-result",
+            Self::PublicCertifiedKeyStatus => "public-certified-key-status",
+            Self::GatewayApplicationStatus => "gateway-application-status",
         }
     }
 }
@@ -918,6 +935,8 @@ impl ObservationRow {
             Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
             Self::Signal { .. } => ObservationRowKind::Signal,
             Self::ProbeResult(_) => ObservationRowKind::ProbeResult,
+            Self::PublicCertifiedKeyStatus(_) => ObservationRowKind::PublicCertifiedKeyStatus,
+            Self::GatewayApplicationStatus(_) => ObservationRowKind::GatewayApplicationStatus,
         }
     }
 }
@@ -1701,6 +1720,7 @@ impl VersionedEnvelope for ReconcileConflictRowEnvelope {
 /// sees `Lagged` and MUST handle it (relist, or fail loudly where lag is a
 /// structural impossibility); none may silently discard it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant, reason = "ObservationRow exact variants remain unboxed")]
 pub enum SubscriptionEvent {
     /// An observation row delivered in order — the steady-state item. Fold
     /// it into the derived view.
@@ -1788,6 +1808,18 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// `docs/feature/fix-issued-cert-append-only/deliver/rca.md` for the
     /// append-only one.
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError>;
+
+    /// Exact redacted custody-status point read.
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError>;
+
+    /// Exact redacted Gateway Application status point read.
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError>;
 
     /// Atomically accept one allocation-current LWW winner and append its
     /// immutable lifecycle occurrence.

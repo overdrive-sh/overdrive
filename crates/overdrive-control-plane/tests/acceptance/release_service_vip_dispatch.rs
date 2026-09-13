@@ -164,6 +164,8 @@ async fn release_action_dispatch_invokes_allocator_release() {
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &lifecycle_tx,
         &tick,
         &writer_node,

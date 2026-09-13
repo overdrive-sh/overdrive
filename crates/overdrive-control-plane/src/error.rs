@@ -412,6 +412,9 @@ pub enum ControlPlaneError {
     #[error("conflict: {message}")]
     Conflict { message: String },
 
+    #[error("public ingress gateway is disabled")]
+    GatewayDisabled,
+
     #[error(transparent)]
     Intent(#[from] overdrive_core::traits::intent_store::IntentStoreError),
 
@@ -877,6 +880,14 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
         ControlPlaneError::Conflict { message } => {
             (StatusCode::CONFLICT, ErrorBody { error: "conflict".into(), message, field: None })
         }
+        ControlPlaneError::GatewayDisabled => (
+            StatusCode::CONFLICT,
+            ErrorBody {
+                error: "gateway_disabled".into(),
+                message: "public ingress gateway is disabled".into(),
+                field: None,
+            },
+        ),
         ControlPlaneError::Intent(IntentStoreError::NotFound) => (
             StatusCode::NOT_FOUND,
             ErrorBody {

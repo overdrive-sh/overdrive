@@ -21,7 +21,9 @@
 use std::net::Ipv4Addr;
 use std::path::Path;
 
+use crate::gateway_identity::{GatewayIdentityCurrentRead, GatewayIdentityDesiredRead};
 use crate::id::NodeId;
+use crate::public_ingress::GatewayFrontendDemandRead;
 use crate::traits::driver::DriverRegistry;
 use crate::traits::intent_store::IntentStore;
 use crate::traits::observation_store::ObservationStore;
@@ -67,6 +69,13 @@ pub struct HydrationContext<'a> {
     pub workflow_live_set: &'a dyn WorkflowLiveSet,
     /// Global node-held SVID snapshot read port (ADR-0086 D5).
     pub held_svid_view: &'a dyn HeldSvidView,
+    /// Derived Gateway Application frontend demand consumed only by the
+    /// Service-map hydrator.
+    pub gateway_frontend_demand: &'a dyn GatewayFrontendDemandRead,
+    /// Dedicated gateway SVID desired projection.
+    pub gateway_identity_desired: &'a dyn GatewayIdentityDesiredRead,
+    /// Dedicated gateway SVID current non-secret projection.
+    pub gateway_identity_current: &'a dyn GatewayIdentityCurrentRead,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
     /// The local host IPv4 (plain data).

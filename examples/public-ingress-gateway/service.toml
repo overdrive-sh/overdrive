@@ -1,0 +1,17 @@
+health_check.startup = []
+
+[service]
+id = "api"
+replicas = 1
+
+[[listener]]
+port = 8080
+protocol = "tcp"
+
+[exec]
+command = "/usr/bin/python3"
+args = ["examples/public-ingress-gateway/workload.py"]
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

@@ -82,6 +82,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /v1/gateway/status:
+    get:
+      tags:
+      - crate::handlers
+      summary: Read the exact redacted gateway status projection over operator mTLS.
+      operationId: gateway_status
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayStatusResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /v1/nodes:
     get:
       tags:
@@ -101,6 +120,89 @@ paths:
                 $ref: '#/components/schemas/NodeList'
         '500':
           description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/routes:
+    post:
+      tags:
+      - crate::handlers
+      summary: |-
+        Declare or replace the singleton public Route through the enabled gateway
+        control capability. The enabled check precedes JSON parsing.
+      operationId: submit_route
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicRouteInput'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitRouteResponse'
+        '201':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitRouteResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/routes/{id}:
+    delete:
+      tags:
+      - crate::handlers
+      summary: Withdraw the same-ID singleton Route; already-empty is successful.
+      operationId: withdraw_route
+      parameters:
+      - name: id
+        in: path
+        description: Route ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawRouteResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: ''
           content:
             application/json:
               schema:
@@ -665,6 +767,47 @@ components:
       enum:
       - operator
       - cluster
+    CertifiedKeyFailureBody:
+      type: string
+      enum:
+      - source_open
+      - source_metadata
+      - source_ownership
+      - source_permissions
+      - source_bounds
+      - pem_shape
+      - certificate_profile
+      - hostname_mismatch
+      - key_mismatch
+      - protection
+      - persistence
+      - rustls_configuration
+    CertifiedKeyProvenanceBody:
+      oneOf:
+      - type: object
+        required:
+        - producer
+        properties:
+          producer:
+            type: string
+            enum:
+            - manual
+      - type: object
+        required:
+        - correlation
+        - producer
+        properties:
+          correlation:
+            type: string
+          producer:
+            type: string
+            enum:
+            - workflow
+    CertifiedKeyUsabilityFailureBody:
+      type: string
+      enum:
+      - not_yet_valid
+      - expired
     ClusterStatus:
       type: object
       description: |-
@@ -843,6 +986,199 @@ components:
           - 'null'
         message:
           type: string
+    GatewayApplicationGenerationStatusBody:
+      type: object
+      required:
+      - application_generation
+      - route_id
+      - route_generation
+      - service_vip
+      - service_port
+      - service_protocol
+      - demand_revision
+      properties:
+        application_generation:
+          type: string
+        demand_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        route_generation:
+          type: string
+        route_id:
+          type: string
+        service_port:
+          type: integer
+          format: int32
+          minimum: 0
+        service_protocol:
+          type: string
+        service_vip:
+          type: string
+    GatewayApplicationStatusBody:
+      type: object
+      required:
+      - listener
+      - draining
+      - gateway_identity
+      - connect_path
+      properties:
+        connect_path:
+          $ref: '#/components/schemas/GatewayConnectPathStatusBody'
+        current:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GatewayApplicationGenerationStatusBody'
+        draining:
+          type: array
+          items:
+            $ref: '#/components/schemas/GatewayApplicationGenerationStatusBody'
+        gateway_identity:
+          $ref: '#/components/schemas/GatewayIdentityStatusBody'
+        listener:
+          $ref: '#/components/schemas/GatewayListenerStatusBody'
+        staged:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GatewayApplicationGenerationStatusBody'
+        unavailable:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GatewayApplicationUnavailableCauseBody'
+    GatewayApplicationUnavailableCauseBody:
+      type: string
+      enum:
+      - route_absent
+      - route_unreadable
+      - certified_key_absent
+      - certified_key_unusable
+      - frontend_unresolved
+      - demand_not_applied
+      - gateway_identity_unusable
+      - connect_path_unavailable
+      - listener_bind_failed
+      - watch_gap
+    GatewayConnectPathStatusBody:
+      type: string
+      enum:
+      - unavailable
+      - ready
+    GatewayFrontendHydrationStateBody:
+      type: string
+      enum:
+      - pending
+      - completed
+      - failed
+    GatewayFrontendHydrationStatusBody:
+      type: object
+      required:
+      - service_vip
+      - service_port
+      - service_protocol
+      - demand_revision
+      - state
+      properties:
+        demand_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        service_port:
+          type: integer
+          format: int32
+          minimum: 0
+        service_protocol:
+          type: string
+        service_vip:
+          type: string
+        state:
+          $ref: '#/components/schemas/GatewayFrontendHydrationStateBody'
+    GatewayIdentityStatusBody:
+      oneOf:
+      - type: object
+        required:
+        - state
+        properties:
+          state:
+            type: string
+            enum:
+            - absent
+      - type: object
+        required:
+        - epoch
+        - spiffe_id
+        - serial
+        - not_after
+        - state
+        properties:
+          epoch:
+            type: integer
+            format: int64
+            minimum: 0
+          not_after:
+            type: string
+          serial:
+            type: string
+          spiffe_id:
+            type: string
+          state:
+            type: string
+            enum:
+            - current
+      - type: object
+        required:
+        - state
+        properties:
+          state:
+            type: string
+            enum:
+            - unusable
+    GatewayListenerStatusBody:
+      oneOf:
+      - type: object
+        required:
+        - state
+        properties:
+          state:
+            type: string
+            enum:
+            - unbound
+      - type: object
+        required:
+        - address
+        - state
+        properties:
+          address:
+            type: string
+          state:
+            type: string
+            enum:
+            - bound
+    GatewayStatusResponse:
+      type: object
+      required:
+      - enabled
+      - configured_address
+      - listener_bound
+      - hydration
+      properties:
+        application:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GatewayApplicationStatusBody'
+        certified_key:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PublicCertifiedKeyStatusBody'
+        configured_address:
+          type: string
+        enabled:
+          type: boolean
+        hydration:
+          type: array
+          items:
+            $ref: '#/components/schemas/GatewayFrontendHydrationStatusBody'
+        listener_bound:
+          type: boolean
     IdempotencyOutcome:
       type: string
       description: |-
@@ -1344,6 +1680,93 @@ components:
       enum:
       - tcp
       - udp
+    PublicCertifiedKeyStateBody:
+      oneOf:
+      - type: object
+        required:
+        - state
+        properties:
+          state:
+            type: string
+            enum:
+            - absent
+      - type: object
+        required:
+        - generation
+        - certificate_fingerprint
+        - hostname
+        - not_before
+        - not_after
+        - provenance
+        - state
+        properties:
+          certificate_fingerprint:
+            type: string
+          generation:
+            type: string
+          hostname:
+            type: string
+          not_after:
+            type: string
+          not_before:
+            type: string
+          provenance:
+            $ref: '#/components/schemas/CertifiedKeyProvenanceBody'
+          state:
+            type: string
+            enum:
+            - usable
+      - type: object
+        required:
+        - generation
+        - cause
+        - state
+        properties:
+          cause:
+            $ref: '#/components/schemas/CertifiedKeyUsabilityFailureBody'
+          generation:
+            type: string
+          state:
+            type: string
+            enum:
+            - unusable
+    PublicCertifiedKeyStatusBody:
+      type: object
+      required:
+      - id
+      - state
+      properties:
+        id:
+          type: string
+        last_install_failure:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CertifiedKeyFailureBody'
+        state:
+          $ref: '#/components/schemas/PublicCertifiedKeyStateBody'
+    PublicRouteInput:
+      type: object
+      description: Public Route HTTP input.
+      required:
+      - id
+      - hostname
+      - path
+      - path_match
+      - certified_key
+      - target
+      properties:
+        certified_key:
+          type: string
+        hostname:
+          type: string
+        id:
+          type: string
+        path:
+          type: string
+        path_match:
+          type: string
+        target:
+          $ref: '#/components/schemas/ServiceListenerReferenceInput'
     ResourceEnvelope:
       type: object
       description: |-
@@ -1469,6 +1892,19 @@ components:
           $ref: '#/components/schemas/RestartOutcome'
         workload_id:
           type: string
+    RouteApplyOutcome:
+      type: string
+      description: Route application outcome.
+      enum:
+      - Declared
+      - Replaced
+      - Unchanged
+    RouteWithdrawOutcome:
+      type: string
+      description: Route withdrawal outcome.
+      enum:
+      - Withdrawn
+      - Unchanged
     ScheduleSpecInput:
       type: object
       description: |-
@@ -1776,6 +2212,23 @@ components:
         dependency cycle. The Service-lifecycle reconciler is the sole
         constructor; downstream consumers branch on the variant for
         operator-facing render.
+    ServiceListenerReferenceInput:
+      type: object
+      description: Wire/parser input for an exact Service listener reference.
+      required:
+      - service
+      - port
+      - protocol
+      properties:
+        port:
+          type: integer
+          format: int32
+          minimum: 0
+        protocol:
+          type: string
+        service:
+          type: string
+      additionalProperties: false
     ServiceSpecInput:
       allOf:
       - $ref: '#/components/schemas/DriverInput'
@@ -2136,6 +2589,19 @@ components:
       - system_gc
       - platform_reclaimed
       - liveness_probe
+    SubmitRouteResponse:
+      type: object
+      required:
+      - route_id
+      - route_generation
+      - outcome
+      properties:
+        outcome:
+          $ref: '#/components/schemas/RouteApplyOutcome'
+        route_generation:
+          type: string
+        route_id:
+          type: string
     SubmitSpecInput:
       oneOf:
       - allOf:
@@ -3430,6 +3896,16 @@ components:
           type: string
           description: Operator-supplied rootfs artifact path (BYO).
       additionalProperties: false
+    WithdrawRouteResponse:
+      type: object
+      required:
+      - route_id
+      - outcome
+      properties:
+        outcome:
+          $ref: '#/components/schemas/RouteWithdrawOutcome'
+        route_id:
+          type: string
     WorkloadDescription:
       type: object
       description: |-

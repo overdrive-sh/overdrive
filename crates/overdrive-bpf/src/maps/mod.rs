@@ -13,6 +13,7 @@
 
 pub mod backend_map;
 pub mod drop_counter;
+pub mod gateway_connect;
 pub mod hash_of_maps;
 pub mod local_backend_map;
 pub mod maglev_map;

@@ -9,15 +9,17 @@
 //! tests call directly; SIGINT handling lives in `main.rs` and delegates
 //! into `ServeHandle::shutdown`.
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::public_ingress::PublicCertifiedKeyId;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::dataplane::Dataplane;
+use overdrive_gateway::{GatewayConfig, GatewayConfigError};
 use overdrive_host::RealCgroupFs;
 use url::Url;
 
@@ -59,6 +61,30 @@ pub struct ServeArgs {
     /// `commands::cluster::default_operator_config_dir()`; tests pass
     /// an explicit subdirectory of their `TempDir`.
     pub config_dir: PathBuf,
+    /// Optional public gateway IPv4 address; all gateway fields are all-or-none.
+    pub gateway_address: Option<Ipv4Addr>,
+    /// Optional public certified-key identity.
+    pub gateway_certified_key_id: Option<PublicCertifiedKeyId>,
+    /// Optional absolute leaf-first public certificate-chain path.
+    pub gateway_certificate_chain: Option<PathBuf>,
+    /// Optional absolute PKCS#8 public origin private-key path.
+    pub gateway_private_key: Option<PathBuf>,
+}
+
+impl ServeArgs {
+    /// Project the four all-or-none CLI values into the fixed gateway config.
+    #[expect(clippy::todo, reason = "public-ingress DISTILL RED scaffold")]
+    #[allow(clippy::unnecessary_wraps, reason = "exact DESIGN-pinned typed error signature")]
+    pub fn gateway_config(&self) -> Result<Option<GatewayConfig>, GatewayConfigError> {
+        if self.gateway_address.is_none()
+            && self.gateway_certified_key_id.is_none()
+            && self.gateway_certificate_chain.is_none()
+            && self.gateway_private_key.is_none()
+        {
+            return Ok(None);
+        }
+        todo!("SCAFFOLD: ServeArgs::gateway_config enabled/partial truth table")
+    }
 }
 
 /// Handle to a running control-plane server, owned by the CLI layer.
@@ -236,6 +262,8 @@ async fn run_inner(
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
     with_config: impl FnOnce(ServerConfig) -> ServerConfig,
 ) -> Result<ServeHandle, CliError> {
+    let gateway =
+        args.gateway_config().map_err(|source| CliError::GatewayConfiguration { source })?;
     let requested_endpoint = format!("https://{}", args.bind);
 
     // ADR-0054 § Composition root wiring — Earned-Trust probe.
@@ -306,6 +334,7 @@ async fn run_inner(
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         dataplane_override,
+        gateway,
         ..ServerConfig::new(kek)
     });
     let inner = run_server(config, fs.clone()).await.map_err(|e| {

@@ -235,7 +235,15 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
-    let args = ServeArgs { bind, data_dir, config_dir };
+    let args = ServeArgs {
+        bind,
+        data_dir,
+        config_dir,
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
     let handle = overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -263,7 +271,15 @@ async fn spawn_vm_server_with_vmm(vmm: std::sync::Arc<dyn Vmm>) -> (ServeHandle,
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
-    let args = ServeArgs { bind, data_dir, config_dir };
+    let args = ServeArgs {
+        bind,
+        data_dir,
+        config_dir,
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
     let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vmm_override(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -724,8 +740,15 @@ async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args = ServeArgs {
+        bind,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    };
     overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),

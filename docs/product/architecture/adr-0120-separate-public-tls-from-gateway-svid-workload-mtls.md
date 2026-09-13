@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -21,7 +21,7 @@ Public Web-PKI, operator/control-plane HTTPS and internal SPIFFE credentials
 remain three non-substitutable domains.
 
 This ADR decides only the System trust-boundary transition. ADR-0109 owns the
-dedicated holder/lifecycle and exact-peer Application decision.
+dedicated Gateway SVID lifecycle; ADR-0126 owns exact-peer authentication.
 
 ## Alternatives considered
 
@@ -41,8 +41,9 @@ dedicated holder/lifecycle and exact-peer Application decision.
 
 ## Links
 
-- [ADR-0109](adr-0109-dedicated-gateway-svid-lifecycle-and-exact-peer-mtls.md)
+- [ADR-0109](adr-0109-dedicated-gateway-svid-identity-lifecycle.md)
+- [ADR-0126](adr-0126-exact-peer-gateway-client-mtls.md)
 - [ADR-0113](adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md)
-- [ADR-0114](adr-0114-dataplane-selection-receipt-and-applied-backend-identity.md)
+- [Applied-identity ownership ADR-0133](adr-0133-dataplane-applied-backend-identity-association.md)
 - [Exact Application identity contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-identity-and-lifecycle-integration)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -41,7 +41,8 @@ This ADR decides only the cross-owner consistency model.
 ## Links
 
 - [ADR-0106](adr-0106-public-ingress-route-and-gateway-application-owner.md)
-- [ADR-0108](adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md)
+- [ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md)
+- [ADR-0125](adr-0125-commit-gated-backend-identity-publication.md)
 - [ADR-0111](adr-0111-redacted-operator-gateway-status.md)
 - [Application status contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)

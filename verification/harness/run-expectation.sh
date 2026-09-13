@@ -64,6 +64,15 @@ EXPECTATION_DIR="${matches[0]%/}"
 export EXPECTATION_DIR
 EVIDENCE_DIR="$EXPECTATION_DIR/evidence"
 export EVIDENCE_DIR
+
+# Capture source provenance before creating or updating evidence. E14 uses
+# these exact values to build its own default-feature product from clean HEAD.
+EXPECTATION_SOURCE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+EXPECTATION_SOURCE_STATUS="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)"
+EXPECTATION_SOURCE_DIRTY="false"
+[[ -z "$EXPECTATION_SOURCE_STATUS" ]] || EXPECTATION_SOURCE_DIRTY="true"
+export EXPECTATION_SOURCE_SHA EXPECTATION_SOURCE_DIRTY
+
 mkdir -p "$EVIDENCE_DIR"
 
 # Most catalogue entries predate explicit substrate metadata and execute in
@@ -84,13 +93,13 @@ esac
 export SEED="${SEED:-1}"
 
 # --- Pin everything (governing rule 2) ---------------------------------------
-SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+SHA="$EXPECTATION_SOURCE_SHA"
 HARNESS_SHA="$(git -C "$REPO_ROOT" log -1 --format=%H -- "$VERIFICATION_DIR" 2>/dev/null || echo "uncommitted")"
 DATE_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DIRTY="false"
-if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+if [[ "$EXPECTATION_SOURCE_DIRTY" == "true" ]]; then
   DIRTY="true"
-  git -C "$REPO_ROOT" status --porcelain >"$EVIDENCE_DIR/dirty-status.txt"
+  printf '%s\n' "$EXPECTATION_SOURCE_STATUS" >"$EVIDENCE_DIR/dirty-status.txt"
   # Evidence is captured after this receipt is written. Exclude the
   # repository's tracked evidence trees so the receipt cannot contain a
   # self-hunk or recursively embed prior raw captures, while retaining every
@@ -142,7 +151,9 @@ else
 fi
 
 EXECUTED_IN_LIMA="false"
-if [[ "$RUNNER_INVOKED" == "true" && "$EXECUTION_SUBSTRATE" == "lima" ]]; then
+if [[ "$ID" == "E14" && -f "$EVIDENCE_DIR/observations/0001-platform/lima-verified" ]]; then
+  EXECUTED_IN_LIMA="true"
+elif [[ "$RUNNER_INVOKED" == "true" && "$EXECUTION_SUBSTRATE" == "lima" ]]; then
   EXECUTED_IN_LIMA="true"
 fi
 

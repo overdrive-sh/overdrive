@@ -199,6 +199,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         // responder; this fixture never exercises dial-by-name).
         overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(
         ),
+        overdrive_control_plane::gateway_composition::GatewayAppStateComposition::disabled(),
     );
 
     // --- The fixture trigger reconciler emits StartWorkflow. The

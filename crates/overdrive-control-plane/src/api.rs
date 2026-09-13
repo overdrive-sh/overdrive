@@ -41,6 +41,172 @@ use overdrive_core::wall_clock::UnixInstant;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use overdrive_core::public_ingress::{PublicRouteInput, RouteApplyOutcome, RouteWithdrawOutcome};
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SubmitRouteResponse {
+    pub route_id: String,
+    pub route_generation: String,
+    pub outcome: RouteApplyOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WithdrawRouteResponse {
+    pub route_id: String,
+    pub outcome: RouteWithdrawOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayStatusResponse {
+    pub enabled: bool,
+    #[schema(value_type = String)]
+    pub configured_address: Option<std::net::SocketAddrV4>,
+    pub listener_bound: bool,
+    pub application: Option<GatewayApplicationStatusBody>,
+    pub certified_key: Option<PublicCertifiedKeyStatusBody>,
+    pub hydration: Vec<GatewayFrontendHydrationStatusBody>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayApplicationStatusBody {
+    pub listener: GatewayListenerStatusBody,
+    pub staged: Option<GatewayApplicationGenerationStatusBody>,
+    pub current: Option<GatewayApplicationGenerationStatusBody>,
+    pub draining: Vec<GatewayApplicationGenerationStatusBody>,
+    pub unavailable: Option<GatewayApplicationUnavailableCauseBody>,
+    pub gateway_identity: GatewayIdentityStatusBody,
+    pub connect_path: GatewayConnectPathStatusBody,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicCertifiedKeyStatusBody {
+    pub id: String,
+    pub state: PublicCertifiedKeyStateBody,
+    pub last_install_failure: Option<CertifiedKeyFailureBody>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayApplicationGenerationStatusBody {
+    pub application_generation: String,
+    pub route_id: String,
+    pub route_generation: String,
+    pub service_vip: String,
+    pub service_port: u16,
+    pub service_protocol: String,
+    pub demand_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayFrontendHydrationStatusBody {
+    pub service_vip: String,
+    pub service_port: u16,
+    pub service_protocol: String,
+    pub demand_revision: u64,
+    pub state: GatewayFrontendHydrationStateBody,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GatewayListenerStatusBody {
+    Unbound,
+    Bound { address: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayApplicationUnavailableCauseBody {
+    RouteAbsent,
+    RouteUnreadable,
+    CertifiedKeyAbsent,
+    CertifiedKeyUnusable,
+    FrontendUnresolved,
+    DemandNotApplied,
+    GatewayIdentityUnusable,
+    ConnectPathUnavailable,
+    ListenerBindFailed,
+    WatchGap,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GatewayIdentityStatusBody {
+    Absent,
+    Current {
+        epoch: u64,
+        spiffe_id: String,
+        serial: String,
+        #[schema(value_type = String)]
+        not_after: UnixInstant,
+    },
+    Unusable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayConnectPathStatusBody {
+    Unavailable,
+    Ready,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PublicCertifiedKeyStateBody {
+    Absent,
+    Usable {
+        generation: String,
+        certificate_fingerprint: String,
+        hostname: String,
+        #[schema(value_type = String)]
+        not_before: UnixInstant,
+        #[schema(value_type = String)]
+        not_after: UnixInstant,
+        provenance: CertifiedKeyProvenanceBody,
+    },
+    Unusable {
+        generation: String,
+        cause: CertifiedKeyUsabilityFailureBody,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "producer", rename_all = "snake_case")]
+pub enum CertifiedKeyProvenanceBody {
+    Manual,
+    Workflow { correlation: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CertifiedKeyUsabilityFailureBody {
+    NotYetValid,
+    Expired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CertifiedKeyFailureBody {
+    SourceOpen,
+    SourceMetadata,
+    SourceOwnership,
+    SourcePermissions,
+    SourceBounds,
+    PemShape,
+    CertificateProfile,
+    HostnameMismatch,
+    KeyMismatch,
+    Protection,
+    Persistence,
+    RustlsConfiguration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayFrontendHydrationStateBody {
+    Pending,
+    Completed,
+    Failed,
+}
+
 /// Body of `POST /v1/workloads`. Carries the operator-submitted workload
 /// spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
 /// dispatches on the [`SubmitSpecInput`] variant and routes each
@@ -514,6 +680,9 @@ pub struct ErrorBody {
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
+        crate::handlers::submit_route,
+        crate::handlers::withdraw_route,
+        crate::handlers::gateway_status,
     ),
     components(schemas(
         SubmitWorkloadRequest,
@@ -542,6 +711,25 @@ pub struct ErrorBody {
         NodeList,
         NodeRowBody,
         ErrorBody,
+        PublicRouteInput,
+        SubmitRouteResponse,
+        WithdrawRouteResponse,
+        RouteApplyOutcome,
+        RouteWithdrawOutcome,
+        GatewayStatusResponse,
+        GatewayApplicationStatusBody,
+        PublicCertifiedKeyStatusBody,
+        GatewayApplicationGenerationStatusBody,
+        GatewayFrontendHydrationStatusBody,
+        GatewayListenerStatusBody,
+        GatewayApplicationUnavailableCauseBody,
+        GatewayIdentityStatusBody,
+        GatewayConnectPathStatusBody,
+        PublicCertifiedKeyStateBody,
+        CertifiedKeyProvenanceBody,
+        CertifiedKeyUsabilityFailureBody,
+        CertifiedKeyFailureBody,
+        GatewayFrontendHydrationStateBody,
         JobSpecInput,
         ResourcesInput,
         DriverInput,

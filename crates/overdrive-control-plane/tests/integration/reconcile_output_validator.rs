@@ -89,6 +89,7 @@ fn update_service_proto_port(
         port: std::num::NonZeroU16::new(port).expect("non-zero"),
         proto,
         backends: vec![],
+        gateway_demand: None,
         correlation: correlation("update-service"),
     }
 }

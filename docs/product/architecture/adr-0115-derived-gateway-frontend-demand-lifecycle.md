@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -57,7 +57,7 @@ independent BPF-generation meaning.
 - [Domain demand lifecycle](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-event-model-and-lifecycle-gates)
 - [Exact Application owner/demand contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-application-component-decomposition)
 - [Application Route/owner decision](adr-0106-public-ingress-route-and-gateway-application-owner.md)
-- [Dataplane selection decision](adr-0108-demand-gated-cgroup-bpf-selection-and-committed-backend-identity.md)
+- [Application demand-gated TEACH decision](adr-0123-demand-gated-path-a-service-map-teach.md)
 - [System packet-entry decision](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
 - [System consistency decision](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

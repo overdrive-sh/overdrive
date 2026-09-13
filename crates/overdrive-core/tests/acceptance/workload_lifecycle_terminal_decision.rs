@@ -632,7 +632,9 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // `TerminalCondition`. Makes no terminal claim by construction
         // — same bucket as every other action above.
         | Action::ReclaimAllocation { .. }
-        | Action::DiscardStrandedArtifacts { .. } => None,
+        | Action::DiscardStrandedArtifacts { .. }
+        | Action::IssueGatewaySvid { .. }
+        | Action::DropGatewaySvid { .. } => None,
     }
 }
 

@@ -21,6 +21,8 @@
 //! caller — only an `ObservationStoreError` causes the dispatch fn
 //! to return `Err`.
 
+#![expect(clippy::todo, reason = "public-ingress exact-demand RED scaffold")]
+
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{NodeId, ServiceVip};
@@ -30,6 +32,7 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationStore, ObservationStoreError, ObservationWrite,
     ServiceHydrationResultRow, ServiceHydrationStatus,
 };
+use overdrive_gateway::application::GatewayDemandDispatchPorts;
 use thiserror::Error;
 
 /// Outcome of a single `Action::DataplaneUpdateService` dispatch.
@@ -45,6 +48,8 @@ pub enum DispatchOutcome {
     /// `Dataplane::update_service` returned `Err(_)` and the action
     /// shim wrote a `Failed` row to the ObservationStore.
     Failed,
+    /// The exact demand revision/key no longer authorizes this effect.
+    StaleGatewayDemand,
 }
 
 /// Dispatch error for the service-hydration shim. Pass-through
@@ -69,6 +74,8 @@ pub enum ServiceHydrationDispatchError {
         /// The offending VIP, for structured error reporting.
         vip: ServiceVip,
     },
+    #[error("gateway demand unavailable")]
+    GatewayDemandUnavailable,
 }
 
 /// Dispatch one `Action::DataplaneUpdateService`. Calls
@@ -97,9 +104,17 @@ pub async fn dispatch(
     observation: &dyn ObservationStore,
     tick: &TickContext,
     writer: &NodeId,
+    gateway_demand_ports: Option<&GatewayDemandDispatchPorts>,
 ) -> Result<DispatchOutcome, ServiceHydrationDispatchError> {
-    let Action::DataplaneUpdateService { service_id, vip, port, proto, backends, correlation: _ } =
-        action
+    let Action::DataplaneUpdateService {
+        service_id,
+        vip,
+        port,
+        proto,
+        backends,
+        gateway_demand,
+        correlation: _,
+    } = action
     else {
         panic!(
             "action_shim::dataplane_update_service::dispatch invoked \
@@ -107,6 +122,12 @@ pub async fn dispatch(
              match arm and is the sole expected caller"
         );
     };
+
+    if gateway_demand.is_some() {
+        let _ports =
+            gateway_demand_ports.ok_or(ServiceHydrationDispatchError::GatewayDemandUnavailable)?;
+        todo!("SCAFFOLD: exact-revision gateway demand guard/ack/wake")
+    }
 
     let fp = fingerprint(vip, backends);
     // ADR-0077 § D2 sites 6+7: the LWW counter derives from the row this

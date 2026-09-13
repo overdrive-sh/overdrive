@@ -30,6 +30,7 @@ pub mod allocators;
 
 // Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
 // 5-step swap orchestration).
+pub mod gateway_connect;
 pub mod gc;
 
 // Direct `bpf(2)` syscall surface used where aya 0.13.x ships no

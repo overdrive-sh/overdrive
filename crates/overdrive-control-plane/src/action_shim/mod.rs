@@ -41,8 +41,10 @@ use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServic
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+use crate::gateway_composition::GatewayIdentityActionComposition;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
+use overdrive_gateway::application::GatewayDemandDispatchPorts;
 // transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
 // lifecycle wiring: per-host slot allocator, slot→plan derivation, the
 // gateway-as-responder helper, and the netns provision/teardown executors.
@@ -210,6 +212,7 @@ pub mod register_local_backend;
 /// trait contract.
 pub mod deregister_local_backend;
 
+pub mod gateway_svid;
 /// Per-arm dispatch for `Action::IssueSvid` / `Action::DropSvid` per
 /// ADR-0067 D3 — the ONE place workload-CA I/O happens. `IssueSvid`
 /// mints the leaf + writes the `issued_certificates` audit row + holds
@@ -848,6 +851,8 @@ pub async fn dispatch(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
+    gateway_demand: Option<&GatewayDemandDispatchPorts>,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -867,6 +872,8 @@ pub async fn dispatch(
         ca,
         clock,
         identity,
+        gateway_identity,
+        gateway_demand,
         bus,
         tick,
         writer_node,
@@ -904,6 +911,8 @@ pub async fn dispatch_with_network_provisioner(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
+    gateway_demand: Option<&GatewayDemandDispatchPorts>,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -927,6 +936,8 @@ pub async fn dispatch_with_network_provisioner(
             ca,
             clock,
             identity,
+            gateway_identity,
+            gateway_demand,
             bus,
             tick,
             writer_node,
@@ -1081,6 +1092,7 @@ pub async fn dispatch_with_workflow_intent(
         persist_workflow_intents(state.store.as_ref(), actions).await;
     let mtls_lifecycle =
         state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let demand_ports = state.gateway.demand().dispatch_ports();
 
     let dispatch_result = dispatch(
         dispatchable,
@@ -1091,6 +1103,8 @@ pub async fn dispatch_with_workflow_intent(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
+        demand_ports.as_ref(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -1128,6 +1142,7 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
         persist_workflow_intents(state.store.as_ref(), actions).await;
     let mtls_lifecycle =
         state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let demand_ports = state.gateway.demand().dispatch_ports();
 
     let dispatch_result = dispatch_with_network_provisioner(
         dispatchable,
@@ -1138,6 +1153,8 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
+        demand_ports.as_ref(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -1481,6 +1498,8 @@ async fn dispatch_single(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
+    gateway_demand: Option<&GatewayDemandDispatchPorts>,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -2862,7 +2881,14 @@ async fn dispatch_single(
         // ObservationStore write failure surfaces as
         // `ShimError::Observation`.
         action @ Action::DataplaneUpdateService { .. } => {
-            dataplane_update_service::dispatch(&action, dataplane, obs, tick, writer_node)
+            dataplane_update_service::dispatch(
+                &action,
+                dataplane,
+                obs,
+                tick,
+                writer_node,
+                gateway_demand,
+            )
                 .await
                 .map_err(|e| match e {
                     dataplane_update_service::ServiceHydrationDispatchError::ObservationWrite {
@@ -2876,8 +2902,19 @@ async fn dispatch_single(
                              a Failed row and returns Ok(DispatchOutcome::Failed)"
                         )
                     }
+                    dataplane_update_service::ServiceHydrationDispatchError::GatewayDemandUnavailable => {
+                        ShimError::GatewayDemandUnavailable
+                    }
                 })?;
             Ok(())
+        }
+        action @ Action::IssueGatewaySvid { .. } => {
+            let target = gateway_identity.target()?;
+            gateway_svid::dispatch_issue(&action, ca, obs, clock, target).await.map(|_| ())
+        }
+        action @ Action::DropGatewaySvid { .. } => {
+            let target = gateway_identity.target()?;
+            gateway_svid::dispatch_drop(&action, target).map(|_| ())
         }
         // service-vip-allocator step 03-02 — real dispatch arm per
         // ADR-0049 (amended 2026-05-15). Threads the digest +
@@ -3006,6 +3043,12 @@ async fn find_prior_alloc_row(
 /// observation row. Per ADR-0023 §3.
 #[derive(Debug, thiserror::Error)]
 pub enum ShimError {
+    #[error("gateway demand unavailable for demand-bearing dataplane action")]
+    GatewayDemandUnavailable,
+    #[error("gateway SVID issuance or audit failed")]
+    GatewaySvidIssue(#[source] crate::ca_issuance::CaIssuanceError),
+    #[error(transparent)]
+    GatewayIdentityDisabled(#[from] crate::gateway_composition::GatewayIdentityDisabled),
     /// A driver failure that did not fit the `SpawnFailed` shape (i.e.
     /// the shim cannot record it as `state: Failed`).
     #[error("driver failure")]
@@ -3127,7 +3170,8 @@ mod tests {
     use overdrive_core::aggregate::IntentKey;
     use overdrive_core::id::{ContentHash, CorrelationKey};
     use overdrive_core::traits::intent_store::{
-        IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
+        IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
+        TxnOutcome,
     };
     use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
@@ -3217,7 +3261,7 @@ mod tests {
         async fn watch(
             &self,
             _prefix: &[u8],
-        ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError>
+        ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>
         {
             Ok(Box::new(futures::stream::empty()))
         }

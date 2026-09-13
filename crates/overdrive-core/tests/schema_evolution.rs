@@ -25,6 +25,9 @@ mod schema_evolution {
     mod harness;
     mod node_health_row;
     mod probe_result_row;
+    mod public_certified_key;
+    mod public_certified_key_status_row;
+    mod public_route_set;
     mod reconcile_conflict_row;
     mod service_backend_row;
     mod service_hydration_result_row;
@@ -43,4 +46,6 @@ mod schema_evolution {
     // (`WorkflowStartEnvelope` / `WorkflowStartV1`), created in
     // `overdrive-core::workflow` in DELIVER Slice 01 (step 01-02).
     mod workflow_start; // NEW-3 / D5 / #217 — wired in DELIVER Slice 01 (step 01-02)
+
+    mod gateway_application_status_row;
 }

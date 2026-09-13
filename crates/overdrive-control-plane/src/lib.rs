@@ -67,6 +67,8 @@ pub mod dataplane_config;
 // `answer.rs` / `name_index.rs` / `responder.rs` are later slices.
 pub mod dns_responder;
 pub mod error;
+pub mod gateway_composition;
+pub mod gateway_identity_lifecycle;
 pub mod handlers;
 // workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
 // in-process held-SVID store + boot trust bundle. Ephemeral runtime state
@@ -180,6 +182,9 @@ use overdrive_reconcilers::AnyReconciler;
 /// [`IntentStore`]: overdrive_core::traits::intent_store::IntentStore
 #[derive(Clone)]
 pub struct AppState {
+    /// Total public-ingress composition: canonical Disabled or one complete
+    /// Enabled demand/identity/control bundle.
+    pub gateway: gateway_composition::GatewayAppStateComposition,
     /// Authoritative intent store — every write lands here.
     pub store: Arc<LocalIntentStore>,
     /// Filesystem path of the intent redb file. Used by handlers that
@@ -629,6 +634,7 @@ impl AppState {
             // instance and passes it through `new_with_workflow_engine` so it is
             // shared with the re-keyed `MtlsResolve` + the `DnsResponder`.
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
+            gateway_composition::GatewayAppStateComposition::disabled(),
         )
     }
 
@@ -671,10 +677,12 @@ impl AppState {
         vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
         frontend_addr_allocator:
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
+        gateway: gateway_composition::GatewayAppStateComposition,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         let tx = Arc::new(tx);
         Self {
+            gateway,
             store,
             intent_redb_path,
             obs,
@@ -987,6 +995,9 @@ pub struct ServerConfig {
     /// `Arc<dyn Vmm>` is neither `Debug` nor `Default`.
     #[cfg(feature = "integration-tests")]
     pub vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+
+    /// Optional public-ingress configuration; `None` is the sole disable gate.
+    pub gateway: Option<overdrive_gateway::GatewayConfig>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -1009,7 +1020,8 @@ impl std::fmt::Debug for ServerConfig {
             .field(
                 "dataplane_override",
                 &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
-            );
+            )
+            .field("gateway", &self.gateway);
         #[cfg(feature = "integration-tests")]
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
@@ -1121,6 +1133,7 @@ impl ServerConfig {
             // exercise the probe-refusal fail-closed branch.
             #[cfg(feature = "integration-tests")]
             vmm_override: None,
+            gateway: None,
         }
     }
 }
@@ -1132,6 +1145,8 @@ impl ServerConfig {
 /// close the listener. The server task runs until the handle is shut
 /// down or the process exits.
 pub struct ServerHandle {
+    /// Complete public-ingress task/socket owner; present only for enabled config.
+    gateway: Option<overdrive_gateway::application::GatewayHandle>,
     inner: AxumHandle,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
@@ -1234,35 +1249,63 @@ pub struct ServerHandle {
 /// converge teardown. The worker is sealed and every userspace child has ended;
 /// this error retains diagnostics only and exposes no retry capability.
 #[derive(Debug)]
-pub struct ServerShutdownError {
-    source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+pub enum ServerShutdownError {
+    Mtls(overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError),
+    Gateway(overdrive_gateway::application::GatewayShutdownReport),
+    Combined {
+        mtls: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+        gateway: overdrive_gateway::application::GatewayShutdownReport,
+    },
 }
 
 impl std::fmt::Display for ServerShutdownError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "server shutdown mTLS teardown failed: {}", self.source)
+        match self {
+            Self::Mtls(mtls) => write!(formatter, "server shutdown mTLS teardown failed: {mtls}"),
+            Self::Gateway(_) => formatter.write_str("server shutdown gateway teardown failed"),
+            Self::Combined { mtls, .. } => {
+                write!(formatter, "server shutdown mTLS and gateway teardown failed: {mtls}")
+            }
+        }
     }
 }
 
 impl std::error::Error for ServerShutdownError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
+        match self {
+            Self::Mtls(mtls) | Self::Combined { mtls, .. } => Some(mtls),
+            Self::Gateway(_) => None,
+        }
     }
 }
 
 impl ServerShutdownError {
+    #[expect(dead_code, reason = "retained exact constructor for the bounded shutdown migration")]
     const fn new(
         source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
     ) -> Self {
-        Self { source }
+        Self::Mtls(source)
     }
 
     /// The typed allocation-scoped teardown failures from the last attempt.
     #[must_use]
     pub const fn teardown_failure(
         &self,
-    ) -> &overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError {
-        &self.source
+    ) -> Option<&overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError> {
+        match self {
+            Self::Mtls(mtls) | Self::Combined { mtls, .. } => Some(mtls),
+            Self::Gateway(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gateway_report(
+        &self,
+    ) -> Option<&overdrive_gateway::application::GatewayShutdownReport> {
+        match self {
+            Self::Gateway(report) | Self::Combined { gateway: report, .. } => Some(report),
+            Self::Mtls(_) => None,
+        }
     }
 }
 
@@ -1274,7 +1317,9 @@ impl ServerShutdownError {
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
 #[derive(Debug)]
-pub struct AbruptServerResidue;
+pub struct AbruptServerResidue {
+    pub gateway: Option<overdrive_gateway::application::GatewayShutdownReport>,
+}
 
 impl std::fmt::Debug for ServerHandle {
     /// Manual `Debug` (the derive was dropped when the test-gated
@@ -1318,6 +1363,7 @@ impl ServerHandle {
     #[cfg(any(test, feature = "integration-tests"))]
     pub async fn abort_for_test(self) -> Result<AbruptServerResidue, ServerShutdownError> {
         let Self {
+            gateway,
             inner: _,
             server_task,
             convergence_task,
@@ -1333,6 +1379,12 @@ impl ServerHandle {
             mtls_worker_owner,
             mtls_resolve_owner,
         } = self;
+
+        let gateway_report = if let Some(gateway) = gateway {
+            Some(gateway.shutdown(Duration::ZERO).await)
+        } else {
+            None
+        };
 
         server_task.abort();
         convergence_task.abort();
@@ -1360,7 +1412,7 @@ impl ServerHandle {
         }
 
         let worker_failure = if let Some(worker) = mtls_worker_owner {
-            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
+            worker.shutdown_owner().await.err()
         } else {
             None
         };
@@ -1368,7 +1420,18 @@ impl ServerHandle {
             resolve.shutdown().await;
         }
 
-        worker_failure.map_or(Ok(AbruptServerResidue), Err)
+        match (worker_failure, gateway_report) {
+            (None, None) => Ok(AbruptServerResidue { gateway: None }),
+            (None, Some(gateway)) if gateway.is_clean() => {
+                Ok(AbruptServerResidue { gateway: Some(gateway) })
+            }
+            (Some(mtls), None) => Err(ServerShutdownError::Mtls(mtls)),
+            (None, Some(gateway)) => Err(ServerShutdownError::Gateway(gateway)),
+            (Some(mtls), Some(gateway)) if gateway.is_clean() => {
+                Err(ServerShutdownError::Mtls(mtls))
+            }
+            (Some(mtls), Some(gateway)) => Err(ServerShutdownError::Combined { mtls, gateway }),
+        }
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -1401,6 +1464,12 @@ impl ServerHandle {
     /// fix item 5 (exit observer drains LAST so any in-flight
     /// `ExitEvent` lands in obs).
     pub async fn shutdown(self, drain_deadline: Duration) -> Result<(), ServerShutdownError> {
+        let gateway_failure = if let Some(gateway) = self.gateway {
+            let report = gateway.shutdown(drain_deadline).await;
+            (!report.is_clean()).then_some(report)
+        } else {
+            None
+        };
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
         //    branch on the next poll and `break`s; the join here
@@ -1472,14 +1541,19 @@ impl ServerHandle {
         // listeners/connections whose lifetime is this serve owner's lifetime.
         // Active allocation rule guards are relinquished without deletion.
         let worker_failure = if let Some(worker) = self.mtls_worker_owner {
-            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
+            worker.shutdown_owner().await.err()
         } else {
             None
         };
         if let Some(resolve) = self.mtls_resolve_owner {
             resolve.shutdown().await;
         }
-        worker_failure.map_or(Ok(()), Err)
+        match (worker_failure, gateway_failure) {
+            (None, None) => Ok(()),
+            (Some(mtls), None) => Err(ServerShutdownError::Mtls(mtls)),
+            (None, Some(gateway)) => Err(ServerShutdownError::Gateway(gateway)),
+            (Some(mtls), Some(gateway)) => Err(ServerShutdownError::Combined { mtls, gateway }),
+        }
     }
 }
 
@@ -2032,7 +2106,8 @@ pub async fn run_server_with_obs_and_driver(
 // may grow real `.await` points as the boot sequence evolves
 // (observation provisioning, lifecycle handshakes). Removing it now
 // would churn every call site for no functional gain.
-#[allow(clippy::unused_async, clippy::too_many_lines)]
+#[allow(clippy::unused_async, clippy::too_many_lines, clippy::option_if_let_else)]
+#[expect(clippy::todo, reason = "public-ingress DISTILL RED serve composition scaffold")]
 pub async fn run_server_with_obs_and_drivers(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
@@ -2684,6 +2759,15 @@ pub async fn run_server_with_obs_and_drivers(
             overdrive_core::vm::config::clone_index_dir(&config.data_dir),
         ));
 
+    let (gateway_state, gateway_handle) = match config.gateway.as_ref() {
+        None => (gateway_composition::GatewayAppStateComposition::disabled(), None),
+        Some(_gateway_config) => {
+            todo!(
+                "SCAFFOLD: compose/probe GatewayBuilder, HostGatewayClientMtls, GatewayConnectDataplane, GatewaySvidLifecycle and transfer StartedGateway parts"
+            )
+        }
+    };
+
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
@@ -2711,6 +2795,7 @@ pub async fn run_server_with_obs_and_drivers(
         // are the SAME allocator, and the SAME one already injected into the
         // re-keyed `MtlsResolve` above.
         frontend_addr_allocator.clone(),
+        gateway_state,
     );
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
@@ -3050,6 +3135,9 @@ pub async fn run_server_with_obs_and_drivers(
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(handlers::cluster_status))
+        .route("/v1/routes", post(handlers::submit_route))
+        .route("/v1/routes/:id", axum::routing::delete(handlers::withdraw_route))
+        .route("/v1/gateway/status", get(handlers::gateway_status))
         .with_state(state);
 
     // Bind the listener synchronously so we can surface bind errors
@@ -3086,6 +3174,7 @@ pub async fn run_server_with_obs_and_drivers(
     let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
     Ok(ServerHandle {
+        gateway: gateway_handle,
         inner: axum_handle,
         server_task,
         convergence_task,

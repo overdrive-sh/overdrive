@@ -47,6 +47,7 @@ integration-tests = [
 
 [dependencies]
 overdrive-core.workspace           = true
+overdrive-gateway                 = { path = "../overdrive-gateway" }
 # Reconciler impls + enum dispatch (`AnyReconciler` / `AnyState` /
 # `AnyReconcilerView`) + `service_lifecycle`, extracted out of
 # `overdrive-core` per ADR-0086 D3 (step 02-02). The control-plane

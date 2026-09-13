@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-09-13.
+Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gateway` DESIGN.
 
 ## Context
 
@@ -19,8 +19,8 @@ producer. A later ACME workflow may publish through the same custody boundary;
 it must not change listener, resolver, Route or Service-forwarding ownership.
 
 This ADR decides only the system boundary between credential acquisition and
-runtime consumption. Custody transaction and preserve-old replacement semantics
-are owned by ADR-0107.
+runtime consumption. Custody ownership is ADR-0107; preserve-old replacement
+ordering is ADR-0122.
 
 ## Alternatives considered
 
@@ -39,7 +39,8 @@ are owned by ADR-0107.
 
 ## Links
 
-- [ADR-0107](adr-0107-public-certified-key-custody-and-preserve-old-replacement.md)
+- [ADR-0107](adr-0107-producer-neutral-public-certified-key-custody.md)
+- [ADR-0122](adr-0122-preserve-last-usable-public-certified-key-replacement.md)
 - [Application custody contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)
 - [GitHub issue #57](https://github.com/overdrive-sh/overdrive/issues/57)
