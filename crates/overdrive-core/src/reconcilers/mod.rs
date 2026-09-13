@@ -456,7 +456,8 @@ pub enum Action {
         correlation: CorrelationKey,
     },
 
-    /// Start a fresh allocation for a job.
+    /// Start a fresh physical allocation for a workload, including a VM
+    /// replacement whose execution identity has already been minted.
     StartAllocation {
         /// Newly-minted allocation identifier.
         alloc_id: AllocationId,
@@ -478,7 +479,8 @@ pub enum Action {
         terminal: Option<TerminalCondition>,
     },
 
-    /// Restart an allocation.
+    /// Restart an existing Exec allocation under its same physical identity.
+    /// VM replacements use [`Action::StartAllocation`] with a fresh identity.
     ///
     /// Carries no restart-cause field. Per ADR-0087 D4 the restart's
     /// cause is the prior observed alloc row's terminal (a crash
