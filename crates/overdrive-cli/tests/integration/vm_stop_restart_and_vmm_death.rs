@@ -1580,7 +1580,6 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-02: fresh VM successor boots from a clean rootfs clone"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -2168,7 +2167,6 @@ fn assert_strace_ownership(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-02: qualified-metal exact-old artifact non-interference"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

@@ -552,7 +552,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
                 next_view.stable_announced.insert(alloc_id.clone());
-                stable_this_tick.insert(alloc_id.clone());
                 continue;
             }
 
@@ -1206,6 +1205,15 @@ fn compute_backend_healthy(
     startup_failed_this_tick: bool,
 ) -> bool {
     if startup_failed_this_tick {
+        return false;
+    }
+    if !fact.startup_probes_empty
+        && !next_view.terminal_announced.is_empty()
+        && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
+    {
+        // A fresh successor has no startup observation yet. Keep it out of
+        // backend eligibility until its own startup owner reports a result;
+        // a predecessor's terminal decision must not be inherited.
         return false;
     }
     if !fact.has_readiness_probe {

@@ -1198,7 +1198,6 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-02: fresh VM successor preserves predecessor history"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
@@ -1332,7 +1331,6 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 01-02: fresh VM successor preserves current SVID coverage"]
 #[expect(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"

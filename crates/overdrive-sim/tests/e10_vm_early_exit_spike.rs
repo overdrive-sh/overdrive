@@ -13,7 +13,6 @@
 #![expect(
     clippy::doc_markdown,
     clippy::large_futures,
-    clippy::large_stack_frames,
     clippy::print_stderr,
     clippy::too_many_lines,
     reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
