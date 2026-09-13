@@ -177,8 +177,10 @@ pub enum ConvergeError {
 mod tests {
     use std::sync::Arc;
 
-    use overdrive_core::id::NodeId;
-    use overdrive_core::traits::driver::{Driver, DriverType};
+    use overdrive_core::SpiffeId;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::Action;
+    use overdrive_core::traits::driver::{Driver, DriverPayload, DriverType};
     use overdrive_core::traits::intent_store::IntentStore;
     use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vm_host_state::VmHostState;
@@ -233,6 +235,28 @@ mod tests {
         );
         state.vm_host_state = vm_host_state;
         state
+    }
+
+    fn assert_fresh_vm_start(
+        actions: &[Action],
+        expected: &AllocationId,
+        workload_id: &WorkloadId,
+    ) {
+        let mut starts = actions.iter().filter_map(|action| match action {
+            Action::StartAllocation { alloc_id, workload_id: action_workload_id, spec, .. } => {
+                Some((alloc_id, action_workload_id, spec))
+            }
+            _ => None,
+        });
+        let (alloc_id, action_workload_id, spec) =
+            starts.next().expect("one fresh VM StartAllocation");
+        assert!(starts.next().is_none(), "exactly one fresh VM StartAllocation: {actions:#?}");
+        assert_eq!(alloc_id, expected);
+        assert_eq!(action_workload_id, workload_id);
+        assert_eq!(&spec.alloc, alloc_id);
+        assert_eq!(spec.identity, SpiffeId::for_allocation(action_workload_id, alloc_id));
+        assert!(matches!(&spec.driver, DriverPayload::Vm(_)));
+        assert!(actions.iter().all(|action| !matches!(action, Action::RestartAllocation { .. })));
     }
 
     #[tokio::test]
@@ -365,8 +389,8 @@ mod tests {
         assert!(plan_reclamation(&claimed_desired, &claimed_actual).is_empty());
 
         // The standing intent consumes that one platform claim exactly once
-        // in this boot epoch: one same-id redrive, then the returned view
-        // suppresses an identical second evaluation.
+        // in this boot epoch. Each lifecycle evaluation that needs to
+        // re-drive the reclaimed VM receives its own fresh execution ID.
         let lifecycle_desired = WorkloadLifecycleState {
             workload_id,
             job: Some(job),
@@ -382,7 +406,7 @@ mod tests {
         let lifecycle_actual = WorkloadLifecycleState {
             job: None,
             nodes: BTreeMap::new(),
-            allocations: BTreeMap::from([(alloc.clone(), reclaimed_row)]),
+            allocations: BTreeMap::from([(alloc, reclaimed_row)]),
             ..lifecycle_desired.clone()
         };
         let view = WorkloadLifecycleView::default();
@@ -396,23 +420,15 @@ mod tests {
         let lifecycle = WorkloadLifecycle::canonical();
         let (first_actions, next_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
-        assert_eq!(
-            first_actions
-                .iter()
-                .filter(|action| matches!(
-                    action,
-                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-                ))
-                .count(),
-            1,
-        );
+        let first_alloc =
+            AllocationId::new("alloc-vm-boot-desired-workload-1").expect("valid fresh allocation");
+        assert_fresh_vm_start(&first_actions, &first_alloc, &lifecycle_desired.workload_id);
         let (repeated_actions, repeated_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
-        assert!(repeated_actions.iter().all(|action| !matches!(
-            action,
-            Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-        )));
-        assert_eq!(repeated_view, next_view);
+        let second_alloc =
+            AllocationId::new("alloc-vm-boot-desired-workload-2").expect("valid fresh allocation");
+        assert_fresh_vm_start(&repeated_actions, &second_alloc, &lifecycle_desired.workload_id);
+        assert_ne!(repeated_view, next_view, "each fresh VM re-drive reserves its own identity");
     }
 
     /// Step 02-03 completion — the desired-side join makes
@@ -531,9 +547,9 @@ mod tests {
         );
 
         // Join the boot claim to the standing-intent lifecycle boundary. The
-        // first evaluation owes exactly one same-id re-drive; re-evaluating
-        // the identical reclaimed row with the returned private view must not
-        // emit a second RestartAllocation in this boot epoch.
+        // first evaluation owes exactly one fresh-identity re-drive;
+        // re-evaluating the identical reclaimed row reserves the next fresh
+        // identity rather than reusing the predecessor.
         let lifecycle = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
         let target =
             TargetResource::new(&format!("workload/{workload_id}")).expect("valid workload target");
@@ -555,29 +571,28 @@ mod tests {
         };
         let (first_actions, next_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &view, &tick);
+        let first_alloc =
+            AllocationId::new("alloc-vm-boot-desired-workload-1").expect("valid fresh allocation");
         let first_redrives = first_actions
             .iter()
             .filter(|action| {
-                matches!(
-                    action,
-                    Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-                )
+                matches!(action, Action::StartAllocation { alloc_id, .. } if alloc_id == &first_alloc)
             })
             .count();
+        assert_fresh_vm_start(&first_actions, &first_alloc, &workload_id);
         assert_eq!(
             first_redrives, 1,
-            "one Platform Reclamation claim emits exactly one same-id lifecycle re-drive: {first_actions:#?}"
+            "one Platform Reclamation claim emits exactly one fresh-identity lifecycle re-drive: {first_actions:#?}"
         );
         let (repeated_actions, repeated_view) =
             lifecycle.reconcile(&lifecycle_desired, &lifecycle_actual, &next_view, &tick);
-        assert!(
-            repeated_actions.iter().all(|action| !matches!(
-                action,
-                Action::RestartAllocation { alloc_id, .. } if alloc_id == &alloc
-            )),
-            "same boot epoch must not emit a second same-id re-drive: {repeated_actions:#?}"
+        let second_alloc =
+            AllocationId::new("alloc-vm-boot-desired-workload-2").expect("valid fresh allocation");
+        assert_fresh_vm_start(&repeated_actions, &second_alloc, &workload_id);
+        assert_ne!(
+            repeated_view, next_view,
+            "each fresh VM re-drive reserves its own identity in the View"
         );
-        assert_eq!(repeated_view, next_view, "the no-op evaluation preserves its exact view");
 
         converge(&state).await.expect("a repeated same-boot convergence is a no-op");
         let repeated = state
