@@ -1188,7 +1188,7 @@ placeholder seam.
 | **D-APP-3** | Persist the singleton `PublicRouteSetEnvelope::V1` at exact key `public-ingress/route-set`; persist even the empty Route set. A bounded `PublicRouteSetOwner` is the sole serialized writer. |
 | **D-APP-4** | A Route carries exact validated `RouteId`, deterministic `RouteGeneration`, `PublicHostname`, `PathMatch`, `ServiceListenerReference(WorkloadId, NonZeroU16, Proto::Tcp)` and `PublicCertifiedKeyId`. |
 | **D-APP-5** | A new read-only `ServiceFrontendResolve` port reads current Service intent plus the already-probed `ServiceVipView` and returns the exact existing `ServiceFrontend`; control-plane wraps its existing mutex-held allocator in a private read adapter. It never reads backend/health/BPF state. |
-| **D-APP-6** | `ServerConfig.gateway: Option<GatewayConfig>` is the only enablement gate. CLI `--gateway-address` plus all three certified-key arguments constructs IPv4 TCP/443; absence means disabled. Public bind occurs only after connect/mTLS/identity/demand/application gates. |
+| **D-APP-6** | `ServerConfig.gateway: Option<GatewayConfig>` is the only enablement gate. CLI `--gateway-address`, `--gateway-certified-key-id`, `--gateway-certificate-chain` and `--gateway-private-key` construct IPv4 TCP/443 only as an all-present set; all absent means disabled. Public bind occurs only after connect/mTLS/identity/demand/application gates. |
 | **D-APP-7** | Manual certificate/key paths are host-local `serve` configuration, like VM kernel/rootfs references only at the artifact boundary. The source validates then installs through producer-neutral custody; paths/raw PEM never enter Route, status or request state. |
 | **D-APP-8** | [ADR-0107] makes Public Certified-Key Custody the one configured-ID owner, with validate/build/seal/persist/publish/status ordering that never replaces the last usable generation with an unusable candidate. Its ID-free `install` accepts `Manual | Workflow { correlation }` provenance and is #57's future producer boundary. |
 | **D-APP-9** | One active `GatewayApplicationOwner` atomically owns staged/current/draining demand, one ArcSwap Current generation, dynamic TCP/443 bind/unbind, RAII connection/request leases, the join set and application status. Shutdown force-joins leases before demand/SVID release. |
@@ -1386,12 +1386,35 @@ control-plane, reconcilers, worker, store-local or aya.
 
 | Surface | Exact first-slice contract |
 |---|---|
-| `overdrive serve` | All-or-none gateway address/key arguments activate identity, connect/demand probes, GatewayApplicationOwner and dynamic fixed TCP/443 after gates. |
+| `overdrive serve` | Scalar `--gateway-address`, `--gateway-certified-key-id`, `--gateway-certificate-chain` and `--gateway-private-key` arguments are all absent or all present. The complete set activates identity, connect/demand probes, `GatewayApplicationOwner` and dynamic fixed TCP/443 after gates. |
 | `overdrive deploy <SERVICE_SPEC>` | Existing workload path byte/behavior unchanged. |
 | `overdrive deploy <ROUTE_SPEC>` | `deploy_resource(args, stream_workloads)` parses once; `[route]` + `[route.target]` selects one-shot `POST /v1/routes` and `RouteDeployOutput`; `--detach` has no additional effect and no NDJSON opens. Existing workload output functions/types remain unchanged. |
 | `DELETE /v1/routes/{id}` | Withdraws the same-ID singleton Route or returns cause-distinct conflict; persists empty Route Set rather than deleting its key; both `Withdrawn` and already-empty `Unchanged` return 200. |
 | Public TCP/443 | Each accept snapshots one Current Gateway Application before TLS and retains it through bounded keep-alive; no Current means socket unbound/no accept. |
 | Manual file replacement | Atomic replacement of configured files is discovered on the source owner's private finite maintenance cadence and invokes the same custody install command future ACME uses; cadence is not a knob/KPI. |
+
+The clap surface is an exact additive delta to `overdrive-cli::cli::Command::Serve`:
+
+```rust
+#[arg(long = "gateway-address", value_name = "IPV4")]
+gateway_address: Option<Ipv4Addr>,
+#[arg(long = "gateway-certified-key-id", value_name = "ID")]
+gateway_certified_key_id: Option<PublicCertifiedKeyId>,
+#[arg(long = "gateway-certificate-chain", value_name = "PATH")]
+gateway_certificate_chain: Option<PathBuf>,
+#[arg(long = "gateway-private-key", value_name = "PATH")]
+gateway_private_key: Option<PathBuf>,
+```
+
+Each `Option<T>` is clap's scalar `ArgAction::Set`: the flag occurs zero or one
+time, and a repeated occurrence is an argument conflict. `Ipv4Addr` and
+`PublicCertifiedKeyId` use their typed `FromStr` parsers at the argv boundary;
+there is no address string or unvalidated ID in `main`. The chain argument is
+one host-local file containing the complete leaf-first PEM certificate chain;
+the key argument is one host-local file containing exactly one PKCS#8 private
+key. They are paths, not inline PEM, and project unchanged into the manual
+source boundary specified below. No ACME/account/order argument or environment
+fallback exists.
 
 Exact Route TOML:
 
@@ -1616,6 +1639,17 @@ pub struct RouteDeployOutput {
     pub endpoint: Url,
 }
 
+// overdrive-cli::commands::serve; existing fields retain their exact types.
+pub struct ServeArgs {
+    pub bind: SocketAddr,
+    pub data_dir: PathBuf,
+    pub config_dir: PathBuf,
+    pub gateway_address: Option<Ipv4Addr>,
+    pub gateway_certified_key_id: Option<PublicCertifiedKeyId>,
+    pub gateway_certificate_chain: Option<PathBuf>,
+    pub gateway_private_key: Option<PathBuf>,
+}
+
 pub struct ManualCertifiedKeyConfig {
     id: PublicCertifiedKeyId,
     certificate_chain_path: PathBuf,
@@ -1636,16 +1670,53 @@ impl GatewayConfig {
     pub const fn bind(&self) -> SocketAddrV4; // always port 443
     pub fn manual_certified_key(&self) -> &ManualCertifiedKeyConfig;
 }
+// Additive overdrive-control-plane::ServerConfig field; all existing fields
+// and ServerConfig::new semantics remain unchanged.
+pub struct ServerConfig {
+    // existing fields unchanged
+    pub gateway: Option<GatewayConfig>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GatewayConfigField {
     Address, CertifiedKeyId, CertificateChainPath, PrivateKeyPath,
 }
+#[derive(Debug, thiserror::Error)]
 pub enum GatewayConfigError {
+    #[error("partial public ingress gateway enablement; missing {missing:?}")]
     PartialEnablement { missing: Vec<GatewayConfigField> },
 }
 impl ServeArgs {
     pub fn gateway_config(&self) -> Result<Option<GatewayConfig>, GatewayConfigError>;
 }
+
+// Exact additive overdrive-cli::http_client::CliError variant.
+#[error("invalid public ingress gateway configuration: {source}")]
+GatewayConfiguration {
+    #[source]
+    source: GatewayConfigError,
+},
 ```
+
+`ServeArgs::gateway_config` is called as the first operation in
+`commands::serve::run_inner`, before the cgroup probe, any file read, store
+open or listener bind. Its closed truth table is:
+
+| Supplied fields | Result |
+|---|---|
+| all four `None` | `Ok(None)`; `ServerConfig.gateway = None` and the gateway remains disabled |
+| all four `Some` | `Ok(Some(GatewayConfig::new(address, ManualCertifiedKeyConfig::new(id, chain, key))))`; `GatewayConfig::new` fixes the public bind port to 443 |
+| every other combination | `Err(GatewayConfigError::PartialEnablement { missing })`; `missing` is emitted in `Address, CertifiedKeyId, CertificateChainPath, PrivateKeyPath` order and no startup effect occurs |
+
+`run_inner` maps only that error to
+`CliError::GatewayConfiguration { source }`, then moves the successful value
+unchanged into the additive `ServerConfig.gateway: Option<GatewayConfig>`
+field. `ServerConfig::new(kek)` initializes that field to `None`; the
+production `run_inner` struct update is the only enabling override. `main`
+destructures the four typed clap fields and moves them into the
+same-named `ServeArgs` fields; it performs no second parse or file read. All
+existing direct `ServeArgs` construction sites add the four fields as `None`
+unless that fixture intentionally enables public ingress. There is no partial
+default, implicit certificate location or fallback producer.
 
 `PublicRouteSpecInput` is TOML-parser-only; `PublicRouteInput` is serde/OpenAPI
 wire-only; `Route`/envelopes are rkyv-only. The presence walk rejects a Route
@@ -3691,6 +3762,95 @@ all received `Forwarded` and `X-Forwarded-*`, emits no `X-Forwarded-*`, appends
 The response appends the same Via product token. All remaining end-to-end
 headers, status and raw body octets stream with backpressure.
 
+The input-sensitive routing/header logic is production code with pure,
+source-local property entry points; no test-only facade is introduced. The
+exact ownership and signatures are:
+
+```rust
+// overdrive-core::public_ingress
+impl PathMatch {
+    #[must_use]
+    pub fn matches_raw_path(&self, raw_request_path: &str) -> bool;
+}
+
+// overdrive-gateway::runtime::routing
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RouteAuthorityError {
+    #[error("Host header is missing")]
+    MissingHost,
+    #[error("Host header occurs more than once")]
+    DuplicateHost,
+    #[error("Host header is not visible ASCII")]
+    NonAsciiHost,
+    #[error("Host header is not a valid HTTP authority")]
+    InvalidAuthority,
+    #[error("Host authority port must be 443, got {got}")]
+    UnsupportedPort { got: u16 },
+    #[error("Host name is invalid: {0}")]
+    InvalidHostname(PublicHostnameError),
+    #[error("Host does not equal the TLS SNI")]
+    SniMismatch,
+}
+pub(crate) fn normalize_route_authority(
+    headers: &HeaderMap,
+    sni: &PublicHostname,
+) -> Result<PublicHostname, RouteAuthorityError>;
+
+// overdrive-gateway::runtime::proxy_headers
+#[must_use]
+pub(crate) fn rewrite_request_headers(
+    headers: HeaderMap,
+    accepted_client: Ipv4Addr,
+    authority: &PublicHostname,
+) -> HeaderMap;
+#[must_use]
+pub(crate) fn rewrite_response_headers(headers: HeaderMap) -> HeaderMap;
+```
+
+The owning files are
+`crates/overdrive-core/src/public_ingress.rs`,
+`crates/overdrive-gateway/src/runtime/routing.rs` and
+`crates/overdrive-gateway/src/runtime/proxy_headers.rs`. Their property modules
+remain source-local `#[cfg(test)]` modules in those same files; no integration
+test visibility widening is permitted.
+
+The approved Route-path value is `PublicPath` inside `PathMatch`; no second
+`RoutePath` alias/type is created. `PathMatch::matches_raw_path` consumes the
+exact `Uri::path()` bytes rendered as `&str`; the query is never passed.
+`Exact(p)` is true only for byte equality.
+`SegmentPrefix(p)` is true when the request path equals `p`, when `p == "/"`
+and the request is absolute, when `p` ends in `/` and the request begins with
+`p`, or when the request begins with `p` and the next byte is `/`; `/api`
+therefore matches `/api` and `/api/v1`, never `/apix`, while `/api/` matches
+`/api/` and `/api/v1`.
+Neither operand is percent-decoded, Unicode-normalized or slash-normalized.
+
+`normalize_route_authority` reads `HOST` with `HeaderMap::get_all` and requires
+exactly one value. It rejects non-visible-ASCII bytes, parses the value with
+`hyper::http::uri::Authority`, rejects userinfo (`@`), permits no port or
+explicit port 443 only,
+lowercases the host with ASCII case-folding, then calls
+`PublicHostname::new`. The resulting canonical hostname must equal the typed
+TLS SNI. `MissingHost`, `DuplicateHost`, `NonAsciiHost`, `InvalidAuthority`,
+`UnsupportedPort` and `InvalidHostname` map to the already-selected public
+400; `SniMismatch` alone maps to 421. The runtime calls this function before
+hostname/path Route selection; it then calls `matches_raw_path` on that Route's
+`PathMatch`.
+
+Both header functions take ownership and return a transformed map without
+I/O, clock, global state or hidden input. They remove `Connection`, all valid
+case-insensitive header names nominated by every comma-separated Connection
+value, and the fixed hop-by-hop set already stated above. A malformed
+Connection token names no header, while `Connection` itself is always removed.
+The request function additionally removes the prior `Host`, all `Forwarded`
+values and every field whose case-insensitive name starts `x-forwarded-`, then
+inserts exactly one canonical `Host`, appends `Via: 1.1 overdrive`, and inserts
+the one approved `Forwarded` value. The response function appends the same Via
+value after hop-by-hop removal. Existing Via values are preserved in order
+unless `Connection` explicitly nominated `Via`; the Overdrive value is always
+last. All nonremoved field names and each field's value sequence are preserved.
+Hyper alone regenerates framing after these functions return.
+
 `overdrive-gateway::runtime::limits::GatewayLimits::first_slice()` is the sole
 host-side limit SSOT and returns exactly:
 
@@ -4448,9 +4608,9 @@ the table is the final dormant-surface gate:
 
 | Exact surface group | Constructor/producer | Live production caller/consumer |
 |---|---|---|
-| Route IDs/hostname/path/listener/Route/generation plus parser and HTTP input types | top-level deploy parser and `Route::from_submit` | `deploy_resource` → `ApiClient::submit_route` → Route POST; Route owner/application/status use accessors |
+| Route IDs/hostname/path/listener/Route/generation plus parser and HTTP input types | top-level deploy parser and `Route::from_submit` | `deploy_resource` → `ApiClient::submit_route` → Route POST; Route owner/application/status use accessors; public runtime calls `PathMatch::matches_raw_path` |
 | `PublicRouteSetHandle::{apply,withdraw}` | crate-private Route owner startup inside `UnboundGatewayBuilder::new` | Route POST/DELETE through `GatewayControl::routes`; there is no CLI DELETE helper |
-| `GatewayConfig`/`ManualCertifiedKeyConfig` and accessors | `ServeArgs::gateway_config` | `run_server_with_obs_and_drivers` and `UnboundGatewayBuilder::new`; handlers never receive paths |
+| Four typed gateway clap/`ServeArgs` fields, `GatewayConfig`/`ManualCertifiedKeyConfig`, `GatewayConfigError` and accessors | clap `Command::Serve` → `main` → first `ServeArgs::gateway_config` call | `run_inner` moves only complete config into `ServerConfig.gateway`; `run_server_with_obs_and_drivers` and `UnboundGatewayBuilder::new` consume it; handlers never receive paths |
 | `GatewayAppStateComposition`, canonical disabled identity read and appended AppState field/constructor parameter | broad fixtures default Disabled; production/Tier-3/Sim may pass Enabled | Hydration builder, every action/workflow wrapper and Route/status handlers through accessors only; Arc ownership preserves AppState Clone/borrow lifetime |
 | `ControlPlaneError::GatewayDisabled` and exact response arm | Route POST/DELETE pre-parse control check | exhaustive `to_response` and live OpenAPI 409 ErrorBody |
 | `ServiceFrontendResolve::{probe,resolve}` and closed errors | private `IntentServiceFrontendResolver` construction in the builder | gateway owner startup/application convergence only |
@@ -4468,12 +4628,14 @@ the table is the final dormant-surface gate:
 | `GatewayControl::{routes,application_status,certified_key_status}` | `StartedGateway::into_parts` | Route POST/DELETE and operator-mTLS Gateway GET only; no task/admission/key access |
 | Status rows/envelopes/write variants/kinds/point reads and wire bodies | custody/application writers plus LocalStore/Sim adapters | `GatewayControl` and Gateway GET projection only |
 | `GatewayLimits::first_slice` and read-only accessors | one call in `run_server_with_obs_and_drivers` | builder/runtime, `HostGatewayClientMtls` and BPF capacity assertion; no deserializer/builder/mutator |
+| `normalize_route_authority`, `rewrite_request_headers` and `rewrite_response_headers` | public HTTP connection/request path | Route selection and upstream/downstream Hyper framing; all three are crate-private and their source-local PBT calls the same production functions |
 | `GatewayIdentityDesiredRead`/`GatewayIdentityCurrentRead` | `GatewayIdentitySlot` | lifecycle hydration and status only; `GatewayIdentityCurrentRead` has no `subscribe` |
 | `GatewayIdentityLifecycleControl::{ensure_current,current,subscribe,disable_after_drain}` | control-plane adapter over slot/broker plus named Sim adapter over Sim target/real broker/Sim Clock | active application owner in production and seeded application composition in Sim |
 | `GatewayIdentityActionComposition`/target and Sim target | Enabled/Disabled AppState composition | every exact action-shim dispatcher and only the Issue/Drop arms; no private-material getter |
 | `GatewayIdentitySlot` constructor/non-secret reads plus ActionHandle, LifecycleHandle and client-access capabilities | `run_server_with_obs_and_drivers` | lifecycle-control adapter, Gateway SVID action executor and `HostGatewayClientMtls`; slot mutators/access closure are crate-private and only the matching opaque handle/adapter can reach them |
 | `GatewaySvidLifecycle::canonical`, factory, Any* variants and Issue/Drop actions | control-plane canonical registration | existing reconciler runtime/broker/exhaustive dispatch and action shim only |
 | `GatewayClientMtls::authenticate`, opaque `GatewayUpstream`, Host/Sim mTLS constructors | `run_server_with_obs_and_drivers` / Sim composition | private connector readiness probe and request path; only successful exact-peer adapters hold the unforgeable seal needed to construct the authenticated stream |
+| `Invariant::{GatewayApplicationGenerationLifecycleIsSafe,GatewayApplicationShutdownConverges}` and evaluator functions | `Invariant::ALL` plus existing `cargo dst --only` parser | exhaustive `Harness::evaluate` calls the crate-private evaluators with the run seed; no production or test-only gateway API is added |
 
 The same audit removes the two previously dormant proposals:
 `PublicCertifiedKeyCustodyHandle::withdraw` does not exist, and
@@ -4513,10 +4675,134 @@ CDN, DNS provider, ACME client, new store or proprietary component is added.
 
 ## Wave: DESIGN / [REF] Application verification and full-stack handoff
 
+### Exact seeded Gateway Application invariant registration
+
+The Gateway Application lifecycle uses the existing `cargo dst` catalogue and
+seed controls; it does not gain a second runner or one variant per example.
+Two truths are independently useful: generation lifecycle safety while the
+owner is live, and shutdown convergence after ownership is revoked. The exact
+additions are:
+
+```rust
+// overdrive-sim::invariants
+pub mod gateway_application;
+
+pub enum Invariant {
+    // existing variants unchanged
+    GatewayApplicationGenerationLifecycleIsSafe,
+    GatewayApplicationShutdownConverges,
+}
+
+// overdrive-sim::invariants::gateway_application
+pub(crate) async fn evaluate_generation_lifecycle_is_safe(
+    seed: u64,
+) -> InvariantResult;
+pub(crate) async fn evaluate_shutdown_converges(seed: u64) -> InvariantResult;
+
+pub(crate) enum GatewayApplicationSimInput {
+    ApplyRoute(Route),
+    WithdrawRoute(RouteId),
+    RetainCurrentPublicConnection,
+    ReleaseRetainedPublicConnection,
+    RestartOwner,
+    BeginShutdown,
+}
+
+pub(crate) enum GatewayApplicationSimFault {
+    HoldDemandCompletion(GatewayFrontendDemandApply),
+    ReleaseDemandCompletion(GatewayFrontendDemandApply),
+}
+
+pub(crate) struct GatewayApplicationInvariantCase {
+    pub(crate) inputs: Vec<GatewayApplicationSimInput>,
+    pub(crate) faults: Vec<GatewayApplicationSimFault>,
+}
+impl GatewayApplicationInvariantCase {
+    pub(crate) fn generation_lifecycle(seed: u64) -> Self;
+    pub(crate) fn shutdown(seed: u64) -> Self;
+}
+```
+
+The evaluator/control definitions live only in
+`crates/overdrive-sim/src/invariants/gateway_application.rs`; catalogue
+variants and canonical names live only in
+`crates/overdrive-sim/src/invariants/mod.rs`, and dispatch lives only in the
+existing exhaustive match in `crates/overdrive-sim/src/harness.rs`.
+
+`Invariant::as_canonical` maps the variants respectively to
+`gateway-application-generation-lifecycle-is-safe` and
+`gateway-application-shutdown-converges`; both variants are appended exactly
+once to `Invariant::ALL`. The existing exhaustive `Harness::evaluate` adds the
+two arms below, so existing `Display`, `FromStr`, `Harness::only` and report
+rendering require no parallel registration surface:
+
+```rust
+Invariant::GatewayApplicationGenerationLifecycleIsSafe =>
+    gateway_application::evaluate_generation_lifecycle_is_safe(seed).await,
+Invariant::GatewayApplicationShutdownConverges =>
+    gateway_application::evaluate_shutdown_converges(seed).await,
+```
+
+The only CLI inputs remain the existing `--seed <u64>` and `--only <NAME>`:
+
+```text
+cargo dst --seed <N> --only gateway-application-generation-lifecycle-is-safe
+cargo dst --seed <N> --only gateway-application-shutdown-converges
+```
+
+There is no lifecycle-specific CLI flag. Each case constructor uses
+`StdRng::seed_from_u64(seed)` to order only concurrently deliverable items;
+every seed still contains all mandatory inputs/faults. `ApplyRoute` and
+`WithdrawRoute` drive `GatewayControl::routes`, restart re-composes the same
+durable stores through `GatewayBuilder::start`, and `BeginShutdown` consumes
+the real `GatewayHandle`. Retain/release drives a public TLS connection through
+the active listener. Demand hold/release is implemented only by the
+`overdrive-sim` adapter for the already-approved
+`GatewayFrontendDemandAcknowledge`/wake path and carries the real
+`GatewayFrontendDemandApply`; it neither invokes a private owner method nor
+adds a production hook. `SimClock` and the existing Sim identity/dataplane/mTLS
+adapters supply time and effect completion. The seed and generated schedule
+are included in the failure cause, and twin runs at one seed must produce the
+same ordered observation trace.
+
+`generation_lifecycle(seed)` always applies three generations of the same
+Route ID, retains a connection on the first Current, holds the second
+generation's demand completion, supersedes it with the third, releases the
+stale second completion, promotes the third, withdraws it, releases the first
+connection, and restarts once against the unchanged durable intent at a
+seed-selected legal boundary. Its oracle reads only
+`GatewayApplicationStatusRowV1` plus `GatewayFrontendDemandRead::snapshot` and
+asserts at every observation:
+
+- Staged precedes promotion, Current changes in one generation step, and the
+  displaced Current remains Draining while its retained connection is open.
+- The demand snapshot is exactly the phase-precedence union of
+  Staged/Current/Draining ServiceKeys; no generation retires before its
+  retained connection closes.
+- A released completion whose `(revision, ServiceKey)` no longer names Staged
+  never becomes Current and never acknowledges or retires the successor.
+- Withdrawal unbinds/stops admission before clearing Current, then converges
+  to no Staged/Current/Draining demand after retained leases close. Restart
+  relists durable Route intent and never compares demand revisions across
+  processes or resurrects a withdrawn/superseded generation.
+
+`shutdown(seed)` begins with one Current retained connection and one Staged
+generation whose completion is held, then permutes completion/connection
+release around `GatewayHandle::shutdown`. Its oracle uses the final
+`GatewayShutdownReport`, the last application status row, the demand snapshot
+and non-secret identity read. A passing trace has listener unbound and no new
+admission, no Staged or Current application, an empty demand snapshot after
+all retained leases join, `identity_empty == true`, zero ledger entries, and
+`live_intents == Some(0)` plus `live_receipts == Some(0)`. Any typed task,
+application, identity or cleanup failure makes the invariant fail with the
+seed; the evaluator never treats a non-clean report as convergence. These are
+observable-owner oracles, not copies of private owner fields or a simulated
+replacement state machine.
+
 | Evidence lane | Required contract |
 |---|---|
-| Pure/PBT | Route/path/hash laws; demand phase/union/revision; receipt matching/cleanup; immutable BackendId identity; gateway SVID lifecycle; header complement; finite limit ordering. Every property carries `/// CONTRACT_SHAPE: pure-function.` |
-| DST | staged-before-swap/current-to-draining/no-early-retire; hydrate-to-dispatch stale-demand guard; key/identity loss closes admission; demand TEACH including empty; registered/unregistered isolation; cleanup on every connector result; seeded shutdown during an in-flight gate proves staged removal attempt before demand cancellation, joined leases before retire/drop, bounded command/task failures, and Identity Empty before convergence stop. |
+| Pure/PBT | `PathMatch::matches_raw_path`, `runtime::routing::normalize_route_authority` and both `runtime::proxy_headers::rewrite_*_headers` functions own the Route-path/authority/header properties; Route/hash laws, demand phase/union/revision, receipt matching/cleanup, immutable BackendId identity, gateway SVID lifecycle and finite limit ordering remain in their owning source modules. Every live property carries `/// CONTRACT_SHAPE: pure-function.` |
+| DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. Existing demand TEACH, registered/unregistered isolation, connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
 | In-process integration | Real stores/Route/custody/application/status; Hydrator/action demand guard+ack; Sim connect/identity/mTLS equivalence; typed boot/shutdown and concurrent retained generations; production `ServerHandle` ordering. Rust tests do not spawn the product binary. |
 | `AT-PIG-E2E-1` recurring Tier-3 production composition | `tests/tier3/public-ingress-gateway/runner.sh` drives the built default-feature binary plus the checked-in root example through real serve/Service/Route/external test-CA TLS; it proves demand TEACH -> registered cgroup-BPF Maglev/rewrite -> BackendId receipt/identity -> gateway-SVID exact-peer mTLS -> streamed workload response. It is not an expectation or Rust test. |
 | Tier 3 | Real-kernel cookie equality, Selected/NoBackend receipt, identity association, unchanged unregistered LOCAL/XDP behavior, Path-A nft-TPROXY, wrong-valid-peer and cleanup. |
@@ -4532,6 +4818,25 @@ cannot collapse the evidence layers:
 | Operator-runnable journey | `examples/public-ingress-gateway/README.md`, `service.toml`, `route.toml`, `workload.py`, `prepare-test-ca.sh`, and `run-example.sh`. The README/run script invoke a supplied built `overdrive` binary, use caller-supplied chain/key/CA paths when all are present or otherwise generate a bounded test CA/cert/key in a caller-provided scratch directory, run real `serve`, deploy the checked-in Service and Route specs, and make the external TLS1.3/HTTP1.1 request. It is explanatory/operator-runnable and owns no regression oracle. |
 | Recurring production-composition test | `tests/tier3/public-ingress-gateway/runner.sh <absolute-overdrive-binary> <scratch-dir>`. The shell runner requires a default-feature binary built before invocation, calls the checked-in example rather than recreating specs/workload, and asserts the public response plus kernel/wire/cleanup facts with external tools. It imports/links no crate and invokes neither `cargo test`, a Rust test binary nor `verification/expectations`. This is the sole artifact carrying ID `AT-PIG-E2E-1`. |
 | Point-in-time expectation | `verification/expectations/E14-public-ingress-operator-journey/{README.md,runner.sh}`. It invokes the same root example with a SHA-pinned built default-feature binary and operator-supplied publicly trusted chain, captures only stakeholder-visible command/status/TLS/response output, and has no recurring-regression or internal/kernel oracle role. |
+
+The checked-in `run-example.sh` starts the supplied product binary with this
+exact gateway argv shape (its local variable/positional-argument plumbing may
+not rename or omit a flag):
+
+```sh
+"$overdrive_bin" serve \
+  --gateway-address "$gateway_address" \
+  --gateway-certified-key-id api-origin \
+  --gateway-certificate-chain "$certificate_chain_path" \
+  --gateway-private-key "$private_key_path"
+```
+
+`route.toml`'s `certified_key = "api-origin"` is byte-equal to the flag value.
+When the example creates its bounded test CA, it passes the generated
+leaf-first chain file and PKCS#8 key file through these same two flags; when an
+operator supplies files, it substitutes only the path values. Neither mode
+creates an alternate config file, environment-only credential channel or ACME
+producer.
 
 Both external runners supply the public certified key only through the real
 `overdrive serve` arguments. Neither may hand-program a BPF map, install a
