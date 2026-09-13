@@ -1,0 +1,132 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running `target/debug/xtask metal run -- env CC_x86_64_unknown_linux_musl=cc bash spike-scratch/increment-p-netns-density-295-metal-20260913T2237/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=7c50521e0a632ec2f69361bc pid=1791606
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 195,679 bytes  received 47,581 bytes  97,304.00 bytes/sec
+total size is 199,677,434  speedup is 820.84
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295-p.lI9Zr0o4
+START=2026-09-13T22:48:13Z
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND build-and-execute-static-Rust-probe
+   Compiling ring v0.17.14
+   Compiling yasna v0.6.0
+   Compiling rustls v0.23.44
+   Compiling rustls-webpki v0.103.15
+   Compiling rcgen v0.14.10
+   Compiling netns-density-295-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-p-netns-density-295-metal-20260913T2237)
+error[E0308]: mismatched types
+    --> probe.rs:220:40
+     |
+ 220 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFADDR, &ifr) }, "guest IP");
+     |                        -----------     ^^^^^^^^^^^^^^^^^ expected `i32`, found `u64`
+     |                        |
+     |                        arguments to this function are incorrect
+     |
+note: function defined here
+    --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.189/src/unix/linux_like/mod.rs:1756:20
+     |
+1756 |             pub fn ioctl(fd: c_int, request: Ioctl, ...) -> c_int;
+     |                    ^^^^^
+help: you can convert a `u64` to an `i32` and panic if the converted value doesn't fit
+     |
+ 220 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFADDR.try_into().unwrap(), &ifr) }, "guest IP");
+     |                                                         ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> probe.rs:223:40
+     |
+ 223 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFNETMASK, &ifr) }, "guest netmask");
+     |                        -----------     ^^^^^^^^^^^^^^^^^^^^ expected `i32`, found `u64`
+     |                        |
+     |                        arguments to this function are incorrect
+     |
+note: function defined here
+    --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.189/src/unix/linux_like/mod.rs:1756:20
+     |
+1756 |             pub fn ioctl(fd: c_int, request: Ioctl, ...) -> c_int;
+     |                    ^^^^^
+help: you can convert a `u64` to an `i32` and panic if the converted value doesn't fit
+     |
+ 223 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFNETMASK.try_into().unwrap(), &ifr) }, "guest netmask");
+     |                                                            ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> probe.rs:224:40
+     |
+ 224 |         check(unsafe { libc::ioctl(fd, libc::SIOCGIFFLAGS, &mut ifr) }, "guest flags read");
+     |                        -----------     ^^^^^^^^^^^^^^^^^^ expected `i32`, found `u64`
+     |                        |
+     |                        arguments to this function are incorrect
+     |
+note: function defined here
+    --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.189/src/unix/linux_like/mod.rs:1756:20
+     |
+1756 |             pub fn ioctl(fd: c_int, request: Ioctl, ...) -> c_int;
+     |                    ^^^^^
+help: you can convert a `u64` to an `i32` and panic if the converted value doesn't fit
+     |
+ 224 |         check(unsafe { libc::ioctl(fd, libc::SIOCGIFFLAGS.try_into().unwrap(), &mut ifr) }, "guest flags read");
+     |                                                          ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> probe.rs:226:40
+     |
+ 226 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFFLAGS, &ifr) }, "guest link up");
+     |                        -----------     ^^^^^^^^^^^^^^^^^^ expected `i32`, found `u64`
+     |                        |
+     |                        arguments to this function are incorrect
+     |
+note: function defined here
+    --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.189/src/unix/linux_like/mod.rs:1756:20
+     |
+1756 |             pub fn ioctl(fd: c_int, request: Ioctl, ...) -> c_int;
+     |                    ^^^^^
+help: you can convert a `u64` to an `i32` and panic if the converted value doesn't fit
+     |
+ 226 |         check(unsafe { libc::ioctl(fd, libc::SIOCSIFFLAGS.try_into().unwrap(), &ifr) }, "guest link up");
+     |                                                          ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> probe.rs:235:36
+     |
+ 235 |     check(unsafe { libc::ioctl(fd, libc::SIOCADDRT, &route) }, "guest default route");
+     |                    -----------     ^^^^^^^^^^^^^^^ expected `i32`, found `u64`
+     |                    |
+     |                    arguments to this function are incorrect
+     |
+note: function defined here
+    --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.189/src/unix/linux_like/mod.rs:1756:20
+     |
+1756 |             pub fn ioctl(fd: c_int, request: Ioctl, ...) -> c_int;
+     |                    ^^^^^
+help: you can convert a `u64` to an `i32` and panic if the converted value doesn't fit
+     |
+ 235 |     check(unsafe { libc::ioctl(fd, libc::SIOCADDRT.try_into().unwrap(), &route) }, "guest default route");
+     |                                                   ++++++++++++++++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `netns-density-295-probe` (bin "probe") due to 5 previous errors
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

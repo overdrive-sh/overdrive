@@ -1,0 +1,37 @@
+[    0.003097] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+
+thread 'main' (1) panicked at probe.rs:253:61:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Uncategorized, error: "failed to lookup address information: Try again" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[    2.309769] Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b
+[    2.312115] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    2.314838] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    2.316831] Call Trace:
+[    2.317674]  <TASK>
+[    2.318450]  show_stack+0x49/0x60
+[    2.319538]  dump_stack_lvl+0x5f/0x90
+[    2.320716]  dump_stack+0x10/0x18
+[    2.321792]  vpanic+0x262/0x4b0
+[    2.322822]  panic+0x67/0x70
+[    2.323776]  ? acct_update_integrals+0x5e/0xa0
+[    2.325176]  do_exit.cold+0x15/0x15
+[    2.326304]  do_group_exit+0x2d/0xb0
+[    2.327467]  get_signal+0x7f5/0x830
+[    2.328603]  arch_do_signal_or_restart+0x36/0x110
+[    2.330079]  irqentry_exit+0x249/0x6f0
+[    2.331286]  exc_general_protection+0x19a/0x410
+[    2.332732]  asm_exc_general_protection+0x27/0x30
+[    2.334201] RIP: 0033:0x75ff6442fc25
+[    2.335352] Code: 00 00 4c 89 c6 48 63 78 30 b8 c8 00 00 00 0f 05 b8 0e 00 00 00 48 8d 74 24 08 bf 01 00 00 00 48 c7 44 24 08 20 00 00 00 0f 05 <f4> bf 09 00 00 00 e8 ce 56 00 00 bf 7f 00 00 00 e8 d4 ac 00 00 41
+[    2.340945] RSP: 002b:00007ffcad163b80 EFLAGS: 00010246
+[    2.342580] RAX: 0000000000000000 RBX: 0000000000000001 RCX: 000075ff6442fc25
+[    2.344775] RDX: 0000000000000000 RSI: 00007ffcad163b88 RDI: 0000000000000001
+[    2.346697] RBP: 00007ffcad163bc0 R08: 0000000000000006 R09: 0000000000000000
+[    2.348427] R10: 0000000000000008 R11: 0000000000000246 R12: 000075ff644c5318
+[    2.350144] R13: 000075ff644c9bd8 R14: 0000000000000000 R15: 00007ffcad163cc8
+[    2.351882]  </TASK>
+[    2.352614] Kernel Offset: 0x16e00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    2.355167] ---[ end Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b ]---

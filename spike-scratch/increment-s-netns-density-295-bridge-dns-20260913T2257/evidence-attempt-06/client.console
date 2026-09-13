@@ -1,0 +1,38 @@
+[    0.003077] KHO: Failed to reserve lowmem scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+
+thread 'main' (1) panicked at probe.rs:255:85:
+called `Result::unwrap()` on an `Err` value: Error { kind: TimedOut, message: "connection timed out" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[   12.320054] Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b
+[   12.322409] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[   12.325137] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[   12.327134] Call Trace:
+[   12.327963]  <TASK>
+[   12.328677]  show_stack+0x49/0x60
+[   12.329773]  dump_stack_lvl+0x5f/0x90
+[   12.330960]  dump_stack+0x10/0x18
+[   12.332037]  vpanic+0x262/0x4b0
+[   12.333072]  panic+0x67/0x70
+[   12.334028]  ? acct_update_integrals+0x5e/0xa0
+[   12.335432]  do_exit.cold+0x15/0x15
+[   12.336562]  do_group_exit+0x2d/0xb0
+[   12.337717]  get_signal+0x7f5/0x830
+[   12.338870]  arch_do_signal_or_restart+0x36/0x110
+[   12.340348]  irqentry_exit+0x249/0x6f0
+[   12.341557]  exc_general_protection+0x19a/0x410
+[   12.343020]  asm_exc_general_protection+0x27/0x30
+[   12.344489] RIP: 0033:0x736fb6dfbc25
+[   12.345643] Code: 00 00 4c 89 c6 48 63 78 30 b8 c8 00 00 00 0f 05 b8 0e 00 00 00 48 8d 74 24 08 bf 01 00 00 00 48 c7 44 24 08 20 00 00 00 0f 05 <f4> bf 09 00 00 00 e8 ce 56 00 00 bf 7f 00 00 00 e8 d4 ac 00 00 41
+[   12.351251] RSP: 002b:00007ffd1ab18e90 EFLAGS: 00010246
+[   12.352887] RAX: 0000000000000000 RBX: 0000000000000001 RCX: 0000736fb6dfbc25
+[   12.355078] RDX: 0000000000000000 RSI: 00007ffd1ab18e98 RDI: 0000000000000001
+[   12.357269] RBP: 00007ffd1ab18ed0 R08: 0000000000000006 R09: 0000000000000000
+[   12.359264] R10: 0000000000000008 R11: 0000000000000246 R12: 0000736fb6e91318
+[   12.360999] R13: 0000736fb6e95bd8 R14: 0000000000000000 R15: 00007ffd1ab18fd8
+[   12.362729]  </TASK>
+[   12.363463] Kernel Offset: 0x38800000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[   12.366042] ---[ end Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b ]---

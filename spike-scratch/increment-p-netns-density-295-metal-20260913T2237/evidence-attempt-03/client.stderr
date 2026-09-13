@@ -1,0 +1,16 @@
+cloud-hypervisor:   0.002213s: <vmm> WARN:vmm/src/device_manager.rs:2756 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.002256s: <vmm> WARN:vmm/src/device_manager.rs:2761 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.002280s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:   0.002539s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:   0.427100s: <_disk0_q0> WARN:virtio-devices/src/block.rs:226 -- Attempting to write to sector 0 on a disk without specifying image_type
+cloud-hypervisor:   0.427153s: <_disk0_q0> WARN:virtio-devices/src/block.rs:308 -- Request check failed: Request { request_type: Out, sector: 0, data_descriptors: [(GuestAddress(2a70000), 1000)], status_addr: GuestAddress(2b587e0), writeback: true, start: Instant { tv_sec: 281023, tv_nsec: 13005098 } } ReadOnly
+cloud-hypervisor:   1.473152s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:   5.058283s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:   8.645121s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  12.221211s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  15.800502s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  19.375156s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  22.952053s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  26.543861s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  30.115990s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+cloud-hypervisor:  33.702862s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.

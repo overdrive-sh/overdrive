@@ -1,0 +1,49 @@
+trace id bf31c5b5 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30960 ip protocol udp ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id bf31c5b5 bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id bf31c5b5 bridge gh295p prerouting policy accept 
+trace id 66b3130c ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30960 ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id 66b3130c ip gh295p prerouting policy accept 
+trace id 66b3130c ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30960 ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id 66b3130c ip overdrive-mtls prerouting policy accept 
+trace id b5bc4679 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30961 ip protocol udp ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id b5bc4679 bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id b5bc4679 bridge gh295p prerouting policy accept 
+trace id 85594075 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30961 ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id 85594075 ip gh295p prerouting policy accept 
+trace id 85594075 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 30961 ip length 55 udp sport 55008 udp dport 53 udp length 35 udp checksum 5365 
+trace id 85594075 ip overdrive-mtls prerouting policy accept 
+trace id cac7bb44 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26334 ip protocol tcp ip length 60 tcp sport 39770 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id cac7bb44 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id cac7bb44 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 0d352f6e ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26334 ip length 60 tcp sport 39770 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id 0d352f6e ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 0d352f6e ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26334 ip length 60 tcp sport 39770 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id 0d352f6e ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 4f040953 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26335 ip protocol tcp ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 4f040953 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 4f040953 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 51b2dd31 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26335 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 51b2dd31 ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 51b2dd31 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26335 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 51b2dd31 ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 4f040953 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26336 ip protocol tcp ip length 84 tcp sport 39770 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 4f040953 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 4f040953 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 51b2dd31 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26336 ip length 84 tcp sport 39770 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 51b2dd31 ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 51b2dd31 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26336 ip length 84 tcp sport 39770 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 51b2dd31 ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id ef3c2977 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26337 ip protocol tcp ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id ef3c2977 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id ef3c2977 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id aa727317 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26337 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id aa727317 ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id aa727317 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26337 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id aa727317 ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id ef3c2977 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26338 ip protocol tcp ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id ef3c2977 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id ef3c2977 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id aa727317 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26338 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id aa727317 ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id aa727317 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 26338 ip length 52 tcp sport 39770 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id aa727317 ip overdrive-mtls prerouting policy accept meta mark 0x00000295 

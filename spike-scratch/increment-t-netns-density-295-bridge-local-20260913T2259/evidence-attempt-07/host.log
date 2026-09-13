@@ -1,0 +1,18 @@
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
+DNS QUERY source=10.95.0.2:37287 name=peer.mesh qtype=1 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:37287 name=peer.mesh qtype=1 ipv4=true
+DNS QUERY source=10.95.0.2:37287 name=peer.mesh qtype=28 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:37287 name=peer.mesh qtype=28 ipv4=false
+LEG_F owner=tap295a GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.2:36170
+LEG_B WIRE local=10.95.0.1:46792 peer=10.95.0.3:9000 mark=0x2951
+LEG_C owner=tap295b GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.1:46792
+LEG_B MTLS_AUTHENTICATED server_certificates=1 version=Some(TLSv1_3)
+LEG_B KTLS_ARMED direction=1 tls_version=0x0304 cipher=52 seq=0
+LEG_B KTLS_ARMED direction=2 tls_version=0x0304 cipher=52 seq=0
+LEG_C MTLS_AUTHENTICATED client_certificates=1 version=Some(TLSv1_3)
+LEG_C KTLS_ARMED direction=1 tls_version=0x0304 cipher=52 seq=0
+LEG_C KTLS_ARMED direction=2 tls_version=0x0304 cipher=52 seq=0
+LEG_S CLEAR_TO_GUEST local=10.95.0.1:46794 peer=10.95.0.3:9000 mark=0x2952
+LEG_C COMPLETE request_bytes=32 response_bytes=37
+LEG_F COMPLETE request_bytes=32 response_bytes=37
+HOST COMPLETE elapsed_seconds=1.526729

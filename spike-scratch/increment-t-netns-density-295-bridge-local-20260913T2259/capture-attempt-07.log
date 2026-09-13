@@ -1,0 +1,375 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask metal run -- env CC_x86_64_unknown_linux_musl=cc bash spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=1b79bfb4566fc8cb3e7339a5 pid=1799062
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 215,916 bytes  received 47,950 bytes  105,546.40 bytes/sec
+total size is 200,033,773  speedup is 758.09
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295-p.ZmsGfObK
+START=2026-09-13T23:00:09Z
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND build-and-execute-static-Rust-probe
+   Compiling find-msvc-tools v0.1.12
+   Compiling shlex v2.0.1
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling untrusted v0.9.0
+   Compiling zeroize v1.9.0
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling deranged v0.5.8
+   Compiling powerfmt v0.2.0
+   Compiling rustls v0.23.44
+   Compiling base64 v0.23.1
+   Compiling subtle v2.6.1
+   Compiling once_cell v1.21.4
+   Compiling rustls-pki-types v1.15.1
+   Compiling cc v1.4.6
+   Compiling pem v4.0.0
+   Compiling getrandom v0.2.17
+   Compiling ring v0.17.14
+   Compiling time v0.3.55
+   Compiling yasna v0.6.0
+   Compiling rustls-webpki v0.103.15
+   Compiling rcgen v0.14.10
+   Compiling netns-density-295-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259)
+    Finished `release` profile [optimized] target(s) in 12.63s
+/home/ubuntu/overdrive/spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259/target/x86_64-unknown-linux-musl/release/probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=fe3bd9b3b1a1caed6203745a81b028a13481c520, not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295p
+Device "br295p" does not exist.
++ ip link show tap295a
+Device "tap295a" does not exist.
++ ip link show tap295b
+Device "tap295b" does not exist.
++ nft list table ip gh295p
+Error: No such file or directory
+list table ip gh295p
+              ^^^^^^
++ nft list table bridge gh295p
+Error: No such file or directory
+list table bridge gh295p
+                  ^^^^^^
+++ ip route show table 295
++ '[' -z '' ']'
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295p type bridge
++ spike_links+=(br295p)
++ ip link set br295p address 02:00:00:95:00:01
++ ip addr add 10.95.0.1/24 dev br295p
++ ip link set br295p up
++ for tap in tap295a tap295b
++ ip tuntap add dev tap295a mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295a master br295p
++ ip link set tap295a up
++ sysctl -qw net.ipv4.conf.tap295a.rp_filter=0
++ for tap in tap295a tap295b
++ ip tuntap add dev tap295b mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295b master br295p
++ ip link set tap295b up
++ sysctl -qw net.ipv4.conf.tap295b.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295p.rp_filter=0
++ ip rule add priority 2950 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table bridge gh295p
++ spike_bridge_table=1
++ nft add chain bridge gh295p prerouting '{ type filter hook prerouting priority -300; policy accept; }'
++ nft add rule bridge gh295p prerouting iifname tap295a ether type ip ip protocol tcp tcp dport 9000 counter meta nftrace set 1 meta mark set 0x295a ether daddr set 02:00:00:95:00:01 meta pkttype set host
++ nft add rule bridge gh295p prerouting iifname tap295a ether type ip ip protocol udp udp dport 53 counter meta nftrace set 1
++ nft add table ip gh295p
++ spike_table=1
++ nft add chain ip gh295p prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295p prerouting iifname tap295a ip protocol udp udp dport 53 counter
++ nft add rule ip gh295p prerouting meta mark 0x295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295p prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295p output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295p output meta mark 0x2951 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+br295p           DOWN           10.95.0.1/24 
+tap295a          DOWN           
+tap295b          DOWN           
++ ip netns list
++ bridge link
+2: eno12399np0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 hwmode VEB 
+4: eno12409np1: <BROADCAST,MULTICAST> mtu 1500 hwmode VEB 
+51816: tap295a: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295p state disabled priority 32 cost 2 
+51817: tap295b: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295p state disabled priority 32 cost 2 
++ spike_pids+=("$!")
++ for iface in lo tap295a tap295b
++ nft monitor trace
++ spike_captures+=("$!")
++ for iface in lo tap295a tap295b
++ tcpdump -U -s 0 -ni lo -w /var/tmp/gh295-p.ZmsGfObK/lo.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ for iface in lo tap295a tap295b
++ tcpdump -U -s 0 -ni tap295a -w /var/tmp/gh295-p.ZmsGfObK/tap295a.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ sleep 0.4
++ tcpdump -U -s 0 -ni tap295b -w /var/tmp/gh295-p.ZmsGfObK/tap295b.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_host=1800144
++ spike_pids+=("$spike_host")
++ timeout 45 /home/ubuntu/overdrive/spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259/target/x86_64-unknown-linux-musl/release/probe
+++ seq 1 100
++ for i in $(seq 1 100)
++ grep -q 'HOST READY' /var/tmp/gh295-p.ZmsGfObK/host.log
++ break
++ grep 'HOST READY' /var/tmp/gh295-p.ZmsGfObK/host.log
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
++ spike_server=1800151
++ spike_pids+=("$spike_server")
++ timeout 40 cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=server' --disk path=/var/tmp/gh295-p.ZmsGfObK/server.ext4,image_type=raw --net tap=tap295b,mac=02:00:00:95:00:03,offload_tso=off,offload_ufo=off,offload_csum=off --serial file=/var/tmp/gh295-p.ZmsGfObK/server.console --console off
+++ seq 1 200
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
++ break
++ grep 'GUEST SERVER READY' /var/tmp/gh295-p.ZmsGfObK/server.console
+GUEST SERVER READY
++ spike_client=1800189
++ spike_pids+=("$spike_client")
++ wait 1800189
++ timeout 35 cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=client' --disk path=/var/tmp/gh295-p.ZmsGfObK/client.ext4,image_type=raw --net tap=tap295a,mac=02:00:00:95:00:02,offload_tso=off,offload_ufo=off,offload_csum=off --serial file=/var/tmp/gh295-p.ZmsGfObK/client.console --console off
++ wait 1800151
++ wait 1800144
++ grep 'GUEST ROUNDTRIP SUCCESS' /var/tmp/gh295-p.ZmsGfObK/client.console
+GUEST ROUNDTRIP SUCCESS RESPONSE=GH295-BYTE-DISTINCT-PEER-RESPONSE-42 elapsed_seconds=0.049117
++ sleep 0.4
++ for pid in "${spike_captures[@]}"
++ kill -INT 1800140
++ for pid in "${spike_captures[@]}"
++ kill -INT 1800141
++ for pid in "${spike_captures[@]}"
++ kill -INT 1800142
++ for pid in "${spike_captures[@]}"
++ wait 1800140
++ for pid in "${spike_captures[@]}"
++ wait 1800141
++ for pid in "${spike_captures[@]}"
++ wait 1800142
++ spike_captures=()
++ set +x
+WIRE_SCAN ('10.95.0.1', 46792, '10.95.0.3', 9000) stream_bytes=796 tls_records={20: 1, 22: 1, 23: 2} application_data_0x17=2 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 46792) stream_bytes=799 tls_records={20: 1, 22: 1, 23: 2} application_data_0x17=2 plaintext=0 gaps=0
+SHARED_L2 source_tap_plaintext_request=1 peer_tap_agent_plaintext_request=1 peer_tap_plaintext_response=1 guest_to_guest_bypass_packets=0
+VERDICT=WORKS: two real microVMs, guest plaintext DNS dial, per-port bridge-local+TPROXY, mutual TLS1.3 with kTLS TX/RX, zero cleartext on leg-B/leg-C, no direct shared-L2 bypass
+
+CLEANUP START prior_exit=0 at=2026-09-13T23:00:25Z
+table bridge gh295p {
+	chain prerouting {
+		type filter hook prerouting priority dstnat; policy accept;
+		iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 5 bytes 300 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host
+		iifname "tap295a" ip protocol udp udp dport 53 counter packets 2 bytes 110 meta nftrace set 1
+	}
+}
+table ip gh295p {
+	chain prerouting {
+		type filter hook prerouting priority mangle - 1; policy accept;
+		iifname "tap295a" udp dport 53 counter packets 0 bytes 0
+		meta mark 0x0000295a tcp dport 9000 counter packets 5 bytes 300 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept
+		meta mark 0x00000295 ip daddr 10.95.0.3 tcp dport 9000 counter packets 9 bytes 1272 tproxy to 127.0.0.1:15295 accept
+	}
+
+	chain output {
+		type route hook output priority mangle - 1; policy accept;
+		meta mark 0x00002951 ip daddr 10.95.0.3 tcp dport 9000 counter packets 9 bytes 1272 meta mark set 0x00000295 accept
+	}
+}
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+br295p           UP             10.95.0.1/24 fe80::ff:fe95:1/64 
+tap295a          DOWN           fe80::64e1:16ff:fe17:f2a9/64 
+tap295b          UP             fe80::2065:31ff:fe80:c296/64 
+0:	from all lookup local
+2950:	from all fwmark 0x295 lookup 295
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+
+CAPTURE host.log
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
+DNS QUERY source=10.95.0.2:37287 name=peer.mesh qtype=1 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:37287 name=peer.mesh qtype=1 ipv4=true
+DNS QUERY source=10.95.0.2:37287 name=peer.mesh qtype=28 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:37287 name=peer.mesh qtype=28 ipv4=false
+LEG_F owner=tap295a GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.2:36170
+LEG_B WIRE local=10.95.0.1:46792 peer=10.95.0.3:9000 mark=0x2951
+LEG_C owner=tap295b GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.1:46792
+LEG_B MTLS_AUTHENTICATED server_certificates=1 version=Some(TLSv1_3)
+LEG_B KTLS_ARMED direction=1 tls_version=0x0304 cipher=52 seq=0
+LEG_B KTLS_ARMED direction=2 tls_version=0x0304 cipher=52 seq=0
+LEG_C MTLS_AUTHENTICATED client_certificates=1 version=Some(TLSv1_3)
+LEG_C KTLS_ARMED direction=1 tls_version=0x0304 cipher=52 seq=0
+LEG_C KTLS_ARMED direction=2 tls_version=0x0304 cipher=52 seq=0
+LEG_S CLEAR_TO_GUEST local=10.95.0.1:46794 peer=10.95.0.3:9000 mark=0x2952
+LEG_C COMPLETE request_bytes=32 response_bytes=37
+LEG_F COMPLETE request_bytes=32 response_bytes=37
+HOST COMPLETE elapsed_seconds=1.526729
+
+CAPTURE client.console
+[    0.003125] KHO: Failed to reserve lowmem scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+GUEST PLAINTEXT REQUEST=GH295-PLAINTEXT-GUEST-REQUEST-7
+
+GUEST ROUNDTRIP SUCCESS RESPONSE=GH295-BYTE-DISTINCT-PEER-RESPONSE-42 elapsed_seconds=0.049117
+GUEST EXIT=0
+[    0.349763] reboot: Power down
+
+CAPTURE server.console
+[    0.003125] KHO: Failed to reserve lowmem scratch buffer
+GUEST CONFIG ip=10.95.0.3/24 gateway=10.95.0.1 role=server PID=1 NO_CREDENTIALS
+GUEST SERVER READY
+GUEST SERVER ACCEPT peer=10.95.0.1:46794
+GUEST SERVER REQUEST=GH295-PLAINTEXT-GUEST-REQUEST-7
+
+GUEST SERVER RESPONSE=GH295-BYTE-DISTINCT-PEER-RESPONSE-42
+
+GUEST EXIT=0
+[    1.710290] reboot: Power down
+
+CAPTURE client.stderr
+cloud-hypervisor:   0.002517s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
+
+CAPTURE server.stderr
+cloud-hypervisor:   0.002461s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295b already exists. IP configuration will not be overwritten.
+
+CAPTURE capture-lo.stderr
+tcpdump: listening on lo, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+15 packets captured
+34 packets received by filter
+0 packets dropped by kernel
+
+CAPTURE capture-tap295a.stderr
+tcpdump: listening on tap295a, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13 packets captured
+13 packets received by filter
+0 packets dropped by kernel
+
+CAPTURE capture-tap295b.stderr
+tcpdump: listening on tap295b, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+9 packets captured
+14 packets received by filter
+0 packets dropped by kernel
+
+CAPTURE nft-trace.log
+trace id 3a2f9c17 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37869 ip protocol udp ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 610 
+trace id 3a2f9c17 bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id 3a2f9c17 bridge gh295p prerouting policy accept 
+trace id c07d779c ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37869 ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 610 
+trace id c07d779c ip gh295p prerouting policy accept 
+trace id c07d779c ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37869 ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 610 
+trace id c07d779c ip overdrive-mtls prerouting policy accept 
+trace id 1629b94c bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37870 ip protocol udp ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 58796 
+trace id 1629b94c bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id 1629b94c bridge gh295p prerouting policy accept 
+trace id 8663e02e ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37870 ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 58796 
+trace id 8663e02e ip gh295p prerouting policy accept 
+trace id 8663e02e ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 37870 ip length 55 udp sport 37287 udp dport 53 udp length 35 udp checksum 58796 
+trace id 8663e02e ip overdrive-mtls prerouting policy accept 
+trace id e999c7cd bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27844 ip protocol tcp ip length 60 tcp sport 36170 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id e999c7cd bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id e999c7cd bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 3b76934a ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27844 ip length 60 tcp sport 36170 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id 3b76934a ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 3b76934a ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27844 ip length 60 tcp sport 36170 tcp dport 9000 tcp flags == syn tcp window 64240 
+trace id 3b76934a ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 91eb5a59 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27845 ip protocol tcp ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 91eb5a59 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 91eb5a59 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 9bc4a45e ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27845 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 9bc4a45e ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 9bc4a45e ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27845 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 9bc4a45e ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 91eb5a59 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27846 ip protocol tcp ip length 84 tcp sport 36170 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 91eb5a59 bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 91eb5a59 bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id 9bc4a45e ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27846 ip length 84 tcp sport 36170 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 9bc4a45e ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id 9bc4a45e ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27846 ip length 84 tcp sport 36170 tcp dport 9000 tcp flags == 0x18 tcp window 502 
+trace id 9bc4a45e ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 9c203fec bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27847 ip protocol tcp ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id 9c203fec bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 9c203fec bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id f927315f ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27847 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id f927315f ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id f927315f ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27847 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == ack tcp window 502 
+trace id f927315f ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+trace id 9c203fec bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27848 ip protocol tcp ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id 9c203fec bridge gh295p prerouting rule iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host (verdict continue)
+trace id 9c203fec bridge gh295p prerouting policy accept meta mark 0x0000295a 
+trace id f927315f ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27848 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id f927315f ip gh295p prerouting rule meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept (verdict accept)
+trace id f927315f ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr 02:00:00:95:00:01 ip saddr 10.95.0.2 ip daddr 10.95.0.3 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 27848 ip length 52 tcp sport 36170 tcp dport 9000 tcp flags == 0x11 tcp window 502 
+trace id f927315f ip overdrive-mtls prerouting policy accept meta mark 0x00000295 
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295-p.ZmsGfObK original_exit=0
+TOTAL_ELAPSED_SECONDS=15.846023

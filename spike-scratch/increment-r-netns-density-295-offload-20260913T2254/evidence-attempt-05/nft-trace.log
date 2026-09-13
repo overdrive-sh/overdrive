@@ -1,0 +1,16 @@
+trace id 4939b140 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32716 ip protocol udp ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 61873 
+trace id 4939b140 bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 meta pkttype set host meta broute set 1 (verdict continue)
+trace id 4939b140 bridge gh295p prerouting policy accept 
+trace id 4939b140 ip gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32716 ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 61873 
+trace id 4939b140 ip gh295p prerouting rule iifname "tap295a" udp dport 53 counter packets 0 bytes 0 (verdict continue)
+trace id 4939b140 ip gh295p prerouting policy accept 
+trace id 4939b140 ip overdrive-mtls prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32716 ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 61873 
+trace id 4939b140 ip overdrive-mtls prerouting policy accept 
+trace id 4939b140 bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32717 ip protocol udp ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 54781 
+trace id 4939b140 bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 meta pkttype set host meta broute set 1 (verdict continue)
+trace id 4939b140 bridge gh295p prerouting policy accept 
+trace id 4939b140 ip gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32717 ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 54781 
+trace id 4939b140 ip gh295p prerouting rule iifname "tap295a" udp dport 53 counter packets 0 bytes 0 (verdict continue)
+trace id 4939b140 ip gh295p prerouting policy accept 
+trace id 4939b140 ip overdrive-mtls prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 32717 ip length 55 udp sport 49163 udp dport 53 udp length 35 udp checksum 54781 
+trace id 4939b140 ip overdrive-mtls prerouting policy accept 

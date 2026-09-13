@@ -294,7 +294,7 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/bogota-v3] recent context, 2026-09-12 10:21pm GMT+2
+# [helios/khartoum-v1] recent context, 2026-09-14 1:18am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
@@ -302,18 +302,19 @@ Fetch details: get_observations([IDs]) | Search: mem-search skill
 
 Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
 
-### Jun 21, 2026
-S9210 Fix P1 orphaned-kTLS-handle race (GH #26) via Outside-In TDD; dispatch directly to CRAFTER phase (no deliver wave). Single production file, pinned API shape, exactly per design. (Jun 21 at 9:26 PM)
-S9211 Surgical correction of stale GitHub issue references and daemon terminology across design documentation after #178 split (Jun 21 at 9:39 PM)
-S9212 User approved re-targeting architect corrections to canonical documentation copies and resolving docs/feature/ vs docs/architecture/ divergence (Jun 21 at 9:39 PM)
-S9213 Re-run architect corrections against canonical post-finalize documentation copies after discovering initial edits targeted wrong (temporary) paths (Jun 21 at 9:41 PM)
-### Jun 22, 2026
-S9217 Systematic documentation update to remap GitHub issue references following #178 umbrella issue reorganization into focused issues (Jun 22 at 7:00 AM)
-S9220 Documentation issue-reference remapping following #178 umbrella issue reorganization, with post-commit verification and investigation of canonical file locations (Jun 22 at 7:05 AM)
-S9221 Complete in-code GitHub issue reference remapping (#178→#241/#242/#243 and #61→#243) with validation (Jun 22 at 7:07 AM)
-S9257 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 7:40 AM)
-S9254 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 1:18 PM)
-S9258 Fix CI timeout failures in trybuild compile-fail tests by correcting nextest filter pattern mismatch (Jun 22 at 1:21 PM)
+### May 16, 2026
+S6519 Create GitHub issue for IPIP DSR implementation based on completed research (May 16 at 2:14 PM)
+S6520 Complete IPIP DSR research and create tracking issue for implementation (May 16 at 2:17 PM)
+S6521 IPIP DSR research completion and GitHub issue creation for Phase 3 implementation (May 16 at 2:17 PM)
+S6920 Update GitHub issue #133 body to correct the framing from RPITIT dyn-compatibility to associated type erasure (May 16 at 2:18 PM)
+### May 24, 2026
+S6919 Research RPITIT dyn-compatibility status in Rust to determine viability of issue #133 Option 3 (May 24 at 10:28 AM)
+S6921 Update GitHub issue #133 body to correct the framing from RPITIT blocker to associated type erasure blocker (May 24 at 10:32 AM)
+S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
+### Jun 17, 2026
+S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
+S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
+S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:44 AM)
 ### Jul 29, 2026
 57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
 57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope

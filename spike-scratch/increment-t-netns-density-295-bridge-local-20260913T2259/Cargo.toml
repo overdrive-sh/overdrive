@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "netns-density-295-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libc = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+
+[[bin]]
+name = "probe"
+path = "probe.rs"
+
+[profile.release]
+panic = "abort"

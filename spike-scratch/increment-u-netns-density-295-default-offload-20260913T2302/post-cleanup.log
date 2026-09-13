@@ -1,0 +1,35 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- bash -lc 'set -eu; date -u +%FT%TZ; uname -r; uname -m; nft --version; ip -V; sha256sum "$OVERDRIVE_METAL_KERNEL" spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302/target/x86_64-unknown-linux-musl/release/probe; for dev in br295p tap295a tap295b; do if ip link show "$dev" >/dev/null 2>&1; then echo "UNEXPECTED_LINK=$dev"; exit 1; else echo "OWNED_LINK_ABSENT=$dev"; fi; done; nft list tables; ip rule; ip route show table 295 2>&1 || test "$?" -eq 2; ip netns list; sysctl net.ipv4.conf.all.rp_filter; echo POST_CLEANUP_COMPLETE'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=03c5ed0fcf943e60787ef31f pid=1802373
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 174,378 bytes  received 48,234 bytes  89,044.80 bytes/sec
+total size is 200,246,563  speedup is 899.53
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+2026-09-13T23:05:12Z
+7.0.0-29-generic
+x86_64
+nftables v1.1.6 (Commodore Bullmoose #7)
+ip utility, iproute2-6.19.0, libbpf 1.6.3
+b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682  /var/tmp/spike-increment-n/kernel
+1f1465db80cc82fef25319db05078ae98c5d807de1895c2db2559b5a16682780  spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302/target/x86_64-unknown-linux-musl/release/probe
+OWNED_LINK_ABSENT=br295p
+OWNED_LINK_ABSENT=tap295a
+OWNED_LINK_ABSENT=tap295b
+table ip overdrive-mtls
+0:	from all lookup local
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
+net.ipv4.conf.all.rp_filter = 0
+POST_CLEANUP_COMPLETE

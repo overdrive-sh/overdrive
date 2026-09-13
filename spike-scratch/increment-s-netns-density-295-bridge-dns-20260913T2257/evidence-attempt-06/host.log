@@ -1,0 +1,5 @@
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
+DNS QUERY source=10.95.0.2:46682 name=peer.mesh qtype=1 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:46682 name=peer.mesh qtype=1 ipv4=true
+DNS QUERY source=10.95.0.2:46682 name=peer.mesh qtype=28 HOME=shared-bridge:no-host-netns-resolv-conf
+DNS ANSWER source=10.95.0.2:46682 name=peer.mesh qtype=28 ipv4=false

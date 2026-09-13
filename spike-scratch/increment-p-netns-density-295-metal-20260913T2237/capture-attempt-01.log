@@ -1,0 +1,130 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-p-netns-density-295-metal-20260913T2237/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=506c6c3ca93eb95d9bcddb6f pid=1790530
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 200,430 bytes  received 47,447 bytes  99,150.80 bytes/sec
+total size is 199,656,395  speedup is 805.47
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295-p.eerHdKia
+START=2026-09-13T22:46:58Z
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND build-and-execute-static-Rust-probe
+    Updating crates.io index
+     Locking 64 packages to latest Rust 1.95.0 compatible versions
+ Downloading crates ...
+  Downloaded num-conv v0.2.2
+  Downloaded find-msvc-tools v0.1.12
+  Downloaded num-integer v0.1.47
+  Downloaded time-core v0.1.9
+  Downloaded pem v4.0.0
+  Downloaded thiserror-impl v2.0.20
+  Downloaded thiserror v2.0.20
+  Downloaded zeroize v1.9.0
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded cc v1.4.6
+  Downloaded rustls-webpki v0.103.15
+  Downloaded num-bigint v0.4.8
+  Downloaded rcgen v0.14.10
+  Downloaded base64 v0.23.1
+  Downloaded displaydoc v0.2.7
+  Downloaded asn1-rs v0.7.2
+  Downloaded time-macros v0.2.32
+  Downloaded shlex v2.0.1
+  Downloaded data-encoding v2.11.1
+  Downloaded time v0.3.55
+  Downloaded rustls v0.23.44
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling untrusted v0.9.0
+   Compiling zeroize v1.9.0
+   Compiling num-conv v0.2.2
+   Compiling powerfmt v0.2.0
+   Compiling deranged v0.5.8
+   Compiling time-core v0.1.9
+   Compiling rustls v0.23.44
+   Compiling base64 v0.23.1
+   Compiling once_cell v1.21.4
+   Compiling subtle v2.6.1
+   Compiling cc v1.4.6
+   Compiling rustls-pki-types v1.15.1
+   Compiling pem v4.0.0
+   Compiling getrandom v0.2.17
+   Compiling ring v0.17.14
+   Compiling time v0.3.55
+warning: ring@0.17.14: Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-linux-musl-gcc": No such file or directory (os error 2)
+warning: ring@0.17.14: Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-linux-musl-gcc": No such file or directory (os error 2)
+error: failed to run custom build command for `ring v0.17.14`
+
+Caused by:
+  process didn't exit successfully: `/home/ubuntu/overdrive/spike-scratch/increment-p-netns-density-295-metal-20260913T2237/target/release/build/ring-2950b694dba2e01d/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=CARGO_MANIFEST_DIR
+  cargo:rerun-if-env-changed=CARGO_PKG_NAME
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_MAJOR
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_MINOR
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_PATCH
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_PRE
+  cargo:rerun-if-env-changed=CARGO_MANIFEST_LINKS
+  cargo:rerun-if-env-changed=RING_PREGENERATE_ASM
+  cargo:rerun-if-env-changed=OUT_DIR
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ARCH
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN
+  cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-musl
+  CC_x86_64-unknown-linux-musl = None
+  cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_musl
+  CC_x86_64_unknown_linux_musl = None
+  cargo:rerun-if-env-changed=TARGET_CC
+  TARGET_CC = None
+  cargo:rerun-if-env-changed=CC
+  CC = None
+  cargo:rerun-if-env-changed=CROSS_COMPILE
+  CROSS_COMPILE = None
+  PATH = Some(/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin)
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-linux-musl-gcc": No such file or directory (os error 2)
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CFLAGS
+  CFLAGS = None
+  cargo:rerun-if-env-changed=TARGET_CFLAGS
+  TARGET_CFLAGS = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_musl
+  CFLAGS_x86_64_unknown_linux_musl = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-musl
+  CFLAGS_x86_64-unknown-linux-musl = None
+  cargo:warning=Compiler family detection failed due to error: ToolNotFound: failed to find tool "x86_64-linux-musl-gcc": No such file or directory (os error 2)
+
+  --- stderr
+
+
+  error occurred in cc-rs: failed to find tool "x86_64-linux-musl-gcc": No such file or directory (os error 2)
+
+
+warning: build failed, waiting for other jobs to finish...
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

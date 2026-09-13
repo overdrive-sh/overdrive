@@ -1,0 +1,7 @@
+cloud-hypervisor:   0.002662s: <vmm> WARN:vmm/src/device_manager.rs:2756 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.002701s: <vmm> WARN:vmm/src/device_manager.rs:2761 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.002725s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:   0.003069s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295b already exists. IP configuration will not be overwritten.
+cloud-hypervisor:   0.446545s: <_disk0_q0> WARN:virtio-devices/src/block.rs:226 -- Attempting to write to sector 0 on a disk without specifying image_type
+cloud-hypervisor:   0.446599s: <_disk0_q0> WARN:virtio-devices/src/block.rs:308 -- Request check failed: Request { request_type: Out, sector: 0, data_descriptors: [(GuestAddress(2a2c000), 1000)], status_addr: GuestAddress(2b2f7e0), writeback: true, start: Instant { tv_sec: 281021, tv_nsec: 13e8b4a5 } } ReadOnly
+cloud-hypervisor:   1.498199s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295b already exists. IP configuration will not be overwritten.

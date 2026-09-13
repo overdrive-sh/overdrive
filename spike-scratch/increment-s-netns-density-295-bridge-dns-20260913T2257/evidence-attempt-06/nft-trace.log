@@ -1,0 +1,14 @@
+trace id 0956ed2b bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9731 ip protocol udp ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 13635 
+trace id 0956ed2b bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id 0956ed2b bridge gh295p prerouting policy accept 
+trace id 088bce24 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9731 ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 13635 
+trace id 088bce24 ip gh295p prerouting policy accept 
+trace id 088bce24 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9731 ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 13635 
+trace id 088bce24 ip overdrive-mtls prerouting policy accept 
+trace id 85c609fb bridge gh295p prerouting packet: iif "tap295a" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9732 ip protocol udp ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 6523 
+trace id 85c609fb bridge gh295p prerouting rule iifname "tap295a" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1 (verdict continue)
+trace id 85c609fb bridge gh295p prerouting policy accept 
+trace id 6b6b5725 ip gh295p prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9732 ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 6523 
+trace id 6b6b5725 ip gh295p prerouting policy accept 
+trace id 6b6b5725 ip overdrive-mtls prerouting packet: iif "br295p" ether saddr 02:00:00:95:00:02 ether daddr be:15:87:df:33:95 ip saddr 10.95.0.2 ip daddr 10.95.0.1 ip dscp cs0 ip ecn not-ect ip ttl 64 ip id 9732 ip length 55 udp sport 46682 udp dport 53 udp length 35 udp checksum 6523 
+trace id 6b6b5725 ip overdrive-mtls prerouting policy accept 

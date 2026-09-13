@@ -1,0 +1,4 @@
+[    0.003060] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1

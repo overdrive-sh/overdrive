@@ -1,0 +1,391 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/xtask metal run -- env CC_x86_64_unknown_linux_musl=cc bash spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=38271a4c3a8acc821d771fb1 pid=1794348
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 170,954 bytes  received 47,511 bytes  87,386.00 bytes/sec
+total size is 199,753,596  speedup is 914.35
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295-p.40xGBdCM
+START=2026-09-13T22:52:35Z
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND build-and-execute-static-Rust-probe
+   Compiling find-msvc-tools v0.1.12
+   Compiling shlex v2.0.1
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling zeroize v1.9.0
+   Compiling untrusted v0.9.0
+   Compiling num-conv v0.2.2
+   Compiling powerfmt v0.2.0
+   Compiling deranged v0.5.8
+   Compiling time-core v0.1.9
+   Compiling base64 v0.23.1
+   Compiling rustls v0.23.44
+   Compiling subtle v2.6.1
+   Compiling once_cell v1.21.4
+   Compiling rustls-pki-types v1.15.1
+   Compiling cc v1.4.6
+   Compiling pem v4.0.0
+   Compiling ring v0.17.14
+   Compiling getrandom v0.2.17
+   Compiling time v0.3.55
+   Compiling yasna v0.6.0
+   Compiling rustls-webpki v0.103.15
+   Compiling rcgen v0.14.10
+   Compiling netns-density-295-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252)
+    Finished `release` profile [optimized] target(s) in 12.64s
+/home/ubuntu/overdrive/spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252/target/x86_64-unknown-linux-musl/release/probe: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=fe3bd9b3b1a1caed6203745a81b028a13481c520, not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295p
+Device "br295p" does not exist.
++ ip link show tap295a
+Device "tap295a" does not exist.
++ ip link show tap295b
+Device "tap295b" does not exist.
++ nft list table ip gh295p
+Error: No such file or directory
+list table ip gh295p
+              ^^^^^^
++ nft list table bridge gh295p
+Error: No such file or directory
+list table bridge gh295p
+                  ^^^^^^
+++ ip route show table 295
++ '[' -z '' ']'
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295p type bridge
++ spike_links+=(br295p)
++ ip addr add 10.95.0.1/24 dev br295p
++ ip link set br295p up
++ for tap in tap295a tap295b
++ ip tuntap add dev tap295a mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295a master br295p
++ ip link set tap295a up
++ sysctl -qw net.ipv4.conf.tap295a.rp_filter=0
++ for tap in tap295a tap295b
++ ip tuntap add dev tap295b mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295b master br295p
++ ip link set tap295b up
++ sysctl -qw net.ipv4.conf.tap295b.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295p.rp_filter=0
++ ip rule add priority 2950 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table bridge gh295p
++ spike_bridge_table=1
++ nft add chain bridge gh295p prerouting '{ type filter hook prerouting priority -300; policy accept; }'
++ nft add rule bridge gh295p prerouting iifname tap295a ether type ip ip protocol tcp tcp dport 9000 counter meta pkttype set host meta broute set 1
++ nft add rule bridge gh295p prerouting iifname tap295a ether type ip ip protocol udp udp dport 53 counter meta pkttype set host meta broute set 1
++ nft add table ip gh295p
++ spike_table=1
++ nft add chain ip gh295p prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295p prerouting iifname tap295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295p prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295p output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295p output meta mark 0x2951 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+br295p           DOWN           10.95.0.1/24 fe80::d0ed:41ff:fe72:c7fc/64 
+tap295a          DOWN           
+tap295b          DOWN           
++ ip netns list
++ bridge link
+2: eno12399np0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 hwmode VEB 
+4: eno12409np1: <BROADCAST,MULTICAST> mtu 1500 hwmode VEB 
+51807: tap295a: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295p state disabled priority 32 cost 2 
+51808: tap295b: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295p state disabled priority 32 cost 2 
++ for iface in lo tap295a tap295b
++ spike_captures+=("$!")
++ for iface in lo tap295a tap295b
++ tcpdump -U -s 0 -ni lo -w /var/tmp/gh295-p.40xGBdCM/lo.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ for iface in lo tap295a tap295b
++ tcpdump -U -s 0 -ni tap295a -w /var/tmp/gh295-p.40xGBdCM/tap295a.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ sleep 0.4
++ tcpdump -U -s 0 -ni tap295b -w /var/tmp/gh295-p.40xGBdCM/tap295b.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_host=1795431
++ spike_pids+=("$spike_host")
++ timeout 45 /home/ubuntu/overdrive/spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252/target/x86_64-unknown-linux-musl/release/probe
+++ seq 1 100
++ for i in $(seq 1 100)
++ grep -q 'HOST READY' /var/tmp/gh295-p.40xGBdCM/host.log
++ break
++ grep 'HOST READY' /var/tmp/gh295-p.40xGBdCM/host.log
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
++ spike_server=1795438
++ spike_pids+=("$spike_server")
++ timeout 40 cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=server' --disk path=/var/tmp/gh295-p.40xGBdCM/server.ext4,image_type=raw --net tap=tap295b,mac=02:00:00:95:00:03 --serial file=/var/tmp/gh295-p.40xGBdCM/server.console --console off
+++ seq 1 200
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ sleep 0.05
++ for i in $(seq 1 200)
++ grep -q 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
++ break
++ grep 'GUEST SERVER READY' /var/tmp/gh295-p.40xGBdCM/server.console
+GUEST SERVER READY
++ spike_client=1795475
++ timeout 35 cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=client' --disk path=/var/tmp/gh295-p.40xGBdCM/client.ext4,image_type=raw --net tap=tap295a,mac=02:00:00:95:00:02 --serial file=/var/tmp/gh295-p.40xGBdCM/client.console --console off
++ spike_pids+=("$spike_client")
++ wait 1795475
++ cleanup
++ spike_status=124
++ trap - EXIT
++ set +e
+++ date -u +%FT%TZ
++ printf '\nCLEANUP START prior_exit=%s at=%s\n' 124 2026-09-13T22:53:24Z
+
+CLEANUP START prior_exit=124 at=2026-09-13T22:53:24Z
++ for pid in "${spike_pids[@]}"
++ kill -TERM 1795431
++ for pid in "${spike_pids[@]}"
++ kill -TERM 1795438
++ for pid in "${spike_pids[@]}"
++ kill -TERM 1795475
++ for pid in "${spike_captures[@]}"
++ kill -INT 1795427
++ for pid in "${spike_captures[@]}"
++ kill -INT 1795428
++ for pid in "${spike_captures[@]}"
++ kill -INT 1795429
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795431
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795438
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795475
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795427
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795428
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 1795429
++ nft list table bridge gh295p
+table bridge gh295p {
+	chain prerouting {
+		type filter hook prerouting priority dstnat; policy accept;
+		iifname "tap295a" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta pkttype set host meta broute set 1
+		iifname "tap295a" ip protocol udp udp dport 53 counter packets 2 bytes 110 meta pkttype set host meta broute set 1
+	}
+}
++ nft list table ip gh295p
+table ip gh295p {
+	chain prerouting {
+		type filter hook prerouting priority mangle - 1; policy accept;
+		iifname "tap295a" tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept
+		meta mark 0x00000295 ip daddr 10.95.0.3 tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15295 accept
+	}
+
+	chain output {
+		type route hook output priority mangle - 1; policy accept;
+		meta mark 0x00002951 ip daddr 10.95.0.3 tcp dport 9000 counter packets 0 bytes 0 meta mark set 0x00000295 accept
+	}
+}
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+br295p           UP             10.95.0.1/24 fe80::d0ed:41ff:fe72:c7fc/64 
+tap295a          DOWN           fe80::64e1:16ff:fe17:f2a9/64 
+tap295b          UP             fe80::2065:31ff:fe80:c296/64 
++ ip rule
+0:	from all lookup local
+2950:	from all fwmark 0x295 lookup 295
+32765:	from all fwmark 0x1 lookup 100
+32766:	from all lookup main
+32767:	from all lookup default
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/host.log ']'
++ printf '\nCAPTURE %s\n' host.log
+
+CAPTURE host.log
++ cat /var/tmp/gh295-p.40xGBdCM/host.log
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/client.console ']'
++ printf '\nCAPTURE %s\n' client.console
+
+CAPTURE client.console
++ cat /var/tmp/gh295-p.40xGBdCM/client.console
+[    0.003097] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+
+thread 'main' (1) panicked at probe.rs:253:61:
+called `Result::unwrap()` on an `Err` value: Custom { kind: Uncategorized, error: "failed to lookup address information: Try again" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[    2.309769] Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b
+[    2.312115] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    2.314838] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    2.316831] Call Trace:
+[    2.317674]  <TASK>
+[    2.318450]  show_stack+0x49/0x60
+[    2.319538]  dump_stack_lvl+0x5f/0x90
+[    2.320716]  dump_stack+0x10/0x18
+[    2.321792]  vpanic+0x262/0x4b0
+[    2.322822]  panic+0x67/0x70
+[    2.323776]  ? acct_update_integrals+0x5e/0xa0
+[    2.325176]  do_exit.cold+0x15/0x15
+[    2.326304]  do_group_exit+0x2d/0xb0
+[    2.327467]  get_signal+0x7f5/0x830
+[    2.328603]  arch_do_signal_or_restart+0x36/0x110
+[    2.330079]  irqentry_exit+0x249/0x6f0
+[    2.331286]  exc_general_protection+0x19a/0x410
+[    2.332732]  asm_exc_general_protection+0x27/0x30
+[    2.334201] RIP: 0033:0x75ff6442fc25
+[    2.335352] Code: 00 00 4c 89 c6 48 63 78 30 b8 c8 00 00 00 0f 05 b8 0e 00 00 00 48 8d 74 24 08 bf 01 00 00 00 48 c7 44 24 08 20 00 00 00 0f 05 <f4> bf 09 00 00 00 e8 ce 56 00 00 bf 7f 00 00 00 e8 d4 ac 00 00 41
+[    2.340945] RSP: 002b:00007ffcad163b80 EFLAGS: 00010246
+[    2.342580] RAX: 0000000000000000 RBX: 0000000000000001 RCX: 000075ff6442fc25
+[    2.344775] RDX: 0000000000000000 RSI: 00007ffcad163b88 RDI: 0000000000000001
+[    2.346697] RBP: 00007ffcad163bc0 R08: 0000000000000006 R09: 0000000000000000
+[    2.348427] R10: 0000000000000008 R11: 0000000000000246 R12: 000075ff644c5318
+[    2.350144] R13: 000075ff644c9bd8 R14: 0000000000000000 R15: 00007ffcad163cc8
+[    2.351882]  </TASK>
+[    2.352614] Kernel Offset: 0x16e00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    2.355167] ---[ end Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b ]---
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/server.console ']'
++ printf '\nCAPTURE %s\n' server.console
+
+CAPTURE server.console
++ cat /var/tmp/gh295-p.40xGBdCM/server.console
+[    0.003125] KHO: Failed to reserve lowmem scratch buffer
+GUEST CONFIG ip=10.95.0.3/24 gateway=10.95.0.1 role=server PID=1 NO_CREDENTIALS
+GUEST SERVER READY
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/client.stderr ']'
++ printf '\nCAPTURE %s\n' client.stderr
+
+CAPTURE client.stderr
++ cat /var/tmp/gh295-p.40xGBdCM/client.stderr
+cloud-hypervisor:   0.004218s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295a already exists. IP configuration will not be overwritten.
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/server.stderr ']'
++ printf '\nCAPTURE %s\n' server.stderr
+
+CAPTURE server.stderr
++ cat /var/tmp/gh295-p.40xGBdCM/server.stderr
+cloud-hypervisor:   0.002851s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295b already exists. IP configuration will not be overwritten.
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/capture-lo.stderr ']'
++ printf '\nCAPTURE %s\n' capture-lo.stderr
+
+CAPTURE capture-lo.stderr
++ cat /var/tmp/gh295-p.40xGBdCM/capture-lo.stderr
+tcpdump: listening on lo, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+0 packets captured
+0 packets received by filter
+0 packets dropped by kernel
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/capture-tap295a.stderr ']'
++ printf '\nCAPTURE %s\n' capture-tap295a.stderr
+
+CAPTURE capture-tap295a.stderr
++ cat /var/tmp/gh295-p.40xGBdCM/capture-tap295a.stderr
+tcpdump: listening on tap295a, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
++ for f in host.log client.console server.console client.stderr server.stderr capture-lo.stderr capture-tap295a.stderr capture-tap295b.stderr
++ '[' -f /var/tmp/gh295-p.40xGBdCM/capture-tap295b.stderr ']'
++ printf '\nCAPTURE %s\n' capture-tap295b.stderr
+
+CAPTURE capture-tap295b.stderr
++ cat /var/tmp/gh295-p.40xGBdCM/capture-tap295b.stderr
+tcpdump: listening on tap295b, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+0 packets captured
+0 packets received by filter
+0 packets dropped by kernel
++ '[' 1 = 0 ']'
++ nft delete table ip gh295p
++ '[' 1 = 0 ']'
++ nft delete table bridge gh295p
++ '[' 1 = 0 ']'
++ ip rule del priority 2950 fwmark 0x295 lookup 295
++ '[' 1 = 0 ']'
++ ip route del local 0.0.0.0/0 dev lo table 295
++ for link in "${spike_links[@]}"
++ ip link del tap295b
++ for link in "${spike_links[@]}"
++ ip link del tap295a
++ for link in "${spike_links[@]}"
++ ip link del br295p
++ sysctl -qw net.ipv4.conf.all.rp_filter=0
++ printf 'CLEANUP COMPLETE preserved_evidence=%s original_exit=%s\n' /var/tmp/gh295-p.40xGBdCM 124
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295-p.40xGBdCM original_exit=124
++ python3 -c 'import sys,time; print(f"TOTAL_ELAPSED_SECONDS={time.perf_counter()-float(sys.argv[1]):.6f}")' 2625762.010553171
+TOTAL_ELAPSED_SECONDS=49.023541
++ exit 124
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 124[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
