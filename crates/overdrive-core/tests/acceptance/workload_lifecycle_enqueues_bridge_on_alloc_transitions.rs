@@ -2,7 +2,7 @@
 //! ServiceLifecycle for Start, Stop, GC Stop and FinalizeFailed; SVID wakes
 //! remain kind-independent. Job starts, converged ticks and VIP-only release
 //! retain their negative ServiceLifecycle controls. BE11/BE12 prove the
-//! corresponding dispatch path, including same-ID restart, compositionally.
+//! corresponding dispatch path compositionally.
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::doc_markdown)]
