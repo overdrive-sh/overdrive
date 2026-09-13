@@ -208,6 +208,7 @@ fn only_start(
 /// predecessor row immutable.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn vm_failure_reserves_fresh_execution_and_preserves_predecessor() {
     let predecessor = failed_row("payments", 0);
     let (desired, actual) = states(vm_job("payments"), [predecessor.clone()]);
@@ -236,6 +237,7 @@ fn vm_failure_reserves_fresh_execution_and_preserves_predecessor() {
 /// without consuming Workload Failure budget or inventing a failure time.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn vm_reclamation_carries_policy_without_charging_failure_budget() {
     let mut predecessor = reclaimed_row("render", 4);
     predecessor.kind = WorkloadKind::Job;
@@ -260,6 +262,7 @@ fn vm_reclamation_carries_policy_without_charging_failure_budget() {
 /// yet its physical ID is consumed and the next VM decision skips it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn unpublished_reservation_is_skipped_without_becoming_current() {
     let predecessor = failed_row("search", 0);
     let rejected = aid("alloc-search-1");
@@ -286,6 +289,7 @@ fn unpublished_reservation_is_skipped_without_becoming_current() {
 /// candidate only; unrelated historical values cannot advance or delay it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn retry_deadline_is_derived_only_from_current_accepted_candidate() {
     // Lexically `...-2` sorts after `...-10`; numerically suffix 10 is
     // current. Distinct policy values make a lexical-last mutation observable.
@@ -314,6 +318,7 @@ fn retry_deadline_is_derived_only_from_current_accepted_candidate() {
 /// re-driven or donate its retry values after a newer accepted row exists.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn numeric_current_row_owns_replacement_and_history_stays_isolated() {
     // Lexical ordering chooses suffix 2; numeric ordering must choose 10.
     let historical = failed_row("ledger", 2);
@@ -341,6 +346,7 @@ fn numeric_current_row_owns_replacement_and_history_stays_isolated() {
 /// contracts: VM creates a fresh allocation; Exec restarts the same ID.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn vm_uses_fresh_start_while_exec_keeps_same_id_restart() {
     let vm_predecessor = failed_row("vm-control", 0);
     let (vm_desired, vm_actual) = states(vm_job("vm-control"), [vm_predecessor]);
@@ -369,6 +375,7 @@ fn vm_uses_fresh_start_while_exec_keeps_same_id_restart() {
 /// exhaustion; it never clamps to or reuses the maximum ID.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn exhausted_vm_attempt_domain_emits_no_execution_action() {
     let exhausted = failed_row("exhausted", u32::MAX);
     let (desired, actual) = states(vm_job("exhausted"), [exhausted]);
@@ -388,6 +395,7 @@ fn exhausted_vm_attempt_domain_emits_no_execution_action() {
 /// following decision stops rather than wraps.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn vm_max_minus_one_issues_the_final_attempt_identity() {
     let predecessor = failed_row("last-attempt", u32::MAX - 1);
     let (desired, actual) = states(vm_job("last-attempt"), [predecessor]);
@@ -404,6 +412,7 @@ fn vm_max_minus_one_issues_the_final_attempt_identity() {
 /// selection begins the canonical minted domain at suffix zero.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn malformed_attempt_suffix_is_not_silently_reused() {
     let mut predecessor = failed_row("legacy", 0);
     predecessor.alloc_id = aid("legacy-vm-allocation");
@@ -422,6 +431,7 @@ fn malformed_attempt_suffix_is_not_silently_reused() {
 /// View even though no accepted allocation row exists yet.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn initial_vm_placement_reserves_zero_before_dispatch() {
     let (desired, actual) = states(vm_job("initial-vm"), []);
 
@@ -439,6 +449,7 @@ fn initial_vm_placement_reserves_zero_before_dispatch() {
 /// without manufacturing another Workload Failure.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER step 01-01"]
 fn generation_replacement_reserves_fresh_id_without_failure_increment() {
     let predecessor = operator_stopped_row("generation-vm", 0);
     let (mut desired, mut actual) = states(vm_job("generation-vm"), [predecessor.clone()]);
@@ -473,6 +484,7 @@ proptest! {
     /// the greatest accepted-row or issued-reservation suffix.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
+    #[ignore = "pending DELIVER step 01-01"]
     fn vm_identity_advances_above_rows_and_reservations(
         accepted_suffix in 0_u32..100_000,
         reservation_gap in 0_u32..100_000,

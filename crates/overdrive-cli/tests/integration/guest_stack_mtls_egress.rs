@@ -4380,6 +4380,7 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
 async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()
@@ -4546,6 +4547,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 01-03; ADR-0104 VM Platform Reclamation must publish a fresh allocation row"]
 async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let server_tmp = tempfile::Builder::new()

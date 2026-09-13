@@ -319,10 +319,9 @@ impl Reconciler for WorkloadLifecycle {
         if desired.desired_to_stop && desired.job.is_some() {
             return None;
         }
-        let job = desired.job.as_ref()?;
+        let _job = desired.job.as_ref()?;
         let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
         let restart_pending = view.observed_generation < desired.generation;
-        let vm_driver = matches!(&job.driver, WorkloadDriver::Vm(_));
 
         if desired.workload_kind == WorkloadKind::Job
             && !restart_pending
@@ -362,13 +361,7 @@ impl Reconciler for WorkloadLifecycle {
             return None;
         }
 
-        let failed = if vm_driver && restart_pending {
-            None
-        } else if vm_driver {
-            current_alloc(&allocs).filter(|row| is_restartable(row))
-        } else {
-            active_allocs.iter().copied().find(|row| is_restartable(row))
-        }?;
+        let failed = active_allocs.iter().find(|row| is_restartable(row))?;
         let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
         if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
             return None;
@@ -933,14 +926,7 @@ impl WorkloadLifecycle {
                 // the operator's stop in obs and contradicting the
                 // §intentional_stop ordering invariant on
                 // `Driver::take_exit_receiver`.
-                let vm_driver = matches!(&job.driver, WorkloadDriver::Vm(_));
-                let failed_alloc = if vm_driver && restart_pending {
-                    None
-                } else if vm_driver {
-                    current_alloc(&allocs_vec).filter(|row| is_restartable(row))
-                } else {
-                    active_allocs_vec.iter().copied().find(|row| is_restartable(row))
-                };
+                let failed_alloc = active_allocs_vec.iter().find(|r| is_restartable(r));
                 if let Some(failed) = failed_alloc {
                     // Backoff exhaustion check — emit no further
                     // RestartAllocation past the ceiling. Pure check
@@ -1040,37 +1026,7 @@ impl WorkloadLifecycle {
                         // Backoff window not yet elapsed.
                         return (Vec::new(), view.clone());
                     }
-                    if vm_driver {
-                        let Some(attempt) = next_vm_attempt(&allocs_vec, view) else {
-                            return (Vec::new(), view.clone());
-                        };
-                        let action = restart_allocation_action(job, desired, failed, attempt);
-                        let Action::StartAllocation { alloc_id: fresh, .. } = &action else {
-                            unreachable!(
-                                "VM restart helper must return StartAllocation for a VM driver"
-                            )
-                        };
-                        let mut next_view = view.clone();
-                        let reclaimed = is_platform_reclaimed(failed);
-                        let next_attempts =
-                            if reclaimed { attempts } else { attempts.saturating_add(1) };
-                        if !reclaimed {
-                            next_view.restart_counts.insert(failed.alloc_id.clone(), next_attempts);
-                            next_view
-                                .last_failure_seen_at
-                                .insert(failed.alloc_id.clone(), tick.now_unix);
-                        }
-                        next_view.restart_counts.insert(fresh.clone(), next_attempts);
-                        if reclaimed {
-                            if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id) {
-                                next_view.last_failure_seen_at.insert(fresh.clone(), *seen_at);
-                            }
-                        } else {
-                            next_view.last_failure_seen_at.insert(fresh.clone(), tick.now_unix);
-                        }
-                        return (vec![action], next_view);
-                    }
-                    let action = restart_allocation_action(job, desired, failed, 0);
+                    let action = restart_allocation_action(job, desired, failed);
                     let mut next_view = view.clone();
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
@@ -1119,38 +1075,81 @@ impl WorkloadLifecycle {
                         (Vec::new(), view.clone())
                     },
                     |node_id| {
-                        let (alloc_id, carried_policy) = if vm_driver {
-                            let Some(attempt) = next_vm_attempt(&allocs_vec, view) else {
-                                return (Vec::new(), view.clone());
-                            };
-                            let carried_policy = if restart_pending {
-                                current_alloc(&allocs_vec).map(|candidate| {
-                                    (
-                                        view.restart_counts
-                                            .get(&candidate.alloc_id)
-                                            .copied()
-                                            .unwrap_or(0),
-                                        view.last_failure_seen_at.get(&candidate.alloc_id).copied(),
-                                    )
+                        // Fresh-id derivation per workload-gc-absent-
+                        // stale-allocs step 01-04: index the new
+                        // alloc by the number of pre-existing rows
+                        // for this workload. With zero rows the
+                        // suffix is `0` (preserves the prior shape);
+                        // with a SystemGc-Terminated row already in
+                        // `allocs_vec` (resubmit-after-GC), the
+                        // suffix is `1` and the new alloc gets a
+                        // distinct id. This makes the action shim's
+                        // LWW write of the new `Running` row land
+                        // on a NEW key rather than overwrite the
+                        // prior SystemGc terminal stamp — making
+                        // good on architecture.md § 5's
+                        // `resubmit.preserves_prior_gc_terminal`
+                        // promise.
+                        let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
+                        let alloc_id = mint_alloc_id(&job.id, attempt);
+                        let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
+                        // Per ADR-0031 §5 + Amendment 1 + ADR-0083 § D3
+                        // (GH #42, step 01-08): the Start action carries
+                        // the operator-declared driver payload projected
+                        // from the tagged-enum `WorkloadDriver` field on
+                        // `Job`, preserving the driver kind. No more
+                        // literal `/bin/sleep` / `["60"]`.
+                        let driver = match &job.driver {
+                            WorkloadDriver::Exec(Exec { command, args }) => {
+                                DriverPayload::Exec(ExecPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
                                 })
-                            } else {
-                                None
-                            };
-                            (mint_alloc_id(&job.id, attempt), carried_policy)
-                        } else {
-                            let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
-                            (mint_alloc_id(&job.id, attempt), None)
-                        };
-                        let action =
-                            start_allocation_action(job, desired, node_id, alloc_id.clone());
-                        let mut next_view = view.clone();
-                        if vm_driver {
-                            let (count, seen_at) = carried_policy.unwrap_or((0, None));
-                            next_view.restart_counts.insert(alloc_id.clone(), count);
-                            if let Some(seen_at) = seen_at {
-                                next_view.last_failure_seen_at.insert(alloc_id, seen_at);
                             }
-                        }
+                            WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
+                                DriverPayload::Vm(VmPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
+                                    kernel: PathBuf::from(kernel),
+                                    rootfs: PathBuf::from(rootfs),
+                                })
+                            }
+                        };
+                        let action = Action::StartAllocation {
+                            alloc_id: alloc_id.clone(),
+                            workload_id: job.id.clone(),
+                            node_id,
+                            spec: AllocationSpec {
+                                alloc: alloc_id,
+                                identity,
+                                driver,
+                                resources: job.resources,
+                                // Per ADR-0054 §3 + GAP-8 close-out:
+                                // projected from the live intent at
+                                // hydrate-desired time. Job-kind = empty
+                                // vec; Service-kind = startup → readiness
+                                // → liveness in canonical order. See
+                                // `WorkloadLifecycleState::probe_descriptors`.
+                                probe_descriptors: desired.probe_descriptors.clone(),
+                                // D-A1 / D-BLOCKER1 (GH #241): declared Service
+                                // listener ports, projected at hydrate-desired
+                                // time — same clone-from-desired shape as
+                                // `probe_descriptors`. See the RestartAllocation
+                                // spec above.
+                                service_ports: desired.service_ports.clone(),
+                                // Netns/veth/addr-agnostic reconciler (JOIN-2 +
+                                // D-A1) — see the RestartAllocation spec above.
+                                netns: None,
+                                host_veth: None,
+                                workload_addr: None,
+                                guest_tap: None,
+                                guest_mac: None,
+                                guest_gateway: None,
+                                guest_prefix_len: None,
+                                guest_dns: None,
+                            },
+                            kind: desired.workload_kind,
+                        };
                         // backend-instance-replacement step 01-02
                         // (ADR-0073 § 5, R3/R4): the placement tick is the
                         // ONLY tick that stamps. When `restart_pending`
@@ -1167,6 +1166,7 @@ impl WorkloadLifecycle {
                         // `restart_pending` (an ordinary first placement /
                         // resubmit-after-GC), `observed_generation` is left
                         // unchanged.
+                        let mut next_view = view.clone();
                         if restart_pending {
                             next_view.observed_generation = desired.generation;
                         }
@@ -1401,16 +1401,15 @@ fn is_liveness_killed(row: &AllocStatusRow) -> bool {
         ))
 }
 
-/// Build the allocation specification shared by the existing start and
-/// restart actions. Keeping this construction in one place prevents the
-/// retry path from drifting on driver payload, probes, ports, or runtime-
-/// injected network fields.
-fn allocation_spec(
+/// Build the same-allocation restart command used by crash recovery. Keeping
+/// action construction in one place prevents the retry path from drifting on
+/// driver payload, probes, ports, or runtime-injected network fields.
+fn restart_allocation_action(
     job: &Job,
     desired: &WorkloadLifecycleState,
-    alloc_id: AllocationId,
-) -> AllocationSpec {
-    let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
+    row: &AllocStatusRow,
+) -> Action {
+    let identity = SpiffeId::for_allocation(&job.id, &row.alloc_id);
     let driver = match &job.driver {
         WorkloadDriver::Exec(Exec { command, args }) => {
             DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
@@ -1422,67 +1421,26 @@ fn allocation_spec(
             rootfs: PathBuf::from(rootfs),
         }),
     };
-    AllocationSpec {
-        alloc: alloc_id,
-        identity,
-        driver,
-        resources: job.resources,
-        probe_descriptors: desired.probe_descriptors.clone(),
-        service_ports: desired.service_ports.clone(),
-        netns: None,
-        host_veth: None,
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
-    }
-}
-
-/// Build the existing fresh-allocation action for a selected node.
-fn start_allocation_action(
-    job: &Job,
-    desired: &WorkloadLifecycleState,
-    node_id: NodeId,
-    alloc_id: AllocationId,
-) -> Action {
-    Action::StartAllocation {
-        alloc_id: alloc_id.clone(),
-        workload_id: job.id.clone(),
-        node_id,
-        spec: allocation_spec(job, desired, alloc_id),
-        kind: desired.workload_kind,
-    }
-}
-
-/// Build the existing restart action for Exec or a fresh start action for VM.
-/// The VM attempt is the checked suffix selected by [`next_vm_attempt`].
-fn restart_allocation_action(
-    job: &Job,
-    desired: &WorkloadLifecycleState,
-    row: &AllocStatusRow,
-    attempt: u32,
-) -> Action {
-    if matches!(&job.driver, WorkloadDriver::Vm(_)) {
-        let alloc_id = mint_alloc_id(&job.id, attempt);
-        return start_allocation_action(job, desired, row.node_id.clone(), alloc_id);
-    }
-    let alloc_id = row.alloc_id.clone();
     Action::RestartAllocation {
-        alloc_id: alloc_id.clone(),
-        spec: allocation_spec(job, desired, alloc_id),
+        alloc_id: row.alloc_id.clone(),
+        spec: AllocationSpec {
+            alloc: row.alloc_id.clone(),
+            identity,
+            driver,
+            resources: job.resources,
+            probe_descriptors: desired.probe_descriptors.clone(),
+            service_ports: desired.service_ports.clone(),
+            netns: None,
+            host_veth: None,
+            workload_addr: None,
+            guest_tap: None,
+            guest_mac: None,
+            guest_gateway: None,
+            guest_prefix_len: None,
+            guest_dns: None,
+        },
         kind: desired.workload_kind,
     }
-}
-
-/// Return the checked successor of the greatest parseable VM attempt suffix
-/// across retained rows and issued-ID reservations.
-fn next_vm_attempt(allocs: &[&AllocStatusRow], view: &WorkloadLifecycleView) -> Option<u32> {
-    let max_row_attempt = allocs.iter().filter_map(|row| alloc_attempt_index(&row.alloc_id)).max();
-    let max_reserved_attempt = view.restart_counts.keys().filter_map(alloc_attempt_index).max();
-    let max_attempt = max_row_attempt.into_iter().chain(max_reserved_attempt).max();
-    max_attempt.map_or(Some(0), |attempt| attempt.checked_add(1))
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
@@ -1899,15 +1857,11 @@ pub fn allocation_spec_for_live_intent(
 /// private memory per ADR-0035.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorkloadLifecycleView {
-    /// Exec: number of same-ID restart decisions for each allocation. VM:
-    /// presence reserves an issued physical execution ID, and the value is
-    /// the Workload Failure budget carried at that candidate.
+    /// How many times each alloc has been started under this
+    /// reconciler's lifecycle.
     #[serde(default)]
     pub restart_counts: BTreeMap<AllocationId, u32>,
-    /// Exec: wall-clock observation timestamp of the latest failure per
-    /// allocation. VM: latest genuine Workload Failure carried at that
-    /// candidate; Platform Reclamation may carry it but never stamps a new
-    /// value.
+    /// Wall-clock observation timestamp of the last failure per alloc.
     #[serde(default)]
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
     /// Set of `spec_digest`s for which `Action::ReleaseServiceVip`
