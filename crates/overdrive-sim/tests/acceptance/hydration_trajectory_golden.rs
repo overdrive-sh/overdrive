@@ -294,6 +294,16 @@ async fn run_trajectory() -> String {
         };
 
         let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+        if i == 0 {
+            let AnyReconcilerView::WorkloadLifecycle(initial_view) = &next_view else {
+                panic!("workload-lifecycle trajectory returned the wrong View variant")
+            };
+            assert_eq!(
+                initial_view.restart_counts.get(&alloc_id("alloc-traj-job-0")),
+                Some(&0),
+                "initial placement must reserve its issued allocation ID in the returned View"
+            );
+        }
         let rows = project_rows(&state, &wid).await;
 
         write!(
@@ -331,6 +341,7 @@ fn golden_path() -> std::path::PathBuf {
 /// replay-equivalence golden. Also proves the trajectory is bit-reproducible
 /// under the fixed seed (the task's non-blocker requirement) by running it
 /// twice and asserting byte-identity before comparing against the golden.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn pre_move_reconcile_trajectory_is_reproducible_and_pinned() {
     // (1) Bit-reproducibility under the fixed seed — the B-02 property, proven

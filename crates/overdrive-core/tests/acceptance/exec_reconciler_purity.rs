@@ -30,12 +30,12 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+use overdrive_core::{SpiffeId, UnixInstant};
 use overdrive_reconcilers::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
 
 // ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
 // §5 — Restart carries operator-declared command + args from live Job
 // ---------------------------------------------------------------------------
 
-/// CONTRACT_SHAPE: bounded-change.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn restart_action_carries_full_alloc_spec_from_live_job() {
     // Given a Job whose command is /opt/x/y and args are ["--mode=fast"]
@@ -274,7 +274,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = WorkloadLifecycle::canonical();
-    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+    let (actions, next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // Then a RestartAllocation followed by the ServiceLifecycle and
     // SvidLifecycle wake-ups; the spec carries the operator's declared
@@ -288,6 +288,10 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     match &actions[0] {
         Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
+            let successor = aid("alloc-payments-1");
+            assert_eq!(spec.alloc, successor, "the Exec successor is a fresh physical identity");
+            assert_ne!(spec.alloc, *alloc_id);
+            assert_eq!(spec.identity, SpiffeId::for_allocation(&jid("payments"), &successor));
             assert_eq!(
                 spec.driver.command(),
                 "/opt/x/y",
@@ -304,7 +308,11 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
                 "Restart spec.resources must equal the live Job.resources \
                  (NOT the deleted default_restart_resources fabrication)",
             );
-            assert_eq!(spec.alloc, *alloc_id);
+            assert_eq!(next.restart_counts.get(&successor), Some(&1));
+            assert_eq!(
+                next.last_failure_seen_at.get(&successor),
+                Some(&UnixInstant::from_unix_duration(Duration::ZERO))
+            );
         }
         other => panic!("expected RestartAllocation, got {other:?}"),
     }

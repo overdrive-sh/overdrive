@@ -3,26 +3,19 @@
 //!
 //! Submits a 1-replica job; waits until the alloc is Running; SIGKILLs
 //! the workload externally; drives the convergence loop forward; and
-//! asserts the alloc recovers under the (deterministic, same) `alloc_id`
-//! (Phase 1 reuses `mint_alloc_id(workload_id)` per ADR-0023).
+//! asserts the accepted predecessor remains Failed while recovery reaches
+//! Running under a distinct successor `AllocationId`.
 //!
 //! # The contract (ADR-0078 § D6)
 //!
-//! Phase 3 asserts on the DURABLE crash facts the recovered `Running`
-//! row carries — `restart_count` and `last_terminated` — never on a
-//! transient `Failed` row. This is strictly stronger than the assertion
-//! it replaced: the old shape proved only "a `Failed` row existed at some
-//! instant"; this proves the SIGKILL was classified as a *crash* (not an
-//! intentional stop), that the workload recovered, that exactly one
-//! restart was counted, and that the recovered row strictly dominates the
-//! terminal it describes — all from state no LWW merge can discard.
+//! Phase 3 asserts the predecessor's durable crash facts remain immutable and
+//! the recovered successor starts its per-allocation history at zero/None.
 //!
-//! The "fresh `alloc_id`" framing in the scenario name reflects the
-//! Phase-2+ direction; in Phase 1 single-mode the alloc id is a pure
-//! function of the job id (`alloc-{workload_id}-0`), so observable rebirth
-//! is the state transition Terminated → Running with a distinct PID
-//! at the driver layer.
-//!
+#![allow(
+    clippy::doc_markdown,
+    reason = "the required CONTRACT_SHAPE line is an exact repository token"
+)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -32,7 +25,7 @@ use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -45,6 +38,7 @@ use tempfile::TempDir;
 
 use super::cleanup::AllocCleanup;
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn killed_workload_is_restarted_with_fresh_alloc_id() {
@@ -203,32 +197,25 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // not on the syscall result.
     let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
 
-    // Phase 3: drive convergence until the DURABLE crash facts appear on
-    // the recovered Running row (ADR-0078 § D6).
-    //
-    // `last_terminated` and `restart_count` survive the LWW merge by
-    // construction, so there is no transient window to catch and no race
-    // to lose. The previous shape polled for a row in `AllocState::Failed`
-    // and captured its counter — but that `Failed` row is transient BY
-    // DESIGN (the reconciler's whole job is to replace it), and the test
-    // only won the race at HEAD because of the pre-ADR-0077 defect: the
-    // exit observer stamped `prior.counter + 1`, the restart write stamped
-    // `tick.tick + 1`, the two tied on the very next tick, and `dominates`
-    // returns `false` on `Equal` — so the restart write was silently
-    // DROPPED and `Failed` lingered long enough to be seen. Under ADR-0077
-    // the restart write dominates immediately and whether a 20 ms poll
-    // lands inside the exit-observer-write → shim-write window is a
-    // genuine race the test has no way to win reliably.
-    //
-    // Real wall-clock sleep (not just yield) between ticks so the OS
-    // can deliver SIGCHLD, ExecDriver's per-alloc watcher (`child.wait()`)
-    // can resolve, the watcher can write to its mpsc, and the
-    // exit_observer can drain it and write the Failed row to obs.
-    // Under heavy parallel test load `yield_now` alone has been
-    // observed to complete the tick budget before the OS reaper has
-    // had a chance to deliver the signal — `tokio::time::sleep`
-    // releases the current task to the runtime AND advances real
-    // wall-clock during which the kernel can do its work.
+    // Capture the accepted predecessor terminal before asking the production
+    // owner to allocate its successor.
+    let crash_deadline = Instant::now() + Duration::from_secs(20);
+    let crash_row = loop {
+        if let Some(row) =
+            state.obs.alloc_status_row(&prior.alloc_id).await.expect("read predecessor row")
+            && row.state == AllocState::Failed
+        {
+            break row;
+        }
+        assert!(
+            Instant::now() < crash_deadline,
+            "exit observer did not publish predecessor Failed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let successor = AllocationId::new("alloc-recovery-1").expect("valid successor allocation ID");
+
+    // Phase 3: drive convergence until a distinct successor reaches Running.
     let mut recovered: Option<AllocStatusRow> = None;
     while tick_n < 150 && recovered.is_none() {
         run_convergence_tick(
@@ -244,29 +231,25 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         tokio::time::sleep(Duration::from_millis(20)).await;
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
         recovered =
-            rows.into_iter().find(|r| r.state == AllocState::Running && r.restart_count >= 1);
+            rows.into_iter().find(|r| r.state == AllocState::Running && r.alloc_id == successor);
         tick_n += 1;
     }
     let row = recovered.expect(
-        "alloc must converge to a Running row carrying restart_count >= 1 after SIGKILL \
+        "alloc must converge to a distinct Running successor after SIGKILL \
          within the Phase-3 tick budget",
     );
 
-    // The crash happened, exactly once.
-    assert_eq!(row.restart_count, 1, "exactly one observed restart");
-
-    // The crash is durably described on the converged row.
-    let lt = row.last_terminated.as_ref().expect("recovered row must carry last_terminated");
-    assert_eq!(lt.state, AllocState::Failed, "the SIGKILL was classified Failed");
+    assert_eq!(row.alloc_id, successor);
+    assert_eq!(row.restart_count, 0, "fresh successor starts per-key history at zero");
+    assert!(row.last_terminated.is_none(), "fresh successor inherits no predecessor snapshot");
     assert!(
-        matches!(lt.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        matches!(crash_row.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
         "the SIGKILL must be classified as a crash, not an intentional stop: {:?}",
-        lt.reason,
+        crash_row.reason,
     );
-
-    // The recovered row strictly dominates the terminal it summarises.
-    assert!(
-        row.updated_at.dominates(&lt.terminated_at),
-        "the recovered Running row must dominate the Failed row it snapshots",
+    assert_eq!(
+        state.obs.alloc_status_row(&prior.alloc_id).await.expect("predecessor row re-read"),
+        Some(crash_row),
+        "successor publication must not rewrite predecessor crash history",
     );
 }

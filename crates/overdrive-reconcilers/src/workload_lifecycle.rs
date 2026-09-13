@@ -129,12 +129,12 @@ pub fn allocation_attempt_transition(
 /// `actual.allocations` (running set), calls
 /// `overdrive_core::scheduler::schedule(...)` on `desired.nodes` +
 /// `desired.job`'s resource envelope, and emits `Action::StartAllocation` /
-/// `Action::StopAllocation` to converge. Restart counts are tracked
-/// in `view.restart_counts`; backoff is gated by recomputing the
-/// deadline as `view.last_failure_seen_at + backoff_for_attempt(...)`
-/// against `tick.now_unix` (NEVER `Instant::now()` /
-/// `SystemTime::now()`). Per `.claude/rules/development.md` §
-/// "Persist inputs, not derived state".
+/// `Action::StopAllocation` to converge. Fresh allocation identities are
+/// recorded in `view.restart_counts`; Workload Failure backoff is gated by
+/// recomputing the deadline as
+/// `view.last_failure_seen_at + backoff_for_attempt(...)` against
+/// `tick.now_unix` (NEVER `Instant::now()` / `SystemTime::now()`). Per
+/// `.claude/rules/development.md` § "Persist inputs, not derived state".
 pub struct WorkloadLifecycle {
     name: ReconcilerName,
 }
@@ -340,12 +340,11 @@ impl Reconciler for WorkloadLifecycle {
         if active_allocs.iter().any(|row| row.state == AllocState::Running) {
             return None;
         }
-        if restart_pending
-            && current_alloc(&allocs).is_some_and(|row| row.state == AllocState::Draining)
-        {
+        let current = current_alloc(&allocs);
+        if current.is_some_and(|row| row.state == AllocState::Draining) {
             return None;
         }
-        if !restart_pending && current_alloc(&allocs).is_some_and(is_operator_stopped) {
+        if !restart_pending && current.is_some_and(is_operator_stopped) {
             return None;
         }
 
@@ -361,7 +360,7 @@ impl Reconciler for WorkloadLifecycle {
             return None;
         }
 
-        let failed = active_allocs.iter().find(|row| is_restartable(row))?;
+        let failed = current.filter(|row| is_restartable(row))?;
         let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
         if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
             return None;
@@ -773,23 +772,15 @@ impl WorkloadLifecycle {
                     return (Vec::new(), next_view);
                 }
 
-                // backend-instance-replacement step 01-02 / R5 (ADR-0073 § 5;
-                // review-01-02 BLOCKER-1). During a replacement (`restart_pending`), the
-                // current instance may be observably `Draining` — the transient teardown
-                // state — after the R2 StopAllocation landed on a prior tick but before it
-                // reaches Terminated. Leave it alone: emit nothing and do NOT stamp. The
-                // fresh placement (R3) happens on a later tick once the instance is
-                // terminal. Without this guard the crash-recovery `is_restartable` branch
-                // below matches the draining row (`is_restartable` includes `Draining`) and
-                // emits a spurious `RestartAllocation` that fights the teardown and corrupts
-                // the backoff bookkeeping. Scoped to the CURRENT instance
-                // (`current_alloc(&allocs_vec)`, the numeric-max suffix — same scope as the
-                // veto) and gated on `restart_pending` (the mirror of the `!restart_pending`
-                // veto): a draining superseded prior-generation row is never the current
-                // instance and never reaches here.
-                if restart_pending
-                    && current_alloc(&allocs_vec).is_some_and(|r| r.state == AllocState::Draining)
-                {
+                // During a replacement, the current instance may be observably
+                // `Draining` — the transient teardown state — after the prior
+                // StopAllocation landed but before it reaches Terminated. Leave it alone:
+                // emit nothing and do NOT stamp. The same handoff rule applies to a
+                // crash-recovery evaluation: a Draining row is not an accepted terminal
+                // predecessor. The guard is scoped to the CURRENT instance
+                // (`current_alloc(&allocs_vec)`, the numeric-max suffix), so a historical
+                // Draining row cannot block a newer accepted terminal row.
+                if current_alloc(&allocs_vec).is_some_and(|r| r.state == AllocState::Draining) {
                     return (Vec::new(), view.clone());
                 }
 
@@ -926,7 +917,9 @@ impl WorkloadLifecycle {
                 // the operator's stop in obs and contradicting the
                 // §intentional_stop ordering invariant on
                 // `Driver::take_exit_receiver`.
-                let failed_alloc = active_allocs_vec.iter().find(|r| is_restartable(r));
+                let failed_alloc = current_alloc(&allocs_vec).filter(|row| {
+                    is_restartable(row) || (restart_pending && is_operator_stopped(row))
+                });
                 if let Some(failed) = failed_alloc {
                     // Backoff exhaustion check — emit no further
                     // RestartAllocation past the ceiling. Pure check
@@ -948,7 +941,12 @@ impl WorkloadLifecycle {
                     // reached unconditionally past its backoff window,
                     // however high `attempts` has climbed from prior
                     // reclamations.
-                    if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
+                    let platform_reclaimed = is_platform_reclaimed(failed);
+                    let generation_replacement = restart_pending;
+                    if attempts >= RESTART_BACKOFF_CEILING
+                        && !platform_reclaimed
+                        && !generation_replacement
+                    {
                         // Idempotency guard: if the row already carries a
                         // finalised terminal claim the reconciler has
                         // already finalised this alloc on a prior tick —
@@ -1020,27 +1018,47 @@ impl WorkloadLifecycle {
                     // `backoff_for_attempt` policy lands without a
                     // schema migration — every persisted row picks up
                     // the new policy on the next reconcile tick.
-                    if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id)
+                    if !generation_replacement
+                        && let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id)
                         && tick.now_unix < restart_retry_deadline(*seen_at, attempts)
                     {
                         // Backoff window not yet elapsed.
                         return (Vec::new(), view.clone());
                     }
-                    let action = restart_allocation_action(job, desired, failed);
+                    let Some(attempt) = next_allocation_attempt(&allocs_vec, view) else {
+                        return (Vec::new(), view.clone());
+                    };
+                    let successor_alloc_id = mint_alloc_id(&job.id, attempt);
+                    let action =
+                        restart_allocation_action(job, desired, failed, successor_alloc_id.clone());
                     let mut next_view = view.clone();
-                    let count =
-                        next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
-                    *count = count.saturating_add(1);
-                    // Persist-inputs write site (issue #141): record
-                    // the wall-clock observation timestamp of this
-                    // failure (`tick.now_unix`) — NOT the precomputed
-                    // deadline `tick.now + RESTART_BACKOFF_DURATION`,
-                    // which would lock in the policy-at-write-time and
-                    // break the "policy evolution is a no-op for the
-                    // schema" guarantee. The deadline is recomputed at
-                    // the read site on every tick from this seen_at +
-                    // `backoff_for_attempt(restart_count)`.
-                    next_view.last_failure_seen_at.insert(failed.alloc_id.clone(), tick.now_unix);
+                    if generation_replacement {
+                        next_view.observed_generation = desired.generation;
+                    }
+                    let predecessor_attempts =
+                        view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+                    let successor_attempts = if generation_replacement || platform_reclaimed {
+                        predecessor_attempts
+                    } else {
+                        predecessor_attempts.saturating_add(1)
+                    };
+                    next_view.restart_counts.insert(successor_alloc_id.clone(), successor_attempts);
+                    if generation_replacement || platform_reclaimed {
+                        if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id) {
+                            next_view.last_failure_seen_at.insert(successor_alloc_id, *seen_at);
+                        }
+                    } else {
+                        // Persist-inputs write site (issue #141): record
+                        // the wall-clock observation timestamp of this
+                        // failure (`tick.now_unix`) — NOT the precomputed
+                        // deadline `tick.now + RESTART_BACKOFF_DURATION`,
+                        // which would lock in the policy-at-write-time and
+                        // break the "policy evolution is a no-op for the
+                        // schema" guarantee. The deadline is recomputed at
+                        // the read site on every tick from this seen_at +
+                        // `backoff_for_attempt(restart_count)`.
+                        next_view.last_failure_seen_at.insert(successor_alloc_id, tick.now_unix);
+                    }
                     return (vec![action], next_view);
                 }
 
@@ -1075,22 +1093,9 @@ impl WorkloadLifecycle {
                         (Vec::new(), view.clone())
                     },
                     |node_id| {
-                        // Fresh-id derivation per workload-gc-absent-
-                        // stale-allocs step 01-04: index the new
-                        // alloc by the number of pre-existing rows
-                        // for this workload. With zero rows the
-                        // suffix is `0` (preserves the prior shape);
-                        // with a SystemGc-Terminated row already in
-                        // `allocs_vec` (resubmit-after-GC), the
-                        // suffix is `1` and the new alloc gets a
-                        // distinct id. This makes the action shim's
-                        // LWW write of the new `Running` row land
-                        // on a NEW key rather than overwrite the
-                        // prior SystemGc terminal stamp — making
-                        // good on architecture.md § 5's
-                        // `resubmit.preserves_prior_gc_terminal`
-                        // promise.
-                        let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
+                        let Some(attempt) = next_allocation_attempt(&allocs_vec, view) else {
+                            return (Vec::new(), view.clone());
+                        };
                         let alloc_id = mint_alloc_id(&job.id, attempt);
                         let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
                         // Per ADR-0031 §5 + Amendment 1 + ADR-0083 § D3
@@ -1120,7 +1125,7 @@ impl WorkloadLifecycle {
                             workload_id: job.id.clone(),
                             node_id,
                             spec: AllocationSpec {
-                                alloc: alloc_id,
+                                alloc: alloc_id.clone(),
                                 identity,
                                 driver,
                                 resources: job.resources,
@@ -1167,6 +1172,7 @@ impl WorkloadLifecycle {
                         // resubmit-after-GC), `observed_generation` is left
                         // unchanged.
                         let mut next_view = view.clone();
+                        next_view.restart_counts.insert(alloc_id, 0);
                         if restart_pending {
                             next_view.observed_generation = desired.generation;
                         }
@@ -1178,22 +1184,10 @@ impl WorkloadLifecycle {
     }
 }
 
-/// Mint a deterministic [`AllocationId`] for a job at attempt index
-/// `attempt`. Pure function over `(workload_id, attempt)` so two
-/// reconcile calls with the same desired/actual produce the same
-/// alloc id (purity contract).
-///
-/// **The `attempt` parameter is the count of pre-existing alloc
-/// rows for the workload at placement time** (per workload-gc-
-/// absent-stale-allocs step 01-04). With zero pre-existing rows the
-/// suffix is `0` (preserves the pre-Phase-1.4 single-shot shape);
-/// after a SystemGc stop leaves one Terminated row behind, a
-/// resubmit's placement passes `attempt = 1` and mints
-/// `alloc-{workload_id}-1` — distinct from the GC'd row's
-/// `alloc-{workload_id}-0`. This is the structural defence against
-/// the resurrection class where the action shim's LWW write of the
-/// new `Running` row would otherwise overwrite the prior SystemGc
-/// terminal stamp.
+/// Mint a deterministic [`AllocationId`] for a workload and checked attempt
+/// suffix. The caller selects `attempt` above every parseable accepted-row and
+/// issued-View suffix; this helper only projects that selected number into the
+/// existing allocation-id grammar.
 fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
     let raw = format!("alloc-{}-{}", workload_id.as_str(), attempt);
     #[allow(clippy::expect_used)]
@@ -1214,6 +1208,20 @@ fn alloc_attempt_index(alloc_id: &AllocationId) -> Option<u32> {
     alloc_id.as_str().rsplit_once('-').and_then(|(_, suffix)| suffix.parse::<u32>().ok())
 }
 
+/// Select the checked successor attempt above every accepted allocation row
+/// and every durably reserved allocation key in the workload View.
+fn next_allocation_attempt(
+    allocs: &[&AllocStatusRow],
+    view: &WorkloadLifecycleView,
+) -> Option<u32> {
+    let greatest = allocs
+        .iter()
+        .filter_map(|row| alloc_attempt_index(&row.alloc_id))
+        .chain(view.restart_counts.keys().filter_map(alloc_attempt_index))
+        .max();
+    greatest.map_or(Some(0), |attempt| attempt.checked_add(1))
+}
+
 /// The workload's **current** instance — the row with the
 /// numerically-highest [`mint_alloc_id`] attempt suffix
 /// (`alloc-<workload>-<N>`). This is the most-recently-placed instance;
@@ -1226,23 +1234,17 @@ fn alloc_attempt_index(alloc_id: &AllocationId) -> Option<u32> {
 /// `alloc-payments-2`), so "last in iteration" is WRONG once the attempt
 /// index reaches double digits (backend-instance-replacement step 01-02,
 /// ADR-0073 § 5 / DDD-13). A row whose suffix fails to parse
-/// ([`alloc_attempt_index`] → `None`) sorts below any parseable suffix
-/// (a defensive floor — never the current instance when a parseable one
-/// exists).
+/// ([`alloc_attempt_index`] → `None`) is excluded (never the current instance
+/// when a parseable row exists).
 ///
-/// Robust by construction: `mint_alloc_id` mints
-/// `attempt = allocs_vec.len()` and the feature relies on alloc rows
-/// being **never deleted** (the superseded `payments-0` row is
-/// intentionally retained), so the attempt indices are a
-/// strictly-increasing `0, 1, 2, …` series and the numeric max is
-/// unambiguously the latest placement. Needs no new per-row field (no
-/// `generation` on `AllocStatusRow` ⇒ no ADR-0048 envelope bump).
+/// Needs no new per-row field (no `generation` on `AllocStatusRow` ⇒ no
+/// ADR-0048 envelope bump).
 fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow> {
-    // `max_by_key` over `(Option<u32>, …)` orders `None` below every
-    // `Some` (the defensive floor) and breaks ties on the later
-    // iteration position — irrelevant here since the never-delete
-    // invariant makes attempt indices unique, but deterministic.
-    allocs.iter().copied().max_by_key(|row| alloc_attempt_index(&row.alloc_id))
+    allocs
+        .iter()
+        .filter_map(|row| alloc_attempt_index(&row.alloc_id).map(|attempt| (attempt, *row)))
+        .max_by_key(|(attempt, _)| *attempt)
+        .map(|(_, row)| row)
 }
 
 /// service-vip-allocator step 03-01 — pure helper for the Service-arm
@@ -1401,15 +1403,16 @@ fn is_liveness_killed(row: &AllocStatusRow) -> bool {
         ))
 }
 
-/// Build the same-allocation restart command used by crash recovery. Keeping
-/// action construction in one place prevents the retry path from drifting on
+/// Build a predecessor-to-fresh-successor restart action. Keeping action
+/// construction in one place prevents the replacement path from drifting on
 /// driver payload, probes, ports, or runtime-injected network fields.
 fn restart_allocation_action(
     job: &Job,
     desired: &WorkloadLifecycleState,
-    row: &AllocStatusRow,
+    predecessor: &AllocStatusRow,
+    successor_alloc_id: AllocationId,
 ) -> Action {
-    let identity = SpiffeId::for_allocation(&job.id, &row.alloc_id);
+    let identity = SpiffeId::for_allocation(&job.id, &successor_alloc_id);
     let driver = match &job.driver {
         WorkloadDriver::Exec(Exec { command, args }) => {
             DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
@@ -1422,9 +1425,9 @@ fn restart_allocation_action(
         }),
     };
     Action::RestartAllocation {
-        alloc_id: row.alloc_id.clone(),
+        alloc_id: predecessor.alloc_id.clone(),
         spec: AllocationSpec {
-            alloc: row.alloc_id.clone(),
+            alloc: successor_alloc_id,
             identity,
             driver,
             resources: job.resources,
@@ -1857,11 +1860,14 @@ pub fn allocation_spec_for_live_intent(
 /// private memory per ADR-0035.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorkloadLifecycleView {
-    /// How many times each alloc has been started under this
-    /// reconciler's lifecycle.
+    /// Durable issued-allocation ledger. Each key is consumed when a fresh
+    /// allocation identity is reserved; its value carries the workload
+    /// failure count for that candidate.
     #[serde(default)]
     pub restart_counts: BTreeMap<AllocationId, u32>,
-    /// Wall-clock observation timestamp of the last failure per alloc.
+    /// Wall-clock observation timestamp of the last Workload Failure per
+    /// candidate. Generation and Platform Reclamation carry this input when
+    /// they reserve a successor without stamping a new failure.
     #[serde(default)]
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
     /// Set of `spec_digest`s for which `Action::ReleaseServiceVip`

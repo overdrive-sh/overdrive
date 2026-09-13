@@ -8,8 +8,8 @@
 //! simulated cadences, threading the observed `AllocStatusRow` and the
 //! `WorkloadLifecycleView.restart_counts` budget exactly as the runtime
 //! + action-shim would (the shim's `StopAllocation` writes the
-//! action-supplied `terminal` verbatim; its `RestartAllocation` brings
-//! the alloc back to Running). The load-bearing property this pins is
+//! action-supplied `terminal` verbatim; each `RestartAllocation` carries the
+//! terminal predecessor and a distinct Running successor). The load-bearing property this pins is
 //! the ADR-0087 crux: the liveness cause travels ONLY on the shared
 //! observed row's terminal — `ServiceLifecycle` reads no restart budget,
 //! `WorkloadLifecycle` owns the single budget spanning the whole loop —
@@ -47,7 +47,6 @@ use overdrive_reconcilers::{
     RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 
-const ALLOC: &str = "alloc-svc-0";
 const WORKLOAD: &str = "svc";
 const NODE: &str = "local";
 
@@ -59,6 +58,10 @@ fn jid(s: &str) -> WorkloadId {
 }
 fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
+}
+
+fn allocation_id(attempt: u32) -> AllocationId {
+    aid(&format!("alloc-svc-{attempt}"))
 }
 
 fn tick_at(now_unix_secs: u64) -> TickContext {
@@ -73,9 +76,9 @@ fn tick_at(now_unix_secs: u64) -> TickContext {
 
 // ---- ServiceLifecycle side ----
 
-fn liveness_running_fact() -> ServiceAllocFact {
+fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
     ServiceAllocFact {
-        alloc_id: aid(ALLOC),
+        alloc_id: alloc_id.clone(),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
@@ -89,10 +92,7 @@ fn liveness_running_fact() -> ServiceAllocFact {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/0",
-        )
-        .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::for_allocation(&jid(WORKLOAD), alloc_id),
         backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
@@ -140,9 +140,9 @@ fn one_node_map() -> BTreeMap<NodeId, Node> {
 /// A Terminated alloc row carrying the liveness terminal the shim writes
 /// after a `ServiceLifecycle` liveness `StopAllocation`: `reason =
 /// Stopped { by: Reconciler }` (shim hardcode), cause on `terminal`.
-fn terminated_by_liveness(counter: u64) -> AllocStatusRow {
+fn terminated_by_liveness(alloc_id: &AllocationId, counter: u64) -> AllocStatusRow {
     AllocStatusRow {
-        alloc_id: aid(ALLOC),
+        alloc_id: alloc_id.clone(),
         workload_id: jid(WORKLOAD),
         node_id: nid(NODE),
         state: AllocState::Terminated,
@@ -198,11 +198,12 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
     // Cycles 0..CEILING each restart; the CEILING-th cycle finalises.
     for cycle in 0..=RESTART_BACKOFF_CEILING {
         let now_secs = 100 + u64::from(cycle) * 10; // advance well past the 1s backoff window
+        let current = allocation_id(cycle);
 
         // --- ServiceLifecycle: liveness threshold → StopAllocation ---
         let (sl_actions, _sl_next) = sl.reconcile(
             &ServiceLifecycleState::default(),
-            &service_state(liveness_running_fact()),
+            &service_state(liveness_running_fact(&current)),
             &sl_view,
             &tick_at(now_secs),
         );
@@ -232,7 +233,7 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
         );
 
         // --- shim: write the Terminated row (cause on `terminal`) ---
-        let row = terminated_by_liveness(2 + u64::from(cycle));
+        let row = terminated_by_liveness(&current, 2 + u64::from(cycle));
         let (desired, actual) = workload_states(row);
 
         // --- WorkloadLifecycle: sole restart authority ---
@@ -240,6 +241,7 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
         wl_view = wl_next;
 
         if cycle < RESTART_BACKOFF_CEILING {
+            let successor = allocation_id(cycle + 1);
             let restarts: Vec<_> = wl_actions
                 .iter()
                 .filter(|a| matches!(a, Action::RestartAllocation { .. }))
@@ -249,18 +251,39 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
                 1,
                 "cycle {cycle}: below ceiling WorkloadLifecycle restarts under its single budget; got {wl_actions:?}",
             );
+            match restarts[0] {
+                Action::RestartAllocation { alloc_id, spec, .. } => {
+                    assert_eq!(
+                        alloc_id, &current,
+                        "cycle {cycle}: current accepted row is predecessor"
+                    );
+                    assert_eq!(
+                        spec.alloc, successor,
+                        "cycle {cycle}: replacement uses fresh successor"
+                    );
+                }
+                other => panic!("expected RestartAllocation, got {other:?}"),
+            }
             assert_eq!(
-                wl_view.restart_counts.get(&aid(ALLOC)).copied(),
+                wl_view.restart_counts.get(&successor).copied(),
                 Some(cycle + 1),
-                "cycle {cycle}: the single restart budget increments by one per liveness restart",
+                "cycle {cycle}: the shared budget is carried and incremented on the successor",
+            );
+            assert_eq!(
+                wl_view.restart_counts.get(&current).copied(),
+                (cycle > 0).then_some(cycle),
+                "cycle {cycle}: earlier accepted successor remains immutable issued-ID history",
+            );
+            assert_eq!(
+                wl_view.last_failure_seen_at.get(&successor),
+                Some(&UnixInstant::from_unix_duration(Duration::from_secs(now_secs)))
             );
             assert!(
                 !wl_actions.iter().any(|a| matches!(a, Action::FinalizeFailed { .. })),
                 "cycle {cycle}: below ceiling nothing is finalised; got {wl_actions:?}",
             );
-            // shim RestartAllocation brings the alloc back to Running for
-            // the next cadence — modelled by the fresh Running fact the
-            // next ServiceLifecycle tick presents.
+            // The accepted successor becomes the current Running fixture for
+            // the next cadence; the predecessor remains historical.
         } else {
             // Ceiling: cause-aware exhaustion terminal, NOT BackoffExhausted.
             let terminal = wl_actions.iter().find_map(|a| match a {
@@ -282,13 +305,17 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
                 !wl_actions.iter().any(|a| matches!(a, Action::RestartAllocation { .. })),
                 "ceiling: no further RestartAllocation; got {wl_actions:?}",
             );
+            assert!(wl_actions.iter().any(|action| matches!(
+                action,
+                Action::FinalizeFailed { alloc_id, .. } if alloc_id == &current
+            )));
         }
     }
 
     // The unified budget was drawn down entirely by liveness kills.
     assert_eq!(
-        wl_view.restart_counts.get(&aid(ALLOC)).copied(),
+        wl_view.restart_counts.get(&allocation_id(RESTART_BACKOFF_CEILING)).copied(),
         Some(RESTART_BACKOFF_CEILING),
-        "the whole liveness loop drew ONE budget up to RESTART_BACKOFF_CEILING",
+        "the current successor carries the one workload budget at exhaustion",
     );
 }

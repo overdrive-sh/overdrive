@@ -40,21 +40,20 @@
 //!   intermediate checkpoint, well inside the 1s restart-backoff window.
 //!   Step 02-04 re-scope: S-VM-26's guard makes restart-after-reclaim the
 //!   correct behavior for this never-stopped Job-kind allocation, so the
-//!   checkpoint's terminal row is superseded by the SAME live `serve`
-//!   session's `WorkloadLifecycle` re-drive -- the test's FINAL assertion
-//!   is the DURABLE occurrence proof (`restart_count` +
-//!   `last_terminated.reason`, ADR-0078) that survives the restart, not
-//!   the transient terminal row it supersedes. See that test's own doc
+//!   same live `serve` session's `WorkloadLifecycle` creates a fresh VM row.
+//!   The final assertion retains the `PlatformReclaimed` predecessor and proves
+//!   the new row begins at `restart_count == 0` / `last_terminated == None`.
+//!   See that test's own doc
 //!   comment for the residual gap this suite surfaces rather than papers
 //!   over (no production surface exposes `IdentityMgr` state to a
 //!   real-serve test; the four-evaluations claim IS fully proven,
 //!   executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
-//! - S-VM-28 (step 02-04): [`reclaim_then_restart_populates_restart_count_and_last_terminated_together`]
+//! - S-VM-28 (preserved by the GH #284 corrective design): [`reclaim_then_fresh_start_retains_predecessor_and_resets_history`]
 //!   — the SAME boot-epoch-reclaim fixture shape as S-VM-81, but the
 //!   workload is never `stop()`-ed: its intent still stands, so the SAME
 //!   live `serve` session's `WorkloadLifecycle` reconcile loop re-drives
-//!   it (S-VM-26/27's guards), and ONE scenario asserts BOTH
-//!   `restart_count` and `last_terminated` populate together.
+//!   it (S-VM-26/27's guards), and one scenario asserts the old disposition
+//!   remains in history while the fresh row starts with empty history.
 //!
 //! # Fixture construction — why not a plain fault-injection seam
 //!
@@ -406,29 +405,31 @@ async fn poll_until_terminal(
             describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
                 .await
                 .expect("workload describe must succeed while polling");
-        if let Some(row) = out.snapshot.rows.first()
-            && matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
+        if !out.snapshot.rows.is_empty()
+            && out
+                .snapshot
+                .rows
+                .iter()
+                .all(|row| matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed))
         {
             return out;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not reach a terminal state within {max_wait:?}"
+            "workload {workload_id} did not settle every retained allocation row terminal \
+             within {max_wait:?}; rows={:?}",
+            out.snapshot.rows,
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
-/// Polls up to `max_wait` for the single row to be `Running` again with
-/// `restart_count >= 1` -- the reclaim-then-restart postcondition
-/// (S-VM-28). Distinct from `poll_until_running`: a restart REUSES the
-/// SAME `alloc_id` (`Action::RestartAllocation`, mirrors the Exec-driver
-/// shape in `crash_observability_two_cycles.rs`), so `state == Running`
-/// alone cannot distinguish "still the original boot" from "recovered
-/// via a reclaim-then-restart cycle" -- the restart count is what pins it.
-async fn poll_until_restarted(
+/// Polls until the predecessor remains durably `PlatformReclaimed` and a
+/// distinct fresh allocation is Running with its own empty history.
+async fn poll_until_fresh_vm_running(
     cfg: &Path,
     workload_id: &str,
+    predecessor_id: &str,
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
@@ -437,17 +438,30 @@ async fn poll_until_restarted(
             describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
                 .await
                 .expect("workload describe must succeed while polling");
-        if out
-            .snapshot
-            .rows
-            .first()
-            .is_some_and(|r| r.state == AllocStateWire::Running && r.restart_count >= 1)
-        {
+        let predecessor_retained = out.snapshot.rows.iter().any(|row| {
+            row.alloc_id == predecessor_id
+                && row.state == AllocStateWire::Terminated
+                && matches!(
+                    row.reason,
+                    Some(overdrive_core::TransitionReason::Stopped {
+                        by: StoppedBy::PlatformReclaimed
+                    })
+                )
+        });
+        let fresh_running = out.snapshot.rows.iter().any(|row| {
+            row.alloc_id != predecessor_id
+                && row.state == AllocStateWire::Running
+                && row.restart_count == 0
+                && row.last_terminated.is_none()
+        });
+        if predecessor_retained && fresh_running {
             return out;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not restart (Running with restart_count>=1) within {max_wait:?}"
+            "workload {workload_id} did not retain predecessor {predecessor_id} and publish a \
+             fresh Running VM within {max_wait:?}; rows={:?}",
+            out.snapshot.rows,
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -1124,8 +1138,8 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// S-VM-26's guard (`is_natural_exit && !is_platform_reclaimed(row)`,
 /// `transition_reason.rs`), the reclaim is NOT this test's final word:
 /// the SAME live `serve` session's `WorkloadLifecycle` reconcile loop
-/// re-drives the allocation once the 1s `RESTART_BACKOFF_DURATION`
-/// elapses, which is the correct, intended behavior for a reclaimed
+/// re-drives the workload once the 1s `RESTART_BACKOFF_DURATION`
+/// elapses under a fresh VM allocation identity, which is the intended behavior for a reclaimed
 /// Job-kind allocation, not the bug S-VM-26 fixed (pre-fix,
 /// `is_natural_exit` finalised the row via a fabricated `Failed {
 /// exit_code: Some(0) }` claim instead of ever restarting it).
@@ -1146,23 +1160,16 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// ("a convergent record cannot answer 'did it happen'" --
 /// `development.md` § "A convergent record cannot answer 'did it
 /// happen'"), the test therefore asserts ONLY the DURABLE occurrence
-/// proof that survives the restart: `restart_count` (the budget) and
-/// `last_terminated` (the disposition), once `poll_until_restarted`
-/// confirms the cycle has genuinely settled.
-/// `last_terminated.reason == Stopped { by: PlatformReclaimed }` is
-/// exactly as strong a claim that `execute_reclaim_allocation`'s
-/// AUTHORISED branch (not `stop()`, not `DiscardStrandedArtifacts`) ran
-/// as a synchronous checkpoint would have been -- ADR-0078's crash-facts
-/// snapshot preserves the terminal disposition the row passed through,
-/// observed without racing the restart. `Action::RestartAllocation`
-/// reuses the SAME `alloc_id`, so there is no "old `alloc_id`" distinct
-/// from the current one whose artifacts this test could check post-
-/// restart either. This is what keeps S-VM-81 a genuine end-to-end
+/// proof that survives the replacement: the retained `PlatformReclaimed`
+/// predecessor row, once
+/// `poll_until_fresh_vm_running` confirms the cycle has genuinely settled.
+/// The fresh row has `restart_count == 0` and `last_terminated == None`;
+/// predecessor history is never copied into the new physical attempt. This
+/// keeps S-VM-81 a genuine end-to-end
 /// witness that a reclaimed **SVID-holder** specifically is handled
 /// correctly through a real restart -- distinct from S-VM-28, which
-/// drives the SAME boot-epoch-reclaim-then-restart cycle without the
-/// SVID precondition, asserting the identical `restart_count` /
-/// `last_terminated` pair.
+/// drives the same boot-epoch-reclaim-then-fresh-start cycle without the
+/// SVID precondition, asserting the same fresh-row/history partition.
 ///
 /// **Residual gap, surfaced rather than papered over.** Observing that
 /// the `svid_lifecycle` evaluation is subsequently DEQUEUED by a live
@@ -1188,8 +1195,13 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// `identity_mgr.rs` / `issue_svid.rs`; the FOUR-evaluations claim
 /// (including `svid_lifecycle`) is Tier-1-proven, executor-direct, at
 /// the site named above.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
+#[expect(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
 async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1252,47 +1264,37 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
         .await
         .expect("boot #2 (mTLS-composed) must succeed");
 
-    // The DURABLE occurrence proof (ADR-0078: "a convergent record
-    // cannot answer 'did it happen'"). The workload's intent was never
-    // withdrawn, so the SAME live `serve` session's `WorkloadLifecycle`
-    // reconcile loop re-drives the boot-epoch reclaim's terminal row
-    // once the backoff window elapses -- per S-VM-26 this is now the
-    // correct, intended behavior. No intermediate "reclaimed, not yet
-    // restarted" checkpoint is asserted here -- see the test's own doc
-    // comment: `WorkloadLifecycle`'s convergence loop runs concurrently
-    // with the mTLS/SVID boot sequence, leaving no reliable pre-restart
-    // observation window (confirmed on real metal). What survives the
-    // restart durably is `restart_count` (the budget) and
-    // `last_terminated` (the disposition -- unambiguous proof
-    // `execute_reclaim_allocation`'s AUTHORISED branch ran, since
-    // ADR-0078's crash-facts snapshot preserves the SAME `Stopped {
-    // by: PlatformReclaimed }` disposition a synchronous checkpoint
-    // would have observed), asserted together per S-VM-28's own
-    // reasoning: only together do they rule out both an implementation
-    // that erases the occurrence and one that silently consumes the
-    // budget.
-    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
-    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
-    assert_eq!(
-        restarted_row.restart_count, 1,
-        "restart_count must have incremented by EXACTLY one across the reclaim-then-restart \
-         cycle; got {restarted_row:?}"
-    );
-    let last_terminated = restarted_row
-        .last_terminated
-        .as_ref()
-        .expect("last_terminated must be populated by the SAME restart that bumped restart_count");
+    // Durable occurrence proof: retain the exact PlatformReclaimed row while
+    // a distinct replacement becomes current. The new physical attempt must
+    // not inherit predecessor retry/failure history.
+    let restarted =
+        poll_until_fresh_vm_running(&cfg, &submit.workload_id, &alloc_id, Duration::from_secs(90))
+            .await;
+    let predecessor_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == alloc_id)
+        .expect("PlatformReclaimed predecessor remains in accepted history");
     assert!(
         matches!(
-            last_terminated.reason,
+            predecessor_row.reason,
             Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
         ),
-        "last_terminated must describe the reclamation disposition (StoppedBy::PlatformReclaimed) \
-         this SVID-holding allocation actually underwent -- written ONLY by \
-         execute_reclaim_allocation's AUTHORISED branch (stop() writes Stopped {{ by: Reconciler }}; \
-         DiscardStrandedArtifacts writes no row at all, DD-5) -- not silently erased or describing \
-         something else; got {:?}",
-        last_terminated.reason
+        "the SVID-holding predecessor retains its PlatformReclaimed disposition; got {:?}",
+        predecessor_row.reason
+    );
+    let fresh_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id != alloc_id && row.state == AllocStateWire::Running)
+        .expect("distinct fresh VM row");
+    assert_eq!(fresh_row.restart_count, 0);
+    assert!(fresh_row.last_terminated.is_none());
+    assert!(
+        !restarted.snapshot.issued_certificates.is_empty(),
+        "the replacement remains SVID-covered"
     );
 
     // Reap the restarted (still-live) spin VM via the PRODUCTION stop
@@ -1310,9 +1312,8 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-28 (step 02-04) -- restart_count and last_terminated populate
-// TOGETHER, in one scenario, across a genuine reclaim-then-restart
-// cycle.
+// S-VM-28 corrective preservation -- PlatformReclaimed predecessor history
+// and a fresh replacement row are both retained.
 // ---------------------------------------------------------------------
 
 /// `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
@@ -1325,15 +1326,16 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 /// SAME live `serve` session's `WorkloadLifecycle` reconcile loop
 /// re-drives it once the boot-epoch drive's terminal write lands (the
 /// `is_natural_exit` / ceiling guards S-VM-26/27 exist for exactly this
-/// branch). Deliberately ONE scenario asserting BOTH crash-observability
-/// fields together, per the DISTILL crafter notes: asserting only the
-/// budget (`restart_count`) passes an implementation that erased the
-/// occurrence; asserting only the occurrence (`last_terminated`) passes
-/// one that consumed the budget silently -- per ADR-0078, "a convergent
-/// record cannot answer 'did it happen'."
+/// branch). Deliberately one scenario asserts both the predecessor occurrence
+/// and the new physical attempt's empty restart/failure history.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-async fn reclaim_then_restart_populates_restart_count_and_last_terminated_together() {
+#[expect(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
         .prefix("vm-reclaim-s28-")
@@ -1359,6 +1361,7 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
         deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
     let baseline = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let baseline_row = baseline.snapshot.rows.first().expect("one row for the running alloc");
+    let predecessor_id = baseline_row.alloc_id.clone();
     assert_eq!(baseline_row.restart_count, 0, "sanity: a first start is not a restart");
     assert_eq!(baseline_row.last_terminated, None, "sanity: nothing survived yet");
 
@@ -1398,42 +1401,48 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
         reclaimed_row.reason
     );
 
-    // The workload was NEVER stopped -- its intent still stands, so the
-    // SAME live `serve` session's `WorkloadLifecycle` reconcile loop
-    // re-drives it once the backoff window elapses. This is the restart
-    // half of the Given, and the ONE scenario's Then: both
-    // crash-observability fields populate TOGETHER as a direct result of
-    // the SAME cycle.
-    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
-    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
-    assert_eq!(
-        restarted_row.restart_count, 1,
-        "restart_count must have incremented by EXACTLY one across the reclaim-then-restart \
-         cycle; got {restarted_row:?}"
-    );
-    let last_terminated = restarted_row
-        .last_terminated
-        .as_ref()
-        .expect("last_terminated must be populated by the SAME restart that bumped restart_count");
+    // The workload was never stopped, so its intent still stands. The same
+    // live WorkloadLifecycle owner starts a fresh physical VM while preserving
+    // the predecessor row as history.
+    let restarted = poll_until_fresh_vm_running(
+        &cfg,
+        &submit.workload_id,
+        &predecessor_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let predecessor_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == predecessor_id)
+        .expect("predecessor retained after fresh VM start");
     assert!(
         matches!(
-            last_terminated.reason,
+            predecessor_row.reason,
             Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
         ),
-        "last_terminated must describe the reclamation disposition (StoppedBy::PlatformReclaimed), \
-         not be silently erased or describe something else; got {:?}",
-        last_terminated.reason
+        "predecessor must retain PlatformReclaimed; got {:?}",
+        predecessor_row.reason
     );
+    let fresh_row = restarted
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id != predecessor_id && row.state == AllocStateWire::Running)
+        .expect("fresh Running VM row");
+    assert_eq!(fresh_row.restart_count, 0);
+    assert!(fresh_row.last_terminated.is_none());
 
-    // Reap the restarted (still-live) spin VM via the PRODUCTION stop
+    // Reap the fresh (still-live) spin VM via the PRODUCTION stop
     // path before shutdown: `Command::kill_on_drop` is deliberately
     // `false` on the production spawn, so nothing kills a still-Running
     // VM merely because this test process exits (same leak class
     // `vm_walking_skeleton.rs`'s long-lived-spin scenarios guard
     // against).
-    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() }).await.expect(
-        "stop the restarted spin workload before shutdown to avoid leaking the VMM process",
-    );
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the fresh spin workload before shutdown to avoid leaking the VMM process");
     poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");

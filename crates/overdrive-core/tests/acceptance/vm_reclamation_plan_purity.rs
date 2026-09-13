@@ -60,6 +60,7 @@ use overdrive_reconcilers::{
     WorkloadLifecycleView, plan_reclamation,
 };
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
 
 // ---------------------------------------------------------------------------
 // S-VM-31 — plan_reclamation fixtures
@@ -473,13 +474,22 @@ fn svc_spiffe() -> SpiffeId {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/acceptance/vm_reclamation_plan_purity.s_vm_26.proptest-regressions",
+        )))),
+        ..ProptestConfig::default()
+    })]
+
     /// S-VM-26 -- a Job-kind VM allocation reclaimed by the platform is
-    /// re-driven through the restart/backoff branch, NEVER finalised via
+    /// re-driven through the driver-neutral predecessor-to-fresh-successor
+    /// replacement branch, NEVER finalised via
     /// `FinalizeFailed { Failed { exit_code: Some(0) } }` -- the fabricated
     /// clean-exit DD-1 trap `is_natural_exit`'s new
     /// `&& !is_platform_reclaimed` clause exists to close
     /// (`workload_lifecycle.rs:1157-1163`, `brief.md` §104/§105a.10).
-    /// CONTRACT_SHAPE: bounded-change.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero(
         alloc in arb_alloc_id(10_000_000),
@@ -495,11 +505,14 @@ proptest! {
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(alloc.clone(), attempts);
         let mut last_failure_seen_at = BTreeMap::new();
-        last_failure_seen_at.insert(alloc, UnixInstant::from_unix_duration(Duration::from_secs(0)));
+        last_failure_seen_at.insert(
+            alloc.clone(),
+            UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        );
         let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, ..Default::default() };
         let tick = fresh_tick(UnixInstant::from_unix_duration(Duration::from_secs(elapsed_secs)));
 
-        let (actions, _next) = WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+        let (actions, next) = WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
 
         prop_assert!(
             !actions.iter().any(|a| matches!(
@@ -514,27 +527,50 @@ proptest! {
         );
         if elapsed_secs >= 1 {
             prop_assert!(
-                actions.iter().any(|a| matches!(a, Action::RestartAllocation { .. })),
+                actions.iter().any(|a| matches!(
+                    a, Action::RestartAllocation { alloc_id, spec, .. }
+                        if alloc_id == &alloc && spec.alloc != alloc
+                )),
                 "past the (degenerate 1s) backoff window, a platform-reclaimed row must be \
-                 RE-DRIVEN (restarted), not left inert; got {:?}", actions
+                 RE-DRIVEN from predecessor to a fresh VM allocation identity, not left inert; got {:?}", actions
             );
+            prop_assert!(
+                actions.iter().all(|a| !matches!(a, Action::StartAllocation { .. })),
+                "an eligible predecessor uses RestartAllocation for every driver; got {:?}", actions
+            );
+            let successor = actions.iter().find_map(|action| match action {
+                Action::RestartAllocation { spec, .. } => Some(&spec.alloc),
+                _ => None,
+            }).expect("one driver-neutral replacement action");
+            prop_assert_eq!(next.restart_counts.get(&alloc), Some(&attempts));
+            prop_assert_eq!(next.restart_counts.get(successor), Some(&attempts));
         }
     }
+}
 
-    /// S-VM-27 -- six consecutive reclaim-then-restart cycles never trip
+proptest! {
+    #![proptest_config(ProptestConfig {
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/acceptance/vm_reclamation_plan_purity.s_vm_27.proptest-regressions",
+        )))),
+        ..ProptestConfig::default()
+    })]
+
+    /// S-VM-27 -- six consecutive Platform Reclamations never trip
     /// `RestartBudgetExhausted`: the ceiling guard (`workload_lifecycle.rs`
     /// ~:680) excludes Platform Reclamation from the attempts count.
-    /// CONTRACT_SHAPE: bounded-change.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn six_consecutive_reclamations_never_trip_restart_budget_exhausted(
         alloc in arb_alloc_id(11_000_000),
         workload_id in arb_workload_id(),
         cycle in 1u32..=6,
     ) {
-        // `attempts` models the CUMULATIVE restart_counts value six
-        // consecutive reclaim-then-restart cycles would have driven this
-        // alloc's counter to -- at and past RESTART_BACKOFF_CEILING (5),
-        // exactly the shape an unguarded ceiling branch trips on.
+        // `attempts` models policy carried onto the selected predecessor at
+        // and past RESTART_BACKOFF_CEILING (5), exactly the shape an
+        // unguarded ceiling branch trips on. Reclamation must carry it to a
+        // fresh key without charging another Workload Failure.
         let attempts = RESTART_BACKOFF_CEILING + cycle - 1;
         let node_id = NodeId::new("local").expect("valid NodeId");
         let row = vm_reclaimed_row(alloc.clone(), workload_id.clone(), &node_id);
@@ -543,11 +579,14 @@ proptest! {
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(alloc.clone(), attempts);
         let mut last_failure_seen_at = BTreeMap::new();
-        last_failure_seen_at.insert(alloc, UnixInstant::from_unix_duration(Duration::from_secs(0)));
+        last_failure_seen_at.insert(
+            alloc.clone(),
+            UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        );
         let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, ..Default::default() };
         let tick = fresh_tick(UnixInstant::from_unix_duration(Duration::from_secs(10)));
 
-        let (actions, _next) = WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
+        let (actions, next) = WorkloadLifecycle::canonical().reconcile(&desired, &actual, &view, &tick);
 
         prop_assert!(
             !actions.iter().any(|a| matches!(
@@ -561,11 +600,26 @@ proptest! {
              attempts ({attempts}) has climbed from prior reclamations; got {:?}", actions
         );
         prop_assert!(
-            actions.iter().any(|a| matches!(a, Action::RestartAllocation { .. })),
-            "the allocation must remain restartable past the ceiling when reclaimed; got {:?}", actions
+            actions.iter().any(|a| matches!(
+                a, Action::RestartAllocation { alloc_id, spec, .. }
+                    if alloc_id == &alloc && spec.alloc != alloc
+            )),
+            "the VM must remain replaceable under a fresh identity past the ceiling when reclaimed; got {:?}", actions
         );
+        prop_assert!(
+            actions.iter().all(|a| !matches!(a, Action::StartAllocation { .. })),
+            "an eligible predecessor uses RestartAllocation for every driver; got {:?}", actions
+        );
+        let successor = actions.iter().find_map(|action| match action {
+            Action::RestartAllocation { spec, .. } => Some(&spec.alloc),
+            _ => None,
+        }).expect("one driver-neutral replacement action");
+        prop_assert_eq!(next.restart_counts.get(&alloc), Some(&attempts));
+        prop_assert_eq!(next.restart_counts.get(successor), Some(&attempts));
     }
+}
 
+proptest! {
     /// S-VM-29 -- the Service-path analogue: a reclaimed allocation is
     /// never handed a fabricated `ServiceFailed { StartupProbeFailed }` --
     /// `startup_probe_failed_action`'s new `AllocState` gate

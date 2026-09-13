@@ -475,19 +475,26 @@ fn workload_lifecycle_alone_decides_restart_after_liveness_stop() {
     let reconciler = WorkloadLifecycle::canonical();
     let (restart_actions, restart_view) =
         reconciler.reconcile(&desired, &actual, &WorkloadLifecycleView::default(), &tick(30));
+    let successor = AllocationId::new("alloc-service-vm-liveness-restart-1")
+        .expect("valid successor allocation id");
     assert!(restart_actions.iter().any(|action| matches!(
         action,
         Action::RestartAllocation {
             alloc_id: action_alloc_id,
+            spec,
             kind: WorkloadKind::Service,
-            ..
-        } if action_alloc_id == &alloc_id
+        } if action_alloc_id == &alloc_id && spec.alloc == successor
     )));
     assert!(!restart_actions.iter().any(|action| matches!(
         action,
         Action::StopAllocation { .. } | Action::FinalizeFailed { .. }
     )));
-    assert_eq!(restart_view.restart_counts.get(&alloc_id), Some(&1));
+    assert_eq!(restart_view.restart_counts.get(&alloc_id), None);
+    assert_eq!(restart_view.restart_counts.get(&successor), Some(&1));
+    assert_eq!(
+        restart_view.last_failure_seen_at.get(&successor),
+        Some(&UnixInstant::from_unix_duration(Duration::from_secs(30)))
+    );
     assert!(restart_actions.iter().any(|action| matches!(
         action,
         Action::EnqueueEvaluation { reconciler, target }

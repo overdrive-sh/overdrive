@@ -18,6 +18,13 @@ No independent DESIGN review of this amendment has occurred. Its exact
 interface and eligibility clauses govern that authorized implementation;
 the original approval above records the earlier design only.
 
+**Accepted VM issued-ID amendment, 2026-09-12 (GH #284; independent DESIGN
+review iteration 2 APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`):** the final section
+below makes rejected VM publication consume its execution identity through the
+already-persisted `WorkloadLifecycleView`. It changes no broker/hook signature
+and does not weaken this ADR's candidate-keyed retry rule.
+
 ## Decision and actual ownership keys
 
 Extend the current `EvaluationBroker` and `spawn_convergence_loop`. The owner
@@ -515,3 +522,89 @@ Sim tests enforce the effect boundary. Tests stay in-process, without spawning
 the production binary or emitting expectation evidence. This documentation
 amendment changes no production/test code and claims no passing regression or
 performance result.
+
+## Accepted amendment 2026-09-12 — VM issued allocation identity survives rejected publication (GH #284)
+
+### Revalidated premise and bounded correction
+
+`run_convergence_tick_inner` persists and installs `next_view` before dispatch,
+then requeues even when awaited action dispatch returns an error
+(`reconciler_runtime.rs:1485–1500,1526–1571,1590–1607`). The existing
+`StartAllocation` path can start a VM and then lose its first Running write;
+the shim awaits stop, releases supervision and tears down networking before
+returning the write error, and no allocation row commits
+(`action_shim/mod.rs:2079–2163`). The existing VM regression
+`vm_running_write_failure_releases_the_supervision_claim`
+(`action_shim_running_write_failure_stops_alloc.rs:329–383`) proves that exact
+VM driver-start/cleanup/no-row result. Row-count allocation minting can
+therefore choose the same ID on the runtime's requeue.
+
+ADR-0104 resolves only that proven identity-consumption gap. It adds no broker,
+hook, persistence, action, row or public API. The existing
+`WorkloadLifecycleView.restart_counts` key set becomes the VM issued-ID ledger,
+and the runtime's existing pre-dispatch View fsync becomes the consumption
+boundary.
+
+### Exact reconciliation with the candidate-keyed retry contract
+
+The accepted retry rule in the table above remains exact:
+
+```text
+last_failure_seen_at[candidate]
+    + backoff_for_attempt(restart_counts[candidate])
+```
+
+Both `WorkloadLifecycle::reconcile` and `next_evaluation_at` use only the
+candidate selected by the current Run branch for ceiling/backoff. They do not
+take a maximum count or latest timestamp over historical entries, and a stale
+earlier deadline cannot override the current candidate.
+
+VM ID selection is a separate pure decision. Before any VM
+`StartAllocation`, `WorkloadLifecycle` chooses the checked numeric successor of
+the greatest attempt suffix across retained row IDs and
+`view.restart_counts.keys()`, inserts that fresh key into `next_view`, and
+returns the action. A View-only key is not an allocation-current candidate and
+does not alter `current_alloc`; it proves only that this physical VM ID has
+been issued. The runtime fsyncs it before dispatch. If View persistence fails,
+no execution starts. If dispatch or Running publication fails, or the process
+restarts after the fsync, the reservation survives and the next VM action skips
+that ID. A crash between View fsync and dispatch may leave an unused suffix gap;
+it cannot cause reuse.
+
+The unchanged fields have explicit driver-specific semantics:
+
+- Exec keeps the accepted per-allocation restart count and failure timestamp.
+- For VM, a `restart_counts` key is an issued execution-ID reservation; its
+  value is the stable owner's Workload Failure budget carried at that
+  candidate. `last_failure_seen_at` remains that candidate's latest genuine
+  Workload Failure input.
+- Ordinary VM Workload Failure advances the candidate budget once and writes
+  the advanced budget/time under both the old current candidate and the fresh
+  reservation. A rejected publication therefore leaves the old candidate with
+  the consumed retry input.
+- VM Platform Reclamation carries candidate budget/time into the fresh
+  reservation without incrementing the budget or stamping a new failure. It
+  remains exempt from exhaustion. Initial VM placement starts at zero/no time;
+  explicit generation replacement carries without increment.
+
+Only the issued-ID **key scan** amends the phrase “Do not scan unrelated
+historical View entries.” Those keys are related identity-consumption inputs by
+their amended contract; historical **values** remain excluded from retry
+policy. `EvaluationEligibility::NotBefore` is still derived from the selected
+candidate's exact deadline. The owner order remains pure decision → View fsync
+→ awaited dispatch → eligibility-aware requeue → result consumption.
+
+### Changed Assumptions
+
+| Superseded wording | Accepted amendment |
+|---|---|
+| Retry table: “Do not scan unrelated historical View entries or let an earlier historical deadline override the selected candidate.” | Retain verbatim for budget/backoff values. VM identity selection may scan the existing View's issued-ID keys only, so an unpublished execution identity remains consumed. |
+| “retain View fields and their persisted input semantics” | Retain field/codec shape. Explicitly amend `WorkloadLifecycleView.restart_counts` for VM: key presence is also issued-ID reservation and the value carries Workload Failure budget at that candidate; Exec semantics are unchanged. |
+
+This accepted amendment changes no public signature listed by ADR-0102 and no
+lifecycle state/gate. Its blocking evidence is the existing VM Running-write
+failure composed with a second real `WorkloadLifecycle` evaluation: no row for
+the rejected ID, a higher next VM ID, candidate-keyed deadline behavior, and
+boot bulk-load of the same reservation. The independent review obligation was
+satisfied by DESIGN review iteration 2 APPROVED for commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.

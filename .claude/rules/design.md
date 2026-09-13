@@ -3,6 +3,89 @@
 Repository-specific rules for DESIGN work. These bind architects, reviewers,
 and orchestrators relaying architecture choices to the user.
 
+## Surface material design decisions to the user before they become accepted
+
+**A design document is a record of a proposal, not evidence that the user has
+accepted it.** Before a material design decision is marked accepted, carried
+into DISTILL, or used to authorize DELIVER, the architect or orchestrator MUST
+surface it to the user in the conversation and obtain an explicit approval.
+Buried ADR prose, a reviewer verdict, a roadmap, a prior issue, or silence
+after an artifact was written is not approval.
+
+This applies to every new or amended decision that changes any of these:
+
+- the owner or meaning of a domain identity, state, lifecycle transition, or
+  cleanup authority;
+- a public or internal action/port contract, including the meaning of an
+  existing field or parameter;
+- driver-neutral versus driver-specific policy placement;
+- persistence, retry, ordering, recovery, compatibility, or migration
+  behavior;
+- an explicitly rejected alternative whose exclusion constrains the
+  implementation.
+
+The user-facing decision request names the exact proposed contract, affected
+owners and boundaries, material alternatives, and the consequence for the
+next wave. Use numbered decisions so the user's approval or rejection is
+unambiguous. An architect may write those decisions as **proposed** in an ADR
+or feature artifact, but must not label them accepted, amend an accepted SSOT
+as if ratified, or dispatch implementation from them until the user explicitly
+approves them.
+
+After approval, record the approval in the canonical design artifact with the
+decision identifier and date, then proceed to independent design review and
+downstream waves. If the user rejects or changes a proposal, revise the
+proposal and surface the replacement; do not quietly preserve the rejected
+branch as a compatibility exception.
+
+**Reviewers enforce this boundary.** A technically coherent design whose
+material decisions were not surfaced to the user is `CHANGES_REQUESTED`, not
+accepted. The reviewer must name the missing user decision rather than
+substituting its own judgment.
+
+## One ADR records one decision — never use an ADR as a design bucket
+
+An Architecture Decision Record captures **one independently decidable and
+reversible architectural choice**. “System Architecture,” “Domain Model,”
+“Application Architecture,” a whole subsystem, or an entire feature is an
+organizational category — not one decision. If two parts could be accepted,
+rejected, superseded, or reversed independently, they require separate ADRs.
+
+An ADR contains only its decision-specific context and forces; one decision
+and its scope; viable alternatives and why they lost; consequences and
+trade-offs; status; and links to the authoritative architecture, interface,
+diagram, and verification artifacts.
+
+An ADR does **not** contain Rust signatures, enum variants, constructors,
+accessors, trait methods, wire structs, error catalogs, file-by-file
+implementation instructions, executable test obligations, scenario matrices,
+fixture mechanics, mutation targets, runner commands, C4 source or
+walkthroughs, roadmap steps, delivery sequencing, review history, validation
+output, or a comprehensive feature specification.
+
+Route design content to its owner:
+
+| Content | Authoritative home |
+|---|---|
+| One architectural choice, alternatives, consequences | One ADR |
+| Exact implementation-facing API/port contract pinned by DESIGN | `docs/feature/{feature-id}/feature-delta.md` under the relevant DESIGN `[REF]` component, driving-port, or driven-port section |
+| Current high-level architecture and decision links | `docs/product/architecture/brief.md` |
+| C4 diagrams and detailed relationships | `docs/product/architecture/c4-diagrams.md` |
+| Executable acceptance scenarios and test obligations | DISTILL artifacts |
+| Implementation order, files and quality gates | DELIVER roadmap/artifacts |
+
+Moving Rust signatures out of an ADR does not permit leaving them unspecified:
+DESIGN pins exact implementation-facing contracts in `feature-delta.md`, and
+the ADR links to that contract. Never duplicate the same normative signature
+in both places.
+
+Before creating or extending an ADR, state its decision in one sentence and
+ask whether any clause could be adopted or superseded independently. If so,
+split those clauses into separate ADRs and move API references, C4 detail, and
+tests to their owning artifacts. Reviewers block an ADR that joins independent
+decisions, embeds interface or test specifications, uses an architecture layer
+as its decision statement, or becomes large by acting as a feature bucket.
+
 ## Preserve the meaning and ownership of existing states
 
 A locally useful readiness check does not automatically own an upstream

@@ -407,3 +407,19 @@ Rootfs owners must deploy the rebuilt init to receive guest responsiveness;
 older init images retain the host's bounded force fallback. Native validation
 must record this exact guest artifact and may not infer behavior from the
 host binary version alone.
+
+## Accepted amendment 2026-09-12 — VM replacement identity is ADR-0104 (GH #284)
+
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
+
+The natural/post-EXEC cleanup gate, stop/watcher claim hand-off, guest
+supervision and host/guest ordering remain unchanged. References in this ADR
+to a same-ID replacement describe the pre-#284 VM path; automatic VM
+replacement is amended to use the existing fresh `StartAllocation` path defined by
+[ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md). The
+fresh VM ID is reserved in the existing View before dispatch, so a rejected
+Running publication's awaited stop/cleanup completes under that exact ID and a
+requeue cannot reuse it. The `Exec` same-ID path and the accepted VM stop/
+natural-watcher cleanup contract are unaffected.

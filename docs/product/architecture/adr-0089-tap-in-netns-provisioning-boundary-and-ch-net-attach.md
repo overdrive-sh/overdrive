@@ -779,3 +779,28 @@ reopen A2.
   (official netfilter documentation): the counter records packets+bytes and is
   non-terminal/passive for rule evaluation when placed between matches and the
   terminal verdict.
+
+## Accepted amendment 2026-09-12 — VM replacement identity is owned by ADR-0104 (GH #284)
+
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
+
+This ADR's network provisioning, selected-TAP attachment, mTLS install gates,
+teardown order and slot ownership are unchanged. The prior text's VM-specific
+same-allocation recovery route is superseded only in identity shape: automatic
+VM Workload Failure and Platform-Reclamation replacement is amended to use the existing
+`Action::StartAllocation` with a fresh `AllocationId`, as specified by
+[ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md). The existing
+same-ID `Action::RestartAllocation` remains the `Exec` path.
+
+The VM ID is reserved in the existing fsynced WorkloadLifecycle View before
+the action shim receives it. Therefore a rejected fresh Running publication
+tears down and releases the fresh allocation's existing C3 slot/network state,
+while the next requeue or boot mints above that reserved ID. This adds no C3
+retry/fallback and does not alter teardown-before-release.
+
+No TAP/netns ownership generalization is made here. #284 reproduced VM
+run-directory, beacon, cgroup and clone/index aliasing; it did not reproduce a
+TAP mutation. `NetSlotAllocator` and teardown-before-release therefore remain
+the sole network ownership contract.

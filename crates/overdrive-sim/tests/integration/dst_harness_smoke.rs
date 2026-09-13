@@ -119,7 +119,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "exit-event-observable-outcome",
     "terminal-contention-converges",
     "vm-provision-failure-cleans-network-and-reuses-slot",
-    "same-id-restart-removes-prior-protection-before-replacement-provision",
     // workload-gc-absent-stale-allocs steps 01-03 + 01-04 — DST
     // scenarios covering the absent-intent workload GC arm and the
     // resubmit-after-GC race. Step 01-04 promoted

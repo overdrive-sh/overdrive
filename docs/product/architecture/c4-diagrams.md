@@ -61,6 +61,97 @@ The host reaper's process exit and cleanup evidence do not become new health
 states. Broker target leases preserve existing workload Views and do not make
 the convergence owner the sole terminal-row publisher.
 
+## Driver-neutral allocation replacement (GH #284 corrective proposal)
+
+**Corrective DESIGN ratified by the user on 2026-09-13 as P-105-1 through
+P-105-7, including P-105-4A, P-105-5A and P-105-6A. Final review iteration 2
+accepted this topology but returned `CHANGES_REQUESTED` on the complete DESIGN;
+F-03…F-06 were remediated afterward without a third review under the user's
+two-cycle cap. Explicit user disposition remains required, so this is not
+accepted implementation authority.**
+[ADR-0105](adr-0105-driver-neutral-allocation-replacement-identity.md),
+[ADR-0106](adr-0106-successor-creation-does-not-wait-for-predecessor-cleanup.md),
+[ADR-0108](adr-0108-durable-reservation-consumes-successor-allocation-identity.md),
+[ADR-0109](adr-0109-replacement-requires-terminal-predecessor-handoff.md), and the
+canonical `docs/feature/vm-recreation-allocation-id-reuse/feature-delta.md`
+supersede ADR-0104's rejected VM-only boundary only after explicit user
+disposition of the final review.
+[ADR-0107](adr-0107-successor-identity-consumption-follows-successor-owned-effect.md)
+is withdrawn before acceptance.
+The existing topology stays. Automatic replacement uses existing
+`RestartAllocation` as predecessor `alloc_id` → fresh successor `spec.alloc`
+for every driver; successor creation does not wait for exact-old cleanup;
+legacy Exec follows the contract until GH #293 removes it.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+    title Driver-neutral allocation replacement — GH #284 corrective proposal
+    Person(operator, "Platform operator", "Declares and observes workloads")
+    System(overdrive, "Overdrive node", "Owns workload policy, physical allocations and replacement ordering")
+    System_Ext(host, "Linux host substrate", "Runs process and microVM allocation effects")
+    System_Ext(guest, "MicroVM-family guest", "Runs VM, unikernel or sandboxed workload payloads")
+    Rel(operator, overdrive, "deploys, restarts and describes workloads through")
+    Rel(overdrive, host, "creates and cleans allocation-scoped effects on")
+    Rel(overdrive, guest, "starts and supervises physical executions through")
+    Rel(guest, overdrive, "reports execution outcomes to")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+    title Driver-neutral predecessor-to-successor replacement
+    Person(operator, "Platform operator", "Declares and observes workloads")
+    Container(cli, "overdrive CLI", "Rust client", "Submits HTTPS commands and renders retained allocation rows")
+    System_Boundary(node, "Overdrive node") {
+        Container(serve, "overdrive serve control plane", "Rust/Axum", "Handles operator HTTP requests and writes workload intent")
+        Container(runtime, "Convergence runtime", "Rust/Tokio", "Persists Views before dispatch and owns complete evaluations")
+        Container(recon, "WorkloadLifecycle", "Rust reconciler", "Selects predecessor, policy and fresh successor without driver discrimination")
+        Container(shim, "Action shim", "Rust component", "Creates the successor without waiting for exact-old cleanup")
+        Container(registry, "DriverRegistry", "Rust core value", "Routes supplied specs to execution adapters")
+        Container(exec, "ExecDriver", "Legacy Rust adapter", "Runs allocation-scoped processes until GH #293 removal")
+        Container(vm, "VmDriver", "Rust adapter", "Runs allocation-scoped microVM executions and capabilities")
+        Container(reclaim, "VmReclamation", "Rust reconciler", "Disposes exact predecessor VM residue")
+        Container(vmhost, "VmHostState", "Rust driven port + host adapter", "Observes and removes exact allocation-keyed VM residue")
+        ContainerDb(intent, "IntentStore", "redb", "Stores stable workload intent and generation")
+        ContainerDb(view, "WorkloadLifecycle ViewStore", "CBOR/redb", "Durably consumes issued IDs and stores candidate policy inputs")
+        ContainerDb(obs, "ObservationStore", "redb/Sim", "Retains rows and bounded occurrences per physical AllocationId")
+    }
+    System_Ext(host, "Linux host", "cgroups, netns/veth/TAP, files, sockets, KVM and processes")
+    Rel(operator, cli, "invokes workload commands through")
+    Rel(cli, serve, "submits deploy/restart and reads status over HTTPS from")
+    Rel(serve, intent, "commits workload intent/generation to")
+    Rel(serve, runtime, "runs convergence through")
+    Rel(runtime, intent, "hydrates desired workload state from")
+    Rel(runtime, obs, "hydrates actual allocation state from")
+    Rel(runtime, recon, "hydrates and invokes")
+    Rel(recon, view, "returns consumed successor reservation and candidate policy inputs for")
+    Rel(runtime, view, "fsyncs before dispatch to")
+    Rel(recon, shim, "emits predecessor plus fresh-successor RestartAllocation to")
+    Rel(shim, registry, "starts successor and later addresses predecessor cleanup through")
+    Rel(registry, exec, "routes legacy process specs to")
+    Rel(registry, vm, "routes microVM-family specs to")
+    Rel(shim, host, "creates successor effects before one exact-old cleanup attempt on")
+    Rel(shim, obs, "retains predecessor and publishes fresh successor in")
+    Rel(obs, recon, "feeds retained predecessor/current rows back to")
+    Rel(obs, reclaim, "provides old VM allocation terminality to")
+    Rel(reclaim, vmhost, "hydrates exact old-ID host facts from")
+    Rel(reclaim, shim, "emits exact old-ID reclaim/disposal actions to")
+    Rel(shim, vmhost, "kills or discards exact old-ID host state through")
+    Rel(vmhost, host, "removes old-ID cgroup, run-dir and recorded clone state from")
+```
+
+The predecessor and successor are ratified as separate physical identities and
+publish at separate allocation keys. WorkloadLifecycle chooses and durably
+reserves the pair without driver policy. The action shim completes the
+successor outcome before one exact-old cleanup attempt through existing ports,
+and successor error remains primary if both outcomes fail. VmReclamation may
+dispose exact-old VM residue independently. No component-level diagram is
+needed because the design creates no component; the feature delta owns the
+exact component contracts.
+
 ---
 
 ## Phase 2.1 — eBPF Dataplane Containers
@@ -1258,7 +1349,7 @@ C4Component
     Component(vw, "WorkloadLifecycleView.observed_generation (EXTEND)", "workload_lifecycle.rs:1179", "u64 #[serde(default)] persisted input")
     Component(rc, "reconcile_inner Run branch (EXTEND)", "workload_lifecycle.rs:485,520,725", "restart_pending = view.observed_generation < desired.generation. veto = !restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped) — scoped to the CURRENT instance, NOT any(...) across history (superseded operator-stop rows never veto). Current operator-stop ⇒ veto stands (Bug 3). Current crash + stale superseded operator-stop row ⇒ NO veto ⇒ is_restartable crash-restart (R1-crash). restart_pending + Running ⇒ StopAllocation. restart_pending + no-Running ⇒ first_fit_place + stamp observed_generation = desired.generation")
     Component(ca, "current_alloc (NEW, pure)", "workload_lifecycle.rs:863 (next to mint_alloc_id)", "latest-placed alloc = numeric max of mint_alloc_id suffix (NOT BTreeMap/.values() order, which is lexical). No new per-row state; no rkyv AllocStatusRow change")
-    Component(mint, "mint_alloc_id (REUSE)", "workload_lifecycle.rs:863", "attempt = allocs_vec.len() ⇒ payments-1 (A1≠A2, new /30) — the SystemGc-resubmit precedent; rows never deleted ⇒ suffix monotone")
+    Component(mint, "mint_alloc_id (REUSE)", "workload_lifecycle.rs:863", "Exec placement keeps row-count attempt; VM placement uses next_vm_attempt over retained rows + fsynced issued-ID reservation keys, then reserves before dispatch (ADR-0104)")
   }
   ContainerDb(intent, "IntentStore (redb)", "LocalStore", "txn / get — NEW TxnOp::IncrementU64 variant (atomic monotonic bump, read-modify inside the write txn); carries trait contract + concurrency acceptance test")
 

@@ -214,3 +214,24 @@ Existing Service-health C4 L1/L2 diagrams are retained unchanged in
 Rust's private types and existing crate boundaries enforce containment; the
 seeded invariant supplies behavioral enforcement. Independent review must
 verify necessity and API conformity, not just green tests.
+
+## Accepted amendment 2026-09-12 — VM replacements use fresh allocation identity (GH #284)
+
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
+
+The accepted-session `Weak<BeaconWriter>` witness and allocation-key claim
+remain unchanged **inside `VmDriver::ClaimGuard` only**. They continue to
+arbitrate the real VM stop-versus-watcher and same-VM-key accepted-session races
+described by this ADR. `ExecDriver` has no `BeaconWriter`, `ClaimGuard` or
+accepted-session witness; Exec same-ID `RestartAllocation` is unaffected by
+ADR-0100 and must not be cited as protected by G-100.
+
+For automatic VM replacement,
+[ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md) uses
+`StartAllocation` with a fresh `AllocationId`; an old VM watcher retains its
+old key and witness and cannot match the replacement VM's distinct claim. This
+fresh-key separation complements, but does not broaden, the existing VM-only
+session predicate. No new watcher identity, public method, or cleanup owner is
+added.

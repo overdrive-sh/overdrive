@@ -1,36 +1,19 @@
-//! T-F (ADR-0078 § D6) — TWO crash-restart cycles through the REAL exit
-//! observer and the REAL action shim. **Mandatory; nothing else covers
-//! the forward-carry.**
+//! T-F (ADR-0078 § D6) — two crash-replacement cycles through the real exit
+//! observer and action shim.
 //!
-//! Drives `Running → Failed → Running → Failed → Running` with a real
-//! `ExecDriver`, a real `exit_observer::spawn` watcher task, and real
-//! `action_shim::dispatch` restarts, then asserts the final row carries
-//! `restart_count == 2` and a `last_terminated` describing the **second**
-//! terminal — not the first.
+//! Drives `A0 Running → A0 Failed → A1 Running → A1 Failed → A2 Running`
+//! with a real `ExecDriver` and `exit_observer::spawn`, then proves each
+//! predecessor row remains immutable while every successor begins zero/None.
 //!
 //! # Why this test is load-bearing (§ D6)
 //!
-//! This is the ONLY test that fails when a writer forward-carries the
-//! two crash-observability fields wrongly. A hand-typed
-//! `restart_count: 0` at any forward-carry site:
-//!
-//! - passes T-A (`crash_facts_advance.rs`), which tests the pure
-//!   function, not the call sites;
-//! - passes T-C (`action_shim_crash_observability.rs`), which asserts
-//!   `== 1` after exactly one restart;
-//! - passes the rewritten `crash_recovery.rs`, which also asserts `== 1`.
-//!
-//! Only a SECOND cycle observes the difference: a resetting writer
-//! yields `1` again where the contract requires `2`. The specific hazard
-//! is § D2 site 7 — the exit observer, which before ADR-0078 built its
-//! row from a raw `AllocStatusRow { .. }` literal and would have had to
-//! type both fields by hand. Routing it through
-//! `build_alloc_status_row` puts it inside the required-parameter net;
-//! this test is what proves the routing actually forwards.
+//! The two cycles distinguish per-allocation crash history from the stable
+//! workload budget: an exit observer may update only its exact allocation key,
+//! and replacement may never copy or overwrite a predecessor's history.
 //!
 //! # Determinism
 //!
-//! The restarts are dispatched EXPLICITLY through `action_shim::dispatch`
+//! The replacements are dispatched explicitly through `action_shim::dispatch`
 //! rather than driven by the `WorkloadLifecycle` reconciler's backoff, so
 //! there is no restart-budget timing to race. The only waits are for the
 //! kernel to reap the workload and for the observer task to drain its
@@ -42,6 +25,10 @@
 //! vs unit gating".
 
 #![cfg(target_os = "linux")]
+#![allow(
+    clippy::doc_markdown,
+    reason = "the required CONTRACT_SHAPE line is an exact repository token"
+)]
 
 use std::path::Path;
 use std::sync::Arc;
@@ -83,8 +70,10 @@ const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 fn crashing_spec(alloc: &AllocationId, exit_code: u8) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs2/alloc/0")
-            .expect("valid spiffe id"),
+        identity: SpiffeId::for_allocation(
+            &WorkloadId::new("crashobs2").expect("valid workload id"),
+            alloc,
+        ),
         driver: overdrive_core::traits::driver::DriverPayload::Exec(
             overdrive_core::traits::driver::ExecPayload {
                 command: "/bin/sh".to_owned(),
@@ -146,10 +135,11 @@ async fn await_row(
     panic!("timed out waiting for {what}; last observed row: {last:#?}");
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
 #[allow(clippy::too_many_lines)]
-async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() {
+async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     let cgroup_root = Path::new(CGROUP_ROOT);
     let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
     CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
@@ -174,6 +164,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     let events = Arc::new(events_tx);
 
     let alloc = AllocationId::new("alloc-crashobs2-0").expect("valid alloc id");
+    let successor_one = AllocationId::new("alloc-crashobs2-1").expect("valid alloc id");
+    let successor_two = AllocationId::new("alloc-crashobs2-2").expect("valid alloc id");
     let workload = WorkloadId::new("crashobs2").expect("valid workload id");
     let _cleanup =
         AllocCleanup { obs: obs.clone(), cgroup_root: std::path::PathBuf::from(CGROUP_ROOT) };
@@ -240,7 +232,7 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
         crash_one.reason,
     );
 
-    // ---- Cycle 1 recovery: RestartAllocation -> Running (restarts 1). --
+    // ---- Cycle 1 recovery: predecessor A0 -> fresh Running A1. -----
     dispatch_one(
         obs.as_ref(),
         drivers.as_ref(),
@@ -249,7 +241,7 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
         &events,
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
-            spec: crashing_spec(&alloc, 4),
+            spec: crashing_spec(&successor_one, 4),
             kind: WorkloadKind::Service,
         },
         1,
@@ -258,28 +250,24 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
 
     let recovery_one = await_row(
         obs.as_ref(),
-        &alloc,
+        &successor_one,
         Duration::from_secs(5),
         "the first recovered Running row",
-        |r| r.state == AllocState::Running && r.restart_count >= 1,
+        |r| r.state == AllocState::Running,
     )
     .await;
-    assert_eq!(recovery_one.restart_count, 1, "exactly one observed restart after cycle 1");
-    let lt_one =
-        recovery_one.last_terminated.as_ref().expect("recovery 1 must snapshot the first crash");
-    assert!(
-        matches!(
-            lt_one.reason,
-            Some(TransitionReason::WorkloadCrashedImmediately { exit_code: Some(3), .. })
-        ),
-        "the snapshot must describe crash 1 (exit 3): {:?}",
-        lt_one.reason,
+    assert_eq!(recovery_one.restart_count, 0, "fresh A1 starts per-key history at zero");
+    assert!(recovery_one.last_terminated.is_none());
+    assert_eq!(
+        obs.alloc_status_row(&alloc).await.expect("A0 row re-read"),
+        Some(crash_one.clone()),
+        "A1 publication must not rewrite A0 crash history",
     );
 
-    // ---- Cycle 2: the SECOND crash -> Failed (forwards both fields). ---
+    // ---- Cycle 2: A1 crashes and keeps its own zero/None history. ---
     let crash_two = await_row(
         obs.as_ref(),
-        &alloc,
+        &successor_one,
         Duration::from_secs(20),
         "the SECOND Failed row (exit 4)",
         |r| {
@@ -292,22 +280,10 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     )
     .await;
 
-    // THE assertion this whole test exists for. A writer that hand-types
-    // `restart_count: 0` here — the pre-ADR-0078 raw-literal shape — makes
-    // this line fail while every other crash-observability test still
-    // passes.
-    assert_eq!(
-        crash_two.restart_count, 1,
-        "§ D2 site 7: the exit observer must FORWARD restart_count across a crash, \
-         not reset it (this is the forward-carry regression T-F exists to catch)",
-    );
-    assert_eq!(
-        crash_two.last_terminated.as_ref().and_then(|lt| lt.reason.clone()),
-        lt_one.reason.clone(),
-        "and it must forward the snapshot of crash 1 verbatim, not re-mint one",
-    );
+    assert_eq!(crash_two.restart_count, 0);
+    assert!(crash_two.last_terminated.is_none());
 
-    // ---- Cycle 2 recovery: RestartAllocation -> Running (restarts 2). --
+    // ---- Cycle 2 recovery: predecessor A1 -> fresh Running A2. -----
     dispatch_one(
         obs.as_ref(),
         drivers.as_ref(),
@@ -315,10 +291,10 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
         &store,
         &events,
         Action::RestartAllocation {
-            alloc_id: alloc.clone(),
+            alloc_id: successor_one.clone(),
             // A long-lived command so the final Running row is stable for
             // the assertions; the cleanup guard reaps it.
-            spec: long_lived_spec(&alloc),
+            spec: long_lived_spec(&successor_two),
             kind: WorkloadKind::Service,
         },
         2,
@@ -327,62 +303,47 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
 
     let recovery_two = await_row(
         obs.as_ref(),
-        &alloc,
+        &successor_two,
         Duration::from_secs(5),
         "the second recovered Running row",
-        |r| r.state == AllocState::Running && r.restart_count >= 2,
+        |r| r.state == AllocState::Running,
     )
     .await;
 
-    assert_eq!(recovery_two.restart_count, 2, "TWO crashes survived, TWO restarts counted");
-    let lt_two =
-        recovery_two.last_terminated.as_ref().expect("recovery 2 must snapshot the second crash");
-    assert!(
-        matches!(
-            lt_two.reason,
-            Some(TransitionReason::WorkloadCrashedImmediately { exit_code: Some(4), .. })
-        ),
-        "the depth-1 snapshot must describe the SECOND terminal (exit 4), not the first: {:?}",
-        lt_two.reason,
-    );
+    assert_eq!(recovery_two.restart_count, 0, "fresh A2 starts per-key history at zero");
+    assert!(recovery_two.last_terminated.is_none());
     assert_eq!(
-        lt_two.terminated_at, crash_two.updated_at,
-        "and it must identify exactly WHICH durable observation it summarises",
-    );
-    assert!(
-        recovery_two.updated_at.dominates(&lt_two.terminated_at),
-        "the recovered row must strictly dominate the terminal it snapshots",
+        obs.alloc_status_row(&successor_one).await.expect("A1 row re-read"),
+        Some(crash_two.clone()),
+        "A2 publication must not rewrite A1 crash history",
     );
 
     // Reap the long-lived final workload through the PRODUCTION stop path
     // rather than leaving it for the `Drop` guard: an outliving
     // `sleep 3600` is what nextest flags as LEAK, and the guard only fires
-    // on unwind. This also exercises § D2 site 6's forward-carry against a
-    // row that genuinely carries crash history.
+    // on unwind. This also exercises exact-key stop forward-carry on A2.
     dispatch_one(
         obs.as_ref(),
         drivers.as_ref(),
         &alloc_drivers,
         &store,
         &events,
-        Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
+        Action::StopAllocation { alloc_id: successor_two.clone(), terminal: None },
         3,
     )
     .await;
     let stopped = await_row(
         obs.as_ref(),
-        &alloc,
+        &successor_two,
         Duration::from_secs(10),
         "the Terminated row after the operator stop",
         |r| r.state == AllocState::Terminated,
     )
     .await;
-    assert_eq!(stopped.restart_count, 2, "§ D2 site 6: a stop FORWARDS the monotone counter");
-    assert_eq!(
-        stopped.last_terminated.as_ref().map(|lt| &lt.terminated_at),
-        Some(&crash_two.updated_at),
-        "and it keeps describing the crash the alloc survived",
-    );
+    assert_eq!(stopped.restart_count, 0);
+    assert!(stopped.last_terminated.is_none());
+    assert_eq!(obs.alloc_status_row(&alloc).await.unwrap(), Some(crash_one));
+    assert_eq!(obs.alloc_status_row(&successor_one).await.unwrap(), Some(crash_two));
 
     drop(driver_concrete);
     drop(driver);

@@ -569,3 +569,19 @@ them:
   H-1, user-approved. Companion ADR-0082 § D8 and ADR-0083 §§ D5–D7 already
   consumed this decision by name before it had a number; cross-referenced in
   both directions in this version.
+
+- 2026-09-12 — **Accepted VM replacement identity amendment (GH #284;
+  independent DESIGN review iteration 2 APPROVED; approved design commit
+  `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`).** The three
+  Ending Classes, their restart eligibility and Platform-Reclamation budget
+  exemption remain unchanged. The VM application path no longer re-drives a
+  Platform-Reclamation row by reusing its allocation key: it emits the existing
+  fresh `StartAllocation` path under [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md).
+  `AllocStatusRow.restart_count` / `LastTerminated` remain per-physical-key
+  facts, while the stable `WorkloadId` owner retains candidate-keyed policy
+  inputs. Platform Reclamation still increments no Workload Failure budget and
+  stamps no failure time; the existing VM View now carries those values into a
+  fresh issued-ID reservation before dispatch solely so rejected publication
+  cannot reuse an execution identity. The old terminal row remains the
+  occurrence/history record; no new ending class or cross-allocation row is
+  introduced.

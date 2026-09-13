@@ -998,3 +998,36 @@ record this row.
   differs from `stop`'s sticky-sentinel idempotency; documented in the
   `RestartOutcome` rationale and the § "Idempotency posture: level-triggered
   coalescing" subsection.
+
+## Accepted amendment 2026-09-12 — automatic VM replacement also uses the fresh-ID path (GH #284)
+
+Accepted through ADR-0104 after independent DESIGN review iteration 2
+APPROVED; approved design commit
+`a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
+
+ADR-0073's explicit `overdrive workload restart` decision already mints a fresh
+allocation during the generation-mismatch placement branch. GH #284 revalidated
+that the separate automatic recovery branch still emitted same-ID
+`RestartAllocation` for VM payloads, allowing the predecessor's VM run
+directory, beacon, cgroup and clone ownership to alias the replacement.
+
+The VM-specific automatic recovery branch is therefore amended to reuse the
+already-existing `Action::StartAllocation` fresh-ID shape. `WorkloadId`,
+`generation`/`observed_generation` and `current_alloc`'s accepted-row selection
+remain the logical-owner contract. VM ID minting advances above both retained
+row suffixes and the existing View's pre-dispatch issued-ID reservation keys,
+so a rejected Running publication cannot reuse an execution identity.
+`Action::RestartAllocation` remains unchanged for `Exec` payloads. No revision
+pointer, `VmIncarnationId`, new action, persistence row, retry, barrier, sleep,
+global lock or cleanup fallback is added. The exact application contract is
+recorded in [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md).
+
+The existing `WorkloadLifecycleView` field/codec shape is retained with an
+explicit VM semantic amendment: `restart_counts` key presence reserves an
+issued VM identity and its value carries the candidate's Workload Failure
+budget; `last_failure_seen_at` remains candidate-keyed genuine-failure input.
+Generation replacement carries those inputs to its fresh reservation without
+incrementing them. Retry/backoff never scans historical values. Exec retains
+its existing per-allocation semantics. `AllocStatusRow.restart_count` and
+`LastTerminated` remain per-physical-allocation facts under ADR-0078 and are not
+copied to a new row.
