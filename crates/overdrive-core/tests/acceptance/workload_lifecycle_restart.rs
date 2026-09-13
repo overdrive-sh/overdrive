@@ -306,6 +306,21 @@ fn start_allocations(actions: &[Action]) -> Vec<&Action> {
     actions.iter().filter(|a| matches!(a, Action::StartAllocation { .. })).collect()
 }
 
+fn restart_allocations(actions: &[Action]) -> Vec<&Action> {
+    actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect()
+}
+
+fn assert_restart_pair(action: &Action, predecessor: &str, successor: &str) {
+    match action {
+        Action::RestartAllocation { alloc_id, spec, .. } => {
+            assert_eq!(alloc_id, &aid(predecessor));
+            assert_eq!(spec.alloc, aid(successor));
+            assert_ne!(alloc_id, &spec.alloc);
+        }
+        other => panic!("expected RestartAllocation, got {other:?}"),
+    }
+}
+
 /// Count the `StopAllocation` actions in an action set.
 fn stop_allocations(actions: &[Action]) -> Vec<&Action> {
     actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).collect()
@@ -316,6 +331,7 @@ fn stop_allocations(actions: &[Action]) -> Vec<&Action> {
 // instance, intent retained, observed stamped to desired.
 // ===================================================================
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
     // Given: payments-0 Terminated{Operator}, desired.generation=1,
@@ -329,27 +345,15 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
 
     let (actions, next) = run(&desired, &actual, &view);
 
-    let starts = start_allocations(&actions);
+    let restarts = restart_allocations(&actions);
     assert_eq!(
-        starts.len(),
+        restarts.len(),
         1,
-        "stopped-origin restart (R4) must place exactly one fresh instance; got {actions:?}",
+        "stopped-origin restart (R4) must replace into exactly one fresh instance; got {actions:?}",
     );
-    match starts[0] {
-        Action::StartAllocation { alloc_id, .. } => {
-            assert_ne!(
-                alloc_id.as_str(),
-                "alloc-payments-0",
-                "the fresh instance must be a NEW AllocationId (A1 != A2), got {alloc_id:?}",
-            );
-            assert_eq!(
-                alloc_id.as_str(),
-                "alloc-payments-1",
-                "mint_alloc_id(attempt = allocs_vec.len() = 1) mints payments-1",
-            );
-        }
-        other => panic!("expected StartAllocation, got {other:?}"),
-    }
+    assert_restart_pair(restarts[0], "alloc-payments-0", "alloc-payments-1");
+    assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
+    assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
         next.observed_generation, 1,
         "the placement tick must stamp observed_generation = desired.generation (1)",
@@ -357,7 +361,8 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
     // Intent-retained contract, pinned across EVERY withdrawal/teardown
     // shape (review-01-02 nitpick): a stopped-origin restart places the
     // fresh instance and withdraws NOTHING. The full action set for this
-    // R4 fixture is exactly one `StartAllocation` plus the three
+    // R4 fixture is exactly one predecessor→fresh-successor
+    // `RestartAllocation` plus the three
     // documented Service-kind dual-emit enqueues (backend-discovery-bridge
     // + service-lifecycle + svid-lifecycle) — no StopAllocation (the prior
     // instance is already Terminated), no ReleaseServiceVip (intent
@@ -429,6 +434,7 @@ fn s_bir_restart_running_stop_emits_one_stop_no_stamp() {
 // Terminated, place the fresh one and stamp.
 // ===================================================================
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn s_bir_restart_running_place_places_fresh_and_stamps() {
     // Given: coinflip-0 already stopped (Terminated{Operator}), no Running.
@@ -441,18 +447,11 @@ fn s_bir_restart_running_place_places_fresh_and_stamps() {
 
     let (actions, next) = run(&desired, &actual, &view);
 
-    let starts = start_allocations(&actions);
-    assert_eq!(starts.len(), 1, "R3 places exactly one fresh instance; got {actions:?}");
-    match starts[0] {
-        Action::StartAllocation { alloc_id, .. } => {
-            assert_eq!(
-                alloc_id.as_str(),
-                "alloc-coinflip-1",
-                "the fresh coinflip-1 (A1 != A2, new /30)",
-            );
-        }
-        other => panic!("expected StartAllocation, got {other:?}"),
-    }
+    let restarts = restart_allocations(&actions);
+    assert_eq!(restarts.len(), 1, "R3 replaces into exactly one fresh instance; got {actions:?}");
+    assert_restart_pair(restarts[0], "alloc-coinflip-0", "alloc-coinflip-1");
+    assert_eq!(next.restart_counts.get(&aid("alloc-coinflip-1")), Some(&0));
+    assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-coinflip-1")));
     assert_eq!(
         next.observed_generation, 1,
         "the placement tick (R3) is the only tick that stamps observed_generation = desired",
@@ -490,6 +489,7 @@ fn s_bir_stop_once_no_duplicate_stop_while_draining() {
 // instance for the latest generation, stamp observed = desired (=2).
 // ===================================================================
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn s_bir_coalesce_place_one_instance_stamps_to_latest_generation() {
     // Given: stopped-origin payments, observed=0, two restarts advanced
@@ -503,11 +503,11 @@ fn s_bir_coalesce_place_one_instance_stamps_to_latest_generation() {
 
     let (actions, next) = run(&desired, &actual, &view);
 
-    assert_eq!(
-        start_allocations(&actions).len(),
-        1,
-        "two pre-placement restarts coalesce into exactly ONE placement; got {actions:?}",
-    );
+    let restarts = restart_allocations(&actions);
+    assert_eq!(restarts.len(), 1, "two requests coalesce into exactly ONE replacement");
+    assert_restart_pair(restarts[0], "alloc-payments-0", "alloc-payments-1");
+    assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
+    assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
         next.observed_generation, 2,
         "stamp is observed = desired (= 2), NOT observed + 1 — the level-triggered coalesce",
@@ -769,6 +769,7 @@ fn s_bir_bug3_preserved_same_spec_deploy_does_not_resurrect() {
 /// `restart_counts` pool). `RestartAllocation` carries no cause field —
 /// the cause is the prior row's observable `Stopped { by: LivenessProbe }`
 /// terminal (ADR-0087 D4).
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn s_roh_a_02_liveness_terminated_restarts_under_single_budget() {
     let (desired, actual) = states(
@@ -790,21 +791,16 @@ fn s_roh_a_02_liveness_terminated_restarts_under_single_budget() {
         "a liveness-terminated row below ceiling is restartable — exactly one RestartAllocation; \
          got {actions:?}",
     );
-    match restarts[0] {
-        Action::RestartAllocation { alloc_id, .. } => {
-            assert_eq!(
-                alloc_id.as_str(),
-                "alloc-payments-0",
-                "restart targets the liveness-killed alloc"
-            );
-        }
-        other => panic!("expected RestartAllocation, got {other:?}"),
-    }
+    assert_restart_pair(restarts[0], "alloc-payments-0", "alloc-payments-1");
     assert_eq!(
-        next.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        next.restart_counts.get(&aid("alloc-payments-1")).copied(),
         Some(3),
-        "the single restart_counts site increments by exactly one (2 -> 3) — crash and liveness \
-         share ONE budget",
+        "the fresh successor carries the one shared workload budget increment (2 -> 3)",
+    );
+    assert_eq!(next.restart_counts.get(&aid("alloc-payments-0")), Some(&2));
+    assert_eq!(
+        next.last_failure_seen_at.get(&aid("alloc-payments-1")),
+        Some(&UnixInstant::from_unix_duration(Duration::ZERO))
     );
     assert!(
         !actions.iter().any(|a| matches!(a, Action::FinalizeFailed { .. })),
@@ -1003,46 +999,56 @@ fn s_roh_a_05_intentional_stop_discriminator_unchanged() {
     );
 }
 
-/// S-ROH-A-08 — budget unification: a crash and a liveness kill on the
-/// SAME alloc draw the SAME `restart_counts` pool through the single
-/// increment site (the kubelet single-RESTARTS shape). A crash restart
-/// bumps the counter, and a subsequent liveness restart bumps the SAME
-/// counter — one budget, not two.
+/// S-ROH-A-08 — budget unification: a crash and a later liveness kill on
+/// its accepted successor draw one workload budget through the single
+/// increment site. Each physical allocation retains its issued ledger entry;
+/// the carried candidate value, not key reuse, proves one budget.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn s_roh_a_08_crash_and_liveness_share_one_budget() {
-    // Crash restart at counts=2 → counts=3.
+    // Crash replacement carries counts=2 → successor counts=3.
     let (crash_desired, crash_actual) =
         states("payments", 1, vec![alloc_crashed("alloc-payments-0", "payments", "local")]);
     let view = view_with_restart_counts(1, "alloc-payments-0", 2);
-    let (_crash_out, after_crash) = run(&crash_desired, &crash_actual, &view);
+    let (crash_out, after_crash) = run(&crash_desired, &crash_actual, &view);
+    let crash_restarts = restart_allocations(&crash_out);
+    assert_eq!(crash_restarts.len(), 1);
+    assert_restart_pair(crash_restarts[0], "alloc-payments-0", "alloc-payments-1");
     assert_eq!(
-        after_crash.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        after_crash.restart_counts.get(&aid("alloc-payments-1")).copied(),
         Some(3),
-        "a crash restart increments the shared budget (2 -> 3)",
+        "a crash replacement carries and increments the shared budget (2 -> 3)",
     );
+    assert_eq!(after_crash.restart_counts.get(&aid("alloc-payments-0")), Some(&2));
 
-    // A liveness kill on the same alloc continues the SAME pool → 3 -> 4.
+    // A liveness kill on the accepted successor continues the same workload
+    // budget into another fresh successor: 3 -> 4.
     // Advance the clock past the 1s backoff window the crash restart
     // stamped (last_failure_seen_at) so the restart-emission path is
     // reached — the point under test is the shared counter, not backoff.
     let (liveness_desired, liveness_actual) = states(
         "payments",
         1,
-        vec![alloc_liveness_terminated("alloc-payments-0", "payments", "local")],
+        vec![alloc_liveness_terminated("alloc-payments-1", "payments", "local")],
     );
     let later_tick =
         fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(10)));
-    let (_liveness_out, after_liveness) = WorkloadLifecycle::canonical().reconcile(
+    let (liveness_out, after_liveness) = WorkloadLifecycle::canonical().reconcile(
         &liveness_desired,
         &liveness_actual,
         &after_crash,
         &later_tick,
     );
+    let liveness_restarts = restart_allocations(&liveness_out);
+    assert_eq!(liveness_restarts.len(), 1);
+    assert_restart_pair(liveness_restarts[0], "alloc-payments-1", "alloc-payments-2");
     assert_eq!(
-        after_liveness.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        after_liveness.restart_counts.get(&aid("alloc-payments-2")).copied(),
         Some(4),
-        "a liveness restart draws the SAME budget the crash did (3 -> 4) — one pool, not two",
+        "a liveness replacement draws the same workload budget (3 -> 4)",
     );
+    assert_eq!(after_liveness.restart_counts.get(&aid("alloc-payments-0")), Some(&2));
+    assert_eq!(after_liveness.restart_counts.get(&aid("alloc-payments-1")), Some(&3));
 }
 
 proptest! {

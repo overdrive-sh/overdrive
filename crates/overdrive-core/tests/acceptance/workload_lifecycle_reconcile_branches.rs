@@ -745,9 +745,10 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
 
 /// Single-tick: a fresh Terminated alloc with no prior view entries
 /// must emit `RestartAllocation` AND populate
-/// `next_view.last_failure_seen_at[<alloc_id>]` with `tick.now_unix`
+/// `next_view.last_failure_seen_at[<successor_id>]` with `tick.now_unix`
 /// (the observation timestamp, NOT `tick.now_unix +
 /// RESTART_BACKOFF_DURATION`). Restart count goes from 0 to 1.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn fresh_failure_writes_seen_at_into_next_view() {
     let nodes = one_node_map("local");
@@ -796,16 +797,18 @@ fn fresh_failure_writes_seen_at_into_next_view() {
          svid-lifecycle EnqueueEvaluation \
          per ADR-0067 D5b (Service-kind restart); got {actions:?}"
     );
+    let successor = aid("alloc-payments-1");
     match &actions[0] {
-        Action::RestartAllocation { alloc_id, .. } => {
+        Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
+            assert_eq!(spec.alloc, successor);
         }
         other => panic!("expected RestartAllocation, got {other:?}"),
     }
 
     // Restart count incremented from 0 to 1.
     assert_eq!(
-        next_view.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        next_view.restart_counts.get(&successor).copied(),
         Some(1),
         "restart count must be incremented to 1 on first failure",
     );
@@ -814,7 +817,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
     // precomputed deadline). Per issue #141 — persist inputs, recompute
     // deadlines on read.
     assert_eq!(
-        next_view.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        next_view.last_failure_seen_at.get(&successor).copied(),
         Some(now_unix),
         "last_failure_seen_at must be populated with tick.now_unix \
          (the observation timestamp, NOT a precomputed deadline)",
@@ -828,6 +831,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
 /// regression evidence: against the pre-issue-141 `main`, tick 2
 /// re-emits `RestartAllocation` because `view.last_failure_seen_at`
 /// was never populated by tick 1.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn subsequent_tick_within_backoff_window_emits_nothing() {
     let nodes = one_node_map("local");
@@ -869,6 +873,14 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
     let r = WorkloadLifecycle::canonical();
     let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
 
+    // The successor accepted the failed/terminated outcome and is now the
+    // numeric-current candidate whose carried policy gates tick 2.
+    let mut actual_2 = actual;
+    actual_2.allocations = one_alloc_map(
+        "alloc-payments-1",
+        alloc_with_state("alloc-payments-1", "payments", "local", AllocState::Terminated),
+    );
+
     // Tick 2: advance now_unix by less than RESTART_BACKOFF_DURATION.
     // The gate must fire (`now_unix < seen_at + backoff`) and emit
     // nothing. The view fed in IS the next_view from tick 1.
@@ -876,7 +888,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
     let now_unix_2 = now_unix_1 + Duration::from_millis(500);
     let tick_2 = tick_at_unix(now_2, now_unix_2, 1);
 
-    let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
+    let (actions_2, next_view_2) = r.reconcile(&desired, &actual_2, &next_view_1, &tick_2);
 
     assert!(
         actions_2.is_empty(),
@@ -887,8 +899,8 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
     // Count NOT bumped during a gated tick — the alloc was never
     // restarted on this tick.
     assert_eq!(
-        next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied(),
-        next_view_1.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        next_view_2.restart_counts.get(&aid("alloc-payments-1")).copied(),
+        next_view_1.restart_counts.get(&aid("alloc-payments-1")).copied(),
         "restart count must not advance on a gated tick",
     );
 
@@ -896,8 +908,8 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
     // gated tick. (Advancing it on a gated tick would let failures
     // slip past the ceiling indefinitely.)
     assert_eq!(
-        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
-        next_view_1.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-1")).copied(),
+        next_view_1.last_failure_seen_at.get(&aid("alloc-payments-1")).copied(),
         "last_failure_seen_at must not advance on a gated tick",
     );
 }
@@ -909,6 +921,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
 /// timestamp, NOT the previous seen_at + window). This pins the spec
 /// semantics: each restart attempt records a fresh failure
 /// observation.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
     let nodes = one_node_map("local");
@@ -950,6 +963,14 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
     let r = WorkloadLifecycle::canonical();
     let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
 
+    // The accepted successor, not its historical predecessor, owns the next
+    // failure observation and becomes the next RestartAllocation predecessor.
+    let mut actual_2 = actual;
+    actual_2.allocations = one_alloc_map(
+        "alloc-payments-1",
+        alloc_with_state("alloc-payments-1", "payments", "local", AllocState::Terminated),
+    );
+
     // Tick 2: advance now_unix strictly past RESTART_BACKOFF_DURATION.
     // Gate elapsed → another restart must fire, seen_at rolls forward
     // to the new tick's now_unix.
@@ -957,36 +978,38 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
     let now_unix_2 = now_unix_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
     let tick_2 = tick_at_unix(now_2, now_unix_2, 1);
 
-    let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
+    let (actions_2, next_view_2) = r.reconcile(&desired, &actual_2, &next_view_1, &tick_2);
 
     assert_eq!(
         actions_2.len(),
         3,
         "tick 2 after backoff elapsed must emit one RestartAllocation + service-lifecycle EnqueueEvaluation per GAP-9 + svid-lifecycle EnqueueEvaluation per ADR-0067 D5b (Service-kind restart); got {actions_2:?}",
     );
-    assert!(
-        matches!(
-            actions_2[0],
-            Action::RestartAllocation {
-                kind: overdrive_core::aggregate::WorkloadKind::Service,
-                ..
-            }
-        ),
-        "first action must be RestartAllocation; got {:?}",
-        actions_2[0],
-    );
+    match &actions_2[0] {
+        Action::RestartAllocation { alloc_id, spec, kind } => {
+            assert_eq!(alloc_id, &aid("alloc-payments-1"));
+            assert_eq!(spec.alloc, aid("alloc-payments-2"));
+            assert_eq!(*kind, overdrive_core::aggregate::WorkloadKind::Service);
+        }
+        other => panic!("expected RestartAllocation, got {other:?}"),
+    }
 
     // Count bumped by exactly 1.
-    let count_1 = next_view_1.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
-    let count_2 = next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
+    let count_1 = next_view_1.restart_counts.get(&aid("alloc-payments-1")).copied().unwrap_or(0);
+    let count_2 = next_view_2.restart_counts.get(&aid("alloc-payments-2")).copied().unwrap_or(0);
     assert_eq!(count_2, count_1 + 1, "restart count must advance by exactly 1 on a non-gated tick");
+    assert_eq!(
+        next_view_2.restart_counts.get(&aid("alloc-payments-1")).copied(),
+        Some(count_1),
+        "the predecessor reservation remains immutable issued-ID history",
+    );
 
     // seen_at rolls forward to tick_2.now_unix — NOT the old seen_at +
     // window. This pins the spec semantics: each restart attempt
     // records a fresh failure observation, and the deadline is
     // recomputed from it on subsequent reads.
     assert_eq!(
-        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-2")).copied(),
         Some(now_unix_2),
         "deadline must roll forward to new tick.now + RESTART_BACKOFF_DURATION",
     );
