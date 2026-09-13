@@ -9,6 +9,21 @@ application/component scope for `vm-recreation-allocation-id-reuse` (GH #284)
 and uses the repository's OOP, modular-monolith, ports-and-adapters
 architecture.
 
+**Corrective status, 2026-09-13:** the user rejected this ADR's VM-only
+boundary. The user-ratified
+[ADR-0105](adr-0105-driver-neutral-allocation-replacement-identity.md),
+[ADR-0106](adr-0106-successor-creation-does-not-wait-for-predecessor-cleanup.md),
+and [ADR-0108](adr-0108-durable-reservation-consumes-successor-allocation-identity.md)
+plus [ADR-0109](adr-0109-replacement-requires-terminal-predecessor-handoff.md)
+record the replacement choices. The exact contract ratified as P-105-1 through
+P-105-7 lives in the canonical feature delta. Final independent review
+iteration 2 returned `CHANGES_REQUESTED`; its bounded F-03…F-06 documentation
+findings were remediated without a third review under the user's two-cycle cap,
+so explicit user disposition remains required.
+[ADR-0107](adr-0107-successor-identity-consumption-follows-successor-owned-effect.md)
+was withdrawn before acceptance. This record is historical #284 evidence, not
+PR #292 merge authority.
+
 This ADR amends the VM-specific replacement identity described by ADR-0073,
 ADR-0081, ADR-0083 and ADR-0089. It does not change their accepted ending
 taxonomy, claim lifecycle, public port signatures, network ownership, or
