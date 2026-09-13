@@ -566,7 +566,7 @@ fn assert_service_and_svid_wakes(world: &World) {
 /// also wakes ServiceLifecycle. No retry count, terminal row, restart view, or
 /// replacement Action is seeded to reach exhaustion.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: liveness projection follows fresh successors"]
+#[ignore = "pending DELIVER step 01-02: liveness projection follows fresh successors"]
 async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
     let mut spec = input(&[(18081, "tcp")], 1);
@@ -733,7 +733,7 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
 /// attaching it to a fresh successor. A subsequent reconciliation repairs the
 /// rejected row from observation, not emit memory.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: terminal veto remains predecessor-scoped across fresh successor"]
+#[ignore = "pending DELIVER step 01-02: terminal veto remains predecessor-scoped across fresh successor"]
 async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
@@ -950,7 +950,7 @@ async fn rejected_first_publication_is_repaired_from_observed_state() {
 /// startup decision preserve the policy owner's predecessor-scoped veto
 /// through bounded reconciliation.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: startup replacement uses fresh successor without inherited veto"]
+#[ignore = "pending DELIVER step 01-02: startup replacement uses fresh successor without inherited veto"]
 async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
     for seed in [257_209, 257_216] {
         let mut spec = input(&[(18081, "tcp")], 1);

@@ -491,7 +491,7 @@ proptest! {
     /// (`workload_lifecycle.rs:1157-1163`, `brief.md` §104/§105a.10).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending corrective re-DELIVER roadmap: driver-neutral Platform Reclamation replacement"]
+    #[ignore = "pending DELIVER step 01-01: driver-neutral Platform Reclamation replacement"]
     fn job_kind_reclaimed_vm_is_restarted_never_fabricated_completed_zero(
         alloc in arb_alloc_id(10_000_000),
         workload_id in arb_workload_id(),
@@ -563,7 +563,7 @@ proptest! {
     /// ~:680) excludes Platform Reclamation from the attempts count.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending corrective re-DELIVER roadmap: driver-neutral Platform Reclamation replacement"]
+    #[ignore = "pending DELIVER step 01-01: driver-neutral Platform Reclamation replacement"]
     fn six_consecutive_reclamations_never_trip_restart_budget_exhausted(
         alloc in arb_alloc_id(11_000_000),
         workload_id in arb_workload_id(),

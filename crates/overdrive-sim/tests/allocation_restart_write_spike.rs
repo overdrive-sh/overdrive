@@ -275,7 +275,7 @@ async fn drive(seed: u64, contend: bool) {
     reason = "the test intentionally awaits the complete seeded production composition"
 )]
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: predecessor exit is isolated from fresh successor publication"]
+#[ignore = "pending DELIVER step 01-02: predecessor exit is isolated from fresh successor publication"]
 async fn predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication() {
     drive(257_203, true).await;
 }
@@ -286,7 +286,7 @@ async fn predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publicat
     reason = "the test intentionally awaits the complete seeded production composition"
 )]
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: fresh successor control without predecessor exit"]
+#[ignore = "pending DELIVER step 01-02: fresh successor control without predecessor exit"]
 async fn fresh_successor_publication_without_predecessor_exit_control() {
     drive(257_203, false).await;
 }

@@ -131,7 +131,7 @@ fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
 /// consumed ID. No row or replacement Action is seeded by the test.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: full production-owner replacement and reopen"]
+#[ignore = "pending DELIVER step 01-02: full production-owner replacement and reopen"]
 async fn production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm() {
     eprintln!(
         "seed={SEED}; reproduce: cargo xtask lima run -- cargo nextest run -p overdrive-sim \
@@ -784,7 +784,7 @@ async fn seeded_predecessor(
 /// for the one post-successor exact-old cleanup attempt.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: successor-first exact-old cleanup ordering"]
+#[ignore = "pending DELIVER step 01-02: successor-first exact-old cleanup ordering"]
 async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver() {
     eprintln!("seed={SEED}: successor-first driver-neutral replacement");
     for driver_type in [DriverType::Exec, DriverType::Vm] {
@@ -904,7 +904,7 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
 /// structured tracing.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: successor and cleanup failure precedence"]
+#[ignore = "pending DELIVER step 01-02: successor and cleanup failure precedence"]
 async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
     eprintln!("seed={SEED}: successor/cleanup precedence table");
     let captured = CapturedEvents::default();
@@ -1154,7 +1154,7 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
 /// and can no longer be numeric-current.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: fresh-key rejected successor publication"]
+#[ignore = "pending DELIVER step 01-02: fresh-key rejected successor publication"]
 async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
     let (obs, predecessor, successor, workload) = seeded_predecessor(DriverType::Exec).await;
     let before = obs.alloc_status_row(&predecessor).await.unwrap().unwrap();
@@ -1308,7 +1308,7 @@ impl ObservationStore for RejectFreshPublication {
 /// invent a second allocation proposal inside the shim.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: rejected fresh-key publication unwind"]
+#[ignore = "pending DELIVER step 01-02: rejected fresh-key publication unwind"]
 async fn rejected_successor_publication_fully_unwinds_without_immediate_second_proposal() {
     let (inner, predecessor, successor, workload) = seeded_predecessor(DriverType::Exec).await;
     let before = inner.alloc_status_row(&predecessor).await.unwrap().unwrap();

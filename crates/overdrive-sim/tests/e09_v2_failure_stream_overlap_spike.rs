@@ -399,7 +399,7 @@ async fn start_stream(
 /// and backend eligibility. Nine pre-existing healthy stops must not cause
 /// the original E09 unbound deploy to report only a generic Timeout.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: overlap stream preserves failure across fresh successor"]
+#[ignore = "pending DELIVER step 01-02: overlap stream preserves failure across fresh successor"]
 async fn overlapping_healthy_stops_preserve_e09_startup_failure_result() {
     drive(true).await;
 }
@@ -408,7 +408,7 @@ async fn overlapping_healthy_stops_preserve_e09_startup_failure_result() {
 /// Same owners, inputs and stop delays; failure submitted after peers stop.
 /// The original stream reports StartupProbeFailed and remains never-Stable.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending corrective re-DELIVER roadmap: post-stop control uses fresh successor"]
+#[ignore = "pending DELIVER step 01-02: post-stop control uses fresh successor"]
 async fn completed_healthy_stops_control_reports_startup_failure() {
     drive(false).await;
 }
