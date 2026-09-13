@@ -4,9 +4,11 @@
 > DOMAIN model and APPLICATION architecture — are **APPROVED — user ratification
 > APPROVED, 2026-09-13**. The user explicitly approved the complete
 > `public-ingress-gateway` DESIGN; the former application-review/design-approval
-> gate is closed and the full-stack DESIGN handoff is approved. DISTILL remains
-> **ACCEPTABLE_WITH_DOCUMENTED_GAPS — 12/15 passing** because its separate C4a/C6
-> high-only acceptance gaps remain; DISTILL is not marked approved.
+> gate is closed and the full-stack DESIGN handoff is approved. DISTILL is
+> **COMPLETE by the mechanical threshold — 14/15 passing**, but is not marked
+> approved because the separate C4a acceptance gap remains. C6b/C6c use the
+> two-layer owner-boundary and redacted-projection evidence below; the public
+> collapse remains exactly the accepted DESIGN contract.
 > Interaction mode: PROPOSE. Density: lean, Tier-1 `[REF]` only
 > (`explicit_override`; optional expansions were not emitted). Stage 3 pins the
 > public/config/persistence/application surfaces that current evidence supports.
@@ -5212,7 +5214,7 @@ operator-controlled E14 hostname/build provenance, and the structured
 and signatures. The one-decision ADR split through ADR-0133 changes no
 behavior or API shape; DISTILL re-read those records and retained this feature
 delta as the approved implementation-contract SSOT. DISTILL-to-DELIVER
-handoff remains blocked by the documented C4a/C6 acceptance gaps; DESIGN
+handoff remains blocked only by the documented C4a acceptance gap; DESIGN
 approval is recorded above and is not a remaining gate.
 
 ## Wave: DISTILL / [REF] Scenario list and tags
@@ -5268,8 +5270,8 @@ approval is recorded above and is not a remaining gate.
 | S-PIG-47 | Ciphertext/tag/AAD tamper and CSPRNG failure expose no plaintext or protected record | @security @error @degraded-resource @contract-shape:bounded-change | overdrive-host production-codec tamper acceptance plus CSPRNG fault through real GatewayBuilder custody boot with intent/status snapshots |
 | S-PIG-48 | A lagged IntentStore subscription preserves the exact missed count and resumes with the next committed Changed event | @interruption @error @real-io @contract-shape:bounded-change | already-delivered active prerequisite in overdrive-store-local real-redb integration; not pending DELIVER activation |
 | S-PIG-49 | Frontend resolution triggers every closed error and rejects real persisted Job/Schedule targets without mutating intent | @error @adapter-integration @contract-shape:unbounded-preservation | overdrive-gateway frontend source-local adapter acceptance |
-| S-PIG-50 | Every GatewayConnectDataplane failure is emitted by its exact probe/register/receipt/cleanup/identity/count port operation | @error @adapter-contract @contract-shape:bounded-change | documented AT gap: connector bodies cover receipt mismatch/missing, selected identity and cleanup through the real consumer, but probe/count and both registration variants do not yet have real-owner observable bodies; the removed scripted port echo is not evidence |
-| S-PIG-51 | Gateway identity desired/actual hydration, reconciliation, audit-before-hold, stale epoch, replay and every lifecycle-control failure remain cause-distinct | @error @lifecycle @security @contract-shape:bounded-change | documented AT gap: audit-before-hold and shutdown DropFailed mapping drive real owners, but the full ensure/disable error set has no complete real-owner matrix; the removed scripted lifecycle echo is not evidence |
+| S-PIG-50 | Every GatewayConnectDataplane failure is emitted by its exact probe/register/receipt/cleanup/identity/count port operation | @error @adapter-contract @contract-shape:bounded-change | `every_gateway_connect_dataplane_error_crosses_its_real_owner_boundary` injects each declared error through its originating driven operation; `every_gateway_connect_dataplane_error_collapses_to_redacted_public_status` drives the same cases through status and asserts `GatewayApplicationUnavailableCause::ConnectPathUnavailable` with no internal detail |
+| S-PIG-51 | Gateway identity desired/actual hydration, reconciliation, audit-before-hold, stale epoch, replay and every lifecycle-control failure remain cause-distinct | @error @lifecycle @security @contract-shape:bounded-change | `every_gateway_identity_lifecycle_error_crosses_its_real_owner_boundary` injects each declared lifecycle error through `ensure_current` or `disable_after_drain`; `every_gateway_identity_lifecycle_error_collapses_to_redacted_public_status` asserts `GatewayIdentityUnusable` and no internal detail |
 | S-PIG-52 | HostGatewayClientMtls rejects absent/expired/malformed held identity, non-peer fds, elapsed handshakes, malformed URI-SAN shape and wrong-valid peers without plaintext fallback | @error @security @real-io @contract-shape:bounded-change | overdrive-dataplane real-rustls integration plus overdrive-gateway production-connector mapping/cleanup matrix |
 | S-PIG-53 | A failed connector cleanup is retained and retried without a second registration, connection or mTLS attempt | @error @degraded-resource @lifecycle @contract-shape:bounded-change | overdrive-gateway connector source-local integration |
 | S-PIG-54 | Repeating the same custody, demand and identity application has an empty second observable delta | @idempotency @contract-shape:bounded-change | documented AT gap: custody replay uses the real owner/store and identity hold is source-local; demand apply-twice has no real-owner snapshot body after removal of the scripted acknowledgment echo |
@@ -5326,10 +5328,10 @@ not part of the future-pending inventory.
 | PublicCertifiedKeyAeadCodec / KEK / protected redb record | S-PIG-01/25/45–47/54 | Production codec/custody composition; 0/1/N chain, replay/replacement/expiry, tamper/AAD/CSPRNG faults, and secret-free status/artifacts |
 | ObservationStore / gateway status | S-PIG-25/35/36/42 | Populated real JSON, exact active fields, typed point reads, disabled response and 500 fault mapping |
 | ServiceFrontendResolve | S-PIG-01/49 | Existing Service intent plus platform VIP resolves one exact frontend; all closed failures and real persisted Job/Schedule rejection preserve the intent universe |
-| Gateway Frontend Demand / ServiceMapHydrator | S-PIG-01/02/31/50/54 | Staged/current/draining demand, empty eligible set and stale completion are driven by the real application owner; apply-twice and the complete Dataplane error dispatch remain documented C4a/C6 gaps and are not credited to a scripted port |
-| EbpfDataplane / cgroup connect maps | S-PIG-01/02/28/29/37/41/50/53 | Tier-3 uses the production connector's operation-bracketed structured receipt occurrences—not transient map polling—to prove cookie/ServiceKey, Selected BackendId/applied SPIFFE identity and NoBackend before stable cleanup. Closed Dataplane failures, cleanup capacity/retry and unregistered LOCAL/XDP preservation are focused complements. |
+| Gateway Frontend Demand / ServiceMapHydrator | S-PIG-01/02/31/50/54 | Staged/current/draining demand, empty eligible set and stale completion are driven by the real application owner. S-PIG-54's demand apply-twice remains the documented C4a gap and is not credited to a scripted port; S-PIG-50 drives its Dataplane faults through the same owner before the redacted status projection. |
+| EbpfDataplane / cgroup connect maps | S-PIG-01/02/28/29/37/41/50/53 | Tier-3 uses the production connector's operation-bracketed structured receipt occurrences—not transient map polling—to prove cookie/ServiceKey, Selected BackendId/applied SPIFFE identity and NoBackend before stable cleanup. S-PIG-50's two named owner/status tests add the exhaustive typed Dataplane matrix and collapsed projection without exposing a new cause API. |
 | SocketCookieReader | S-PIG-01/28–30/44 | The structured validated-receipt occurrence carries the nonzero SO_COOKIE-derived intent cookie after BPF receipt equality validation; the production syscall trace is a reachability complement, not the receipt oracle |
-| Gateway identity issuance/audit/slot | S-PIG-01/25/26/32/43/51/52/54 | Dedicated non-allocation gateway subject, issue/audit-before-hold, epoch idempotency/staleness, real peer-observed client identity, absent/expired fail-closed, redacted status and drain-ordered empty; the full lifecycle error set remains the documented C6 gap |
+| Gateway identity issuance/audit/slot | S-PIG-01/25/26/32/43/51/52/54 | Dedicated non-allocation gateway subject, issue/audit-before-hold, epoch idempotency/staleness, real peer-observed client identity, absent/expired fail-closed, redacted status and drain-ordered empty; S-PIG-51's two named owner/status tests cover every lifecycle error and prove the intentional `GatewayIdentityUnusable` collapse. |
 | HostGatewayClientMtls / rustls | S-PIG-01/30/38/43/52 | Exact selected peer plus real happy client-identity observation, same-CA A/B mismatch, absent/expired identity, peer-address/deadline and zero/multiple URI-SAN errors; failure precedes body with no plaintext, retry or alternate peer |
 | Hyper public HTTP runtime | S-PIG-01/02/12–17/39/40 | TLS1.3/HTTP1.1 200/404/502/503, authority/path/header/limit policy and single-attempt failure |
 | ServerHandle / GatewayHandle lifecycle | S-PIG-26/32 and S-PIG-01 | Stop accepts, join, sweep, retire demand, empty identity, preserve typed residue |
@@ -5365,8 +5367,9 @@ the SNI, HTTP Host and certificate identity.
 
 Each present Rust test body compiles. Pending bodies are executable assertions
 through the named production contract; none is a panic-only test placeholder.
-The C4a/C6 audit rows explicitly identify the three scenario obligations that
-remain gaps after scripted echo bodies were removed; they are not represented
+The C4a audit row explicitly retains the demand apply-twice gap after the
+scripted acknowledgment echo was removed. The C6b/C6c audit rows now carry
+both owner-boundary and redacted-projection evidence; they are not represented
 as passing scaffolds. Production scaffold panics carry SCAFFOLD text so
 activation is semantic RED, not import/setup BROKEN.
 
@@ -5455,17 +5458,17 @@ The nonzero collision gate remains the registry verification mechanism.
 | C5a material mode combinations | PASS | All sixteen gateway enablement masks, exact/prefix Route modes, hermetic-test-CA versus E14 system-trust modes, and every material detach behavior |
 | C5b orthogonality | PASS | S-PIG-34 drives both Route detach decisions through deploy_resource and proves both return Route rather than NDJSON/workload output |
 | C6a malformed input parameters | PASS | Every Route field, `target.service`/legacy alias, authority, path, hostname, canonical newtype, repeated argv, missing key file and malformed/tampered certificate input is driven through its SUT parser/adapter |
-| C6b every declared error | FAIL — documented AT gap | Route/authority/config/newtype/frontend and mTLS errors have real parser/adapter or connector-consumer bodies; custody CSPRNG now enters through GatewayBuilder and identity DropFailed through GatewayHandle, but the complete Dataplane and identity-lifecycle sets are not yet driven through real owners. Scripted ports returning their input error were removed and are not counted. |
-| C6c closed error set | FAIL — documented AT gap | Exact enum/nested-cause assertions exist for covered production consumers, but without complete real-owner Dataplane and identity-lifecycle matrices the closed sets cannot honestly be claimed exhaustive |
+| C6b every declared error | PASS | The two S-PIG-50/51 owner-boundary tests inject every declared `GatewayConnectDataplaneError` and `GatewayIdentityLifecycleError` variant through the real Gateway Application owner at the existing driven-port operation. Exact typed variants are matched at the narrow adapter/shutdown boundary; paired status tests drive the same faults through the status consumer and match only the approved redacted public causes. No public cause accessor/result/status API is added. |
+| C6c closed error set | PASS | Each error set has one SSOT case table plus an exhaustive Rust match classifier. A new enum variant fails compilation before the matrix can pass; the public projection match is also exhaustive and requires the new variant to be assigned to the approved collapsed cause. The tests reject internal variant names, nested source text, key material, paths, BackendId, socket cookie and peer identity in status. |
 | C7a degraded resource | PASS | Unreadable key source, CSPRNG and observation-store faults, NoBackend, missing receipt/identity, cleanup failure and full cleanup ledger |
 | C7b interruption | PASS | Exact lag count/resubscription, held demand completion, withdrawal/restart, handshake deadline, retained connection and in-flight joined shutdown schedules |
 | C7c concurrent actors | PASS | Two concurrent singleton Route claims |
 
-Verdict: **ACCEPTABLE_WITH_DOCUMENTED_GAPS — 12/15 passing**. The three
-failures are deliberately retained rather than filled with scripted error
-echoes or expanded into the high-only coverage work excluded from this
-remediation. Taxonomy telemetry: public-ingress-gateway C1=0/LOW, C2=0/LOW,
-C3=0/LOW, C4=1/HIGH, C5=0/LOW, C6=2/HIGH, C7=0/LOW.
+Verdict: **COMPLETE by the mechanical threshold — 14/15 passing**. C4a
+retains its documented demand apply-twice gap; C6b/C6c are closed by the
+two-layer typed owner/projection matrices without an invented cause-bearing
+API. Taxonomy telemetry: public-ingress-gateway C1=0/LOW, C2=0/LOW,
+C3=0/LOW, C4=1/HIGH, C5=0/LOW, C6=0/LOW, C7=0/LOW.
 
 Mandate evidence: every present executable scenario has a Contract Shape declaration;
 every live source-local pure property uses the exact required rustdoc line.
@@ -5477,17 +5480,21 @@ step-reuse-ratio is informational: 55 scenario contracts / 16 unique driving
 families = 3.44x, the natural ceiling for this cross-layer security journey;
 no ratio-driven vocabulary collapse was applied.
 
-Because C4a/C6 retain documented AT gaps, this audit does not authorize a
-DISTILL-to-DELIVER handoff. DESIGN approval is recorded above and is not a
-remaining gate.
+Because C4a retains its documented gap, this audit does not authorize a
+DISTILL-to-DELIVER handoff; the handoff is blocked only by C4a. The C6b/C6c
+closure does not alter the accepted public redaction boundary:
+internal causes remain observable only at their narrow owner/adapter test
+boundary, while the Gateway Application/status consumer exposes the fixed
+redacted causes. DESIGN approval is recorded above and is not a remaining gate.
 
 ## Wave: DISTILL / [REF] Pre-DELIVER RED classification
 
 Classification: **RED / MISSING_FUNCTIONALITY**.
 
 This is a draft execution signal only. DESIGN is approved; the signal does not
-override the documented C4a/C6 acceptance gaps, so handoff remains blocked by
-those separate gaps.
+override the C4a blocker or the C6b/C6c closure; the pending DELIVER ignores
+remain the normal one-at-a-time activation markers for the already-authored
+bodies.
 
 - Lima cargo check over the workspace, all targets and integration-tests
   feature compiled every inactive Rust body successfully; workspace Clippy

@@ -11,12 +11,17 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
+};
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::Proto;
 use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
 use overdrive_core::id::{BackendId, CertSerial, ContentHash, NodeId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{
-    GatewayConnectIntent, GatewaySelectionReceipt, PublicCertifiedKeyId, PublicRouteInput, Route,
-    RouteApplyOutcome, RouteId, RouteWithdrawOutcome, ServiceListenerReferenceInput,
+    GatewayApplicationStatusRowV1, GatewayApplicationUnavailableCause, GatewayConnectIntent,
+    GatewaySelectionReceipt, PublicCertifiedKeyId, PublicRouteInput, Route, RouteApplyOutcome,
+    RouteId, RouteWithdrawOutcome, ServiceListenerReferenceInput,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -29,7 +34,7 @@ use overdrive_gateway::certified_key::{PublicCertifiedKeyAeadError, PublicCertif
 use overdrive_gateway::ports::{
     GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanupSweep, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
-    GatewayUpstream, GatewayUpstreamSeal,
+    GatewayIdentityWaitPhase, GatewayUpstream, GatewayUpstreamSeal,
 };
 use overdrive_gateway::route_set::PublicRouteSetError;
 use overdrive_gateway::runtime::GatewayLimits;
@@ -101,10 +106,454 @@ impl GatewayConnectDataplane for NoBackendDataplane {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatewayDataplaneFaultOperation {
+    Probe,
+    Register,
+    Receipt,
+    SelectedIdentity,
+    Cleanup,
+    CleanupAll,
+    IntentCount,
+    ReceiptCount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GatewayDataplaneFaultCase {
+    error: GatewayConnectDataplaneError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GatewayDataplaneErrorContract {
+    operation: GatewayDataplaneFaultOperation,
+    public_cause: GatewayApplicationUnavailableCause,
+}
+
+/// The one C6 SSOT table for the closed GatewayConnectDataplaneError set.
+///
+/// Each entry names the existing driven-port operation that can originate the
+/// typed error. `gateway_connect_error_contract` below is an exhaustive
+/// compile guard: adding a production variant fails this test module until its
+/// owner operation and both evidence layers are updated.
+fn gateway_connect_error_cases() -> Vec<GatewayDataplaneFaultCase> {
+    use GatewayConnectDataplaneError as Error;
+
+    vec![
+        GatewayDataplaneFaultCase { error: Error::Unavailable },
+        GatewayDataplaneFaultCase { error: Error::ProbeTimeout },
+        GatewayDataplaneFaultCase { error: Error::IntentRegistryFull },
+        GatewayDataplaneFaultCase { error: Error::IntentAlreadyRegistered },
+        GatewayDataplaneFaultCase { error: Error::IntentMissing },
+        GatewayDataplaneFaultCase { error: Error::ReceiptMissing },
+        GatewayDataplaneFaultCase { error: Error::ReceiptMismatch },
+        GatewayDataplaneFaultCase {
+            error: Error::BackendIdentityMissing {
+                backend_id: BackendId::new(7).expect("BackendId"),
+            },
+        },
+        GatewayDataplaneFaultCase { error: Error::Kernel },
+        GatewayDataplaneFaultCase { error: Error::Cleanup },
+    ]
+}
+
+const fn gateway_connect_error_contract(
+    error: &GatewayConnectDataplaneError,
+) -> GatewayDataplaneErrorContract {
+    use GatewayConnectDataplaneError as Error;
+
+    match error {
+        Error::Unavailable | Error::ProbeTimeout | Error::Kernel => GatewayDataplaneErrorContract {
+            operation: GatewayDataplaneFaultOperation::Probe,
+            public_cause: GatewayApplicationUnavailableCause::ConnectPathUnavailable,
+        },
+        Error::IntentRegistryFull | Error::IntentAlreadyRegistered => {
+            GatewayDataplaneErrorContract {
+                operation: GatewayDataplaneFaultOperation::Register,
+                public_cause: GatewayApplicationUnavailableCause::ConnectPathUnavailable,
+            }
+        }
+        Error::IntentMissing | Error::ReceiptMissing | Error::ReceiptMismatch => {
+            GatewayDataplaneErrorContract {
+                operation: GatewayDataplaneFaultOperation::Receipt,
+                public_cause: GatewayApplicationUnavailableCause::ConnectPathUnavailable,
+            }
+        }
+        Error::BackendIdentityMissing { .. } => GatewayDataplaneErrorContract {
+            operation: GatewayDataplaneFaultOperation::SelectedIdentity,
+            public_cause: GatewayApplicationUnavailableCause::ConnectPathUnavailable,
+        },
+        Error::Cleanup => GatewayDataplaneErrorContract {
+            operation: GatewayDataplaneFaultOperation::CleanupAll,
+            public_cause: GatewayApplicationUnavailableCause::ConnectPathUnavailable,
+        },
+    }
+}
+
+/// Fault adapter used only through Gateway Application's existing driven port.
+/// It records which owner operation crossed the boundary and injects the typed
+/// error from that operation; tests never call an adapter method directly.
+struct FaultingDataplane {
+    case: GatewayDataplaneFaultCase,
+    calls: Mutex<Vec<GatewayDataplaneFaultOperation>>,
+    intents: Mutex<Vec<GatewayConnectIntent>>,
+    observed_errors: Mutex<Vec<GatewayConnectDataplaneError>>,
+}
+
+impl FaultingDataplane {
+    fn new(case: GatewayDataplaneFaultCase) -> Arc<Self> {
+        Arc::new(Self {
+            case,
+            calls: Mutex::new(Vec::new()),
+            intents: Mutex::new(Vec::new()),
+            observed_errors: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn fault_at(
+        &self,
+        operation: GatewayDataplaneFaultOperation,
+    ) -> Option<GatewayConnectDataplaneError> {
+        self.calls.lock().expect("dataplane calls lock").push(operation);
+        if gateway_connect_error_contract(&self.case.error).operation != operation {
+            return None;
+        }
+        let error = self.case.error.clone();
+        self.observed_errors.lock().expect("dataplane error lock").push(error.clone());
+        Some(error)
+    }
+
+    fn observed_errors(&self) -> Vec<GatewayConnectDataplaneError> {
+        self.observed_errors.lock().expect("dataplane error lock").clone()
+    }
+
+    fn calls(&self) -> Vec<GatewayDataplaneFaultOperation> {
+        self.calls.lock().expect("dataplane calls lock").clone()
+    }
+
+    fn intents(&self) -> Vec<GatewayConnectIntent> {
+        self.intents.lock().expect("dataplane intents lock").clone()
+    }
+}
+
+#[async_trait]
+impl GatewayConnectDataplane for FaultingDataplane {
+    async fn probe(
+        &self,
+        _deadline: Instant,
+        _clock: &dyn Clock,
+    ) -> Result<(), GatewayConnectDataplaneError> {
+        self.fault_at(GatewayDataplaneFaultOperation::Probe).map_or(Ok(()), Err)
+    }
+
+    fn register(&self, intent: GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        self.intents.lock().expect("dataplane intents lock").push(intent);
+        self.fault_at(GatewayDataplaneFaultOperation::Register).map_or(Ok(()), Err)
+    }
+
+    fn take_receipt(
+        &self,
+        intent: &GatewayConnectIntent,
+    ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
+        if let Some(error) = self.fault_at(GatewayDataplaneFaultOperation::Receipt) {
+            return Err(error);
+        }
+        if gateway_connect_error_contract(&self.case.error).operation
+            == GatewayDataplaneFaultOperation::SelectedIdentity
+        {
+            return Ok(GatewaySelectionReceipt::Selected {
+                socket_cookie: intent.socket_cookie,
+                service_key: intent.service_key,
+                backend_id: BackendId::new(7).expect("BackendId"),
+            });
+        }
+        Ok(GatewaySelectionReceipt::NoBackend {
+            socket_cookie: intent.socket_cookie,
+            service_key: intent.service_key,
+        })
+    }
+
+    fn cleanup(&self, _intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        self.fault_at(GatewayDataplaneFaultOperation::Cleanup).map_or(Ok(()), Err)
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        self.fault_at(GatewayDataplaneFaultOperation::CleanupAll)
+            .map_or(Ok(GatewayConnectCleanupSweep { removed_intents: 0, removed_receipts: 0 }), Err)
+    }
+
+    fn selected_backend_identity(
+        &self,
+        backend_id: BackendId,
+    ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
+        if let Some(error) = self.fault_at(GatewayDataplaneFaultOperation::SelectedIdentity) {
+            return Err(error);
+        }
+        SpiffeId::new("spiffe://overdrive.local/workload/api/alloc/api-0")
+            .map_err(|_| GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        self.fault_at(GatewayDataplaneFaultOperation::IntentCount).map_or(Ok(0), Err)
+    }
+
+    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        self.fault_at(GatewayDataplaneFaultOperation::ReceiptCount).map_or(Ok(0), Err)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GatewayIdentityFaultOperation {
+    EnsureCurrent,
+    DisableAfterDrain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GatewayIdentityFaultCase {
+    error: GatewayIdentityLifecycleError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GatewayIdentityErrorContract {
+    operation: GatewayIdentityFaultOperation,
+    public_cause: GatewayApplicationUnavailableCause,
+}
+
+/// The one C6 SSOT table for the closed GatewayIdentityLifecycleError set.
+///
+/// Timeout is represented for both declared wait phases because each phase is
+/// a distinct originating owner operation; the exhaustive classifier below
+/// prevents a new lifecycle variant from silently escaping the matrix.
+fn gateway_identity_error_cases() -> Vec<GatewayIdentityFaultCase> {
+    use GatewayIdentityLifecycleError as Error;
+
+    vec![
+        GatewayIdentityFaultCase { error: Error::ReconcilerUnavailable },
+        GatewayIdentityFaultCase { error: Error::EpochExhausted },
+        GatewayIdentityFaultCase { error: Error::IssueFailed },
+        GatewayIdentityFaultCase { error: Error::DropFailed },
+        GatewayIdentityFaultCase {
+            error: Error::Timeout { phase: GatewayIdentityWaitPhase::EnsureCurrent },
+        },
+        GatewayIdentityFaultCase {
+            error: Error::Timeout { phase: GatewayIdentityWaitPhase::DisableAfterDrain },
+        },
+        GatewayIdentityFaultCase { error: Error::Closed },
+    ]
+}
+
+const fn gateway_identity_error_contract(
+    error: &GatewayIdentityLifecycleError,
+) -> GatewayIdentityErrorContract {
+    use GatewayIdentityLifecycleError as Error;
+
+    match error {
+        Error::ReconcilerUnavailable
+        | Error::EpochExhausted
+        | Error::IssueFailed
+        | Error::Closed => GatewayIdentityErrorContract {
+            operation: GatewayIdentityFaultOperation::EnsureCurrent,
+            public_cause: GatewayApplicationUnavailableCause::GatewayIdentityUnusable,
+        },
+        Error::DropFailed => GatewayIdentityErrorContract {
+            operation: GatewayIdentityFaultOperation::DisableAfterDrain,
+            public_cause: GatewayApplicationUnavailableCause::GatewayIdentityUnusable,
+        },
+        Error::Timeout { phase: GatewayIdentityWaitPhase::EnsureCurrent } => {
+            GatewayIdentityErrorContract {
+                operation: GatewayIdentityFaultOperation::EnsureCurrent,
+                public_cause: GatewayApplicationUnavailableCause::GatewayIdentityUnusable,
+            }
+        }
+        Error::Timeout { phase: GatewayIdentityWaitPhase::DisableAfterDrain } => {
+            GatewayIdentityErrorContract {
+                operation: GatewayIdentityFaultOperation::DisableAfterDrain,
+                public_cause: GatewayApplicationUnavailableCause::GatewayIdentityUnusable,
+            }
+        }
+    }
+}
+
+struct FaultingIdentity {
+    facts: GatewayIdentityFacts,
+    sender: watch::Sender<Option<GatewayIdentityFacts>>,
+    case: GatewayIdentityFaultCase,
+    observed_errors: Mutex<Vec<GatewayIdentityLifecycleError>>,
+}
+
+impl FaultingIdentity {
+    fn new(case: GatewayIdentityFaultCase) -> Arc<Self> {
+        let facts = gateway_identity_facts();
+        let (sender, _) = watch::channel(Some(facts.clone()));
+        Arc::new(Self { facts, sender, case, observed_errors: Mutex::new(Vec::new()) })
+    }
+
+    fn observed_errors(&self) -> Vec<GatewayIdentityLifecycleError> {
+        self.observed_errors.lock().expect("identity error lock").clone()
+    }
+}
+
+#[async_trait]
+impl GatewayIdentityLifecycleControl for FaultingIdentity {
+    async fn ensure_current(
+        &self,
+        _deadline: Instant,
+    ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
+        if gateway_identity_error_contract(&self.case.error).operation
+            == GatewayIdentityFaultOperation::EnsureCurrent
+        {
+            let error = self.case.error.clone();
+            self.observed_errors.lock().expect("identity error lock").push(error.clone());
+            return Err(error);
+        }
+        Ok(self.facts.clone())
+    }
+
+    fn current(&self) -> Option<GatewayIdentityFacts> {
+        (gateway_identity_error_contract(&self.case.error).operation
+            != GatewayIdentityFaultOperation::EnsureCurrent)
+            .then(|| self.facts.clone())
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
+        self.sender.subscribe()
+    }
+
+    async fn disable_after_drain(
+        &self,
+        _deadline: Instant,
+    ) -> Result<(), GatewayIdentityLifecycleError> {
+        if gateway_identity_error_contract(&self.case.error).operation
+            == GatewayIdentityFaultOperation::DisableAfterDrain
+        {
+            let error = self.case.error.clone();
+            self.observed_errors.lock().expect("identity error lock").push(error.clone());
+            return Err(error);
+        }
+        self.sender.send_replace(None);
+        Ok(())
+    }
+}
+
+fn gateway_identity_facts() -> GatewayIdentityFacts {
+    GatewayIdentityFacts {
+        epoch: GatewayIdentityEpoch::new(1).expect("first epoch"),
+        spiffe_id: SpiffeId::new("spiffe://overdrive.local/gateway/gateway-node")
+            .expect("gateway SPIFFE ID"),
+        serial: CertSerial::new("01").expect("serial"),
+        not_after: overdrive_core::UnixInstant::from_unix_duration(Duration::from_secs(
+            4_000_000_000,
+        )),
+    }
+}
+
+fn assert_no_internal_debug_tokens(rendered: &str, debug_error: &str) {
+    let status_tokens = rendered
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    for error_token in debug_error
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .filter(|token| !token.is_empty())
+    {
+        assert!(
+            !status_tokens.iter().any(|status_token| status_token == &error_token),
+            "status leaked the internal error token {error_token}: {rendered}",
+        );
+    }
+}
+
+fn assert_gateway_connect_status_redacted(
+    status: &GatewayApplicationStatusRowV1,
+    case: &GatewayDataplaneFaultCase,
+    dataplane: &FaultingDataplane,
+    key_path: &std::path::Path,
+) {
+    assert_eq!(
+        status.unavailable,
+        Some(gateway_connect_error_contract(&case.error).public_cause),
+        "the public Application status must use the closed redacted connect-path cause",
+    );
+    let rendered = format!("{status:?}");
+    let debug_error = format!("{:?}", case.error);
+    assert_no_internal_debug_tokens(&rendered, &debug_error);
+    assert!(!rendered.contains(&case.error.to_string()), "status leaked the internal error text");
+    if let GatewayConnectDataplaneError::BackendIdentityMissing { backend_id } = &case.error {
+        assert!(!rendered.contains(&backend_id.to_string()), "status leaked BackendId");
+    }
+    for forbidden in [
+        "gateway connect dataplane",
+        "gateway intent",
+        "gateway receipt",
+        "gateway kernel operation",
+        "api-origin-key.pem",
+        "PRIVATE KEY",
+        "spiffe://overdrive.local/workload/api/alloc/api-0",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "status leaked forbidden connect detail {forbidden}"
+        );
+    }
+    assert!(
+        !rendered.contains(&key_path.display().to_string()),
+        "status leaked the configured private-key path",
+    );
+    for intent in dataplane.intents() {
+        let socket_cookie = intent.socket_cookie.get().get().to_string();
+        assert!(!rendered.contains(&socket_cookie), "status leaked socket cookie {socket_cookie}");
+    }
+}
+
+fn assert_gateway_identity_status_redacted(
+    status: &GatewayApplicationStatusRowV1,
+    case: &GatewayIdentityFaultCase,
+    key_path: &std::path::Path,
+) {
+    assert_eq!(
+        status.unavailable,
+        Some(gateway_identity_error_contract(&case.error).public_cause),
+        "the public Application status must use the closed redacted identity cause",
+    );
+    let rendered = format!("{status:?}");
+    let debug_error = format!("{:?}", case.error);
+    assert_no_internal_debug_tokens(&rendered, &debug_error);
+    assert!(
+        !rendered.contains(&case.error.to_string()),
+        "status leaked the internal identity text"
+    );
+    for forbidden in [
+        "gateway identity reconciler unavailable",
+        "gateway SVID issuance failed",
+        "gateway SVID drop failed",
+        "EnsureCurrent",
+        "DisableAfterDrain",
+        "PRIVATE KEY",
+        "api-origin-key.pem",
+        "spiffe://overdrive.local/workload/api/alloc/api-0",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "status leaked forbidden identity detail {forbidden}"
+        );
+    }
+    assert!(
+        !rendered.contains(&key_path.display().to_string()),
+        "status leaked the configured private-key path",
+    );
+}
+
 struct CurrentIdentity {
     facts: GatewayIdentityFacts,
     sender: watch::Sender<Option<GatewayIdentityFacts>>,
     disable_error: Mutex<Option<GatewayIdentityLifecycleError>>,
+}
+
+fn healthy_identity() -> Arc<CurrentIdentity> {
+    let facts = gateway_identity_facts();
+    let (sender, _) = watch::channel(Some(facts.clone()));
+    Arc::new(CurrentIdentity { facts, sender, disable_error: Mutex::new(None) })
 }
 
 #[async_trait]
@@ -234,6 +683,94 @@ impl World {
     }
 }
 
+struct C6World {
+    _root: TempDir,
+    key_path: std::path::PathBuf,
+    control: GatewayControl,
+    handle: GatewayHandle,
+}
+
+async fn persist_c6_service(intent: &LocalIntentStore) -> Arc<SimServiceVipView> {
+    let service = ServiceV2::from_submit(ServiceSpecInput {
+        id: "api".to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_owned(), args: Vec::new() }),
+        listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+        startup_probes: Vec::new(),
+        readiness_probes: Vec::new(),
+        liveness_probes: Vec::new(),
+    })
+    .expect("valid api Service input");
+    let workload_id = service.id.clone();
+    let service_intent = WorkloadIntent::Service(service);
+    let service_digest = service_intent.spec_digest().expect("api Service digest");
+    let archived = service_intent.archive_for_store().expect("archive api Service intent");
+    intent
+        .put(IntentKey::for_workload(&workload_id).as_bytes(), archived.as_ref())
+        .await
+        .expect("persist api Service through the real IntentStore");
+    intent
+        .put(
+            IntentKey::for_workload_kind(&workload_id).as_bytes(),
+            &[WorkloadKind::Service.discriminator_byte()],
+        )
+        .await
+        .expect("persist api Service kind discriminator");
+    let service_vip = ServiceVip::new("127.0.0.1".parse().expect("IPv4")).expect("Service VIP");
+    Arc::new(SimServiceVipView::new(BTreeMap::<ContentHash, ServiceVip>::from([(
+        service_digest,
+        service_vip,
+    )])))
+}
+
+impl C6World {
+    async fn start_with_dependencies(
+        dataplane: Arc<dyn GatewayConnectDataplane>,
+        identity: Arc<dyn GatewayIdentityLifecycleControl>,
+    ) -> Result<Self, GatewayBootError> {
+        let root = tempfile::tempdir().expect("isolated C6 gateway root");
+        let (chain, key) = write_test_cert(&root);
+        let config = GatewayConfig::new(
+            "127.0.0.1".parse().expect("IPv4"),
+            ManualCertifiedKeyConfig::new(
+                PublicCertifiedKeyId::new("api-origin").expect("key ID"),
+                chain,
+                key.clone(),
+            ),
+        );
+        let intent = Arc::new(
+            LocalIntentStore::open(root.path().join("intent.redb")).expect("real intent store"),
+        );
+        let vip_view = persist_c6_service(intent.as_ref()).await;
+        let observations = Arc::new(SimObservationStore::single_peer(
+            NodeId::new("gateway-node").expect("node ID"),
+            54,
+        ));
+        let sim_clock = Arc::new(SimClock::new());
+        let clock: Arc<dyn Clock> = sim_clock.clone();
+        let builder = UnboundGatewayBuilder::new(
+            config,
+            intent,
+            observations,
+            vip_view,
+            Arc::new(PublicCertifiedKeyAeadCodec::new(Arc::new(SimKek::for_boot()))),
+            Arc::new(SocketCookieReader::new()),
+            clock,
+        )
+        .await?;
+        let (builder, _demand, seal) = builder.bind_demand_wake(Arc::new(NoopWake));
+        let dependencies = GatewayRuntimeDependencies::new(
+            GatewayLimits::first_slice(),
+            dataplane,
+            Arc::new(MatchingMtls { seal }),
+            identity,
+        );
+        let (handle, control) = builder.start(dependencies).await.into_parts();
+        Ok(Self { _root: root, key_path: key, control, handle })
+    }
+}
+
 fn write_test_cert(root: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
     let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("test key");
     let mut params = rcgen::CertificateParams::new(vec!["api.example.com".to_owned()])
@@ -270,6 +807,172 @@ fn route(id: &str, path: &str) -> Route {
         },
     })
     .expect("valid Route")
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER GatewayConnectDataplane owner error matrix"]
+async fn every_gateway_connect_dataplane_error_crosses_its_real_owner_boundary() {
+    for case in gateway_connect_error_cases() {
+        let contract = gateway_connect_error_contract(&case.error);
+        let dataplane = FaultingDataplane::new(case.clone());
+        let world = C6World::start_with_dependencies(dataplane.clone(), healthy_identity())
+            .await
+            .expect("Gateway Application composition accepts the injected driven port");
+
+        world
+            .control
+            .routes()
+            .apply(route("public-api", "/"))
+            .await
+            .expect("Route command reaches the real Gateway Application owner");
+        for _ in 0..128 {
+            tokio::task::yield_now().await;
+        }
+
+        let report = world.handle.shutdown(Duration::from_secs(5)).await;
+        let observed = dataplane.observed_errors();
+        assert!(
+            observed.iter().any(|actual| actual == &case.error),
+            "the owner did not receive the exact injected {:?}; observed {observed:?}",
+            case.error,
+        );
+        assert!(
+            dataplane.calls().contains(&contract.operation),
+            "the owner did not drive the declared {:?} operation; calls={:?}",
+            contract.operation,
+            dataplane.calls(),
+        );
+
+        if contract.operation == GatewayDataplaneFaultOperation::CleanupAll {
+            let residual = report
+                .residual_connect
+                .as_ref()
+                .expect("cleanup failure remains typed in the shutdown residual");
+            assert!(matches!(
+                residual.sweep_failures.as_slice(),
+                [overdrive_gateway::application::GatewayConnectSweepFailure::CleanupAll(error)]
+                    if error == &case.error
+            ));
+        }
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER GatewayConnectDataplane redacted status projection"]
+async fn every_gateway_connect_dataplane_error_collapses_to_redacted_public_status() {
+    for case in gateway_connect_error_cases() {
+        let contract = gateway_connect_error_contract(&case.error);
+        let dataplane = FaultingDataplane::new(case.clone());
+        let world = C6World::start_with_dependencies(dataplane.clone(), healthy_identity())
+            .await
+            .expect("Gateway Application composition accepts the injected driven port");
+        world
+            .control
+            .routes()
+            .apply(route("public-api", "/"))
+            .await
+            .expect("Route command reaches the real Gateway Application owner");
+        for _ in 0..128 {
+            tokio::task::yield_now().await;
+        }
+
+        let mut handle = Some(world.handle);
+        if matches!(
+            contract.operation,
+            GatewayDataplaneFaultOperation::CleanupAll
+                | GatewayDataplaneFaultOperation::IntentCount
+                | GatewayDataplaneFaultOperation::ReceiptCount
+        ) {
+            handle.take().expect("GatewayHandle exists").shutdown(Duration::from_secs(5)).await;
+        }
+
+        let status = world
+            .control
+            .application_status()
+            .await
+            .expect("redacted Application status read")
+            .expect("Gateway Application publishes a status row for the fault");
+        assert_gateway_connect_status_redacted(&status, &case, dataplane.as_ref(), &world.key_path);
+
+        if !matches!(
+            contract.operation,
+            GatewayDataplaneFaultOperation::CleanupAll
+                | GatewayDataplaneFaultOperation::IntentCount
+                | GatewayDataplaneFaultOperation::ReceiptCount
+        ) {
+            handle.take().expect("GatewayHandle exists").shutdown(Duration::from_secs(5)).await;
+        }
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER Gateway identity lifecycle owner error matrix"]
+async fn every_gateway_identity_lifecycle_error_crosses_its_real_owner_boundary() {
+    for case in gateway_identity_error_cases() {
+        let contract = gateway_identity_error_contract(&case.error);
+        let identity = FaultingIdentity::new(case.clone());
+        let world =
+            C6World::start_with_dependencies(Arc::new(NoBackendDataplane), identity.clone())
+                .await
+                .expect("Gateway Application composition accepts the injected identity port");
+        world
+            .control
+            .routes()
+            .apply(route("public-api", "/"))
+            .await
+            .expect("Route command reaches the real Gateway Application owner");
+        for _ in 0..128 {
+            tokio::task::yield_now().await;
+        }
+        let report = world.handle.shutdown(Duration::from_secs(5)).await;
+        assert_eq!(identity.observed_errors(), vec![case.error.clone()]);
+
+        if contract.operation == GatewayIdentityFaultOperation::DisableAfterDrain {
+            assert_eq!(report.identity_error, Some(case.error));
+        }
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER Gateway identity redacted status projection"]
+async fn every_gateway_identity_lifecycle_error_collapses_to_redacted_public_status() {
+    for case in gateway_identity_error_cases() {
+        let contract = gateway_identity_error_contract(&case.error);
+        let identity = FaultingIdentity::new(case.clone());
+        let world =
+            C6World::start_with_dependencies(Arc::new(NoBackendDataplane), identity.clone())
+                .await
+                .expect("Gateway Application composition accepts the injected identity port");
+        world
+            .control
+            .routes()
+            .apply(route("public-api", "/"))
+            .await
+            .expect("Route command reaches the real Gateway Application owner");
+        for _ in 0..128 {
+            tokio::task::yield_now().await;
+        }
+
+        let mut handle = Some(world.handle);
+        if contract.operation == GatewayIdentityFaultOperation::DisableAfterDrain {
+            handle.take().expect("GatewayHandle exists").shutdown(Duration::from_secs(5)).await;
+        }
+        let status = world
+            .control
+            .application_status()
+            .await
+            .expect("redacted Application status read")
+            .expect("Gateway Application publishes a status row for the fault");
+        assert_gateway_identity_status_redacted(&status, &case, &world.key_path);
+
+        if contract.operation == GatewayIdentityFaultOperation::EnsureCurrent {
+            handle.take().expect("GatewayHandle exists").shutdown(Duration::from_secs(5)).await;
+        }
+    }
 }
 
 /// CONTRACT_SHAPE: bounded-change.
