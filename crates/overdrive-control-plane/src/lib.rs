@@ -2874,9 +2874,11 @@ pub async fn run_server_with_obs_and_drivers(
         // mark-first programs remained in the kernel while their serve-owner
         // listeners disappeared. Reclamation has already made the old VM
         // terminal, so removing those dead redirects cannot reopen a live
-        // cleartext workload. Ordinary same-id RestartAllocation later installs
-        // one fresh rule per direction after READY and before EXEC. Pinned boot
-        // order: reclamation → adopt/GC → sweep → serve.
+        // cleartext workload. A later RestartAllocation carries the
+        // predecessor alloc_id separately from the fresh successor spec.alloc;
+        // the successor outcome completes first, then one exact-old driver →
+        // mTLS → structural-network cleanup attempt addresses only alloc_id.
+        // Pinned boot order: reclamation → adopt/GC → sweep → serve.
         match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
             Ok(swept) => {
                 tracing::info!(
