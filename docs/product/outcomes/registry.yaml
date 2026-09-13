@@ -769,3 +769,95 @@ outcomes:
   artifact: crates/overdrive-reconcilers/src/workload_lifecycle.rs
   related: []
   superseded_by: null
+- id: OUT-PIG-CERTIFIED-KEY-CUSTODY
+  kind: specification
+  summary: An operator-supplied public Web-PKI chain and matching PKCS#8 key are validated and built before KEK-protected persistence, then published as one opaque time-usable TLS snapshot before status; an unusable candidate never replaces the last usable generation, and later ACME is additive at the same install boundary
+  feature: public-ingress-gateway
+  inputs:
+  - shape: PublicCertifiedKeyId plus bounded certificate-chain/private-key files and expected current CertifiedKeyGeneration
+  output:
+    shape: PublicCertifiedKeyAvailability::Usable opaque rustls snapshot or cause-distinct redacted failure; no plaintext key/path in Route, status, logs, or request state
+  keywords:
+  - public-ingress-certified-key
+  - web-pki-origin-custody
+  - producer-neutral-key-generation
+  - opaque-public-tls-snapshot
+  artifact: crates/overdrive-gateway/src/certified_key.rs
+  related: []
+  superseded_by: null
+- id: OUT-PIG-GATEWAY-APPLICATION
+  kind: invariant
+  summary: GatewayApplicationOwner stages exact frontend demand before atomically publishing a whole Route/frontend/public-key generation, retains superseded demand while old connections drain, and never folds BPF generation or backend state into Gateway Applied Generation
+  feature: public-ingress-gateway
+  inputs:
+  - shape: Route and certified-key changes, exact ServiceFrontend resolutions, demand acknowledgments, gateway identity currentness, connection open/close events
+  output:
+    shape: staged/current/draining Gateway Frontend Demand plus zero-or-one atomic GatewayApplicationSnapshot and ordered dynamic TCP/443 bind/unbind
+  keywords:
+  - gateway-application-generation
+  - staged-current-draining-demand
+  - atomic-public-admission
+  - independent-bpf-generation
+  artifact: crates/overdrive-gateway/src/application.rs
+  related: []
+  superseded_by: null
+- id: OUT-PIG-BPF-SELECTION-IDENTITY
+  kind: invariant
+  summary: A registered gateway socket cookie and exact ServiceKey are selected by the existing cgroup-BPF Maglev path, yielding Selected BackendId or NoBackend; the Service-map outer swap is the guarded commit point after which Selected resolves through the immutable Dataplane-owned association to the exact applied Backend.alloc identity
+  feature: public-ingress-gateway
+  inputs:
+  - shape: GatewayConnectIntent(SocketCookie, ServiceKey), demanded Path-A Service-map generation, and exact applied Backend values
+  output:
+    shape: consumed GatewaySelectionReceipt::Selected(BackendId) plus exact immutable committed SpiffeId, or NoBackend; pre-commit failure exposes no Applied identity, intent/receipt are cleaned, and unregistered LOCAL/XDP behavior is unchanged
+  keywords:
+  - gateway-cookie-servicekey
+  - cgroup-bpf-selection-receipt
+  - backendid-applied-identity
+  - service-map-outer-commit-point
+  - no-userspace-load-balancer
+  artifact: crates/overdrive-dataplane/src/gateway_connect.rs
+  related:
+  - OUT-MTLS-COMPOSED-PROXY-SKELETON
+  superseded_by: null
+- id: OUT-PIG-GATEWAY-EXACT-PEER
+  kind: operation
+  summary: Gateway-client rustls consumes a BPF-rewritten connected fd, the dedicated current gateway SVID slot, and the receipt-selected workload identity, returning an upstream stream only when the peer's sole SPIFFE URI SAN equals that exact identity
+  feature: public-ingress-gateway
+  inputs:
+  - shape: OwnedFd plus receipt-selected SpiffeId and time-usable dedicated Gateway Identity Slot
+  output:
+    shape: authenticated GatewayUpstream or fail-closed absent/expired/wrong-valid-peer error before HTTP bytes; no AllocationId, plaintext, retry, or alternate peer
+  keywords:
+  - gateway-client-exact-peer
+  - receipt-selected-spiffe-equality
+  - dedicated-gateway-svid-slot
+  - authenticated-upstream-capability
+  artifact: crates/overdrive-dataplane/src/mtls/gateway_client.rs
+  related:
+  - OUT-CA-SVID
+  - OUT-WIM-SVID-LIFECYCLE
+  - OUT-MTLS-HANDSHAKE-FAIL-CLOSED
+  - OUT-MTLS-INBOUND-SERVER-MTLS
+  superseded_by: null
+- id: OUT-PIG-PUBLIC-REQUEST
+  kind: operation
+  summary: A real external TLS 1.3 HTTP/1.1 request to the serve-owned public Route streams the selected Service workload response through demand-gated BPF selection and receipt-bound gateway-SVID exact-peer mTLS without userspace backend selection
+  feature: public-ingress-gateway
+  inputs:
+  - shape: built overdrive serve with manual public Certified Key plus real deployed Service and Route and external HTTPS request
+  output:
+    shape: workload status/headers/streamed body, 404 Route miss, 503 NoBackend, or 502 internal failure; complete receipt/demand/connection cleanup and no hand-installed production effect
+  keywords:
+  - public-ingress-walking-skeleton
+  - external-https-to-workload
+  - demand-teach-cookie-receipt
+  - gateway-svid-selected-peer
+  artifact: tests/tier3/public-ingress-gateway/runner.sh
+  related:
+  - OUT-PIG-CERTIFIED-KEY-CUSTODY
+  - OUT-PIG-GATEWAY-APPLICATION
+  - OUT-PIG-BPF-SELECTION-IDENTITY
+  - OUT-PIG-GATEWAY-EXACT-PEER
+  - OUT-MTLS-COMPOSED-PROXY-SKELETON
+  - OUT-MTLS-WIRE-TLS13
+  superseded_by: null

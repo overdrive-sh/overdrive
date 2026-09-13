@@ -42,6 +42,44 @@ drags the build chain, and blurs "what ships." **If a dispatch does pollute
 `crates/`, MOVE the files into `spike-scratch/` (preserve the work) and revert the
 production wiring — do not delete the work.**
 
+## A spike may drive an existing component — never stand in for one
+
+**A spike cannot establish component reuse or multi-component composition by
+copying, simplifying, mocking, or reimplementing the components it claims to
+validate.** Reuse is decided in DESIGN from the real component contracts and
+production caller paths. A mechanism already validated by an existing component
+does not need another spike; and a question whose answer depends on two or more
+components working together is a walking-skeleton or integration-test question,
+not a spike.
+
+The valid boundary is:
+
+- The existing production component remains unchanged and is driven through an
+  already-existing production surface (binary, CLI, socket, syscall effect, or
+  other real driving port). Scratch code may supply one input or observe one
+  external effect; it must not substitute a parallel implementation.
+- If the production component has no surface through which the one mechanism can
+  be driven or observed, stop and record a **DESIGN/testability gap**. Do not add
+  a production API, port, trait method, test hook, enum variant, or adapter merely
+  to manufacture a spike result.
+- The self-contained-copy exception above is limited to a small helper such as a
+  syscall wrapper, wire constant, or struct layout needed to isolate a low-level
+  kernel/library mechanism. Its verdict applies **only to that mechanism**. It is
+  never evidence that the copied production component, its public contract, or
+  its integration with another component works.
+- A scratch-only API shape proves nothing about the production API. Exact
+  aggregate, trait, method, error, and ownership surfaces remain DESIGN
+  decisions; the later production walking skeleton proves their composition.
+
+For example, “does this kernel accept this aya-rs attach shape?” can be a spike.
+“Does Gateway SVID issuance → XDP backend selection → intended-peer mTLS work?”
+cannot: it crosses several existing owners and must be exercised through the
+production composition. If uncertainty can be decomposed honestly, use separate
+single-mechanism probes such as “does a host-originated socket traverse the
+existing Service frontend XDP path?” and “is the XDP-selected peer identity
+observable at the existing mTLS boundary?” Each probe must drive the real
+component unchanged. If it cannot, return the gap to DESIGN.
+
 ## eBPF in spikes is aya-rs Rust — never C
 
 The whole codebase is Rust; eBPF is **aya-rs** (`no_std`, `aya-ebpf` macros) —
@@ -94,10 +132,23 @@ The verdict rests on a real exercise on the real kernel, not "it compiled":
   runtime signal; run it under Lima.
 - A `findings.md` verdict with no pasted command/program output → narrated, not
   executed.
+- A scratch `Sim*`, fake holder, parallel map hydrator, or copied proxy standing
+  in for the production component named by the finding → the finding validates
+  the substitute, not the component.
+- One spike claiming an end-to-end verdict across multiple existing component
+  owners → misclassified walking skeleton/integration test; split only the truly
+  independent mechanism questions and leave composition to the production path.
+- A new production port, method, hook, or adapter added only so scratch code can
+  reach the hypothesised state → DESIGN/testability gap disguised as a spike
+  seam; remove it and surface the gap.
 
 ## Cross-references
 
 - `nw-spike` skill — the PROBE → PROMOTION GATE → WALKING SKELETON mechanics.
+- `nw-spike-methodology` skill — one-assumption limit, when to skip an already
+  proven mechanism, and the distinction between a spike and a walking skeleton.
+- `nw-design` skill § "Reuse Analysis" — EXTEND/CREATE decisions come from real
+  component overlap and contracts, never from a scratch substitute.
 - `.claude/rules/testing.md` § "Running tests — Lima VM" — the Lima execution
   discipline + the no-Tier-2-backstop hazard for `cgroup_sock_addr`.
 - `.claude/rules/development.md` § "aya-rs XDP / TC kernel-side patterns" — how to

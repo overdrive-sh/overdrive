@@ -108,6 +108,77 @@ The order of authority is:
 Never collapse these evidence classes. If accepted design and production
 ordering differ, surface the mismatch before recommending a new gate.
 
+## One ADR records one decision — never use an ADR as a design bucket
+
+An Architecture Decision Record captures **one independently decidable and
+reversible architectural choice**. “System Architecture,” “Domain Model,”
+“Application Architecture,” a whole subsystem, or an entire feature is an
+organizational category — not one decision. If two parts could be accepted,
+rejected, superseded, or reversed independently, they require separate ADRs.
+
+An ADR contains only:
+
+- the decision-specific context and forces;
+- one decision and its scope;
+- viable alternatives considered and why they lost;
+- consequences and trade-offs;
+- status; and
+- links to the authoritative architecture, interface, diagram, and verification
+  artifacts.
+
+The following content does **not** belong in an ADR:
+
+- Rust signatures, enum variants, constructors, accessors, trait methods, wire
+  structs, error catalogs, or file-by-file implementation instructions;
+- executable test obligations, scenario matrices, fixture mechanics, mutation
+  targets, or runner commands;
+- C4 diagram source or a component-by-component C4 walkthrough;
+- roadmap steps, delivery sequencing, review iteration history, or validation
+  command output; and
+- a comprehensive specification of every decision needed by the feature.
+
+Route each artifact to its actual owner:
+
+| Content | Authoritative home |
+|---|---|
+| One architectural choice, alternatives, consequences | One ADR |
+| Exact implementation-facing API/port contract pinned by DESIGN | `docs/feature/{feature-id}/feature-delta.md` under the relevant DESIGN `[REF]` component/driving-port/driven-port section |
+| Current high-level architecture and decision links | `docs/product/architecture/brief.md` |
+| C4 diagrams and detailed relationships | `docs/product/architecture/c4-diagrams.md` |
+| Executable acceptance scenarios and test obligations | DISTILL artifacts |
+| Implementation order, files and quality gates | DELIVER roadmap/artifacts |
+
+The exact-API rule still applies: moving Rust signatures out of an ADR does not
+permit leaving them unspecified. DESIGN pins the implementation-facing contract
+in `feature-delta.md`; the ADR links to it. Do not duplicate the same normative
+signature in both places — two copies create two sources of truth.
+
+### ADR boundary test
+
+Before creating or extending an ADR, answer:
+
+1. State the decision in one sentence.
+2. Ask whether any clause can be adopted or superseded without the others.
+3. If yes, split those clauses into separate ADRs.
+4. Move API reference, C4 detail and tests to their owning artifacts; link them.
+
+### Symptoms during review
+
+- An ADR title joins several nouns with “and” because it covers Route modeling,
+  certificate custody, identity lifecycle, runtime ownership, and protocol
+  behavior together.
+- Headings named “Exact Rust API,” “Test obligations,” “C4 detail,” “Changes per
+  file,” or “Review iteration” inside an ADR.
+- A layer name (`Application Architecture`) offered as the decision statement.
+- One ADR whose independent subsections need different owners, statuses, or
+  supersession paths.
+- A very large ADR whose size comes from embedded interface specifications,
+  diagrams, or test plans rather than decision context and alternatives.
+
+Any of these is a blocking DESIGN-document defect. Split by decision and move
+the misplaced content; do not solve the problem by copying the same material
+into several smaller ADRs.
+
 ## Lifecycle Gate Ownership is a blocking DESIGN artifact
 
 Every DESIGN that adds, removes, or moves a gate must contain a
