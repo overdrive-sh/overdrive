@@ -119,7 +119,7 @@ async fn issue_svid_executor_audits_before_hold() {
     let identity = IdentityMgr::new(None);
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
 
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -200,7 +200,7 @@ async fn audit_write_failure_refuses_hold() {
     let identity = IdentityMgr::new(None);
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
 
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));

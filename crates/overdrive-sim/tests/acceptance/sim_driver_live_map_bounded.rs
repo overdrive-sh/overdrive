@@ -33,7 +33,7 @@ const CYCLES: usize = 8;
 
 #[tokio::test]
 async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
 
     // Pre-condition: the allocations map starts empty.
     assert_eq!(

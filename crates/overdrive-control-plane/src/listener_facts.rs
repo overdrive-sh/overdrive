@@ -417,7 +417,7 @@ mod tests {
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
         let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
-            Arc::new(SimDriver::new(DriverType::Exec));
+            Arc::new(SimDriver::new(DriverType::Vm));
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
         // The fixture seeds intent AFTER construction, so the
         // boot-rebuild at this point would be empty regardless — pass a
@@ -934,7 +934,7 @@ mod tests {
             // only ever composes a single Exec entry.
             state
                 .drivers
-                .get(overdrive_core::traits::driver::DriverType::Exec)
+                .get(overdrive_core::traits::driver::DriverType::Vm)
                 .cloned()
                 .unwrap_or_else(|| {
                     unreachable!("test fixture always composes a single Exec driver")

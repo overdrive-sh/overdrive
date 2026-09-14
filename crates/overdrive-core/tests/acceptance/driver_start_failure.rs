@@ -16,7 +16,7 @@
 
 use overdrive_core::TransitionReason;
 use overdrive_core::traits::driver::{
-    DriverError, DriverStartClass, DriverStartFailure, DriverType, ExecStartFailure, VmStartFailure,
+    DriverError, DriverStartClass, DriverStartFailure, DriverType, VmStartFailure,
 };
 use proptest::prelude::*;
 
@@ -32,16 +32,13 @@ fn convert(failure: DriverStartFailure) -> (TransitionReason, String) {
     }
 }
 
-/// Non-empty diagnostics that share NO vocabulary with any retired prefix
-/// (`spawn `, `cgroup setup failed: `, `No such file or directory`, ...).
-/// If any of these could still steer a classification, the grammar would
-/// not really be gone.
+/// Non-empty diagnostics that do not encode the structured start cause.
 fn arbitrary_detail() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("fichier introuvable".to_owned()),
         Just("the thing is simply not there".to_owned()),
-        Just("spawn /decoy: No such file or directory (os error 2)".to_owned()),
-        Just("cgroup setup failed: place_pid: decoy".to_owned()),
+        Just("the substrate returned an unclassified status".to_owned()),
+        Just("guest control channel did not answer".to_owned()),
         Just("\u{1F4A5} unprintable-ish \u{0}\u{7} tail".to_owned()),
         "[^\u{0}]{1,64}",
     ]
@@ -134,13 +131,6 @@ proptest! {
         second in arbitrary_detail(),
     ) {
         let classes = [
-            DriverStartClass::Exec(ExecStartFailure::BinaryNotFound {
-                path: "/usr/local/bin/payments".to_owned(),
-            }),
-            DriverStartClass::Exec(ExecStartFailure::CgroupSetupFailed {
-                kind: "create_scope".to_owned(),
-                source: "EACCES".to_owned(),
-            }),
             DriverStartClass::Vm(VmStartFailure::KernelNotFound {
                 path: "/srv/vm/vmlinuz".to_owned(),
             }),
@@ -188,119 +178,16 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------
-// Exec parity — every payload below is the pre-existing live operator
-// surface and must not move.
-// ---------------------------------------------------------------------
-
-/// Assert one Exec class converts to exactly `expected` and preserves its
-/// diagnostic verbatim.
-fn assert_exec_parity(class: ExecStartFailure, detail: &str, expected: &TransitionReason) {
-    let (reason, preserved) = convert(DriverStartFailure {
-        class: DriverStartClass::Exec(class),
-        detail: detail.to_owned(),
-    });
-    assert_eq!(&reason, expected, "Exec operator classification must not change");
-    assert_eq!(preserved, detail, "the verbatim Exec diagnostic must be preserved");
-}
-
-#[test]
-fn exec_binary_not_found_preserves_existing_operator_cause_and_detail() {
-    assert_exec_parity(
-        ExecStartFailure::BinaryNotFound { path: "/no/such".to_owned() },
-        "spawn /no/such: No such file or directory (os error 2)",
-        &TransitionReason::ExecBinaryNotFound { path: "/no/such".to_owned() },
-    );
-}
-
-#[test]
-fn exec_permission_denied_preserves_existing_operator_cause_and_detail() {
-    assert_exec_parity(
-        ExecStartFailure::PermissionDenied { path: "/usr/local/bin/payments".to_owned() },
-        "spawn /usr/local/bin/payments: Permission denied (os error 13)",
-        &TransitionReason::ExecPermissionDenied { path: "/usr/local/bin/payments".to_owned() },
-    );
-}
-
-/// ENOEXEC keeps the canonical `kind` token exactly. A renamed token is
-/// an operator-visible break even though nothing fails to compile, so it
-/// is asserted as a literal rather than via a shared constant.
-#[test]
-fn exec_format_error_preserves_exec_format_error_kind_and_detail() {
-    assert_exec_parity(
-        ExecStartFailure::BinaryInvalid {
-            path: "/tmp/garbage".to_owned(),
-            kind: "exec_format_error".to_owned(),
-        },
-        "spawn /tmp/garbage: Exec format error (os error 8)",
-        &TransitionReason::ExecBinaryInvalid {
-            path: "/tmp/garbage".to_owned(),
-            kind: "exec_format_error".to_owned(),
-        },
-    );
-
-    // The retired Phase-1 wording must not reappear anywhere.
-    let (reason, _) = convert(DriverStartFailure {
-        class: DriverStartClass::Exec(ExecStartFailure::BinaryInvalid {
-            path: "/tmp/garbage".to_owned(),
-            kind: "exec_format_error".to_owned(),
-        }),
-        detail: "spawn /tmp/garbage: Exec format error (os error 8)".to_owned(),
-    });
-    match reason {
-        TransitionReason::ExecBinaryInvalid { kind, .. } => {
-            assert_eq!(kind, "exec_format_error");
-            assert_ne!(kind, "not_executable", "the retired sub-cause token must not return");
-            assert_ne!(kind, "bad_elf", "the retired sub-cause token must not return");
-            assert_ne!(kind, "wrong_arch", "the retired sub-cause token must not return");
-        }
-        other => panic!("expected ExecBinaryInvalid, got {other:?}"),
-    }
-}
-
-#[test]
-fn exec_cgroup_create_scope_failure_preserves_existing_kind_and_detail() {
-    assert_exec_parity(
-        ExecStartFailure::CgroupSetupFailed {
-            kind: "create_scope".to_owned(),
-            source: "mkdir /sys/fs/cgroup/...: Permission denied".to_owned(),
-        },
-        "create workload scope: mkdir /sys/fs/cgroup/...: Permission denied",
-        &TransitionReason::CgroupSetupFailed {
-            kind: "create_scope".to_owned(),
-            source: "mkdir /sys/fs/cgroup/...: Permission denied".to_owned(),
-        },
-    );
-}
-
-#[test]
-fn exec_cgroup_place_pid_failure_preserves_existing_kind_and_detail() {
-    assert_exec_parity(
-        ExecStartFailure::CgroupSetupFailed {
-            kind: "place_pid".to_owned(),
-            source: "write cgroup.procs: Permission denied".to_owned(),
-        },
-        "place pid in scope: write cgroup.procs: Permission denied",
-        &TransitionReason::CgroupSetupFailed {
-            kind: "place_pid".to_owned(),
-            source: "write cgroup.procs: Permission denied".to_owned(),
-        },
-    );
-}
-
-// ---------------------------------------------------------------------
 // The single unknown fallback.
 // ---------------------------------------------------------------------
 
 /// The closed contract has ONE unknown fallback: the pre-existing
 /// `DriverInternalError`, carrying the diagnostic verbatim. An unknown
-/// failure is never guessed into a named Exec or VM cause.
+/// failure is never guessed into a named VM cause.
 #[test]
 fn unclassified_start_failure_maps_only_to_driver_internal_error_with_verbatim_detail() {
     for driver in [DriverType::Vm, DriverType::Unikernel, DriverType::Wasm] {
-        // Prose deliberately shaped like the retired grammar's own
-        // matches — if any of it still steered a decision, this would
-        // resolve to a named Exec cause instead of the fallback.
-        let detail = "spawn /no/such: No such file or directory (os error 2)";
+        let detail = "unclassified substrate failure";
         let (reason, preserved) = convert(DriverStartFailure {
             class: DriverStartClass::Unclassified { driver },
             detail: detail.to_owned(),

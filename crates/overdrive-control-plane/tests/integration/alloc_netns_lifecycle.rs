@@ -1073,7 +1073,7 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
     let obs = build_obs();
     let worker = build_worker();
     // No driver call on the FinalizeFailed arm — a SimDriver is sufficient.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -1167,7 +1167,7 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
         Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs = build_obs();
     let worker = build_worker();
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));

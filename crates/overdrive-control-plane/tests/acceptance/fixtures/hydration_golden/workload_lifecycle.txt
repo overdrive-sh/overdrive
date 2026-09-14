@@ -86,7 +86,7 @@ WorkloadLifecycle(
         allocations: {
             AllocationId(
                 "job-app-0",
-            ): AllocStatusRowV3 {
+            ): AllocStatusRowV1 {
                 alloc_id: AllocationId(
                     "job-app-0",
                 ),

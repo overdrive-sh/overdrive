@@ -1088,7 +1088,7 @@ mod tests {
             to: AllocStateWire::Terminated,
             reason: TransitionReason::Stopped { by: StoppedBy::Reconciler },
             detail: None,
-            source: TransitionSource::Driver(DriverType::Exec),
+            source: TransitionSource::Driver(DriverType::Vm),
             at: "1@node-a".to_string(),
             terminal: None,
         }

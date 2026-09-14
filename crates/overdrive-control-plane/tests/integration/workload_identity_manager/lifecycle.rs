@@ -599,7 +599,7 @@ async fn build_harness_with_ca_and_clock(
         Arc::new(LocalObservationStore::open(tmp.path().join("obs.redb")).expect("open obs store"));
 
     let node_id = NodeId::new(NODE_NAME).expect("valid NodeId");
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver;
 
     let allocator =

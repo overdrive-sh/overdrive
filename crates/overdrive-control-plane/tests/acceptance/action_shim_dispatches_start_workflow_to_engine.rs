@@ -100,7 +100,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     let workflow_id = WorkflowId::for_correlation(&correlation);
 
     // --- Remaining action-shim ports (untouched by StartWorkflow) -----
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::new(driver));

@@ -57,7 +57,7 @@ fn failed_lifecycle_event(
             stderr_tail: None,
         },
         detail: None,
-        source: TransitionSource::Driver(DriverType::Exec),
+        source: TransitionSource::Driver(DriverType::Vm),
         at: "3@node-a".to_string(),
         terminal: None,
     }

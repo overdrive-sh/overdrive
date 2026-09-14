@@ -153,7 +153,7 @@ async fn drive(seed: u64, contend: bool) {
     // Keep the pre-existing phase-less simulator behavior for this
     // schedule-racy diagnostic; the wrapper itself routes the VM payload as
     // the supported VM capability.
-    let inner = Arc::new(SimDriver::with_clock(DriverType::Exec, clock.clone()));
+    let inner = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
     let driver = Arc::new(ScheduledStop {
         inner,
         clock: clock.clone(),

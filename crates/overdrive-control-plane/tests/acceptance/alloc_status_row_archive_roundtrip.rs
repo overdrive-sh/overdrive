@@ -33,6 +33,7 @@ use std::time::Duration;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{CancelledBy, ResourceEnvelope, StoppedBy};
 use proptest::prelude::*;
@@ -48,9 +49,9 @@ fn arb_label() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9-]{0,15}".prop_map(String::from)
 }
 
-/// Generator for every `TransitionReason` variant (16 total). Cause-class
-/// variants carry proptest-generated payloads; progress markers are
-/// payload-less or carry minimal scalar payloads.
+/// Generator for representative surviving `TransitionReason` variants.
+/// Cause-class variants carry proptest-generated payloads; progress markers
+/// are payload-less or carry minimal scalar payloads.
 #[allow(clippy::too_many_lines)]
 fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
     prop_oneof![
@@ -65,13 +66,24 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
             Just(StoppedBy::Process)
         ]
         .prop_map(|by| TransitionReason::Stopped { by }),
-        // ---- cause-class failures, Phase-1 emit (9) ----
-        arb_label().prop_map(|path| TransitionReason::ExecBinaryNotFound { path }),
-        arb_label().prop_map(|path| TransitionReason::ExecPermissionDenied { path }),
-        (arb_label(), arb_label())
-            .prop_map(|(path, kind)| TransitionReason::ExecBinaryInvalid { path, kind }),
-        (arb_label(), arb_label())
-            .prop_map(|(kind, source)| TransitionReason::CgroupSetupFailed { kind, source }),
+        // ---- VM and generic cause-class failures ----
+        arb_label().prop_map(|path| TransitionReason::VmKernelNotFound { path }),
+        arb_label().prop_map(|path| TransitionReason::VmRootfsNotFound { path }),
+        (arb_label(), arb_label(), arb_label()).prop_map(|(path, arch, detail)| {
+            TransitionReason::VmKernelFormatUnsupported { path, arch, detail }
+        }),
+        (
+            prop_oneof![
+                Just(ConfinementControl::Landlock),
+                Just(ConfinementControl::Seccomp),
+                Just(ConfinementControl::UidDrop),
+            ],
+            arb_label()
+        )
+            .prop_map(|(control, detail)| TransitionReason::VmConfinementUnavailable {
+                control,
+                detail,
+            }),
         arb_label().prop_map(|detail| TransitionReason::DriverInternalError { detail }),
         (any::<u32>(), arb_label()).prop_map(|(attempts, last_cause_summary)| {
             TransitionReason::RestartBudgetExhausted { attempts, last_cause_summary }
@@ -84,9 +96,8 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
                 free: ResourceEnvelope { cpu_milli: free_cpu, memory_bytes: free_mem },
             }
         ),
-        // ---- cause-class failures, Phase-2 forward-compat (2) ----
         (any::<u64>(), any::<u64>()).prop_map(|(peak_bytes, limit_bytes)| {
-            TransitionReason::OutOfMemory { peak_bytes, limit_bytes }
+            TransitionReason::VmOutOfMemory { limit_bytes, oom_kill_count: peak_bytes }
         }),
         (
             proptest::option::of(any::<i32>()),
@@ -256,7 +267,7 @@ fn pre_feature_shape_row_archives_byte_deterministically() {
 fn failed_state_with_cause_class_reason_round_trips() {
     let row = build_row(
         AllocState::Failed,
-        Some(TransitionReason::ExecBinaryNotFound { path: "/usr/local/bin/payments".to_owned() }),
+        Some(TransitionReason::VmKernelNotFound { path: "/srv/vm/vmlinuz".to_owned() }),
         Some("verbatim driver text".to_owned()),
     );
 

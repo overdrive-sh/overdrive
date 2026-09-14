@@ -81,7 +81,7 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -217,7 +217,7 @@ fn make_lifecycle_event(
         to,
         reason,
         detail: None,
-        source: TransitionSource::Driver(DriverType::Exec),
+        source: TransitionSource::Driver(DriverType::Vm),
         at: "1@node-a".to_string(),
         // Per ADR-0037 §4: synthetic test fixtures default to `None`
         // unless the scenario specifically exercises the terminal-

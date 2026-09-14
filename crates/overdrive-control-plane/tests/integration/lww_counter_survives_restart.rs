@@ -125,7 +125,7 @@ async fn dispatch_one_at_tick(
     intent: Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
     tick: u64,
 ) -> Result<(), overdrive_control_plane::action_shim::ShimError> {
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));

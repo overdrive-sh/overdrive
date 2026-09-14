@@ -1876,7 +1876,7 @@ mod tests {
                     .expect("put kind");
             }
 
-            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
             let listener_facts = crate::test_empty_listener_facts();
@@ -2494,7 +2494,7 @@ mod tests {
                 store_path,
                 obs,
                 Arc::new(runtime),
-                Arc::new(SimDriver::new(DriverType::Exec)),
+                Arc::new(SimDriver::new(DriverType::Vm)),
                 Arc::new(SimClock::new()),
                 Arc::new(SimDataplane::new()),
                 Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -2847,7 +2847,7 @@ mod tests {
             let archived = spec.archive_for_store().expect("archive WorkflowStart");
             store.put(key.as_bytes(), archived.as_ref()).await.expect("put workflow intent");
 
-            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+            let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
             AppState::new(

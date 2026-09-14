@@ -34,6 +34,7 @@ use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -70,7 +71,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -245,12 +246,23 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
             Just(StoppedBy::Process)
         ]
         .prop_map(|by| TransitionReason::Stopped { by }),
-        arb_label().prop_map(|path| TransitionReason::ExecBinaryNotFound { path }),
-        arb_label().prop_map(|path| TransitionReason::ExecPermissionDenied { path }),
-        (arb_label(), arb_label())
-            .prop_map(|(path, kind)| TransitionReason::ExecBinaryInvalid { path, kind }),
-        (arb_label(), arb_label())
-            .prop_map(|(kind, source)| TransitionReason::CgroupSetupFailed { kind, source }),
+        arb_label().prop_map(|path| TransitionReason::VmKernelNotFound { path }),
+        arb_label().prop_map(|path| TransitionReason::VmRootfsNotFound { path }),
+        (arb_label(), arb_label(), arb_label()).prop_map(|(path, arch, detail)| {
+            TransitionReason::VmKernelFormatUnsupported { path, arch, detail }
+        }),
+        (
+            prop_oneof![
+                Just(ConfinementControl::Landlock),
+                Just(ConfinementControl::Seccomp),
+                Just(ConfinementControl::UidDrop),
+            ],
+            arb_label()
+        )
+            .prop_map(|(control, detail)| TransitionReason::VmConfinementUnavailable {
+                control,
+                detail,
+            }),
         arb_label().prop_map(|detail| TransitionReason::DriverInternalError { detail }),
         (any::<u32>(), arb_label()).prop_map(|(attempts, last_cause_summary)| {
             TransitionReason::RestartBudgetExhausted { attempts, last_cause_summary }
@@ -263,8 +275,9 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
                 free: ResourceEnvelope { cpu_milli: fc, memory_bytes: fm },
             }
         },),
-        (any::<u64>(), any::<u64>())
-            .prop_map(|(p, l)| TransitionReason::OutOfMemory { peak_bytes: p, limit_bytes: l }),
+        (any::<u64>(), any::<u64>()).prop_map(|(limit_bytes, oom_kill_count)| {
+            TransitionReason::VmOutOfMemory { limit_bytes, oom_kill_count }
+        }),
         (
             proptest::option::of(any::<i32>()),
             proptest::option::of(any::<u8>()),

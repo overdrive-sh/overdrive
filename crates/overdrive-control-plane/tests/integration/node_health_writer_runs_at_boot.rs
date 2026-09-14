@@ -69,7 +69,7 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
         ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
         .await
@@ -144,7 +144,7 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
         ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
         .await

@@ -449,7 +449,7 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
                 .expect("VM probe registration requires a provisioned workload address")
                 .to_string()
         }
-        DriverType::Exec | DriverType::Unikernel | DriverType::Wasm => return,
+        DriverType::Unikernel | DriverType::Wasm => return,
     };
     match &mut descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => *host = workload_addr,

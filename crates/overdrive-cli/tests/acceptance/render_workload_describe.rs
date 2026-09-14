@@ -757,15 +757,15 @@ fn wrap_live(snapshot: AllocStatusResponse) -> WorkloadDescribeOutput {
 /// The header obligation is the honesty half. `AllocStatusRowBody.error`
 /// is verbatim driver / OS detail — for a VM allocation it is a boot
 /// diagnostic or a guest console tail, never process stderr — and
-/// `STDERR_TAIL_LINES` is `ExecDriver`'s own retention constant. Labelling
+/// `STDERR_TAIL_LINES` is the VM driver's own retention constant. Labelling
 /// this field `stderr (last N lines):` asserted two things that are not
 /// true of it, so `workload describe` must not.
 #[test]
 fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
     let rows = vec![row_with_state("alloc-coinflip-0", AllocStateWire::Failed, None, Some(1)), {
         let mut r = row_with_state("alloc-coinflip-1", AllocStateWire::Failed, None, Some(1));
-        r.reason = Some(overdrive_core::TransitionReason::ExecBinaryNotFound {
-            path: "/usr/local/bin/coinflip".to_owned(),
+        r.reason = Some(overdrive_core::TransitionReason::VmKernelNotFound {
+            path: "/srv/vm/vmlinuz".to_owned(),
         });
         r.error = Some("panic: dice roll said 6\nstack trace line 1\n".to_string());
         r
@@ -788,10 +788,9 @@ fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
         rendered.contains("panic: dice roll said 6"),
         "Failed Job must surface the last attempt's verbatim driver detail; got:\n{rendered}",
     );
-    let named = overdrive_core::TransitionReason::ExecBinaryNotFound {
-        path: "/usr/local/bin/coinflip".to_owned(),
-    }
-    .human_readable();
+    let named =
+        overdrive_core::TransitionReason::VmKernelNotFound { path: "/srv/vm/vmlinuz".to_owned() }
+            .human_readable();
     assert!(
         !"panic: dice roll said 6\nstack trace line 1\n".contains(&named),
         "test integrity: the verbatim detail must not already contain the named cause {named:?}, \
@@ -804,7 +803,7 @@ fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
     );
     assert!(
         !rendered.contains("stderr (last"),
-        "verbatim driver detail must NOT be labelled as a stderr tail with ExecDriver's line \
+        "verbatim driver detail must NOT be labelled as a stderr tail with the VM driver's line \
          budget — the field is neither; got:\n{rendered}",
     );
     // S-03-05 anti-scenario: a Job must never render Service phrasing.

@@ -406,20 +406,9 @@ impl LogicalTimestamp {
 /// (= [`AllocStatusRowEnvelope::latest`]); readers project through
 /// [`AllocStatusRowEnvelope::into_latest`].
 ///
-/// Re-aliased V1 → V2 in the same commit as the
-/// `AllocStatusRowEnvelope::V2` bump
-/// (canonical-workload-address-inbound-tproxy, GH #241) — the public
-/// name tracks the LATEST payload (alias-to-payload, UI-02), so
-/// struct-literal call sites pick up the additive `workload_addr`
-/// field. The exit-observer write path populates it; every host-netns
-/// fixture leaves it `None` (defaulted by the `From<V1> for V2`
-/// up-conversion on legacy reads).
-///
-/// Re-aliased V2 → V3 in the same commit as the
-/// `AllocStatusRowEnvelope::V3` bump (ADR-0078) — the crash-observability
-/// pair `last_terminated` + `restart_count`, which make a
-/// crash-and-recover durably observable under last-write-wins.
-pub type AllocStatusRow = AllocStatusRowV3;
+/// The current VM-only allocation status payload after the greenfield
+/// lifecycle-evidence reset.
+pub type AllocStatusRow = AllocStatusRowV1;
 
 /// Maximum retained lifecycle occurrences for one allocation.
 pub const ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC: usize = 64;
@@ -1012,28 +1001,13 @@ impl JobSpec {
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocStatusRowEnvelope {
     V1(AllocStatusRowV1),
-    // V2 appends the materialized per-alloc `workload_addr` (the
-    // `slot × base-at-provision` join the inbound nft rule is keyed on)
-    // — canonical-workload-address-inbound-tproxy, GH #241 / ADR-0071
-    // Path A. The V1 discriminant is UNMOVED (declaration order: V1 = 0,
-    // V2 = 1) so pre-existing V1 archives continue to read through the
-    // `From<V1> for V2` chain. Per `development.md` § "rkyv schema
-    // evolution" → "Version-bump procedure".
-    V2(AllocStatusRowV2),
-    // V3 appends the crash-observability pair `last_terminated` +
-    // `restart_count` (ADR-0078). The V1 and V2 discriminants are UNMOVED
-    // (declaration order: V1 = 0, V2 = 1, V3 = 2) so pre-existing archives
-    // continue to read through the `From<V1> for V2` → `From<V2> for V3`
-    // chain. Per `development.md` § "rkyv schema evolution" →
-    // "Version-bump procedure".
-    V3(AllocStatusRowV3),
 }
 
 // Alias-to-payload (UI-02): the public name points at the LATEST
 // payload struct so call sites keep using struct-literal
 // `AllocStatusRow { ... }`. Re-aliased V1 → V2 in the same commit as
 // the variant append, and V2 → V3 in the ADR-0078 commit.
-pub type AllocStatusRowLatest = AllocStatusRowV3;
+pub type AllocStatusRowLatest = AllocStatusRowV1;
 
 // SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
 // enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
@@ -1099,101 +1073,16 @@ pub struct AllocStatusRowV1 {
     /// "no Running observation yet" signal; reconcilers branch on
     /// it rather than treating it as zero.
     pub started_at: Option<UnixInstant>,
-}
-
-// SCAFFOLD: false — V2 payload for `AllocStatusRowEnvelope`
-// (canonical-workload-address-inbound-tproxy, GH #241). `pub` due to
-// rustc E0446 in the trait impl (same constraint as V1); Layer 1
-// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct AllocStatusRowV2 {
-    pub alloc_id: AllocationId,
-    pub workload_id: WorkloadId,
-    pub node_id: NodeId,
-    pub state: AllocState,
-    pub updated_at: LogicalTimestamp,
-    pub reason: Option<TransitionReason>,
-    pub detail: Option<String>,
-    pub terminal: Option<TerminalCondition>,
-    pub stderr_tail: Option<String>,
-    pub kind: WorkloadKind,
-    pub listeners: Vec<ListenerRow>,
-    /// Wall-clock instant at which this allocation first transitioned
-    /// Pending → Running. Carried forward verbatim from
-    /// [`AllocStatusRowV1::started_at`] — see that field's docstring
-    /// for the full "persist inputs, not derived state" rationale.
-    pub started_at: Option<UnixInstant>,
-    /// Canonical per-allocation workload address — the **materialized
-    /// `slot × base-at-provision` join** the inbound nft-TPROXY rule is
-    /// keyed on (canonical-workload-address-inbound-tproxy, GH #241 /
-    /// ADR-0071 Path A, feature-delta BLOCKER-2).
-    ///
-    /// # What this is
-    ///
-    /// A frozen snapshot of `WORKLOAD_SUBNET_BASE + slot*4 + 2`,
-    /// computed ONCE at provision time (`plan.workload_addr` at the C3
-    /// seam) and persisted here as an **observed input** — the exact
-    /// same value three readers share: the inbound nft rule installed
-    /// against it, this persisted row, and the ServiceLifecycle backend
-    /// projection advertise (`workload_addr:port`).
-    /// Persisting the materialized join (rather than the `NetSlot` to
-    /// recompute) keeps the address byte-identical across install,
-    /// observe, and advertise — a recompute-at-the-bridge would diverge
-    /// the instant the base is re-tuned.
-    ///
-    /// # Semantics
-    ///
-    /// - `None`: a host-netns workload (no provisioned netns / no
-    ///   Path-A interception). Every current fixture. Symmetric with
-    ///   `AllocationSpec.netns` / `host_veth` being absent. The bridge
-    ///   falls back to `host_ipv4:port` (unchanged behaviour).
-    /// - `Some(addr)`: a Path-A (mTLS-composed) alloc that provisioned
-    ///   a netns; `addr` is the canonical workload address the inbound
-    ///   rule captures to.
-    ///
-    /// # Discipline — #239 Phase-1 single-cut constraint
-    ///
-    /// The address is a *join* of `slot × base-at-provision-time`. Its
-    /// inputs are immutable for the life of the allocation: the slot is
-    /// fixed at provision, and the base is a Phase-1 single-node
-    /// constant. Per `.claude/rules/development.md` § "Persist inputs,
-    /// not derived state", the persisted derived-value risk (a future
-    /// `#239`-tunable base making the stored addr stale) does NOT bite
-    /// within a deployment's life: **a base change is a full redeploy /
-    /// re-provision / re-observe of every allocation — NOT a live
-    /// re-tune of running allocs.** The netns and inbound rule are
-    /// re-provisioned against the new base and the new `workload_addr`
-    /// is re-observed into a fresh row. This rustdoc is the structural
-    /// guard: it forbids a future "just recompute it at the bridge"
-    /// refactor that would silently reintroduce the install/advertise
-    /// divergence the design rejected.
+    /// Canonical per-allocation workload address observed at provision time.
+    /// `None` means that no workload address was observed for this row.
     pub workload_addr: Option<Ipv4Addr>,
-}
-
-/// Additive V1 → V2 up-conversion: every pre-existing field carried
-/// forward verbatim; the new `workload_addr` defaults to `None` (a V1
-/// row was written before the canonical-address field existed, so the
-/// honest projection is "no workload address observed"). Per
-/// `development.md` § "rkyv schema evolution" → "Version-bump
-/// procedure" step 4.
-impl From<AllocStatusRowV1> for AllocStatusRowV2 {
-    fn from(v1: AllocStatusRowV1) -> Self {
-        Self {
-            alloc_id: v1.alloc_id,
-            workload_id: v1.workload_id,
-            node_id: v1.node_id,
-            state: v1.state,
-            updated_at: v1.updated_at,
-            reason: v1.reason,
-            detail: v1.detail,
-            terminal: v1.terminal,
-            stderr_tail: v1.stderr_tail,
-            kind: v1.kind,
-            listeners: v1.listeners,
-            started_at: v1.started_at,
-            workload_addr: None,
-        }
-    }
+    /// The most recent terminal observation this allocation survived. This
+    /// depth-one snapshot is populated by [`CrashFacts::advance`] when a
+    /// terminal row is superseded by a non-terminal row.
+    pub last_terminated: Option<LastTerminated>,
+    /// Monotone count of observed terminal-to-Running transitions at this
+    /// allocation key, computed by [`CrashFacts::advance`].
+    pub restart_count: u32,
 }
 
 /// Verbatim snapshot of the most recent terminal observation for an
@@ -1239,9 +1128,9 @@ pub struct LastTerminated {
     pub state: AllocState,
     /// The superseded row's typed cause-class, verbatim. Carries `exit_code`
     /// / `signal` / `stderr_tail` inside
-    /// [`TransitionReason::WorkloadCrashedImmediately`], `path` inside
-    /// [`TransitionReason::ExecBinaryNotFound`], and so on — NOT flattened
-    /// into scalars. `None` when the superseded row carried no reason.
+    /// [`TransitionReason::WorkloadCrashedImmediately`], and so on — NOT
+    /// flattened into scalars. `None` when the superseded row carried no
+    /// reason.
     pub reason: Option<TransitionReason>,
     /// The superseded row's verbatim driver / OS text, verbatim. The
     /// audit-preserving sidecar the typed `reason` payload cannot capture
@@ -1404,195 +1293,26 @@ impl CrashFacts {
     }
 }
 
-// SCAFFOLD: false — V3 payload for `AllocStatusRowEnvelope` (ADR-0078).
-// `pub` due to rustc E0446 in the trait impl (same constraint as V1/V2);
-// Layer 1 enforced by non-re-export from `lib.rs` + Layer 2 dst_lint
-// scanner.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct AllocStatusRowV3 {
-    pub alloc_id: AllocationId,
-    pub workload_id: WorkloadId,
-    pub node_id: NodeId,
-    pub state: AllocState,
-    pub updated_at: LogicalTimestamp,
-    pub reason: Option<TransitionReason>,
-    pub detail: Option<String>,
-    pub terminal: Option<TerminalCondition>,
-    pub stderr_tail: Option<String>,
-    pub kind: WorkloadKind,
-    pub listeners: Vec<ListenerRow>,
-    /// Wall-clock instant at which this allocation first transitioned
-    /// Pending → Running. Carried forward verbatim from
-    /// [`AllocStatusRowV1::started_at`] — see that field's docstring
-    /// for the full "persist inputs, not derived state" rationale.
-    pub started_at: Option<UnixInstant>,
-    /// Canonical per-allocation workload address. Carried forward verbatim
-    /// from [`AllocStatusRowV2::workload_addr`] — see that field's
-    /// docstring for the materialized-join rationale and the #239 Phase-1
-    /// single-cut constraint.
-    pub workload_addr: Option<Ipv4Addr>,
-    /// The most recent terminal observation this allocation SURVIVED —
-    /// the depth-1 `lastState` snapshot that makes a crash-and-recover
-    /// durably observable under last-write-wins (ADR-0078 § D1).
-    ///
-    /// `None` until the allocation recovers from its first terminal.
-    /// **Never describes the row that carries it**: it is populated only
-    /// by the write that supersedes a terminal row, never by the terminal
-    /// write itself. See [`LastTerminated`] for the membership rule.
-    ///
-    /// Computed exclusively by [`CrashFacts::advance`]; no writer sets it
-    /// directly.
-    pub last_terminated: Option<LastTerminated>,
-    /// Monotone per-allocation restart counter — Kubernetes'
-    /// `restartCount` / Nomad's `Restarts` (ADR-0078 § D1, § D3).
-    ///
-    /// Increments by exactly 1 on the write that observes a
-    /// `terminal → Running` transition at this LWW key; carried forward
-    /// verbatim by every other write. Never decreases, never resets.
-    ///
-    /// `u32` matches the attempt counters it sits beside
-    /// (`WorkloadLifecycleView.restart_counts`,
-    /// `TerminalCondition::BackoffExhausted { attempts }`,
-    /// `TransitionReason::RestartBudgetExhausted { attempts }`).
-    /// `saturating_add` clamps at `u32::MAX`; at that point the
-    /// postcondition "strictly greater than prior on a restart" no longer
-    /// holds. Stated rather than hidden, exactly as ADR-0077 § D1 states
-    /// its `u64::MAX` edge.
-    ///
-    /// **An observed input, not derived state.** It counts *observed
-    /// transitions*: no constant, policy table, or operator knob anywhere
-    /// in the codebase can change its correct value. It is NOT the same
-    /// quantity as `WorkloadLifecycleView.restart_counts`, which counts
-    /// restart *attempts* at emit time and drives the backoff budget —
-    /// the two diverge on every driver-rejected restart. Do not source
-    /// one from the other (ADR-0078 § D3).
-    ///
-    /// Computed exclusively by [`CrashFacts::advance`]; no writer sets it
-    /// directly.
-    pub restart_count: u32,
-}
-
-/// Additive V2 → V3 up-conversion: every pre-existing field carried
-/// forward verbatim; `last_terminated` defaults to `None` and
-/// `restart_count` to `0` (a V2 row was written before crash
-/// observability existed, so the honest projection is "no terminal
-/// observed, no restarts counted"). Per `development.md` § "rkyv schema
-/// evolution" → "Version-bump procedure" step 4.
-impl From<AllocStatusRowV2> for AllocStatusRowV3 {
-    fn from(v2: AllocStatusRowV2) -> Self {
-        Self {
-            alloc_id: v2.alloc_id,
-            workload_id: v2.workload_id,
-            node_id: v2.node_id,
-            state: v2.state,
-            updated_at: v2.updated_at,
-            reason: v2.reason,
-            detail: v2.detail,
-            terminal: v2.terminal,
-            stderr_tail: v2.stderr_tail,
-            kind: v2.kind,
-            listeners: v2.listeners,
-            started_at: v2.started_at,
-            workload_addr: v2.workload_addr,
-            last_terminated: None,
-            restart_count: 0,
-        }
-    }
-}
-
 impl VersionedEnvelope for AllocStatusRowEnvelope {
-    type Latest = AllocStatusRowV3;
+    type Latest = AllocStatusRowV1;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V3(payload)
+        Self::V1(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        // The V1 arm must chain EXPLICITLY through V2 (ADR-0078 § D4 step
-        // 4): no `From<V1> for V3` exists and none should be added — each
-        // hop is a separate, additive, independently-reviewable
-        // projection.
         match self {
-            Self::V1(v1) => Ok(AllocStatusRowV2::from(v1).into()),
-            Self::V2(v2) => Ok(v2.into()),
-            Self::V3(v3) => Ok(v3),
+            Self::V1(v1) => Ok(v1),
         }
     }
 
-    /// Discriminant offset for `AllocStatusRowEnvelope` archives,
-    /// measured from the END of the archive bytes.
-    ///
-    /// Empirically determined against canonical V1 payloads of
-    /// varying `listeners: Vec<ListenerRow>` / `detail` / `stderr_tail`
-    /// / `terminal` shapes: rkyv 0.8 places the outer enum's
-    /// discriminant byte at a fixed offset from the END of the
-    /// archive, stable across all payload sizes (the trailing "root"
-    /// structure has a fixed footprint; only the leading slab grows
-    /// with variable-length data).
-    ///
-    /// **Repinned 2026-05-24** (greenfield, no shipped consumers; per
-    /// the `feedback_single_cut_greenfield_migrations` rule): the
-    /// previously-pinned offset of 168 reflected the canonical V1
-    /// layout before `TerminalCondition::Stable` and `::ServiceFailed`
-    /// were appended. Appending those two variants grew the inline
-    /// footprint of `Option<TerminalCondition>` (which `AllocStatusRowV1`
-    /// embeds inline), which extended the trailing root structure by
-    /// 24 bytes. The new offset of 192 was empirically located by
-    /// flipping each stable-zero byte in canonical archives to 0xFE
-    /// and observing which one caused rkyv to reject the archive with
-    /// `invalid discriminant '254' for enum
-    /// 'ArchivedAllocStatusRowEnvelope'`.
-    ///
-    /// **Repinned 2026-05-29** (greenfield extension per the
-    /// subsidiary GAP-1 fix): added an `Option<UnixInstant>`
-    /// `started_at` field inline to `AllocStatusRowV1`. `UnixInstant`
-    /// wraps `Duration` (12 bytes — 8 for seconds + 4 for nanos),
-    /// inlined behind the `Option` discriminant; this extended the
-    /// trailing root structure to the 212-byte pin.
-    ///
-    /// **Repinned 2026-06-22 — 212 → 224 — V2 append
-    /// (canonical-workload-address-inbound-tproxy, GH #241).**
-    /// Appending `V2(AllocStatusRowV2)` — whose only delta is the
-    /// additive `workload_addr: Option<Ipv4Addr>` — grows the outer
-    /// enum's INLINE footprint to `max(V1, V2)`, extending the
-    /// trailing root structure by 8 bytes (the `Option<Ipv4Addr>`
-    /// footprint, aligned) and shifting the discriminant offset to
-    /// 224. The value is EMPIRICAL — derived from the actual archived
-    /// bytes via the schema-evolution triangulation test
-    /// (`alloc_status_row_discriminant_offset_triangulation`), NOT
-    /// guessed. Update this constant and
-    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant or
-    /// layout change.
-    ///
-    /// **Repinned 2026-08-01 — 224 → 416 — V3 append (ADR-0078).**
-    /// Appending `V3(AllocStatusRowV3)` — whose delta over V2 is
-    /// `last_terminated: Option<LastTerminated>` (itself carrying inline
-    /// `Option<TransitionReason>` / `Option<TerminalCondition>` /
-    /// `Option<UnixInstant>` / `LogicalTimestamp`) plus a `u32` — grows the
-    /// outer enum's INLINE footprint to `max(V1, V2, V3)`, extending the
-    /// trailing root structure and shifting the discriminant offset. The
-    /// value is EMPIRICAL — derived from the actual archived bytes via the
-    /// schema-evolution triangulation test
-    /// (`alloc_status_row_discriminant_offset_triangulation`), NOT guessed.
-    /// Update this constant and `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep
-    /// at every variant or layout change.
-    ///
-    /// Re-pin alongside the schema-evolution fixture at every
-    /// version-bump per
-    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
-    /// docstring.
+    /// Discriminant offset for the current V1 archive, measured from the end.
     fn discriminant_offset_from_end() -> Option<usize> {
         Some(416)
     }
 
     fn known_discriminants() -> &'static [u8] {
-        // V1 = 0, V2 = 1, V3 = 2 (rkyv declaration order). The V3 bump
-        // appended tag 2 (ADR-0078); V1 (tag 0) and V2 (tag 1) continue to
-        // round-trip through `into_latest` via the
-        // `From<V1> for V2` → `From<V2> for V3` chain. Empirically verified
-        // by the `alloc_status_row_unknown_version_probe_surfaces` test
-        // (supported_max == 2).
-        &[0, 1, 2]
+        &[0]
     }
 
     fn type_name() -> &'static str {

@@ -27,10 +27,8 @@ use crate::{AllocationId, SpiffeId};
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
-/// `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
-/// with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
-/// amendment 2026-04-28).
+/// wire form. [`Display`] and [`FromStr`] emit `vm`, `unikernel`, `wasm` —
+/// matching `docs/whitepaper.md` §6.
 ///
 /// `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
 /// migration (step 01-10, GH #42 — `docs/feature/
@@ -64,8 +62,6 @@ use crate::{AllocationId, SpiffeId};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
-    /// Native binary under cgroups v2 (`tokio::process`).
-    Exec,
     /// Cloud Hypervisor microVM (hotplug, virtiofs, any OS).
     Vm,
     /// Cloud Hypervisor + Unikraft unikernel.
@@ -79,7 +75,6 @@ impl DriverType {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Exec => "exec",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
             Self::Wasm => "wasm",
@@ -98,7 +93,6 @@ impl FromStr for DriverType {
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
-            "exec" => Ok(Self::Exec),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),
             "wasm" => Ok(Self::Wasm),
@@ -138,12 +132,11 @@ impl Display for DriverStartFailure {
 
 /// The driver-family discriminator for a [`DriverStartFailure`]
 /// (ADR-0083 §D5). There is deliberately no sibling `driver` field: the
-/// family rides the variant, so a `driver: Exec` / VM-cause mismatch is
+/// family rides the variant, so a mismatched driver/cause pair is
 /// unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DriverStartClass {
-    Exec(ExecStartFailure),
     Vm(VmStartFailure),
     /// A failure with no named class for this driver family. Converts to
     /// the pre-existing `DriverInternalError`; the ONLY unknown fallback.
@@ -157,28 +150,10 @@ impl DriverStartClass {
     #[must_use]
     pub const fn driver_type(&self) -> DriverType {
         match self {
-            Self::Exec(_) => DriverType::Exec,
             Self::Vm(_) => DriverType::Vm,
             Self::Unclassified { driver } => *driver,
         }
     }
-}
-
-/// `ExecDriver`'s named start causes (ADR-0083 §D5). Selected from
-/// structured OS error identity — never from `Display` text. Every payload
-/// string is the pre-existing live operator surface and does not change.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ExecStartFailure {
-    /// `spawn(2)` returned ENOENT.
-    BinaryNotFound { path: String },
-    /// `spawn(2)` returned EACCES.
-    PermissionDenied { path: String },
-    /// `spawn(2)` returned ENOEXEC / ELIBBAD. `kind` is the canonical
-    /// `"exec_format_error"` for the ENOEXEC case.
-    BinaryInvalid { path: String, kind: String },
-    /// Cgroup setup failed. `kind` is `"create_scope"` or `"place_pid"`.
-    CgroupSetupFailed { kind: String, source: String },
 }
 
 /// `VmDriver`'s named start causes (ADR-0083 §D5 rows 1-12 and 15). Not
@@ -621,10 +596,10 @@ pub struct ExitEvent {
     /// error mid-stream). Per ADR-0033 Amendment 2026-05-10.
     ///
     /// Producers:
-    /// - `ExecDriver` (production): consumes `child.stderr` line-by-
+    /// - `VmDriver` (production): consumes the VMM stderr stream line-by-
     ///   line into a bounded ring buffer of capacity
-    ///   `STDERR_TAIL_LINES`; on `child.wait()` resolution emits the
-    ///   ring contents joined by `\n` (no trailing newline).
+    ///   `STDERR_TAIL_LINES`; on exit emits the ring contents joined by
+    ///   `\n` (no trailing newline).
     /// - `SimDriver` (tests): emits `None` by default; tests that
     ///   want to exercise the tail-rendering path inject explicit
     ///   stderr via the sim driver's tail-injection API.
@@ -632,8 +607,7 @@ pub struct ExitEvent {
     /// Set only when the driver observed, immediately after exit and
     /// before any teardown, that the allocation's cgroup scope had a
     /// nonzero `oom_kill` counter (ADR-0082 §D8, the D-3 fold-in).
-    /// `ExecDriver` never sets this (its own OOM diagnosis is the
-    /// unreduced half of D-3, still deferred). `None` means "not
+    /// `VmDriver` sets this only on its VMM-died branch. `None` means "not
     /// observed to be OOM" -- it does NOT mean "confirmed not OOM": a
     /// read error also yields `None`, per this fold-in's best-effort
     /// scope.
@@ -656,7 +630,7 @@ pub struct OomFacts {
     pub oom_kill_count: u64,
 }
 
-/// Number of trailing stderr lines `ExecDriver` retains for inclusion
+/// Number of trailing stderr lines `VmDriver` retains for inclusion
 /// on the [`ExitEvent`]. The constant is the project-wide SSOT so the
 /// driver-side ring buffer (which fills it) and the renderer (which
 /// displays it as "stderr (last N lines):") read from one source.
@@ -802,7 +776,7 @@ pub trait Driver: Send + Sync + 'static {
     /// The `exit_observer` subsystem (in
     /// `overdrive-control-plane::worker::exit_observer`) consumes this
     /// receiver at startup. Drivers that emit exit events
-    /// (`ExecDriver`, `SimDriver`) override this to return their
+    /// (`VmDriver`, `SimDriver`) override this to return their
     /// internal receiver exactly once.
     ///
     /// Default: `None` — drivers that have no watcher (e.g.
@@ -833,7 +807,7 @@ pub trait Driver: Send + Sync + 'static {
     ///
     /// Production [`crate::traits::driver::Driver`] implementations
     /// that hold a reference to the worker's `ProbeRunner` (today:
-    /// `overdrive_worker::ExecDriver`) override this to call
+    /// `overdrive_worker::VmDriver`) override this to call
     /// `probe_runner.start_alloc(spec)`, handing the allocation facts and
     /// validated probe descriptors to the per-alloc supervisor per ADR-0054
     /// § 3.
@@ -901,7 +875,7 @@ pub trait Driver: Send + Sync + 'static {
     /// async").
     ///
     /// Default: `None`, for drivers that do not report supervision
-    /// (`overdrive_worker::ExecDriver` keeps the default — correct
+    /// (`overdrive_worker::VmDriver` keeps the default — correct
     /// rather than an omission, since a reclamation-shaped consumer
     /// only ever acts on VM allocations).
     fn live_allocations(&self) -> Option<Vec<AllocationId>> {

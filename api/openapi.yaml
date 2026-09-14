@@ -801,10 +801,8 @@ components:
         Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 
         Stable: new drivers are appended; existing variants never change their
-        wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
-        `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
-        with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
-        amendment 2026-04-28).
+        wire form. [`Display`] and [`FromStr`] emit `vm`, `unikernel`, `wasm` —
+        matching `docs/whitepaper.md` §6.
 
         `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
         migration (step 01-10, GH #42 — `docs/feature/
@@ -821,7 +819,6 @@ components:
         transitively (DWD-03). `utoipa` is a declarative-derive crate with no
         runtime I/O — the dst-lint banned-API list does not enumerate it.
       enum:
-      - exec
       - vm
       - unikernel
       - wasm
@@ -1320,8 +1317,7 @@ components:
           type: string
           description: |-
             Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
-            `"http GET http://0.0.0.0:8080/healthz"`,
-            `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
+            `"http GET http://0.0.0.0:8080/healthz"`). Reconciler
             composes from `ProbeDescriptor.mechanic` at the deciding
             tick.
         probe_idx:
@@ -2716,112 +2712,6 @@ components:
             - stopped
       - type: object
         description: |-
-          `spawn(2)` returned ENOENT for the configured binary path.
-          Replaces the previous state-class `DriverStartFailed` for the
-          missing-binary case; the broken-binary regression target
-          (US-02 KPI-02) emits this variant.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned ENOENT for the configured binary path.
-              Replaces the previous state-class `DriverStartFailed` for the
-              missing-binary case; the broken-binary regression target
-              (US-02 KPI-02) emits this variant.
-            required:
-            - path
-            properties:
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_binary_not_found
-      - type: object
-        description: |-
-          `spawn(2)` returned EACCES — the binary exists but is not
-          executable by the running uid.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned EACCES — the binary exists but is not
-              executable by the running uid.
-            required:
-            - path
-            properties:
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_permission_denied
-      - type: object
-        description: |-
-          `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
-          not a valid executable for this kernel/architecture.
-          `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
-          `"bad_elf"`, `"wrong_arch"`).
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
-              not a valid executable for this kernel/architecture.
-              `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
-              `"bad_elf"`, `"wrong_arch"`).
-            required:
-            - path
-            - kind
-            properties:
-              kind:
-                type: string
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_binary_invalid
-      - type: object
-        description: |-
-          Cgroup setup failed (scope mkdir, PID enrolment, limit write).
-          `kind` is one of `"create_scope"`, `"place_pid"`,
-          `"write_limits"`; `source` is the verbatim `std::io::Error`
-          `Display`.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              Cgroup setup failed (scope mkdir, PID enrolment, limit write).
-              `kind` is one of `"create_scope"`, `"place_pid"`,
-              `"write_limits"`; `source` is the verbatim `std::io::Error`
-              `Display`.
-            required:
-            - kind
-            - source
-            properties:
-              kind:
-                type: string
-              source:
-                type: string
-          kind:
-            type: string
-            enum:
-            - cgroup_setup_failed
-      - type: object
-        description: |-
           Driver returned an uncategorised failure that did not fit any
           of the more specific cause variants. Falls back on the verbatim
           driver `Display` text in `detail`. Operators seeing this variant
@@ -2962,41 +2852,9 @@ components:
             - no_capacity
       - type: object
         description: |-
-          Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
-          cgroup-events subscription; defined now for wire-shape forward-
-          compatibility.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
-              cgroup-events subscription; defined now for wire-shape forward-
-              compatibility.
-            required:
-            - peak_bytes
-            - limit_bytes
-            properties:
-              limit_bytes:
-                type: integer
-                format: int64
-                minimum: 0
-              peak_bytes:
-                type: integer
-                format: int64
-                minimum: 0
-          kind:
-            type: string
-            enum:
-            - out_of_memory
-      - type: object
-        description: |-
           Workload exited with a non-zero status or signal within the
-          post-spawn settle window. Emitted by the `ExitObserver` when
-          `ExitKind::Crashed` is received from the driver — `ExecDriver`
-          already performs `child.wait()` in Phase 1 and that is exactly
+          post-start settle window. Emitted by the `ExitObserver` when
+          `ExitKind::Crashed` is received from the VM driver — that is exactly
           how `ExitKind::Crashed` is produced. The `exit_code` field
           carries the process exit status (`None` for signal-only exits);
           `signal` carries the signal number cast to `u8` (`None` when
@@ -3010,9 +2868,8 @@ components:
             type: object
             description: |-
               Workload exited with a non-zero status or signal within the
-              post-spawn settle window. Emitted by the `ExitObserver` when
-              `ExitKind::Crashed` is received from the driver — `ExecDriver`
-              already performs `child.wait()` in Phase 1 and that is exactly
+              post-start settle window. Emitted by the `ExitObserver` when
+              `ExitKind::Crashed` is received from the VM driver — that is exactly
               how `ExitKind::Crashed` is produced. The `exit_code` field
               carries the process exit status (`None` for signal-only exits);
               `signal` carries the signal number cast to `u8` (`None` when
@@ -3046,8 +2903,7 @@ components:
           `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
           that failed; `detail` is the verbatim `Display` of the underlying
           `MtlsInterceptInstallError` (which names the privilege / kernel-feature
-          remediation an operator acts on). Mirrors the `CgroupSetupFailed {
-          kind, source }` cause-class shape — `stage` is a `String` carrying a
+          remediation an operator acts on). The `stage` is a `String` carrying a
           closed vocabulary, NOT a sub-enum.
         required:
         - data
@@ -3062,8 +2918,7 @@ components:
               `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
               that failed; `detail` is the verbatim `Display` of the underlying
               `MtlsInterceptInstallError` (which names the privilege / kernel-feature
-              remediation an operator acts on). Mirrors the `CgroupSetupFailed {
-              kind, source }` cause-class shape — `stage` is a `String` carrying a
+              remediation an operator acts on). The `stage` is a `String` carrying a
               closed vocabulary, NOT a sub-enum.
             required:
             - stage
@@ -3147,9 +3002,9 @@ components:
 
           **Additive position**: appended after `WorkloadNetnsProvisionFailed`
           to keep every pre-existing rkyv discriminant stable — the same
-          discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
-          never populates `ExitEvent::oom`, so every Exec crash falls
-          through unchanged to `WorkloadCrashedImmediately`.
+          discipline `StoppedBy` states verbatim at `:237-241`. VM exits
+          without OOM facts fall through unchanged to
+          `WorkloadCrashedImmediately`.
         required:
         - data
         - kind
@@ -3174,9 +3029,9 @@ components:
 
               **Additive position**: appended after `WorkloadNetnsProvisionFailed`
               to keep every pre-existing rkyv discriminant stable — the same
-              discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
-              never populates `ExitEvent::oom`, so every Exec crash falls
-              through unchanged to `WorkloadCrashedImmediately`.
+              discipline `StoppedBy` states verbatim at `:237-241`. VM exits
+              without OOM facts fall through unchanged to
+              `WorkloadCrashedImmediately`.
             required:
             - limit_bytes
             - oom_kill_count
@@ -3396,8 +3251,8 @@ components:
 
         Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
         `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
-        gives a self-describing wire shape: `{"kind": "exec_binary_not_found",
-        "data": {"path": "/usr/local/bin/payments"}}` for cause-class variants;
+        gives a self-describing wire shape: `{"kind": "vm_kernel_not_found",
+        "data": {"path": "/boot/vmlinux"}}` for cause-class variants;
         `{"kind": "scheduling"}` for progress markers (serde elides the empty
         `data` for unit variants by default).
 
@@ -3405,19 +3260,14 @@ components:
         |---|---|---|---|
         | `Scheduling` | progress | reconciler — placement decided, action emitted | yes |
         | `Starting` | progress | reconciler — driver invocation underway | yes |
-        | `Started` | progress | driver(exec) — driver returned `Ok(handle)` | yes |
+        | `Started` | progress | VM driver — driver returned `Ok(handle)` | yes |
         | `BackoffPending { attempt }` | progress | reconciler — holding off restart | yes |
         | `Stopped { by }` | progress | reconciler — observed terminal stop | yes |
-        | `ExecBinaryNotFound { path }` | cause | `ExecDriver` — `spawn(2)` ENOENT | yes |
-        | `ExecPermissionDenied { path }` | cause | `ExecDriver` — `spawn(2)` EACCES | yes |
-        | `ExecBinaryInvalid { path, kind }` | cause | `ExecDriver` — `spawn(2)` ENOEXEC / ELIBBAD | yes |
-        | `CgroupSetupFailed { kind, source }` | cause | `ExecDriver` — cgroup mkdir / write failure | yes |
-        | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
+        | `DriverInternalError { detail }` | cause | driver — uncategorised failure | yes |
         | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
         | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
-        | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | VM driver — post-start exit-code observation | yes |
         | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
         | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
         | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
@@ -3430,10 +3280,8 @@ components:
         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 
-        **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
-        subscription not yet present in the Phase 1 `ExecDriver`; it is defined
-        now for wire-shape forward-compatibility and will be emitted in Phase 2.
-        `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+        **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
+        capacity accounting exists, and until 2026-08-11
         this table claimed it was emitted. It is not: nothing in production
         constructs `TransitionReason::NoCapacity` — only two acceptance tests do
         (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
@@ -3442,8 +3290,8 @@ components:
         what let the false claim stand: a grep for `NoCapacity` appears to
         confirm it. Emitting this variant needs real node capacity and
         cross-workload accounting to exist first — GH #261.
-        `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
-        performs `child.wait()` and produces `ExitKind::Crashed`; the
+        `WorkloadCrashedImmediately` is emitted by the VM exit observer when a
+        guest produces `ExitKind::Crashed`; the
         `ExitObserver` maps that to this variant directly.
 
         **Cause-class payloads carry typed cause-specific data**, NOT a

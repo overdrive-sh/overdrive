@@ -629,7 +629,7 @@ async fn dispatch_with_driver(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
         outcome,
-        driver_type: DriverType::Exec,
+        driver_type: DriverType::Vm,
         terminal_calls: Arc::new(AtomicUsize::new(0)),
         start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
@@ -806,7 +806,7 @@ impl ObservationStore for PendingTerminalObservationStore {
                 self.inner
                     .write_alloc_lifecycle(
                         exit_observation,
-                        TransitionSource::Driver(DriverType::Exec),
+                        TransitionSource::Driver(DriverType::Vm),
                     )
                     .await?
                     .expect("the concurrent exit observation wins the stale timestamp");
@@ -1586,7 +1586,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     let terminal_calls = Arc::new(AtomicUsize::new(0));
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
         outcome: StartOutcome::Accept,
-        driver_type: DriverType::Exec,
+        driver_type: DriverType::Vm,
         terminal_calls: Arc::clone(&terminal_calls),
         start_calls: Arc::new(AtomicUsize::new(0)),
         stop_calls: Arc::new(AtomicUsize::new(0)),
@@ -1598,7 +1598,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         registry
     };
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    alloc_drivers.lock().insert(alloc_id(), DriverType::Exec);
+    alloc_drivers.lock().insert(alloc_id(), DriverType::Vm);
     let net_slots = NetSlotAllocator::new();
     net_slots.assign(alloc_id()).expect("pre-final allocation owns one network slot");
     let network = CountingNetworkProvisioner::succeed();

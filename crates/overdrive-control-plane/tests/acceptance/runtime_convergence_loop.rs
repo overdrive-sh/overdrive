@@ -63,7 +63,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -297,7 +297,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -527,9 +527,8 @@ async fn stop_after_failed_alloc_drains_broker() {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(
-        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::new(DriverType::Vm).fail_on_start_with("binary not found".to_string()));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -841,9 +840,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(
-        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::new(DriverType::Vm).fail_on_start_with("binary not found".to_string()));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -1155,7 +1153,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // SimDriver doesn't matter — no Start/Restart action will be
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );

@@ -409,7 +409,7 @@ fn build_in_process_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         VipRange::default(),
         Arc::clone(&store) as Arc<dyn IntentStore>,

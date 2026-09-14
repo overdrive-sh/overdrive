@@ -41,7 +41,7 @@ async fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
-        Arc::new(SimDriver::new(DriverType::Exec));
+        Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
