@@ -22,8 +22,12 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{
     AppState, InterestRouterBroker, build_interest_table, service_lifecycle, spawn_interest_router,
     workload_lifecycle,
@@ -65,6 +69,23 @@ use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 const SEED: u64 = 25_717;
 
@@ -401,13 +422,14 @@ async fn run_owner_tick(
 ) {
     let reconciler = overdrive_core::reconcilers::ReconcilerName::new(owner)
         .expect("static reconciler name is valid");
-    run_convergence_tick(
+    run_convergence_tick_with_network_provisioner_for_test(
         state,
         &reconciler,
         target,
         clock.now(),
         tick,
         clock.now() + Duration::from_secs(30),
+        &NoopNetworkProvisioner,
     )
     .await
     .unwrap_or_else(|error| panic!("seed={SEED}: {owner} convergence failed: {error:?}"));

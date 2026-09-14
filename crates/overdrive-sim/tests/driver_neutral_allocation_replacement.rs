@@ -55,7 +55,7 @@ use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickCo
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExecPayload, Resources, VmPayload,
+    DriverStartClass, DriverStartFailure, DriverType, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -94,22 +94,13 @@ enum TraceEvent {
     Teardown(String),
 }
 
-fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
-    let driver = match driver_type {
-        DriverType::Exec => DriverInput::Vm(overdrive_core::aggregate::VmInput {
-            command: "/bin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-            kernel: "/kernel".to_owned(),
-            rootfs: "/rootfs".to_owned(),
-        }),
-        DriverType::Vm => DriverInput::Vm(VmInput {
-            command: "/sbin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-            kernel: "/srv/vm/kernel".to_owned(),
-            rootfs: "/srv/vm/rootfs.ext4".to_owned(),
-        }),
-        other => panic!("fixture covers Exec and VM, got {other:?}"),
-    };
+fn service_intent(workload: &str) -> WorkloadIntent {
+    let driver = DriverInput::Vm(VmInput {
+        command: "/sbin/workload".to_owned(),
+        args: vec!["--serve".to_owned()],
+        kernel: "/srv/vm/kernel".to_owned(),
+        rootfs: "/srv/vm/rootfs.ext4".to_owned(),
+    });
     WorkloadIntent::Service(
         Service::from_submit(ServiceSpecInput {
             id: workload.to_owned(),
@@ -125,29 +116,23 @@ fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
     )
 }
 
-/// S-284-SIM-05 — the full production owner path for both composed drivers:
+/// S-284-SIM-05 — the full production owner path for the composed VM driver:
 /// registered WorkloadLifecycle authors the initial StartRejected predecessor,
 /// the runtime fsyncs a fresh successor reservation before dispatch, rejected
 /// successor publication fully unwinds, and runtime reopen re-drives above the
 /// consumed ID. No row or replacement Action is seeded by the test.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-async fn production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm() {
+async fn production_owner_replacement_survives_rejected_publication_and_reopen_for_vm() {
     eprintln!(
         "seed={SEED}; reproduce: cargo xtask lima run -- cargo nextest run -p overdrive-sim \
          --features integration-tests,overdrive-control-plane/integration-tests \
          --test driver_neutral_allocation_replacement --run-ignored ignored-only \
-         -E 'test(production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm)' \
+         -E 'test(production_owner_replacement_survives_rejected_publication_and_reopen_for_vm)' \
          --no-capture"
     );
 
-    let exec = tokio::spawn(production_owner_replacement_case(DriverType::Exec));
-    let vm = tokio::spawn(production_owner_replacement_case(DriverType::Vm));
-    let (exec, vm) = tokio::join!(exec, vm);
-    assert!(
-        exec.is_ok() && vm.is_ok(),
-        "MISSING_CORRECTED_BEHAVIOR: both production driver compositions must complete; exec={exec:?}, vm={vm:?}"
-    );
+    production_owner_replacement_case(DriverType::Vm).await;
 }
 
 async fn production_owner_replacement_case(driver_type: DriverType) {
@@ -192,7 +177,7 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
     );
-    let desired = service_intent(driver_type, &workload);
+    let desired = service_intent(&workload);
     let workload_id = wid(&workload);
     state
         .store
@@ -573,7 +558,7 @@ impl WorkloadNetworkProvisioner for RecordingNetwork {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         self.trace.lock().push(TraceEvent::Provision(workload.netns.as_str().to_owned()));
         Ok(())
@@ -653,20 +638,13 @@ fn tick() -> TickContext {
     }
 }
 
-fn payload(driver_type: DriverType) -> DriverPayload {
-    match driver_type {
-        DriverType::Exec => DriverPayload::Exec(ExecPayload {
-            command: "/bin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-        }),
-        DriverType::Vm => DriverPayload::Vm(VmPayload {
-            command: "/sbin/workload".to_owned(),
-            args: vec!["--serve".to_owned()],
-            kernel: Path::new("/srv/vm/kernel").to_path_buf(),
-            rootfs: Path::new("/srv/vm/rootfs.ext4").to_path_buf(),
-        }),
-        other => panic!("fixture covers currently composed replacement drivers, got {other:?}"),
-    }
+fn payload(_driver_type: DriverType) -> DriverPayload {
+    DriverPayload::Vm(VmPayload {
+        command: "/sbin/workload".to_owned(),
+        args: vec!["--serve".to_owned()],
+        kernel: Path::new("/srv/vm/kernel").to_path_buf(),
+        rootfs: Path::new("/srv/vm/rootfs.ext4").to_path_buf(),
+    })
 }
 
 fn successor_spec(
@@ -780,13 +758,13 @@ async fn seeded_predecessor(
 }
 
 /// S-284-SIM-01 — the successor starts and publishes before a blocked
-/// predecessor cleanup for both Exec and VM; the action remains in flight only
+/// predecessor cleanup for the VM; the action remains in flight only
 /// for the one post-successor exact-old cleanup attempt.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver() {
     eprintln!("seed={SEED}: successor-first driver-neutral replacement");
-    for driver_type in [DriverType::Exec, DriverType::Vm] {
+    for driver_type in [DriverType::Vm] {
         let (obs, predecessor, successor, workload) = seeded_predecessor(driver_type).await;
         let before = obs.alloc_status_row(&predecessor).await.unwrap().unwrap();
         let driver = Arc::new(
@@ -908,7 +886,7 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
     let captured = CapturedEvents::default();
     let _capture = set_default(Registry::default().with(captured.clone()));
 
-    for driver_type in [DriverType::Exec, DriverType::Vm] {
+    for driver_type in [DriverType::Vm] {
         for start_behavior in [StartBehavior::IoFailure, StartBehavior::Success] {
             for cleanup_failure in [
                 CleanupFailure::None,
@@ -1153,19 +1131,19 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
-    let (obs, predecessor, successor, workload) = seeded_predecessor(DriverType::Exec).await;
+    let (obs, predecessor, successor, workload) = seeded_predecessor(DriverType::Vm).await;
     let before = obs.alloc_status_row(&predecessor).await.unwrap().unwrap();
     let driver = Arc::new(
-        RecordingDriver::new(DriverType::Exec, predecessor.clone())
+        RecordingDriver::new(DriverType::Vm, predecessor.clone())
             .with_behavior(StartBehavior::Rejected),
     );
     let index = AllocDriverIndex::default();
-    index.lock().insert(predecessor.clone(), DriverType::Exec);
+    index.lock().insert(predecessor.clone(), DriverType::Vm);
 
     dispatch_one(
         Action::RestartAllocation {
             alloc_id: predecessor.clone(),
-            spec: successor_spec(DriverType::Exec, &workload, &successor),
+            spec: successor_spec(DriverType::Vm, &workload, &successor),
             kind: WorkloadKind::Service,
         },
         Arc::clone(&driver),
@@ -1306,16 +1284,16 @@ impl ObservationStore for RejectFreshPublication {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 async fn rejected_successor_publication_fully_unwinds_without_immediate_second_proposal() {
-    let (inner, predecessor, successor, workload) = seeded_predecessor(DriverType::Exec).await;
+    let (inner, predecessor, successor, workload) = seeded_predecessor(DriverType::Vm).await;
     let before = inner.alloc_status_row(&predecessor).await.unwrap().unwrap();
     let obs = RejectFreshPublication {
         inner,
         successor: successor.clone(),
         running_attempts: AtomicUsize::new(0),
     };
-    let driver = Arc::new(RecordingDriver::new(DriverType::Exec, predecessor.clone()));
+    let driver = Arc::new(RecordingDriver::new(DriverType::Vm, predecessor.clone()));
     let index = AllocDriverIndex::default();
-    index.lock().insert(predecessor.clone(), DriverType::Exec);
+    index.lock().insert(predecessor.clone(), DriverType::Vm);
     let slots = NetSlotAllocator::new();
     let predecessor_slot = NetSlot::new(7).expect("valid predecessor slot");
     slots.adopt(predecessor.clone(), predecessor_slot).expect("predecessor slot ownership");
@@ -1326,7 +1304,7 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         derive_workload_netns_plan(predecessor_slot, responder_addr_for_slot(predecessor_slot));
     let network = RecordingNetwork { trace: Arc::clone(&driver.trace), ..Default::default() };
     let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
-    mtls.start_alloc(&successor_spec(DriverType::Exec, &workload, &predecessor))
+    mtls.start_alloc(&successor_spec(DriverType::Vm, &workload, &predecessor))
         .await
         .expect("predecessor mTLS is live");
     driver.trace.lock().clear();
@@ -1334,7 +1312,7 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
     dispatch_one(
         Action::RestartAllocation {
             alloc_id: predecessor.clone(),
-            spec: successor_spec(DriverType::Exec, &workload, &successor),
+            spec: successor_spec(DriverType::Vm, &workload, &successor),
             kind: WorkloadKind::Service,
         },
         Arc::clone(&driver),

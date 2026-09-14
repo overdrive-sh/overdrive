@@ -1,9 +1,9 @@
-//! [`Driver`] — a workload backend (exec, microVM, VM, unikernel, WASM).
+//! [`Driver`] — a workload backend (microVM, VM, unikernel, WASM).
 //!
 //! Each driver is a thin trait object owned by the node agent. Production
-//! wires concrete drivers (`CloudHypervisorDriver`, `ExecDriver`,
-//! `WasmDriver`); simulation wires `SimDriver` with configurable failure
-//! modes for scheduler and reconciler tests.
+//! wires concrete drivers (`CloudHypervisorDriver`, `WasmDriver`);
+//! simulation wires `SimDriver` with configurable failure modes for
+//! scheduler and reconciler tests.
 //!
 //! See `docs/whitepaper.md` §6 for the driver catalogue.
 
@@ -328,7 +328,7 @@ pub struct AllocationSpec {
     /// Validated health-check probe declarations per ADR-0054 §3.
     ///
     /// Carried from the reconciler-emitted `Action::StartAllocation`
-    /// down to the worker-side `ExecDriver` so the driver's
+    /// down to the worker-side `VmDriver` so the driver's
     /// `on_alloc_running` lifecycle hook can hand them to
     /// `ProbeRunner::start_alloc`.
     ///
@@ -340,14 +340,12 @@ pub struct AllocationSpec {
     /// reconciler-emitted `AllocationSpec`.
     pub probe_descriptors: Vec<ProbeDescriptor>,
 
-    /// Target network namespace NAME this allocation's workload is spawned
-    /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
-    /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). Every VM receives `Some(plan.netns)` even when the
-    /// optional mTLS worker is not composed, because guest networking is a
-    /// VM admission requirement rather than an interception side effect.
-    /// `None` remains the host-netns shape only for an Exec workload on a
-    /// non-mTLS boot. The driver opens `/var/run/netns/<name>` (via
+    /// Target network namespace NAME this allocation's VM is spawned INTO;
+    /// the action-shim C3 site provisions it before `Driver::start`. Every VM
+    /// receives `Some(plan.netns)` even when the optional mTLS worker is not
+    /// composed, because guest networking is a VM admission requirement rather
+    /// than an interception side effect. The driver opens
+    /// `/var/run/netns/<name>` (via
     /// [`NetnsName::as_str`]) when `Some`.
     ///
     /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
@@ -377,10 +375,9 @@ pub struct AllocationSpec {
     /// matches to redirect the workload's egress to leg-F
     /// (`MtlsInterceptWorker::start_alloc` →
     /// `install_outbound_tproxy(host_veth, leg_f_port)`). `Some(plan.host_veth)`
-    /// ONLY when the action-shim C3 site provisioned a per-workload netns/veth
-    /// (the production mTLS-composed boot); `None` for every non-netns workload
-    /// (every current test fixture, and any boot where the mTLS composition gate
-    /// is off) — the pre-join host-netns behaviour, exactly like `netns`.
+    /// when the action-shim C3 site admitted and provisioned the current
+    /// VM network plan; `None` only for a spec that did not pass through that
+    /// provision seam (for example, a direct unit-test fixture).
     ///
     /// `Option<String>`, NOT a newtype — on its OWN rationale (JOIN-6; this
     /// field is not this step's subject): the value is already a validated,
@@ -401,10 +398,9 @@ pub struct AllocationSpec {
 
     /// Canonical per-workload IPv4 address this allocation was provisioned
     /// into for the canonical-workload-address inbound-TPROXY path (D-A1, GH
-    /// #241). For Exec this is the in-netns transit-veth address
-    /// (`WorkloadNetnsPlan::workload_addr`); for VM it is the guest NIC address
-    /// (`VmTapPlan::guest_addr`), never the transit forwarding hop. `None` for
-    /// every non-netns workload or boot outside the mTLS composition gate.
+    /// #241). For VM this is the guest NIC address (`VmTapPlan::guest_addr`),
+    /// never the transit forwarding hop. `None` only when the current VM
+    /// network plan was not injected at the C3 provision seam.
     ///
     /// The third member of the slot-derived channel beside `netns` /
     /// `host_veth`, injected at the SAME C3 provision seam off the SAME
@@ -422,12 +418,11 @@ pub struct AllocationSpec {
     /// compose with [`Self::workload_addr`] (the guest address for VM allocs)
     /// to form the guest's fail-closed network configuration.
     ///
-    /// All five fields are `Some` together only for a VM allocation behind
-    /// the mTLS composition gate. They remain `None` for Exec allocations and
-    /// for every non-netns boot. This is deliberately a minimal field family,
-    /// not a new public value type: `AllocationSpec` is a transient in-memory
-    /// handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no persisted or
-    /// wire schema changes.
+    /// All five fields are `Some` together for a VM allocation whose current
+    /// network plan was provisioned. This is deliberately a minimal field
+    /// family, not a new public value type: `AllocationSpec` is a transient
+    /// in-memory handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no
+    /// persisted or wire schema changes.
     pub guest_tap: Option<String>,
     /// Slot-derived, locally administered unicast MAC for the guest NIC.
     pub guest_mac: Option<[u8; 6]>,
@@ -459,18 +454,10 @@ pub struct AllocationSpec {
 
 /// Tagged per-driver invocation payload (ADR-0083 §D3). The routing key
 /// [`DriverPayload::driver_type`] is what [`DriverRegistry::get`] indexes
-/// on; `command()` / `args()` are the two fields every variant carries.
+/// on; `command()` / `args()` borrow the fields carried by the VM payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriverPayload {
-    Exec(ExecPayload),
     Vm(VmPayload),
-}
-
-/// `[exec]` invocation fields — the native-binary-under-cgroups-v2 driver.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecPayload {
-    pub command: String,
-    pub args: Vec<String>,
 }
 
 /// `[vm]` invocation fields — the Cloud Hypervisor microVM driver
@@ -492,25 +479,22 @@ impl DriverPayload {
     #[must_use]
     pub const fn driver_type(&self) -> DriverType {
         match self {
-            Self::Exec(_) => DriverType::Exec,
             Self::Vm(_) => DriverType::Vm,
         }
     }
 
-    /// Both variants carry a command; borrow it regardless of kind.
+    /// Borrow the command carried by the VM payload.
     #[must_use]
     pub fn command(&self) -> &str {
         match self {
-            Self::Exec(e) => &e.command,
             Self::Vm(v) => &v.command,
         }
     }
 
-    /// Both variants carry argv; borrow it regardless of kind.
+    /// Borrow the argv carried by the VM payload.
     #[must_use]
     pub fn args(&self) -> &[String] {
         match self {
-            Self::Exec(e) => &e.args,
             Self::Vm(v) => &v.args,
         }
     }

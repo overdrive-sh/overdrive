@@ -439,7 +439,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_obs = Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
     let obs: Arc<dyn ObservationStore> = sim_obs;
     let sim_clock = Arc::new(SimClock::new());
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver;
 
     let allocator =

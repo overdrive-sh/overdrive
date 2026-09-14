@@ -9,7 +9,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -21,6 +25,23 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 // `too_many_lines`: the 01-06 required-field AppState change (adds `ca` +
 // `identity`) tipped this walking-skeleton fn from 100 → 102 lines via two
@@ -111,13 +132,14 @@ async fn job_stop_drives_running_to_terminated() {
     // Drive until Running.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -135,13 +157,14 @@ async fn job_stop_drives_running_to_terminated() {
 
     let mut converged_terminated = false;
     for tick_n in 30..60_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

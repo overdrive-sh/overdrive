@@ -56,6 +56,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -63,7 +64,10 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use proptest::prelude::*;
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, ShimError, dispatch};
+use overdrive_control_plane::action_shim::{
+    LifecycleEvent, ShimError, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
@@ -108,7 +112,7 @@ struct AlwaysOkDriver;
 #[async_trait]
 impl Driver for AlwaysOkDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -149,7 +153,7 @@ struct BarrieredOwnerDriver {
 #[async_trait]
 impl Driver for BarrieredOwnerDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -200,7 +204,7 @@ impl FailingDriver {
 #[async_trait]
 impl Driver for FailingDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -228,6 +232,23 @@ impl Driver for FailingDriver {
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSpec {
     let identity = SpiffeId::new(&format!(
         "spiffe://overdrive.local/workload/{}/alloc/{}",
@@ -238,10 +259,12 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
     AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(
+            overdrive_core::traits::driver::VmPayload {
                 command: "/bin/true".to_owned(),
                 args: vec![],
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
             },
         ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
@@ -352,7 +375,7 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
-            dispatch(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
+            dispatch_with_network_provisioner(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
@@ -360,6 +383,7 @@ proptest! {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
                 .await
@@ -432,7 +456,7 @@ async fn run_classifier_scenario(
 
     let (_alloc_tmp, allocator) = fresh_test_allocator();
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
         &alloc_drivers,
@@ -453,6 +477,7 @@ async fn run_classifier_scenario(
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
@@ -522,7 +547,7 @@ async fn dispatch_cleanup_composition_action(
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (_tmp, allocator) = fresh_test_allocator();
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         &drivers,
         &alloc_drivers,
@@ -541,6 +566,7 @@ async fn dispatch_cleanup_composition_action(
         None,
         None,
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
@@ -699,7 +725,7 @@ async fn s_cp_05_classifier_cgroup_failure_to_cgroup_setup_failed() {
 async fn s_cp_05_classifier_unclassified_falls_through_to_driver_internal_error() {
     let raw = "totally unclassifiable driver text from a future driver";
     run_classifier_scenario(
-        DriverStartClass::Unclassified { driver: DriverType::Exec },
+        DriverStartClass::Unclassified { driver: DriverType::Vm },
         raw,
         TransitionReason::DriverInternalError { detail: raw.to_owned() },
     )
@@ -797,7 +823,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
     let (_alloc_tmp, allocator) = fresh_test_allocator();
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
         &alloc_drivers,
@@ -818,6 +844,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await

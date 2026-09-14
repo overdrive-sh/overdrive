@@ -48,9 +48,29 @@ use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
+use overdrive_control_plane::action_shim::{
+    LifecycleEvent, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
+};
 use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// A workload that exits non-zero after a short delay. The delay gives
 /// the action shim's `Running` write and the observer's Running-gate
@@ -370,7 +390,7 @@ async fn dispatch_one(
         deadline: now + Duration::from_secs(10),
     };
 
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers,
         alloc_drivers,
@@ -389,6 +409,7 @@ async fn dispatch_one(
         None,
         None,
         &net_slot_allocator,
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await

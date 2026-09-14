@@ -30,7 +30,10 @@ crate_class = "adapter-host"
 # redirect-stand-in seam was deleted at step 04-02 (the per-connection
 # `MtlsResolve` consumer superseded it); the forward remains because the
 # Tier-3 worker intercept-install suite is gated on it.
-integration-tests = ["overdrive-dataplane/integration-tests"]
+integration-tests = [
+    "overdrive-dataplane/integration-tests",
+    "overdrive-sim/integration-tests",
+]
 
 [dependencies]
 overdrive-core.workspace = true

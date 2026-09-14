@@ -711,13 +711,11 @@ impl MtlsInterceptWorker {
 
     /// Install the per-alloc intercept and start the accept→`enforce`
     /// tasks. Fired from the action-shim's `on_alloc_running` site for every
-    /// networked allocation, with the two call sites accepting
-    /// `DriverType::Exec | DriverType::Vm`. Exec traffic traverses its direct
-    /// host veth. A Cloud Hypervisor VM terminates TCP inside the guest, so its
-    /// traffic reaches the same host-side interception boundary through the
-    /// TAP-fed veth selected by its persisted canonical guest address. Both
-    /// driver paths therefore install before execution is released; neither
-    /// relies on cgroup socket visibility.
+    /// networked VM allocation. A Cloud Hypervisor VM terminates TCP inside
+    /// the guest, so its traffic reaches the host-side interception boundary
+    /// through the TAP-fed veth selected by its persisted canonical guest
+    /// address. The intercept therefore installs before guest execution is
+    /// released and does not rely on cgroup socket visibility.
     ///
     /// Idempotent: a re-fire for an alloc already intercepted (a Restart
     /// reusing the same alloc id) tears the prior intercept down first.
@@ -1777,6 +1775,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Read as _, Write as _};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Weak};
     use std::time::Duration;
@@ -1784,7 +1783,7 @@ mod tests {
     use super::AllocationTaskOwner;
     use async_trait::async_trait;
     use overdrive_core::traits::clock::Clock;
-    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
     use overdrive_core::traits::mtls_enforcement::{
         EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
         PumpLiveness, Routed,
@@ -1985,9 +1984,11 @@ mod tests {
                 &alloc,
             ),
             alloc,
-            driver: DriverPayload::Exec(ExecPayload {
+            driver: DriverPayload::Vm(VmPayload {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
             }),
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
@@ -2789,9 +2790,11 @@ mod tests {
                 "spiffe://overdrive.local/workload/orphan-race/alloc/alloc-orphan-race",
             )
             .expect("valid fixture SPIFFE id"),
-            driver: DriverPayload::Exec(ExecPayload {
+            driver: DriverPayload::Vm(VmPayload {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
             }),
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),

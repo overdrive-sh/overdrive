@@ -3,7 +3,7 @@
 //!
 //! Two scenarios drive end-to-end through the live `SimIntentStore +
 //! SimObservationStore + WorkloadLifecycle` runtime stack via the
-//! public `submit` (intent put) / `tick` (run_convergence_tick)
+//! public `submit` (intent put) / `tick` (run_convergence_tick_with_network_provisioner_for_test)
 //! harness driving ports. Assertions land at the
 //! `ObservationStore::alloc_status_rows()` driven port boundary.
 //! No reconciler internals are exercised directly.
@@ -85,7 +85,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput, WorkloadIntent,
@@ -99,6 +101,7 @@ use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::{TerminalCondition, WorkloadId};
 use tempfile::TempDir;
 
+use super::NoopNetworkProvisioner;
 use crate::adapters::ca::SimCa;
 use crate::adapters::clock::SimClock;
 use crate::adapters::dataplane::SimDataplane;
@@ -173,13 +176,14 @@ async fn drive_orphan_converges() -> Result<(), String> {
     let start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut converged = false;
     for tick_n in start_tick..(start_tick + MAX_TICKS_GC) {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -245,13 +249,14 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
     let start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut converged = false;
     for tick_n in start_tick..(start_tick + MAX_TICKS_GC) {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -283,13 +288,14 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
     let resubmit_start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut placed_fresh = false;
     for tick_n in resubmit_start_tick..(resubmit_start_tick + MAX_TICKS_RESUBMIT) {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -355,13 +361,14 @@ async fn drive_to_running(h: &Harness) -> Result<Vec<AllocationId>, String> {
     let mut last_tick = start_tick;
     for tick_n in start_tick..(start_tick + MAX_TICKS_TO_RUNNING) {
         last_tick = tick_n;
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("drive_to_running tick {tick_n}: {e:?}"))?;
@@ -439,7 +446,7 @@ struct Harness {
     start: Instant,
     deadline: Instant,
     /// Monotonic tick counter shared across the scenario phases. Each
-    /// `run_convergence_tick` call uses this value and the harness
+    /// `run_convergence_tick_with_network_provisioner_for_test` call uses this value and the harness
     /// bumps it after the call. `AtomicU64` (not `Cell`) because the
     /// futures returned by the evaluator must be `Send` so the harness
     /// can run them via `tokio::spawn` / Send-bound combinators —

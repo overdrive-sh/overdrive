@@ -9,8 +9,8 @@
 //!
 //! # Exit-event injection
 //!
-//! Per `fix-exec-driver-exit-watcher` Step 01-02, `SimDriver` mirrors
-//! the production `ExecDriver`'s `ExitEvent` surface so the
+//! Per `fix-exit-observer-running-gate` Step 01-02, `SimDriver` mirrors
+//! the production VM driver's `ExitEvent` surface so the
 //! `exit_observer` subsystem can be exercised under DST. Tests call
 //! [`SimDriver::inject_exit_after`] to schedule a delayed `ExitEvent`
 //! emission; the `Driver::take_exit_receiver` impl returns the
@@ -34,8 +34,7 @@ use overdrive_core::traits::driver::{
 
 use crate::adapters::clock::SimClock;
 
-/// Capacity of the per-driver `ExitEvent` channel. Identical to
-/// `ExecDriver`'s constant — sized for burst load.
+/// Capacity of the per-driver `ExitEvent` channel, sized for burst load.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
 
 /// In-memory driver. Construct via [`SimDriver::new`], optionally
@@ -52,8 +51,7 @@ pub struct SimDriver {
     /// phase of the supervision claim. Populated by [`Driver::stop`]
     /// ONLY when this driver models a phased-claim driver
     /// (`DriverType::Vm`), drained by [`Driver::release_supervision`].
-    /// Always empty for an `Exec`-typed driver (its `stop` is a full
-    /// remove, mirroring `ExecDriver` — no phased claim).
+    /// Non-VM driver types do not use the phased claim.
     ///
     /// This is what makes a `Vm`-typed `SimDriver` a FAITHFUL stand-in
     /// for `VmDriver`'s `Live -> EndingInFlight` transition: after
@@ -61,20 +59,18 @@ pub struct SimDriver {
     /// `allocations`) yet the alloc is still SUPERVISED —
     /// `live_allocations()` keeps reporting it until
     /// `release_supervision` retires the claim. Without this phase a
-    /// `SimDriver` could only model the Exec full-remove shape, and a
-    /// shim test over it cannot exhibit the `EndingInFlight` leak
+    /// A phase-less driver cannot exhibit the `EndingInFlight` leak
     /// (greptile PR #268 P1).
     ending_in_flight: Mutex<BTreeSet<AllocationId>>,
     failure_mode: Mutex<Option<FailureMode>>,
-    /// Per-alloc `intentional_stop` flags — mirrors `ExecDriver`'s
-    /// `LiveAllocation::Running { intentional_stop, .. }` field.
+    /// Per-alloc `intentional_stop` flags for scheduled exit events.
     /// Set by [`Driver::stop`] BEFORE returning, read by the
     /// scheduled exit-event task before sending.
     intentional_stops: Mutex<HashMap<AllocationId, Arc<AtomicBool>>>,
     /// Per-alloc Running-confirmed gate senders. Stashed at
     /// [`Driver::start`]; consumed by
     /// [`Driver::release_for_exit_emission`]. Mirrors
-    /// `ExecDriver`'s `LiveAllocation::gate_sender` field; the
+    /// the VM driver's per-allocation gate sender; the
     /// matching `oneshot::Receiver` is parked in `gate_receivers`
     /// until [`SimDriver::inject_exit_after`] picks it up for the
     /// scheduled emit task. Per
@@ -97,7 +93,7 @@ pub struct SimDriver {
     /// observer subsystem (so observer counters are derived from the
     /// same logical-time source the harness drives) construct the
     /// driver via [`SimDriver::with_clock`]. Per
-    /// `fix-exec-driver-exit-watcher` Step 01-02 RCA §Bug 1.
+    /// `fix-exit-observer-running-gate` Step 01-02 RCA §Bug 1.
     ///
     /// `tokio::time::sleep` is forbidden here per whitepaper §21:
     /// every nondeterminism source in `core`-class logic crates must
@@ -132,7 +128,7 @@ impl SimDriver {
     /// by integration tests that share the clock with the
     /// `exit_observer` subsystem so the observer's counter and the
     /// driver's emit-delay are derived from the same logical-time
-    /// source. Per `fix-exec-driver-exit-watcher` Step 01-02 RCA
+    /// source. Per `fix-exit-observer-running-gate` Step 01-02 RCA
     /// §Bug 1.
     #[must_use]
     pub fn with_clock(r#type: DriverType, clock: Arc<dyn Clock>) -> Self {
@@ -166,7 +162,7 @@ impl SimDriver {
     /// The `Driver` trait does not (and should not) expose live-map
     /// cardinality. This accessor is the regression hook for
     /// `fix-terminated-slot-accumulation` Step 01-01: the sim adapter
-    /// must mirror `ExecDriver`'s cardinality contract so the shared
+    /// must mirror the VM driver's cardinality contract so the shared
     /// trait does not diverge across host/sim. The GREEN fix (Step
     /// 01-02) evicts the slot in `stop()` so `live_count()` returns 0
     /// after each round-trip; this accessor lets the regression test
@@ -197,7 +193,7 @@ impl SimDriver {
     /// see `intentional_stop = true` on the event, exactly as the
     /// production watcher would.
     ///
-    /// Mirrors `ExecDriver`'s spawn-watcher path: the production
+    /// Mirrors the VM driver's spawn-watcher path: the production
     /// driver's per-alloc tokio task awaits `child.wait()` then
     /// sends; the sim's task awaits `tokio::time::sleep(after)` then
     /// sends. Same observation surface.
@@ -329,7 +325,7 @@ impl SimDriver {
                 oom: None,
             };
             // Running-confirmed gate await: symmetric with
-            // `ExecDriver`'s watcher per
+            // the VM driver's watcher per
             // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
             // (Solution 1'). The action shim fires the gate via
             // `Driver::release_for_exit_emission` after committing
@@ -342,7 +338,7 @@ impl SimDriver {
             // ORDERING: gate await happens AFTER the simulated
             // emit-delay (`clock.sleep(after)`) AND AFTER the
             // sim-internal cooperative yield, BEFORE
-            // `exit_tx.send`. This mirrors the `ExecDriver` watcher's
+            // `exit_tx.send`. This mirrors the VM driver's watcher
             // "after `child.wait()` AND stderr-tail drain budget,
             // before `exit_tx.send`" ordering.
             //
@@ -359,7 +355,7 @@ impl SimDriver {
             // action-shim-crashed orphan path) AND `None`
             // (alloc whose `start` was never called) both
             // collapse to "proceed and emit"; symmetric with
-            // `ExecDriver`'s orphan-path handling.
+            // the VM driver's orphan-path handling.
             if let Some(gate_receiver) = gate_receiver {
                 let _ = gate_receiver.await;
             }
@@ -399,7 +395,7 @@ impl Driver for SimDriver {
         // (Solution 1'). Sender stashed for
         // `Driver::release_for_exit_emission` to consume; receiver
         // parked for `inject_exit_after` to pick up. Mirrors
-        // `ExecDriver`'s start-time mint of the channel.
+        // the VM driver's start-time mint of the channel.
         //
         // Per step 01-03 of `fix-exit-observer-running-gate`: the
         // 01-02 transitional immediate-drop has been removed. The
@@ -429,7 +425,7 @@ impl Driver for SimDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
-        // Symmetric with `ExecDriver::stop` per
+        // Symmetric with the VM driver's stop path per
         // `fix-terminated-slot-accumulation` Step 01-02: the slot is
         // removed on stop, NOT overwritten with `Terminated`. Durable
         // terminal-state truth lives in the `ObservationStore`
@@ -448,7 +444,7 @@ impl Driver for SimDriver {
         // above (so `status()` now reports `NotFound`, matching VmDriver's
         // post-stop contract), but it stays SUPERVISED — `live_allocations()`
         // keeps reporting it until `release_supervision` retires the claim.
-        // An `Exec`-typed SimDriver keeps `ExecDriver`'s full-remove shape
+        // A non-VM-typed SimDriver keeps the VM driver's full-remove shape
         // (no phased claim), so `ending_in_flight` stays empty. A second
         // `stop` on an already-ending alloc takes the `NotFound` early
         // return above and leaves the `EndingInFlight` marker in place —
@@ -456,7 +452,7 @@ impl Driver for SimDriver {
         if matches!(self.r#type, DriverType::Vm) {
             self.ending_in_flight.lock().insert(handle.alloc.clone());
         }
-        // Per `fix-exec-driver-exit-watcher` RCA §Approved fix item
+        // Per `fix-exit-observer-running-gate` RCA §Approved fix item
         // 3: set `intentional_stop = true` BEFORE any further side
         // effect. The flag is shared with any in-flight scheduled
         // exit-event task; the next emission honours it. The flag is
@@ -474,7 +470,7 @@ impl Driver for SimDriver {
         // was never called before stop landed, the spawned
         // `inject_exit_after` task's `gate_receiver.await` resolves
         // to `Err(RecvError)` and the task proceeds with the emit.
-        // Symmetric with `ExecDriver::stop`'s `drop(gate_sender)`.
+        // Symmetric with the VM driver's `drop(gate_sender)`.
         // Per `Driver::start` rustdoc § "Sender drop (orphan path)".
         let _dropped_sender = self.gate_senders.lock().remove(&handle.alloc);
         // Drop any unparked gate receiver — if `inject_exit_after`
@@ -507,7 +503,7 @@ impl Driver for SimDriver {
     }
 
     /// Fire the Running-confirmed gate for `handle.alloc`. Symmetric
-    /// with `ExecDriver::release_for_exit_emission`. Idempotent: a
+    /// with `VM driver::release_for_exit_emission`. Idempotent: a
     /// call against an alloc whose gate has already fired (or whose
     /// alloc is unknown to the driver) is a no-op, NOT a panic. The
     /// structural exactly-once guarantee comes from
@@ -528,8 +524,8 @@ impl Driver for SimDriver {
     /// ending-in-flight — faithfully honouring the
     /// [`Driver::live_allocations`] contract. A `Vm`-typed `SimDriver`
     /// mirrors `VmDriver` (`Some(..)`, including the `EndingInFlight`
-    /// set a `stop` produced); an `Exec`-typed `SimDriver` mirrors
-    /// `ExecDriver`, which keeps the trait-default `None` ("does not
+    /// set a `stop` produced); a non-VM-typed `SimDriver` mirrors
+    /// the VM driver, which keeps the trait-default `None` ("does not
     /// report supervision"). Preserving the `None` vs `Some(vec![])`
     /// distinction is load-bearing per the trait doc. Deterministic
     /// order (`BTreeSet`) so DST assertions on the reported vec are
@@ -546,10 +542,10 @@ impl Driver for SimDriver {
     /// Retire this driver's supervision claim on `alloc` — the releaser
     /// symmetric with [`Self::live_allocations`], per the trait
     /// contract. Only a `Vm`-typed `SimDriver` holds a claim to retire;
-    /// an `Exec`-typed one keeps `ExecDriver`'s trait-default no-op, so
+    /// a non-VM-typed one keeps the VM driver's trait-default no-op, so
     /// a release there MUST NOT touch `allocations` (that would change
-    /// the exit-observer round-trip cardinality the Exec-shaped tests
-    /// rely on). Idempotent: removing an absent id from either phase set
+    /// the exit-observer round-trip cardinality of non-VM fixtures.
+    /// Idempotent: removing an absent id from either phase set
     /// is a no-op, never a panic — an exit-observer caller and an
     /// ending-authoring caller may race to release the same id. Mirrors
     /// `VmDriver::release_supervision`'s unconditional map remove: the
@@ -579,7 +575,8 @@ mod release_for_exit_emission_tests {
     //! once step 01-03 wires the firing site.
     use super::*;
     use overdrive_core::SpiffeId;
-    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
+    use std::path::PathBuf;
     use std::str::FromStr;
 
     fn sample_spec(name: &str) -> AllocationSpec {
@@ -587,9 +584,11 @@ mod release_for_exit_emission_tests {
             alloc: AllocationId::from_str(name).expect("valid AllocationId"),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),
-            driver: DriverPayload::Exec(ExecPayload {
+            driver: DriverPayload::Vm(VmPayload {
                 command: "/bin/true".to_owned(),
                 args: vec![],
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
@@ -612,7 +611,7 @@ mod release_for_exit_emission_tests {
     /// firing).
     #[tokio::test]
     async fn release_for_exit_emission_is_idempotent() {
-        let driver = SimDriver::new(DriverType::Exec);
+        let driver = SimDriver::new(DriverType::Vm);
         let spec = sample_spec("alloc-idempotent");
         let handle = driver.start(&spec).await.expect("start succeeds");
         // First fire — consumes the stashed sender.
@@ -628,7 +627,7 @@ mod release_for_exit_emission_tests {
     /// release).
     #[tokio::test]
     async fn release_for_exit_emission_on_unknown_alloc_is_noop() {
-        let driver = SimDriver::new(DriverType::Exec);
+        let driver = SimDriver::new(DriverType::Vm);
         let unknown = AllocationHandle {
             alloc: AllocationId::from_str("alloc-never-started").expect("valid AllocationId"),
             pid: None,

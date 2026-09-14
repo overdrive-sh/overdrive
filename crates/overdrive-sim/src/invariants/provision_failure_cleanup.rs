@@ -148,7 +148,7 @@ impl WorkloadNetworkProvisioner for SimPartialFailureNetwork {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         let owner = workload.netns.as_str().to_owned();
         let mut all = network_artifacts(workload, vm_tap);
@@ -205,10 +205,7 @@ impl WorkloadNetworkProvisioner for SimPartialFailureNetwork {
     }
 }
 
-fn network_artifacts(
-    workload: &WorkloadNetnsPlan,
-    vm_tap: Option<&VmTapPlan>,
-) -> Vec<NetworkArtifact> {
+fn network_artifacts(workload: &WorkloadNetnsPlan, vm_tap: &VmTapPlan) -> Vec<NetworkArtifact> {
     let owner = workload.netns.as_str();
     let mut artifacts = vec![
         NetworkArtifact::Namespace(owner.to_owned()),
@@ -217,16 +214,14 @@ fn network_artifacts(
         NetworkArtifact::ResolverDirectory(format!("/etc/netns/{owner}")),
         NetworkArtifact::TransitRoute(workload.subnet.to_string()),
     ];
-    if let Some(tap) = vm_tap {
-        artifacts.extend([
-            NetworkArtifact::GuestTap(tap.tap.clone()),
-            NetworkArtifact::GuestRoute(tap.guest_network.to_string()),
-            NetworkArtifact::ReturnRoute(format!(
-                "{} via {} dev {}",
-                tap.guest_network, workload.workload_addr, workload.host_veth
-            )),
-        ]);
-    }
+    artifacts.extend([
+        NetworkArtifact::GuestTap(vm_tap.tap.clone()),
+        NetworkArtifact::GuestRoute(vm_tap.guest_network.to_string()),
+        NetworkArtifact::ReturnRoute(format!(
+            "{} via {} dev {}",
+            vm_tap.guest_network, workload.workload_addr, workload.host_veth
+        )),
+    ]);
     artifacts
 }
 

@@ -89,9 +89,9 @@ impl WorkloadNetworkProvisioner for Network {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
-        self.provisions.lock().push((workload.clone(), vm_tap.cloned()));
+        self.provisions.lock().push((workload.clone(), Some(vm_tap.clone())));
         Ok(())
     }
     fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {

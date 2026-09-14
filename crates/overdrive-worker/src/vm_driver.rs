@@ -1148,17 +1148,7 @@ impl VmDriver {
         // binding reaches them and states the routing precondition in the
         // same breath — no accessor is added to `DriverPayload`.
         //
-        // A non-`Vm` payload reaching `VmDriver` is a registry-ROUTING
-        // defect, not a VM-start failure, so it takes the existing
-        // `DriverStartClass::Unclassified` fallback rather than minting a
-        // class of its own. It runs before step 0 below: nothing has been
-        // claimed or provisioned yet, so there is nothing to release.
-        let DriverPayload::Vm(payload) = &spec.driver else {
-            return Err(start_rejected_unclassified(format!(
-                "VmDriver received a {} payload",
-                spec.driver.driver_type()
-            )));
-        };
+        let DriverPayload::Vm(payload) = &spec.driver;
         let composed_network = compose_vm_network(self.layout.arch, spec.into())?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision

@@ -86,8 +86,8 @@ fn restart_retry_deadline(seen_at: UnixInstant, attempts: u32) -> UnixInstant {
 pub enum AllocationAttemptEvent {
     /// A late guest readiness report.
     Ready,
-    /// A late start/restart execution request.
-    Exec,
+    /// A late start/restart dispatch request.
+    Dispatch,
     /// A duplicate or competing finalization request.
     Finalize,
 }
@@ -104,7 +104,7 @@ pub enum AllocationAttemptTransition {
 /// Decide whether an event may mutate an existing allocation attempt.
 ///
 /// A typed terminal claim is immutable for a Job allocation. Late READY,
-/// EXEC, and finalization events therefore all become exact no-ops. A
+/// dispatch, and finalization events therefore all become exact no-ops. A
 /// platform-reclaimed row intentionally has no terminal claim, so it remains
 /// eligible for the ordinary policy-driven replacement path.
 #[must_use]
@@ -699,7 +699,7 @@ impl WorkloadLifecycle {
                 let restart_pending = view.observed_generation < desired.generation;
 
                 // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
-                // attempt identity even if a late READY/EXEC-shaped row tries
+                // attempt identity even if a late READY/DISPATCH-shaped row tries
                 // to project that same allocation as Pending or Running. The
                 // fence is scoped to the current allocation, exactly like the
                 // existing operator-stop veto: historical terminal rows cannot
@@ -1594,7 +1594,7 @@ mod guest_pre_ready_exit_tests {
             pre_state.terminal = Some(terminal);
             let event = match reopening_event {
                 0 => AllocationAttemptEvent::Ready,
-                1 => AllocationAttemptEvent::Exec,
+                1 => AllocationAttemptEvent::Dispatch,
                 _ => AllocationAttemptEvent::Finalize,
             };
 
@@ -1619,7 +1619,7 @@ mod guest_pre_ready_exit_tests {
                 },
             );
             prop_assert_eq!(
-                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Exec),
+                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Dispatch),
                 AllocationAttemptTransition::Apply,
             );
         }

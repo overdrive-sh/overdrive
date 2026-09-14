@@ -11,8 +11,12 @@
 )]
 
 use async_trait::async_trait;
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
@@ -39,6 +43,23 @@ use std::sync::{
 };
 use std::time::Duration;
 
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 /// Existing driven-port decorator: model the old process watcher/observer
 /// completing while ExecDriver::stop awaits its watcher. SimDriver emits the
 /// genuine intentional ExitEvent; the production observer constructs its row.
@@ -54,7 +75,7 @@ struct ScheduledStop {
 #[async_trait]
 impl Driver for ScheduledStop {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         self.inner.start(spec).await
@@ -129,6 +150,9 @@ async fn drive(seed: u64, contend: bool) {
     let node = NodeId::new("local").unwrap();
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
     let clock = Arc::new(SimClock::new());
+    // Keep the pre-existing phase-less simulator behavior for this
+    // schedule-racy diagnostic; the wrapper itself routes the VM payload as
+    // the supported VM capability.
     let inner = Arc::new(SimDriver::with_clock(DriverType::Exec, clock.clone()));
     let driver = Arc::new(ScheduledStop {
         inner,
@@ -196,7 +220,17 @@ async fn drive(seed: u64, contend: bool) {
     let workload = ReconcilerName::new("workload-lifecycle").unwrap();
     let service = ReconcilerName::new("service-lifecycle").unwrap();
     let deadline = clock.now() + Duration::from_secs(30);
-    run_convergence_tick(&state, &workload, &target, clock.now(), 33, deadline).await.unwrap();
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &workload,
+        &target,
+        clock.now(),
+        33,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .unwrap();
     let started = obs.alloc_status_rows().await.unwrap();
     assert_eq!(started[0].state, AllocState::Running, "seed={seed}");
     clock.tick(Duration::from_secs(2));
@@ -210,12 +244,31 @@ async fn drive(seed: u64, contend: bool) {
     })
     .await
     .unwrap();
-    run_convergence_tick(&state, &service, &target, clock.now(), 33, deadline).await.unwrap();
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &service,
+        &target,
+        clock.now(),
+        33,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .unwrap();
     let finalized = obs.alloc_status_rows().await.unwrap();
     assert_eq!(finalized[0].state, AllocState::Failed, "seed={seed}; rows={finalized:?}");
     assert!(finalized[0].terminal.is_some(), "seed={seed}");
     driver.armed.store(contend, Ordering::SeqCst);
-    let result = run_convergence_tick(&state, &workload, &target, clock.now(), 33, deadline).await;
+    let result = run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &workload,
+        &target,
+        clock.now(),
+        33,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await;
     let current = obs.alloc_status_rows().await.unwrap();
     let predecessor_occurrences = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
     let successor_occurrences = obs.alloc_lifecycle_occurrences(&successor).await.unwrap();

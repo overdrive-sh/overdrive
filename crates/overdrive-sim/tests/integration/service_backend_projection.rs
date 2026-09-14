@@ -24,14 +24,15 @@
 
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
-use overdrive_control_plane::action_shim::ShimError;
+use overdrive_control_plane::action_shim::{ShimError, WorkloadNetworkProvisioner};
 use overdrive_control_plane::dns_responder::name_index::NameIndex;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::listener_facts::ListenerFactStore;
 use overdrive_control_plane::mtls_resolve_adapter::ServiceBackendsResolve;
 use overdrive_control_plane::reconciler_runtime::{
-    ConvergenceError, ReconcilerRuntime, run_convergence_tick,
+    ConvergenceError, ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
 };
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::{
     AppState, service_lifecycle, service_map_hydrator, workload_lifecycle,
@@ -74,7 +75,25 @@ use std::{
 };
 
 const HOST: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
+const VM_GUEST: Ipv4Addr = Ipv4Addr::new(10, 99, 128, 2);
 const WORKLOAD: &str = "backend-projection";
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// Mirrors all production driver-to-ProbeRunner lifecycle hooks. SimDriver
 /// substitutes only the external process; lifecycle rows come from dispatch.
@@ -86,7 +105,7 @@ struct ProbedDriver {
 #[async_trait]
 impl Driver for ProbedDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         self.inner.start(spec).await
@@ -197,7 +216,7 @@ impl World {
         let tcp = Arc::new(SimTcpProber::new());
         let http = Arc::new(SimHttpProber::new());
         let driver = Arc::new(ProbedDriver {
-            inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+            inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
             probes: ProbeRunner::new(tcp.clone(), http.clone(), clock.clone(), obs.clone()),
         });
         let views = Arc::new(RedbViewStore::open(directory.path()).unwrap());
@@ -291,13 +310,14 @@ impl World {
 
     async fn run_target(&mut self, owner: ReconcilerName, target: TargetResource) {
         self.tick += 1;
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &self.state,
             &owner,
             &target,
             self.clock.now(),
             self.tick,
             self.clock.now() + Duration::from_secs(30),
+            &NoopNetworkProvisioner,
         )
         .await
         .unwrap();
@@ -447,7 +467,8 @@ impl World {
             assert!(
                 row.backends.iter().all(|backend| backend.healthy == healthy
                     && backend.weight == 1
-                    && backend.addr == std::net::SocketAddr::V4(SocketAddrV4::new(HOST, *port))),
+                    && backend.addr
+                        == std::net::SocketAddr::V4(SocketAddrV4::new(VM_GUEST, *port))),
                 "seed={}: listener-specific address, health and weight: {row:?}",
                 self.seed
             );
@@ -746,13 +767,14 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
         peer: "deciding-withdrawal-fault".into(),
     });
     world.tick += 1;
-    let outcome = run_convergence_tick(
+    let outcome = run_convergence_tick_with_network_provisioner_for_test(
         &world.state,
         &ReconcilerName::new("service-lifecycle").unwrap(),
         &world.target,
         world.clock.now(),
         world.tick,
         world.clock.now() + Duration::from_secs(30),
+        &NoopNetworkProvisioner,
     )
     .await;
     assert!(
@@ -916,13 +938,14 @@ async fn rejected_first_publication_is_repaired_from_observed_state() {
         peer: "seeded-write-fault".into(),
     });
     world.tick += 1;
-    let outcome = run_convergence_tick(
+    let outcome = run_convergence_tick_with_network_provisioner_for_test(
         &world.state,
         &ReconcilerName::new("service-lifecycle").unwrap(),
         &world.target,
         world.clock.now(),
         world.tick,
         world.clock.now() + Duration::from_secs(30),
+        &NoopNetworkProvisioner,
     )
     .await;
     assert!(
@@ -1071,10 +1094,7 @@ async fn consumer_trajectory(include_hydrator: bool) {
     let vip = world.vip.as_ref().unwrap().try_as_ipv4().unwrap();
     if include_hydrator {
         world.hydrate_published().await;
-        assert_eq!(
-            world.dataplane.local_backend_for(vip, 18081, Proto::Tcp),
-            Some(SocketAddrV4::new(HOST, 18081))
-        );
+        assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     world.http.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded readiness outage".into() });
     world.advance_probes().await;
@@ -1095,10 +1115,7 @@ async fn consumer_trajectory(include_hydrator: bool) {
     assert_eq!(dns.frontend_for(&world.name), Some(world.frontend));
     if include_hydrator {
         world.hydrate_published().await;
-        assert_eq!(
-            world.dataplane.local_backend_for(vip, 18081, Proto::Tcp),
-            Some(SocketAddrV4::new(HOST, 18081))
-        );
+        assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     drop(dns);
     drop(resolve);

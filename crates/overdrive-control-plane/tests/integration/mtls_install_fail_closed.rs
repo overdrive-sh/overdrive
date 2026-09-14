@@ -147,6 +147,7 @@
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -256,10 +257,12 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/mif/alloc/01")
             .expect("valid spiffe id"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(
+            overdrive_core::traits::driver::VmPayload {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
             },
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
@@ -348,7 +351,7 @@ struct RecordingDriver {
 impl RecordingDriver {
     fn new() -> Self {
         Self {
-            inner: SimDriver::new(DriverType::Exec),
+            inner: SimDriver::new(DriverType::Vm),
             starts: parking_lot::Mutex::new(Vec::new()),
             releases: parking_lot::Mutex::new(Vec::new()),
             on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
@@ -409,7 +412,7 @@ struct HoldingReleaseDriver {
 impl HoldingReleaseDriver {
     fn new() -> Self {
         Self {
-            inner: SimDriver::new(DriverType::Exec),
+            inner: SimDriver::new(DriverType::Vm),
             release_entered: tokio::sync::Semaphore::new(0),
             release_permit: tokio::sync::Semaphore::new(0),
             release_cancelled: AtomicBool::new(false),
@@ -778,7 +781,7 @@ impl WorkloadNetworkProvisioner for RunningWriteRejectNetwork {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         self.provisions.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -1209,7 +1212,7 @@ struct RestartAbortDriver {
 #[async_trait::async_trait]
 impl Driver for RestartAbortDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -1217,7 +1220,7 @@ impl Driver for RestartAbortDriver {
         if self.scenario == RestartAbortScenario::DriverStart {
             return Err(DriverError::StartRejected {
                 failure: DriverStartFailure {
-                    class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+                    class: DriverStartClass::Unclassified { driver: DriverType::Vm },
                     detail: "injected restart driver-start rejection".to_owned(),
                 },
             });
@@ -1262,7 +1265,7 @@ impl WorkloadNetworkProvisioner for RestartAbortNetwork {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         self.provisions.fetch_add(1, Ordering::SeqCst);
         if self.scenario == RestartAbortScenario::Provision {

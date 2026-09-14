@@ -65,9 +65,9 @@ impl WorkloadNetworkProvisioner for RecordingNetworkProvisioner {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
-        assert!(vm_tap.is_some(), "the VM allocation receives its tap plan");
+        let _ = vm_tap;
         self.provisions.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }

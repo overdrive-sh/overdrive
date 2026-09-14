@@ -469,7 +469,7 @@ async fn handle_exit_event(
     let Some(prior) = prior else {
         return Ok(None);
     };
-    if allocation_attempt_transition(&prior, AllocationAttemptEvent::Exec)
+    if allocation_attempt_transition(&prior, AllocationAttemptEvent::Dispatch)
         == AllocationAttemptTransition::NoChange
     {
         return Ok(None);
@@ -541,8 +541,8 @@ async fn handle_exit_event(
         // `spec.workload_addr` lands at the action-shim's
         // Pending → Running write (step 01-02, D-A1 / D-BLOCKER2); from
         // there the value rides the prior row into every successor
-        // transition. `None` for host-netns allocs (every current
-        // fixture, where the C3 seam never ran).
+        // transition. `None` only for a row whose originating spec did not
+        // pass through the C3 provision seam.
         prior.workload_addr,
         // ADR-0078 § D2 site 7: FORWARDS. The crash row this writer produces
         // carries the PREVIOUS terminal's snapshot, per § D1's invariant that

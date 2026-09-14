@@ -34,7 +34,7 @@ use std::sync::Arc;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{HydrationContext, TargetResource};
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, ExecPayload, Resources,
+    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, Resources, VmPayload,
 };
 use overdrive_core::traits::vm_host_state::{ScopeFacts, VmHostObservation};
 use overdrive_reconcilers::{
@@ -63,7 +63,12 @@ fn vm_spec(name: &str) -> AllocationSpec {
     AllocationSpec {
         alloc: aid(name),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/vm").expect("valid SpiffeId"),
-        driver: DriverPayload::Exec(ExecPayload { command: "/bin/true".to_owned(), args: vec![] }),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/bin/true".to_owned(),
+            args: vec![],
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,

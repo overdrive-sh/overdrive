@@ -8,7 +8,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -21,6 +25,23 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 #[tokio::test]
 async fn submitted_job_reaches_running_via_simulated_vm_driver() {
@@ -90,13 +111,14 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
     // cadence). We expect convergence within a handful of ticks.
     let mut converged = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

@@ -173,7 +173,7 @@ impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         Ok(())
     }
@@ -219,7 +219,7 @@ impl WorkloadNetworkProvisioner for ProvisionFailureNetwork {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         self.trace.lock().push("provision");
         Err(Self::error("provision"))
@@ -370,12 +370,12 @@ fn spec() -> AllocationSpec {
         alloc: alloc_id(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs/alloc/0")
             .expect("valid spiffe id"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/true".to_owned(),
-                args: Vec::new(),
-            },
-        ),
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,

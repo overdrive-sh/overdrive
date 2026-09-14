@@ -23,8 +23,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::LifecycleEvent;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::{LifecycleEvent, WorkloadNetworkProvisioner};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -38,6 +41,23 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// Async bootstrap — wires runtime, store, obs, driver, and state with
 /// a broadcast subscriber attached BEFORE any tick runs so no
@@ -168,13 +188,14 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // emit FinalizeFailed) plus headroom for backoff timer ticks.
     let mut terminal_row = None;
     for tick_n in 0..200_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -263,13 +284,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // Drive until Running.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -293,13 +315,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // and the row + event must carry terminal=Stopped{by:Operator}.
     let mut terminal_row = None;
     for tick_n in 30..120_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -381,13 +404,14 @@ async fn non_terminal_transitions_emit_none() {
     // Drive until Running, then stop early.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

@@ -19,6 +19,7 @@
 //!   a tool-choice deviation returns a `TranscriptMismatch` error.
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -26,7 +27,9 @@ use bytes::Bytes;
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::{Backend, Dataplane, FlowEvent, PolicyKey, Verdict};
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, DriverType, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverError, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::llm::{
     Completion, Llm, LlmError, Message, Prompt, Role, ToolCall, Usage,
@@ -315,12 +318,12 @@ fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("workload/payments/alloc/a1b2c3"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "registry/payments:1.0".to_owned(),
-                args: vec![],
-            },
-        ),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "registry/payments:1.0".to_owned(),
+            args: vec![],
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

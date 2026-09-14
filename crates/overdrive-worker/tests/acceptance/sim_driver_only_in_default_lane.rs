@@ -6,27 +6,30 @@
 //! `AllocationHandle.pid` — `SimDriver` never sets a PID, so a
 //! `Some(_)` would prove a real process was spawned.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_sim::adapters::driver::SimDriver;
 
 #[tokio::test]
 async fn default_lane_does_not_spawn_real_processes() {
     // Driving port — `Driver` trait, wired to `SimDriver`.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let spec = AllocationSpec {
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1")
             .expect("valid spiffe id"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/sleep".to_owned(),
-                args: vec![],
-            },
-        ),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/bin/sleep".to_owned(),
+            args: vec![],
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

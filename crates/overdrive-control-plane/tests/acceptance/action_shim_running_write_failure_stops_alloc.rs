@@ -25,26 +25,8 @@
 //! # PORT-TO-PORT litmus
 //!
 //! Drives the production driving port `action_shim::dispatch` and asserts
-//! at the driven-port boundary. TWO driver shapes are exercised, because
-//! write-failure recovery has two observable halves:
-//!
-//! * **Exec shape** (`DriverType::Exec`) — asserts `SimDriver::live_count()`
-//!   is 0 after the failure: the shim STOPPED the started workload
-//!   (`SimDriver::stop` evicts the slot). The teardown half.
-//! * **VM shape** (`DriverType::Vm`) — asserts `Driver::live_allocations()`
-//!   no longer reports the alloc after the failure: the shim RELEASED the
-//!   supervision claim `stop` left `EndingInFlight`. The release half —
-//!   and it is VmDriver-SPECIFIC. `VmDriver::stop` moves its claim
-//!   `Live -> EndingInFlight` (never a full remove — its double-authorship
-//!   guard), so `stop` ALONE does not retire it; without the explicit
-//!   `release_supervision` pairing the torn-down alloc is reported by
-//!   `live_allocations()` forever, pinning `VmReclamation`
-//!   (`!reclamation_authorised`) for a dead id (greptile PR #268 P1
-//!   "Ending claim survives teardown"). An Exec-shaped `SimDriver` CANNOT
-//!   exhibit this leak — its `stop` is a full remove — which is exactly
-//!   why an Exec-only `live_count` assertion left the leak uncaught. The
-//!   VM-shaped `SimDriver` faithfully models the phased claim so the
-//!   pairing is actually observable here.
+//! at the driven-port boundary. The VM-shaped `SimDriver` asserts both
+//! started-workload teardown and release of its phased supervision claim.
 //!
 //! Per-driver teardown internals stay covered by the driver-level suites
 //! (`vm_driver_stop_totality.rs`, `driver.rs` gate tests).
@@ -72,8 +54,7 @@ use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, ExecPayload, Resources,
-    VmPayload,
+    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -92,7 +73,7 @@ use tempfile::TempDir;
 
 #[derive(Debug, Default)]
 struct SimNetworkProvisioner {
-    provisions: parking_lot::Mutex<Vec<(WorkloadNetnsPlan, Option<VmTapPlan>)>>,
+    provisions: parking_lot::Mutex<Vec<(WorkloadNetnsPlan, VmTapPlan)>>,
     teardowns: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
 }
 
@@ -100,9 +81,9 @@ impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
-        self.provisions.lock().push((workload.clone(), vm_tap.cloned()));
+        self.provisions.lock().push((workload.clone(), vm_tap.clone()));
         Ok(())
     }
 
@@ -116,41 +97,12 @@ fn alloc_id() -> AllocationId {
     AllocationId::new("alloc-writefail-0").expect("valid alloc id")
 }
 
-fn start_action() -> Action {
-    Action::StartAllocation {
-        alloc_id: alloc_id(),
-        workload_id: WorkloadId::new("writefail").expect("valid workload id"),
-        node_id: NodeId::new("node-001").expect("valid node id"),
-        spec: AllocationSpec {
-            alloc: alloc_id(),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/writefail/alloc/0")
-                .expect("valid spiffe id"),
-            driver: DriverPayload::Exec(ExecPayload {
-                command: "/bin/true".to_owned(),
-                args: Vec::new(),
-            }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
-            service_ports: Vec::new(),
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
-        },
-        kind: WorkloadKind::Service,
-    }
-}
-
 /// The VM-shaped counterpart of [`start_action`]. Routes to a
 /// `DriverType::Vm` driver (`spec.driver.driver_type() == Vm`), so the
 /// shim selects the registered VM-typed `SimDriver` — the one that models
 /// `VmDriver`'s phased `Live -> EndingInFlight` claim. `kernel` / `rootfs`
 /// are placeholders: `SimDriver::start` boots nothing and ignores them.
-fn start_action_vm() -> Action {
+fn start_action() -> Action {
     Action::StartAllocation {
         alloc_id: alloc_id(),
         workload_id: WorkloadId::new("writefail").expect("valid workload id"),
@@ -185,8 +137,7 @@ fn start_action_vm() -> Action {
 /// `SimDriver` + `SimObservationStore`, so the caller retains both for
 /// post-dispatch assertions. Every other port is a fresh sim adapter;
 /// `mtls_worker` / `workflow_engine` are `None`. The caller supplies the
-/// action so the same harness drives both the Exec-shaped
-/// ([`start_action`]) and VM-shaped ([`start_action_vm`]) starts.
+/// action so the same harness drives the supported VM-shaped start.
 async fn dispatch_action(
     obs: &Arc<SimObservationStore>,
     sim_driver: &Arc<SimDriver>,
@@ -250,13 +201,13 @@ async fn dispatch_action(
 /// orphaned-live with a stranded exit watcher.
 ///
 /// `SimObservationStore::inject_write_failure` is a one-shot FIFO; a
-/// `StartAllocation` for an Exec alloc with `netns: None` performs exactly
-/// ONE observation write (the `Running` row — reads do not consume the
-/// FIFO), so the injected failure lands on it deterministically.
+/// `StartAllocation` for the VM alloc performs exactly ONE observation write
+/// (the `Running` row — reads do not consume the FIFO), so the injected
+/// failure lands on it deterministically.
 #[tokio::test]
 async fn running_write_failure_stops_the_started_alloc() {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, Arc::new(SimClock::new())));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::new(SimClock::new())));
 
     // Fail exactly the next observation write — the `Running` row.
     obs.inject_write_failure(ObservationStoreError::Io(io::Error::from(
@@ -304,7 +255,7 @@ async fn running_write_failure_stops_the_started_alloc() {
 #[tokio::test]
 async fn running_write_success_keeps_the_started_alloc() {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, Arc::new(SimClock::new())));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::new(SimClock::new())));
 
     // No injected failure — the Running write commits.
     let result =
@@ -326,8 +277,7 @@ async fn running_write_success_keeps_the_started_alloc() {
     assert_eq!(row.state, AllocState::Running, "the committed row is Running");
 }
 
-/// The VM (phased-claim) shape of the same fix — the leg an Exec driver
-/// cannot exhibit. `VmDriver::stop` moves its supervision entry
+/// `VmDriver::stop` moves its supervision entry
 /// `Live -> EndingInFlight` rather than removing it, so `stop` ALONE does
 /// not retire the claim: `live_allocations()` keeps reporting the
 /// torn-down alloc until `release_supervision` runs. On the
@@ -344,7 +294,7 @@ async fn running_write_success_keeps_the_started_alloc() {
 ///
 /// A `DriverType::Vm` `SimDriver` faithfully models the phased claim, so
 /// this goes RED if the `release_supervision` pairing is dropped — a leak
-/// the Exec-shaped `live_count` assertion above structurally cannot see.
+/// the driver-level `live_count` assertion does not expose.
 #[tokio::test]
 async fn vm_running_write_failure_releases_the_supervision_claim() {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
@@ -356,7 +306,7 @@ async fn vm_running_write_failure_releases_the_supervision_claim() {
     )));
 
     let network = SimNetworkProvisioner::default();
-    let result = dispatch_action(&obs, &sim_driver, start_action_vm(), &network).await;
+    let result = dispatch_action(&obs, &sim_driver, start_action(), &network).await;
     assert!(
         result.is_err(),
         "the Running-write failure must propagate as a ShimError; got {result:?}",
@@ -368,7 +318,7 @@ async fn vm_running_write_failure_releases_the_supervision_claim() {
     // means the claim was NOT retired — the torn-down alloc leaks and
     // `VmReclamation` is pinned `!reclamation_authorised` for a dead id
     // forever. This is the exact state greptile PR #268 P1 flagged, and it
-    // is invisible to a full-remove Exec driver.
+    // is visible through the VM driver's phased supervision surface.
     assert_eq!(
         sim_driver.live_allocations(),
         Some(Vec::new()),
@@ -395,7 +345,7 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
 
     // No injected failure — the Running write commits.
     let network = SimNetworkProvisioner::default();
-    let result = dispatch_action(&obs, &sim_driver, start_action_vm(), &network).await;
+    let result = dispatch_action(&obs, &sim_driver, start_action(), &network).await;
     assert!(result.is_ok(), "a clean StartAllocation must succeed; got {result:?}");
 
     assert_eq!(
@@ -421,7 +371,7 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
         );
         provisions[0].clone()
     };
-    let tap = tap.as_ref().expect("a VM assignment includes its TAP half");
+    let tap = &tap;
     let started = sim_driver.started_specs();
     assert_eq!(started.len(), 1, "the VM-shaped driver is exercised exactly once");
     let started = &started[0];

@@ -639,10 +639,12 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
     AllocationSpec {
         alloc: pki.client_alloc.clone(),
         identity: pki.client_leaf.spiffe.clone(),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(
+            overdrive_core::traits::driver::VmPayload {
                 command: "/bin/true".to_owned(),
                 args: vec![],
+                kernel: "/nonexistent/kernel".into(),
+                rootfs: "/nonexistent/rootfs".into(),
             },
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },

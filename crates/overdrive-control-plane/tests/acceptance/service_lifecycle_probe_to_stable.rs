@@ -49,6 +49,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -57,7 +58,7 @@ use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
@@ -88,14 +89,16 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
     }
 }
 
-fn exec_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
+fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
             .expect("valid SPIFFE ID"),
-        driver: DriverPayload::Exec(ExecPayload {
+        driver: DriverPayload::Vm(VmPayload {
             command: "/bin/true".to_owned(),
             args: Vec::new(),
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
@@ -237,7 +240,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     // ACT 1 — start the supervised tick loop, advance the clock past
     // one interval, wait for the row to land in the obs store.
     // -----------------------------------------------------------------
-    let _token = runner.start_alloc(&exec_spec(&alloc, vec![descriptor.clone()]));
+    let _token = runner.start_alloc(&vm_spec(&alloc, vec![descriptor.clone()]));
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
 

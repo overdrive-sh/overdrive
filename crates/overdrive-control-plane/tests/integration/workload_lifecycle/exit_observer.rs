@@ -27,8 +27,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::AllocStateWire;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, NodeId};
@@ -41,6 +45,23 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 // The crate path below is the load-bearing GREEN-step landing zone:
 // the worker subsystem `exit_observer::spawn` is what consumes
@@ -97,7 +118,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     // Share the SimClock with the harness so the test can drive
     // logical time past `inject_exit_after`'s deadline.
     let sim_clock = Arc::new(SimClock::new());
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
     let allocator = overdrive_control_plane::test_default_allocator(
@@ -132,7 +153,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         state.obs.clone(),
         state
             .drivers
-            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .get(overdrive_core::traits::driver::DriverType::Vm)
             .cloned()
             .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
@@ -184,13 +205,14 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
     let mut tick_n = 0_u64;
     let mut running: Option<AllocStatusRow> = None;
     while tick_n < 30 && running.is_none() {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -207,13 +229,14 @@ async fn drive_ticks(h: &Harness, start: Instant, range: std::ops::Range<u64>) {
             .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     for tick_n in range {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -270,13 +293,14 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
     let deadline = start + Duration::from_secs(120);
     let mut found_failed_at: Option<String> = None;
     'outer: for tick_n in 30_u64..50 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -328,7 +352,7 @@ async fn simulated_intentional_stop_writes_terminated_to_obs() {
     let handle = AllocationHandle { alloc: h.alloc_id.clone(), pid: None };
     h.state
         .drivers
-        .get(overdrive_core::traits::driver::DriverType::Exec)
+        .get(overdrive_core::traits::driver::DriverType::Vm)
         .expect("registry has an Exec entry")
         .stop(&handle)
         .await
@@ -383,13 +407,14 @@ async fn crashed_alloc_eventually_reaches_non_running() {
     let deadline = start + Duration::from_secs(120);
     let mut left_running = false;
     for tick_n in 30_u64..90 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -428,7 +453,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         // Same logical tick: stop sets intentional_stop, exit fires.
         h.state
             .drivers
-            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .get(overdrive_core::traits::driver::DriverType::Vm)
             .expect("registry has an Exec entry")
             .stop(&handle)
             .await
@@ -481,13 +506,14 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         let deadline = start + Duration::from_secs(120);
         let mut saw_failed = false;
         'outer: for tick_n in 30_u64..50 {
-            run_convergence_tick(
+            run_convergence_tick_with_network_provisioner_for_test(
                 &h.state,
                 &workload_lifecycle_name,
                 &h.target,
                 start + Duration::from_millis(tick_n.saturating_mul(100)),
                 tick_n,
                 deadline,
+                &NoopNetworkProvisioner,
             )
             .await
             .expect("tick");
@@ -510,7 +536,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         let _ = h
             .state
             .drivers
-            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .get(overdrive_core::traits::driver::DriverType::Vm)
             .expect("registry has an Exec entry")
             .stop(&handle)
             .await; // idempotent
@@ -560,13 +586,14 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
     let deadline = start + Duration::from_secs(120);
     let mut found_ev = None;
     'outer: for tick_n in 30_u64..50 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -628,7 +655,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
     let sim_clock = Arc::new(SimClock::new());
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
     let allocator = overdrive_control_plane::test_default_allocator(
@@ -660,7 +687,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
         state.obs.clone(),
         state
             .drivers
-            .get(overdrive_core::traits::driver::DriverType::Exec)
+            .get(overdrive_core::traits::driver::DriverType::Vm)
             .cloned()
             .expect("registry has an Exec entry"),
         state.lifecycle_events.clone(),
@@ -710,13 +737,14 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     let mut tick_n = 0_u64;
     let mut running = false;
     while tick_n < 30 && !running {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -757,7 +785,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     );
 
     // Let the observer task observe the exit, write Failed, and broadcast —
-    // WITHOUT calling run_convergence_tick (no manual broker poke). Drive
+    // WITHOUT calling run_convergence_tick_with_network_provisioner_for_test (no manual broker poke). Drive
     // logical time via the ticker and yield repeatedly. Assert BOTH halves of
     // the cut: (retained) the Failed transition is broadcast, and (removed)
     // the observer submits NOTHING to the broker.

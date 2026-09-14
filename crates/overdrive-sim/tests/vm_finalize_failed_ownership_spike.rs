@@ -71,11 +71,7 @@ struct Network {
 }
 
 impl WorkloadNetworkProvisioner for Network {
-    fn provision(
-        &self,
-        _: &WorkloadNetnsPlan,
-        _: Option<&VmTapPlan>,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _: &WorkloadNetnsPlan, _: &VmTapPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
     fn teardown(&self, _: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {

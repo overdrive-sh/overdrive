@@ -195,6 +195,19 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# remove-legacy-exec-workload-driver step 01-03 — the VM path now provisions
+# its current netns/veth/TAP plan even when the mTLS worker is not composed.
+# These production-server simulations intentionally use the real host network
+# provisioner, so serialize them with the existing node-global kernel state
+# group; their in-process SimDriver does not provide a network-port override.
+[[profile.default.overrides]]
+filter = 'package(overdrive-sim) & binary(vm_lifecycle_latency_283_spike)'
+test-group = 'host-kernel-shared'
+
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(integration) & test(convergence_loop_spawned_in_production_boot)'
+test-group = 'host-kernel-shared'
+
 # service-kind-vm-workloads quick-bind integration scenarios — both modules
 # drive a real ExecDriver through the shared host cgroup hierarchy. Their
 # `#[serial(workload_cgroup)]` annotations serialize only inside one nextest
