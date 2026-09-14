@@ -7,12 +7,12 @@
 | Feature | `remove-legacy-exec-workload-driver` |
 | Review role | `nw-solution-architect-reviewer` |
 | Review scope | Application/component DESIGN in Propose mode |
-| Iteration | 1–2 |
+| Iteration | 1–4 (corrected DESIGN re-review iterations 1–2 are overall iterations 3–4) |
 | Date | 2026-09-14 |
-| Reviewed repository state | `5377fcb85681b33fb27da6025374fa5b1990fd3f` plus the uncommitted DESIGN artifacts and this review artifact |
+| Reviewed repository state | Iterations 1–2: `5377fcb85681b33fb27da6025374fa5b1990fd3f`; corrected DESIGN re-review iterations 1–2: `db1e5e10d3de6e54e5603f05f25d47f17a0e00f7` plus the successive uncommitted corrected DESIGN artifacts and this review artifact |
 | Requirements authority | GH #293 body and comments (no comments were present when fetched) |
-| User authority | P-293-1 through P-293-6 explicitly approved on 2026-09-14 |
-| Result | `APPROVED` after iteration 2 |
+| User authority | P-293-1 through P-293-6 explicitly approved on 2026-09-14; later correction rejects the retired-driver error/message/compatibility branch and dedicated tests of deleted symbols |
+| Result | `APPROVED` after corrected DESIGN re-review iteration 2 (overall iteration 4); prior verdicts remain as review history |
 
 ## Review conclusion — iteration 1
 
@@ -346,7 +346,7 @@ remains temporary until GH #295 replaces it.
   code, tests, mutation run, native-metal run or expectation evidence was
   changed or executed for this documentation review.
 
-## Final verdict
+## Iteration-2 verdict
 
 **APPROVED**
 
@@ -354,3 +354,246 @@ F-01 through F-04 are closed with scope-bound documentation corrections. There
 are no unresolved critical/high findings and no #295 implementation leakage.
 The independent DESIGN review gate for the user-approved P-293-1 through
 P-293-6 bundle is satisfied.
+
+## Iteration 3 — bounded parser-contract correction re-review
+
+### Conclusion
+
+The bounded correction removes the unsanctioned parser compatibility API from
+the normative DESIGN. The post-cut parser recognizes only `[vm]`; input without
+that supported table uses the existing `ParseError::MissingDriverSection`;
+other unsupported or malformed input remains on ordinary generic parser/serde
+errors; no exact legacy diagnostic is contractual; and
+`WorkloadSpecInput::exec_command` is still deleted without replacement.
+`ParseError::RetiredExecDriver` now appears only in the architecture brief's
+dated changelog entry describing the rejected prior bundle, not in a normative
+type, parser, outcome, C4 relationship, ADR decision or feature contract.
+
+The broader approved decisions also remain bounded: exactly four affected
+envelopes reset to incompatible V1; old readers, translations, variants and
+fixtures are deleted; the host Exec probe port/adapters and rejection shim are
+deleted; P-105 predecessor/fresh-successor identity and ordering do not change;
+and GH #295 retains exclusive ownership of the later shared-switch/per-tap/DNS/
+transparent-mTLS replacement. The current VM netns/veth/TAP path remains only
+because the present production VM path reaches it.
+
+One blocking handoff defect remains. Although the correction deletes the
+special parser error and explicitly rejects a legacy-spelling rejection
+matrix, several DESIGN evidence clauses still require or permit assertions
+whose sole subject is the absence of deleted Exec symbols. That instruction is
+the source-level equivalent of the rejected compatibility/deletion suite and
+contradicts the binding rule that dedicated tests for deleted symbols disappear
+with their production code. The design must constrain executable evidence to
+surviving observable contracts and leave deleted-name absence to the
+implementation/review deletion audit.
+
+### Corrected-contract and compatibility-residue audit
+
+| Audit target | Result | Evidence and disposition |
+|---|---|---|
+| Retired parser error, exact message or special presence branch | PASS | The exact parser contract forbids all three and routes no-supported-driver input through existing `MissingDriverSection` (`feature-delta.md:207-224,608-633`; ADR-0110 `Decision`; ADR-0111 `Decision`). The literal `RetiredExecDriver` occurs only in the dated brief changelog's account of the rejected prior bundle. |
+| Replacement accessor, alias or renamed parser API | PASS | `WorkloadSpecInput::exec_command` is deleted without `command`, `driver_command`, `vm_command` or another replacement (`feature-delta.md:226-239,577,732-734`). The current nested `DriverInput::command` and runtime `DriverPayload::{command,args}` accessors pre-exist and remain VM-consumed; they are not new replacements. |
+| Backwards reader, migration/translation bridge, version fallback or old-data detector | PASS | ADR-0111/0112 and Gate G-293-2 delete old payloads, readers, conversions, discriminant history and fixtures, add no detector/upgrader/fallback, and reset exactly the four named owners. Current source confirms only `ServiceSpecEnvelope` and `WorkloadIntentEnvelope` embed the driver input/intent unions and only `AllocStatusRowEnvelope` and `AllocLifecycleOccurrenceRowEnvelope` embed the affected reason/source vocabulary. |
+| Deprecated, disabled, feature-flagged or placeholder Exec path | PASS | The design rejects inactive/deprecated arms, records no removal feature flag, deletes the concrete driver/prober ports and adapters, and leaves GH #280 no placeholder (`feature-delta.md:162-187,343-414,698-708`; ADR-0110/0113 alternatives). |
+| Compatibility config key or fallback route | PASS | No `[exec]` field/table/presence flag survives. The live grammar has `[vm]` only; ordinary generic parsing handles unknown/invalid input. Production registry post-states remain exactly `∅` or `{Vm}` from existing VMM capability semantics, with no old-driver fallback (`feature-delta.md:207-224,343-373,563-566`). |
+| Same-ID exception or P-105 drift | PASS | The lifecycle section preserves `RestartAllocation.alloc_id` as accepted numeric-current predecessor and `spec.alloc` as the distinct durably reserved successor; current `WorkloadLifecycle` and action-shim paths implement the `Failed|Terminated` handoff, successor-first outcome and one exact-old cleanup attempt. No driver-specific identity policy is introduced (`feature-delta.md:416-431,597-606`; ADR-0105/0106/0108/0109). |
+| Generated OpenAPI/wire spelling | PASS | Live driver/probe/reason/source enums reduce in place and the generated schema must be regenerated with zero dedicated Exec vocabulary; no alias or deprecated spelling is retained (`feature-delta.md:239-241,343-366,720-753`; ADR-0112). The existing generic OpenAPI regeneration/check remains the surviving schema evidence. |
+| Historical prose and superseded outcome context | PASS | ADR/brief/outcome history may name the removed surface only as history. `OUT-SVM-SERVICE-ADMISSION` is explicitly superseded, while the four current #293 outcomes describe VM-only admission, four current V1 schemas, HTTP/TCP probing and P-105 preservation. The outcome registry parses with 29 unique IDs and every relationship resolves. |
+| Tests or fixtures whose sole subject is a deleted name | **FAIL — F-05** | Reuse Analysis and gate evidence still authorize compile-time absence assertions for removed arms, ports, constructor parameters, helpers, old types and conversions (`feature-delta.md:565-576,630-633,662-663,735-742`). Those are not surviving observable behavior. Old envelope/driver/probe/parser fixtures are otherwise correctly directed to delete. |
+| GH #295 mechanism leakage | PASS | The feature retains only today's VM-used network inputs/effects and expressly forbids shared switching, per-port classification/interception, shared-bridge DNS, listener consolidation and transparent-mTLS redesign (`feature-delta.md:759-778`; C4 GH #293 section). GH #295 and all current comments were re-read; its mechanism and unresolved design questions remain outside #293. |
+
+The uncommitted DISTILL sections and test scaffolds were not reviewed as
+authority and do not affect this verdict. They remain explicitly non-authoritative
+under the corrected feature status. Their deleted-name scenarios illustrate why
+F-05's DESIGN wording must be corrected before a separate DISTILL reconciliation;
+they do not create an additional DESIGN finding.
+
+### F-05 — Blocking: DESIGN still authorizes dedicated absence tests for deleted symbols
+
+**Severity:** High
+
+**Locations:** `feature-delta.md:565-576,630-633,662-663,735-742`
+
+The corrected contract says dedicated tests for deleted Exec symbols disappear
+with the production deletion and only surviving observable contracts justify
+narrow evidence. The feature delta still instructs downstream work to:
+
+- assert that no Exec registry entry/helper exists at the composition boundary;
+- assert compile-time absence of the Exec probe variant, port and constructor
+  parameter;
+- use compile-time absence of deleted type arms, old types and conversions as
+  an evidence lane; and
+- permit surviving evidence to assert absence of deleted type arms.
+
+Those assertions retain the removed names as permanent test vocabulary and
+test repository shape rather than a surviving product behavior. A dedicated
+trybuild/source-shape fixture can remain green forever while the real VM parser,
+registry, probe runner or codec behavior regresses; conversely, ordinary Rust
+compilation already checks exhaustiveness of the one-arm live unions wherever
+production matches them. The extra absence suite therefore adds no independent
+behavioral evidence and recreates the garbage the user explicitly rejected.
+
+**Required remediation:** Keep deletion/zero-vocabulary statements as
+implementation and reviewer audit criteria, not executable acceptance-test
+obligations. Remove the quoted absence assertions from Reuse Analysis and Gates
+G-293-1/G-293-2, and make the Documentation and Test Migration Contract explicit
+that no dedicated test, trybuild fixture, source-token scan or rejection case
+may exist solely to mention/detect a deleted Exec symbol, syntax, helper,
+parameter, alias, message or historical payload. Preserve only evidence over
+surviving contracts: positive `[vm]` parsing/roundtrip, generic
+`MissingDriverSection`/serde failure with no intent write using non-legacy-specific
+inputs, registry `∅ | {Vm}`, HTTP/TCP probe-runner state deltas, current V1
+roundtrips, surviving VM/generic lifecycle vocabulary, and existing P-105/VM
+effect evidence. Do not edit DISTILL in this bounded DESIGN remediation; it is
+reconciled separately after the DESIGN review passes.
+
+### Architecture quality assessment — iteration 3
+
+| Dimension | Assessment |
+|---|---|
+| Architectural bias | PASS. The corrected runtime/API design deletes surface and adds no technology, service, adapter, state or migration mechanism. |
+| ADR quality | PASS. ADR-0110 through ADR-0113 remain one-decision-scoped, alternatives-based and consequence-complete; exact API contracts remain in the feature delta. |
+| Completeness | **FAIL on F-05 only.** Runtime, schema, lifecycle, probe, compatibility and #295 boundaries are complete, but the executable-evidence boundary still contradicts the corrected user contract. |
+| Implementation feasibility | PASS. Current production contains each named deletion/migration site and every retained VM/P-105 owner; no new public API or testability seam is necessary. |
+| Priority validation | PASS. The design still allocates 100% removal to active Exec routes, 0% semantic change to P-105 and 0% implementation to GH #295. |
+| Effect isolation | PASS. Retained stateful owners have bounded-change universes and current observable deltas; F-05 concerns unnecessary deleted-name assertions, not a missing effect universe. |
+| Testability | PASS after F-05 remediation. Surviving VM/parser/codec/probe/lifecycle contracts already have positive observable evidence without keeping deleted vocabulary alive. |
+
+### Validation performed — iteration 3
+
+- Re-read GH #293, GH #295 and GH #280 with comments. GH #293 still has no
+  comments; GH #295 retains the shared-switch/per-tap/DNS/mTLS follow-on; GH
+  #280 retains the independently designed in-guest command-probe boundary.
+- Re-read the corrected DESIGN portion of the feature delta, ADR-0110 through
+  ADR-0113, the focused architecture brief and C4 sections, the outcome
+  registry and the complete prior review history.
+- Re-traced current parser section-presence/error behavior, both driver-input
+  unions, the four affected envelopes, driver/reason/source vocabularies,
+  production composition, exit-observer cardinality/shutdown, probe ports and
+  runner, current VM network/intercept ordering and P-105 restart path.
+- Ran the literal and semantic compatibility-residue audit across normative
+  DESIGN for readers, conversions, migrations, fallbacks, aliases, deprecated
+  or feature-gated paths, config keys, same-ID exceptions, old fixtures,
+  placeholders, OpenAPI/wire spellings and deleted-name tests. No active
+  compatibility mechanism was found; F-05 is the sole surviving test-contract
+  residue.
+- `git diff --check` passed for the corrected tracked DESIGN artifacts.
+- `docs/product/outcomes/registry.yaml` parsed with 29 unique outcome IDs and
+  all `related` / `superseded_by` references resolving.
+- Every local Markdown target in the feature delta and ADR-0110 through
+  ADR-0113 resolves. `nwave-ai outcomes check-delta` still reports `5 outcomes
+  checked, 0 collisions found across 0 outcomes`; as before, the zero loaded
+  registry population is not semantic collision evidence.
+- No roadmap exists, so roadmap review is not applicable. No production code,
+  test, DISTILL artifact, mutation run, native-metal run or expectation record
+  was changed or executed.
+
+## Corrected DESIGN re-review iteration-1 verdict (overall iteration 3)
+
+**CHANGES_REQUESTED**
+
+F-05 is the only unresolved critical/high finding. The parser API/message
+correction itself is accepted, and no compatibility reader, alias, fallback,
+config key, same-ID exception, OpenAPI spelling, placeholder adapter or GH #295
+mechanism survives in the normative runtime design. The original solution
+architect should make only the evidence-boundary correction above and request
+another fresh independent review; P-293-1 through P-293-6 remain unchanged.
+
+## Corrected DESIGN re-review — iteration 2 (overall iteration 4)
+
+### Conclusion
+
+F-05 is fully closed. The normative DESIGN now separates deletion verification
+from executable evidence at every location cited by the finding. Deleted names,
+syntax, helpers, parameters, adapters, historical payloads and semantic renames
+are checked only through the implementation/reviewer diff audit; they cannot be
+the subject of an acceptance test, trybuild fixture, compile-pass/compile-fail
+fixture, source-token scan, source-shape scan or legacy-spelling rejection case.
+
+Executable evidence is now limited to surviving contracts: successful `[vm]`
+parsing and projection; ordinary generic `MissingDriverSection`/serde failure
+and no-write behavior using non-legacy-specific invalid input; registry
+`∅ | {Vm}`; HTTP/TCP probe registration, task deltas, cancellation and row
+writes; one current V1 roundtrip for each of the four affected envelopes;
+surviving VM/generic lifecycle vocabulary; P-105 predecessor/fresh-successor
+behavior; per-composed-driver exit-observer ownership; and existing VM
+production composition/network/intercept/effect behavior. The two private
+cleanup renames are covered only through those surviving P-105 and VM ordering
+contracts, not through name-shape tests.
+
+No new blocking finding was identified. The parser still has no retired-driver
+error, dedicated message, special presence branch or replacement accessor. No
+backwards reader, migration/translation bridge, fallback, deprecated/disabled
+variant, compatibility config key, old fixture, placeholder adapter, same-ID
+exception, special wire/OpenAPI spelling or GH #295 mechanism entered the
+design.
+
+### F-05 remediation disposition
+
+| Required closure | Result | Independent evidence |
+|---|---|---|
+| Remove executable absence/source-shape obligations | **CLOSED** | Architecture enforcement explicitly classifies removed-name statements as implementation/reviewer deletion-audit criteria, not executable absence tests, source scans or compile fixtures (`feature-delta.md:548-554`). The `DriverPayload`, production-composition and probe-runner Reuse Analysis rows now attach executable evidence only to surviving VM/HTTP/TCP behavior and send deletion to review audit (`:560-580`). |
+| Keep generic parser evidence free of deleted syntax/messages | **CLOSED** | Gate G-293-1 permits only positive VM parsing plus ordinary `MissingDriverSection`/serde failure and no-intent-write behavior driven by non-legacy-specific invalid input. It expressly excludes deleted arms, legacy spellings, rejection matrices and retired-driver messages from executable acceptance (`feature-delta.md:611-637`). |
+| Keep schema evidence on current V1 payloads | **CLOSED** | Gate G-293-2 requires only current V1 roundtrip/schema fixtures for the four named owners; old types, conversions, discriminants, bytes and fixtures are deletion-review scope rather than negative executable evidence (`feature-delta.md:639-669`). |
+| Forbid dedicated tests for deleted names and semantic renames | **CLOSED** | The migration contract forbids a dedicated acceptance/trybuild/compile/source-token/source-shape/rejection case whose sole subject is a deleted symbol, syntax, helper, parameter, alias, message, variant, adapter, accessor, payload or semantic rename, and assigns deletion exclusively to diff audit (`feature-delta.md:741-750`). `AllocationAttemptEvent::Dispatch` and `guest_command_release_permitted` specifically receive no name-shape test (`:757-760`). |
+| Enumerate the complete allowed executable evidence set | **CLOSED** | The surviving-evidence allowlist is explicit at `feature-delta.md:751-760`; the per-driver exit-observer row separately preserves task cardinality, receiver provenance, shared cancellation/join and VM-source/supervision-release behavior (`:569`). No deleted vocabulary is needed to exercise any of those outcomes. |
+
+### Compatibility-residue re-audit
+
+| Audit target | Result | Evidence |
+|---|---|---|
+| Parser error/message/API | PASS | `[vm]` is the sole driver grammar; missing VM uses existing `MissingDriverSection`; other invalid input uses ordinary generic parser/serde errors; `WorkloadSpecInput::exec_command` deletes without replacement (`feature-delta.md:207-239`). |
+| Reader/migration/version fallback | PASS | Exactly four affected envelopes reset to new incompatible V1; all old readers, conversions, discriminant histories and fixtures delete; no detector, upgrader or fallback is added (`feature-delta.md:246-341,639-669`; ADR-0111/0112). |
+| Runtime/config/wire residue | PASS | Live unions contain only VM; the concrete driver/prober adapters and composition branches delete; generated OpenAPI derives from the reduced enums with no alias/deprecated spelling; no removal feature flag exists (`feature-delta.md:343-415,548-585,711-714`). |
+| Renamed equivalents | PASS | `AllocationAttemptEvent::Dispatch` is the existing generic action preflight meaning and `guest_command_release_permitted` is the VM beacon-command gate. Neither creates public surface or carries a dedicated shape test (`feature-delta.md:416-470,757-760`). No `Legacy*`, `Retired*`, `Compat*`, host-process-driver, native-process-driver, command-driver or local-driver replacement identifier is specified in normative DESIGN. |
+| Fixtures/tests | PASS | Dedicated driver/parser/probe/codec/adapter/accessor/source-shape tests and old bytes delete with their production symbols; four new V1 fixtures and migrated driver-neutral VM fixtures exercise only surviving contracts (`feature-delta.md:726-763`). |
+| P-105 and GH #295 boundaries | PASS | Allocation identity, durable reservation, terminal handoff, successor-first result precedence and exact-old cleanup remain unchanged; current VM netns/veth/TAP remains only until GH #295, whose replacement mechanics are expressly out of scope (`feature-delta.md:416-476,671-717,777-796`). |
+
+The feature delta's uncommitted DISTILL section still records the superseded
+first acceptance design after line 834. It was not reviewed as authority and is
+explicitly invalidated by the feature status. Its stale deleted-name scenarios
+must be removed or re-authored during the separate DISTILL reconciliation
+before DELIVER; their presence does not weaken the now-exact DESIGN prohibition
+or create a second DESIGN finding.
+
+### Architecture quality assessment — overall iteration 4
+
+| Dimension | Assessment |
+|---|---|
+| Architectural bias | PASS. No technology, service, compatibility layer or new mechanism was introduced. |
+| ADR quality | PASS. ADR-0110 through ADR-0113 remain focused and the correction changes no decision scope. |
+| Completeness | PASS. Exact API deletion, four-envelope reset, probe removal, evidence limits, lifecycle ownership, P-105 preservation and GH #295 exclusion are consistent. |
+| Implementation feasibility | PASS. Current code exposes every deletion and surviving-behavior seam; no new API or testability boundary is required. |
+| Priority validation | PASS. Active Exec removal remains 100%; P-105 semantic change and GH #295 implementation remain 0%. |
+| Effect isolation | PASS. Retained stateful owners keep their bounded universes and positive observable deltas. |
+| Testability | PASS. The allowlisted surviving contracts provide parser, codec, registry, probe, observer, lifecycle and production-effect evidence without retaining deleted vocabulary. |
+
+### Validation performed — overall iteration 4
+
+- Re-read the complete normative DESIGN section of the current feature delta
+  and the full prior review artifact.
+- Rechecked every F-05 location and searched normative DESIGN for literal and
+  semantic equivalents of legacy/retired/compatibility aliases, drivers,
+  branches, fallbacks, feature flags, config keys and source-shape tests.
+- Revalidated the exact parser, four-envelope, host-probe, composition,
+  exit-observer, P-105 and GH #295 contracts against the production evidence
+  traced in earlier iterations; the remediation changes only test/evidence
+  instructions.
+- `git diff --check` passed for the tracked DESIGN artifacts.
+- `docs/product/outcomes/registry.yaml` parsed with 29 unique IDs and every
+  `related` / `superseded_by` reference resolved.
+- `nwave-ai outcomes check-delta` still reports `5 outcomes checked, 0
+  collisions found across 0 outcomes`; the zero-population result remains
+  non-evidence and the manual registry audit remains authoritative.
+- No roadmap exists. No production code, test, DISTILL artifact, mutation run,
+  native-metal run or expectation record was changed or executed.
+
+## Final verdict
+
+**APPROVED**
+
+F-05 is closed and no critical/high finding remains. The corrected DESIGN is
+approved for the user-authorized P-293-1 through P-293-6 contract. Downstream
+work must first reconcile the explicitly stale DISTILL artifacts to this
+approved evidence boundary; they do not authorize DELIVER in their current
+form.

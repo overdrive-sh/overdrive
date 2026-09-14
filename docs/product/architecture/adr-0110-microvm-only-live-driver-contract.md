@@ -2,9 +2,9 @@
 
 ## Status
 
-**User-approved on 2026-09-14; iteration-1 findings remediated; awaiting
-independent DESIGN re-review.** This record is not implementation authority
-until that review approves the complete #293 design bundle.
+**User-approved on 2026-09-14; the corrected DESIGN was independently
+`APPROVED` after overall review iteration 4 on 2026-09-14.** This record is
+authoritative as part of the complete #293 DESIGN bundle.
 
 ## Context
 
@@ -25,6 +25,11 @@ disabled/deprecated would keep the compatibility boundary GH #293 removes.
 Remove Exec from every **live** workload-driver surface: operator admission,
 live intent aliases, action payload, concrete worker adapter, production
 composition, action-shim branches, and active tests/examples.
+
+The live parser grammar recognizes only the VM driver table. It retains no
+special retired-Exec parser error, message, or presence branch; unsupported or
+missing driver input follows existing ordinary generic parser/serde failures.
+No replacement public API is introduced.
 
 Retain the existing tagged driver unions and `DriverRegistry`/
 allocation-driver-index/exit-observer ownership model. Their live set contains

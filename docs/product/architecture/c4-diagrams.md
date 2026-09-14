@@ -1472,8 +1472,9 @@ container, port, route, lifecycle owner, or persistence boundary.
 ## MicroVM-only workload execution after Exec removal (GH #293)
 
 **Status: all P-293-1 through P-293-6 decisions user-approved on 2026-09-14;
-iteration-1 findings remediated; awaiting independent DESIGN re-review. Not
-implementation authority.**
+the corrected DESIGN was independently `APPROVED` after overall review
+iteration 4 on 2026-09-14 and is authoritative for the complete #293 DESIGN
+bundle.**
 
 ### C4 Level 1 — System Context
 
@@ -1492,8 +1493,10 @@ C4Context
   Rel(guest, substrate, "Runs and exchanges traffic through")
 ```
 
-`[exec]` is outside the context because it is rejected before intent commit;
-there is no external Exec workload system or compatibility adapter. The Linux
+The removed `[exec]` table is outside the context because it is not part of the
+live grammar, DTO, wire, or runtime model; there is no dedicated rejection path,
+external Exec workload system, or compatibility adapter. Unsupported/missing
+driver input follows the parser's existing ordinary generic failure. The Linux
 network description is the current VM implementation, not the #295 target.
 
 ### C4 Level 2 — Container
@@ -1504,7 +1507,7 @@ C4Container
 
   Person(operator, "Platform operator")
 
-  Container(cli, "overdrive CLI", "Rust / clap", "Parses [vm], rejects [exec] before HTTP, submits and renders existing workload APIs")
+  Container(cli, "overdrive CLI", "Rust / clap", "Parses the sole [vm] driver grammar; ordinary generic errors handle unsupported or missing driver input")
   Container(core, "Typed contracts", "overdrive-core / Rust", "VM-only driver unions, forward-only V1 envelopes, Driver port and DriverRegistry")
   Container(cp, "Control plane + action shim", "Rust / axum", "Persists intent, dispatches driver-neutral allocation actions, and sequences current VM network/mTLS effects")
   Container(recon, "Reconcilers", "Rust", "Own workload policy, fresh allocation identity, replacement handoff, Service health, and reclamation")

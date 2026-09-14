@@ -8,11 +8,10 @@
 
 **Interaction mode:** Propose
 
-**Status:** **All material DESIGN decisions user-approved on 2026-09-14;
-iteration-1 `CHANGES_REQUESTED` findings remediated; awaiting independent
-DESIGN re-review. Not implementation authority.**
-P-293-1 through P-293-6 are binding. No downstream wave may start until the
-independent design review approves this complete bundle.
+**Status:** **The corrected DESIGN is independently `APPROVED` after overall
+review iteration 4. DISTILL has been reconciled to its minimum-evidence
+boundary and is awaiting the consolidated review gate. Not DELIVER authority.**
+P-293-1 through P-293-6 remain binding.
 
 **Documentation density:** lean, from `~/.nwave/global-config.json`.
 The named resolver `scripts/shared/density_config.py` and telemetry helper
@@ -90,7 +89,7 @@ All priorities in GH #293 are in scope. No #295 implementation is in scope.
 | 5 | Testability | The live type graph makes Exec admission unrepresentable; existing simulation adapters exercise the VM kind; only new V1 fixtures remain. |
 | 6 | Compatibility / migration | User-approved greenfield single cut: no old workload-intent, parser-Service, allocation-row, or occurrence bytes are supported or migrated. |
 | 7 | Performance efficiency | No new runtime hop, task, store, retry, or network mechanism; active dispatch loses one branch/adapter. |
-| 8 | Usability | Local TOML rejection names the removed `[exec]` surface and the supported `[vm]` replacement before any remote effect. |
+| 8 | Usability | `[vm]` is the sole supported driver table; unsupported, unknown, invalid, or missing-driver input follows the parser's existing ordinary diagnostics before any remote effect. No retired-Exec diagnostic is added. |
 
 Constraints:
 
@@ -168,8 +167,8 @@ drivers remain effect adapters that do not choose allocation identity.
 
 The persisted-data and historical-evidence alternatives are closed by the
 user's 2026-09-14 greenfield ruling. No
-backwards-reader, V2/V3 append, migration bridge, legacy variant, typed retired-
-payload branch, or old-data consequence may be reintroduced.
+backwards-reader, V2/V3 append, migration bridge, legacy variant, legacy-
+specific payload error branch, or old-data consequence may be reintroduced.
 
 ### Choice B — host Exec health-probe residue
 
@@ -204,23 +203,22 @@ pub enum DriverInput {
 }
 ```
 
-The live `ExecInput` types in both modules are deleted. The parser recognizes
-a top-level `[exec]` only to return this exact typed error before any HTTP call:
+The live `ExecInput` types in both modules are deleted. The parser grammar has
+no Exec field, table, presence flag, variant, type, or special-case branch; it
+recognizes only `[vm]` as a driver table. No dedicated retired-driver
+`ParseError` variant or message exists. A document whose only former driver table
+is `[exec]` therefore has no recognized supported driver and follows the
+existing `ParseError::MissingDriverSection` path. That existing variant uses
+the parser's ordinary missing-required-section wording and names only `[vm]`;
+#293 defines no new exact display-string contract. Other unsupported, unknown,
+or malformed input follows the ordinary generic parser error applicable to its
+shape; none receives an Exec-specific classification or compatibility promise.
 
-```rust
-ParseError::RetiredExecDriver
-```
-
-Its operator rendering is:
-
-```text
-[exec] workload driver has been removed; use the supported [vm] microVM driver
-```
-
-`MissingDriverSection` remains but its message names `[vm]` as the required
-live driver table. `MultipleDriverSections` is deleted because the live grammar
-has one driver section. Raw JSON carrying an `exec` union arm is rejected by
-the existing serde/HTTP decode boundary and never reaches an intent constructor.
+`MultipleDriverSections` is deleted because the live grammar has one driver
+section. Raw JSON carrying an unsupported driver-union spelling follows the
+existing generic serde/HTTP decode error and never reaches an intent
+constructor. The design adds or renames no public error, API, alias, or
+diagnostic surface.
 
 The public convenience accessor below is **deleted without replacement**:
 
@@ -234,6 +232,12 @@ with the approved single-cut surface. No `command()`, `driver_command()`,
 consumer is the `coinflip_migration` acceptance test: that one command-value
 assertion is deleted, while the test migrates the example to `[vm]` and retains
 its driver-neutral Job-kind and workload-ID assertions.
+
+After the cut, active production, public API, wire/schema, parser, runtime,
+configuration, and generated OpenAPI surfaces contain zero dedicated Exec
+vocabulary. Historical ADR/evolution context may name the deleted symbols, and
+a generic parser may echo an operator-supplied token in an ordinary diagnostic;
+neither is a supported compatibility contract.
 
 ### Exact affected-envelope inventory
 
@@ -397,9 +401,10 @@ async fn compose_and_probe_runner_gate(
 `ProbeFailure::ExecSpawnFailed`, `ParseError::ExecProbeMissingCommand`,
 `parse_exec_mechanic`, VM-Exec cross-field validators/diagnostics, runner
 fields/parameters/match arms, and their tests/docs are deleted. A
-`type = "exec"` probe reaches the existing `ParseError::UnknownProbeType`
-result. HTTP/TCP behavior, target projection, roles, thresholds, rows,
-supervision, and Earned-Trust TCP probe remain unchanged.
+currently unsupported probe-mechanic spelling follows the existing generic
+`ParseError::UnknownProbeType` result; no exact deleted spelling is a test or
+compatibility contract. HTTP/TCP behavior, target projection, roles,
+thresholds, rows, supervision, and Earned-Trust TCP probe remain unchanged.
 
 GH #280 remains an unimplemented future feature. It must establish a new
 in-guest execution port and protocol through its own approved DESIGN; #293
@@ -470,7 +475,7 @@ Exec compatibility. Their replacement/deletion is #295 work.
 
 | Component | Path | Change | Responsibility after #293 |
 |---|---|---|---|
-| TOML workload parser | `overdrive-core/src/aggregate/workload_spec.rs` | EXTEND/DELETE | Admit `[vm]`; reject `[exec]` before HTTP; delete live Exec parser shapes and delete public `WorkloadSpecInput::exec_command` without replacement. |
+| TOML workload parser | `overdrive-core/src/aggregate/workload_spec.rs` | EXTEND/DELETE | Make `[vm]` the sole recognized driver table; delete all Exec parser shapes/presence checks and public `WorkloadSpecInput::exec_command` without replacement. Unsupported or absent driver input follows only existing generic parser errors. |
 | HTTP submit/describe types | `overdrive-core/src/aggregate/mod.rs`, `src/api/{submit,describe}.rs` | EXTEND/DELETE | Carry only live VM driver input; preserve workload-kind union. |
 | Parser Service codec | `overdrive-core/src/aggregate/service_spec.rs`, `workload_spec.rs`, schema fixtures | RESET (approved) | Delete V3/history; create sole incompatible VM-only V1. |
 | Workload intent codec | `overdrive-core/src/aggregate/mod.rs`, schema fixtures | RESET (approved) | Delete old V1/V2/history; create sole incompatible VM-only V1. |
@@ -493,9 +498,11 @@ Exec compatibility. Their replacement/deletion is #295 work.
 ## Wave: DESIGN / [REF] Driving Ports
 
 - `overdrive deploy <SPEC>` remains the only workload-deploy verb. A `[vm]`
-  Job/Service follows the existing parse → HTTP → intent path. A `[exec]` TOML
-  fails locally with `ParseError::RetiredExecDriver`; raw JSON `exec` fails at
-  the HTTP decode boundary. Neither writes intent.
+  Job/Service follows the existing parse → HTTP → intent path. Input without
+  the supported `[vm]` table follows the existing generic
+  `MissingDriverSection` path; unsupported raw JSON driver spellings follow the
+  existing generic decode error. Neither writes intent. No special retired-
+  driver case is added.
 - `overdrive workload describe <ID>` retains its route and workload-kind
   output. Live specs and lifecycle reason/source schemas contain no Exec arm.
 - `overdrive serve` keeps the existing VMM discover/probe semantics. A node
@@ -538,21 +545,23 @@ Architecture enforcement remains type-first: parser, wire, intent, runtime
 payload, failure-reason, and driver-source enums have no Exec arm; no concrete
 Exec driver is exported; dependency direction stays core ← adapters ←
 composition. New V1 golden-byte fixtures pin only the post-cut schemas, and the
-existing crate-class/dst-lint gates remain.
+existing crate-class/dst-lint gates remain. The removed-name statements are
+implementation/reviewer deletion-audit criteria, not executable absence tests,
+source scans, or compile fixtures.
 
 ## Wave: DESIGN / [REF] Reuse Analysis
 
 | Existing component | Overlap | Decision | Contract shape / universe / assertion mechanism |
 |---|---|---|---|
-| `WorkloadSpecInput` | Driver-table admission | EXTEND | pure-function over one TOML document; output is VM spec or typed retired-Exec error; input bytes are unchanged. |
+| `WorkloadSpecInput` | Driver-table admission | EXTEND/DELETE | **pure-function** over one TOML document. Delete the Exec table/type/presence walk and retain VM output plus the parser's ordinary generic unknown/invalid/missing-supported-driver errors. Evidence covers successful `[vm]` parsing and ordinary generic failure/no-write behavior using non-legacy-specific invalid input; the deleted spelling, error, and types receive no executable assertion. |
 | Live submit/describe `DriverInput` | Driver wire union | EXTEND | pure tagged projection; universe one workload DTO; only VM round-trips. |
 | `ServiceSpecEnvelope` | Parser-side direct archive contract | RESET V1 | pure codec; universe one current Service spec; one new VM-only V1 roundtrip, no old fixture/read path. |
 | `WorkloadIntentEnvelope` | Durable driver intent | RESET V1 | pure codec; universe one current workload intent; one new VM-only V1 family, no old fixture/read path. |
 | `AllocStatusRowEnvelope` | Durable current allocation row | RESET V1 | bounded persisted row universe; current fields retained, Exec-only nested variants deleted, one new V1 fixture. |
 | `AllocLifecycleOccurrenceRowEnvelope` | Durable lifecycle occurrence | RESET V1 | bounded occurrence universe; Exec-only nested reason/source deleted, one regenerated V1 fixture. |
-| `DriverPayload` | Action-to-driver routing | EXTEND/DELETE | pure-function; one VM payload; exhaustive match provides compile-time guard. |
+| `DriverPayload` | Action-to-driver routing | EXTEND/DELETE | pure-function over one surviving VM payload; existing VM action-to-driver projection and routing behavior remain the evidence. Deleted payload names receive no fixture or source-shape assertion. |
 | `DriverRegistry` | Capability/routing | REUSE | bounded-change over composed entry set; production composition inserts VM only; `kinds()` remains deterministic. |
-| Production composition root (`run_server`, `probe_runner_boot`, `compose_vm_driver`) | Trusted probe-runner ownership and driver capability insertion | EXTEND/DELETE | **bounded-change** over exactly one server boot's trusted `ProbeRunner` binding and `DriverRegistry` entry set. Delete Exec construction plus `compose_production_driver`; retain the existing probe gate and conditional VM discovery/probe/insert. Allowed post-state is registry `∅` on ordinary VMM absence or `{Vm}` on success; present-but-failing VMM still refuses boot. Assert at the existing composition boundary that the same trusted runner reaches `VmDriver`, registry kinds equal the VMM outcome, and no Exec entry/helper exists. |
+| Production composition root (`run_server`, `probe_runner_boot`, `compose_vm_driver`) | Trusted probe-runner ownership and driver capability insertion | EXTEND/DELETE | **bounded-change** over exactly one server boot's trusted `ProbeRunner` binding and `DriverRegistry` entry set. Delete Exec construction plus `compose_production_driver`; retain the existing probe gate and conditional VM discovery/probe/insert. Allowed post-state is registry `∅` on ordinary VMM absence or `{Vm}` on success; present-but-failing VMM still refuses boot. Evidence at the existing composition boundary asserts that the same trusted runner reaches `VmDriver` and that registry kinds equal the VMM outcome; deletion of the old entry/helper is review audit, not a test subject. |
 | Per-composed-driver exit-observer ownership (`run_server_with_obs_and_drivers`, `exit_observer`) | One sole receiver/provenance owner per registry entry and coordinated shutdown | REUSE WITH ENTRY-SET NARROWING | **bounded-change** over one shared `exit_observer_shutdown` token, `ServerHandle.exit_observer_tasks`, each composed driver's one taken receiver/captured `DriverType`, resulting lifecycle writes, and supervision release. #293 changes only the registry entry set: zero entries spawn zero observers; one VM entry spawns one VM observer. Assert task count/provenance equals `drivers.kinds()`, all tasks share cancellation and are joined, and a VM exit retains VM source plus supervision-release behavior. No merger, helper, token, or shutdown owner is added. |
 | `AllocDriverIndex` | Stop/finalize routing without a spec | REUSE | bounded-change over exact predecessor/successor IDs; existing P-105 ordering assertions. |
 | `Driver` trait | Execution effects | REUSE AS-IS | bounded-change inside exact allocation capability; existing host/sim equivalence and VM acceptance evidence. |
@@ -563,7 +572,7 @@ existing crate-class/dst-lint gates remain.
 | Current network/mTLS ports | VM datapath | REUSE/NARROW | bounded-change over one allocation's current netns/veth/TAP/rules; #293 adds no shared-switch or per-tap effect. |
 | `SimDriver` | Deterministic execution adapter | EXTEND fixtures | bounded-change over one simulated VM allocation; no Exec-kind fixtures. |
 | `TransitionReason` / `TransitionSource` / `DriverType` | Current lifecycle evidence | EXTEND/DELETE | pure wire/persisted vocabulary; delete exact Exec-only variants, retain VM/generic variants, regenerate only affected V1 fixtures/OpenAPI. |
-| `ProbeMechanic` / `ProbeRunner` / prober ports | Service health | EXTEND/DELETE (approved P-293-4/B1) | **bounded-change** over exactly one allocation's `ProbeRunner.supervisors` entry, its HTTP/TCP task set, cancellation token, and emitted `ProbeResultRow`s. Delete only the Exec dependency/dispatch set; HTTP/TCP registration, scheduling, cancellation, result writes, thresholds, and Earned-Trust TCP probe are complement-equal. Assert HTTP/TCP state deltas and observation writes through the existing runner boundary, plus compile-time absence of the Exec variant/port/constructor parameter. |
+| `ProbeMechanic` / `ProbeRunner` / prober ports | Service health | EXTEND/DELETE (approved P-293-4/B1) | **bounded-change** over exactly one allocation's `ProbeRunner.supervisors` entry, its HTTP/TCP task set, cancellation token, and emitted `ProbeResultRow`s. Delete only the Exec dependency/dispatch set; HTTP/TCP registration, scheduling, cancellation, result writes, thresholds, and Earned-Trust TCP probe are complement-equal. Evidence asserts surviving HTTP/TCP registration, task state deltas, cancellation, and observation writes through the existing runner boundary. Deleted variants, ports, adapters, and constructor parameters receive no compile/source-shape fixture. |
 | `WorkloadSpecInput::exec_command` | Public parser convenience accessor | DELETE WITHOUT REPLACEMENT | **pure-function** with universe ∅. Its name is Exec-specific and its sole in-tree consumer is the `coinflip_migration` test. Delete the public method and that command assertion; retain the migrated example's driver-neutral kind/id assertions. Do not add or rename a public accessor. |
 | Cgroup infrastructure | Shared VM/worker substrate | REUSE AS-IS | bounded-change over declared cgroup paths; existing Earned-Trust probe and Tier-3 kernel evidence. |
 
@@ -606,17 +615,22 @@ migration component is created.
 - **Promise:** any newly accepted intent names the supported VM/microVM path;
   no newly accepted intent can name Exec.
 - **Affected state:** only whether workload intent is accepted/committed.
-- **Failure projection:** `[exec]` TOML returns
-  `ParseError::RetiredExecDriver`; `exec` JSON fails existing decode; neither
-  reaches `IntentStore` or allocation lifecycle.
+- **Failure projection:** input with no recognized `[vm]` table follows the
+  existing generic `MissingDriverSection` path; unsupported raw JSON driver
+  spellings follow the existing generic decode path. Neither reaches
+  `IntentStore` or allocation lifecycle. There is no retired-Exec error,
+  message, branch, or exact legacy-token contract.
 - **Explicitly unaffected:** workload-kind selection, VM validation, VMM
   capability absence, replacement identity, Service health, mTLS/networking.
 - **Ordering:** parse/decode → validate → intent commit. No timeout is added.
 - **Counterexample:** retaining a disabled `DriverInput::Exec` arm and rejecting
   later would allow Exec-shaped intent to leak into live DTOs and keep every
   downstream compatibility match alive.
-- **Evidence lane:** pure parser/constructor and HTTP boundary; built-binary
-  rejection through `overdrive deploy` without an intent write.
+- **Evidence lane:** positive VM-only parser/constructor coverage plus the
+  existing generic `MissingDriverSection`/serde failure and no-intent-write
+  behavior, driven with non-legacy-specific invalid input. No deleted type arm,
+  exact legacy spelling, special rejection matrix, or retired-driver message is
+  an executable acceptance obligation.
 
 ### Gate G-293-2 — forward-only affected-schema cut
 
@@ -645,8 +659,10 @@ migration component is created.
   still a backwards reader and keeps the old two-driver schema as an
   implementation dependency; resetting unrelated CA/probe/backend envelopes
   would exceed the user-approved bound.
-- **Evidence lane:** compile-time absence of old types/conversions plus current
-  V1 roundtrip/schema fixtures for exactly the four named owners.
+- **Evidence lane:** current V1 roundtrip/schema fixtures for exactly the four
+  named owners, exercising their surviving VM/current payloads. Old types,
+  conversions, discriminants, bytes, and fixtures are deletion-review scope,
+  not executable negative evidence.
 
 ### Gate G-293-3 — removal of the Exec-specific network branch
 
@@ -686,11 +702,11 @@ migration component is created.
 | Boundary | Required observable obligation |
 |---|---|
 | Available | `[vm]` is accepted; current VM network and guest readiness precede accepted Running, then intercept success precedes VM guest-command release. The P-105 lifecycle remains unchanged. |
-| Unavailable | `[exec]` is rejected before intent; absent VMM capability retains its existing typed no-driver result; network provision failure remains pre-Running; post-Running intercept failure authors the existing dominating Failed result and withholds VM guest-command release. Old affected storage is reset, not read. |
+| Unavailable | Input without the supported `[vm]` table follows the existing generic parser failure and cannot reach intent; absent VMM capability retains its existing typed no-driver result; network provision failure remains pre-Running; post-Running intercept failure authors the existing dominating Failed result and withholds VM guest-command release. Old affected storage is reset, not read. |
 | Unrelated state | Job/Service kind, Stable/readiness/liveness, WorkloadId/AllocationId meanings, and exact predecessor/successor ordering remain unchanged. |
-| Late success | A later VMM availability change cannot resurrect a rejected Exec submission; normal reboot re-runs the existing VMM probe against current V1 state only. A late/stale intercept result cannot reinterpret or rewrite a newer terminal allocation row through a new path; existing action-shim LWW/cleanup behavior remains. |
+| Late success | A later VMM availability change cannot turn previously invalid input into committed intent; normal reboot re-runs the existing VMM probe against current V1 state only. A late/stale intercept result cannot reinterpret or rewrite a newer terminal allocation row through a new path; existing action-shim LWW/cleanup behavior remains. |
 | Disconnect/reconnect | Current post-cut V1 VM intent/rows reopen through their normal codecs; no pre-cut payload participates in the contract. |
-| Duplicate/re-drive | Repeated `[exec]` submissions remain no-write rejections; repeated VM evaluations retain P-105 durable-ID and exact-action behavior. |
+| Duplicate/re-drive | Repeated invalid submissions retain the existing generic parser/no-write behavior; repeated VM evaluations retain P-105 durable-ID and exact-action behavior. No repeated legacy spelling becomes a dedicated compatibility contract. |
 | Feature disabled | Not applicable: #293 is a single-cut removal with no feature flag. The pre-removal Exec path is not retained behind configuration. |
 
 No gate changes the meaning of `Running`, `Stable`, readiness, liveness,
@@ -718,6 +734,26 @@ No gate changes the meaning of `Running`, `Stable`, readiness, liveness,
 - Delete `WorkloadSpecInput::exec_command` without replacement. In its sole
   `coinflip_migration` test consumer, delete only the command assertion and
   retain the migrated VM example's driver-neutral kind/ID assertions.
+- Do not add a dedicated retired-driver `ParseError` variant or message, a
+  special `[exec]` presence walk, or an acceptance matrix that makes the
+  deleted spelling a permanent compatibility rule. Dedicated Exec parser,
+  driver, probe, codec, adapter, accessor, and source-shape tests delete with
+  their production symbols. No dedicated acceptance test, trybuild fixture,
+  compile-pass fixture, source-token scan, or rejection case may exist solely
+  to mention or detect a deleted symbol, syntax, helper, parameter, alias,
+  message, variant, adapter, accessor, historical payload, or semantic rename
+  of any of them. Deletion is checked in implementation/reviewer diff audit,
+  not preserved as executable vocabulary.
+- Narrow surviving evidence covers only successful `[vm]` parsing, ordinary
+  generic missing/invalid/unknown-driver behavior with non-legacy-specific
+  input, no intent write after that ordinary failure, registry `∅ | {Vm}`,
+  HTTP/TCP probe-runner behavior, the four current incompatible V1 roundtrips,
+  surviving VM/generic lifecycle vocabulary, P-105 behavior, and the existing
+  VM production composition/effects already warranted by those contracts.
+- The private cleanup renames to `AllocationAttemptEvent::Dispatch` and
+  `guest_command_release_permitted` receive no dedicated compile/source-shape
+  test. Their surviving semantics are covered only through the existing P-105
+  preflight behavior and VM Running → intercept → guest-command ordering.
 - Delete old fixtures for the four affected envelopes and replace each owner
   with only its new post-cut V1 fixture. Do not keep old bytes as negative
   compatibility tests. Unaffected envelope fixtures remain byte-identical.
@@ -759,7 +795,8 @@ abstractions.
 ## Wave: DESIGN / [REF] Outcome Collision Candidates
 
 - **OUT-EXEC-REMOVAL-ADMISSION:** newly accepted workload intent is VM/microVM
-  driver-only; `[exec]` is rejected before intent commit. This supersedes the
+  driver-only; unsupported or missing driver input follows the existing generic
+  parse/decode failure before intent commit. This supersedes the
   Exec-driver half of `OUT-SVM-SERVICE-ADMISSION` and also supersedes that
   outcome's VM-Exec-probe rejection clause under approved P-293-4/B1.
 - **OUT-EXEC-REMOVAL-FORWARD-SCHEMA:** exactly four Exec-coupled envelope owners
@@ -801,7 +838,139 @@ These are downstream/upstream documentation changes, not changes to the GH
 
 ## Wave: DESIGN / [REF] Open Questions
 
-None. The user approved P-293-1 through P-293-6 on 2026-09-14. The remaining
-gate is independent DESIGN re-review; this artifact does not self-approve that
-review and remains non-authoritative for DISTILL or implementation until the
-review verdict is `APPROVED`.
+None. The user approved P-293-1 through P-293-6 on 2026-09-14, and the
+corrected bundle's overall iteration-4 review recorded `APPROVED` in
+`design/review-design.md`. The corrected contract adds no compatibility error,
+message, branch, reader, fixture, or deletion/absence test obligation.
+
+## Wave: DISTILL / [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|---|---|---|---|
+| GH #293 + P-293-1 | Make VM/microVM the sole live workload execution family while retaining registry/index/observer routing. | ADR-0110 | Existing VM capability and production composition remain the only successful execution path. |
+| P-293-2 | Reset only Service-spec and workload-intent envelopes to incompatible current V1. | ADR-0111 | Each owner keeps one current VM-only roundtrip fixture and no historical reader. |
+| P-293-3 | Reset only allocation-status and lifecycle-occurrence envelopes to incompatible current V1. | ADR-0112 | Surviving VM/generic lifecycle evidence remains; unrelated envelopes stay unchanged. |
+| P-293-4 | Retain only HTTP/TCP health probing and leave any future guest command probe to GH #280. | ADR-0113 | Existing HTTP/TCP registration, task, cancellation, target, and observation behavior remains. |
+| P-293-5 | Preserve accepted-predecessor/distinct-durably-reserved-successor P-105 semantics exactly. | ADR-0105/0106/0108/0109 | Driver removal changes no identity, publication, retry, precedence, or exact-old cleanup rule. |
+| P-293-6 | Treat GH #295 as constraint-only. | n/a | No shared switch, per-tap interception, shared DNS, or replacement mTLS mechanism enters #293. |
+
+## Wave: DISTILL / [REF] Consultation and reconciliation
+
+- Corrected DESIGN final verdict: `APPROVED` after overall iteration 4.
+- GH #293 and the approved feature delta/ADR-0110..0113 contract were read.
+- Relevant existing journeys were consulted only to locate VM behavior locks;
+  no #293 journey was invented.
+- Feature DISCUSS, SPIKE, and DEVOPS artifacts remain missing warnings.
+- Deliverable type resolves to `application`; language is Rust; project ATDD
+  policy is inherited and forbids `.feature`/Python test machinery.
+- `docs/product/kpi-contracts.yaml` is docs-platform-only; no #293 KPI test is
+  added.
+- Reconciliation result: **0 contradictions**.
+- Documentation density remains lean. The named resolver/telemetry helper is
+  absent, so no density telemetry event is invented.
+
+## Wave: DISTILL / [REF] Minimum executable contracts
+
+The authoritative concise specification and complete evidence map are in
+`distill/test-scenarios.md`. Five surviving contracts remain:
+
+1. Valid VM Job/Service/Schedule parser and wire projections round-trip and
+   production composition routes VM allocations through the probed capability.
+2. No-supported-driver and arbitrary unsupported-driver input follows existing
+   generic parser/serde/validation behavior with no intent write.
+3. Exactly four named current payloads establish new incompatible V1 roundtrip
+   fixtures; no historical negative fixture and no unrelated reset exists.
+4. Registry `∅ | {Vm}`, HTTP/TCP probe lifecycle, per-driver VM exit
+   observation, and current Running → intercept → guest-command ordering remain.
+5. P-105 predecessor/fresh-successor, durable reservation, publication,
+   precedence, and exact-old cleanup semantics remain unchanged.
+
+No executable test may exist solely to mention or detect a deleted name,
+syntax, helper, parameter, alias, message, variant, adapter, accessor,
+historical payload, or semantic rename. Deletion and the GH #295 boundary are
+implementation/reviewer diff audits.
+
+## Wave: DISTILL / [REF] Existing-test reuse and transition
+
+| Contract | Existing evidence/disposition |
+|---|---|
+| VM parser/wire | Retain/transition `service_kind_vm_workloads.rs` positive VM parse, `api_type_shapes.rs` VM request/describe roundtrips, `coinflip_migration.rs` kind/ID, and the existing VM Job/Schedule CLI integration tests. |
+| Generic failure/no write | Transitioned `workload_spec_parser.rs::s_01_07_missing_supported_driver_rejected`; new generic `api_type_shapes.rs::submit_request_rejects_unknown_driver_keys`; transitioned production `submit_round_trip.rs` invalid VM request now asserts the canonical intent key is absent. |
+| Registry/composition | Retain `vm_walking_skeleton.rs` capability-present/absent/probe-refusal tests and VM production paths; narrow the existing trusted-runner composition test to its single VM assertion. |
+| HTTP/TCP probes | Retain the existing worker HTTP/TCP outcome, supervision, VM target, lifecycle-hook, and idempotent re-registration suites; delete only dedicated disappearing-mechanic tests. |
+| Four V1 codecs | Rewrite existing `schema_evolution/{service_spec,workload_intent,alloc_status_row,alloc_lifecycle_occurrence_row}.rs` modules in place to one current V1 fixture each; delete historical fixtures/tests. |
+| VM/generic lifecycle | Transition existing row, reason, renderer, and observation generators to surviving variants. |
+| P-105 | Narrow existing reconciler and composed action-shim suites to VM without weakening their universes or assertions. |
+| VM effect order | Transition existing `mtls_install_fail_closed.rs` fixtures to VM; retain Running, dominating Failed, release withholding, and cleanup assertions. |
+| #295 | No executable test; reviewer audit only. |
+
+## Wave: DISTILL / [REF] Test delta and placement
+
+- New feature-specific test files: **0**.
+- New test functions: **1** generic unsupported-driver-key property inside the
+  existing `api_type_shapes.rs` module.
+- Modified existing test functions: **4** (generic missing-driver, two VM wire
+  roundtrips, and production invalid-submit/no-write).
+- Rejected new `remove_*.rs` files deleted: **8**, including all compile-pass
+  fixtures; module registrations removed.
+- Pending/ignored feature scaffolds: **0**.
+
+All tests remain in existing Rust acceptance/integration modules at their
+owning ports. The property samples a bounded generated representative domain:
+lowercase `driver_<suffix>` keys whose suffix length is 1..12. Every case first
+proves the unchanged VM request deserializes, then inserts one unsupported
+sibling key and asserts ordinary generic serde rejection. Finite VM, VMM,
+probe, codec, and lifecycle cases reuse the existing example suites.
+
+## Wave: DISTILL / [REF] Driving and adapter coverage
+
+| Boundary | Evidence |
+|---|---|
+| Parser / wire | VM positive roundtrips, generic missing-driver test, generic unsupported-key property. |
+| Production HTTP submit | Existing real `run_server`/HTTP/redb integration test proves ordinary invalid VM input writes no intent. |
+| Production VM composition | Existing `vm_walking_skeleton` and `vm_boot_failure_vocabulary` tests drive real in-process serve/deploy/describe on the qualified native-metal lane. |
+| Driver registry / VMM | Existing present, absent, and probe-refusal production cases. |
+| HTTP/TCP probers | Existing worker/controller suites; no new adapter exists. |
+| Intent/observation codecs | Existing four schema-evolution modules are the transition sites. |
+| Action shim / mTLS / network | Existing P-105 and fail-closed suites; real host effects remain Tier 3. |
+
+Exact internal exit-observer task-vector cardinality and shutdown-token identity
+are not port-exposed. Existing VM completion, supervision-release, and clean
+shutdown tests prove the behavioral boundary; exact one-task-per-entry,
+clone-one-token, and join-all ownership remain reviewer diff checks. DISTILL
+adds no test-only accessor or composition seam.
+
+## Wave: DISTILL / [REF] Post-cut black-box event
+
+E06 and E08 are historical SHA-pinned receipts only. The post-cut event is
+named `E14-vm-service-post-greenfield-cut`. DELIVER/DEVOPS captures it at the
+new SHA by running the checked-in
+`examples/service-kind-vm-workloads/run-example.sh run healthy` through the
+built default-feature binary on native metal. It records only the example's
+stakeholder-visible success and owned cleanup outcomes, does not overwrite E08,
+and does not duplicate integration assertions. Generic invalid-input behavior
+stays in Rust tests and is not duplicated into E14.
+
+## Wave: DISTILL / [REF] Outcome traceability and completeness
+
+| Outcome | Evidence |
+|---|---|
+| `OUT-EXEC-REMOVAL-ADMISSION` | VM positive parser/wire/production evidence plus generic missing/unknown/no-write behavior. |
+| `OUT-EXEC-REMOVAL-FORWARD-SCHEMA` | Four rewritten current V1 roundtrip modules. |
+| `OUT-EXEC-REMOVAL-PROBES` | Existing HTTP/TCP parser, runner, supervision, target, and result-row evidence. |
+| `OUT-EXEC-REMOVAL-LIFECYCLE-PRESERVATION` | Existing deterministic P-105 pure properties and composed precedence cases. The pre-existing schedule-racy oracle below is excluded from #293 evidence. |
+
+Canonical completeness: **15/15 — COMPLETE**. C7b is N/A because this pure
+deletion adds no interruption behavior. Details and run IDs are in
+`distill/red-classification.md`.
+
+Pre-existing non-blocking fixture: mandatory review ran
+`driver_neutral_allocation_replacement::successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver`
+50 times and observed 39 passes / 11 failures. Its printed seed controls model
+data, not the unbiased Tokio `select!` between already-ready notifications, so
+it is not reproducible seeded production behavior. DISTILL classifies it as an
+out-of-scope pre-existing flaky fixture, leaves it untouched, and does not use
+it as a #293 RED or completeness blocker. The deterministic P-105 suite remains
+green.
+
+Mutation testing was not run in DISTILL.

@@ -2,11 +2,11 @@
 
 ## Status
 
-**User-approved on 2026-09-14; iteration-1 findings remediated; awaiting
-independent DESIGN re-review.** The user explicitly directed a greenfield,
-forward-only reset because there are no production users. This record is not
-implementation authority until the review approves the complete #293 design
-bundle.
+**User-approved on 2026-09-14; the corrected DESIGN was independently
+`APPROVED` after overall review iteration 4 on 2026-09-14.** This record is
+authoritative as part of the complete #293 DESIGN bundle. The user explicitly
+directed a greenfield, forward-only reset because there are no production
+users.
 
 ## Context
 
@@ -38,6 +38,9 @@ families.
 - Add only new V1 golden fixtures for the current shapes.
 - Add no retired-payload error, detector, upgrader, fallback, or migration
   method.
+- Retain no dedicated parser error/message for the deleted driver grammar;
+  unsupported or missing driver input uses only existing ordinary generic
+  parser/serde failures.
 
 The exact type contracts and the proof that no other envelope embeds these
 driver unions live in the feature delta.

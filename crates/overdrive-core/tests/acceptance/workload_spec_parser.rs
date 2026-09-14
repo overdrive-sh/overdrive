@@ -218,11 +218,13 @@ memory_bytes = 67108864
 }
 
 // ---------------------------------------------------------------------------
-// S-01-07 — Spec missing [exec] is rejected
+// S-01-07 — Spec missing the supported driver table is rejected
 // ---------------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: pure-function.
+#[allow(clippy::doc_markdown, reason = "repository-required Contract Shape declaration")]
 #[test]
-fn s_01_07_missing_exec_rejected() {
+fn s_01_07_missing_supported_driver_rejected() {
     let toml = r#"
 [job]
 id = "coinflip"
@@ -231,9 +233,13 @@ id = "coinflip"
 cpu_milli = 100
 memory_bytes = 67108864
 "#;
-    let err = parse(toml).expect_err("missing [exec] must be rejected");
+    let err = parse(toml).expect_err("a spec without the supported driver must be rejected");
+    assert!(
+        matches!(err, ParseError::MissingDriverSection),
+        "expected the existing MissingDriverSection result; got {err:?}"
+    );
     let display = err.to_string();
-    assert!(display.contains("[exec]"), "error must name [exec]; got: {display}");
+    assert!(display.contains("[vm]"), "ordinary guidance must name the supported [vm] table");
 }
 
 // ---------------------------------------------------------------------------

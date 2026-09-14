@@ -2,9 +2,9 @@
 
 ## Status
 
-**User-approved on 2026-09-14; iteration-1 findings remediated; awaiting
-independent DESIGN re-review.** This record is not implementation authority
-until that review approves the complete #293 design bundle.
+**User-approved on 2026-09-14; the corrected DESIGN was independently
+`APPROVED` after overall review iteration 4 on 2026-09-14.** This record is
+authoritative as part of the complete #293 DESIGN bundle.
 
 ## Context
 

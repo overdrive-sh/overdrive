@@ -2,11 +2,11 @@
 
 ## Status
 
-**User-approved on 2026-09-14; iteration-1 findings remediated; awaiting
-independent DESIGN re-review.** The user explicitly directed a greenfield
-single cut with no row/occurrence migration or compatibility because there are
-no production users. This record is not implementation authority until the
-review approves the complete #293 design bundle.
+**User-approved on 2026-09-14; the corrected DESIGN was independently
+`APPROVED` after overall review iteration 4 on 2026-09-14.** This record is
+authoritative as part of the complete #293 DESIGN bundle. The user explicitly
+directed a greenfield single cut with no row/occurrence migration or
+compatibility because there are no production users.
 
 ## Context
 

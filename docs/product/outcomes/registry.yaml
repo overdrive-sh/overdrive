@@ -694,12 +694,12 @@ outcomes:
   superseded_by: OUT-EXEC-REMOVAL-ADMISSION
 - id: OUT-EXEC-REMOVAL-ADMISSION
   kind: specification
-  summary: New Job, Service, and Schedule workload intent admits only the VM/microVM driver; an Exec driver table or wire arm is rejected before intent commit and no Exec driver is composed
+  summary: New Job, Service, and Schedule workload intent admits only the VM/microVM driver; the live grammar, wire model, and runtime contain no Exec driver surface and no Exec driver is composed
   feature: remove-legacy-exec-workload-driver
   inputs:
   - shape: workload TOML or SubmitSpecInput for Job, Service, or Schedule
   output:
-    shape: VM-only DriverInput and WorkloadDriver V1 intent, or pre-intent parse/HTTP decode rejection for Exec
+    shape: VM-only DriverInput and WorkloadDriver V1 intent, or the existing ordinary generic parse/HTTP decode failure for unsupported, unknown, invalid, or missing driver input; no dedicated compatibility error
   keywords:
   - exec-removal
   - vm-only
@@ -738,7 +738,7 @@ outcomes:
   inputs:
   - shape: VM Service startup, readiness, and liveness ProbeDescriptor vectors
   output:
-    shape: ProbeMechanic is HTTP or TCP; type=exec is unknown and no ExecProber/CgroupExecProber adapter exists
+    shape: ProbeMechanic is HTTP or TCP; unsupported probe types use the existing generic unknown-type result and no ExecProber/CgroupExecProber adapter exists
   keywords:
   - exec-removal
   - service-health

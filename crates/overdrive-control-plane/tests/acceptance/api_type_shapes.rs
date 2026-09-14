@@ -26,9 +26,10 @@ use overdrive_control_plane::api::{
     IdempotencyOutcome, NodeList, NodeRowBody, SubmitWorkloadRequest, SubmitWorkloadResponse,
     WorkloadDescription,
 };
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
+use proptest::prelude::*;
 use utoipa::ToSchema;
 
 fn sample_job_spec() -> JobSpecInput {
@@ -36,10 +37,16 @@ fn sample_job_spec() -> JobSpecInput {
         id: "payments".to_string(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(VmInput {
+            command: "/sbin/init".to_string(),
+            args: vec![],
+            kernel: "/srv/vm/kernel".to_string(),
+            rootfs: "/srv/vm/rootfs.ext4".to_string(),
+        }),
     }
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn submit_job_request_round_trips_through_serde_json() {
     let original = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(sample_job_spec()) };
@@ -47,6 +54,34 @@ fn submit_job_request_round_trips_through_serde_json() {
     let round_tripped: SubmitWorkloadRequest =
         serde_json::from_str(&wire).expect("deserialise SubmitWorkloadRequest");
     assert_eq!(round_tripped.spec, original.spec);
+}
+
+fn unknown_driver_key() -> impl Strategy<Value = String> {
+    "[a-z]{1,12}".prop_map(|suffix| format!("driver_{suffix}"))
+}
+
+proptest! {
+    /// Each bounded generated representative unsupported driver key follows
+    /// the existing generic serde failure without granting any one removed
+    /// spelling a permanent compatibility contract.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn submit_request_rejects_unknown_driver_keys(driver_key in unknown_driver_key()) {
+        let original = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(sample_job_spec()) };
+        let mut request = serde_json::to_value(&original).expect("valid VM request serializes");
+
+        let control: SubmitWorkloadRequest = serde_json::from_value(request.clone())
+            .expect("the unchanged VM request is the passing control");
+        prop_assert_eq!(control.spec, original.spec);
+
+        request
+            .get_mut("spec")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("Job input is a JSON object")
+            .insert(driver_key, serde_json::json!({"value": "unsupported"}));
+
+        prop_assert!(serde_json::from_value::<SubmitWorkloadRequest>(request).is_err());
+    }
 }
 
 /// RED-phase pin (Step 01-01): `SubmitWorkloadResponse` MUST carry
@@ -116,6 +151,7 @@ fn idempotency_outcome_serialises_lowercase_unchanged() {
     assert_eq!(parsed, IdempotencyOutcome::Unchanged);
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn job_description_round_trips_with_typed_spec() {
     // Post-ADR-0064 `WorkloadDescription.spec` is the kind-discriminated
