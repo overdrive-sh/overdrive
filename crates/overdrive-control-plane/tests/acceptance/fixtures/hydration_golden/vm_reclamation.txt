@@ -7,7 +7,16 @@
 == hydrate_desired -> AnyState::VmReclamation ==
 VmReclamation(
     VmReclamationState {
-        allocations: {},
+        allocations: {
+            AllocationId(
+                "job-app-0",
+            ): VmAllocFacts {
+                workload_id: WorkloadId(
+                    "job-app",
+                ),
+                terminal: false,
+            },
+        },
         host: VmHostObservation {
             scopes: {},
             run_dirs: {},

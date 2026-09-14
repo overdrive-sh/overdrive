@@ -16,9 +16,7 @@ use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_converg
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
@@ -163,13 +161,15 @@ async fn drive(seed: u64, contend: bool) {
         state.lifecycle_events.clone(),
         clock.clone(),
     );
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "restart-write-spike".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_owned(),
             args: vec!["3600".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![ProbeDescriptor {

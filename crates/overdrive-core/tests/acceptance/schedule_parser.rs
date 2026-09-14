@@ -22,9 +22,11 @@ fn schedule_05_04_schedule_requires_non_empty_cron_field() {
 [job]
 id = "nightly-backup"
 
-[exec]
+[vm]
 command = "/bin/echo"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -48,9 +50,11 @@ memory_bytes = 67108864
 [job]
 id = "nightly-backup"
 
-[exec]
+[vm]
 command = "/bin/echo"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100

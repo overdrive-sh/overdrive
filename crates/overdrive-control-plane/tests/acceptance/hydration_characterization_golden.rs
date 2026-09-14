@@ -87,8 +87,8 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV2,
-    WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, Service, WorkloadIntent,
+    WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -169,20 +169,27 @@ fn exec_job(id: &str) -> Job {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/serve".to_owned(),
             args: vec!["--job".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec")
 }
 
-fn service_with_startup_probe(id: &str) -> ServiceV2 {
-    ServiceV2::from_submit(ServiceSpecInput {
+fn service_with_startup_probe(id: &str) -> Service {
+    Service::from_submit(ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_owned(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_owned(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![ProbeDescriptor {
             idx: ProbeIdx::new(0),

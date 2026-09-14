@@ -1345,7 +1345,6 @@ pub fn format_probe_mechanic_summary(
             let host = host.as_deref().unwrap_or("0.0.0.0");
             format!("http GET http://{host}:{port}{path}")
         }
-        ProbeMechanic::Exec { command } => format!("exec {}", command.join(" ")),
     }
 }
 

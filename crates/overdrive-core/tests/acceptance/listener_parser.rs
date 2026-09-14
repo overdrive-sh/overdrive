@@ -36,7 +36,7 @@ use overdrive_core::dataplane::backend_key::Proto;
 // ---------------------------------------------------------------------------
 
 /// Render a TOML body with the supplied `[[listener]]` section. Other
-/// sections (`[service]`, `[exec]`, `[resources]`) are fixed canonical
+/// sections (`[service]`, `[vm]`, `[resources]`) are fixed canonical
 /// minimal values.
 fn service_toml_with_listeners(listeners_section: &str) -> String {
     format!(
@@ -47,9 +47,11 @@ replicas = 1
 
 {listeners_section}
 
-[exec]
+[vm]
 command = "/opt/frontend/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 500

@@ -164,7 +164,6 @@ mod integration {
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
     mod probe_runner {
-        mod real_exec_probe_cgroup;
         mod real_http_probe;
         mod real_tcp_probe;
     }
@@ -180,7 +179,7 @@ mod integration {
         // Re-used cross-sibling by the Class C real_cgroup_fs tests
         // (step 01-08), the cgroup_manager
         // write_to_readonly_cgroup_file test, and the probe_runner
-        // Tier-3 suite (`real_exec_probe_cgroup.rs`, step 02-02) —
+        // Tier-3 cgroup-isolation suites —
         // `pub` so siblings under the `integration` mod can import it
         // via `super::super::exec_driver::cleanup::AllocCleanup`. The
         // AllocCleanup shape is the canonical cgroup-leak-hygiene

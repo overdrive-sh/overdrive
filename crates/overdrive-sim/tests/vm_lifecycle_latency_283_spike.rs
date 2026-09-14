@@ -15,9 +15,7 @@ use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, JobSpecInput, ResourcesInput, WorkloadKind,
-};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
@@ -308,9 +306,11 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
         }),
     };
@@ -325,9 +325,11 @@ async fn submit_service(client: &reqwest::Client, base: &str, id: &str) {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
             startup_probes: vec![ProbeDescriptor {
@@ -1089,9 +1091,11 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_owned(),
             args: vec!["3600".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .unwrap();

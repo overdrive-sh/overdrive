@@ -42,8 +42,7 @@ use overdrive_control_plane::view_store::{
 use overdrive_control_plane::{AppState, workload_lifecycle};
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
@@ -97,9 +96,11 @@ enum TraceEvent {
 
 fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
     let driver = match driver_type {
-        DriverType::Exec => DriverInput::Exec(ExecInput {
+        DriverType::Exec => DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/workload".to_owned(),
             args: vec!["--serve".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         DriverType::Vm => DriverInput::Vm(VmInput {
             command: "/sbin/workload".to_owned(),
@@ -110,7 +111,7 @@ fn service_intent(driver_type: DriverType, workload: &str) -> WorkloadIntent {
         other => panic!("fixture covers Exec and VM, got {other:?}"),
     };
     WorkloadIntent::Service(
-        ServiceV2::from_submit(ServiceSpecInput {
+        Service::from_submit(ServiceSpecInput {
             id: workload.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

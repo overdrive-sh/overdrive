@@ -46,7 +46,7 @@ use overdrive_core::vm::config::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -63,7 +63,6 @@ fn probe_runner() -> std::sync::Arc<ProbeRunner> {
     std::sync::Arc::new(ProbeRunner::new(
         std::sync::Arc::new(SimTcpProber::new()),
         std::sync::Arc::new(SimHttpProber::new()),
-        std::sync::Arc::new(SimExecProber::new()),
         std::sync::Arc::new(SimClock::new()),
         std::sync::Arc::new(SimObservationStore::single_peer(
             NodeId::new("vm-stop-totality").expect("valid node ID"),

@@ -1776,7 +1776,7 @@ mod tests {
         use std::sync::Arc;
 
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
+            DriverInput, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
@@ -1821,13 +1821,15 @@ mod tests {
                 .iter()
                 .map(|p| ListenerInput { port: *p, protocol: "tcp".to_string() })
                 .collect();
-            let svc = ServiceV2::from_submit(ServiceSpecInput {
+            let svc = Service::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/serve".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
                 listeners,
                 startup_probes: vec![],
@@ -2013,16 +2015,18 @@ mod tests {
         /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn hydrate_actual_job_returns_empty_listeners() {
-            use overdrive_core::aggregate::{JobSpecInput, JobV2};
+            use overdrive_core::aggregate::{Job, JobSpecInput};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let job = JobV2::from_submit(JobSpecInput {
+            let job = Job::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/run".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
             })
             .expect("valid job");
@@ -2049,28 +2053,30 @@ mod tests {
         /// S-BDB-08 unit-level proxy: a `Schedule` intent also has no
         /// listeners — same hydrate skip as Job.
         ///
-        /// Note: `ScheduleV2::from_submit` is itself a RED scaffold
+        /// Note: `Schedule::from_submit` is itself a RED scaffold
         /// (lands in a future slice per ADR-0051 OQ-5). The test
-        /// constructs `ScheduleV2` directly via struct literal —
+        /// constructs `Schedule` directly via struct literal —
         /// the wire-arm validator is not under test here, only the
         /// hydrate path's `Schedule(_)` arm.
         /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn hydrate_actual_schedule_returns_empty_listeners() {
-            use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV2, ScheduleV2};
+            use overdrive_core::aggregate::{CronExpr, Job, JobSpecInput, Schedule};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let inner_job = JobV2::from_submit(JobSpecInput {
+            let inner_job = Job::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/run".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
             })
             .expect("valid job");
-            let sched = ScheduleV2 {
+            let sched = Schedule {
                 id: workload_id(),
                 job: inner_job,
                 cron_expr: CronExpr::new("* * * * *").expect("valid cron"),
@@ -2366,8 +2372,7 @@ mod tests {
         use overdrive_core::UnixInstant;
         use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
-            WorkloadKind,
+            DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -2439,13 +2444,15 @@ mod tests {
                 inferred: false,
             };
 
-            let svc = ServiceV2::from_submit(ServiceSpecInput {
+            let svc = Service::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_owned(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/serve".to_owned(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
                 listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
                 startup_probes: vec![tcp_probe(ProbeRole::Startup)],

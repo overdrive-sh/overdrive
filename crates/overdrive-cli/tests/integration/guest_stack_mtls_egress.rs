@@ -905,11 +905,13 @@ fn main() {{
     build_static_binary(tmp, "gti-non-mesh-guest", &source)
 }
 
-fn service_toml(peer: &Path) -> String {
+fn service_toml(peer: &Path, kernel: &Path, rootfs: &Path) -> String {
     let command = toml::Value::String(peer.display().to_string()).to_string();
+    let kernel = toml::Value::String(kernel.display().to_string()).to_string();
+    let rootfs = toml::Value::String(rootfs.display().to_string()).to_string();
     format!(
         "[service]\nid = \"server\"\nreplicas = 1\n\n[[listener]]\nport = {SERVICE_PORT}\n\
-         protocol = \"tcp\"\n\n[exec]\ncommand = {command}\nargs = []\n\n[resources]\n\
+         protocol = \"tcp\"\n\n[vm]\ncommand = {command}\nargs = []\nkernel = {kernel}\nrootfs = {rootfs}\n\n[resources]\n\
          cpu_milli = 100\nmemory_bytes = 67108864\n"
     )
 }
@@ -2639,7 +2641,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
 
     let (handle, server_tmp, vmm_cuts) = spawn_capture_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
-    let service_spec = write_toml(server_tmp.path(), "gti-peer.toml", &service_toml(&peer));
+    let service_spec = write_toml(
+        server_tmp.path(),
+        "gti-peer.toml",
+        &service_toml(&peer, &fixture.kernel_path, &rootfs),
+    );
     let service_submit = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
         .expect("deploy mesh peer service through commands::deploy");
@@ -4454,8 +4460,11 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         let restart_cut = boot_two_cuts
             .recv_timeout(Duration::from_secs(30))
             .map_err(|error| format!("observe boot-two VMM cut: {error}"))?;
-        let service_spec =
-            write_toml(server_tmp.path(), "gti-restart-peer.toml", &service_toml(&peer));
+        let service_spec = write_toml(
+            server_tmp.path(),
+            "gti-restart-peer.toml",
+            &service_toml(&peer, &fixture.kernel_path, &rootfs),
+        );
         let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy fresh boot-two mesh peer: {error}"))?;

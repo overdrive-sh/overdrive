@@ -39,7 +39,7 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::listener_facts::ListenerFactStore;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -95,7 +95,12 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> SubmitSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listeners
             .into_iter()
             .map(|(port, protocol)| ListenerInput { port, protocol: protocol.to_owned() })
@@ -111,7 +116,12 @@ fn job_spec(id: &str) -> SubmitSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 67_108_864 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/run".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/run".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
 }
 

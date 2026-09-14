@@ -54,8 +54,7 @@ use bytes::Bytes;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -124,7 +123,12 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("rkyv archive");

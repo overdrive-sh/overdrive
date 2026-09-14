@@ -24,7 +24,7 @@ use overdrive_core::traits::prober::{ProbeFailure, ProbeOutcome, TcpProber};
 use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber};
+use overdrive_sim::adapters::probers::SimHttpProber;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::{VmDriver, VmHostLayout};
 
@@ -85,7 +85,6 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drive
     let (exec_driver, runner) = compose_production_driver(
         Arc::clone(&tcp) as Arc<dyn TcpProber>,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         PathBuf::from("/tmp/svm-22-cgroup"),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::new(SimCgroupFs::new()),

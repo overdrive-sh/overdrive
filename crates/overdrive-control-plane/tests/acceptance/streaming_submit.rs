@@ -33,7 +33,7 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
@@ -65,9 +65,11 @@ fn payments_spec() -> JobSpecInput {
         id: "payments-v0".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/payments".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     }
 }
@@ -1383,6 +1385,10 @@ async fn unchanged_resubmit_with_different_kind_uses_stored_discriminator_for_st
 /// the foreign terminal as if it belonged to this service, and closed
 /// the stream with incorrect output.
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "VM driver artifact fields keep this existing streaming boundary fixture explicit"
+)]
 async fn foreign_service_terminal_does_not_leak_into_service_stream() {
     let tmp = TempDir::new().expect("tmpdir");
     let sim_clock = Arc::new(SimClock::new());
@@ -1410,9 +1416,11 @@ async fn foreign_service_terminal_does_not_leak_into_service_stream() {
         id: "svc-ours-v0".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/svc-ours".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: vec![],

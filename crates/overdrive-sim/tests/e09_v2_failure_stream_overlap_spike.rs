@@ -23,9 +23,7 @@ use overdrive_control_plane::streaming::{
 };
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
@@ -45,7 +43,7 @@ use overdrive_sim::adapters::{
     driver::SimDriver,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
 };
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -139,13 +137,7 @@ async fn drive(overlap: bool) {
         inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
         clock: clock.clone(),
         stopping,
-        probes: ProbeRunner::new(
-            tcp,
-            Arc::new(SimHttpProber::new()),
-            Arc::new(SimExecProber::new()),
-            clock.clone(),
-            obs.clone(),
-        ),
+        probes: ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), clock.clone(), obs.clone()),
     });
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
@@ -177,9 +169,11 @@ async fn drive(overlap: bool) {
         id: "e09-v2-failure-stream".into(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".into(),
             args: vec!["3600".into()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 18081, protocol: "tcp".into() }],
         startup_probes: vec![ProbeDescriptor {
@@ -349,7 +343,7 @@ async fn submit(
     state: &AppState,
     input: ServiceSpecInput,
 ) -> (overdrive_core::WorkloadId, TargetResource, ServiceSubmitEvent) {
-    let svc = ServiceV2::from_submit(input).unwrap();
+    let svc = Service::from_submit(input).unwrap();
     let id = svc.id.clone();
     let key = IntentKey::for_workload(&id);
     let intent = WorkloadIntent::Service(svc);

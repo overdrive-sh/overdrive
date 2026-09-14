@@ -35,7 +35,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::probe_runner::http_prober::classify_http_status;
 use proptest::prelude::*;
@@ -141,7 +141,6 @@ async fn http_connection_refused_outcome_flows_through_probe_runner_to_store() {
     let runner = ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http,
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
@@ -185,7 +184,6 @@ async fn http_pass_outcome_flows_through_probe_runner_to_store() {
     let runner = ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http,
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,

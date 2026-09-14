@@ -37,9 +37,7 @@ use overdrive_control_plane::{
     AppState, service_lifecycle, service_map_hydrator, workload_lifecycle,
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, ServiceVip};
@@ -64,7 +62,7 @@ use overdrive_sim::adapters::{
     driver::SimDriver,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
 };
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -150,9 +148,11 @@ fn input(listeners: &[(u16, &str)], replicas: u32) -> ServiceSpecInput {
         id: WORKLOAD.into(),
         replicas,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".into(),
             args: vec!["3600".into()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: listeners
             .iter()
@@ -198,13 +198,7 @@ impl World {
         let http = Arc::new(SimHttpProber::new());
         let driver = Arc::new(ProbedDriver {
             inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
-            probes: ProbeRunner::new(
-                tcp.clone(),
-                http.clone(),
-                Arc::new(SimExecProber::new()),
-                clock.clone(),
-                obs.clone(),
-            ),
+            probes: ProbeRunner::new(tcp.clone(), http.clone(), clock.clone(), obs.clone()),
         });
         let views = Arc::new(RedbViewStore::open(directory.path()).unwrap());
         let runtime = registered_runtime(directory.path(), views.clone()).await;
@@ -229,7 +223,7 @@ impl World {
         );
         // Same validated driving ports as submit: allocate frontend/VIP, archive
         // canonical intent, and rebuild listener facts from that real intent.
-        let svc = ServiceV2::from_submit(input).unwrap();
+        let svc = Service::from_submit(input).unwrap();
         let declared = svc.listeners.clone();
         let name = MeshServiceName::new(&format!("{WORKLOAD}.svc.overdrive.local")).unwrap();
         let frontend = state.frontend_addr_allocator.assign(&name).unwrap();

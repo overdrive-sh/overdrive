@@ -91,9 +91,11 @@ replicas = 3
 cpu_milli = 500
 memory_bytes = 536870912
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 "#
 }
 
@@ -109,9 +111,11 @@ replicas = 5
 cpu_milli = 500
 memory_bytes = 536870912
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 "#
 }
 

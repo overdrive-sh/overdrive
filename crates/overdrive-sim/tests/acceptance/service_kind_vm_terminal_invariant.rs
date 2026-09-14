@@ -30,7 +30,7 @@ use overdrive_control_plane::{
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -60,7 +60,7 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
@@ -479,7 +479,6 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let probes = Arc::new(ProbeRunner::new(
         tcp.clone(),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         clock.clone(),
         obs.clone(),
     ));
@@ -516,7 +515,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let (startup, readiness) = vm_probe_descriptors();
     let workload_id =
         overdrive_core::WorkloadId::new("service-vm-readiness-25717").expect("workload ID");
-    let spec = ServiceV2::from_submit(ServiceSpecInput {
+    let spec = Service::from_submit(ServiceSpecInput {
         id: workload_id.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

@@ -51,9 +51,8 @@ pub mod mtls_enforcement;
 // I/O surface, exactly as `MtlsEnforcement` / `Dataplane`).
 pub mod mtls_resolve;
 pub mod observation_store;
-// SCAFFOLD: true — service-health-check-probes feature.
-// Three port traits (`TcpProber` / `HttpProber` / `ExecProber`) per
-// ADR-0054 §3. Lands GREEN across slices 01-03.
+// Service-health-check-probes feature. Two port traits (`TcpProber` /
+// `HttpProber`) per ADR-0054 §3.
 pub mod prober;
 pub mod transport;
 // microvm-driver-cloud-hypervisor (ADR-0082, GH #42). The hypervisor-

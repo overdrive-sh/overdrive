@@ -35,9 +35,7 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{
@@ -189,8 +187,8 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
     let sim_clock = Arc::new(SimClock::new());
     // `driver_type` MUST match the submitted job's `DriverInput` kind for
     // `action_shim::dispatch`'s START routing to find this entry — the
-    // S-VM-77 tests (below) drive a real `DriverInput::Exec` job to
-    // Running, so they pass `DriverType::Exec`. The S-VM-78 test never
+    // S-VM-77 tests (below) drive a real `DriverInput::Vm` job to
+    // Running, so they pass `DriverType::Vm`. The S-VM-78 test never
     // drives a tick (it calls `hydrate_actual_for_test` directly) and
     // needs the registry keyed `DriverType::Vm` instead — see that
     // test's own call site.
@@ -230,9 +228,11 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
         id: workload_id.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -312,7 +312,7 @@ fn assert_noise_claim_untouched(h: &Harness, noise: &AllocationId) {
 #[tokio::test]
 async fn release_supervision_fires_on_wrote_arm() {
     let tmp = TempDir::new().expect("tempdir");
-    let h = build_harness(&tmp, "s-vm-77-wrote", DriverType::Exec).await;
+    let h = build_harness(&tmp, "s-vm-77-wrote", DriverType::Vm).await;
     let noise = seed_noise_claim(&h, "wrote");
     let start = Instant::now();
     let alloc = drive_to_first_running(&h, start).await;
@@ -346,7 +346,7 @@ async fn release_supervision_fires_on_wrote_arm() {
 #[tokio::test]
 async fn release_supervision_fires_on_failed_arm() {
     let tmp = TempDir::new().expect("tempdir");
-    let h = build_harness(&tmp, "s-vm-77-failed", DriverType::Exec).await;
+    let h = build_harness(&tmp, "s-vm-77-failed", DriverType::Vm).await;
     let noise = seed_noise_claim(&h, "failed");
     let start = Instant::now();
     let alloc = drive_to_first_running(&h, start).await;

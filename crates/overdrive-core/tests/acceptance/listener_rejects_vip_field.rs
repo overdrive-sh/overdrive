@@ -40,9 +40,11 @@ port = 8080
 protocol = "tcp"
 vip = "10.96.42.17"
 
-[exec]
+[vm]
 command = "/opt/frontend/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 500

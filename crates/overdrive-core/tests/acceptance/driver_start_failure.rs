@@ -126,7 +126,7 @@ proptest! {
     /// Holding the structured facts constant while changing ONLY the
     /// diagnostic prose must not change the selected operator cause.
     ///
-    /// Quantified over every class family — Exec, VM, and the unknown
+    /// Quantified over every class family — VM, and the unknown
     /// fallback — because the fallback is the one arm where `detail` is
     /// legitimately read, and it must still not *select* anything.
     #[test]
@@ -297,7 +297,7 @@ fn exec_cgroup_place_pid_failure_preserves_existing_kind_and_detail() {
 /// failure is never guessed into a named Exec or VM cause.
 #[test]
 fn unclassified_start_failure_maps_only_to_driver_internal_error_with_verbatim_detail() {
-    for driver in [DriverType::Exec, DriverType::Vm, DriverType::Unikernel, DriverType::Wasm] {
+    for driver in [DriverType::Vm, DriverType::Unikernel, DriverType::Wasm] {
         // Prose deliberately shaped like the retired grammar's own
         // matches — if any of it still steered a decision, this would
         // resolve to a named Exec cause instead of the fallback.

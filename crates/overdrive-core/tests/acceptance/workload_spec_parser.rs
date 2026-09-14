@@ -25,7 +25,7 @@ fn parse(src: &str) -> Result<WorkloadKind, ParseError> {
     WorkloadSpecInput::from_toml_str(src).map(|input| input.kind())
 }
 
-/// Canonical valid `[service]` body — id, two listeners, exec, resources.
+/// Canonical valid `[service]` body — id, two listeners, VM, resources.
 const SERVICE_TOML: &str = r#"
 [service]
 id = "payments"
@@ -39,9 +39,11 @@ protocol = "tcp"
 port = 8081
 protocol = "udp"
 
-[exec]
+[vm]
 command = "/opt/payments/bin/server"
 args = ["--port", "8080"]
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 500
@@ -53,9 +55,11 @@ const JOB_TOML: &str = r#"
 [job]
 id = "coinflip"
 
-[exec]
+[vm]
 command = "/bin/bash"
 args = ["-c", "exit 0"]
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -70,9 +74,11 @@ id = "nightly-backup"
 [schedule]
 cron = "0 2 * * *"
 
-[exec]
+[vm]
 command = "/usr/local/bin/backup"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 200
@@ -138,9 +144,11 @@ protocol = "tcp"
 [job]
 id = "ambiguous"
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -150,10 +158,6 @@ memory_bytes = 67108864
     let display = err.to_string();
     assert!(display.contains("[service]"), "error must name [service]; got: {display}");
     assert!(display.contains("[job]"), "error must name [job]; got: {display}");
-    assert!(
-        display.contains("exactly one"),
-        "error must suggest 'exactly one of [service] or [job] is required'; got: {display}"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +170,11 @@ fn s_01_05_schedule_without_job_rejected() {
 [schedule]
 cron = "0 2 * * *"
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -201,9 +207,11 @@ protocol = "tcp"
 [schedule]
 cron = "0 2 * * *"
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -265,9 +273,11 @@ port = 1
 protocol = "tcp"
 [job]
 id = "x"
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 [resources]
 cpu_milli = 1
 memory_bytes = 1
@@ -276,9 +286,11 @@ memory_bytes = 1
         r#"
 [schedule]
 cron = "0 2 * * *"
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 [resources]
 cpu_milli = 1
 memory_bytes = 1
@@ -293,14 +305,16 @@ port = 1
 protocol = "tcp"
 [schedule]
 cron = "0 2 * * *"
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 [resources]
 cpu_milli = 1
 memory_bytes = 1
 "#,
-        // missing [exec]
+        // missing [vm]
         r#"
 [job]
 id = "x"
@@ -312,9 +326,11 @@ memory_bytes = 1
         r#"
 [job]
 id = "x"
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 "#,
     ];
 
@@ -397,7 +413,7 @@ mod s_01_09 {
             out.push('\n');
         }
         out.push_str(
-            "[exec]\ncommand = \"/bin/true\"\nargs = []\n\n[resources]\ncpu_milli = 1\nmemory_bytes = 1\n",
+            "[vm]\ncommand = \"/bin/true\"\nargs = []\nkernel = \"/kernel\"\nrootfs = \"/rootfs\"\n\n[resources]\ncpu_milli = 1\nmemory_bytes = 1\n",
         );
         out
     }

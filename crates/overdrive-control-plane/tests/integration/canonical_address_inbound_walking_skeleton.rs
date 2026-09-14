@@ -88,7 +88,7 @@ use overdrive_control_plane::dataplane_config::DataplaneConfig;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
 use overdrive_core::AllocationId;
 use overdrive_core::CertSerial;
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
@@ -738,9 +738,11 @@ while True:
         id: workload_id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/bin/python3".to_owned(),
             args: vec!["-u".to_owned(), "-c".to_owned(), server_script],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: SERVICE_PORT, protocol: "tcp".to_owned() }],
         startup_probes: vec![],

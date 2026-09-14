@@ -68,7 +68,7 @@ use overdrive_core::vm::config::{
 use overdrive_host::RealVmHostState;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -88,7 +88,6 @@ fn probe_runner() -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::new()),
         Arc::new(SimObservationStore::single_peer(
             NodeId::new("vm-clone-index").expect("valid node ID"),

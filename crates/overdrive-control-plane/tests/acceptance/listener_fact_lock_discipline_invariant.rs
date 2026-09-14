@@ -33,8 +33,7 @@ use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Listener, ResourcesInput, ServiceV2, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, Listener, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -109,11 +108,16 @@ async fn persist_and_allocate(
             },
         })
         .collect();
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: workload.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listener_inputs,
         startup_probes: vec![],
         readiness_probes: vec![],

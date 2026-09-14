@@ -37,9 +37,7 @@ use overdrive_control_plane::api::{
     WorkloadDescription,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -144,7 +142,12 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
         id: "payments".to_owned(),
         replicas,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

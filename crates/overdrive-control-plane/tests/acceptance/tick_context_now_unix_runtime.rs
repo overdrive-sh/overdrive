@@ -31,9 +31,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -145,7 +143,12 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())

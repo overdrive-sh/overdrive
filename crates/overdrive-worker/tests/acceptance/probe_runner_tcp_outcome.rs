@@ -18,7 +18,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{ProbeOutcome, TcpProber};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
 fn alloc_id(s: &str) -> AllocationId {
@@ -60,13 +60,11 @@ async fn given_sim_tcp_prober_with_pass_outcome_when_probe_then_returns_pass() {
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Pass);
     let http: Arc<dyn overdrive_core::traits::prober::HttpProber> = Arc::new(SimHttpProber::new());
-    let exec: Arc<dyn overdrive_core::traits::prober::ExecProber> = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
     let runner = ProbeRunner::new(
         tcp.clone(),
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -106,13 +104,11 @@ async fn given_sim_tcp_prober_with_fail_outcome_when_probe_then_returns_fail_wit
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "connection refused".to_owned() });
     let http: Arc<dyn overdrive_core::traits::prober::HttpProber> = Arc::new(SimHttpProber::new());
-    let exec: Arc<dyn overdrive_core::traits::prober::ExecProber> = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
     let runner = ProbeRunner::new(
         tcp.clone(),
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -160,7 +156,6 @@ async fn given_sim_tcp_prober_when_used_as_dyn_tcp_prober_then_compiles_and_call
     let _runner = ProbeRunner::new(
         prober,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
@@ -179,7 +174,6 @@ async fn given_sim_tcp_prober_pass_when_earned_trust_then_returns_ok() {
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
@@ -199,7 +193,6 @@ async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() 
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
@@ -233,7 +226,6 @@ async fn tcp_probe_translates_wildcard_host_to_loopback() {
     let runner = ProbeRunner::new(
         tcp.clone(),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -273,7 +265,6 @@ async fn register_and_stop_alloc_lifecycle_drives_active_count_and_cancels_child
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
@@ -378,7 +369,6 @@ async fn observed_at_unix_ms_pins_to_injected_clock_value() {
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );

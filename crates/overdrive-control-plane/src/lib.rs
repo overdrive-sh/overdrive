@@ -1675,13 +1675,13 @@ pub async fn run_server(
     // Service-health-check-probes step 01-03d / ADR-0054 § 7 — the
     // probe-runner Earned-Trust gate runs here, at the binary
     // composition root, and the resulting `Arc<ProbeRunner>` is
-    // threaded into the production `ExecDriver` via the
+    // threaded into the production driver via the
     // `compose_production_driver` helper below. Acceptance test
     // `probe_runner_composition` drives the helper with `SimProber`
     // adapters to assert the threading structurally — closes
     // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
-    // Keep the one trusted runner returned by the composition gate: the
-    // Exec and optional VM drivers each receive a clone of this same Arc.
+    // Keep the one trusted runner returned by the composition gate for the
+    // composed driver lifecycle.
     //
     // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
     // substrate the workloads-slice bootstrap above used (Earned Trust
@@ -1692,7 +1692,6 @@ pub async fn run_server(
     let (driver, probe_runner) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
-        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
         cgroup_root_path.clone(),
         Arc::clone(&clock),
         Arc::clone(&fs),
@@ -2050,7 +2049,6 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
 pub async fn compose_production_driver(
     tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
-    exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
     cgroup_root: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
@@ -2062,7 +2060,6 @@ pub async fn compose_production_driver(
     let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
         tcp_prober,
         http_prober,
-        exec_prober,
         Arc::clone(&clock),
         observation_store,
     )
@@ -4081,7 +4078,7 @@ mod tests {
 
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::observation_store::SimObservationStore;
-        use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+        use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
         use overdrive_worker::probe_runner::ProbeRunner;
 
@@ -4093,7 +4090,6 @@ mod tests {
             Arc::new(ProbeRunner::new(
                 Arc::new(SimTcpProber::new()),
                 Arc::new(SimHttpProber::new()),
-                Arc::new(SimExecProber::new()),
                 Arc::new(SimClock::new()),
                 Arc::new(SimObservationStore::single_peer(
                     overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),

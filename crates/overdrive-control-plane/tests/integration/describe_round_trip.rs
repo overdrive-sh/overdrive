@@ -32,7 +32,7 @@ use overdrive_control_plane::api::{
 use overdrive_control_plane::handlers::{describe_workload, submit_workload};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::NodeId;
@@ -130,7 +130,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -436,7 +441,12 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         id: id.to_owned(),
         replicas: 2,
         resources: ResourcesInput { cpu_milli: 250, memory_bytes: 268_435_456 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
         startup_probes: vec![],
         readiness_probes: vec![],
@@ -529,7 +539,12 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
             id,
             replicas,
             resources: ResourcesInput { cpu_milli, memory_bytes },
-            driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                command: "/bin/true".to_string(),
+                args: vec![],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
+            }),
         },
     )
 }

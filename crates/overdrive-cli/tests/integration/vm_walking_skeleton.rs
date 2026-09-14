@@ -452,7 +452,7 @@ pub(super) fn config_path(tmp: &Path) -> PathBuf {
 
 /// A `[job]`+`[vm]`+`[resources]` TOML — the shape `WorkloadSpecInput::
 /// from_toml_str`'s job-family branch parses (confirmed GREEN by
-/// S-VM-06/S-VM-07 in `vm_spec_driver_table_dispatch.rs`).
+/// S-VM-06/S-VM-07 in the VM parser acceptance suite).
 pub(super) fn vm_job_toml(
     id: &str,
     command: &str,
@@ -746,7 +746,7 @@ async fn vm_guest_that_never_starts_is_never_reported_running() {
 // ---------------------------------------------------------------------
 
 /// S-VM-04 — A `[vm]` spec deploys through the exact same
-/// `overdrive_cli::commands::deploy::deploy` handler as an `[exec]`
+/// `overdrive_cli::commands::deploy::deploy` handler as any other workload
 /// spec — no new verb, no new flag. Proven at deploy-acceptance time
 /// (no full boot-to-completion needed; that is S-VM-01/02's claim).
 #[tokio::test]
@@ -769,18 +769,16 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
         "vm-same-verb.toml",
         &vm_job_toml("vm-same-verb", "/sbin/exit0", &[], &fixture.kernel_path, &rootfs),
     );
-    // The SAME `deploy()` fn every [exec] spec in this crate's other
-    // integration tests calls (`exec_spec_walking_skeleton.rs`,
-    // `workload_restart.rs`) — no `[vm]`-specific handler, no new CLI
-    // subcommand.
+    // The SAME `deploy()` fn used by the other workload integration tests —
+    // no VM-specific handler and no new CLI subcommand.
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg })
         .await
-        .expect("deploy the [vm] spec through the exact same verb an [exec] spec uses");
+        .expect("deploy the [vm] spec through the existing workload verb");
     assert_eq!(submit.workload_id, "vm-same-verb");
     assert_eq!(
         submit.outcome,
         overdrive_control_plane::api::IdempotencyOutcome::Inserted,
-        "a fresh [vm] deploy must report Inserted, exactly like a fresh [exec] deploy"
+        "a fresh [vm] deploy must report Inserted through the existing workload verb"
     );
 
     handle.shutdown().await.expect("clean shutdown");

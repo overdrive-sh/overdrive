@@ -88,7 +88,7 @@ use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput, WorkloadIntent,
 };
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -464,9 +464,11 @@ fn build_job_spec() -> Result<Job, String> {
         id: WORKLOAD_NAME.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
-            command: "/bin/sleep".to_owned(),
-            args: vec!["3600".to_owned()],
+        driver: DriverInput::Vm(VmInput {
+            command: "/sbin/init".to_owned(),
+            args: vec!["--quiet".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .map_err(|e| format!("valid job spec: {e:?}"))
@@ -489,7 +491,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_obs = Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
     let obs: Arc<dyn ObservationStore> = sim_obs;
     let sim_clock = Arc::new(SimClock::new());
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver;
 
     let allocator =

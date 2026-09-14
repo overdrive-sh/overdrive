@@ -778,14 +778,6 @@ components:
     DriverInput:
       oneOf:
       - type: object
-        description: Native binary under cgroups v2 — the `[exec]` table in TOML.
-        required:
-        - exec
-        properties:
-          exec:
-            $ref: '#/components/schemas/ExecInput'
-            description: Native binary under cgroups v2 — the `[exec]` table in TOML.
-      - type: object
         description: |-
           Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
           ADR-0083, GH #42).
@@ -801,13 +793,8 @@ components:
         Driver dispatch on a [`JobSpecInput`].
 
         Per ADR-0031 §2 a tagged enum with `#[serde(flatten)]` on the field
-        surfaces the table name as the discriminator in TOML / JSON: `[exec]`
-        → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
-        unknown driver tables.
-
-        Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
-        `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
-        variants additively; no shape change to surrounding code.
+        surfaces the supported `[vm]` table as `DriverInput::Vm(...)`.
+        `deny_unknown_fields` on the enum rejects unsupported driver tables.
     DriverType:
       type: string
       description: |-
@@ -859,27 +846,6 @@ components:
           - 'null'
         message:
           type: string
-    ExecInput:
-      type: object
-      description: Operator-facing `[exec]` table fields per ADR-0031 §2.
-      required:
-      - command
-      - args
-      properties:
-        args:
-          type: array
-          items:
-            type: string
-          description: |-
-            Argv passed verbatim. Required field — an absent `args` is a
-            parse error, not "default to no args" (per ADR-0031 §8). Empty
-            `Vec` is the legitimate zero-args case.
-        command:
-          type: string
-          description: |-
-            Host filesystem path to the binary. Validated non-empty (after
-            trim) at `JobV2::from_submit` per ADR-0031 §4.
-      additionalProperties: false
     IdempotencyOutcome:
       type: string
       description: |-
@@ -938,7 +904,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
+        Input shape for `Job::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -1051,7 +1017,7 @@ components:
         `protocol: Proto` after TOML decoding; the wire side carries
         `port: u16` and `protocol: String` for JSON deserialise tolerance,
         with validation deferred to
-        [`crate::aggregate::ServiceV2::from_submit`].
+        [`crate::aggregate::Service::from_submit`].
       required:
       - port
       - protocol
@@ -1061,14 +1027,14 @@ components:
           format: int32
           description: |-
             Listener port — 1..=65535. `port == 0` is rejected at admission
-            inside `ServiceV2::from_submit`.
+            inside `Service::from_submit`.
           maximum: 65535
           minimum: 1
         protocol:
           type: string
           description: |-
             L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
-            admission inside `ServiceV2::from_submit`.
+            admission inside `Service::from_submit`.
       additionalProperties: false
     NodeList:
       type: object
@@ -1134,8 +1100,8 @@ components:
           $ref: '#/components/schemas/ProbeIdx'
           description: |-
             0-indexed position within THIS descriptor's role array
-            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV3`
-            construction and carried verbatim into `ServiceV2`; never
+            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV1`
+            construction and carried verbatim into `Service`; never
             re-derived downstream.
 
             Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
@@ -1229,30 +1195,11 @@ components:
             type: string
             enum:
             - http
-      - type: object
-        description: |-
-          Spawn `command[0]` with `command[1..]` as args, inside the
-          workload's cgroup per ADR-0059 / C7. Exit 0 = Pass.
-        required:
-        - command
-        - type
-        properties:
-          command:
-            type: array
-            items:
-              type: string
-          type:
-            type: string
-            enum:
-            - exec
       description: |-
         Concrete mechanic for a probe attempt.
 
-        Per ADR-0054: three mechanics, each backed by a distinct port
-        trait (`TcpProber` / `HttpProber` / `ExecProber`). Step 01-02
-        lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
-        in step 02-02 — all three are part of the enum so the
-        `ServiceSpec` envelope shape is stable across slices.
+        Per ADR-0054, each mechanic is backed by a distinct port trait. The
+        supported mechanics are TCP-connect and plain HTTP GET.
     ProbeResultRowJson:
       type: object
       description: |-
@@ -1452,7 +1399,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `Job::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -1531,7 +1478,7 @@ components:
       description: |-
         HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
 
-        The per-fire instance is a [`crate::aggregate::JobV2`] per ADR-0047
+        The per-fire instance is a [`crate::aggregate::Job`] per ADR-0047
         § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
         inner job body uses the same wire shape standalone Jobs use —
         operators write the schedule body and the inner job body in the
@@ -1545,7 +1492,7 @@ components:
           type: string
           description: |-
             Cron expression. String-shaped on the wire; validated and
-            projected onto `CronExpr` inside `ScheduleV2::from_submit`.
+            projected onto `CronExpr` inside `Schedule::from_submit`.
         id:
           type: string
         job:
@@ -1851,7 +1798,7 @@ components:
               $ref: '#/components/schemas/ListenerInput'
             description: |-
               Operator-declared listeners in declaration order. Validated at
-              admission inside [`crate::aggregate::ServiceV2::from_submit`]:
+              admission inside [`crate::aggregate::Service::from_submit`]:
               at least one element; no two share `(port, protocol)`; protocol
               is `tcp` / `udp` only.
           liveness_probes:
@@ -1939,7 +1886,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared liveness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
               surfaced on describe so a Service's liveness probes round-trip.
           readiness_probes:
@@ -1948,7 +1895,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared readiness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
               surfaced on describe so a Service's readiness probes round-trip.
           replicas:
@@ -1963,7 +1910,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared startup probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::startup_probes`].
               Surfaced today so an operator who declared a
               `[[health_check.startup]]` probe sees it reflected on describe
@@ -2262,8 +2209,8 @@ components:
         spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
         dispatches on the [`SubmitSpecInput`] variant and routes each
         arm through the per-kind validating constructor
-        (`JobV2::from_submit` / `ServiceV2::from_submit` /
-        `ScheduleV2::from_submit`) to derive the intent key / digest.
+        (`Job::from_submit` / `Service::from_submit` /
+        `Schedule::from_submit`) to derive the intent key / digest.
 
         Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
         is the SOLE workload-kind discriminator carrier — the previous
@@ -3611,7 +3558,7 @@ components:
         Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
         Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
         not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
-        shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+        shape). Per-VM volumes are out
         of scope for this feature (deferred to overdrive-fs, GH #97 /
         virtiofsd, GH #43).
       required:

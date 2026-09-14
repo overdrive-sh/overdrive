@@ -17,7 +17,7 @@
 //!   round-trip carries the VIP source (10.96.0.10:5353), not the backend
 //!   IP. The subprocess `overdrive deploy` exit-0 + "Accepted." driving-
 //!   adapter assertion lands in the companion direct-handler test under
-//!   `crates/overdrive-cli/tests/` per the `exec_spec_walking_skeleton`
+//!   `crates/overdrive-cli/tests/` per the direct-handler walking-skeleton
 //!   precedent (the `overdrive-cli` crate forbids subprocess tests — see
 //!   `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no
 //!   subprocess"). This file owns the WIRE half.

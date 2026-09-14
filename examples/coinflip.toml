@@ -1,12 +1,14 @@
 [job]
 id = "coinflip"
 
-[exec]
+[vm]
 command = "/bin/bash"
 args = [
     "-c",
     "if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi",
 ]
+kernel = "/srv/vm/overdrive-testing/coinflip/kernel"
+rootfs = "/srv/vm/overdrive-testing/coinflip/rootfs.ext4"
 
 [resources]
 cpu_milli = 100

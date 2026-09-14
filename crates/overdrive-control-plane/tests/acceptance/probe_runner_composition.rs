@@ -48,7 +48,7 @@ use overdrive_core::traits::driver::{AllocationSpec, Resources};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 
 /// Stub clock — `compose_production_driver` plumbs the clock into
 /// `ExecDriver::new`; the driver only consults it from `Driver::stop`
@@ -120,7 +120,6 @@ fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
 async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor() {
     let tcp = Arc::new(SimTcpProber::new()); // empty queue → Pass
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("composition-test").expect("valid NodeId"),
         0,
@@ -128,7 +127,6 @@ async fn production_driver_lifecycle_hooks_drive_wired_probe_runner_supervisor()
     let (driver, runner) = compose_production_driver(
         tcp,
         http,
-        exec,
         // Cgroup path is exercised only on `Driver::start` (which
         // this AT does not call); any path is acceptable here.
         PathBuf::from("/tmp/overdrive-test-composition"),

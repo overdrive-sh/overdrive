@@ -2252,7 +2252,7 @@ mod tests {
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
-    use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+    use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
     use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
     use tokio::net::UnixStream;
 
@@ -2262,7 +2262,6 @@ mod tests {
         Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
-            Arc::new(SimExecProber::new()),
             Arc::new(SimClock::new()),
             Arc::new(SimObservationStore::single_peer(
                 NodeId::new("vm-driver-unit").expect("valid node ID"),

@@ -57,7 +57,7 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput, ServiceV2, WorkloadIntent,
+    DriverInput, IntentKey, JobSpecInput, ResourcesInput, Service, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
@@ -117,7 +117,12 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listeners
             .into_iter()
             .map(|(port, protocol)| ListenerInput { port, protocol: protocol.to_owned() })
@@ -133,7 +138,12 @@ fn job_spec(id: &str) -> JobSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -160,7 +170,7 @@ fn job_name(id: &str) -> MeshServiceName {
 /// rebuild's job.
 async fn seed_declared_service(store: &Arc<LocalIntentStore>, id: &str) {
     let service =
-        ServiceV2::from_submit(service_spec(id, vec![(8080, "tcp")])).expect("valid service spec");
+        Service::from_submit(service_spec(id, vec![(8080, "tcp")])).expect("valid service spec");
     let intent = WorkloadIntent::Service(service);
     let archived = intent.archive_for_store().expect("archive Service intent");
     let key = IntentKey::for_workload(&workload_id(id));
@@ -187,7 +197,7 @@ async fn seed_service_payload_at_sub_key(
     sub_key: &str,
     payload_id: &str,
 ) {
-    let service = ServiceV2::from_submit(service_spec(payload_id, vec![(8080, "tcp")]))
+    let service = Service::from_submit(service_spec(payload_id, vec![(8080, "tcp")]))
         .expect("valid service spec");
     let intent = WorkloadIntent::Service(service);
     let archived = intent.archive_for_store().expect("archive Service intent");

@@ -67,7 +67,7 @@ use overdrive_reconcilers::service_lifecycle::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
 fn alloc_id(s: &str) -> AllocationId {
@@ -144,7 +144,6 @@ fn fact_from_row_and_intent(
         ProbeMechanic::Http { host, port, path } => {
             format!("http {}:{port}{path}", host.as_deref().unwrap_or(""))
         }
-        ProbeMechanic::Exec { command } => format!("exec {command:?}"),
     };
     ServiceAllocFact {
         alloc_id: row.alloc_id.clone(),
@@ -211,7 +210,6 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Pass);
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(
         NodeId::new("probe-to-stable-test").expect("valid NodeId"),
@@ -221,7 +219,6 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let runner = ProbeRunner::new(
         tcp,
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );

@@ -1188,9 +1188,7 @@ mod lifecycle_hook_tests {
     use overdrive_core::id::AllocationId;
     use overdrive_core::traits::clock::Clock;
     use overdrive_core::traits::driver::{AllocationSpec, Driver as _, Resources};
-    use overdrive_core::traits::prober::{
-        ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
-    };
+    use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome, TcpProber};
 
     use super::ExecDriver;
     use crate::probe_runner::ProbeRunner;
@@ -1218,20 +1216,6 @@ mod lifecycle_hook_tests {
         async fn probe(
             &self,
             _url: &str,
-            _timeout: Duration,
-        ) -> Result<ProbeOutcome, ProbeFailure> {
-            Ok(ProbeOutcome::Pass)
-        }
-    }
-
-    struct UnusedExecProber;
-
-    #[async_trait]
-    impl ExecProber for UnusedExecProber {
-        async fn probe(
-            &self,
-            _command: &[String],
-            _cgroup_path: &str,
             _timeout: Duration,
         ) -> Result<ProbeOutcome, ProbeFailure> {
             Ok(ProbeOutcome::Pass)
@@ -1275,7 +1259,6 @@ mod lifecycle_hook_tests {
         let runner = Arc::new(ProbeRunner::new(
             Arc::new(AlwaysPassTcpProber),
             Arc::new(UnusedHttpProber),
-            Arc::new(UnusedExecProber),
             Arc::new(ZeroClock),
             obs,
         ));

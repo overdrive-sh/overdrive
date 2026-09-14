@@ -71,7 +71,7 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
@@ -177,7 +177,6 @@ async fn harness() -> Harness {
         // adapter during these assertions.
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         PathBuf::from("/tmp/overdrive-test-stable-probe"),
         // `SimClock::sleep` PARKS on a deadline and only resolves when
         // the harness calls `tick()`, which this test never does. Each

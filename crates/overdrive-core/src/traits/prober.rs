@@ -1,10 +1,8 @@
-//! Probe port traits — `TcpProber` / `HttpProber` / `ExecProber`.
+//! Probe port traits — `TcpProber` / `HttpProber`.
 //!
-//! Per ADR-0054 §3 (Port-trait shape) — three separate traits because
-//! each mechanic has distinct preconditions, postconditions, and
-//! adapter dependency surfaces. A unified trait would conflate
-//! contracts; see ADR-0054 Consequences (Negative) for the
-//! future-simplification candidate trade-off.
+//! Per ADR-0054 §3 (Port-trait shape), each mechanic has a separate trait
+//! because its preconditions, postconditions, and adapter dependency surface
+//! are distinct.
 //!
 //! Per `.claude/rules/development.md` § "Trait definitions specify
 //! behavior, not just signature": each trait method below carries
@@ -12,8 +10,8 @@
 //! invariants the DST equivalence harness will assert against both
 //! production and sim adapter implementations.
 //!
-//! RED scaffold — production bindings land in `crates/overdrive-
-//! worker/src/probe_runner/{tcp,http,exec}_prober.rs`; sim bindings
+//! Production bindings land in `crates/overdrive-
+//! worker/src/probe_runner/{tcp,http}_prober.rs`; sim bindings
 //! land in `crates/overdrive-sim/src/adapters/probers.rs`.
 // SCAFFOLD: true
 // __SCAFFOLD__ = true (Python convention; Rust marker is the
@@ -41,8 +39,8 @@ pub enum ProbeOutcome {
     Pass,
     /// Probe predicate not satisfied. `reason` is an
     /// operator-renderable short string ("connection refused",
-    /// "HTTP 503", "timeout after 5s", "exit 1", "exec: command not
-    /// found"). Reason strings are part of the operator-facing
+    /// "HTTP 503", "timeout after 5s", "exit 1"). Reason strings are
+    /// part of the operator-facing
     /// contract; renaming them is a wire-shape change.
     Fail { reason: String },
 }
@@ -145,70 +143,6 @@ pub trait HttpProber: Send + Sync + 'static {
     async fn probe(&self, url: &str, timeout: Duration) -> Result<ProbeOutcome, ProbeFailure>;
 }
 
-/// Driven port for exec probes — spawn a command inside the
-/// workload's cgroup scope.
-///
-/// # Preconditions
-/// - `command` is `&[String]` with `command.len() >= 1`. Empty
-///   command surfaces as `ParseError::ExecProbeMissingCommand` at
-///   parse time.
-/// - `cgroup_scope_path` is the absolute path of the workload's
-///   cgroup scope (e.g. `/sys/fs/cgroup/overdrive.slice/workloads.
-///   slice/alloc-payments-0.scope`). Caller (ProbeRunner) sources
-///   this from the AllocationSpec / ExecDriver coordination per
-///   ADR-0059.
-/// - `timeout` is `Duration::from_millis(>= 1)`.
-///
-/// # Postconditions
-/// - Returns `Ok(ProbeOutcome::Pass)` IFF the spawned process exits
-///   with status `0` within `timeout`.
-/// - Returns `Ok(ProbeOutcome::Fail { reason })` for:
-///   - Non-zero exit → `"exit <N>"`.
-///   - Timeout (process SIGKILLed at timeout boundary) →
-///     `"timeout after <duration>"`.
-///   - `execve` failure (binary not on PATH inside cgroup namespace,
-///     no execute permission) → `"exec: command not found"` /
-///     `"exec: permission denied"`.
-/// - Returns `Err(ProbeFailure::ExecSpawnFailed { reason })` ONLY
-///   for cgroup-placement-layer failures (ENOSPC / EACCES / ENOENT /
-///   EBUSY on the cgroup write itself, per ADR-0054 § 3 QR2
-///   amendment). The runner does NOT auto-retry these; retry-on-
-///   cgroup-error is a DELIVER-wave policy decision deliberately
-///   deferred so the trait contract stays stable.
-///
-/// # Edge cases
-/// - The spawned process inherits the workload's mount + network
-///   namespace via cgroup placement per C7 / ADR-0059. Sim adapter
-///   does NOT assert cgroup membership — that's a Tier 3 concern.
-/// - SIGKILL on timeout uses `cgroup.kill` (Linux 5.14+) per
-///   ADR-0059 § 3 — always available on the pinned 6.18 appliance
-///   kernel (ADR-0068). (The `child.kill()` / process-group SIGKILL
-///   reaps are belt-and-braces handle/grandchild cleanup, not a
-///   kernel-version fallback.)
-/// - The probe's stdout / stderr are discarded by default. (Phase 2+
-///   may add capture; not in Phase 1.)
-///
-/// # Observable invariants
-/// - The probe process is a member of `cgroup_scope_path` per its
-///   `/proc/<pid>/cgroup` readout. Asserted by Tier 3 integration
-///   test under `crates/overdrive-worker/tests/integration/
-///   exec_probe_cgroup_membership.rs`.
-/// - The probe does NOT leak descendant processes — `cgroup.kill`
-///   mass-kills any fork descendants. Operator-facing caveat per
-///   ADR-0059 Consequences (Negative): exec probes that fork
-///   workload-side children may have those children reaped on
-///   timeout cleanup.
-#[async_trait]
-pub trait ExecProber: Send + Sync + 'static {
-    /// Execute a single exec probe attempt.
-    async fn probe(
-        &self,
-        command: &[String],
-        cgroup_scope_path: &str,
-        timeout: Duration,
-    ) -> Result<ProbeOutcome, ProbeFailure>;
-}
-
 /// Probe-runner-internal failure variants — distinct from
 /// `ProbeOutcome::Fail` which represents an observed-as-failed probe
 /// outcome that flows into operator-visible state.
@@ -220,12 +154,6 @@ pub trait ExecProber: Send + Sync + 'static {
 /// payloads.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProbeFailure {
-    /// Cgroup-placement-layer failure during exec probe spawn (per
-    /// ADR-0054 §3 QR2 amendment). Reason carries the underlying
-    /// errno or syscall name in the same shape as `execve` failures.
-    /// Runner does NOT auto-retry.
-    #[error("exec probe spawn failed: {reason}")]
-    ExecSpawnFailed { reason: String },
     /// URL parse or transport-layer construction failure that
     /// escaped caller validation. Programmer error; surfaces via
     /// Earned Trust gate failure at runner startup.

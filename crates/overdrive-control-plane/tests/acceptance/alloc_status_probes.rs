@@ -35,8 +35,8 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV2,
-    WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, Service, WorkloadIntent,
+    WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -121,14 +121,16 @@ fn descriptor(
 
 /// Persist a `WorkloadIntent::Service` carrying `startup` + `liveness`
 /// probes, plus its kind discriminator record.
-async fn install_service(state: &AppState) -> ServiceV2 {
+async fn install_service(state: &AppState) -> Service {
     let spec = ServiceSpecInput {
         id: SERVICE_ID.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/payments".to_owned(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![descriptor(
@@ -149,7 +151,7 @@ async fn install_service(state: &AppState) -> ServiceV2 {
             /*inferred=*/ false,
         )],
     };
-    let svc = ServiceV2::from_submit(spec).expect("ServiceV2::from_submit");
+    let svc = Service::from_submit(spec).expect("Service::from_submit");
     let id = WorkloadId::new(SERVICE_ID).expect("valid workload id");
     let archived =
         WorkloadIntent::Service(svc.clone()).archive_for_store().expect("rkyv archive Service");
@@ -175,7 +177,12 @@ async fn install_job(state: &AppState) -> Job {
         id: JOB_ID.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_owned(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_owned(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("Job::from_submit");
     let archived = WorkloadIntent::Job(job.clone()).archive_for_store().expect("rkyv archive Job");

@@ -17,7 +17,7 @@
 //! an empty actual-set; S-BDB-01 was structurally impossible.
 //!
 //! This test enters through the post-fix shape: `read_job` projects
-//! `ServiceV2.{id, replicas, resources, driver}` into a kind-agnostic
+//! `Service.{id, replicas, resources, driver}` into a kind-agnostic
 //! `Job` value, the existing `Some(job) => ...` arm at
 //! `reconciler.rs:1466` emits `Action::StartAllocation`, the action
 //! shim drives `SimDriver::start`, and an `AllocStatusRow` with
@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, ResourcesInput, WorkloadKind};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
@@ -56,7 +56,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -90,7 +90,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// reconciler's `None`-arm fires every tick → zero `StartAllocation`
 /// actions emitted → zero `alloc_status` rows written.
 ///
-/// Post-fix: `read_job` projects `ServiceV2` into a kind-agnostic
+/// Post-fix: `read_job` projects `Service` into a kind-agnostic
 /// `Job`-shape → `Some(job)`-arm fires → `StartAllocation` emitted
 /// with `kind: WorkloadKind::Service` → action shim drives
 /// `SimDriver::start` → one Running row written with
@@ -101,11 +101,16 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     let clock = Arc::new(SimClock::new());
     let state = build_state(&tmp, clock.clone()).await;
 
-    let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
+    let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: vec![],
         readiness_probes: vec![],

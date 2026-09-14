@@ -37,8 +37,7 @@ use std::time::Duration;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Listener, ResourcesInput, ServiceV2, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, Listener, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -118,20 +117,25 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
     )
 }
 
-/// Build the canonical `ServiceV2` intent for `workload` + `listeners`. Shared
+/// Build the canonical `Service` intent for `workload` + `listeners`. Shared
 /// by [`persist_and_allocate`] and [`service_spec_digest`] so the persisted
 /// intent and the digest B-07 seeds its `SimServiceVipView` memo with are
 /// derived from ONE construction (they cannot drift).
-fn service_intent(workload: &str, listeners: &[Listener]) -> ServiceV2 {
+fn service_intent(workload: &str, listeners: &[Listener]) -> Service {
     let listener_inputs: Vec<ListenerInput> = listeners
         .iter()
         .map(|l| ListenerInput { port: l.port.get(), protocol: proto_str(l.protocol).to_string() })
         .collect();
-    ServiceV2::from_submit(ServiceSpecInput {
+    Service::from_submit(ServiceSpecInput {
         id: workload.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listener_inputs,
         startup_probes: vec![],
         readiness_probes: vec![],

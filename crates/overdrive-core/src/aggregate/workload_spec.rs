@@ -15,15 +15,8 @@
 //! with structured `ParseError` variants whose `Display` form names the
 //! offending section names.
 //!
-//! # Coexistence with the legacy `Job` aggregate
-//!
-//! Slice 01 ships the parser-side abstraction additively. The legacy
-//! `aggregate::Job` / `aggregate::JobSpecInput` types remain in
-//! `aggregate/mod.rs` as the production path until downstream slices
-//! (02–06) migrate every reader to `WorkloadSpec`. Per the slice spec:
-//! > `WorkloadSpec::Service` (no submit semantics yet — that's still
-//! > the legacy code path in this slice; full Service-side wiring is
-//! > Slice 04 vocabulary preservation).
+//! The parser-side input projects into the current VM-only workload
+//! aggregates and is shared by CLI and HTTP admission paths.
 //!
 //! # Cron validation
 //!
@@ -70,15 +63,9 @@ pub enum ParseError {
     #[error("missing required section: exactly one of [service] or [job] is required")]
     MissingKindSection,
 
-    /// Neither `[exec]` nor `[vm]` is present. Replaces the former
-    /// `MissingExec` (single cut, ADR-0083 §D4, GH #42).
-    #[error("missing required section: exactly one of [exec] or [vm] is required")]
+    /// The supported `[vm]` driver table is absent.
+    #[error("missing required section: [vm]")]
     MissingDriverSection,
-
-    /// Both `[exec]` and `[vm]` are present. Per ADR-0083 §D4, exactly
-    /// one driver table is required.
-    #[error("both [exec] and [vm] are present; exactly one driver section is required")]
-    MultipleDriverSections,
 
     /// `[resources]` is missing.
     #[error("missing required section: [resources]")]
@@ -95,7 +82,7 @@ pub enum ParseError {
     /// A field within an otherwise valid section failed to deserialise.
     #[error("{section}: {message}")]
     Field {
-        /// Section name (e.g. `[service]`, `[exec]`).
+        /// Section name (e.g. `[service]`, `[vm]`).
         section: &'static str,
         /// Per-field reason.
         message: String,
@@ -207,9 +194,9 @@ pub enum ParseError {
     ProbeFailureThresholdZero { probe_idx: usize },
 
     /// `type = "<value>"` is not one of the recognised mechanics
-    /// (`tcp` for step 01-02; `http` and `exec` land in later slices).
+    /// (`tcp` or `http`).
     #[error(
-        "[[health_check.*]][{probe_idx}]: unknown probe type `{found}` (supported types: tcp; http and exec land in later slices)"
+        "[[health_check.*]][{probe_idx}]: unknown probe type `{found}` (supported types: tcp, http)"
     )]
     UnknownProbeType {
         probe_idx: usize,
@@ -262,23 +249,6 @@ pub enum ParseError {
         probe_idx: usize,
         /// The offending `path` value, verbatim from the operator input.
         path: String,
-    },
-
-    // -----------------------------------------------------------------
-    // Step 02-02 — Exec probe variant per ADR-0057 §2 / US-03.
-    // -----------------------------------------------------------------
-    /// `[[health_check.startup]]` with `type = "exec"` carries an empty
-    /// `command` array (or omits it entirely). An exec probe MUST name
-    /// the binary to spawn; `command[0]` is the binary and
-    /// `command[1..]` (plus any `args`) are the argv tail per the
-    /// `ExecProber` trait contract. `probe_idx` is the 0-indexed
-    /// position within the per-role array.
-    #[error(
-        "[[health_check.startup]][{probe_idx}]: exec probe is missing required field `command` — add a non-empty array like `command = [\"/usr/bin/healthcheck\"]`"
-    )]
-    ExecProbeMissingCommand {
-        /// 0-indexed position within the per-role array.
-        probe_idx: usize,
     },
 
     // -----------------------------------------------------------------
@@ -449,35 +419,11 @@ impl std::fmt::Display for CronExpr {
 }
 
 // ---------------------------------------------------------------------------
-// Inner shape — exec / resources (wire-side twins for the parser)
+// Inner shape — vm / resources (wire-side twins for the parser)
 // ---------------------------------------------------------------------------
 
-/// Wire-side `[exec]` block. Mirrors `aggregate::ExecInput` in shape,
-/// kept private to the new parser surface to avoid coupling to the
-/// legacy aggregate path while Slice 01 ships the discriminator
-/// additively.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    utoipa::ToSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct ExecInput {
-    pub command: String,
-    pub args: Vec<String>,
-}
-
 /// Wire-side `[vm]` block (ADR-0083 §D4, GH #42). Mirrors
-/// `aggregate::VmInput` in shape, kept private to the new parser surface
-/// for the same reason `ExecInput` above is — see that type's doc
-/// comment.
+/// `aggregate::VmInput` in shape, kept private to the parser surface.
 #[derive(
     Debug,
     Clone,
@@ -502,15 +448,13 @@ pub struct VmInput {
     pub rootfs: String,
 }
 
-/// Driver-table dispatch on a `[job]` / `[schedule]` body (ADR-0083 §D4,
-/// GH #42). `[exec]` and `[vm]` are siblings; the presence-walk in
-/// [`WorkloadSpecInput::from_toml_str`] enforces exactly one is present
-/// before either variant is constructed.
+/// Driver-table dispatch on a `[job]` / `[schedule]` body. The supported
+/// driver table is `[vm]`; the presence-walk in
+/// [`WorkloadSpecInput::from_toml_str`] requires it before this value is
+/// constructed.
 ///
-/// This is a SEPARATE type from `aggregate::DriverInput` — see
-/// [`ExecInput`]'s doc comment for why this parser surface keeps its own
-/// wire-shape family (rkyv-archivable; the legacy `aggregate::DriverInput`
-/// is not).
+/// This is a separate type from the API-side `DriverInput` so the parser
+/// can retain its rkyv-archivable aggregate shape.
 #[derive(
     Debug,
     Clone,
@@ -525,16 +469,14 @@ pub struct VmInput {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DriverInput {
-    Exec(ExecInput),
     Vm(VmInput),
 }
 
 impl DriverInput {
-    /// Both variants carry a command; borrow it regardless of kind.
+    /// Borrow the in-guest command.
     #[must_use]
     pub fn command(&self) -> &str {
         match self {
-            Self::Exec(e) => &e.command,
             Self::Vm(v) => &v.command,
         }
     }
@@ -623,7 +565,7 @@ pub struct Listener {
 // Per-kind specs
 // ---------------------------------------------------------------------------
 
-// `ServiceSpec` (= `ServiceSpecV3`) lives in
+// `ServiceSpec` (= the current VM-only V1 payload) lives in
 // `crate::aggregate::service_spec`. It carries the existing driver union
 // and three `Vec<ProbeDescriptor>` fields (startup / readiness / liveness),
 // and is wrapped by `ServiceSpecEnvelope`. We re-import here
@@ -647,9 +589,9 @@ pub use crate::aggregate::service_spec::ServiceSpec;
 )]
 pub struct JobSpec {
     pub id: String,
-    /// Driver-table choice (ADR-0083 §D4, GH #42) — `[exec]` or `[vm]`,
-    /// exactly one, enforced by [`WorkloadSpecInput::from_toml_str`]'s
-    /// presence-walk before this value is ever constructed.
+    /// Driver-table choice — `[vm]`, enforced by
+    /// [`WorkloadSpecInput::from_toml_str`]'s presence-walk before this
+    /// value is ever constructed.
     pub driver: DriverInput,
     pub resources: ResourcesInput,
 }
@@ -756,17 +698,6 @@ impl WorkloadSpecInput {
         }
     }
 
-    /// Borrow the driver-table command as `&str` regardless of kind —
-    /// `[exec]`'s command or, for a VM driver, the in-guest command.
-    #[must_use]
-    pub fn exec_command(&self) -> &str {
-        match self {
-            Self::Service(s) => s.driver.command(),
-            Self::Job(j) => j.driver.command(),
-            Self::Schedule(s) => s.job_inner.driver.command(),
-        }
-    }
-
     /// Parse a `WorkloadSpecInput` from raw TOML bytes.
     ///
     /// Per ADR-0047 §2 this is the single driving port for the parser.
@@ -780,15 +711,12 @@ impl WorkloadSpecInput {
     /// combination per the AC matrix in `slice-01-parser-kind-discriminator.md`:
     /// `[service]+[job]` → `MixedServiceAndJob`; `[schedule]` alone →
     /// `ScheduleWithoutJob`; `[schedule]+[service]` → `ScheduleWithService`;
-    /// both `[exec]` and `[vm]` present → `MultipleDriverSections`; neither
-    /// present → `MissingDriverSection` (ADR-0083 §D4, GH #42 — replaces
-    /// the former `MissingExec`, single cut); missing `[resources]` →
+    /// missing `[vm]` → `MissingDriverSection`; missing `[resources]` →
     /// `MissingResources`; missing `cron` in `[schedule]` →
     /// `MissingCron`; underlying TOML parse failures → `Toml(_)`.
     ///
-    /// `[service]`, `[job]`, and `[schedule]` each require exactly one of
-    /// `[exec]` or `[vm]`. VM Services may declare only HTTP/TCP probes;
-    /// an Exec probe is rejected before intent construction per ADR-0091.
+    /// `[service]`, `[job]`, and `[schedule]` each require the `[vm]`
+    /// driver table. Services may declare HTTP/TCP probes.
     pub fn from_toml_str(src: &str) -> Result<Self, ParseError> {
         // Parse to a generic TOML value so we can inspect section presence
         // before mapping to the variant. `toml` is a dev-dep on this
@@ -801,7 +729,7 @@ impl WorkloadSpecInput {
             .as_table()
             .ok_or_else(|| ParseError::Toml("top-level TOML must be a table".to_string()))?;
 
-        let SectionPresence { service: has_service, schedule: has_schedule, vm: has_vm } =
+        let SectionPresence { service: has_service, schedule: has_schedule } =
             SectionPresence::validated(table)?;
 
         // Inner-section deserialisation. Each section is parsed into its
@@ -820,11 +748,7 @@ impl WorkloadSpecInput {
                 })?;
             let id = parse_string_field(svc_table, "id", "[service]")?;
             let replicas = parse_u32_field_default(svc_table, "replicas", 1, "[service]")?;
-            let driver = if has_vm {
-                DriverInput::Vm(parse_section(table, "vm")?)
-            } else {
-                DriverInput::Exec(parse_section(table, "exec")?)
-            };
+            let driver = DriverInput::Vm(parse_section(table, "vm")?);
             // [[listener]] is a top-level array-of-tables ALONGSIDE
             // [service] (NOT nested under it) per #164 converged
             // decision. Walk the top-level table for a `listener` key
@@ -840,8 +764,8 @@ impl WorkloadSpecInput {
             let _ = startup_was_explicit;
 
             // Step 03-01 / Slice 04 — readiness probe section. Reuses
-            // the 02-01 (HTTP) / 02-02 (Exec) / 01-02 (TCP) mechanic
-            // parse path via `parse_one_role_probe`; sets
+            // the shared HTTP/TCP mechanic parse path via
+            // `parse_one_role_probe`; sets
             // `role = Readiness` and applies the ADR-0057 §2 /
             // ADR-0055 §6 `success_threshold` default of 1. Absent
             // section → no readiness probes (the backward-compat
@@ -858,11 +782,6 @@ impl WorkloadSpecInput {
             // reconciler's liveness branch is a no-op for this Service).
             let liveness_probes = parse_liveness_probes(table)?;
 
-            if matches!(driver, DriverInput::Vm(_)) {
-                validate_vm_service_probes(&startup_probes, "[[health_check.startup]]")?;
-                validate_vm_service_probes(&readiness_probes, "[[health_check.readiness]]")?;
-                validate_vm_service_probes(&liveness_probes, "[[health_check.liveness]]")?;
-            }
             return Ok(Self::Service(ServiceSpec {
                 id,
                 replicas,
@@ -898,13 +817,9 @@ impl WorkloadSpecInput {
             ParseError::Field { section: "[job]", message: "must be a table".to_string() }
         })?;
         let id = parse_string_field(job_table, "id", "[job]")?;
-        // Driver-table dispatch (ADR-0083 §D4, GH #42): the presence-walk
-        // above already enforced exactly one of [exec] / [vm] is present.
-        let driver: DriverInput = if has_vm {
-            DriverInput::Vm(parse_section(table, "vm")?)
-        } else {
-            DriverInput::Exec(parse_section(table, "exec")?)
-        };
+        // The presence-walk above already required the supported [vm]
+        // driver table.
+        let driver = DriverInput::Vm(parse_section(table, "vm")?);
         let job_inner = JobSpec { id, driver, resources };
 
         if has_schedule {
@@ -942,8 +857,6 @@ struct SectionPresence {
     service: bool,
     /// `[schedule]` is present (so the job-family path is a Schedule).
     schedule: bool,
-    /// `[vm]` is the declared driver table rather than `[exec]`.
-    vm: bool,
 }
 
 impl SectionPresence {
@@ -957,7 +870,6 @@ impl SectionPresence {
         let has_service = table.contains_key("service");
         let has_job = table.contains_key("job");
         let has_schedule = table.contains_key("schedule");
-        let has_exec = table.contains_key("exec");
         let has_vm = table.contains_key("vm");
 
         if has_service && has_job {
@@ -973,10 +885,7 @@ impl SectionPresence {
             return Err(ParseError::MissingKindSection);
         }
 
-        if has_exec && has_vm {
-            return Err(ParseError::MultipleDriverSections);
-        }
-        if !has_exec && !has_vm {
+        if !has_vm {
             return Err(ParseError::MissingDriverSection);
         }
 
@@ -984,27 +893,8 @@ impl SectionPresence {
             return Err(ParseError::MissingResources);
         }
 
-        Ok(Self { service: has_service, schedule: has_schedule, vm: has_vm })
+        Ok(Self { service: has_service, schedule: has_schedule })
     }
-}
-
-const VM_EXEC_PROBE_DIAGNOSTIC: &str = "exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280";
-
-fn validate_vm_service_probes(
-    probes: &[crate::aggregate::ProbeDescriptor],
-    section: &'static str,
-) -> Result<(), ParseError> {
-    if let Some((position, _)) = probes
-        .iter()
-        .enumerate()
-        .find(|(_, probe)| matches!(probe.mechanic, crate::aggregate::ProbeMechanic::Exec { .. }))
-    {
-        return Err(ParseError::Field {
-            section,
-            message: format!("entry [{position}]: {VM_EXEC_PROBE_DIAGNOSTIC}"),
-        });
-    }
-    Ok(())
 }
 
 /// Deserialise a top-level TOML section into a typed shape, mapping
@@ -1059,12 +949,11 @@ fn parse_u32_field_default(
     })
 }
 
-/// Map an internal section identifier (`exec`, `resources`, `service`,
-/// `job`, `schedule`) to its operator-facing display label
-/// (`[exec]`, `[resources]`, `[service]`, `[job]`, `[schedule]`).
+/// Map an internal section identifier (`vm`, `resources`, `service`,
+/// `job`, `schedule`) to its operator-facing display label.
 const fn section_label(name: &str) -> &'static str {
     match name.as_bytes() {
-        b"exec" => "[exec]",
+        b"vm" => "[vm]",
         b"resources" => "[resources]",
         b"service" => "[service]",
         b"job" => "[job]",
@@ -1194,7 +1083,7 @@ fn format_listener_pair(l: Listener) -> String {
 
 // ---------------------------------------------------------------------------
 // Step 01-02 — [[health_check.startup]] (TCP only) parsing + ADR-0058
-// default-inference. HTTP / Exec mechanics land in slices 02-01 / 02-02.
+// default-inference. HTTP and TCP are the supported mechanics.
 // ---------------------------------------------------------------------------
 
 use crate::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
@@ -1296,7 +1185,7 @@ fn parse_startup_probes(
 }
 
 /// Parse one `[[health_check.startup]]` entry. TCP variant only this
-/// step; HTTP / Exec land in slices 02-01 / 02-02.
+/// step; HTTP and TCP use the shared mechanic parser.
 fn parse_one_startup_probe(
     entry: &toml::value::Table,
     probe_idx: usize,
@@ -1332,8 +1221,7 @@ fn parse_one_startup_probe(
 
 /// Parse the `type`-discriminated mechanic body shared by every role's
 /// probe entries (startup / readiness / liveness). Extracted from
-/// `parse_one_startup_probe` so the readiness parser (step 03-01 /
-/// Slice 04) reuses the exact 01-02 (TCP) / 02-01 (HTTP) / 02-02 (Exec)
+/// `parse_one_startup_probe` so every role reuses the same HTTP/TCP
 /// mechanic parse paths verbatim rather than forking them.
 fn parse_probe_mechanic(
     entry: &toml::value::Table,
@@ -1369,7 +1257,6 @@ fn parse_probe_mechanic(
             Ok(ProbeMechanic::Tcp { host, port: port_u16 })
         }
         "http" => parse_http_mechanic(entry, probe_idx),
-        "exec" => parse_exec_mechanic(entry, probe_idx),
         other => Err(ParseError::UnknownProbeType { probe_idx, found: other.to_string() }),
     }
 }
@@ -1383,7 +1270,7 @@ const READINESS_INTERVAL_DEFAULT_S: u32 = 2;
 
 /// Discover and parse `[[health_check.readiness]]` per ADR-0057 §2 /
 /// Slice 04. Reuses the role-agnostic [`parse_probe_mechanic`] for the
-/// TCP/HTTP/Exec body (no fork of the 01-02/02-01/02-02 paths).
+/// TCP/HTTP body.
 ///
 /// Unlike startup (which synthesises a default TCP probe per ADR-0058
 /// when absent), readiness has NO default-inference: an omitted
@@ -1476,8 +1363,7 @@ const LIVENESS_INTERVAL_DEFAULT_S: u32 = 2;
 
 /// Discover and parse `[[health_check.liveness]]` per ADR-0057 §2 /
 /// Slice 05 (step 03-02). Reuses the role-agnostic
-/// [`parse_probe_mechanic`] for the TCP/HTTP/Exec body (no fork of the
-/// 01-02 / 02-01 / 02-02 paths).
+/// [`parse_probe_mechanic`] for the TCP/HTTP body.
 ///
 /// Like readiness (and unlike startup), liveness has NO
 /// default-inference: an omitted `[[health_check.liveness]]` section
@@ -1630,72 +1516,6 @@ fn parse_http_mechanic(
 
     let host = entry.get("host").and_then(toml::Value::as_str).map(str::to_owned);
     Ok(ProbeMechanic::Http { path: path.to_owned(), port, host })
-}
-
-/// Parse the `type = "exec"` mechanic body per ADR-0057 §2 / US-03.
-///
-/// Required field: `command` (a non-empty array of strings; `command[0]`
-/// is the binary, `command[1..]` are argv). Optional `args` (an array of
-/// strings) is appended to the argv tail — the operator may split the
-/// binary and its arguments across the two fields or inline everything
-/// in `command`; the parser concatenates them into the single
-/// `ProbeMechanic::Exec { command }` vector the `ExecProber` trait
-/// consumes (binary at index 0, every other token an argv tail).
-///
-/// Edge cases:
-/// - `command` absent OR an empty array →
-///   [`ParseError::ExecProbeMissingCommand`]. An exec probe with no
-///   binary to spawn is meaningless.
-/// - `command` present but not an array of strings, or `args` not an
-///   array of strings → [`ParseError::Field`] with a diagnostic naming
-///   the offending field.
-fn parse_exec_mechanic(
-    entry: &toml::value::Table,
-    probe_idx: usize,
-) -> Result<ProbeMechanic, ParseError> {
-    // `command` is required and must be a non-empty array of strings.
-    let command = match entry.get("command") {
-        None => return Err(ParseError::ExecProbeMissingCommand { probe_idx }),
-        Some(value) => parse_string_array(value, "command", probe_idx)?,
-    };
-    if command.is_empty() {
-        return Err(ParseError::ExecProbeMissingCommand { probe_idx });
-    }
-
-    // `args` is optional; absent → empty. Appended to the argv tail of
-    // the binary so the final `command` vector is
-    // `[binary, command_tail.., args..]`.
-    let mut command_line = command;
-    if let Some(value) = entry.get("args") {
-        let extra = parse_string_array(value, "args", probe_idx)?;
-        command_line.extend(extra);
-    }
-
-    Ok(ProbeMechanic::Exec { command: command_line })
-}
-
-/// Parse a TOML value expected to be an array of strings into a
-/// `Vec<String>`. Surfaces a [`ParseError::Field`] naming `field` when
-/// the value is not an array, or contains a non-string element.
-fn parse_string_array(
-    value: &toml::Value,
-    field: &str,
-    probe_idx: usize,
-) -> Result<Vec<String>, ParseError> {
-    let arr = value.as_array().ok_or_else(|| ParseError::Field {
-        section: "[[health_check.*]]",
-        message: format!("entry [{probe_idx}]: field `{field}` must be an array of strings"),
-    })?;
-    arr.iter()
-        .map(|element| {
-            element.as_str().map(str::to_owned).ok_or_else(|| ParseError::Field {
-                section: "[[health_check.*]]",
-                message: format!(
-                    "entry [{probe_idx}]: every element of `{field}` must be a string"
-                ),
-            })
-        })
-        .collect()
 }
 
 /// Local intermediate-error variant for the zero-field rejection

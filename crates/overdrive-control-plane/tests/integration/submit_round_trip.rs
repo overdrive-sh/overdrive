@@ -27,7 +27,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput,
 };
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
@@ -161,7 +161,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -171,7 +176,12 @@ fn payments_spec_alt() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

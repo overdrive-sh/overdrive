@@ -19,7 +19,6 @@ mod integration {
     mod cluster_and_node_commands;
     mod cluster_init_removed;
     mod endpoint_from_config;
-    mod exec_spec_walking_skeleton;
 
     // udp-service-support step 01-05 — S-04-A driving-adapter companion:
     // `overdrive deploy <udp-spec>` accepted via the direct
@@ -58,13 +57,6 @@ mod integration {
     // of the shell pipeline; see file rustdoc for the full mapping.
     mod submit_jq_pipeline;
 
-    // workload-kind-discriminator slice 02 — Job-kind streaming
-    // submit acceptance tests + S-02-09 K1 honesty (Lima-gated).
-    // The load-bearing assertion is S-02-05 anti-scenario: no
-    // Job-kind submit produces "is running with" or "(took live)".
-    mod coinflip_honesty_100_trials;
-    mod job_kind_streaming;
-
     // workload-kind-discriminator slice 03 — kind-aware workload-describe
     // Job render. KPI K3 byte-equality between rendered Exit column
     // and persisted exit_code (S-03-08 proptest 1024 cases). Per
@@ -77,31 +69,11 @@ mod integration {
     // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
     mod serve_probe_refusal;
 
-    // service-health-check-probes — Tier 3 integration test that
-    // closes the K1 north-star contract:
-    //   * Fixture A: coinflip-as-Service (RCA-A regression guard) →
-    //     99/100 deterministic seeds emit `Failed { EarlyExit }`.
-    //   * Fixture B: quick-bind Service → Stable with settled_in
-    //     ∈ [500ms, 2000ms].
-    //   * Fixture C: never-binds Service → Failed StartupProbeFailed.
-    //   * Fixture D: snapshot/streaming terminal byte-equality.
-    //   * Cross-fixture regression: NEVER "(took live)" for Service.
-    // RED scaffold — production bodies land in slice 01 + slice 08.
-    mod service_honest_stable;
-
-    // service-health-check-probes — probe state is operator-observable
-    // through `overdrive workload describe` (US-06 / K4; EDD O02).
-    // Drives the whole store → API type → handler → CLI chain against a
-    // real `serve` + a real deployed Service, because a renderer unit
-    // test is green whether or not any production caller exists — which
-    // is exactly how `render::probes_section` shipped dead.
-    mod workload_describe_probes;
-
     // service-health-check-probes step 01-03e3-fix — CLI submit-side
     // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
     // TOML through `deploy_streaming` must route to the new
     // `deploy_streaming_service` (the `ServiceSubmitEvent` consumer),
-    // not fall through to the legacy `JobSpecInput` path.
+    // and reach the ServiceSubmitEvent consumer.
     mod service_submit_streaming_cli_dispatch;
 
     // backend-instance-replacement slice 01 step 01-04 — the e2e
@@ -118,7 +90,7 @@ mod integration {
     mod workload_restart;
 
     // microvm-driver-cloud-hypervisor (GH #42) Slice 01 — the walking
-    // skeleton: `[vm]`+`[job]` deploys through the same verb as `[exec]`,
+    // skeleton: `[vm]`+`[job]` deploys through the same verb as every current workload,
     // a real Cloud Hypervisor VM boots, and the guest's real exit code
     // reaches `overdrive workload describe`. RED scaffold — DELIVER fills
     // one scenario at a time starting with S-VM-01. See

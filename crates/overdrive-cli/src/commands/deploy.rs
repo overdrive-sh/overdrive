@@ -29,9 +29,9 @@ use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome, SubmitWorklo
 use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
-    AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
-    JobSpecInput, ParseError, ParserDriverInput, ResourcesInput as LegacyResourcesInput,
-    ServiceSpec, ServiceV2, VmInput, WorkloadSpecInput,
+    AggregateError, DriverInput, IntentKey, Job, JobSpec, JobSpecInput, ParseError,
+    ParserDriverInput, ResourcesInput as LegacyResourcesInput, Service, ServiceSpec, VmInput,
+    WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
@@ -200,9 +200,6 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
             id: job_spec.id,
             replicas: 1,
             driver: match job_spec.driver {
-                ParserDriverInput::Exec(exec) => {
-                    DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
-                }
                 ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
                     command: vm.command,
                     args: vm.args,
@@ -284,8 +281,8 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
 /// [`ServiceSpecInput`] (`u16` port + `String` protocol for JSON
 /// tolerance) and POSTs as `SubmitSpecInput::Service(_)`. The listener
 /// protocol threads through unchanged: the server's
-/// `ServiceV2::from_submit` re-parses the `String` token back into
-/// `Proto`, so the persisted `WorkloadIntent::Service(ServiceV2)`
+/// `Service::from_submit` re-parses the `String` token back into
+/// `Proto`, so the persisted `WorkloadIntent::Service(Service)`
 /// carries the operator's declared protocol verbatim.
 ///
 /// Returns the same [`DeployOutput`] shape as the Job lane so the
@@ -319,8 +316,8 @@ async fn deploy_service(
 
     // Client-side validation via the shared ADR-0011 constructor —
     // same fast-fail discipline as the Job lane's `Job::from_submit`.
-    let _validated: ServiceV2 =
-        ServiceV2::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let _validated: Service =
+        Service::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
 
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
@@ -545,22 +542,17 @@ async fn deploy_streaming_job(
     args: DeployArgs,
     job_spec: JobSpec,
 ) -> Result<DeployStreamingOutput, CliError> {
-    // Translate the kind-discriminated `JobSpec` to the legacy
-    // `JobSpecInput` wire shape the server's spec-ingest still
-    // expects (server-side `WorkloadSpec` ingest is the next slice's
-    // work). The translation is mechanical: the `JobSpec` already
-    // carries the same fields — id, exec, resources.
-    // The kind-discriminator parser produces `ExecInput`/`ResourcesInput`
-    // types living in `aggregate::workload_spec`; the legacy `JobSpecInput`
-    // wire shape uses the same-named types in `aggregate::mod`. The
-    // shapes are field-identical; project field-by-field.
+    // Translate the kind-discriminated `JobSpec` to the current
+    // `JobSpecInput` wire shape the server's spec-ingest expects.
+    // The translation is mechanical: the `JobSpec` already
+    // carries the same fields — id, VM driver, resources.
+    // The kind-discriminator parser produces parser-side VM/resources
+    // types; the shared wire shape carries the same fields. Project
+    // field-by-field.
     let spec_input = JobSpecInput {
         id: job_spec.id,
         replicas: 1,
         driver: match job_spec.driver {
-            ParserDriverInput::Exec(exec) => {
-                DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
-            }
             ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
                 command: vm.command,
                 args: vm.args,
@@ -612,9 +604,6 @@ async fn deploy_streaming_job(
 /// `String` protocol) and POSTs as `SubmitSpecInput::Service(_)`.
 fn project_service_driver(driver: ParserDriverInput) -> DriverInput {
     match driver {
-        ParserDriverInput::Exec(exec) => {
-            DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
-        }
         ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
             command: vm.command,
             args: vm.args,
@@ -631,7 +620,7 @@ async fn deploy_streaming_service(
     // Project parser-side `ServiceSpec` → wire-side `ServiceSpecInput`.
     // The parser-side `Listener` carries `(NonZeroU16, Proto)`; the
     // wire-side `ListenerInput` carries `(u16, String)` for JSON
-    // tolerance. Both sides go through `ServiceV2::from_submit` server-
+    // tolerance. Both sides go through `Service::from_submit` server-
     // side; the client-side fast-fail validation below also exercises
     // the same constructor for symmetry with the Job-kind lane.
     let listeners: Vec<ListenerInput> = service_spec
@@ -643,7 +632,7 @@ async fn deploy_streaming_service(
     // populates `service_spec.startup_probes` from the TOML
     // `[[health_check.startup]]` blocks (plus default-TCP inference
     // per ADR-0058); the wire envelope carries them through to
-    // `ServiceV2::from_submit` server-side. Readiness / liveness
+    // `Service::from_submit` server-side. Readiness / liveness
     // probe vecs are reserved for future slices (02-01 / 02-02)
     // and pass through as the empty vecs the parser populates.
     let spec_input = ServiceSpecInput {
@@ -662,8 +651,8 @@ async fn deploy_streaming_service(
 
     // Client-side validation via the shared ADR-0011 constructor — same
     // discipline as the Job-kind lane's `Job::from_submit` fast-fail.
-    let validated: ServiceV2 =
-        ServiceV2::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated: Service =
+        Service::from_submit(spec_input.clone()).map_err(aggregate_to_cli_error)?;
     let validated_workload_id = validated.id.to_string();
 
     let client = ApiClient::from_config(&args.config_path)?;

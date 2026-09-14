@@ -24,14 +24,10 @@
 //!
 //! # Sequencing note
 //!
-//! The slice 05 surface is render-side + `IntentStore`-side. The
-//! production `deploy_streaming` parser is still legacy
-//! `JobSpecInput`; slice 02 wires the `WorkloadSpec` discriminator
-//! into `deploy_streaming`. These tests therefore exercise the slice
-//! 05 surfaces directly (render functions, `IntentKey` derivation,
-//! `IntentStore` persistence helper) — not the legacy
-//! `deploy_streaming` path. The matching slice-02 wiring covers the
-//! end-to-end CLI flow later.
+//! The slice 05 surface is render-side + `IntentStore`-side. Schedule
+//! execution remains deferred, so these tests exercise the direct
+//! render, `IntentKey`, and persistence surfaces without a streaming
+//! execution path.
 
 use overdrive_cli::render::schedule::{
     SCHEDULE_EXECUTION_TRACKING_URL, schedule_alloc_status_block, schedule_submit_echo,
@@ -60,9 +56,11 @@ const NIGHTLY_BACKUP_TOML: &str = r#"
 [job]
 id = "nightly-backup"
 
-[exec]
+[vm]
 command = "/bin/echo"
 args = ["nightly", "backup"]
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -201,9 +199,11 @@ fn extract_url(text: &str) -> Option<String> {
 #[test]
 fn schedule_05_03_schedule_without_job_cli_handler_rejects() {
     let bad = r#"
-[exec]
+[vm]
 command = "/bin/echo"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100

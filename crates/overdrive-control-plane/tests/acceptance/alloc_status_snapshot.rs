@@ -32,9 +32,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TerminalCondition;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -100,9 +98,11 @@ fn sample_spec() -> JobSpecInput {
         id: sample_job_id_str().to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/payments".to_string(),
             args: vec!["--port".to_string(), "8080".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     }
 }

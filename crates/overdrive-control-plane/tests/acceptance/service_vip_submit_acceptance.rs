@@ -15,7 +15,7 @@
 //!   VIP field.
 //! * S-VIP-03 `multi_listener_one_vip` — two listeners on different
 //!   `(port, protocol)` tuples share ONE Service-level VIP. Listener
-//!   uniqueness is enforced by `ServiceV2::from_submit`; the allocator
+//!   uniqueness is enforced by `Service::from_submit`; the allocator
 //!   issues one VIP per `WorkloadIntent::Service(_).spec_digest()`.
 //! * S-VIP-04 `idempotent_resubmit_same_vip` — resubmitting a byte-
 //!   identical Service spec returns the SAME VIP. The allocator memo is
@@ -53,7 +53,7 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status, submit_workload};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -140,7 +140,12 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listeners
             .into_iter()
             .map(|(port, protocol)| ListenerInput { port, protocol: protocol.to_owned() })

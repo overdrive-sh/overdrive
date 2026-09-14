@@ -26,7 +26,7 @@ use overdrive_control_plane::api::{
     IdempotencyOutcome, NodeList, NodeRowBody, SubmitWorkloadRequest, SubmitWorkloadResponse,
     WorkloadDescription,
 };
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput, VmInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
 use proptest::prelude::*;
@@ -355,6 +355,5 @@ fn every_api_type_implements_utoipa_to_schema() {
     // `OverdriveApi`'s `components(schemas(...))`.
     assert_to_schema::<JobSpecInput>();
     assert_to_schema::<ResourcesInput>();
-    assert_to_schema::<ExecInput>();
     assert_to_schema::<DriverInput>();
 }

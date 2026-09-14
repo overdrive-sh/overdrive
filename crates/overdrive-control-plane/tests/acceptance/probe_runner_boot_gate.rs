@@ -31,7 +31,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunnerError;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -104,14 +104,13 @@ where
 async fn given_passing_tcp_prober_when_probe_gate_runs_then_returns_probe_runner() {
     let tcp = Arc::new(SimTcpProber::new()); // empty queue → Pass
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock: Arc<dyn Clock> = Arc::new(SimClock::default());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("probe-gate-pass-test").expect("valid NodeId"),
         0,
     ));
 
-    let result = compose_and_probe_runner_gate(tcp, http, exec, clock, obs).await;
+    let result = compose_and_probe_runner_gate(tcp, http, clock, obs).await;
 
     let runner = result.expect("probe-gate must succeed when TCP adapter returns Pass");
     assert_eq!(
@@ -145,14 +144,13 @@ async fn given_failing_tcp_prober_when_probe_gate_runs_then_returns_typed_refusa
         reason: "synthetic injection: sacrificial loopback refused".to_owned(),
     });
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock: Arc<dyn Clock> = Arc::new(SimClock::default());
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("probe-gate-fail-test").expect("valid NodeId"),
         0,
     ));
 
-    let result = compose_and_probe_runner_gate(tcp, http, exec, clock, obs).await;
+    let result = compose_and_probe_runner_gate(tcp, http, clock, obs).await;
 
     let Err(err) = result else {
         panic!("probe-gate must refuse when TCP adapter returns Fail");

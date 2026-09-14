@@ -12,9 +12,8 @@
 //! # Port-to-port
 //!
 //! The driving port is the `restart_workload` axum handler, invoked
-//! directly with a real `LocalIntentStore`-backed `AppState` (the
-//! `submit_job_handler_rejects_empty_exec_command_with_400.rs` pattern —
-//! no reqwest, no TLS, no port binding). The driven-port assertions are
+//! directly with a real `LocalIntentStore`-backed `AppState` (no reqwest,
+//! no TLS, no port binding). The driven-port assertions are
 //! taken at the `IntentStore` back-door read boundary (the generation key
 //! is absent ⇒ no bump landed) and at the runtime broker's counter
 //! snapshot (zero queued ⇒ no eval enqueued). No internal helper is

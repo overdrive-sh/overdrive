@@ -29,7 +29,7 @@ use std::time::Duration;
 use proptest::prelude::*;
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -74,7 +74,12 @@ pub fn make_job(id: &str, resources: Resources) -> Job {
         id: jid(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources,
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -205,7 +210,12 @@ pub fn arb_job() -> impl Strategy<Value = Job> {
         id: WorkloadId::new(&id).expect("valid WorkloadId"),
         replicas: NonZeroU32::new(replicas).expect("replicas > 0"),
         resources,
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
 }
 

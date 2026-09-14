@@ -53,9 +53,11 @@ replicas = 1
 port = {port}
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -80,7 +82,7 @@ port = {port}
                 prop_assert_eq!(host.as_ref(), None::<&String>,
                     "host omitted in TOML → None (defaulted at probe time, not parse time)");
             }
-            other => prop_assert!(false, "expected Http mechanic, got {:?}", other),
+            other @ ProbeMechanic::Tcp { .. } => prop_assert!(false, "expected Http mechanic, got {:?}", other),
         }
         prop_assert_eq!(p.timeout_seconds, 5);
         prop_assert_eq!(p.interval_seconds, 2);
@@ -116,107 +118,6 @@ proptest! {
     }
 }
 
-// S-SHCP-PARSE-03 (US-03 / K1 / ADR-0057 §1) — Exec probe parse +
-// defaults. Proptest over arbitrary non-empty `command` arrays and
-// optional `args` arrays: a `type = "exec"` startup probe parses into
-// `ProbeMechanic::Exec { command }` where `command` is the
-// concatenation `[command_binary, command_extra.., args..]` (binary at
-// index 0, the rest as argv tail per the ExecProber trait contract),
-// with the ADR-0057 §2 defaults (timeout 5, interval 2, max_attempts
-// 30) and `inferred: false`.
-//
-// Universe (port-exposed observable surface of the parsed descriptor):
-// mechanic.command, timeout_seconds, interval_seconds, max_attempts,
-// inferred. Every slot is asserted; none silently drifts.
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
-    #[test]
-    fn health_check_startup_exec_parses_with_defaults(
-        id in service_id_strategy(),
-        port in port_strategy(),
-        command in exec_command_strategy(),
-        args in exec_args_strategy(),
-    ) {
-        let command_toml = toml_string_array(&command);
-        let args_toml = toml_string_array(&args);
-        let toml = format!(
-            r#"
-[service]
-id = "{id}"
-replicas = 1
-
-[[listener]]
-port = {port}
-protocol = "tcp"
-
-[exec]
-command = "/usr/bin/server"
-args = []
-
-[resources]
-cpu_milli = 100
-memory_bytes = 134217728
-
-[[health_check.startup]]
-type = "exec"
-command = {command_toml}
-args = {args_toml}
-"#
-        );
-        let input = WorkloadSpecInput::from_toml_str(&toml)
-            .expect("Exec probe parse must succeed");
-        let svc = unwrap_service(input);
-        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one declared exec probe");
-        let p: &ProbeDescriptor = &svc.startup_probes[0];
-        prop_assert_eq!(p.role, ProbeRole::Startup);
-        // The argv the ExecProber receives is `command` followed by
-        // `args` — binary at index 0, every other token an argv tail.
-        let mut expected_argv = command;
-        expected_argv.extend(args.iter().cloned());
-        match &p.mechanic {
-            ProbeMechanic::Exec { command: parsed } => {
-                prop_assert_eq!(parsed, &expected_argv,
-                    "parsed argv is `command` ++ `args`");
-            }
-            other => prop_assert!(false, "expected Exec mechanic, got {:?}", other),
-        }
-        prop_assert_eq!(p.timeout_seconds, 5);
-        prop_assert_eq!(p.interval_seconds, 2);
-        prop_assert_eq!(p.max_attempts, 30);
-        prop_assert!(!p.inferred, "operator-declared probe carries inferred=false");
-    }
-}
-
-// S-SHCP-PARSE-04 (US-03 / K5 / ADR-0057 §3) — Exec probe with an
-// EMPTY `command` array yields
-// `ParseError::ExecProbeMissingCommand { probe_idx }`. Proptest over
-// arbitrary optional `args` — the missing-command verdict is invariant
-// in the presence/absence of args (an empty `command` is the trigger),
-// and the reported probe_idx is the observed position (0 for the
-// single-probe TOML).
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
-    #[test]
-    fn health_check_exec_empty_command_yields_named_parse_error(
-        args in exec_args_strategy(),
-    ) {
-        let args_toml = toml_string_array(&args);
-        let toml = format!(
-            "{SERVICE_PRELUDE}\n\
-             [[health_check.startup]]\n\
-             type = \"exec\"\n\
-             command = []\n\
-             args = {args_toml}\n"
-        );
-        match parse_err(&toml) {
-            ParseError::ExecProbeMissingCommand { probe_idx } => {
-                prop_assert_eq!(probe_idx, 0, "single-probe TOML reports probe_idx 0");
-            }
-            other => prop_assert!(false, "expected ExecProbeMissingCommand, got {:?}", other),
-        }
-    }
-}
-
 /// Arbitrary `[[health_check.<role>]]` TOML fragment naming any of the
 /// three roles with a minimal valid TCP body. Used by the kind-
 /// rejection proptests so the rejection is shown invariant across
@@ -242,7 +143,7 @@ proptest! {
     ) {
         let toml = format!(
             "[job]\nid = \"j\"\n\n\
-             [exec]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
+             [vm]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
              [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
              {health_check}"
         );
@@ -272,7 +173,7 @@ proptest! {
         let toml = format!(
             "[job]\nid = \"j\"\n\n\
              [schedule]\ncron = \"* * * * *\"\n\n\
-             [exec]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
+             [vm]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
              [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
              {health_check}"
         );
@@ -473,38 +374,6 @@ fn http_path_strategy() -> impl Strategy<Value = String> {
         .prop_map(|chars| format!("/{}", chars.into_iter().collect::<String>()))
 }
 
-/// Arbitrary non-empty exec `command` array — each token is a short
-/// lowercase identifier with a leading `/` on the first (the binary
-/// path). Used by the S-SHCP-PARSE-03 happy-path proptest.
-fn exec_command_strategy() -> impl Strategy<Value = Vec<String>> {
-    proptest::collection::vec(exec_token_strategy(), 1..=4).prop_map(|mut tokens| {
-        // First token is the binary path — lead with `/`.
-        tokens[0] = format!("/usr/bin/{}", tokens[0]);
-        tokens
-    })
-}
-
-/// Arbitrary (possibly empty) exec `args` array of short tokens.
-fn exec_args_strategy() -> impl Strategy<Value = Vec<String>> {
-    proptest::collection::vec(exec_token_strategy(), 0..=4)
-}
-
-/// A single exec token — a short lowercase identifier with no TOML
-/// metacharacters (so `toml_string_array` produces valid TOML without
-/// escaping concerns).
-fn exec_token_strategy() -> impl Strategy<Value = String> {
-    proptest::collection::vec(proptest::char::range('a', 'z'), 1..=8)
-        .prop_map(|chars| chars.into_iter().collect())
-}
-
-/// Render a slice of tokens as a TOML inline array of strings:
-/// `["a", "b"]`. Tokens are constrained to `[a-z/]` by the strategies
-/// above so no escaping is required.
-fn toml_string_array(tokens: &[String]) -> String {
-    let body = tokens.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
-    format!("[{body}]")
-}
-
 fn unwrap_service(input: WorkloadSpecInput) -> ServiceSpec {
     match input {
         WorkloadSpecInput::Service(s) => s,
@@ -521,9 +390,11 @@ replicas = 1
 port = 8080
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -552,9 +423,11 @@ replicas = 1
 port = {port}
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -573,7 +446,7 @@ memory_bytes = 134217728
                 prop_assert_eq!(host.as_str(), "0.0.0.0");
                 prop_assert_eq!(*probe_port, port);
             }
-            other => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
+            other @ ProbeMechanic::Http { .. } => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
         }
         prop_assert!(p.inferred, "inferred default carries inferred: true");
         prop_assert_eq!(p.timeout_seconds, 5);
@@ -600,9 +473,11 @@ replicas = 1
 port = {port}
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -693,7 +568,9 @@ fn tcp_type_field_is_case_insensitive() {
         assert_eq!(svc.startup_probes.len(), 1);
         match &svc.startup_probes[0].mechanic {
             ProbeMechanic::Tcp { port, .. } => assert_eq!(*port, 9000),
-            other => panic!("expected Tcp mechanic for casing {casing:?}, got {other:?}"),
+            other @ ProbeMechanic::Http { .. } => {
+                panic!("expected Tcp mechanic for casing {casing:?}, got {other:?}")
+            }
         }
         assert!(
             !svc.startup_probes[0].inferred,
@@ -743,25 +620,6 @@ fn http_field_error_in_readiness_probe_reports_wildcard_section() {
     }
 }
 
-#[test]
-fn exec_field_error_in_liveness_probe_reports_wildcard_section() {
-    let toml = format!(
-        "{SERVICE_PRELUDE}\n\
-         [[health_check.liveness]]\n\
-         type = \"exec\"\n\
-         command = 42\n"
-    );
-    match parse_err(&toml) {
-        ParseError::Field { section, .. } => {
-            assert_eq!(
-                section, "[[health_check.*]]",
-                "liveness probe error must not hardcode startup section"
-            );
-        }
-        other => panic!("expected Field, got {other:?}"),
-    }
-}
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
     #[test]
@@ -790,7 +648,7 @@ proptest! {
         prop_assert_eq!(p.max_attempts, max_attempts);
         match &p.mechanic {
             ProbeMechanic::Tcp { port: pp, .. } => prop_assert_eq!(*pp, port),
-            other => prop_assert!(false, "expected Tcp, got {:?}", other),
+            other @ ProbeMechanic::Http { .. } => prop_assert!(false, "expected Tcp, got {:?}", other),
         }
         prop_assert!(!p.inferred);
     }

@@ -1897,7 +1897,7 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 ///    (ADR-0051 OQ-5)".
 /// 3. The server's submit handler rejects `SubmitSpecInput::Schedule(_)` with
 ///    the same message (`overdrive-control-plane/src/handlers.rs`).
-/// 4. `ScheduleV2::from_submit` and `ScheduleV2::to_describe`
+/// 4. `Schedule::from_submit` and `Schedule::to_describe`
 ///    (`overdrive-core/src/aggregate/mod.rs`) are both `todo!()` RED
 ///    scaffolds — no Schedule intent can be persisted or described.
 /// 5. Nothing evaluates a `CronExpr` at runtime. There is no schedule

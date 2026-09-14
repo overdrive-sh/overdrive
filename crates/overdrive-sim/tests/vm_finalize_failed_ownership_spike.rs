@@ -26,7 +26,7 @@ use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, W
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::cgroup::CgroupPath;
@@ -53,7 +53,7 @@ use overdrive_sim::adapters::{
     dataplane::SimDataplane,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
     vm_host_state::SimVmHostState,
 };
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
@@ -222,7 +222,6 @@ async fn drive(seed: u64, finalize: bool) {
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         clock.clone(),
         obs.clone(),
     ));
@@ -263,7 +262,7 @@ async fn drive(seed: u64, finalize: bool) {
         state.lifecycle_events.clone(),
         clock.clone(),
     );
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "vm-finalize-ownership".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

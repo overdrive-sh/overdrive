@@ -29,7 +29,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_host::RealCgroupFs;
@@ -162,7 +162,12 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     let submit_resp = client
@@ -265,7 +270,12 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
         id: "payments".to_owned(),
         replicas: 0,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     let err = client

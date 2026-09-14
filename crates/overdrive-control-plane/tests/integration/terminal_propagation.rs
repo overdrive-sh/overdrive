@@ -26,9 +26,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::Driver;
@@ -142,9 +140,11 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         id: "backoff-exhaust".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/nonexistent/binary".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -237,9 +237,11 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         id: "term-stop".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -353,9 +355,11 @@ async fn non_terminal_transitions_emit_none() {
         id: "non-term".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");

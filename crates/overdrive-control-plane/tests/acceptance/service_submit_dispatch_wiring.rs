@@ -30,7 +30,7 @@ use overdrive_control_plane::api::{AllocStateWire, SubmitWorkloadRequest, Transi
 use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
@@ -60,9 +60,11 @@ fn payments_service_spec() -> ServiceSpecInput {
         id: "payments-v0".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/payments".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![],

@@ -81,10 +81,8 @@ pub mod view_store;
 // `overdrive_control_plane::journal::JournalStore` per ADR-0066. In-memory
 // `BTreeMap<(WorkflowId, u32), Vec<u8>>` with injectable fsync-failure.
 pub mod journal;
-// SCAFFOLD: true — service-health-check-probes feature.
-// Sim bindings for `TcpProber` / `HttpProber` / `ExecProber` per
-// ADR-0054 §2. Queue-driven outcome injection. Lands GREEN across
-// slices 01-03.
+// Service-health-check-probes feature. Sim bindings for `TcpProber` /
+// `HttpProber` per ADR-0054 §2. Queue-driven outcome injection.
 pub mod probers;
 // microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `SimVmm`, the
 // in-memory `overdrive_core::traits::vmm::Vmm` double. The

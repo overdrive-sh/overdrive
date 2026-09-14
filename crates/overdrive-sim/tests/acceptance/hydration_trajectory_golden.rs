@@ -64,8 +64,7 @@ use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, hydrate_actual_for_test, hydrate_desired_for_test,
 };
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{TargetResource, TickContext};
@@ -137,7 +136,12 @@ async fn seed_job_intent(state: &AppState, wid: &WorkloadId) {
         id: wid.as_str().to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_owned(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_owned(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("rkyv archive");

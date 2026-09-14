@@ -30,9 +30,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
@@ -145,9 +143,11 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         id: "exitobs".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -673,9 +673,11 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
         id: "exitobs".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
