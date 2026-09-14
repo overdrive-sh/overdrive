@@ -2,8 +2,7 @@
 //! (D-MTLS-16 / D-MTLS-17, GH #26; step 06-03).
 //!
 //! This is the **(β) separate lifecycle component** the action-shim fires
-//! alongside the driver hooks (NOT held by `ExecDriver`; `ExecDriver` is
-//! UNTOUCHED). It owns the production mTLS intercept-install +
+//! alongside the VM driver hooks. It owns the production mTLS intercept-install +
 //! leg-acquire + `enforce` wiring per allocation:
 //!
 //! - [`start_alloc`](MtlsInterceptWorker::start_alloc) — fired at the

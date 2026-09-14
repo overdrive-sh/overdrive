@@ -314,13 +314,6 @@ mod acceptance {
     /// Service-health-check-probes step 01-03d — composition-root
     /// `ProbeRunner` Earned-Trust gate per ADR-0054 § 7.
     mod probe_runner_boot_gate;
-    /// GAP-4 + GAP-5 corrective AT — production `ExecDriver` carries
-    /// a wired `ProbeRunner` and its lifecycle hooks drive the
-    /// supervisor on the runner. Closes the structural gap that pre-
-    /// patch let the production composition root discard
-    /// `Arc<ProbeRunner>` into an underscore-binding. See
-    /// `.context/01-03-structural-gap-audit.md`.
-    mod probe_runner_composition;
     // ADR-0080 § D4 / § D7 items 4 + 5 — `Stable` is NON-terminal, so
     // the action shim routes it to `on_alloc_stable` (retire the
     // startup role, keep the supervisor) rather than

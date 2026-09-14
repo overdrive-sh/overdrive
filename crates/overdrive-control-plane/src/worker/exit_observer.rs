@@ -2,8 +2,8 @@
 //! `ExitEvent`s from the driver and writes classified `AllocStatusRow`s
 //! to the `ObservationStore`.
 //!
-//! Per RCA `docs/feature/fix-exec-driver-exit-watcher/deliver/rca.md`
-//! §Approved fix item 4: the driver owns the `Child` and emits an
+//! Per the exit-watcher lifecycle contract, the driver owns its
+//! execution handle and emits an
 //! `ExitEvent` from a per-alloc watcher task on `child.wait()`
 //! resolution. The observer maps each event to `AllocState::Terminated`
 //! (clean exit OR `intentional_stop = true`) or `AllocState::Failed`
@@ -35,7 +35,7 @@
 //!
 //! # `intentional_stop` discriminator
 //!
-//! `Driver::stop` sets the per-alloc `intentional_stop` flag to `true`
+//! `Driver::stop` sets the per-allocation `intentional_stop` flag to `true`
 //! BEFORE delivering any termination signal; the watcher reads this
 //! flag at exit-classification time and propagates it on the
 //! `ExitEvent`. The observer honours `event.intentional_stop` first:
@@ -152,8 +152,8 @@ pub fn spawn(
 ///   - `shutdown_token` is cancelled — the `tokio::select!` resolves
 ///     the cancellation branch and the loop breaks. This is the
 ///     fallback shape used by [`crate::ServerHandle::shutdown`]: when
-///     a workload is still running at shutdown time (e.g. a `/bin/sleep`
-///     watcher hasn't reaped yet, or an in-flight `Driver::stop` was
+///     an allocation is still running at shutdown time (e.g. a driver
+///     watcher has not reaped yet, or an in-flight `Driver::stop` was
 ///     cancelled mid-flight), the watcher keeps `exit_tx` alive and
 ///     `rx.recv()` would block indefinitely. The cancellation token
 ///     gives `shutdown` a bounded await on the observer task, so the
@@ -293,9 +293,9 @@ pub fn spawn_with_runtime(
             // forever — SD-1's unstoppable-orphan failure reintroduced by
             // the very fix meant to close it (NEW-1). `release_supervision`
             // is idempotent and a no-op for drivers that do not report
-            // supervision (`ExecDriver` keeps the trait default), so this
-            // fires unconditionally for every exit event regardless of
-            // driver kind. Distinct from `release_for_exit_emission` above
+            // supervision, so this fires unconditionally for every exit
+            // event regardless of driver kind. Distinct from
+            // `release_for_exit_emission` above
             // (the UNRELATED Running-confirmed liveness gate) — this is the
             // authorship-claim release (§105a.3 transitions 5/6). The
             // `xtask dst-lint` `release-supervision-placement` clause
@@ -459,7 +459,7 @@ fn extract_job_id_or_unknown(alloc: &AllocationId) -> WorkloadId {
 /// success, so the caller can set the correct `from` field on the
 /// resulting `LifecycleEvent`. Returns `Ok(None)` when no prior row
 /// exists for the alloc, or when the existing same-attempt terminal
-/// fence makes a late EXEC exit an exact no-op.
+/// fence makes a late exit an exact no-op.
 async fn handle_exit_event(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
@@ -484,7 +484,7 @@ async fn handle_exit_event(
     let updated_at =
         LogicalTimestamp::dominating(0, prior.node_id.clone(), Some(&prior.updated_at));
     // Bound the stderr_tail to the project-wide line budget at the
-    // observation seam. The driver-side ring buffer in `ExecDriver`
+    // observation seam. The driver-side ring buffer
     // already caps emission at `STDERR_TAIL_LINES`, but the observer
     // is the canonical defence-in-depth: any future driver impl that
     // emits a longer tail (test injection, alternate driver) is
@@ -566,9 +566,9 @@ async fn handle_exit_event(
 /// nonzero-`oom_kill_count` `OomFacts` classifies as
 /// `TransitionReason::VmOutOfMemory` instead — never a bare
 /// `signal: 9`, indistinguishable from `kill -9` (ADR-0082 §D2.3's own
-/// bug report against a wrong `reserve_bytes`). `ExecDriver` never
-/// populates `oom`, so every Exec crash falls through the `_` arm
-/// unchanged. The check is scoped to the `Crashed` arm ONLY — never
+/// bug report against a wrong `reserve_bytes`). Drivers without OOM
+/// facts fall through the `_` arm unchanged. The check is scoped to
+/// the `Crashed` arm ONLY — never
 /// `CleanExit` — matching ADR-0082 §D8's own precedence table (row 13
 /// nests inside `Crashed`, unlike the deferred row-14 `storage_daemon_
 /// died` check, which would run ahead of the whole match). A mutation
@@ -753,7 +753,7 @@ mod terminal_fence_tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    async fn late_exec_exit_cannot_reopen_a_terminal_job_attempt() {
+    async fn late_exit_cannot_reopen_a_terminal_job_attempt() {
         let alloc = AllocationId::new("alloc-terminal-job-0").expect("alloc id");
         let workload = WorkloadId::new("terminal-job").expect("workload id");
         let node = NodeId::new("local").expect("node id");
@@ -787,11 +787,11 @@ mod terminal_fence_tests {
             stderr_tail: None,
             oom: None,
         };
-        let result = handle_exit_event(&obs, &late_exit, DriverType::Exec)
+        let result = handle_exit_event(&obs, &late_exit, DriverType::Vm)
             .await
             .expect("late exit observation");
 
-        assert!(result.is_none(), "the terminal Job fence makes a late EXEC exit a no-op");
+        assert!(result.is_none(), "the terminal Job fence makes a late exit a no-op");
         assert_eq!(
             obs.alloc_status_row(&alloc).await.expect("read current terminal"),
             Some(terminal_row),
@@ -800,7 +800,7 @@ mod terminal_fence_tests {
         assert_eq!(
             obs.alloc_lifecycle_occurrences(&alloc).await.expect("read terminal occurrences").len(),
             1,
-            "the occurrence is not the fence and a late EXEC exit authors no second occurrence",
+            "the occurrence is not the fence and a late exit authors no second occurrence",
         );
     }
 }

@@ -3,7 +3,7 @@
 //!
 //! Attached to the operator-configured cgroup ancestor (default
 //! `/sys/fs/cgroup/overdrive.slice` — both the control plane and
-//! every workload spawned via `ExecDriver` live as descendants).
+//! every VM workload live as descendants).
 //! Intercepts every IPv4 `connect(2)` from a process inside the
 //! cgroup, looks up `(user_ip4, user_port, protocol)` against
 //! `LOCAL_BACKEND_MAP`, and either:

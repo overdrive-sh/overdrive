@@ -29,13 +29,13 @@ use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -45,6 +45,7 @@ use tokio::sync::broadcast;
 /// async.
 async fn bootstrap_async(
     tmp: &TempDir,
+    fail_starts: bool,
 ) -> (AppState, broadcast::Receiver<LifecycleEvent>, Arc<overdrive_sim::adapters::clock::SimClock>)
 {
     let mut runtime =
@@ -57,11 +58,13 @@ async fn bootstrap_async(
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock.clone(),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let simulated_driver = SimDriver::with_clock(DriverType::Vm, sim_clock.clone());
+    let simulated_driver = if fail_starts {
+        simulated_driver.fail_on_start_with("simulated VM start rejection".to_owned())
+    } else {
+        simulated_driver
+    };
+    let driver: Arc<dyn Driver> = Arc::new(simulated_driver);
 
     // SimClock is passed at construction so the convergence-tick's
     // `tick.now_unix` snapshot advances with simulation time. The
@@ -119,7 +122,7 @@ fn drain(rx: &mut broadcast::Receiver<LifecycleEvent>) -> Vec<LifecycleEvent> {
 #[tokio::test]
 async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, true).await;
 
     // Background ticker — advances logical time so any clock.sleep(...)
     // parked inside the driver wakes promptly.
@@ -221,7 +224,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 #[tokio::test]
 async fn terminal_stopped_appears_on_both_surfaces() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {
@@ -338,7 +341,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 #[tokio::test]
 async fn non_terminal_transitions_emit_none() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {

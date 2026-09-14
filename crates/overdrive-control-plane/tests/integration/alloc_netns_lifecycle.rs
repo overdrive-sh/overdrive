@@ -11,8 +11,8 @@
 //!
 //! AC14's four sub-claims:
 //!
-//!   1. a real exec alloc reaching Running has its netns + veth provisioned
-//!      BEFORE spawn (the provision precedes `Driver::start` in the
+//!   1. a VM allocation reaching Running has its netns + veth provisioned
+//!      BEFORE `Driver::start` (the provision precedes the start call in the
 //!      StartAllocation arm), AND
 //!   2. the workload LANDS in `ovd-ns-<slot>` — asserted on the OBSERVABLE
 //!      kernel side effect `ip netns identify <pid>` (the spawned PID's netns
@@ -101,7 +101,6 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
@@ -166,30 +165,6 @@ fn tick_now() -> TickContext {
     }
 }
 
-fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> AllocationSpec {
-    AllocationSpec {
-        alloc: alloc.clone(),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/anl/alloc/01")
-            .expect("valid spiffe id"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload { command: command.to_owned(), args },
-        ),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
-        probe_descriptors: Vec::new(),
-        // The C3 provision seam SETS these (JOIN-2/6) — supplied None so the
-        // seam's own assign/provision/inject is exercised, not pre-set.
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
-    }
-}
-
 fn build_vm_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
@@ -228,17 +203,6 @@ impl Drop for NetnsGuard {
     fn drop(&mut self) {
         let _ = teardown_workload_netns(&self.plan);
     }
-}
-
-/// `ip netns identify <pid>` → the netns NAME the PID lives in (`None` when the
-/// PID is in an unnamed netns or the command fails).
-fn netns_identify(pid: u32) -> Option<String> {
-    let out = Command::new("ip").args(["netns", "identify", &pid.to_string()]).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let name = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    if name.is_empty() { None } else { Some(name) }
 }
 
 /// `ip netns list` contains `<netns>` (first whitespace-delimited token).
@@ -430,7 +394,7 @@ async fn provision_failure_drives_alloc_to_failed_row_not_pending_retry() {
     let worker = build_worker();
     // A SimDriver suffices — the provision seam fails (slot exhaustion) BEFORE
     // `Driver::start` is ever reached, so the driver is not exercised.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -453,7 +417,7 @@ async fn provision_failure_drives_alloc_to_failed_row_not_pending_retry() {
     // Seed a prior Pending row so the StartAllocation arm captures
     // prior_state = Pending (first-seen would default to Pending anyway; this
     // makes the from-state explicit and the Failed transition observable).
-    let spec = build_spec(&alloc, "/bin/true", vec![]);
+    let spec = build_vm_spec(&alloc);
 
     let result = dispatch_one(
         Action::StartAllocation {
@@ -505,178 +469,6 @@ async fn provision_failure_drives_alloc_to_failed_row_not_pending_retry() {
         !allocator.snapshot().contains_key(&alloc),
         "a failed assign must not leave the alloc holding a slot",
     );
-}
-
-// ---------------------------------------------------------------------------
-// AC14 sub-claims 1–3 — provision-before-spawn + lands-in-netns + teardown
-// (real kernel; root + CAP_NET_ADMIN required, SKIP otherwise).
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
-    if !is_root() {
-        eprintln!("SKIP alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal: not root");
-        return;
-    }
-
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
-        Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
-    let obs = build_obs();
-    let worker = build_worker();
-    let sim_clock = Arc::new(SimClock::new());
-    // REAL ExecDriver — it spawns `/bin/sleep` and enters spec.netns via
-    // setns(CLONE_NEWNET); the netns landing is the observable AC14.2 effect.
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock,
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-
-    // TEST ISOLATION: pin THIS test to a DISTINCT slot (this file's band offset
-    // 0) so its slot-derived, system-global netns/veth names do not collide with
-    // the sibling tests in this file OR any other file (each of which would
-    // otherwise derive slot 0's `ovd-ns-0000` from a fresh allocator). The slot
-    // comes from the cross-file registry band `ALLOC_NETNS_LIFECYCLE` so nothing
-    // in the integration binary can drift onto it. `adopt` binds the alloc to
-    // the band slot BEFORE dispatch; `provision_and_inject_netns`'s internal
-    // `assign` is idempotent per alloc-id, so it returns this pre-adopted slot
-    // rather than smallest-free 0. Derive the plan for the RAII sweep +
-    // expected-name asserts.
-    let allocator = NetSlotAllocator::new();
-    let alloc = AllocationId::new("anl-land").expect("valid alloc id");
-    let this_slot = super::net_slots::ALLOC_NETNS_LIFECYCLE.nth(0);
-    allocator.adopt(alloc.clone(), this_slot).expect("adopt this file's band slot 0");
-    let expected_plan = derive_workload_netns_plan(this_slot, responder_addr_for_slot(this_slot));
-    // Pre-sweep any residue from a crashed prior run, then arm the RAII guard.
-    let _ = teardown_workload_netns(&expected_plan);
-    let _guard = NetnsGuard { plan: expected_plan.clone() };
-
-    let workload = WorkloadId::new("svc-anl-land").expect("valid workload id");
-    let node = NodeId::new("node-001").expect("valid node id");
-    // Long-running so the spawned PID is alive when we read its netns.
-    let spec = build_spec(&alloc, "/bin/sleep", vec!["3600".to_owned()]);
-
-    let start = dispatch_one(
-        Action::StartAllocation {
-            alloc_id: alloc.clone(),
-            workload_id: workload.clone(),
-            node_id: node.clone(),
-            spec,
-            kind: WorkloadKind::Service,
-        },
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        Arc::clone(&store),
-        &worker,
-        &allocator,
-    )
-    .await;
-
-    // The provision may legitimately fail for lack of CAP_NET_ADMIN even as
-    // root in a constrained runner — SKIP rather than fail in that case (the
-    // Failed row carries WorkloadNetnsProvisionFailed(netns_provision)).
-    if start.is_err() {
-        worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
-        eprintln!(
-            "SKIP alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal: dispatch errored \
-             (likely no CAP_NET_ADMIN)"
-        );
-        return;
-    }
-    if let Some(row) = latest_row(obs.as_ref(), &alloc).await
-        && row.state == AllocState::Failed
-        && matches!(
-            row.reason,
-            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-                if stage == "netns_provision"
-        )
-    {
-        worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
-        eprintln!(
-            "SKIP alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal: provision \
-             fail-closed (likely no CAP_NET_ADMIN): {:?}",
-            row.reason
-        );
-        return;
-    }
-
-    // AC14.1: the alloc reached Running (the provision preceded the spawn).
-    let row = latest_row(obs.as_ref(), &alloc).await.expect("alloc row present after start");
-    assert_eq!(
-        row.state,
-        AllocState::Running,
-        "AC14.1: a successful provision + spawn must reach Running, got {:?} ({:?})",
-        row.state,
-        row.reason,
-    );
-
-    // AC14.3 (precondition): the slot-derived netns now exists.
-    assert!(
-        netns_present(expected_plan.netns.as_str()),
-        "AC14.1: the per-workload netns {} must exist after the provision seam",
-        expected_plan.netns,
-    );
-
-    // AC14.2: the spawned workload PID LIVES in the slot-derived netns
-    // (`ip netns identify <pid>` == ovd-ns-0000), NOT the host netns. This is
-    // the observable proof the workload was spawned INTO its netns.
-    let pid = {
-        // Read the workload pid from the driver's live handle map via a fresh
-        // /bin/sleep lookup — the ExecDriver records the pid on the row's
-        // detail? No: read it from `ip netns pids`. The most robust observable
-        // is: the netns has exactly the spawned sleep as a member.
-        let out = Command::new("ip")
-            .args(["netns", "pids", expected_plan.netns.as_str()])
-            .output()
-            .expect("spawn ip netns pids");
-        String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.trim().parse::<u32>().ok())
-    };
-    let pid = pid.expect(
-        "AC14.2: the per-workload netns must contain the spawned workload PID \
-         (the workload landed in ovd-ns-<slot>)",
-    );
-    assert_eq!(
-        netns_identify(pid).as_deref(),
-        Some(expected_plan.netns.as_str()),
-        "AC14.2: the spawned workload PID {pid} must live in the slot-derived netns {}, not the host netns",
-        expected_plan.netns,
-    );
-
-    // --- Terminal: StopAllocation tears the netns down + releases the slot ---
-    let stop = dispatch_one(
-        Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        Arc::clone(&store),
-        &worker,
-        &allocator,
-    )
-    .await;
-    stop.expect("StopAllocation dispatch must succeed");
-
-    // AC14.3: the netns is GONE after terminal (teardown-then-release) and the
-    // slot is released (no leak).
-    assert!(
-        !netns_present(expected_plan.netns.as_str()),
-        "AC14.3: the per-workload netns {} must be torn down on terminal",
-        expected_plan.netns,
-    );
-    assert!(
-        !allocator.snapshot().contains_key(&alloc),
-        "AC14.3: the slot must be released after terminal teardown",
-    );
-
-    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
 }
 
 /// ADR-0089 C3 VM branch — CONTRACT_SHAPE: bounded-change (the selected

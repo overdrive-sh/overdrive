@@ -14,12 +14,12 @@ use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 // `too_many_lines`: the 01-06 required-field AppState change (adds `ca` +
@@ -39,17 +39,14 @@ async fn job_stop_drives_running_to_terminated() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     // Share the SimClock between the driver and the test so the test
-    // can `tick(...)` to advance logical time past `ExecDriver`'s
+    // can `tick(...)` to advance logical time through the simulated driver's
     // SIGTERM→SIGKILL grace window. Under the deterministic-park
     // `SimClock::sleep` contract (`.claude/rules/development.md`
     // § "Production code is not shaped by simulation"), the harness —
     // never the SUT — drives logical time.
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock.clone(),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
 
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
@@ -84,9 +81,8 @@ async fn job_stop_drives_running_to_terminated() {
         }
     });
 
-    // Use a distinct workload_id so the derived cgroup scope
-    // (`alloc-stopper-0.scope`) does not collide with submit_to_running
-    // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
+    // Use a distinct workload ID so this test's allocation does not collide
+    // with the other lifecycle fixtures when they run in parallel.
     let job = Job::from_submit(JobSpecInput {
         id: "stopper".to_string(),
         replicas: 1,

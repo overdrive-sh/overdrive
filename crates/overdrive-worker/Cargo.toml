@@ -1,11 +1,11 @@
 # `overdrive-worker` — worker subsystem per ADR-0029. Hosts
-# `ExecDriver`, workload-cgroup management, and the `node_health`
+# `VmDriver`, workload-cgroup management, and the `node_health`
 # row writer at startup. Class `adapter-host`.
 
 [package]
 name         = "overdrive-worker"
 version      = "0.0.0"
-description  = "Worker subsystem: ExecDriver + workload-cgroup management + node_health writer."
+description  = "Worker subsystem: VmDriver + workload-cgroup management + node_health writer."
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
@@ -60,14 +60,6 @@ tokio.workspace          = true
 tracing.workspace        = true
 
 libc = { workspace = true }
-# `nix` — safe Rust bindings to *nix syscalls. Used by `ExecDriver`'s
-# opt-in `netns_path` builder to call `setns(CLONE_NEWNET)` in the
-# `pre_exec` hook so the spawned child enters a caller-managed
-# network namespace before `execve`. Mirrors the CNI spec model
-# (`CNI_NETNS`) applied to native processes. Workspace-pinned with
-# the `sched` feature per `.claude/rules/development.md`
-# § Dependencies.
-nix.workspace = true
 
 # `hyper` + `hyper-util` + `http-body-util` + `tokio-util` — required
 # by the service-health-check probes Phase 1 implementation per
@@ -102,17 +94,6 @@ proptest.workspace  = true
 tempfile.workspace  = true
 serial_test.workspace = true
 tracing-subscriber.workspace = true
-# `trybuild` — compile-fail fixture harness per ADR-0054 § migration
-# step 01-01. Used to pin the post-01-05 `ExecDriver::new` arity at
-# compile time (a constructor missing the mandatory
-# `fs: Arc<dyn CgroupFs>` parameter must fail to compile, not at
-# runtime). The fixture itself lands as a RED scaffold at 01-01 and
-# goes GREEN at 01-05 when the arity change ships. Workspace-pinned
-# at `=1.0.101` per `.claude/rules/testing.md` § "Compile-fail testing
-# (trybuild)" — pin exactly to keep `.stderr` fixtures stable across
-# rustc upgrades.
-trybuild.workspace  = true
-
 # transparent-mtls-enrollment (ADR-0071, step 05-01) — the composed
 # bidirectional Tier-3 walking skeleton
 # (`tests/integration/bidirectional_walking_skeleton.rs`) re-authors a

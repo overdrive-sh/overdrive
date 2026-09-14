@@ -102,7 +102,6 @@ fn frozen_driver_error_remains_exhaustively_matchable_by_external_callers() {
             DriverError::StartRejected { .. } => "start_rejected",
             DriverError::NotFound { .. } => "not_found",
             DriverError::Io(_) => "io",
-            DriverError::NetnsEntry { .. } => "netns_entry",
             DriverError::ResizeUnsupported { .. } => "resize_unsupported",
         }
     }

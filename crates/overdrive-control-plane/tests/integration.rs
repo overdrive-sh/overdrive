@@ -97,11 +97,6 @@ mod integration {
     /// source-pin litmus (NEVER `dig` alone, DDN-5). Root + Lima; SKIP
     /// otherwise. No Tier-2 backstop (DDN-4) — irreducibly real-kernel.
     mod dns_responder_bind;
-    /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
-    /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
-    /// 2026-05-10. Real `/bin/sh` workload writes 7 stderr lines;
-    /// asserts the observer's terminal row carries the last 5.
-    mod exit_observer_stderr_tail;
     mod idempotent_resubmit;
     /// Regression test for the boot-time `node_health` write per
     /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
@@ -211,14 +206,6 @@ mod integration {
     }
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod workload_lifecycle {
-        // Shared cleanup helper — reaps real `/bin/sleep` workloads
-        // spawned by the action shim so nextest does not flag the
-        // tests as `LEAK`. Used by `crash_recovery` and
-        // `submit_to_running`; `stop_to_terminated` cleans up via the
-        // production stop path under test. `pub` so the slice-4
-        // `cgroup_isolation::cluster_status_under_burst` test can
-        // reuse the same `AllocCleanup` guard via `super::super::`.
-        pub mod cleanup;
         mod convergence_loop_spawned_in_production_boot;
         /// ADR-0078 § D6 T-F — TWO crash-restart cycles through the REAL
         /// exit observer and action shim. The ONLY test that fails when a
@@ -255,7 +242,6 @@ mod integration {
         /// 01-02). Holds AC2 + AC3 (sibling
         /// `alloc_start_does_not_emit_resource_limit_warning`).
         mod alloc_scope_has_writable_cpu_weight_and_memory_max;
-        mod cluster_status_under_burst;
         mod idempotent_slice_creation;
         mod preflight_falls_back_to_parent_slice_on_empty_scope;
         mod preflight_missing_cpu;
@@ -294,88 +280,9 @@ mod integration {
     /// next submit. Owns S-VIP-06 (end-to-end) and S-VIP-07 (released-
     /// VIP reuse) per the DISTILL test-scenarios contract.
     mod vip_allocator_lifecycle;
-    /// `backend-discovery-bridge-service-reachability` (joint #174 + #175)
-    /// DISTILL — RED scaffolds per
-    /// `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`.
-    /// Walking-skeleton (S-BDB-01, S-BDB-18, S-BDB-19) + boot-composition
-    /// (S-BDB-11..S-BDB-17, S-BDB-20). All tests
-    /// `#[should_panic(expected = "RED scaffold")]` until DELIVER Slices
-    /// 1 and 2 land the bridge + production `EbpfDataplane` wiring.
     mod backend_discovery_bridge {
         mod boot_composition;
-        /// Shared fixture for the walking-skeleton (S-BDB-01) — spawns
-        /// a production server wired against a real `EbpfDataplane`
-        /// + drives `submit_workload` through the real HTTPS client.
-        /// Lives under `tests/` per architecture.md § 6.2 / Atlas Q1.
-        mod test_server;
-        mod walking_skeleton;
     }
-
-    /// canonical-workload-address-inbound-tproxy (GH #241) — S-WS keystone.
-    /// RELOCATED here (R1) from the `overdrive-worker` test tree because the
-    /// keystone drives in-process `run_server` (the production boot composition
-    /// root + the composed mTLS worker), which lives in `overdrive-control-plane`
-    /// — a worker-crate test physically cannot reach it (the reverse dep edge is
-    /// a Cargo-rejected cycle). Drives the REAL `EbpfDataplane` (NO
-    /// `dataplane_override`, so `compose_mtls` composes the mTLS worker) +
-    /// `mtls_identity_override = Some(TestPki)`; deploys two mesh workloads and
-    /// proves a client dialing the server's canonical `workload_addr:service_port`
-    /// is captured by the PRODUCTION-installed (03-01) inbound nft-TPROXY rule,
-    /// mTLS terminates, and the round-trip completes. Root + CAP_NET_ADMIN;
-    /// SKIP otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
-    mod canonical_address_inbound_walking_skeleton;
-
-    /// dial-by-name-responder step 02-02 (ADR-0072 REV-2, GH #243) — the
-    /// WALKING-SKELETON vertical slice. Four Tier-3 scenarios sharing one
-    /// real-`EbpfDataplane` + `mtls_identity_override` boot fixture (the
-    /// keystone shape): a deployed workload resolves its peer's STABLE
-    /// frontend `F ∈ 10.98.0.0/16` via `getaddrinfo`/`getent` (NOT `dig` —
-    /// K2) from inside its production-provisioned netns, the connect to `F`
-    /// is captured by the production egress nft-TPROXY rule, the re-keyed
-    /// `MtlsResolve` translates `F` → the live backend, and the hop is
-    /// mTLS'd (S-DBN-WS); `F` is byte-stable across a backend alloc cycle
-    /// (S-DBN-WS-STABLE — the SQ1 elimination); the answered `F` is the addr
-    /// `MtlsResolve` recognizes + translates (S-DBN-SINGLE-SRC); in-flight
-    /// churn fails fast bounded by `TCP_USER_TIMEOUT`, no `sock_destroy`
-    /// (S-DBN-CHURN). Drives ONLY production: NO test binds `:53`, installs a
-    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the
-    /// egress capture. Root + Lima; SKIP otherwise. MERGE-BLOCKING on the
-    /// pinned-6.18 Tier-3 matrix (ADR-0068).
-    mod dns_responder_walking_skeleton;
-
-    /// dial-by-name-responder EMPTY-CANDIDATE HONESTY (roadmap 03-01;
-    /// US-DBN-4 · K-DBN-2). Tier-3 `getent` observables that the production
-    /// responder WITHHOLDS the answer (NXDOMAIN) for a name with no
-    /// running-and-healthy backend (S-DBN-NXDOMAIN-01 query-before-healthy;
-    /// S-DBN-NXDOMAIN-02 withheld-after-stop, F-not-released; S-DBN-NXDOMAIN-03
-    /// unknown name), resolving to the stable frontend `F` once a backend is
-    /// running-and-healthy. Drives ONLY production: NO test binds `:53`,
-    /// installs a `resolv.conf`, allocates `F`, or programs a map. Root + Lima;
-    /// SKIP otherwise. The NXDOMAIN-02 recovery-after-stop observable is
-    /// `#[ignore]`'d to overdrive#249 (sticky operator-stop; same dependency as
-    /// 02-02 S-DBN-WS-STABLE). MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix
-    /// (ADR-0068).
-    mod dns_responder_nxdomain;
-
-    /// dial-by-name-responder step 03-02 (ADR-0072 REV-2, GH #243; US-DBN-3 ·
-    /// K-DBN-3) — the BIDIRECTIONAL PING-PONG demo, the operator-runnable proof.
-    /// Two services dial each other by name: `a` resolves `b.svc.overdrive.local`
-    /// and calls B, `b` resolves `a.svc.overdrive.local` and calls A; each call
-    /// increments a counter + refreshes a date on a ~10s cadence; each hop is
-    /// resolved through the in-agent responder, then intercepted + mTLS'd
-    /// (S-DBN-PINGPONG). Drives ONLY production: two `overdrive deploy`s
-    /// (`examples/dial-by-name-responder/{a,b}.toml`) + a staged tiny Rust
-    /// ping-pong bin against `run_server` — NO test binds `:53`, installs a
-    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the egress
-    /// capture. Each egress hop uses the CORRECTED PLAINTEXT-egress model (the
-    /// dialer speaks plaintext; the mTLS proof lives on the inter-agent
-    /// leg-B ↔ leg-C wire — CLAUDE.md § "East-west mTLS tests" / the 02-02 RCA).
-    /// `#[should_panic(expected = "RED scaffold")]` per
-    /// `distill/red-classification.md` (S-DBN-PINGPONG): the operator-runnable
-    /// bidirectional proof graduates to the E05 EDD expectation (honest
-    /// `pending`, #227/#75), NOT an in-process `#[test]`. Root + Lima; SKIP
-    /// otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
-    mod dns_responder_ping_pong;
 
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.
