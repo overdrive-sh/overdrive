@@ -1426,11 +1426,15 @@ mod tests {
                         let mut expected = actual.clone();
                         let passes = matches!(status, Some(ProbeStatus::Pass));
                         let next = u32::try_from((u64::from(count) + 1).min(u64::from(u32::MAX))).unwrap();
-                        if enabled && !veto {
+                        let startup_gate_blocks = !fact.startup_probes_empty
+                            && !expected.terminal_announced.is_empty()
+                            && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
+                        if enabled && !veto && !startup_gate_blocks {
                             if passes { expected.readiness_consecutive_successes.insert(key.clone(), next); }
                             else { expected.readiness_consecutive_successes.remove(&key); }
                         }
-                        let expected_healthy = !veto && (!enabled || (passes && next >= threshold));
+                        let expected_healthy =
+                            !startup_gate_blocks && !veto && (!enabled || (passes && next >= threshold));
                         let healthy = compute_backend_healthy(&alloc, &fact, &mut actual, veto);
                         prop_assert_eq!(healthy, expected_healthy);
                         prop_assert_eq!(actual, expected);

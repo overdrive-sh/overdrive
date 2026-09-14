@@ -249,7 +249,7 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
         unknown_occurrence.from,
         AllocLifecyclePredecessor::Unreadable(AllocLifecycleUnreadable::UnknownVersion {
             observed: 99,
-            supported_max: 2,
+            supported_max: 0,
         })
     );
     assert_eq!(unknown_occurrence.to, k3_row.state);

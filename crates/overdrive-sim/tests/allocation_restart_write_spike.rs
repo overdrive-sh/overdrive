@@ -305,13 +305,13 @@ async fn drive(seed: u64, contend: bool) {
     if contend {
         assert_eq!(
             predecessor_row.state,
-            AllocState::Terminated,
-            "seed={seed}: late exit updates only the predecessor key"
+            AllocState::Failed,
+            "seed={seed}: a late exit cannot replace the predecessor's existing terminal result"
         );
         assert_eq!(
             predecessor_occurrences.last().map(|occurrence| occurrence.to),
-            Some(AllocState::Terminated),
-            "seed={seed}: predecessor exit remains on predecessor history"
+            Some(AllocState::Failed),
+            "seed={seed}: the predecessor's terminal history remains intact"
         );
     } else {
         assert_eq!(
