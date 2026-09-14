@@ -1466,3 +1466,79 @@ constructs the ineligible-row action before the terminal action. The existing
 action shim may continue after a row-write error, so this does not establish a
 durable terminal-before-withdrawal guarantee on that error path. Neither adds a
 container, port, route, lifecycle owner, or persistence boundary.
+
+---
+
+## MicroVM-only workload execution after Exec removal (GH #293)
+
+**Status: all P-293-1 through P-293-6 decisions user-approved on 2026-09-14;
+iteration-1 findings remediated; awaiting independent DESIGN re-review. Not
+implementation authority.**
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+  title System Context — MicroVM-only workload execution
+
+  Person(operator, "Platform operator", "Declares, observes, stops, and replaces workloads")
+  System(overdrive, "Overdrive node", "Accepts VM/microVM workload intent and converges it through driver-neutral allocation lifecycle")
+  System_Ext(guest, "MicroVM guest workload", "Runs the operator command behind the existing guest-honest lifecycle boundary")
+  System_Ext(substrate, "Linux + Cloud Hypervisor substrate", "Provides KVM, cgroups, and the current temporary VM network path")
+
+  Rel(operator, overdrive, "Deploys [vm] intent and observes workload lifecycle through")
+  Rel(overdrive, guest, "Starts, supervises, probes, stops, and replaces")
+  Rel(overdrive, substrate, "Probes and uses VM execution/network capabilities from")
+  Rel(guest, substrate, "Runs and exchanges traffic through")
+```
+
+`[exec]` is outside the context because it is rejected before intent commit;
+there is no external Exec workload system or compatibility adapter. The Linux
+network description is the current VM implementation, not the #295 target.
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+  title Container — Live path after legacy Exec removal
+
+  Person(operator, "Platform operator")
+
+  Container(cli, "overdrive CLI", "Rust / clap", "Parses [vm], rejects [exec] before HTTP, submits and renders existing workload APIs")
+  Container(core, "Typed contracts", "overdrive-core / Rust", "VM-only driver unions, forward-only V1 envelopes, Driver port and DriverRegistry")
+  Container(cp, "Control plane + action shim", "Rust / axum", "Persists intent, dispatches driver-neutral allocation actions, and sequences current VM network/mTLS effects")
+  Container(recon, "Reconcilers", "Rust", "Own workload policy, fresh allocation identity, replacement handoff, Service health, and reclamation")
+  Container(worker, "Worker", "Rust / Tokio", "VmDriver, HTTP/TCP ProbeRunner, and current transparent-mTLS owner")
+  Container(host, "Host adapters", "overdrive-host / Rust", "CloudHypervisorVmm, cgroup, store, and Linux capability adapters")
+  ContainerDb(intent, "IntentStore", "redb / rkyv", "Writes and reads only the new VM-only WorkloadIntent V1")
+  ContainerDb(obs, "ObservationStore", "redb observation adapter", "Stores only new V1 lifecycle rows and occurrences with no Exec reason/source")
+  System_Ext(guest, "MicroVM guest", "Cloud Hypervisor guest", "Runs the declared command and reports guest-honest ready/exit")
+  System_Ext(network, "Current VM network substrate", "Linux netns / veth / TAP / nft", "Temporary VM path retained until GH #295")
+
+  Rel(operator, cli, "Runs deploy, stop, restart, and describe through")
+  Rel(cli, core, "Parses and validates VM-only live contracts with")
+  Rel(cli, cp, "Submits validated workload requests to")
+  Rel(cp, intent, "Commits admitted VM workload intent into")
+  Rel(cp, recon, "Drives hydrated workload evaluations through")
+  Rel(recon, cp, "Returns existing driver-neutral allocation actions to")
+  Rel(cp, core, "Routes action payloads through DriverRegistry from")
+  Rel(cp, worker, "Starts and stops exact VM allocations through")
+  Rel(worker, host, "Creates and terminates VMM processes through")
+  Rel(host, guest, "Boots and controls")
+  Rel(cp, network, "Provisions and tears down the current VM path through")
+  Rel(worker, network, "Installs and serves current VM transparent mTLS through")
+  Rel(cp, obs, "Publishes allocation lifecycle and reads prior state from")
+  Rel(recon, obs, "Hydrates lifecycle and health facts from")
+```
+
+The C4 containers are logical components inside the existing single Overdrive
+binary and current local stores. No container is created by #293. The absence
+of `ExecDriver` is deliberate; `DriverRegistry` remains because routing,
+stop/finalize ownership, exit observation, and future microVM-family capability
+composition already depend on it. The `network` container is explicitly the
+current production VM path and must not be read as the selected #295 design.
+The relationship order is current VM network provision → guest-ready driver
+start → accepted `Running` row → transparent-mTLS intercept install → VM guest
+command release. Intercept success does not gate the already-accepted Running
+row; failure produces the existing later dominating `Failed` result and
+withholds the guest command.

@@ -654,12 +654,12 @@ outcomes:
   superseded_by: null
 - id: OUT-SVM-SERVICE-TARGET-PROJECTION
   kind: invariant
-  summary: VM Service HTTP/TCP effective targets are resolved once at allocation registration; explicit hosts remain byte-identical, VM omitted/wildcard targets use the provisioned workload_addr, and Exec omitted/wildcard targets remain loopback
+  summary: VM Service HTTP/TCP effective targets are resolved once at allocation registration; explicit hosts remain byte-identical and omitted/wildcard targets use the provisioned workload_addr
   feature: service-kind-vm-workloads
   inputs:
-  - shape: AllocationSpec with DriverPayload::Vm or Exec plus HTTP/TCP ProbeDescriptor host
+  - shape: AllocationSpec with DriverPayload::Vm plus HTTP/TCP ProbeDescriptor host
   output:
-    shape: 'effective network probe destination: explicit host unchanged; VM omitted/wildcard to workload_addr; Exec omitted/wildcard to loopback; persisted descriptor unchanged'
+    shape: 'effective network probe destination: explicit host unchanged; omitted/wildcard to VM workload_addr; persisted descriptor unchanged'
   keywords:
   - service
   - vm
@@ -669,7 +669,8 @@ outcomes:
   - tcp
   - registration
   artifact: crates/overdrive-worker/src/probe_runner/mod.rs
-  related: []
+  related:
+  - OUT-EXEC-REMOVAL-PROBES
   superseded_by: null
 - id: OUT-SVM-SERVICE-ADMISSION
   kind: specification
@@ -690,4 +691,81 @@ outcomes:
   artifact: crates/overdrive-core/src/aggregate/service_spec.rs
   related:
   - OUT-SVM-SERVICE-TARGET-PROJECTION
+  superseded_by: OUT-EXEC-REMOVAL-ADMISSION
+- id: OUT-EXEC-REMOVAL-ADMISSION
+  kind: specification
+  summary: New Job, Service, and Schedule workload intent admits only the VM/microVM driver; an Exec driver table or wire arm is rejected before intent commit and no Exec driver is composed
+  feature: remove-legacy-exec-workload-driver
+  inputs:
+  - shape: workload TOML or SubmitSpecInput for Job, Service, or Schedule
+  output:
+    shape: VM-only DriverInput and WorkloadDriver V1 intent, or pre-intent parse/HTTP decode rejection for Exec
+  keywords:
+  - exec-removal
+  - vm-only
+  - admission
+  - before-intent
+  - driver-input
+  - workload-driver
+  artifact: crates/overdrive-core/src/aggregate/workload_spec.rs
+  related:
+  - OUT-SVM-SERVICE-ADMISSION
+  superseded_by: null
+- id: OUT-EXEC-REMOVAL-FORWARD-SCHEMA
+  kind: invariant
+  summary: Exactly four Exec-coupled envelope owners use new incompatible forward-only V1 schemas; no prior payload is read or migrated and every unrelated envelope remains unchanged
+  feature: remove-legacy-exec-workload-driver
+  inputs:
+  - shape: ServiceSpecEnvelope, WorkloadIntentEnvelope, AllocStatusRowEnvelope, and AllocLifecycleOccurrenceRowEnvelope current payloads
+  output:
+    shape: one post-cut V1 arm per named envelope, no legacy variants/readers/conversions/fixtures, and no reset outside the named set
+  keywords:
+  - exec-removal
+  - forward-only
+  - schema-reset
+  - rkyv
+  - four-envelopes
+  - v1
+  artifact: crates/overdrive-core/src/aggregate/mod.rs
+  related:
+  - OUT-EXEC-REMOVAL-ADMISSION
+  - OUT-EXEC-REMOVAL-PROBES
+  superseded_by: null
+- id: OUT-EXEC-REMOVAL-PROBES
+  kind: specification
+  summary: Current Service health supports only HTTP and TCP probes; the host Exec probe surface is absent and any future in-guest command probe belongs to GH #280
+  feature: remove-legacy-exec-workload-driver
+  inputs:
+  - shape: VM Service startup, readiness, and liveness ProbeDescriptor vectors
+  output:
+    shape: ProbeMechanic is HTTP or TCP; type=exec is unknown and no ExecProber/CgroupExecProber adapter exists
+  keywords:
+  - exec-removal
+  - service-health
+  - http-probe
+  - tcp-probe
+  - gh-280
+  - no-exec-prober
+  artifact: crates/overdrive-core/src/aggregate/probe_descriptor.rs
+  related:
+  - OUT-SVM-SERVICE-TARGET-PROJECTION
+  - OUT-SVM-SERVICE-ADMISSION
+  superseded_by: null
+- id: OUT-EXEC-REMOVAL-LIFECYCLE-PRESERVATION
+  kind: invariant
+  summary: Removing Exec changes no driver-neutral allocation replacement policy; every eligible replacement retains the accepted predecessor and a distinct durably-reserved fresh successor
+  feature: remove-legacy-exec-workload-driver
+  inputs:
+  - shape: WorkloadLifecycle desired/actual/View state for an accepted numeric-current Failed or Terminated predecessor
+  output:
+    shape: existing RestartAllocation with predecessor alloc_id and distinct fresh spec.alloc under unchanged P-105 reservation, handoff, publication, and cleanup ordering
+  keywords:
+  - exec-removal
+  - driver-neutral
+  - allocation-identity
+  - fresh-successor
+  - restart-allocation
+  - p-105
+  artifact: crates/overdrive-reconcilers/src/workload_lifecycle.rs
+  related: []
   superseded_by: null
