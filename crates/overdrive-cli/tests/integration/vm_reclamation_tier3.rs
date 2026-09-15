@@ -487,6 +487,14 @@ fn clone_link_path(index_dir: &Path, alloc_id: &str) -> PathBuf {
     index_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
 }
 
+fn artifact_path_is_absent(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => panic!("failed to inspect cleanup artifact {}: {error}", path.display()),
+    }
+}
+
 /// Waits for the per-allocation exit watcher to finish its target-then-link
 /// cleanup. The watcher is owned by the VM driver rather than
 /// `ServerHandle`, so server shutdown is not a completion signal for these
@@ -500,8 +508,8 @@ async fn poll_until_vm_artifacts_reclaimed(
 ) {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
-        let clone_gone = !clone_path(staging_dir, alloc_id).exists();
-        let link_gone = !clone_link_path(index_dir, alloc_id).exists();
+        let clone_gone = artifact_path_is_absent(&clone_path(staging_dir, alloc_id));
+        let link_gone = artifact_path_is_absent(&clone_link_path(index_dir, alloc_id));
         if clone_gone && link_gone {
             return;
         }
@@ -1671,11 +1679,11 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
     wait_for_data_dir_release().await;
     assert!(!pid_is_alive(vmm_pid), "the hypervisor process is genuinely gone");
     assert!(
-        !clone_path(&staging_dir, &alloc_id).exists(),
+        artifact_path_is_absent(&clone_path(&staging_dir, &alloc_id)),
         "a hypervisor death must not leave the platform-staged clone behind"
     );
     assert!(
-        !clone_link_path(&index_dir, &alloc_id).exists(),
+        artifact_path_is_absent(&clone_link_path(&index_dir, &alloc_id)),
         "a hypervisor death must not leave a durable clone-index link behind"
     );
 
