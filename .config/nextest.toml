@@ -298,7 +298,7 @@ filter = '''
             | test(job_kind_installs_no_inbound_rule)
             | test(mtls_intercept_install)
             | test(name_resolve_enforce_consistency)
-            | test(outbound_enforce_substrate_asymmetry)
+            | test(outbound_enforce_substrate_bidirectional_splice_zero_copy)
             | test(start_alloc_installs_both_tproxy)
         ))
         | (package(overdrive-dataplane) & test(mtls))
@@ -646,6 +646,29 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 [[profile.default.overrides]]
 filter = 'package(xtask) & test(metal_run_sync_and_bootstrap_share_one_pre_mutation_lease)'
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# Every `overdrive-cli` integration binary can submit a `[vm]` workload
+# through its in-process `serve` composition. The VM action path always
+# provisions the real host netns/veth/TAP adapter, even when the test injects
+# a simulated dataplane, so a narrow list of known KVM module names is not a
+# complete isolation boundary. Keep the entire CLI integration binary in the
+# same cross-process single-writer domain; pure handler-only cases are cheap
+# to serialize and this prevents an unlisted fixture from colliding with the
+# production-global `ovd-*` kernel names used by the KVM scenarios.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration)'
+test-group = 'host-kernel-shared'
+
+# The control-plane acceptance binary also drives the production convergence
+# and action-shim composition with VM-shaped `SimDriver` fixtures. Those
+# fixtures still use the default host-network mutation port unless they opt
+# into the explicit test adapter, so their `ovd-*` names share the same kernel
+# namespace as the Tier-3 CLI scenarios. Serialize the binary with the same
+# cross-process domain to prevent an acceptance fixture from racing a native
+# guest-stack boot.
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(acceptance)'
+test-group = 'host-kernel-shared'
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:

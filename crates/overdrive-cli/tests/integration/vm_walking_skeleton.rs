@@ -326,6 +326,19 @@ pub(super) fn stage_rootfs_with_extra_binary(
     host_bin: &Path,
     guest_name: &str,
 ) -> PathBuf {
+    stage_rootfs_with_extra_binaries(tmp, fixture, &[(host_bin, guest_name)])
+}
+
+/// Stage a per-test rootfs copy with multiple static guest binaries injected
+/// at `/sbin/<guest_name>`. A VM-to-VM scenario may need both a long-lived
+/// Service peer and a Job caller in the same image; keeping this composition
+/// in one mount/copy/unmount operation prevents the second binary from being
+/// accidentally omitted or from mutating the shared fixture image.
+pub(super) fn stage_rootfs_with_extra_binaries(
+    tmp: &Path,
+    fixture: &VmFixture,
+    binaries: &[(&Path, &str)],
+) -> PathBuf {
     let rootfs_copy = tmp.join("rootfs.ext4");
     std::fs::copy(&fixture.rootfs_path, &rootfs_copy)
         .expect("copy the shared fixture rootfs into a per-test working copy");
@@ -350,11 +363,14 @@ pub(super) fn stage_rootfs_with_extra_binary(
         Command::new("mount").arg(&loop_dev).arg(&mnt).status().expect("spawn mount");
     assert!(mount_status.success(), "mount {loop_dev} {} failed", mnt.display());
 
-    let dest = mnt.join("sbin").join(guest_name);
-    std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
-    let mut perms = std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+    for (host_bin, guest_name) in binaries {
+        let dest = mnt.join("sbin").join(guest_name);
+        std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
+        let mut perms =
+            std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+    }
 
     let umount_status = Command::new("umount").arg(&mnt).status().expect("spawn umount");
     assert!(umount_status.success(), "umount {} failed", mnt.display());

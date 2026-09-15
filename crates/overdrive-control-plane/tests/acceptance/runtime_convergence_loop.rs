@@ -29,7 +29,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
@@ -49,6 +53,26 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
+
+/// The convergence-loop fixture uses only Sim adapters. Keep the production
+/// reconciliation/action path intact while substituting the privileged host
+/// netns/veth mutation port, so this acceptance test cannot collide with
+/// concurrently running native-kernel scenarios on the metal host.
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` and `workload-lifecycle`) — matching the `run_server`
@@ -515,6 +539,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 async fn stop_after_failed_alloc_drains_broker() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());
+    let network = NoopNetworkProvisioner;
 
     // --- Build AppState. Reject starts so the action shim writes
     //     `AllocState::Failed` and the reconciler enters the
@@ -621,13 +646,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick(
+            run_convergence_tick_with_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks,
                 deadline,
+                &network,
             )
             .await
             .expect("convergence tick succeeds");
@@ -697,13 +723,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick(
+            run_convergence_tick_with_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks + tick_n,
                 deadline,
+                &network,
             )
             .await
             .expect("convergence tick succeeds");

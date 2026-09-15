@@ -71,7 +71,7 @@ use tempfile::TempDir;
 
 use super::vm_walking_skeleton::{
     build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
-    stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
+    stage_rootfs_with_extra_binaries, stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
 };
 
 const SERVICE_PORT: u16 = 18_951;
@@ -117,6 +117,8 @@ struct VmmSpawnCut {
     release: tokio::sync::oneshot::Sender<()>,
 }
 
+type VmmCutReceiver = Arc<std::sync::Mutex<Receiver<VmmSpawnCut>>>;
+
 struct CaptureReadyVmm {
     inner: Arc<dyn Vmm>,
     spawn_cut: Sender<VmmSpawnCut>,
@@ -152,7 +154,7 @@ impl Vmm for CaptureReadyVmm {
     }
 }
 
-async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver<VmmSpawnCut>) {
+async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, VmmCutReceiver) {
     let tmp = tempfile::Builder::new()
         .prefix("gti-serve-")
         .tempdir_in(shared_staging_root())
@@ -168,7 +170,7 @@ async fn spawn_capture_observed_mtls_server() -> (ServeHandle, TempDir, Receiver
 async fn spawn_capture_observed_mtls_server_at(
     data_dir: &Path,
     config_dir: &Path,
-) -> (ServeHandle, Receiver<VmmSpawnCut>) {
+) -> (ServeHandle, VmmCutReceiver) {
     std::fs::create_dir_all(data_dir).expect("create serve data dir");
     std::fs::create_dir_all(config_dir).expect("create serve config dir");
     let args = ServeArgs {
@@ -186,7 +188,7 @@ async fn spawn_capture_observed_mtls_server_at(
     )
     .await
     .expect("start production-mTLS serve with observation-only real-VMM decorator");
-    (handle, cuts)
+    (handle, Arc::new(std::sync::Mutex::new(cuts)))
 }
 
 struct FailureObservedVmm {
@@ -310,7 +312,7 @@ fn assert_guest_boundary(
 async fn spawn_failure_observed_mtls_server() -> (
     ServeHandle,
     TempDir,
-    Receiver<VmmSpawnCut>,
+    VmmCutReceiver,
     Receiver<VmControl>,
     Receiver<GuestBoundaryObservation>,
     Arc<dyn Vmm>,
@@ -333,7 +335,7 @@ async fn spawn_failure_observed_mtls_server_at(
     config_dir: &Path,
 ) -> (
     ServeHandle,
-    Receiver<VmmSpawnCut>,
+    VmmCutReceiver,
     Receiver<VmControl>,
     Receiver<GuestBoundaryObservation>,
     Arc<dyn Vmm>,
@@ -362,7 +364,7 @@ async fn spawn_failure_observed_mtls_server_at(
     )
     .await
     .expect("start production-mTLS serve with failure-observed real VMM");
-    (handle, cuts, created, boundary_observed, inner)
+    (handle, Arc::new(std::sync::Mutex::new(cuts)), created, boundary_observed, inner)
 }
 
 fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
@@ -912,7 +914,7 @@ fn service_toml(peer: &Path, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[service]\nid = \"server\"\nreplicas = 1\n\n[[listener]]\nport = {SERVICE_PORT}\n\
          protocol = \"tcp\"\n\n[vm]\ncommand = {command}\nargs = []\nkernel = {kernel}\nrootfs = {rootfs}\n\n[resources]\n\
-         cpu_milli = 100\nmemory_bytes = 67108864\n"
+         cpu_milli = 100\nmemory_bytes = 134217728\n"
     )
 }
 
@@ -2107,9 +2109,11 @@ fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRow
 
 fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocStatusRowBody) {
     // Exact permitted delta over the complete row:
-    // state Running -> Terminated; the live backend address is retired;
-    // reason/last_transition/current terminal are replaced; the logical
-    // observation timestamp is restamped. No other row field may change.
+    // state Running -> Terminated; terminal writers may either forward the
+    // canonical guest address (the exit-observer path) or clear it (the
+    // terminal action-shim path); reason/last_transition/current terminal are
+    // replaced; the logical observation timestamp is restamped. No other row
+    // field may change.
     assert_eq!(running.state, AllocStateWire::Running);
     assert_eq!(terminal.state, AllocStateWire::Terminated);
     assert_ne!(
@@ -2117,7 +2121,10 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
         "the Running transition reason is replaced by the terminal stop reason"
     );
     assert!(running.workload_addr.is_some(), "Running VM carries its live guest address");
-    assert_eq!(terminal.workload_addr, None, "terminal VM is no longer a live backend");
+    assert!(
+        terminal.workload_addr.is_none() || terminal.workload_addr == running.workload_addr,
+        "terminal rows may clear or forward only the canonical guest address"
+    );
     assert!(running.started_at.is_some(), "Running row is timestamped");
     assert!(terminal.started_at.is_some(), "terminal row is timestamped");
     assert_ne!(running.started_at, terminal.started_at, "the lifecycle observation is restamped");
@@ -2322,9 +2329,24 @@ struct ArmedFailureCapture {
     tap_ifindex: u32,
 }
 
-fn receive_vmm_cut(cuts: &Receiver<VmmSpawnCut>) -> VmmSpawnCut {
-    cuts.recv_timeout(Duration::from_secs(30))
-        .expect("the production VM reaches the capture-ready cut within 30s")
+async fn receive_vmm_cut(cuts: &VmmCutReceiver) -> VmmSpawnCut {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let received = cuts.lock().expect("VMM capture receiver mutex is not poisoned").try_recv();
+        match received {
+            Ok(cut) => return cut,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the production VM reaches the capture-ready cut within 30s"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                panic!("the VMM capture channel remains connected until the cut is released")
+            }
+        }
+    }
 }
 
 async fn wait_for_data_dir_release() {
@@ -2334,8 +2356,8 @@ async fn wait_for_data_dir_release() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 }
 
-fn release_vmm_without_capture(cuts: &Receiver<VmmSpawnCut>) -> VmConfig {
-    let cut = receive_vmm_cut(cuts);
+async fn release_vmm_without_capture(cuts: &VmmCutReceiver) -> VmConfig {
+    let cut = receive_vmm_cut(cuts).await;
     let config = cut.config.clone();
     cut.release.send(()).expect("release the real VMM spawn");
     config
@@ -2351,8 +2373,8 @@ fn host_veth_for_config(config: &VmConfig) -> String {
     derive_workload_netns_plan(slot, responder_addr_for_slot(slot)).host_veth
 }
 
-fn arm_failure_capture(cuts: &Receiver<VmmSpawnCut>) -> ArmedFailureCapture {
-    arm_failure_capture_from_cut(receive_vmm_cut(cuts))
+async fn arm_failure_capture(cuts: &VmmCutReceiver) -> ArmedFailureCapture {
+    arm_failure_capture_from_cut(receive_vmm_cut(cuts).await)
 }
 
 fn arm_failure_capture_from_cut(cut: VmmSpawnCut) -> ArmedFailureCapture {
@@ -2637,18 +2659,26 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .expect("mesh fixture tempdir on metal staging root");
     let peer = build_mesh_peer(tmp.path());
     let guest = build_mesh_guest(tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &guest, "gti-mesh-guest");
+    let rootfs = stage_rootfs_with_extra_binaries(
+        tmp.path(),
+        &fixture,
+        &[(&peer, "gti-peer"), (&guest, "gti-mesh-guest")],
+    );
 
     let (handle, server_tmp, vmm_cuts) = spawn_capture_observed_mtls_server().await;
     let cfg = config_path(server_tmp.path());
     let service_spec = write_toml(
         server_tmp.path(),
         "gti-peer.toml",
-        &service_toml(&peer, &fixture.kernel_path, &rootfs),
+        &service_toml(Path::new("/sbin/gti-peer"), &fixture.kernel_path, &rootfs),
     );
     let service_submit = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
         .await
         .expect("deploy mesh peer service through commands::deploy");
+    // This decorator is also used to capture the later VM dialer. Consume
+    // and release the peer service's first capture cut before polling it;
+    // leaving that cut held would block its VMM before it can reach Running.
+    let _service_config = release_vmm_without_capture(&vmm_cuts).await;
     let service_state =
         poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
     // A fresh composition has exactly one declared mesh name (`server`), so
@@ -2681,9 +2711,12 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let vm_submit = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
         .await
         .expect("deploy VM mesh dialer through commands::deploy");
+    let vmm_cuts_for_cut = Arc::clone(&vmm_cuts);
     let spawn_cut = tokio::time::timeout(
         Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || vmm_cuts.recv()),
+        tokio::task::spawn_blocking(move || {
+            vmm_cuts_for_cut.lock().expect("VMM capture receiver mutex is not poisoned").recv()
+        }),
     )
     .await
     .expect("C3 reaches the pre-VMM observation cut within 30s")
@@ -3863,7 +3896,7 @@ async fn when_the_mesh_guard_cannot_be_installed_the_workload_is_refused() {
     let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
         .await
         .expect("deploy VM against the production-named INPUT-hook counterexample");
-    let target_capture = arm_failure_capture(&cuts);
+    let target_capture = arm_failure_capture(&cuts).await;
     let target_control =
         created.recv_timeout(Duration::from_secs(30)).expect("observe target VMM creation");
     let terminal =
@@ -4400,8 +4433,11 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     // first dial and leaves boot two enough time to arm the exact D7 witness
     // after the production reinstall releases EXEC.
     let guest = build_mesh_guest_with_timing(server_tmp.path(), "gti-restart-mesh-guest", 15, 12);
-    let rootfs =
-        stage_rootfs_with_extra_binary(server_tmp.path(), &fixture, &guest, "gti-restart-guest");
+    let rootfs = stage_rootfs_with_extra_binaries(
+        server_tmp.path(),
+        &fixture,
+        &[(&peer, "gti-peer"), (&guest, "gti-restart-guest")],
+    );
 
     let (boot_one, boot_one_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
@@ -4421,7 +4457,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         let vm = deploy(DeployArgs { spec: vm_spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy the VM exactly once: {error}"))?;
-        let boot_one_config = release_vmm_without_capture(&boot_one_cuts);
+        let boot_one_config = release_vmm_without_capture(&boot_one_cuts).await;
         let first = poll_until_running(&cfg, &vm.workload_id, Duration::from_secs(60)).await;
         let first_row = first
             .snapshot
@@ -4457,17 +4493,20 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
     let observation = catch_live_owner_observation(async {
-        let restart_cut = boot_two_cuts
-            .recv_timeout(Duration::from_secs(30))
-            .map_err(|error| format!("observe boot-two VMM cut: {error}"))?;
+        let restart_cut = receive_vmm_cut(&boot_two_cuts).await;
         let service_spec = write_toml(
             server_tmp.path(),
             "gti-restart-peer.toml",
-            &service_toml(&peer, &fixture.kernel_path, &rootfs),
+            &service_toml(Path::new("/sbin/gti-peer"), &fixture.kernel_path, &rootfs),
         );
         let service = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy fresh boot-two mesh peer: {error}"))?;
+        // The observation-only VMM decorator captures every VM creation on
+        // this boot. Release the independent peer's capture cut as soon as
+        // its deploy is accepted; otherwise its VMM remains paused and the
+        // peer can never publish Running.
+        let _peer_config = release_vmm_without_capture(&boot_two_cuts).await;
         let flow = observe_fresh_replacement_mesh_flow(
             restart_cut,
             &cfg,
@@ -4589,7 +4628,7 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
             .await
             .map_err(|error| format!("deploy restart-failure VM exactly once: {error}"))?;
-        let first_config = release_vmm_without_capture(&boot_one_cuts);
+        let first_config = release_vmm_without_capture(&boot_one_cuts).await;
         let first = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
         let row = first
             .snapshot
@@ -4622,7 +4661,7 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     // therefore reaches the production VMM boundary, emits READY, and only
     // then encounters the real post-Running intercept-install rejection.
     let observation = catch_live_owner_observation(async {
-        let capture = arm_failure_capture(&cuts);
+        let capture = arm_failure_capture(&cuts).await;
         let control = created
             .recv_timeout(Duration::from_secs(30))
             .expect("replacement VMM is created before post-READY guard installation");
@@ -4754,7 +4793,7 @@ async fn run_resolver_failure_closure(label: &str) {
         })
         .await
         .expect("deploy independent resolver sibling");
-        let sibling_config = release_vmm_without_capture(&cuts);
+        let sibling_config = release_vmm_without_capture(&cuts).await;
         let _sibling_control =
             created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
         let sibling_before =
@@ -4771,7 +4810,7 @@ async fn run_resolver_failure_closure(label: &str) {
         })
         .await
         .expect("deploy resolver-failure VM");
-        let target_capture = arm_failure_capture(&cuts);
+        let target_capture = arm_failure_capture(&cuts).await;
         let target_control = created
             .recv_timeout(Duration::from_secs(30))
             .expect("observe resolver-failure VMM creation");
@@ -4931,7 +4970,7 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     );
     let submit =
         deploy(DeployArgs { spec, config_path: cfg.clone() }).await.expect("deploy exit-78 VM");
-    let _config = release_vmm_without_capture(&cuts);
+    let _config = release_vmm_without_capture(&cuts).await;
     let _control = created.recv_timeout(Duration::from_secs(30)).expect("observe exit-78 VMM");
     let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     assert_eq!(running.snapshot.rows[0].restart_count, 0);
@@ -5023,7 +5062,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     let sibling_submit = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
         .await
         .expect("deploy interruption sibling");
-    let sibling_config = release_vmm_without_capture(&cuts);
+    let sibling_config = release_vmm_without_capture(&cuts).await;
     let _sibling_control =
         created.recv_timeout(Duration::from_secs(30)).expect("observe sibling VMM creation");
     let sibling_before =
@@ -5047,7 +5086,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     let target_submit = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
         .await
         .expect("deploy externally interrupted VM");
-    let target_capture = arm_failure_capture(&cuts);
+    let target_capture = arm_failure_capture(&cuts).await;
     let target_control = created
         .recv_timeout(Duration::from_secs(30))
         .expect("observe real target VMM before external termination");
@@ -5137,7 +5176,7 @@ async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_b
     let target = deploy(DeployArgs { spec: target_spec, config_path: cfg.clone() })
         .await
         .expect("deploy stop target");
-    let target_config = release_vmm_without_capture(&cuts);
+    let target_config = release_vmm_without_capture(&cuts).await;
     let _ = poll_until_running(&cfg, &target.workload_id, Duration::from_secs(60)).await;
 
     let sibling_spec = write_toml(
@@ -5148,7 +5187,7 @@ async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_b
     let sibling = deploy(DeployArgs { spec: sibling_spec, config_path: cfg.clone() })
         .await
         .expect("deploy independent stop sibling");
-    let sibling_config = release_vmm_without_capture(&cuts);
+    let sibling_config = release_vmm_without_capture(&cuts).await;
     let sibling_before =
         poll_until_running(&cfg, &sibling.workload_id, Duration::from_secs(60)).await.snapshot.rows
             [0]

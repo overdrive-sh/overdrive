@@ -37,6 +37,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::traits::vm_host_state::{
     VmHostObservation, VmHostState, VmHostStateProbeError,
 };
@@ -215,9 +216,14 @@ async fn drive(seed: u64, finalize: bool) {
         scopes: Mutex::new(vec![]),
         host: SimVmHostState::new(),
     });
+    let http_prober = Arc::new(SimHttpProber::new());
+    // Queue the injected startup failure on the driver's real ProbeRunner so
+    // its background attempt cannot race the manually authored `HTTP 302`
+    // observation with the adapter's default happy-path `Pass`.
+    http_prober.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
-        Arc::new(SimHttpProber::new()),
+        http_prober,
         clock.clone(),
         obs.clone(),
     ));

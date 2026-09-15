@@ -993,10 +993,18 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
     );
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
     if let Some(tail) = console_tail.as_deref() {
-        assert!(
-            rendered.contains(tail),
-            "the rendered operator view must carry the captured console tail:\n{rendered}",
-        );
+        // The renderer preserves the complete tail while adding its
+        // human-readable indentation and normalising line endings. Assert
+        // each captured line rather than requiring the raw multi-line byte
+        // sequence to survive those presentation-only delimiters.
+        for line in tail.lines().map(str::trim_end) {
+            if !line.is_empty() {
+                assert!(
+                    rendered.contains(line),
+                    "the rendered operator view must carry captured console line {line:?}:\n{rendered}",
+                );
+            }
+        }
     }
 
     // An aborted boot leaves nothing behind, hypervisor included.

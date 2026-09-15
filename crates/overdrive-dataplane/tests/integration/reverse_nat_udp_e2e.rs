@@ -76,6 +76,17 @@ use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
 /// The DNS-resolver UDP listener port from `dns-resolver.toml` (S-04).
 const UDP_PORT: u16 = 5353;
 
+/// Minimal dependency-free UDP echo responder used inside the backend netns.
+/// The metal runner guarantees Python 3 for its preflight tooling, while
+/// `socat` is not part of the runner image; keeping the responder in the
+/// existing netns command boundary avoids adding a host package dependency.
+const UDP_ECHO_SCRIPT: &str = concat!(
+    "import socket,sys\n",
+    "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n",
+    "s.bind(('0.0.0.0',int(sys.argv[1])))\n",
+    "while True:\n d,a=s.recvfrom(65535)\n s.sendto(d,a)\n",
+);
+
 /// Build a UDP `ServiceFrontend` for `vip` on the listener port. The
 /// proto=`Udp` discriminator threads through `update_service` into the
 /// REVERSE_NAT_MAP key (ADR-0060 D1a/D7), where the kernel
@@ -420,18 +431,18 @@ fn build_udp_service(
         stubs.push(load_xdp_pass_stub(&topo.client_veth, &stub_pin).expect("client stub"));
     }
 
-    // Spawn the UDP echo server on the backend (when bound). `socat
-    // UDP-LISTEN:5353,fork,reuseaddr PIPE` echoes every received datagram
-    // straight back to its sender — a true UDP echo (`fork` handles each
-    // datagram's source independently, which models the connectionless
-    // per-datagram reply S-04-B asserts on). OpenBSD `nc -u -l` does NOT
-    // echo (it only relays its own stdin), so socat is the right tool.
+    // Spawn the UDP echo server on the backend (when bound). Use the existing
+    // Python 3 netns command boundary rather than assuming an optional `socat`
+    // package is installed on the metal runner. The responder echoes every
+    // datagram, preserving the connectionless per-datagram reply S-04-B
+    // asserts on.
     // For the not-bound case (S-04-C) we skip the listener entirely so a
     // datagram to the VIP produces no reply.
     let backend_listener = if backend_bound {
+        let port = UDP_PORT.to_string();
         let child = topo
             .backend_ns
-            .command("socat", [&format!("UDP4-LISTEN:{UDP_PORT},fork,reuseaddr"), "PIPE"])
+            .command("python3", ["-u", "-c", UDP_ECHO_SCRIPT, port.as_str()])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

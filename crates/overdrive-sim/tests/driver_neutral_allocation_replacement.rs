@@ -395,7 +395,12 @@ impl Driver for RecordingDriver {
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
         self.trace.lock().push(TraceEvent::Start(spec.alloc.clone()));
-        self.start_entered.notify_waiters();
+        // Retain a permit when the observer has not been polled yet. The
+        // replacement-order assertion intentionally races this notification
+        // against the dispatch future; `notify_waiters` can lose that event
+        // before registration and turn a valid run into a scheduler-dependent
+        // predecessor-cleanup failure.
+        self.start_entered.notify_one();
         match self.behavior {
             StartBehavior::Success => {
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(42) })
@@ -416,7 +421,10 @@ impl Driver for RecordingDriver {
         self.stops.lock().push(handle.alloc.clone());
         self.trace.lock().push(TraceEvent::Stop(handle.alloc.clone()));
         if handle.alloc == self.predecessor {
-            self.stop_entered.notify_waiters();
+            // As above, preserve the event until the assertion's waiter is
+            // registered so the ordering check remains deterministic under
+            // full-workspace load.
+            self.stop_entered.notify_one();
             if self.block_predecessor_stop.load(Ordering::SeqCst) {
                 self.stop_release.notified().await;
             }
