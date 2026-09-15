@@ -136,9 +136,10 @@ Cluster state divides cleanly along a consistency boundary. *Intent* — workloa
 │  │  BPF LSM (MAC) · kprobes (telemetry)                    │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌────────────────┐   │
-│  │ Process  │ │ MicroVM  │ │ Unikernel  │ │ WASM           │   │
+│  │ VM       │ │ MicroVM  │ │ Unikernel  │ │ WASM           │   │
 │  │ Driver   │ │ (Cloud   │ │ (Cloud HV  │ │ Driver         │   │
-│  │          │ │  HV)     │ │ + Unikraft)│ │ (Wasmtime)     │   │
+│  │ (Cloud   │ │  HV)     │ │ + Unikraft)│ │ (future)       │   │
+│  │ HV)      │ │          │ │ (future)   │ │                │   │
 │  └──────────┘ └──────────┘ └────────────┘ └────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  Gateway Subsystem  (optional, node.gateway.enabled)     │   │
@@ -504,7 +505,8 @@ The agent is event-driven throughout. BPF ringbuf events push telemetry without 
 
 ## 6. Workload Drivers
 
-Overdrive treats every workload type as a first-class citizen through a unified driver interface:
+The shipped VM/microVM path uses a unified driver interface; future workload
+families reuse the same boundary only when their drivers are delivered:
 
 ```rust
 trait Driver: Send + Sync {
@@ -2758,10 +2760,10 @@ A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical
 role = "worker"   # "control-plane" | "worker" | "control-plane+worker"
 
 [drivers]
-process   = true
-microvm   = true    # Cloud Hypervisor
-unikernel = false   # Unikraft (optional, increases image size)
-wasm      = true    # Wasmtime
+vm       = true    # Cloud Hypervisor (the shipped execution path)
+microvm  = true    # Cloud Hypervisor
+unikernel = false   # future driver
+wasm      = false   # future driver
 
 [kernel]
 extra_args = ["intel_iommu=on", "iommu=pt"]

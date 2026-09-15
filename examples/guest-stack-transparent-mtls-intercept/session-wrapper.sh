@@ -100,4 +100,3 @@ exec keyctl session - bash -c '
     "$bin" serve --bind "$bind" --data-dir "$data_dir"
 ' gti-e07-session "$LAUNCH_TOKEN" "$SERVE_PID_FILE" "$DESCRIPTION" \
   "$CONFIG_DIR" "$CREDS_DIR" "$BIN" "$BIND" "$DATA_DIR"
-

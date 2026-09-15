@@ -44,7 +44,6 @@ e07_session_process_identity() {
   start="${start%% *}"
   printf '%s %s %s\n' "${state:0:1}" "$pgid" "$start"
 }
-
 e07_session_process_entry_exists() {
   local pid="$1"
   if [[ -d /proc ]]; then
@@ -228,4 +227,3 @@ e07_session_acknowledge_ownership() {
     >"$SESSION_ACK_FILE.tmp.$$" || return 1
   mv -- "$SESSION_ACK_FILE.tmp.$$" "$SESSION_ACK_FILE"
 }
-

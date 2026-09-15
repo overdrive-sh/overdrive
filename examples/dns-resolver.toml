@@ -16,4 +16,3 @@ memory_bytes = 134217728
 [[listener]]
 port = 15353
 protocol = "udp"
-

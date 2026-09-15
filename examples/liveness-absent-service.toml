@@ -22,4 +22,3 @@ max_attempts = 30
 [resources]
 cpu_milli = 500
 memory_bytes = 134217728
-
