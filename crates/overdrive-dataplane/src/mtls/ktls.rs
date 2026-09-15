@@ -56,12 +56,12 @@ pub(super) fn arm_ktls_tx_rx(
 fn retry_transient_not_connected(
     mut arm: impl FnMut() -> Result<(), MtlsEnforcementError>,
 ) -> Result<(), MtlsEnforcementError> {
-    const MAX_RETRIES: u8 = 8;
+    const MAX_RETRIES: u16 = 100;
     for attempt in 0..=MAX_RETRIES {
         match arm() {
             Ok(()) => return Ok(()),
             Err(error) if attempt < MAX_RETRIES && is_transient_not_connected(&error) => {
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::sleep(Duration::from_millis(2));
             }
             Err(error) => return Err(error),
         }
