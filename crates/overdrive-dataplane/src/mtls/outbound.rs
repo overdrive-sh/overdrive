@@ -309,8 +309,15 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         let peer_listener =
             std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("peer bind: {e}"))?;
         let peer_addr = peer_listener.local_addr().map_err(|e| format!("peer addr: {e}"))?;
+        let (client_arm_tx, client_arm_rx) = std::sync::mpsc::sync_channel(0);
         let peer = std::thread::spawn(move || -> std::result::Result<Vec<u8>, String> {
-            sentinel_peer_recv(&peer_listener, cert, key, SENTINEL.len() + SENTINEL_SPLICE.len())
+            sentinel_peer_recv(
+                &peer_listener,
+                cert,
+                key,
+                SENTINEL.len() + SENTINEL_SPLICE.len(),
+                client_arm_rx,
+            )
         });
 
         // 2. Leg F sentinel source: a self-connected loopback pair the agent owns.
@@ -332,6 +339,14 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         let leg_b_fd = leg_b.as_raw_fd();
         let secrets = sentinel_client_handshake(leg_b)?;
         ktls::arm_ktls_tx_rx(leg_b_fd, secrets).map_err(|e| format!("kTLS arm: {e}"))?;
+        // The accepted server socket can still be in the kernel's handshake
+        // transition while the client is finishing its userspace TLS flight.
+        // Let the server install TLS_RX only after the client has completed its
+        // own arm; this barrier removes the scheduler-sensitive ENOTCONN window
+        // without weakening the probe's fail-closed result.
+        client_arm_tx
+            .send(())
+            .map_err(|_| "sentinel peer exited before the client kTLS arm".to_owned())?;
 
         // 4. Spawn the forward encrypt pump (f_source → leg B's kTLS-TX) with the
         //    FIRST sentinel as its `prelude` — exercising the EXACT production
@@ -406,6 +421,7 @@ fn sentinel_peer_recv(
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
     want: usize,
+    client_arm_rx: std::sync::mpsc::Receiver<()>,
 ) -> std::result::Result<Vec<u8>, String> {
     use std::io::Read as _;
     let mut cfg = rustls::ServerConfig::builder()
@@ -422,6 +438,9 @@ fn sentinel_peer_recv(
     let mut conn = rustls::ServerConnection::new(std::sync::Arc::new(cfg))
         .map_err(|e| format!("sentinel ServerConnection: {e}"))?;
     drive_server_handshake(&mut conn, &mut tcp)?;
+    client_arm_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| format!("sentinel client did not complete kTLS arm: {e}"))?;
     // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
     // handshake BEFORE extract consumes the connection — those bytes seed `got` so
     // the sentinel never loses an early-arriving record (kTLS early-data
