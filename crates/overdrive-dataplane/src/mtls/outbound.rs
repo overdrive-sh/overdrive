@@ -316,7 +316,7 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
                 cert,
                 key,
                 SENTINEL.len() + SENTINEL_SPLICE.len(),
-                client_arm_rx,
+                &client_arm_rx,
             )
         });
 
@@ -421,7 +421,7 @@ fn sentinel_peer_recv(
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
     want: usize,
-    client_arm_rx: std::sync::mpsc::Receiver<()>,
+    client_arm_rx: &std::sync::mpsc::Receiver<()>,
 ) -> std::result::Result<Vec<u8>, String> {
     use std::io::Read as _;
     let mut cfg = rustls::ServerConfig::builder()
