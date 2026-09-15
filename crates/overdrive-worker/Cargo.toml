@@ -32,7 +32,6 @@ crate_class = "adapter-host"
 # Tier-3 worker intercept-install suite is gated on it.
 integration-tests = [
     "overdrive-dataplane/integration-tests",
-    "overdrive-sim/integration-tests",
 ]
 
 [dependencies]
