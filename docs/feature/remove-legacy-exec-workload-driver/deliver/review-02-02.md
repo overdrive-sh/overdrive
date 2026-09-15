@@ -359,3 +359,189 @@ current E10 cleanup oracle is green, this step cannot advance to 03-01.
 **CHANGES_REQUESTED.** Return to the original step crafter for remediation and
 repeat the fresh isolated review. Historical evidence remains protected; no
 approval is granted for the current artifact set.
+
+## Iteration 3 — final independent re-review
+
+### Review metadata
+
+- **Review ID:** `code_rev_20260915_02-02_iteration_3`
+- **Reviewed commits:** `e36b8eb72b6712ef7b5015168361a8e6e001e4cd`,
+  `910512aea6e740521be2601426c342389c7911f2`, remediation commit
+  `2d330816cad4887c7f3fcc51b37d78b4b4eadbde`, remediation commit
+  `183cfd40f1135b75650908fa20decbf357f4e7a3`, and current `HEAD`
+  `8c1b333986dd4d0f563284d0a1a7d022ee065820`
+- **Review basis:** roadmap step `02-02`, feature delta and DISTILL P-105
+  contract, iterations 1–2, the current implementation/example tree, and
+  protected historical E06/E08 and ADR/evolution surfaces
+- **Reviewer:** fresh step-specific DELIVER reviewer
+- **Scope note:** no implementation files were changed and mutation testing was
+  not run.
+
+### Executive conclusion
+
+The latest remediation closes the specific E05/O01/O02 active-fixture
+vocabulary findings and the `run-example.sh` E12 assertion now requires a
+distinct successor. The step is not yet approvable at the complete current
+artifact boundary:
+
+1. The active E12 expectation README and runner still require and describe a
+   same-ID replacement, so the current fresh-successor product journey and its
+   current black-box oracle disagree.
+2. E10's runner and cleanup harness now only print retirement messages and exit
+   `0`. `run-expectation.sh` therefore records a successful execution for a
+   retired, non-validating runner; the E07 host-safe harness and its catalogue
+   references also remain active after E07 was marked out of scope.
+3. Active whitepaper architecture material still presents a Process Driver,
+   universal first-class workload execution, and `process = true` in the
+   current schematic. The 183cfd40 right-sizing and storage edits do not close
+   those remaining claims.
+4. The step diff still fails `git diff --check` on the eight EOF blank-line
+   additions identified in iteration 2.
+
+The current VM source check, VM-shape examples, E05/O01/O02 corrections,
+protected historical surfaces, and GH #295 non-implementation boundary pass.
+The unresolved D1/D2/D3/S1 contracts are bounded artifact corrections, but
+they prevent advancement to step 03-01.
+
+### Finding dispositions
+
+#### D1 — NOT CLOSED: retired E10/E07 execution entry points still report success
+
+The E10 implementation no longer dispatches `http-status-cross-driver`, and
+the current E10 cleanup harness no longer invokes the deleted matrix. However,
+both active entry points are unconditional-success stubs:
+
+- `verification/expectations/E10-vm-service-http-cross-driver-status/runner.sh:1-6`
+  prints a retirement message and exits `0`.
+- `verification/harness/test-e10-cleanup-oracle.sh:1-6` does the same.
+
+Direct execution at `HEAD` produced the two retirement messages with exit `0`.
+The repository harness maps runner exit `0` to `execution_status: succeeded`
+(`verification/harness/run-expectation.sh:120-139,170-175`), so a caller can
+still create a successful E10 execution receipt without any product or cleanup
+assertion. This is the exact testing-theater gap identified in iteration 2;
+renaming the no-op output did not retire the executable success path.
+
+The E07 boundary is also incomplete. `verification/README.md:112,122` still
+lists `test-e07-session-lifecycle.sh` as a current harness,
+`verification/harness/test-e07-session-lifecycle.sh:11,21,111` still sources
+the host-process session fixture, and a direct invocation fails with
+`could not capture the direct wrapper child` (exit `1`) on this host. The E07
+expectation runner is marked out of scope, but its host-process harness remains
+an active catalogue entry point.
+
+**Required remediation:** retire/remove the E10 and E07 executable harness
+entry points (or make them fail closed as out-of-scope/pending rather than
+success), remove their current catalogue/harness listings, and preserve the
+historical E07/E10 evidence trees unchanged. Do not recreate the cross-driver
+matrix or add a replacement mechanism.
+
+#### D2 — NOT CLOSED: the current E12 expectation still asserts same-ID replacement
+
+The product example is corrected: `examples/service-kind-vm-workloads/run-example.sh:866-869`
+requires `replacement_alloc != original_alloc`, and its ledger records the
+predecessor on `before`/`terminal` and the distinct successor on `after`
+(`:917-933`).
+
+The active E12 operator-facing expectation was not corrected with it:
+
+- `verification/expectations/E12-vm-service-liveness-restart-describe/README.md:15`
+  says the ledger records the same allocation identity before, at, and after
+  restart; `:40-41` calls the replacement “same-ID”.
+- `verification/expectations/E12-vm-service-liveness-restart-describe/runner.sh:95`
+  rejects any fresh successor by requiring all three row IDs to be equal, and
+  `:109-110` requires the stale same-ID PASS string.
+
+The current production-owner acceptance evidence already proves the inverse
+contract: a liveness replacement retains the predecessor in the restart action
+and reserves a distinct successor. The existing E12 receipt at
+`evidence/verification.yaml` is a historical SHA-pinned capture whose ledger
+does show the old same-ID behavior; it must remain immutable and must not be
+used as evidence for the current post-cut contract. As written, a future
+current E12 capture would fail its own runner against the corrected
+`run-example.sh` output.
+
+**Required remediation:** update only the current E12 expectation prose,
+ledger predicate, and PASS wording to require the accepted
+predecessor/fresh-successor identity while preserving all liveness, terminal,
+timestamp, and cleanup assertions. Keep the old E12 evidence receipt
+immutable and do not change production lifecycle behavior.
+
+#### D3 — NOT CLOSED: active whitepaper still exposes host-process execution
+
+The abstract, principle 4, current driver table, and Ana persona now describe
+VM/microVM as the shipped path. Active whitepaper material still contradicts
+that boundary:
+
+- `docs/whitepaper.md:138-142` retains a live `Process Driver` beside the
+  current MicroVM driver in the architecture diagram.
+- `docs/whitepaper.md:505-524` still opens the current Workload Drivers section
+  with “every workload type as a first-class citizen”, without making that
+  framing future-only before the later VM-only table.
+- `docs/whitepaper.md:2760-2764` enables `process = true` in the active image
+  schematic alongside the future families.
+
+The latest remediation correctly narrowed scale-to-zero and shared-volume
+prose (`docs/whitepaper.md:1760-1762,1996-2000`), but it did not remove or
+mark these remaining current architecture/configuration claims. They are not
+ADR/evolution history and are not part of the protected E06/E08 receipts.
+
+**Required remediation:** update the active diagram, driver framing, and
+schematic to state the shipped VM/microVM execution path; describe other
+families only as future work. Preserve historical ADR/evolution prose and
+receipts, and make no GH #295 topology or performance claim.
+
+#### S1 — NOT CLOSED: the implementation diff still fails `git diff --check`
+
+`git diff --check 2d330816^ 183cfd40` and the full step-range check from
+`e36b8eb7^` to `183cfd40` both report added blank lines at EOF in:
+
+- `examples/dial-by-name-responder/a.toml`
+- `examples/dial-by-name-responder/b.toml`
+- `examples/dial-by-name-responder/ping_pong.py`
+- `examples/dns-resolver.toml`
+- `examples/guest-stack-transparent-mtls-intercept/session-lifecycle.sh`
+- `examples/guest-stack-transparent-mtls-intercept/session-wrapper.sh`
+- `examples/liveness-absent-service.toml`
+- `examples/quick-bind-service.toml`
+
+The 183cfd40 remediation did not touch these files, so the iteration-2
+mechanical finding remains present. The current tree-vs-remediation check is
+clean only because it does not include the offending 2d330816 additions; that
+does not close the step-range quality gate.
+
+**Required remediation:** remove the added EOF blank lines and rerun
+`git diff --check` over the complete step implementation/remediation range.
+
+### Contract and scope verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| Current healthy VM Service source-valid | **PASS** | `bash examples/service-kind-vm-workloads/prepare.sh check-source` exits 0; it validates positive VM shape without a deleted-spelling absence assertion. |
+| Retained example shell syntax | **PASS** | `bash -n` passes for the retained VM runner/preparation scripts and restored example helper scripts. |
+| E12 product runner successor identity | **PASS** | `run-example.sh:866-869` rejects same-ID replacement; ledger rows at `:919-931` retain predecessor history and emit the successor. |
+| E12 current expectation oracle | **FAIL** | E12 README `:15,40-41` and runner `:95,109-110` still require same-ID replacement. |
+| E10/E07 retirement boundary | **FAIL** | E10 runner and cleanup harness both exit 0 without assertions; E07 remains listed and its host-process harness is active and fails direct execution. |
+| E05/O01/O02 current vocabulary | **PASS** | E05 uses `[vm]` current specs and labels the host-process sketch historical; O01 generates only `[vm]` specs; O02 limits the active mechanic check to HTTP/TCP and calls host-process mechanics historical. |
+| Active whitepaper VM/microVM guidance | **FAIL** | Process Driver diagram, first-class workload framing, and `process = true` schematic remain at the cited lines. |
+| Historical ADR/evolution and E06/E08 | **PASS** | `git diff --quiet e36b8eb7^ 183cfd40 -- docs/evolution docs/product/architecture verification/expectations/E06-vm-job-deploy-reaches-running verification/expectations/E08-vm-service-guest-health` exits 0. |
+| GH #295 boundary | **PASS** | The remediation contains no implementation/selection claim for shared switching, per-tap interception, shared DNS, replacement mTLS, cross-host routing, density, or throughput; the one deferred-boundary mention remains explicitly non-selecting. |
+| Complete step diff whitespace | **FAIL** | `git diff --check 2d330816^ 183cfd40` reports eight added EOF blank lines. |
+| Native-metal E14 / mutation gate | **NOT RUN** | E14 belongs to step 03-01; mutation testing is the final DELIVER-wave gate. |
+
+### Review conclusion
+
+D2 is only closed in the product example, not in the current E12 expectation
+oracle. D1 remains a blocking retirement/testing-theater failure, D3 remains
+a high active-guidance contract failure, and S1 remains a direct mechanical
+quality-gate failure. The remediation remains bounded to examples,
+expectation/harness retirement, active documentation, and whitespace cleanup;
+it does not require architecture, public API, production lifecycle,
+persistence, mutation exclusion, or GH #295 changes.
+
+### Iteration-3 verdict
+
+**CHANGES_REQUESTED.** Return step 02-02 to the original crafter for bounded
+remediation and repeat the independent review. Do not advance to step 03-01
+until D1, D2, D3, and S1 are closed and the complete step-range diff check is
+clean.
