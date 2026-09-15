@@ -23,4 +23,3 @@ port = 18080
 interval_seconds = 1
 timeout_seconds = 1
 max_attempts = 3
-

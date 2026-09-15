@@ -64,10 +64,10 @@ row; installation failure writes the existing dominating `Failed` result and
 withholds guest-command release.
 
 Current operator examples and guidance were migrated to VM/microVM execution.
-Host-process-only outcomes were retired, while the guest-stack E07 journey and
-general UDP, dial-by-name, liveness, and probe fixtures were migrated to VM
-artifacts. Retired E10 evidence remains historical and its executable entry
-point fails closed. The current E12
+Host-process-specific examples and active entry points were retired, while
+general UDP, dial-by-name, liveness, and probe fixtures were migrated instead
+of being discarded. Retired E07/E10 evidence remains historical, but its
+current executable entry points cannot report a false success. The current E12
 oracle now requires the accepted predecessor identity at the terminal
 observation and a distinct fresh successor after restart.
 
@@ -128,7 +128,7 @@ Subsequent 02-02 remediation cycles each record the phases they actually ran.
 | 01-02 | Concrete `ExecDriver`, export, composition helper, and dedicated tests removed while VM capability composition and registry ownership remain | `62c72748` |
 | 01-03 | Runtime payload/network/interception dispatch collapsed onto the existing VM path without changing P-105 or GH #295 scope | `38627cf3` |
 | 02-01 | Exec-only lifecycle source/reason vocabulary removed; allocation-status and occurrence envelopes reset to current V1 | `940f729b`; expectation repair `d2d6d854` |
-| 02-02 | Current examples, verification entry points, README, whitepaper, jobs, journeys, and personas migrated or retired at the VM/microVM boundary, including the VM-only guest-stack E07 journey | `e36b8eb7`; remediations `2d330816`, `183cfd40`, `f1de51be`, `02803355`; corrective VM migration follows |
+| 02-02 | Current examples, verification entry points, README, whitepaper, jobs, journeys, and personas migrated or retired at the VM/microVM boundary | `e36b8eb7`; remediations `2d330816`, `183cfd40`, `f1de51be`, `02803355`; approval `3f628ed0` |
 | 03-01 | Post-cut E14 native-metal evidence captured and independently approved | capture `9de728e5`; DES record `b5c3f3e8`; evidence approval `fb3eaae6` |
 
 The preceding permanent-wave artifacts landed as DESIGN `db1e5e10`, DISTILL
@@ -185,8 +185,9 @@ were not modified or used as proof of the post-cut implementation.
   consumers still pointing at removed files. Migrating those fixtures to VM
   preserved their actual product contracts.
 - A retired runner that prints a message and exits 0 is testing theater. E10's
-  retired runner and cleanup oracle fail closed, while E07 was restored as a
-  VM-to-VM guest-stack journey with a real product runner.
+  retired runner and cleanup oracle now fail closed, and the obsolete E07
+  host-safe harness is absent from the active catalogue surface while its
+  historical evidence remains intact.
 - Current oracles must follow the accepted identity model even when historical
   evidence records older behavior. Review caught E12 requiring same-ID revival;
   its current contract now preserves the predecessor row and requires a fresh

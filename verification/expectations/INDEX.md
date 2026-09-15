@@ -169,9 +169,10 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 - **guest-stack-transparent-mtls-intercept** (GH #222) — E07 is the sole EDD
   expectation. It drives the built default-feature product over the one
   checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle: one
-  `[service]` + `[exec]` callee and one `[job]` + `[vm]` caller whose successful
-  result depends on receiving the exact reply. E07 is captured and awaiting
-  independent review.
+  `[service]` + `[vm]` callee and one `[job]` + `[vm]` caller whose successful
+  result depends on receiving the exact reply. E07 remains `pending` until a
+  fresh post-cut VM-to-VM capture is independently reviewed; the retained
+  pre-cut receipt is historical and is not current evidence.
   Strict D7 framing/counters/capture/TLS/kTLS and all boot-failure, diagnostic,
   C4a, restart/reclamation, stop/idempotency, sibling, nft/FIB, cleanup, and
   replay contracts remain exclusively in Rust integration/component/native
