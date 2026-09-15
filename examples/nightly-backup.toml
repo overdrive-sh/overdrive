@@ -1,0 +1,17 @@
+# VM-backed Schedule fixture. Schedule firing remains a separate GH #166
+# execution concern; this checked-in input uses the supported VM driver shape.
+[job]
+id = "nightly-backup"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = []
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[schedule]
+cron = "0 2 * * *"

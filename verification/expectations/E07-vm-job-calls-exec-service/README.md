@@ -1,11 +1,11 @@
-# E07 — historical pre-cut VM Job → host-process Service expectation
+# E07 — one VM Job calls one VM Service and receives the expected reply
 
-**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `out-of-scope — pre-cut host-process artifact; historical evidence retained`
+**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `pending`
 
 ## Expectation
 
 Using the built default-feature operator binary, deploy exactly one
-`[service]` + `[exec]` callee and one `[job]` + `[vm]` caller from the
+`[service]` + `[vm]` callee and one `[job]` + `[vm]` caller from the
 checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle. The VM
 resolves `gti-e07-callee.svc.overdrive.local`, sends its byte-distinct request,
 and exits successfully only after receiving the exact reply. Built `serve`,
