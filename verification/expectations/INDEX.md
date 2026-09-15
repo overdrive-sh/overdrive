@@ -26,6 +26,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E11](E11-vm-service-readiness-traffic-recovery/) | E | readiness withdraws and restores VM peer-Job Service traffic within interval + timeout | K3 | S-SVM-27A/B/C, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e11-evidence.md) |
 | [E12](E12-vm-service-liveness-restart-describe/) | E | VM liveness failure invokes the existing restart policy visibly through describe | — | S-SVM-28, US-SVM-3, GH #257 | `satisfied` — [independent audit](../../docs/feature/service-kind-vm-workloads/deliver/review-e12-evidence.md) |
 | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
+| [E14](E14-vm-service-post-greenfield-cut/) | E | post-cut checked-in healthy VM Service reaches Stable and its VM client receives the exact guest reply through the Service frontend with owned cleanup | K1/K2 | S-SVM-01, US-SVM-1/2, remove-legacy-exec-workload-driver feature-delta post-cut event, roadmap 03-01 | `pending` — captured at the post-cut SHA; independent evidence review required |
 
 ## Feature coverage
 

@@ -1,0 +1,116 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ad88a41dc017c95d18c2a958 pid=1977022
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/remove-legacy-exec-driver -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 1,641,409 bytes  received 89,222 bytes  692,252.40 bytes/sec
+total size is 295,434,631  speedup is 170.71
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-netlink)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-store-local)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-reconcilers)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.76s
+prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+verified SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
+Script started on 2026-09-15 01:55:05+00:00 [COMMAND="env OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config /home/ubuntu/overdrive/target/debug/overdrive deploy /home/ubuntu/overdrive/examples/service-kind-vm-workloads/service.toml" <not executed on terminal>]
+Accepted.
+Workload ID:   service-vm-e08
+Intent key:    workloads/service-vm-e08
+Spec digest:   a68e60eacccc14e3a5e420f465b1fc5a536637c7a6c6e27b18789a602d81c78a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-e08
+Service 'service-vm-e08' is stable (settled in 2224ms; witness: startup probe[0] (tcp 0.0.0.0:18081))
+
+Script done on 2026-09-15 01:55:08+00:00 [COMMAND_EXIT_CODE="0"]
+Service 'service-vm-e08' (kind: Service)
+Spec digest: a68e60eacccc14e3a5e420f465b1fc5a536637c7a6c6e27b18789a602d81c78a
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-service-vm-e08-0   Running      0          (c=10,w=local)      
+    terminal: Stable
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-service-vm-e08-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+  18081/tcp
+Issued certificates:
+  serial:        2f45c38ffca3ad809e19479e3ae1ec26
+    spiffe_id:     spiffe://overdrive.local/workload/service-vm-e08/alloc/alloc-service-vm-e08-0
+    issuer_serial: 4b2e7e56d068d30bdba3b009db12c425
+    not_after:     1789440845.861402516
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1789437308020
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pass last_observed_at=1789437308021
+Accepted.
+Workload ID:   service-vm-e08-client
+Intent key:    workloads/service-vm-e08-client
+Spec digest:   d69102550bbc05d1eea0d4b114035669b8728624bc2a151e5ce317ca1e85fea9
+Outcome:       created
+Endpoint:      https://127.0.0.1:7644/
+Next: overdrive workload describe service-vm-e08-client
+Job 'service-vm-e08-client' (kind: Job)
+Spec digest: d69102550bbc05d1eea0d4b114035669b8728624bc2a151e5ce317ca1e85fea9
+Verdict: Succeeded
+
+Attempt  State        Exit   Started              Duration  
+1        Terminated   0      (c=23,w=local)       —         
+Memory:        134217728
+E08 PASS: peer VM Job received byte-exact SVM-E08-GUEST-OK through the Service frontend
+Stopped workload 'service-vm-e08-client'.
+Endpoint: https://127.0.0.1:7644/
+Service 'service-vm-e08' (kind: Service)
+Spec digest: a68e60eacccc14e3a5e420f465b1fc5a536637c7a6c6e27b18789a602d81c78a
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-service-vm-e08-0   Failed       0          (c=11,w=local)      
+    reason: crashed (exit None, signal Some(9))
+alloc-service-vm-e08-1   Terminated   0          (c=37,w=local)      
+    reason: stopped
+Memory:        134217728
+Addresses:
+  alloc-service-vm-e08-0: 10.99.128.2
+VIP:           10.96.0.2
+Listeners:
+  18080/tcp
+  18081/tcp
+Probes:
+  startup probe[0] tcp 0.0.0.0:18081 last=pass last_observed_at=1789437308020
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=fail (timeout after 1s) last_observed_at=1789437354097
+  startup probe[0] tcp 0.0.0.0:18081 last=pending last_observed_at=—
+  readiness probe[0] http GET http://0.0.0.0:18080/ready last=pending last_observed_at=—
+removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
+E08 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

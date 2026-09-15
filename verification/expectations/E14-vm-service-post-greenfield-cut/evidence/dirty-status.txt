@@ -1,0 +1,4 @@
+# Working-tree state captured for E14 after the successful native-metal run.
+ M AGENTS.md
+ M docs/feature/remove-legacy-exec-workload-driver/deliver/execution-log.json
+?? verification/expectations/E14-vm-service-post-greenfield-cut/
