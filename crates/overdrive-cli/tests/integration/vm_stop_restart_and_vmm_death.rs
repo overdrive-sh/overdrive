@@ -67,7 +67,7 @@
 //!      modelled directly; the `VmOutOfMemory` *diagnosis* is S-VM-19's
 //!      separate concern, whereas S-VM-43's claim is purely that a host kill
 //!      is a **crash**, not a clean exit.
-//!   2. A microVM is **Job-only** (`[service] + [vm]` is rejected — S-VM-38)
+//!   2. A microVM can back the supported workload kinds, including Service
 //!      and a Job crash **finalises without restarting** by design (the
 //!      run-once contract; `workload_lifecycle.rs` Job-kind natural-exit
 //!      handler, `is_natural_exit`). So the Gherkin's "same *ceiling*, same
@@ -1030,7 +1030,7 @@ async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
 /// NOTE (design-vs-Gherkin, surfaced to acceptance-designer): the scenario's
 /// original second Then said "same *ceiling*, same *backoff curve*", which
 /// describes the Service restart-budget branch. A microVM is Job-only
-/// (`[service] + [vm]` is rejected by S-VM-38) and a Job crash finalises
+/// (a VM Service follows its guest-grounded lifecycle) and a Job crash finalises
 /// without restart by design, so that sub-clause is unobservable for a VM.
 /// The observable **parity** asserted here is that a host-killed VM Job is
 /// treated identically to a crashed process Job — Failed,

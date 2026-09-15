@@ -678,7 +678,7 @@ band.
 
 ## Leaked workload cgroups across runs (Lima / Linux integration tests)
 
-Integration tests that exercise `ExecDriver` against real
+Integration tests that exercise the VM workload lifecycle against real
 `/sys/fs/cgroup` (anything under `tests/integration/job_lifecycle/`
 running on Linux through `cargo xtask lima run --`) create
 per-allocation scope directories under
@@ -692,7 +692,7 @@ behind in the Lima VM until something explicitly removes them.
 
 ### Why this matters
 
-`ExecDriver::start` `mkdir`s a fresh scope directory per allocation.
+The VM driver creates a fresh scope directory per allocation.
 When a stale `alloc-<job>-0.scope` already exists from a prior run,
 the next test in that file (Phase 1 `submit_to_running`,
 `crash_recovery`, `stop_to_terminated`) hits `EEXIST` on the mkdir
@@ -756,7 +756,7 @@ SIGINT from the user. After any such event, expect leftover state.
 If a previously-passing integration test starts failing or timing
 out, **run the detection one-liner before assuming the recent
 changes broke the test**. The fix is to clean the VM, not to add
-defensive `mkdir -p`-style retries to `ExecDriver` (production must
+defensive `mkdir -p`-style retries to the VM driver (production must
 NOT silently reuse a pre-existing scope — that would cross
 allocation boundaries).
 
@@ -1350,7 +1350,7 @@ bpf-next model. Advancing the pin is a deliberate, tested image change.
 ### Running tests — Lima VM
 
 All test execution goes through the Lima VM for reproducibility.
-ProcessDriver, control-plane cgroup management, eBPF programs, and every
+VmDriver, control-plane cgroup management, eBPF programs, and every
 `#[cfg(target_os = "linux")]` test surface require a real Linux kernel
 plus cgroup v2. Running tests directly on the host — even on Linux —
 gives a degraded signal: the toolchain may differ, kernel version may
@@ -1395,7 +1395,7 @@ integration-tests` is mandatory; without it, the Linux-gated tests are
 skipped and the run signal is meaningless.
 
 **Cgroup writes need root or delegation.** Tests that exercise the
-workload-cgroup path (`overdrive-worker::ProcessDriver`, the
+workload-cgroup path (`overdrive-worker::VmDriver`, the
 JobLifecycle convergence loop) `mkdir`
 `/sys/fs/cgroup/overdrive.slice/...`. The Lima default user is
 unprivileged and lacks delegation for that subtree, so the production

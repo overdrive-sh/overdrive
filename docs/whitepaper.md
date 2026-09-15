@@ -492,7 +492,7 @@ The node agent is a single Rust binary that runs on every worker node. It is res
 - Loading and managing eBPF programs via aya-rs
 - Subscribing to Corrosion tables and materialising BPF maps (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`) on row change — there is no push path for dataplane state
 - Requesting and distributing workload SVIDs from the built-in CA
-- Running workloads via the appropriate driver
+- Running supported VM/microVM workloads via the Cloud Hypervisor driver
 - Collecting telemetry from the eBPF ringbuf and forwarding to DuckLake
 - Responding to reconciler actions (start, stop, migrate, resize) — control-flow RPCs still arrive via bidirectional streaming from the regional control plane (tarpc / postcard-rpc over HTTP/2 with rustls, pure-Rust throughout per design principle 7; no protoc toolchain)
 
@@ -515,13 +515,11 @@ trait Driver: Send + Sync {
 
 | Driver | Backend | Use Case |
 |---|---|---|
-| `exec` | tokio::process + cgroups v2 | Native binaries, daemons |
-| `microvm` | Cloud Hypervisor | Fast-boot (~200ms), strong isolation |
-| `vm` | Cloud Hypervisor | Full OS, hotplug, virtiofs, AArch64 |
+| `vm` | Cloud Hypervisor | Current microVM/full-VM workloads with guest-level lifecycle evidence |
 | `unikernel` | Cloud Hypervisor + Unikraft | Extreme density, virtiofs-capable |
 | `wasm` | Wasmtime | Serverless functions, plugins |
 
-All drivers share the same identity model, the same eBPF dataplane, the same policy system, and the same telemetry pipeline. A network policy that governs a process workload governs a VM workload identically.
+The current shipped execution path is the VM/microVM driver. Planned workload families will reuse the same identity model, eBPF dataplane, policy system, and telemetry pipeline when their drivers land.
 
 ### Cloud Hypervisor as the Unified VMM
 
@@ -735,7 +733,8 @@ one `IDENTITY_MAP`, one cluster trust bundle, one SPIFFE-ID-based
 that enforces it is an implementation detail the operator does not see.
 
 The **enforcement mechanism is also universal**: a single **agent-light L4
-proxy** for every workload kind — process/exec, WASM, microVM, unikernel.
+proxy** for the supported VM/microVM path, with the same boundary available to
+future workload families when their drivers land.
 This unifies the two-mechanism split this section previously carried (an
 in-band host-socket kTLS path plus a separate guest-stack tap proxy). The
 unification was settled empirically — six Tier-3 spikes on the pinned-floor
@@ -768,15 +767,17 @@ both directions**. See **ADR-0069** and
    (**agent-light**).
 
 The application is completely unaware; no sidecar is injected; the workload
-holds nothing. This is the **universal transparent-mTLS L4 proxy** —
+holds nothing. This is the **transparent-mTLS L4 proxy for the supported VM/microVM path** —
 [#26](https://github.com/overdrive-sh/overdrive/issues/26) (which now folds
 in the former guest-stack tap proxy,
 [#222](https://github.com/overdrive-sh/overdrive/issues/222)).
 
-**Why one mechanism, not two.** Host-socket workloads (process/WASM) terminate
-TCP in the host kernel; guest-stack workloads (microVM/unikernel) terminate in
-the guest. The earlier design installed in-band kTLS on the host-socket
-workload's *own* socket and used a separate host tap proxy for the guest case.
+**Why one mechanism, not two.** Supported VM/microVM workloads terminate TCP in
+the guest. The node agent owns the corresponding host tap and peer-facing host
+socket, so the current path has one interception boundary. Future workload
+families can reuse that boundary when their drivers land. The earlier design
+installed in-band kTLS on a workload's *own* socket and used a separate host tap
+proxy for the guest case.
 The in-band model uniquely wins **restart-survival** (kTLS state is
 socket-owned) and **1-socket density**, but it has **no lossless
 client-speaks-first path** on runtime-loadable BPF (no `sk_msg` HOLD;
@@ -933,7 +934,7 @@ the handshake on the workload's behalf:
 ```
 Workload A calls connect() to Workload B
     │
-connect() transparently rewritten to the agent's plaintext leg (cgroup/connect4 / TPROXY)
+connect() transparently intercepted to the agent's plaintext leg (VM tap / TPROXY)
 sockops detects ESTABLISHED; agent drains A's pre-arm plaintext losslessly
 node agent fetches SVID for A, trust bundle for cluster
 rustls performs TLS 1.3 handshake on the peer-facing leg (A presents SVID, verifies B's SVID)
@@ -946,12 +947,11 @@ kTLS handles all encrypt/decrypt in-kernel
 optional NIC offload for crypto operations
 ```
 
-**Host-socket workloads** (process, WASM) terminate TCP in the host kernel;
-**guest-stack workloads** (microVM, unikernel) terminate in the guest and are
+**Supported VM/microVM workloads** terminate TCP in the guest and are
 intercepted at the virtio-net tap the host owns (the host knows which
-allocation owns which tap). Both land on the same proxy: the agent's
-peer-facing leg is a host socket carrying host kTLS, so the mechanism is
-identical regardless of where the workload's own TCP terminates.
+allocation owns which tap). The agent's peer-facing leg is a host socket
+carrying host kTLS, so the current mechanism is explicit about the guest
+boundary; future workload classes may reuse it when their drivers land.
 
 **The host is the trust root for every workload class.** The SVID private
 key is held by the host node agent (read via the in-process `IdentityRead`
@@ -2868,7 +2868,7 @@ This section records material drift in the whitepaper's framing as the platform'
 
 **What was deliberately not edited.**
 
-- TOML kind discriminators (`[service]`, `[job]`, `[schedule]`) — these tag the workload kind per ADR-0047 §1 and stay as section names in the wire shape. Workload-level concerns are siblings at the top level (`[exec]`, `[resources]`, `[[listener]]`, `[microvm]`, `[[sidecars]]`, `[[policies]]`, `[security]`) — flattened from the prior `[job.*]` nesting per ADR-0031 Amendment 2's section-as-discriminator convention. The operator-facing CLI verb `overdrive job submit` stays for continuity (ADR-0047 §1a).
+- TOML kind discriminators (`[service]`, `[job]`, `[schedule]`) — these tag the workload kind per ADR-0047 §1 and stay as section names in the wire shape. Workload-level concerns are siblings at the top level (`[vm]`, `[resources]`, `[[listener]]`, `[[sidecars]]`, `[[policies]]`, `[security]`) — flattened from the prior `[job.*]` nesting per ADR-0031 Amendment 2's section-as-discriminator convention. The operator-facing CLI verb is `overdrive deploy <SPEC>`.
 - SPIFFE ID literals (`spiffe://overdrive.local/job/payments/...`) and the per-service VIP DNS pattern (`<job>.svc.overdrive.local`) — the `job/<name>` path component is the canonical workload-identity scheme and applies to all three kinds.
 - Code identifiers (`job_id`, `job_name`, `JobLifecycleState`), Rego policy input fields (`input.src.job`, `input.dst.job`), and SQL column names — these are governed by ADR-0011 / ADR-0031 / ADR-0033 amendments, not whitepaper concerns.
 - Generic English uses of "job" (CI job nomenclature in §22; "the kernel's job"; "Spark-style jobs"; "no separate archival job") — these mean "task" in colloquial English, not the workload primitive.

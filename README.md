@@ -23,13 +23,11 @@ actually run right now:
 - **Ship from one file.** Describe a service or job in a single TOML spec and
   deploy it with `overdrive deploy`. Deploy is idempotent on the spec's content
   hash — an identical spec is a no-op, so it is safe to run straight from CI.
-- **Processes with enforced limits.** Workloads run as managed processes with
-  the CPU and memory caps you declare in the spec.
-- **Boot a microVM, not just a process.** Declare `[vm]` instead of `[exec]` and
-  a batch job boots as a Cloud Hypervisor microVM with its own kernel, isolated
-  by hardware virtualization. The hypervisor runs confined — non-root, seccomp-
-  and Landlock-restricted — and the platform reports the guest's real exit code,
-  so a VM that boots and fails is never counted as a success. You supply the
+- **Boot a microVM with enforced limits.** Declare a `[vm]` workload and it
+  boots as a Cloud Hypervisor microVM with its own kernel, isolated by hardware
+  virtualization. The hypervisor runs confined — non-root, seccomp- and
+  Landlock-restricted — and the platform reports the guest's real exit code, so
+  a VM that boots and fails is never counted as a success. You supply the
   kernel and rootfs; the node needs `/dev/kvm`.
 - **Health-checked and restarted.** Readiness and liveness probes gate traffic
   and catch failures; an allocation that fails its liveness check restarts, and
@@ -54,8 +52,10 @@ health checks that tell the platform when it's ready.
 id       = "payments"
 replicas = 1
 
-[exec]
+[vm]
 command = "/opt/payments/bin/server"
+kernel  = "/var/lib/overdrive/kernel"
+rootfs  = "/var/lib/overdrive/rootfs.ext4"
 
 [[listener]]
 port = 8080
@@ -77,9 +77,8 @@ and a CI job that can't tell whether it already landed is safe to run anyway.
 The full walkthrough is in the
 [deploy guide](https://overdrive.sh/docs/how-to/deploy-a-workload).
 
-To boot a workload as a microVM instead of a process, a `[job]` declares a `[vm]`
-block in place of `[exec]` — its own kernel, hardware-isolated, with the guest's
-real exit code reported back. See
+The `[vm]` block names the guest command plus the operator-supplied kernel and
+rootfs; the guest is hardware-isolated and its real exit code is reported back. See
 [microVMs](https://overdrive.sh/docs/concepts/microvms).
 
 ## Roadmap

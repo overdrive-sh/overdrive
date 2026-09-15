@@ -129,13 +129,6 @@ capture_resource_snapshot() {
   printf '[materialization]\n%s\n' "$([[ -e "$OUTPUT_ROOT" ]] && printf present || printf absent)"
 }
 
-capture_e10_resource_snapshot() {
-  local id="$1"
-  capture_resource_snapshot
-  echo '[allocation-hypervisors]'
-  probe_hypervisors_for_alloc "alloc-$id-0"
-}
-
 snapshot_before() {
   SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/svm-e08-snapshot.XXXXXX")"
   probe_hypervisors >"$SNAPSHOT_DIR/hypervisors"
@@ -145,56 +138,6 @@ snapshot_before() {
   probe_overdrive_network_names >"$SNAPSHOT_DIR/network-names"
   probe_loops >"$SNAPSHOT_DIR/loops"
   probe_mounts >"$SNAPSHOT_DIR/mounts"
-}
-
-capture_e10_current_owned_resources() {
-  local id="$1"
-  local alloc_id="alloc-$id-0"
-  printf 'allocation=%s\n' "$alloc_id"
-  grep -Fxq "$alloc_id.scope" <(probe_scopes) \
-    && printf 'cgroup=%s.scope\n' "$alloc_id" || true
-  grep -Fxq "$alloc_id" <(probe_run_dirs) \
-    && printf 'run-directory=%s\n' "$alloc_id" || true
-  probe_hypervisors_for_alloc "$alloc_id" \
-    | while IFS= read -r pid; do
-        [[ -z "$pid" ]] || printf 'hypervisor=%s\n' "$pid"
-      done
-  comm -13 "$SNAPSHOT_DIR/network-names" <(probe_overdrive_network_names) \
-    | while IFS= read -r name; do
-        [[ -z "$name" ]] || printf 'network=%s\n' "$name"
-      done
-}
-
-e10_named_runtime_resources_absent() {
-  local id="$1"
-  local observed="$2"
-  local alloc_id="alloc-$id-0"
-  local kind name
-
-  # These allocation-bearing resources have stable external names. Their
-  # absence is required even when cleanup won the race before the pre-stop
-  # resource observation and therefore no positive delta was captured.
-  ! grep -Fxq "$alloc_id.scope" <(probe_scopes) || return 1
-  ! grep -Fxq "$alloc_id" <(probe_run_dirs) || return 1
-  [[ -z "$(probe_hypervisors_for_alloc "$alloc_id")" ]] || return 1
-
-  # Network names are learned from the current-session snapshot because the
-  # slot is not part of the public allocation row. A name observed there must
-  # disappear; an already-clean snapshot does not have to invent a delta.
-  while IFS='=' read -r kind name; do
-    [[ "$kind" == "network" ]] || continue
-    ! grep -Fxq "$name" <(probe_overdrive_network_names) || return 1
-  done <"$observed"
-}
-
-wait_for_e10_named_runtime_cleanup() {
-  local id="$1"
-  local observed="$2"
-  local deadline=$((SECONDS + 45))
-  while [[ "$SECONDS" -lt "$deadline" ]]; do
-    e10_named_runtime_resources_absent "$id" "$observed" && return 0
-  done
-  return 1
 }
 
 new_delta_count() {
@@ -227,34 +170,6 @@ stop_workload() {
   if ! wait_for_workload_stop "$id" "$describe"; then
     cat "$describe" >&2
     return 1
-  fi
-  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-    local settled="$OUTPUT_ROOT/${id}-stopped-settled.log"
-    local observed_resources="$OUTPUT_ROOT/current-session-owned-resources.log"
-    wait_for_e10_named_runtime_cleanup "$id" "$observed_resources" || return 1
-    capture_e10_resource_snapshot "$id" \
-      >"$OUTPUT_ROOT/post-runtime-cleanup-resources.log"
-    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-      "$BIN" workload describe "$id" >"$settled" 2>&1 || return 1
-    [[ "$(first_service_alloc_state <"$settled")" == "Terminated" ]] \
-      && [[ "$(first_service_alloc_id <"$settled")" \
-        == "$(first_service_alloc_id <"$describe")" ]] \
-      && [[ "$(first_service_restart_count <"$settled")" \
-        == "$(first_service_restart_count <"$describe")" ]] \
-      && grep -Fq '    reason: stopped' "$settled" \
-      || return 1
-    cp -- "$describe" "$OUTPUT_ROOT/after-stop-describe.log"
-    cp -- "$settled" "$OUTPUT_ROOT/post-cleanup-describe.log"
-    {
-      printf 'after_stop_allocation=%s\n' \
-        "$(first_service_alloc_id <"$describe")"
-      printf 'after_stop_restart_count=%s\n' \
-        "$(first_service_restart_count <"$describe")"
-      printf 'after_cleanup_allocation=%s\n' \
-        "$(first_service_alloc_id <"$settled")"
-      printf 'after_cleanup_restart_count=%s\n' \
-        "$(first_service_restart_count <"$settled")"
-    } >"$OUTPUT_ROOT/stale-session-refusal.log"
   fi
   cat "$output"
 }
@@ -1647,14 +1562,13 @@ case "${1:-}" in
     case "${2:-}" in
       healthy) run_healthy ;;
       tcp-truthfulness-100) run_tcp_truthfulness_100 ;;
-      http-status-cross-driver) run_http_status_cross_driver ;;
       zero-probes) run_zero_probes ;;
       readiness-recovery) run_readiness_recovery ;;
       case) shift 2; run_case "$@" ;;
       liveness-restart)
         run_liveness_restart
         ;;
-      *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|http-status-cross-driver|readiness-recovery|liveness-restart|zero-probes' ;;
+      *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|readiness-recovery|liveness-restart|zero-probes' ;;
     esac
     ;;
   *)

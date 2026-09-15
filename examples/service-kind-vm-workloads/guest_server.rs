@@ -6,7 +6,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const BODY: &[u8] = b"SVM-E08-GUEST-OK";
-const FAILURE_DIAGNOSTIC_SENTINEL: &[u8] = b"SVM-E10-FAILURE-BODY-MUST-NOT-LEAK";
 
 #[derive(Debug)]
 struct Config {
@@ -92,7 +91,7 @@ fn reason(status: u16) -> &'static str {
 }
 
 fn write_status(stream: &mut impl Write, status: u16) {
-    let body: &[u8] = if status == 503 { FAILURE_DIAGNOSTIC_SENTINEL } else { &[] };
+    let body: &[u8] = &[];
     let response = format!(
         "HTTP/1.1 {status} {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         reason(status),

@@ -106,6 +106,20 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-14T22:49:50Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: documentation-only step; existing check-source acceptance is already green before artifact migration",
+      "t": "2026-09-14T23:31:48Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-14T23:46:32Z"
     }
   ]
 }
