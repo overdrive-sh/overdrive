@@ -113,6 +113,7 @@ use std::time::Duration;
 
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
 use overdrive_sim::adapters::SimMtlsResolve;
+use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{
     accept_outbound_and_recover_orig_dst, install_outbound_tproxy, make_transparent_listener,
 };
@@ -124,12 +125,10 @@ use overdrive_worker::mtls_intercept::{
 const NS_W: &str = "nsW-cons0502";
 const VETH_W: &str = "vethW-con05";
 const VETH_H: &str = "vethH-con05";
-// Keep the worker-only netns outside the production VM workload subnet
-// (`10.99.0.0/16`), which can remain routed when a prior production boot is
-// intentionally left alive for reclamation tests.
-const HOST_GW: &str = "10.250.3.1";
-const WL_ADDR: &str = "10.250.3.2";
-const SUBNET_LEN: &str = "24";
+// The topology requests a `/24` from overdrive-testing's global
+// `10.250.0.0/16` pool under this stable owner name. The pool is disjoint from
+// production's `10.99.0.0/16`; the lease supplies the gateway/workload pair.
+const CIDR_LEASE_NAME: &str = "worker-name-resolve-enforce-consistency";
 
 /// The KNOWN `service_backends` addr **B** the workload dials (DNS stubbed — the
 /// workload connects to it directly, standing in for the #243
@@ -320,15 +319,19 @@ fn teardown_topology() {
 /// Stand up the netns + veth pair + addresses + host routing hygiene EXACTLY as
 /// the increment-b egress spike does, plus the lo-bound service backend B the
 /// workload dials.
-fn setup_topology() {
+fn setup_topology(lease: &TestCidrLease) {
     teardown_topology();
+
+    let host_gateway = lease.host_gateway().to_string();
+    let workload_addr = lease.workload_addr().to_string();
+    let prefix_len = lease.prefix_len().to_string();
 
     ip(&["netns", "add", NS_W]);
     ip(&["link", "add", VETH_W, "type", "veth", "peer", "name", VETH_H]);
     ip(&["link", "set", VETH_W, "netns", NS_W]);
 
     // Host side: address + up.
-    ip(&["addr", "add", &format!("{HOST_GW}/{SUBNET_LEN}"), "dev", VETH_H]);
+    ip(&["addr", "add", &format!("{host_gateway}/{prefix_len}"), "dev", VETH_H]);
     ip(&["link", "set", VETH_H, "up"]);
 
     // Workload side (inside netns): lo up + address + up + default route.
@@ -340,12 +343,12 @@ fn setup_topology() {
         "ip",
         "addr",
         "add",
-        &format!("{WL_ADDR}/{SUBNET_LEN}"),
+        &format!("{workload_addr}/{prefix_len}"),
         "dev",
         VETH_W,
     ]);
     ip(&["netns", "exec", NS_W, "ip", "link", "set", VETH_W, "up"]);
-    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", HOST_GW]);
+    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", &host_gateway]);
 
     // The KNOWN service backend B lives on host lo (the host binds+listens on it;
     // the workload routes to it via the gateway).
@@ -494,7 +497,9 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     // Cross-process exclusion + clean baseline.
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
-    setup_topology();
+    let lease =
+        TestCidrLease::acquire(CIDR_LEASE_NAME).expect("acquire name-resolve topology CIDR lease");
+    setup_topology(&lease);
 
     // The single source: the KNOWN `service_backends` addr B. DNS would return
     // it (headless v1, D-TME-10); the workload dials it directly (DNS stubbed).

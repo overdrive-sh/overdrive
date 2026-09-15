@@ -718,15 +718,24 @@ looks like a missing TPROXY listener or a dead backend.
 
 For every hand-built real-netns fixture:
 
-- Choose a fixture CIDR outside the production workload subnet
-  (`WORKLOAD_SUBNET_BASE`, currently `10.99.0.0/16`) and outside any other
-  route the test intentionally leaves active. Each topology module should own
-  a distinct CIDR so residue from one interrupted test cannot create a duplicate
-  route for another module. Do not reuse production slot-0 addresses merely
-  because the test's namespace names differ.
+- Request a named lease with
+  `overdrive_testing::cidr_lease::TestCidrLease::acquire(owner)` rather than
+  embedding a CIDR literal. The shared fixture allocator draws `/24`s from its
+  documented `10.250.0.0/16` pool, which is disjoint from the production
+  workload subnet (`WORKLOAD_SUBNET_BASE`, currently `10.99.0.0/16`). Its
+  cross-process registry records owner/PID/process-start identity and checks
+  live kernel routes before a claim is returned. A lease is released by
+  `Drop`; a dead owner with live route residue remains quarantined until the
+  route disappears.
+- Keep the lease name stable and unique to the topology module. The lease
+  handle supplies the host gateway, workload address, and prefix used by the
+  topology. Each module therefore owns a distinct CIDR even when a prior
+  interrupted run leaves a route behind; do not reuse production slot-0
+  addresses merely because the test's namespace names differ.
 - Keep host-loopback backend addresses and routes disjoint from production
-  addresses as well. Record the selected CIDR in the fixture's module
-  documentation so a later production subnet change cannot silently collide.
+  addresses as well. Record the allocator pool and stable lease name in the
+  fixture's module documentation so a later production subnet change cannot
+  silently collide.
 - Before diagnosing a connection assertion, inspect the exact host routes and
   namespaces (`ip route`, `ip rule`, `ip netns list`). After a panic or
   cancellation, remove only the named fixture resources or restart the test

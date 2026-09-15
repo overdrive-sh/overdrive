@@ -83,6 +83,9 @@ tower-service.workspace = true
 
 [dev-dependencies]
 overdrive-sim.path  = "../overdrive-sim"
+# Shared real-OS fixtures, including the cross-process CIDR lease used by the
+# hand-built worker mTLS topologies. Dev-dependency only.
+overdrive-testing.workspace = true
 # `overdrive-host` — production adapter crate (`adapter-host`). Used
 # by the Tier 3 integration suite under
 # `tests/integration/real_cgroup_fs/` (step 01-02 of the cgroup-fs-port

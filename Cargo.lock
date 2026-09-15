@@ -2399,6 +2399,7 @@ dependencies = [
 name = "overdrive-testing"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "overdrive-core",
  "thiserror 2.0.18",
 ]
@@ -2418,6 +2419,7 @@ dependencies = [
  "overdrive-host",
  "overdrive-netlink",
  "overdrive-sim",
+ "overdrive-testing",
  "parking_lot",
  "proptest",
  "rcgen",
