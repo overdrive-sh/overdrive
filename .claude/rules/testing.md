@@ -593,6 +593,39 @@ async fn honours_home_env_var_fallback() {
 
 ---
 
+## Node-global kernel state requires a catch-all nextest group
+
+`serial_test` and an in-process lock cannot protect node-global kernel state:
+nextest launches tests from different binaries in separate processes. This
+includes shared nft tables and policy routes, root-cgroup or bpffs
+attachments, and production netns/veth resources. A module-specific filter is
+easy to leave stale when a new test is added, so it is not a sufficient
+isolation boundary.
+
+When any test in an integration binary mutates one of these resources, assign
+the **entire package/binary pair** to the existing `host-kernel-shared` group
+(`max-threads = 1`) in the nextest profile used by that lane. Narrower
+module- or test-level assignments may remain as explanatory documentation, but
+they MUST NOT be the only assignment. This deliberately serializes pure tests
+in the same binary; the cost is preferable to allowing an unlisted fixture to
+erase a sibling's live kernel state.
+
+After changing a group filter, verify the effective profile rather than only
+reading the TOML:
+
+```bash
+cargo xtask lima run -- cargo nextest show-config test-groups --profile default
+cargo xtask lima run -- cargo nextest show-config test-groups --profile ci
+```
+
+The `ci` and `mutants` profiles inherit the repository's default overrides;
+still inspect each profile that runs the affected binary. A green isolated
+test does not discharge this rule: run the smallest multi-binary lane that
+shares the kernel resources, because a first failure can leave state that makes
+later failures misleading.
+
+---
+
 ## Net slots are partitioned across parallel tests — draw from the registry, never a fresh allocator
 
 Integration tests that provision REAL workload network namespaces derive
@@ -673,6 +706,32 @@ band.
   one.
 - A flake report shaped "different test each run, same assertion line,
   ~ms failure, green serially" — that is this class.
+
+### Hand-built real-netns fixtures must be route-disjoint from production
+
+Some Tier-3 tests construct a veth/netns topology directly instead of using
+the production `NetSlotAllocator`. A unique namespace or interface name is not
+enough: the host route selected for the fixture can still overlap a retained
+production VM route. If both sides use the same gateway/workload CIDR, the
+kernel may send the test packet into the production namespace and the failure
+looks like a missing TPROXY listener or a dead backend.
+
+For every hand-built real-netns fixture:
+
+- Choose a fixture CIDR outside the production workload subnet
+  (`WORKLOAD_SUBNET_BASE`, currently `10.99.0.0/16`) and outside any other
+  route the test intentionally leaves active. Do not reuse production slot-0
+  addresses merely because the test's namespace names differ.
+- Keep host-loopback backend addresses and routes disjoint from production
+  addresses as well. Record the selected CIDR in the fixture's module
+  documentation so a later production subnet change cannot silently collide.
+- Before diagnosing a connection assertion, inspect the exact host routes and
+  namespaces (`ip route`, `ip rule`, `ip netns list`). After a panic or
+  cancellation, remove only the named fixture resources or restart the test
+  VM; do not paper over a collision with connection retries.
+
+This is distinct from slot partitioning: it protects manually chosen address
+and route state, while the registry protects slot-derived kernel names.
 
 ---
 
