@@ -34,7 +34,7 @@ schema_version: 1
 persona:
   id: ana-platform-engineer
   name: "Ana Moreno"
-  role: "Overdrive platform engineer running host-process and VM-backed Service workloads on a single-node dev host — reachability, honest health, and full lifecycle"
+  role: "Overdrive platform engineer running VM/microVM-backed Service workloads on a single-node dev host — reachability, honest health, and full lifecycle"
   one_liner: >
     Runs UDP-bearing services (DNS resolvers, QUIC edge endpoints, game
     servers, syslog collectors) and expects UDP to be a first-class
@@ -127,6 +127,6 @@ persona:
     - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
     - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
     - "Lifecycle (GH #249): after the replace action, `overdrive workload describe <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
-    - "VM Service (GH #257): a guest HTTP/TCP result drives Stable, readiness eligibility, and liveness behavior through the same deploy/describe contract as a host-process Service"
+    - "VM Service (GH #257): a guest HTTP/TCP result drives Stable, readiness eligibility, and liveness behavior through the supported VM deploy/describe contract"
 
   related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]

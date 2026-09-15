@@ -1,0 +1,19 @@
+# VM-backed Service probe fixture.
+[service]
+id = "quick-bind"
+replicas = 1
+
+[[listener]]
+port = 8080
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = ["--raw-port", "8080"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+

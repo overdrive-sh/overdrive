@@ -1,6 +1,6 @@
-# E07 — A VM Job calls an Exec Service and receives the expected reply
+# E07 — historical pre-cut VM Job → host-process Service expectation
 
-**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `captured — independent review pending`
+**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `out-of-scope — pre-cut host-process artifact; historical evidence retained`
 
 ## Expectation
 

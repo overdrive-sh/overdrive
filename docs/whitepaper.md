@@ -6,7 +6,7 @@
 
 ## Abstract
 
-Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. It unifies virtual machines, processes, unikernels, and serverless WASM functions under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
+Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. Its current shipped execution path is VM/microVM workloads under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability. Additional workload families remain future driver work — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
 
 The foundational thesis: the primitives required to build a genuinely better orchestration platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes, and kTLS offload — only reached maturity in the last two years. Overdrive makes different architectural choices than Kubernetes, not better ones for 2014, but definitively better ones for 2026.
 
@@ -84,8 +84,10 @@ All network policy enforcement, load balancing, service routing, flow telemetry,
 **3. Security is structural, not configurable.**
 mTLS between all workloads is not an option — it is the default and cannot be disabled. Every packet carries cryptographic workload identity. Policy is enforced in the kernel, not by application cooperation.
 
-**4. All workload types are first class.**
-Virtual machines, processes, unikernels, containers, and WASM functions share one control plane, one identity model, one policy system, and one dataplane. Not one model bolted onto another.
+**4. VM/microVM workloads are first class on the shipped path.**
+They share one control plane, one identity model, one policy system, and one
+dataplane. Other workload families are added only when their drivers are
+independently delivered, not implied by this current execution path.
 
 **5. Observability is native, not retrofitted.**
 eBPF gives the platform kernel-level visibility into every workload with full identity context from day one. The LLM observability layer operates on this data, not on logs scraped after the fact.
@@ -570,14 +572,14 @@ impl Driver for CloudHypervisorDriver {
 }
 ```
 
-### virtiofs and Cross-Workload Volume Sharing
+### virtiofs and VM Volume Sharing
 
-Cloud Hypervisor's virtiofs support (backed by a `virtiofsd` daemon per VM) enables shared filesystem volumes between workload types — a capability Firecracker permanently forecloses:
+Cloud Hypervisor's virtiofs support (backed by a `virtiofsd` daemon per VM) enables shared filesystem volumes for VM workloads:
 
 ```
 VM workload writes to /shared-volume  (virtiofs mount)
-Process workload reads /shared-volume (bind mount)
-    → same volume, same data, different workload types
+Another VM workload reads /shared-volume (virtiofs mount)
+    → same volume, same data, independently managed VM workloads
     → lifecycle managed by the storage reconciler
 ```
 
@@ -585,7 +587,7 @@ Unikraft added virtiofs support to mainline (`lib/ukfs-virtiofs`, December 2025)
 
 ### Live VM Right-Sizing
 
-Cloud Hypervisor's CPU and memory hotplug integrates directly with the right-sizing subsystem. Where process workloads are right-sized via live cgroup adjustment, VM workloads are right-sized via hotplug — no restart, no workload disruption:
+Cloud Hypervisor's CPU and memory hotplug integrates directly with the right-sizing subsystem. VM workloads are right-sized via hotplug — no restart, no workload disruption:
 
 ```
 eBPF detects VM memory pressure approaching limit
@@ -596,7 +598,7 @@ Tier 1: node agent issues vm.resize via CH API
 No VM restart. No workload interruption.
 ```
 
-Firecracker cannot do this for CPU — issue #2609 (*Hot-plug vCPUs*) is parked at low priority. Firecracker did gain virtio-mem memory hotplug in 2024, so the gap is narrower than it was a year ago; CPU hotplug, virtiofs, and Windows guest support remain the genuine Cloud Hypervisor differentiators. The right-sizing story is uniform across all workload types at the control-plane layer; the mechanisms differ per class — see §14.
+The right-sizing story is uniform across the supported VM workload path at the control-plane layer; the mechanical path depends on the guest and VMM — see §14.
 
 ### Persistent MicroVMs — Long-Lived Stateful Workloads
 
@@ -1725,7 +1727,7 @@ Overdrive observes actual resource consumption at the kernel level via eBPF kpro
 
 This enables four subsystems:
 
-**Live resizing, mechanism per workload class.** Process, container, and WASM workloads are right-sized by writing the cgroup limit directly (`/sys/fs/cgroup/.../memory.max`). This is a cgroups v2 kernel feature and has no dependency on the VMM. VM and unikernel workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which *does* require Cloud Hypervisor and a guest kernel that recognises the new capacity (Linux ≥5.8 for virtio-mem). The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action. The mechanical path differs sharply; the §14 novelty is that one reconciler and one pressure signal drive both.
+**Live resizing for VM workloads.** VM workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which requires Cloud Hypervisor and a guest kernel that recognises the new capacity. The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action.
 
 **Resource profiles** — the reconciler accumulates p95 CPU and memory utilization per workload, per hour-of-week, over a rolling 30-day window stored in libSQL. Right-sizing recommendations carry a confidence score based on sample count.
 

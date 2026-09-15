@@ -1,0 +1,18 @@
+[service]
+id = "b"
+replicas = 1
+
+[[listener]]
+port = 18972
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = ["--raw-port", "18972"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+

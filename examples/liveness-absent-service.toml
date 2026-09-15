@@ -1,0 +1,25 @@
+[service]
+id = "liveness-absent"
+replicas = 1
+
+[[listener]]
+port = 8091
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+args = ["--raw-port", "8091", "--http-port", "18080"]
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[[health_check.startup]]
+type = "tcp"
+port = 8091
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
