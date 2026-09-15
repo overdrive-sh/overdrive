@@ -34,7 +34,7 @@ svc_name="$(grep -E '^id[[:space:]]*=' "$REPO_ROOT/$SVC_SPEC" | head -1 | sed -E
 
 capture svc_status od workload describe "$SVC_JOB" || true
 evidence_contains svc_status "Probes" || rc=1
-grep -qE 'tcp |http |exec ' "$EVIDENCE_DIR/svc_status.out" \
+grep -qE 'tcp |http ' "$EVIDENCE_DIR/svc_status.out" \
   && echo "  [PASS] svc_status.out shows a mechanic summary" \
   || { echo "  [FAIL] svc_status.out shows no mechanic summary"; rc=1; }
 

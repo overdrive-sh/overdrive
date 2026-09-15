@@ -1757,7 +1757,9 @@ When the idle-eviction reconciler marks an allocation for suspension:
 
 Resume is the inverse: Cloud Hypervisor `restore()` with `userfaultfd` lazy memory paging — pages materialise on access, not upfront. A VMGenID counter update on restore reseeds the guest kernel RNG to prevent entropy-reuse hazards across snapshot forks (§6 *Persistent MicroVMs*).
 
-This composes with the WASM scale-to-zero pool (§16) — the mechanism differs per driver (Cloud Hypervisor snapshot/restore vs Wasmtime instantiation) but the control-plane contract is identical: `suspended` is a first-class allocation state, and the resume trigger is the gateway or the reconciler, not the workload itself. Process-driver workloads opt out — processes cannot be checkpointed safely without userspace cooperation; they remain running or terminate.
+This composes with future workload-family drivers when they are delivered. For
+the supported VM path, `suspended` is a first-class allocation state and the
+resume trigger is the gateway or reconciler, not the workload itself.
 
 ### Proxy-Triggered Resume
 
@@ -1991,7 +1993,11 @@ The design is deliberately narrower than a general distributed filesystem. `over
 
 Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
 
-Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `overdrive-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `overdrive-fs` is specifically the rootfs store for persistent microVMs.
+VM shared volumes — the virtiofs use case in §6 where supported VM workloads
+share `/shared-volume` — do **not** go through `overdrive-fs`. Those are
+short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly
+by the storage reconciler against local or Garage-backed volumes.
+`overdrive-fs` is specifically the rootfs store for persistent microVMs.
 
 Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Overdrive actually has.
 
