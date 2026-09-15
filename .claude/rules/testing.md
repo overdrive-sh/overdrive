@@ -720,8 +720,10 @@ For every hand-built real-netns fixture:
 
 - Choose a fixture CIDR outside the production workload subnet
   (`WORKLOAD_SUBNET_BASE`, currently `10.99.0.0/16`) and outside any other
-  route the test intentionally leaves active. Do not reuse production slot-0
-  addresses merely because the test's namespace names differ.
+  route the test intentionally leaves active. Each topology module should own
+  a distinct CIDR so residue from one interrupted test cannot create a duplicate
+  route for another module. Do not reuse production slot-0 addresses merely
+  because the test's namespace names differ.
 - Keep host-loopback backend addresses and routes disjoint from production
   addresses as well. Record the selected CIDR in the fixture's module
   documentation so a later production subnet change cannot silently collide.

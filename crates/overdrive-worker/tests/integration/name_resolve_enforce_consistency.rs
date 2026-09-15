@@ -127,8 +127,8 @@ const VETH_H: &str = "vethH-con05";
 // Keep the worker-only netns outside the production VM workload subnet
 // (`10.99.0.0/16`), which can remain routed when a prior production boot is
 // intentionally left alive for reclamation tests.
-const HOST_GW: &str = "10.250.0.1";
-const WL_ADDR: &str = "10.250.0.2";
+const HOST_GW: &str = "10.250.3.1";
+const WL_ADDR: &str = "10.250.3.2";
 const SUBNET_LEN: &str = "24";
 
 /// The KNOWN `service_backends` addr **B** the workload dials (DNS stubbed — the

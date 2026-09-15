@@ -20,10 +20,10 @@
 //!
 //! Topology (mirrors the spike EXACTLY):
 //!
-//!   netns nsW:  workload client; vethW 10.250.0.2/24; default via .1
+//!   netns nsW:  workload client; vethW 10.250.2.2/24; default via .1
 //!                 connect(10.200.0.1:18777)
 //!     <== veth ==>
-//!   host netns: vethH 10.250.0.1/24
+//!   host netns: vethH 10.250.2.1/24
 //!                 PREROUTING (priority mangle):
 //!                   meta mark 0x2 accept            <- F5 exemption (chain head)
 //!                   iifname vethH meta l4proto tcp tproxy to 127.0.0.1:<legF>
@@ -90,8 +90,8 @@ const VETH_H: &str = "vethH-egr03";
 // Keep the worker-only netns outside the production VM workload subnet
 // (`10.99.0.0/16`), which can remain routed when a prior production boot is
 // intentionally left alive for reclamation tests.
-const HOST_GW: &str = "10.250.0.1";
-const WL_ADDR: &str = "10.250.0.2";
+const HOST_GW: &str = "10.250.2.1";
+const WL_ADDR: &str = "10.250.2.2";
 const SUBNET_LEN: &str = "24";
 /// The "real backend" the workload dials — a host-side lo-bound address the
 /// workload routes to via the gateway, so its egress genuinely INGRESSES vethH
