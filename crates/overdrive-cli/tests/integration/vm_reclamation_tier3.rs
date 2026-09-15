@@ -487,6 +487,33 @@ fn clone_link_path(index_dir: &Path, alloc_id: &str) -> PathBuf {
     index_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
 }
 
+/// Waits for the per-allocation exit watcher to finish its target-then-link
+/// cleanup. The watcher is owned by the VM driver rather than
+/// `ServerHandle`, so server shutdown is not a completion signal for these
+/// artifacts. Polling the actual clone/index condition avoids coupling the
+/// assertion to an arbitrary scheduler delay.
+async fn poll_until_vm_artifacts_reclaimed(
+    staging_dir: &Path,
+    index_dir: &Path,
+    alloc_id: &str,
+    max_wait: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let clone_gone = !clone_path(staging_dir, alloc_id).exists();
+        let link_gone = !clone_link_path(index_dir, alloc_id).exists();
+        if clone_gone && link_gone {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "VM clone/index cleanup did not complete within {max_wait:?} for {alloc_id}: \
+             clone_gone={clone_gone} link_gone={link_gone}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// A real, reflink-capable directory the artificial-strand scenarios use
 /// to hold a stranded clone FILE. Under DWD-26 (ADR-0083 §§D3f-D3h) the
 /// reclamation sweep no longer enumerates any single node-level staging
@@ -1633,8 +1660,13 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
     // VMM rather than `VmDriver::stop`.
     let vmm_pid = find_cloud_hypervisor_pid().expect("a real cloud-hypervisor process is running");
     let _ = Command::new("kill").arg("-9").arg(vmm_pid.to_string()).status();
+    // The per-allocation exit watcher owns VMM-death cleanup. Wait for its
+    // clone/index condition while the serve owner is still alive; shutting
+    // down the server only joins the observer consumer, not this watcher.
+    poll_until_vm_artifacts_reclaimed(&staging_dir, &index_dir, &alloc_id, Duration::from_secs(30))
+        .await;
     // Shut down boot #1 promptly. No `stop` is used; the exit observer's
-    // VMM-death cleanup owns the clone and index removal for this ending.
+    // VMM-death cleanup has already removed the clone and index entry.
     handle.shutdown().await.expect("shutdown boot #1 after the hypervisor died");
     wait_for_data_dir_release().await;
     assert!(!pid_is_alive(vmm_pid), "the hypervisor process is genuinely gone");
