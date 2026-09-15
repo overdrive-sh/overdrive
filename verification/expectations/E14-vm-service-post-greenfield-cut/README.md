@@ -1,7 +1,6 @@
 # E14 — post-cut healthy VM Service journey
 
-Status: `pending` — capture complete; an independent evidence reviewer must
-evaluate this receipt before any `satisfied` status is recorded.
+Status: `satisfied` — independently audited in [E14 different-fox review](../../../docs/feature/remove-legacy-exec-workload-driver/deliver/review-03-01.md)
 Surface: E — built-product end to end
 Execution substrate: `native-metal`
 Walking skeleton: yes; this is the post-cut receipt for the checked-in VM
