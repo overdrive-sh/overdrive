@@ -619,3 +619,309 @@ code expansion.
 **APPROVED.** Step 02-02 may advance to step 03-01. The final DELIVER-wave
 mutation gate remains required at the wave boundary; it is not a prerequisite
 for this documentation/example review.
+
+## Iteration 5 — corrective VM migration re-review
+
+### Review metadata
+
+- **Review ID:** `code_rev_20260915_02-02_iteration_5`
+- **Reviewed commits:** the approved step-02-02 lineage through
+  `028033556472d5790acef651b3bdf81797791904`, the finalized evolution commit
+  `eb93e089`, and corrective VM-migration commit
+  `0ed931b392c0f44d80d653daa89ff8de58bae80c` (`HEAD`)
+- **Review basis:** roadmap step `02-02`, the feature-delta documentation and
+  #295 boundary, the complete iteration-1 through iteration-4 review history,
+  the current corrective diff, and protected historical E06/E08 and ADR
+  surfaces
+- **Reviewer:** fresh isolated step-specific DELIVER reviewer
+- **Scope note:** this review examined only the bounded example, expectation,
+  and documentation correction. No implementation file was changed, no
+  native-metal product run was attempted, and mutation testing was not run.
+
+### Executive conclusion
+
+The corrective commit restores the guest-stack example as a VM-to-VM journey:
+both callee and caller specs use `[vm]`, the preparation path compiles and
+installs both guest binaries, the four restored HTTP fixtures use `[vm]`, and
+`nightly-backup.toml` has the requested `[job]` + `[vm]` + `[schedule]` shape.
+The current E07 runner drives that VM-to-VM product journey and contains no
+workload-driver Exec claim. The bounded source, shell, TOML/YAML, and
+no-public-API checks otherwise pass, and the architecture ADRs plus E06/E08
+evidence are unchanged.
+
+The corrective tree is not approvable yet because three current-contract
+failures remain:
+
+1. The corrective diff fails `git diff --check` on five newly added TOML files.
+2. The now-current E07 README and expectation index still present the old
+   `Exec Service` / `[service] + [exec]` wording, including a pre-cut receipt
+   as though it were current E07 evidence.
+3. The corrective commit rewrites the finalized evolution archive even though
+   the accepted feature contract explicitly protects evolution history.
+
+These are bounded artifact corrections. None requires a production change,
+new API, architecture mechanism, mutation exclusion, or GH #295 work.
+
+### Finding dispositions
+
+#### S2 — BLOCKER: corrective diff fails the required whitespace gate
+
+`git diff --check HEAD^ HEAD` exits `2` and reports new blank lines at EOF in:
+
+- `examples/guest-stack-transparent-mtls-intercept/caller.toml:13`;
+- `examples/service-kind-vm-workloads/http-exec-204.toml:26`;
+- `examples/service-kind-vm-workloads/http-exec-302.toml:26`;
+- `examples/service-kind-vm-workloads/http-exec-404.toml:26`; and
+- `examples/service-kind-vm-workloads/http-exec-503.toml:26`.
+
+The same command against the prior approved tree is not relevant to this
+correction: these are all new additions in `0ed931b3`. The required
+remediation is mechanical removal of the added EOF blank lines; no fixture
+behavior or file scope needs to expand.
+
+**Disposition:** **OPEN.** Return to the original step crafter, clean the
+five added EOF blank lines, and rerun the complete step-range diff check.
+
+#### D4 — BLOCKER: current E07 README and index still expose the pre-cut Exec claim
+
+The corrective commit changes E07 from a retired pre-cut expectation to the
+current VM-to-VM expectation, but leaves two active descriptions stale:
+
+- `verification/expectations/E07-vm-job-calls-exec-service/README.md:84`
+  still says the captured output contains “the Exec Service reaching
+  `Running`”. The current E07 contract at `:7-13` now requires one `[vm]`
+  callee and one `[vm]` caller, while the retained evidence output itself is
+  the old SHA-pinned pre-cut capture (`evidence/product-run.out`, which still
+  contains “one Exec Service”). As written, the current README does not
+  distinguish that historical receipt from evidence for the restored VM
+  journey.
+- `verification/expectations/INDEX.md:169-174` still describes the active E07
+  journey as a `[service] + [exec]` callee and `[job] + [vm]` caller and says
+  that E07 is already captured. The table row at `:21` has been changed to
+  “one VM Job calls one VM Service”, so the index contradicts itself.
+
+The current E07 runner at
+`verification/expectations/E07-vm-job-calls-exec-service/runner.sh:1-57`
+does drive `examples/guest-stack-transparent-mtls-intercept/run-example.sh`
+and checks the VM-specific PASS line. Its shell `exec` handoff references are
+ordinary process-control terminology, not workload-driver claims. The
+out-of-scope E10 row and its explicitly historical `[service] + [exec]`
+description at `INDEX.md:188-203` are not this finding; they remain protected
+historical catalogue context.
+
+**Required remediation:** update the current E07 README and the E07 narrative
+in `verification/expectations/INDEX.md` to describe VM-to-VM only and not cite
+the pre-cut Exec output as current evidence. Keep the old E07 evidence tree
+byte-identical and label it as historical (or leave it pending until a new
+VM-to-VM capture is made); do not self-stamp a new satisfied result.
+
+**Disposition:** **OPEN.** The active E07 documentation/index boundary does
+not yet satisfy the step's VM/microVM-only current-guidance contract.
+
+#### H2 — BLOCKER: corrective commit rewrites protected evolution history
+
+The feature delta says that current documentation is updated while “historical
+ADRs and evolution records remain historical and are not rewritten”
+(`feature-delta.md:764-768`), and the step acceptance criterion repeats that
+historical ADR/evolution prose remains unchanged
+(`deliver/roadmap.json:186-190`). Nevertheless,
+`0ed931b3` modifies the already-finalized
+`docs/evolution/2026-09-15-remove-legacy-exec-workload-driver.md` in three
+places:
+
+- `:66-72` changes the recorded current-example disposition;
+- `:131` changes the committed step-02-02 delivery history and appends
+  “corrective VM migration follows”; and
+- `:187-189` changes the retained lesson from E07 retirement to E07
+  restoration.
+
+The direct protected-surface check confirms the scope violation:
+`git diff --name-status HEAD^ HEAD -- docs/product/architecture docs/evolution
+verification/expectations/E06-vm-job-deploy-reaches-running
+verification/expectations/E08-vm-service-guest-health` reports only the
+evolution file as modified. The architecture ADR directory is unchanged, and
+the E06/E08 evidence trees are unchanged, but the evolution-history portion
+of the contract is not.
+
+**Required remediation:** restore the finalized evolution archive to the
+pre-correction contents. Record the corrective artifact only through the
+step review/commit lineage already required by DELIVER; do not rewrite the
+historical evolution record or add a new architecture mechanism.
+
+**Disposition:** **OPEN.** The current commit cannot satisfy the protected
+historical-surface criterion until the evolution diff is empty.
+
+### Contract and structural verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| E07 callee/caller shape | **PASS** | `callee.toml:1-9` is `[service] + [vm]`; `caller.toml:1-8` is `[job] + [vm]`; both use the private prepared kernel/rootfs paths. |
+| Both guest binaries prepared and installed | **PASS** | `prepare.sh:236-256` compiles `callee.rs` and `caller.rs`, verifies both static binaries, installs both at `/opt/overdrive/examples/gti/e07-callee` and `/opt/overdrive/examples/gti/e07-caller`, and verifies both again inside the mounted rootfs. |
+| E07 current runner | **PASS** | `runner.sh:25-57` invokes the checked-in VM bundle through one `cargo xtask metal run --` command and requires the VM-specific PASS line. `bash -n` passes. |
+| Service-kind HTTP fixtures | **PASS** | All eight `http-*.toml` files parse as TOML and have exactly `[service] + [vm]`, no `[exec]`, and the checked-in VM guest command. `prepare.sh check-source` exits `0` for the bundle. |
+| `nightly-backup.toml` | **PASS** | `examples/nightly-backup.toml:3-17` contains `[job]`, `[vm]`, and `[schedule]`, with `cron = "0 2 * * *"`; TOML parsing exits `0`. |
+| E07 README/INDEX current VM-to-VM/no-Exec wording | **FAIL** | `README.md:84` still says “Exec Service”; `INDEX.md:172` still says `[service] + [exec]` for the now-current E07 narrative. |
+| Shell syntax | **PASS** | `bash -n` over the restored E07 preparation, runner, session helpers, service preparation/runner, and E07 expectation runner exits `0`. |
+| TOML/YAML parsing | **PASS** | Python `tomllib` parses all seven changed TOML files; PyYAML parses the affected E07 receipt and current product jobs/persona/journey YAML files. |
+| Whitespace gate | **FAIL** | `git diff --check HEAD^ HEAD` exits `2` with five added EOF blank-line diagnostics listed in S2. |
+| Protected ADR history | **PASS** | `git diff --quiet HEAD^ HEAD -- docs/product/architecture` exits `0`. |
+| Protected E06/E08 evidence | **PASS** | `git diff --quiet HEAD^ HEAD -- verification/expectations/E06-vm-job-deploy-reaches-running/evidence verification/expectations/E08-vm-service-guest-health/evidence` exits `0`. |
+| Protected evolution history | **FAIL** | `git diff --quiet HEAD^ HEAD -- docs/evolution` exits `1`; the finalized evolution archive is modified. |
+| GH #295 boundary | **PASS** | The corrective diff adds no shared switch, per-tap classification/interception, shared-bridge DNS, replacement mTLS, cross-host, density, or throughput mechanism/claim. The README's nft/netlink sentence explicitly excludes those internal guarantees from the black-box example. |
+| Public API surface | **PASS** | `git diff --name-only HEAD^ HEAD -- crates api` is empty; the added guest helper functions are private example binaries, not public crate API. |
+| Native-metal evidence / mutation gate | **NOT RUN** | This bounded artifact re-review does not capture a native product event or run mutation testing; E14 and the final mutation gate retain their separate ownership. |
+
+### Review conclusion
+
+The VM migration itself is structurally coherent and the requested current
+fixtures are restored. S2, D4, and H2 remain blocking: the corrective diff is
+not mechanically clean, the active E07 catalogue text still names the retired
+Exec Service, and the finalized evolution record was rewritten. No
+implementation, API, architecture, mutation, or GH #295 remediation is
+authorized or necessary.
+
+### Iteration-5 verdict
+
+**CHANGES_REQUESTED.** Return step 02-02 to the original crafter for the
+bounded documentation/example corrections above, then perform another fresh
+step-specific review. Do not advance the step or treat the prior iteration-4
+approval as covering this corrective commit.
+
+## Iteration 6 — corrective artifact closure re-review
+
+### Review metadata
+
+- **Review ID:** `code_rev_20260915_02-02_iteration_6`
+- **Reviewed commits:** corrective remediation `49a6a62941dd3998c19c6485d88485fb47e42705`,
+  remediation COMMIT record `0810a0fbc9207eee0529078afdc915b502202447` (`HEAD`),
+  and the prior corrective commit `0ed931b392c0f44d80d653daa89ff8de58bae80c`
+- **Review basis:** roadmap step `02-02`, the feature-delta current-artifact
+  and historical-surface contract, Iteration 5 findings, the protected
+  finalized evolution artifact at `eb93e089`, and the current tree
+- **Reviewer:** fresh isolated step-specific DELIVER reviewer
+- **Scope note:** this review covers the bounded example, expectation,
+  documentation, and DES-record remediation. No production implementation was
+  changed, no native-metal product capture was attempted, and mutation testing
+  was not run.
+
+### Executive conclusion
+
+All Iteration 5 findings are closed. The five added EOF blank lines were
+removed and the focused corrective diff is clean. E07's current README and
+expectation-index narrative now describe a VM-to-VM journey, with the retained
+pre-cut receipt explicitly labeled historical; the only remaining `[exec]`
+text in the index is the separately marked, out-of-scope E10 historical
+cross-driver context. The evolution archive now matches the protected
+finalized `eb93e089` content exactly.
+
+The requested VM migrations remain intact: the guest-stack callee and caller
+are `[vm]` workloads and its preparation script compiles, verifies, and
+installs both guest binaries; all four restored `http-exec-*` fixtures are
+VM-shaped and TOML-valid; and `nightly-backup.toml` is `[job] + [vm] +
+[schedule]`. Focused source, shell, TOML/YAML, JSON, whitespace, protected
+history, GH #295, and public-API checks pass. No finding remains.
+
+### Prior finding dispositions
+
+#### S2 — CLOSED: corrective whitespace is clean
+
+`git diff --check 0ed931b3 HEAD` and `git diff --check eb93e089 HEAD` both exit
+`0`. The five files reported in Iteration 5 now end at their final content
+line without an added blank line:
+`examples/guest-stack-transparent-mtls-intercept/caller.toml` and the four
+`examples/service-kind-vm-workloads/http-exec-{204,302,404,503}.toml`
+fixtures. The remediation is limited to the mechanical EOF cleanup.
+
+**Disposition:** **CLOSED.** The focused corrective range satisfies the
+repository whitespace gate.
+
+#### D4 — CLOSED: current E07 documentation is VM-to-VM and historical evidence is scoped
+
+The current E07 README now states one `[service] + [vm]` callee and one
+`[job] + [vm]` caller (`verification/expectations/E07-vm-job-calls-exec-service/README.md:1-17`).
+Its captured-evidence section says that no post-cut capture exists and labels
+the retained files as a historical pre-cut receipt that cannot satisfy the
+current expectation (`README.md:77-91`); it no longer calls the callee an
+“Exec Service”. The retained E07 evidence tree is unchanged from the
+protected pre-correction tree.
+
+The current runner invokes the VM bundle and checks the VM-specific PASS line
+(`verification/expectations/E07-vm-job-calls-exec-service/runner.sh:25-57`).
+The E07 narrative in `verification/expectations/INDEX.md:169-175` likewise
+uses `[service] + [vm]` and `[job] + [vm]`, keeps E07 `pending`, and identifies
+the old receipt as historical. A token audit finds no stale workload-driver
+`[exec]`, “Exec Service”, `ExecDriver`, or host-process claim in the current
+E07 README/runner; shell `exec` handoff wording remains ordinary process
+control. The one index match at `INDEX.md:202` is under the E10 section, whose
+table row explicitly says “historical pre-cut” and “out-of-scope”; it is
+clearly retained historical cross-driver context, not an E07 current claim.
+
+**Disposition:** **CLOSED.** The active E07 operator-artifact boundary is
+VM-to-VM and does not present the retained pre-cut receipt as current proof.
+
+#### H2 — CLOSED: finalized evolution archive is byte-identical to `eb93e089`
+
+`git diff --quiet HEAD eb93e089 --
+docs/evolution/2026-09-15-remove-legacy-exec-workload-driver.md` exits `0`.
+The current archive SHA-256 is
+`19fe9f6a9e606e4cf170a460e0359c7626c6b99dae4f4ff1c82466ce38265af5`, equal to
+the blob at `eb93e089`. The remediation restored all three Iteration 5
+changes; no history rewrite remains in the current tree.
+
+**Disposition:** **CLOSED.** The protected finalized evolution artifact is
+unchanged.
+
+### VM migration verification
+
+| Contract | Result | Evidence |
+|---|---|---|
+| Guest-stack callee/caller shape | **PASS** | `callee.toml:1-9` is `[service] + [vm]`; `caller.toml:1-8` is `[job] + [vm]`; both reference the private prepared kernel/rootfs paths and no `[exec]` table. |
+| Both guest binaries prepared/installed | **PASS** | `prepare.sh:236-256` compiles both checked-in Rust helpers for the static target, verifies both binaries, installs both at `/opt/overdrive/examples/gti/e07-{callee,caller}`, and verifies both inside the mounted rootfs. |
+| Service HTTP fixtures | **PASS** | `http-exec-204.toml`, `302`, `404`, and `503` each parse as `[service] + [vm]` with no `[exec]`; each is byte-identical to its corresponding `http-vm-*` fixture. All eight `http-*.toml` files passed the bounded TOML shape check. |
+| Schedule fixture | **PASS** | `examples/nightly-backup.toml:3-17` contains `[job]`, `[vm]`, and `[schedule]` with `cron = "0 2 * * *"`, and has no `[exec]` table. |
+
+### Focused verification performed
+
+- `bash examples/service-kind-vm-workloads/prepare.sh check-source` exited
+  `0`.
+- `bash examples/guest-stack-transparent-mtls-intercept/prepare.sh
+  check-source` exited `0`.
+- `bash -n` over both preparation/run scripts, both guest session helpers,
+  and the E07 expectation runner exited `0`.
+- Python `tomllib` parsed the seven changed TOML files and independently
+  parsed all eight Service HTTP fixtures plus the three required migrated
+  shapes; PyYAML parsed the affected E07 receipt and current product
+  jobs/persona/journey YAML files; `python3 -m json.tool` parsed the updated
+  `execution-log.json`.
+- `git diff --check 0ed931b3 HEAD` exited `0`, including the five TOML files
+  from S2.
+- The two remediation commits carry exactly the required
+  `Co-Authored-By: Codex <codex@openai.com>` trailer and `Step-Id: 02-02`.
+
+### Protected-boundary verification
+
+| Boundary | Result | Evidence |
+|---|---|---|
+| ADR history | **PASS** | `git diff --quiet eb93e089 HEAD -- docs/product/architecture` exits `0`. |
+| Evolution history | **PASS** | Current finalized evolution file is byte-identical to `eb93e089`, as recorded under H2. |
+| E06 historical receipt | **PASS** | `git diff --quiet eb93e089 HEAD -- verification/expectations/E06-vm-job-deploy-reaches-running` exits `0`. |
+| E08 historical receipt | **PASS** | `git diff --quiet eb93e089 HEAD -- verification/expectations/E08-vm-service-guest-health` exits `0`. |
+| GH #295 non-implementation | **PASS** | The remediation diff contains no shared switch/vswitch, per-tap classification/interception, shared-bridge DNS, replacement mTLS, cross-host, density, or throughput mechanism/claim. |
+| Public API shape | **PASS** | `git diff --name-only eb93e089 HEAD -- crates api` is empty; only examples, expectation/docs, and the DES log changed. No public Rust API was added. |
+| Native-metal/mutation boundary | **NOT RUN** | This bounded structural re-review does not capture E07 on native metal or run the final DELIVER mutation gate; those remain separately owned. |
+
+### Review conclusion
+
+The corrective artifact set now satisfies the complete step-02-02 current
+artifact contract. E07's active expectation is VM-to-VM with old evidence
+clearly historical, the migrated examples retain VM execution shape, the
+protected evolution/ADR/E06/E08 surfaces are unchanged, and no GH #295 or
+public API scope has entered the correction. The current E07 status correctly
+remains `pending` until a fresh post-cut native-metal capture and independent
+evidence audit; that pending status is not a step failure.
+
+### Iteration-6 verdict
+
+**APPROVED.** Iteration 5's S2, D4, and H2 findings are closed. Step 02-02 may
+advance; no further remediation is required for this step. Mutation testing
+remains the final DELIVER-wave gate and was intentionally not run here.
