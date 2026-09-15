@@ -205,3 +205,157 @@ mechanism is implicated.
 **CHANGES_REQUESTED.** D1 is a blocking operator-artifact failure; D2 and D3
 are high contract violations. The step must return to its original crafter for
 remediation and a fresh re-review before DELIVER can advance to step 03-01.
+
+## Iteration 2 — remediation re-review
+
+### Review metadata
+
+- **Review ID:** `code_rev_20260915_02-02_iteration_2`
+- **Reviewed commits:** `e36b8eb72b6712ef7b5015168361a8e6e001e4cd`,
+  `910512aea6e740521be2601426c342389c7911f2`, and remediation commit
+  `2d330816cad4887c7f3fcc51b37d78b4b4eadbde`
+- **Review basis:** roadmap step `02-02`, feature delta, iteration-1 findings,
+  current tree at the remediation commit, and the protected historical
+  surfaces named by the step contract
+- **Reviewer:** fresh step-specific DELIVER reviewer
+
+### Executive conclusion
+
+The remediation closes the E12 identity inversion and materially repairs the
+general VM fixture paths. It does not close D1 or D3, and it introduces a
+mechanical diff failure. The active E10 cleanup harness still invokes a runner
+that now exits successfully without validating anything; the harness therefore
+fails on its residual-resource control. Active E05/O02/O01 guidance and the
+verification harness still retain current Exec vocabulary, while the
+authoritative whitepaper still presents a Process driver and process-backed
+workload paths as live. Historical ADR/evolution prose and E06/E08 evidence
+remain unchanged, and no GH #295 mechanism entered the remediation.
+
+**Final verdict: CHANGES_REQUESTED.** DELIVER must return this step to the
+original crafter for bounded artifact cleanup and another independent review.
+
+### Finding dispositions
+
+#### D1 — NOT CLOSED: active consumers and harnesses still retain retired Exec paths
+
+The remediation correctly restores VM-shaped current fixtures:
+
+- `examples/dns-resolver.toml`, `examples/quick-bind-service.toml`, the three
+  liveness fixtures, and both dial-by-name service specs now carry `[vm]` and
+  checked-in VM kernel/rootfs fields.
+- `verification/expectations/INDEX.md:21,25` marks E07 and E10 out of scope,
+  and the E07/E10 runners explicitly report retirement. E06/E08 evidence is
+  byte-for-byte unchanged.
+
+The current consumer boundary is still inconsistent, however:
+
+1. `verification/harness/test-e10-cleanup-oracle.sh:35-40,84-91` still calls
+   the retired E10 runner as the cleanup/probe oracle. Running
+   `bash verification/harness/test-e10-cleanup-oracle.sh` against the
+   remediation prints the retirement message three times and then fails with
+   `E10 cleanup oracle accepted a residual allocation cgroup`. The runner's
+   unconditional success means the residual-resource and probe-preservation
+   controls no longer execute; this is both an active consumer failure and a
+   testing-theater regression.
+2. `verification/README.md:112,122` still presents
+   `test-e07-session-lifecycle.sh` as a current harness and a runnable E07
+   command, even though E07 is now explicitly out of scope. The harness still
+   sources the host-process bundle's `session-lifecycle.sh` at
+   `verification/harness/test-e07-session-lifecycle.sh:11,21,111`.
+3. The retained current E05/O02/O01 artifacts are not fully migrated: E05's
+   active pending README still says the dial-by-name specs are `[exec]` and its
+   runner comment still names `ExecDriver` (`verification/expectations/E05...`),
+   O02 still recommends a future `exec` probe and describes it as the only
+   truthful production mechanic (`verification/expectations/O02.../README.md:58-65`),
+   and O01 still creates three `[exec]` tables in its current runner
+   (`verification/expectations/O01.../runner.sh:13,26,38`). These are current
+   expectation/runner inputs, not immutable E06/E08 receipts, and they either
+   need VM/generic migration or explicit retirement.
+
+**Required remediation:** retire or migrate the active E07/E10 harness entry
+points without modifying their historical evidence; update the remaining
+current E05/O02/O01 expectation prose and inputs to the VM/generic contract (or
+mark a genuinely host-process-specific expectation out of scope); and rerun the
+cleanup harness so its negative controls are live. Do not preserve the old
+runner as an unconditional-success stub.
+
+#### D2 — CLOSED: E12 now asserts a distinct fresh P-105 successor
+
+`examples/service-kind-vm-workloads/run-example.sh:866-874` captures the
+replacement allocation and requires `replacement_alloc != original_alloc`.
+The ledger records the predecessor on the `before`/`terminal` rows and the
+distinct replacement on the `after` row (`:917-933`), while retaining the
+liveness attribution, prior terminal observation, restart count, and timestamp
+non-reuse checks. The focused production-owner test and composed P-105 property
+from iteration 1 remain untouched; the remediation contains no Rust/API
+changes. This matches the accepted predecessor-ID / fresh-successor-ID
+contract without changing lifecycle production behavior.
+
+#### D3 — NOT CLOSED: active whitepaper still claims host-process execution
+
+The persona correction is present: Ana's role is VM/microVM-backed and its VM
+Service success signal no longer compares against a host-process Service
+(`docs/product/personas/ana-platform-engineer.yaml:37,130`). The whitepaper
+still contains active current claims that contradict the VM/microVM-only step:
+
+- the architecture diagram still includes a live `Process Driver`
+  (`docs/whitepaper.md:138-142`);
+- the current workload-driver section still opens with “every workload type as
+  a first-class citizen” (`docs/whitepaper.md:505-524`);
+- current right-sizing/scale-to-zero prose still says “Process-driver
+  workloads opt out” (`docs/whitepaper.md:1756-1760`);
+- current storage prose still describes a “process workload” sharing a volume
+  with a VM (`docs/whitepaper.md:1990-1996`); and
+- the active schematic example enables `process = true`
+  (`docs/whitepaper.md:2748-2758`).
+
+These are not historical ADR/evolution records and are not framed as
+superseded assumptions. Updating only the abstract, principle, VM table, and
+mTLS paragraphs did not remove the active host-process execution claims.
+
+**Required remediation:** update the remaining active whitepaper diagram,
+workload-driver framing, right-sizing/storage claims, and schematic example to
+state the shipped VM/microVM path; describe other families only as future work.
+Keep historical changed-assumption prose, ADRs, evolution records, and E06/E08
+receipts unchanged. No GH #295 topology or performance claim is needed.
+
+#### S1 — HIGH: remediation commit fails the repository diff check
+
+`git diff --check 2d330816^ 2d330816` reports added blank lines at EOF in:
+`examples/dial-by-name-responder/a.toml`, `b.toml`, `ping_pong.py`,
+`examples/dns-resolver.toml`,
+`examples/guest-stack-transparent-mtls-intercept/session-lifecycle.sh`,
+`session-wrapper.sh`, `examples/liveness-absent-service.toml`, and
+`examples/quick-bind-service.toml`. This is a direct structural failure in the
+remediation diff and must be cleaned before approval.
+
+### Contract and scope verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| D1 general fixtures use VM shape | **PASS** | All restored UDP, dial-by-name, probe, and liveness specs inspected; `[vm]`, kernel, rootfs, and VM command are present. `examples/service-kind-vm-workloads/prepare.sh check-source` exits 0. |
+| D1 active E07/E10 retirement boundary | **FAIL** | E07 README/runner and E10 README/runner are marked out of scope, but `verification/README.md` and `test-e07-session-lifecycle.sh` remain active; `test-e10-cleanup-oracle.sh` still calls the no-op E10 runner and fails its residual control. |
+| D1 current expectation consumers | **FAIL** | E05/O02/O01 retain current `[exec]`, `ExecDriver`, or exec-probe vocabulary in live README/runner paths. |
+| D2 E12 successor identity | **PASS** | Distinct-ID assertion at `run-example.sh:866-869`; predecessor/successor ledger at `:917-933`; no production Rust/API changes in remediation. |
+| D3 Ana persona | **PASS** | VM/microVM role and VM-only success signal at `ana-platform-engineer.yaml:37,130`. |
+| D3 active whitepaper | **FAIL** | Process Driver diagram, first-class framing, process scale-to-zero/volume claims, and `process = true` schematic remain at the cited lines. |
+| Historical ADR/evolution and E06/E08 | **PASS** | `git diff --quiet 2d330816^ 2d330816 -- docs/evolution docs/product/architecture verification/expectations/E06-vm-job-deploy-reaches-running verification/expectations/E08-vm-service-guest-health`. |
+| GH #295 boundary | **PASS** | No shared-switch, per-tap, shared-bridge, replacement-mTLS, cross-host, density, or throughput terms occur in the remediation diff. |
+| Shell/example structural checks | **PARTIAL** | `bash -n` and VM `check-source` pass; `git diff --check` fails on eight added EOF blank lines. |
+| Expectation harness smoke checks | **PARTIAL** | `verification/harness/test-run-expectation.sh` passes; E10 cleanup harness fails as described. E07 host-safe harness is not a product-path signal on this macOS sandbox because `ps` is unavailable/denied. |
+| Native-metal E14 / mutation gate | **NOT RUN** | Owned by step 03-01 and final DELIVER gate respectively. |
+
+### Review conclusion
+
+D2 is closed. D1 remains a blocking current-artifact/harness failure, D3
+remains a high active-documentation contract failure, and S1 is a direct
+mechanical quality-gate failure. The remediation is bounded and does not call
+for architecture, public API, production lifecycle, persistence, mutation
+exclusion, or GH #295 changes. Until D1, D3, and S1 are corrected and the
+current E10 cleanup oracle is green, this step cannot advance to 03-01.
+
+### Iteration-2 verdict
+
+**CHANGES_REQUESTED.** Return to the original step crafter for remediation and
+repeat the fresh isolated review. Historical evidence remains protected; no
+approval is granted for the current artifact set.
