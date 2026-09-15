@@ -171,8 +171,11 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 const NS_W: &str = "nsW-asym0503";
 const VETH_W: &str = "vethW-asym05";
 const VETH_H: &str = "vethH-asym05";
-const HOST_GW: &str = "10.99.0.1";
-const WL_ADDR: &str = "10.99.0.2";
+// Keep the worker-only netns outside the production VM workload subnet
+// (`10.99.0.0/16`), which can remain routed when a prior production boot is
+// intentionally left alive for reclamation tests.
+const HOST_GW: &str = "10.250.0.1";
+const WL_ADDR: &str = "10.250.0.2";
 const SUBNET_LEN: &str = "24";
 
 /// The mesh backend the OUTBOUND workload dials — a host-side lo-bound address it

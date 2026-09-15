@@ -296,6 +296,7 @@ filter = '''
             | test(inbound_rule_keys_declared_port)
             | test(inbound_rules_per_listener)
             | test(job_kind_installs_no_inbound_rule)
+            | test(mtls_intercept_equivalence)
             | test(mtls_intercept_install)
             | test(name_resolve_enforce_consistency)
             | test(outbound_enforce_substrate_bidirectional_splice_zero_copy)
@@ -668,6 +669,24 @@ test-group = 'host-kernel-shared'
 # guest-stack boot.
 [[profile.default.overrides]]
 filter = 'package(overdrive-control-plane) & binary(acceptance)'
+test-group = 'host-kernel-shared'
+
+# Every Linux integration binary in these crates can reach a production
+# composition root that mutates shared kernel state (nft, netns/veth, cgroup,
+# bpffs, or the dataplane attachment points). Keep the whole binaries in the
+# same cross-process single-writer domain; the narrower rules above document
+# the specific surfaces but must not leave an unlisted fixture able to race
+# them.
+[[profile.default.overrides]]
+filter = 'package(overdrive-worker) & binary(integration)'
+test-group = 'host-kernel-shared'
+
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(integration)'
+test-group = 'host-kernel-shared'
+
+[[profile.default.overrides]]
+filter = 'package(overdrive-dataplane) & binary(integration)'
 test-group = 'host-kernel-shared'
 
 [profile.ci]
