@@ -217,10 +217,15 @@ async fn drive(seed: u64, finalize: bool) {
         host: SimVmHostState::new(),
     });
     let http_prober = Arc::new(SimHttpProber::new());
-    // Queue the injected startup failure on the driver's real ProbeRunner so
-    // its background attempt cannot race the manually authored `HTTP 302`
-    // observation with the adapter's default happy-path `Pass`.
-    http_prober.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
+    // Queue enough failures for every background startup-probe tick in the
+    // bounded `with_clock` drive. A single queued failure is insufficient:
+    // under full-workspace scheduling the supervisor can consume it before
+    // the manually authored `HTTP 302` row, then the adapter's default
+    // `Pass` overwrites the terminal decision. The drive advances at most
+    // ~66 one-second intervals; 128 failures leaves deterministic headroom.
+    for _ in 0..128 {
+        http_prober.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
+    }
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http_prober,
