@@ -309,14 +309,14 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         let peer_listener =
             std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("peer bind: {e}"))?;
         let peer_addr = peer_listener.local_addr().map_err(|e| format!("peer addr: {e}"))?;
-        let (client_arm_tx, client_arm_rx) = std::sync::mpsc::sync_channel(0);
+        let (client_arm_handoff, server_arm_handoff) = sentinel_arm_handoff();
         let peer = std::thread::spawn(move || -> std::result::Result<Vec<u8>, String> {
             sentinel_peer_recv(
                 &peer_listener,
                 cert,
                 key,
                 SENTINEL.len() + SENTINEL_SPLICE.len(),
-                &client_arm_rx,
+                &server_arm_handoff,
             )
         });
 
@@ -340,13 +340,14 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
         let secrets = sentinel_client_handshake(leg_b)?;
         ktls::arm_ktls_tx_rx(leg_b_fd, secrets).map_err(|e| format!("kTLS arm: {e}"))?;
         // The accepted server socket can still be in the kernel's handshake
-        // transition while the client is finishing its userspace TLS flight.
-        // Let the server install TLS_RX only after the client has completed its
-        // own arm; this barrier removes the scheduler-sensitive ENOTCONN window
-        // without weakening the probe's fail-closed result.
-        client_arm_tx
-            .send(())
-            .map_err(|_| "sentinel peer exited before the client kTLS arm".to_owned())?;
+        // transition while the client is finishing its userspace TLS flight. Use
+        // the complete two-phase handoff before the client creates any plaintext
+        // source activity: client armed → server arms kTLS → server acknowledges →
+        // client starts the pump. This prevents the pump's source-EOF half-close
+        // from racing the server's TCP_ULP install and moving the accepted socket
+        // to CLOSE_WAIT, where the kernel rejects that original fail-closed arm
+        // syscall with ENOTCONN.
+        client_arm_handoff.client_armed_and_wait_for_server_arm()?;
 
         // 4. Spawn the forward encrypt pump (f_source → leg B's kTLS-TX) with the
         //    FIRST sentinel as its `prelude` — exercising the EXACT production
@@ -412,6 +413,56 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
     })
 }
 
+const SENTINEL_ARM_HANDOFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Client side of the private sentinel arm rendezvous. The probe may continue to
+/// the forward pump only after [`Self::client_armed_and_wait_for_server_arm`]
+/// returns.
+struct SentinelClientArmHandoff {
+    client_arm_tx: std::sync::mpsc::SyncSender<()>,
+    server_arm_rx: std::sync::mpsc::Receiver<()>,
+}
+
+/// Server side of the private sentinel arm rendezvous.
+struct SentinelServerArmHandoff {
+    client_arm_rx: std::sync::mpsc::Receiver<()>,
+    server_arm_tx: std::sync::mpsc::SyncSender<()>,
+}
+
+fn sentinel_arm_handoff() -> (SentinelClientArmHandoff, SentinelServerArmHandoff) {
+    let (client_arm_tx, client_arm_rx) = std::sync::mpsc::sync_channel(0);
+    let (server_arm_tx, server_arm_rx) = std::sync::mpsc::sync_channel(0);
+    (
+        SentinelClientArmHandoff { client_arm_tx, server_arm_rx },
+        SentinelServerArmHandoff { client_arm_rx, server_arm_tx },
+    )
+}
+
+impl SentinelClientArmHandoff {
+    fn client_armed_and_wait_for_server_arm(&self) -> std::result::Result<(), String> {
+        self.client_arm_tx
+            .send(())
+            .map_err(|_| "sentinel peer exited before the client kTLS arm".to_owned())?;
+        self.server_arm_rx
+            .recv_timeout(SENTINEL_ARM_HANDOFF_TIMEOUT)
+            .map_err(|e| format!("sentinel peer did not complete the server kTLS arm: {e}"))
+    }
+}
+
+impl SentinelServerArmHandoff {
+    fn wait_for_client_arm(&self) -> std::result::Result<(), String> {
+        self.client_arm_rx
+            .recv_timeout(SENTINEL_ARM_HANDOFF_TIMEOUT)
+            .map_err(|e| format!("sentinel client did not complete kTLS arm: {e}"))
+    }
+
+    fn acknowledge_server_arm(&self) -> std::result::Result<(), String> {
+        self.server_arm_tx.send(()).map_err(|_| {
+            "sentinel client exited before the server kTLS arm acknowledgement".to_owned()
+        })
+    }
+}
+
 /// The sentinel peer: a loopback TLS 1.3 server that arms kTLS-RX and reads
 /// `want` bytes of decrypted plaintext (proving the spliced bytes arrived
 /// ENCRYPTED and decrypt to the sentinel). Uses an `AcceptAny` client-verifier
@@ -421,7 +472,7 @@ fn sentinel_peer_recv(
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
     want: usize,
-    client_arm_rx: &std::sync::mpsc::Receiver<()>,
+    arm_handoff: &SentinelServerArmHandoff,
 ) -> std::result::Result<Vec<u8>, String> {
     use std::io::Read as _;
     let mut cfg = rustls::ServerConfig::builder()
@@ -438,9 +489,7 @@ fn sentinel_peer_recv(
     let mut conn = rustls::ServerConnection::new(std::sync::Arc::new(cfg))
         .map_err(|e| format!("sentinel ServerConnection: {e}"))?;
     drive_server_handshake(&mut conn, &mut tcp)?;
-    client_arm_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|e| format!("sentinel client did not complete kTLS arm: {e}"))?;
+    arm_handoff.wait_for_client_arm()?;
     // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
     // handshake BEFORE extract consumes the connection — those bytes seed `got` so
     // the sentinel never loses an early-arriving record (kTLS early-data
@@ -449,6 +498,11 @@ fn sentinel_peer_recv(
     let secrets =
         conn.dangerous_extract_secrets().map_err(|e| format!("sentinel extract secrets: {e}"))?;
     ktls::arm_ktls_tx_rx(fd, secrets).map_err(|e| format!("sentinel kTLS-RX arm: {e}"))?;
+    // This is the second phase of the probe handoff. It deliberately follows the
+    // complete TX/RX arm above: any syscall failure returns through the existing
+    // Probe error path without releasing the client to start its pump or EOF the
+    // plaintext source.
+    arm_handoff.acknowledge_server_arm()?;
     std::mem::forget(tcp); // keep the fd open for the kTLS read
     // Read decrypted plaintext off the kTLS-RX leg. Reconstruct an owning
     // `TcpStream` from the fd — dropping it at the end of this fn closes the leg.
@@ -591,5 +645,57 @@ fn drive_server_handshake(
             Err(e) if e.kind() == ErrorKind::WouldBlock => {}
             Err(e) => return Err(format!("read_tls: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        reason = "test preconditions should fail at the exact broken handoff operation"
+    )]
+
+    use super::*;
+
+    /// CONTRACT_SHAPE: bounded-change (client continuation remains blocked until the server kTLS arm is acknowledged).
+    #[test]
+    fn sentinel_client_cannot_continue_before_server_arm_acknowledgement() {
+        let (client, server) = sentinel_arm_handoff();
+        let (continued_tx, continued_rx) = std::sync::mpsc::sync_channel(1);
+        let client_thread = std::thread::spawn(move || {
+            client.client_armed_and_wait_for_server_arm().unwrap();
+            continued_tx.send(()).unwrap();
+        });
+
+        server.wait_for_client_arm().unwrap();
+        assert_eq!(
+            continued_rx.recv_timeout(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+            "pump start, source EOF, and leg-B half-close continuation escaped before server arm"
+        );
+
+        server.acknowledge_server_arm().unwrap();
+        continued_rx
+            .recv_timeout(SENTINEL_ARM_HANDOFF_TIMEOUT)
+            .expect("client continuation must be released after server arm acknowledgement");
+        client_thread.join().unwrap();
+    }
+
+    /// CONTRACT_SHAPE: bounded-change (server-arm failure disconnects the waiting client instead of releasing its continuation).
+    #[test]
+    fn sentinel_client_refuses_to_continue_when_server_arm_disconnects() {
+        let (client, server) = sentinel_arm_handoff();
+        let server_thread = std::thread::spawn(move || {
+            server.wait_for_client_arm().unwrap();
+            drop(server);
+        });
+
+        let error = client
+            .client_armed_and_wait_for_server_arm()
+            .expect_err("a disconnected server-arm acknowledgement must fail closed");
+
+        assert!(error.contains("server kTLS arm"), "unexpected handoff error: {error}");
+        server_thread.join().unwrap();
     }
 }
