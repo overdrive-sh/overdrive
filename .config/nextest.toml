@@ -689,6 +689,23 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-dataplane) & binary(integration)'
 test-group = 'host-kernel-shared'
 
+# The xtask metal-qualification binary drives the production
+# `infra/metal/bootstrap.sh` lease protocol through several nested shell
+# processes and a real `flock`. Although its fixtures use temporary paths,
+# the subprocess/descriptor workload is node-global and is sensitive to the
+# same host I/O pressure as the kernel-backed tests above. Keep the two
+# subprocess-heavy qualification scenarios in the existing single-writer
+# group so they are not run concurrently with the large host-kernel fixture
+# drain. The host preflight assertion is pure and remains in the normal pool.
+[[profile.default.overrides]]
+filter = '''
+    package(xtask) & (
+        test(metal_run_reinjects_guest_artifacts_without_sudo_environment_preservation)
+        | test(metal_run_sync_and_bootstrap_share_one_pre_mutation_lease)
+    )
+'''
+test-group = 'host-kernel-shared'
+
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:
 # `.claude/rules/testing.md` — "Flaky DST is a bug … never a just-rerun-it."
