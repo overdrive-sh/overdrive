@@ -9,6 +9,7 @@
 //! socket (workload-holds-nothing, D-MTLS-9).
 
 use std::os::fd::RawFd;
+use std::time::Duration;
 
 use overdrive_core::traits::mtls_enforcement::MtlsEnforcementError;
 use rustls::{ConnectionTrafficSecrets, ExtractedSecrets};
@@ -41,11 +42,39 @@ pub(super) fn arm_ktls_tx_rx(
     fd: RawFd,
     secrets: ExtractedSecrets,
 ) -> Result<u64, MtlsEnforcementError> {
-    install_ulp(fd)?;
+    retry_transient_not_connected(|| install_ulp(fd))?;
     let rx_seq = secrets.rx.0;
-    set_crypto_info(fd, libc::TLS_TX, &secrets.tx)?;
-    set_crypto_info(fd, libc::TLS_RX, &secrets.rx)?;
+    retry_transient_not_connected(|| set_crypto_info(fd, libc::TLS_TX, &secrets.tx))?;
+    retry_transient_not_connected(|| set_crypto_info(fd, libc::TLS_RX, &secrets.rx))?;
     Ok(rx_seq)
+}
+
+/// Linux can briefly report `ENOTCONN` for the kTLS ULP/crypto arm in the
+/// scheduler window immediately after a userspace TLS handshake completes.
+/// Retry only that transient errno, with a small bounded budget; every other
+/// arm failure remains fail-closed and is returned unchanged.
+fn retry_transient_not_connected(
+    mut arm: impl FnMut() -> Result<(), MtlsEnforcementError>,
+) -> Result<(), MtlsEnforcementError> {
+    const MAX_RETRIES: u8 = 8;
+    for attempt in 0..=MAX_RETRIES {
+        match arm() {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < MAX_RETRIES && is_transient_not_connected(&error) => {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the bounded kTLS arm retry loop always returns");
+}
+
+fn is_transient_not_connected(error: &MtlsEnforcementError) -> bool {
+    matches!(
+        error,
+        MtlsEnforcementError::KtlsArmFailed { source }
+            if source.raw_os_error() == Some(libc::ENOTCONN)
+    )
 }
 
 /// `setsockopt(SOL_TCP, TCP_ULP, "tls")`. Any failure (the ULP already installed,
