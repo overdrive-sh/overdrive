@@ -58,7 +58,7 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 # `overdrive_control_plane::view_store::ViewStore` and serialises `View`
 # values to CBOR via `ciborium` for storage parity with the production
 # `RedbViewStore`. Per ADR-0035 §3.
-overdrive-control-plane = { path = "../overdrive-control-plane", features = ["integration-tests"] }
+overdrive-control-plane.path = "../overdrive-control-plane"
 # `SimMtlsIntercept` (GH #250) implements
 # `overdrive_worker::mtls_intercept_port::MtlsIntercept` — the per-alloc
 # intercept-INSTALL port whose trait, error type, and guard trait are declared
