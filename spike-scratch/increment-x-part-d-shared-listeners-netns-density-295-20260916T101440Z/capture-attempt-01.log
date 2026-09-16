@@ -1,0 +1,63 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e15daeea54f3b5839d516986 pid=2838440
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 648,268 bytes  received 61,013 bytes  472,854.00 bytes/sec
+total size is 316,635,783  speedup is 446.42
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295d.g3DJ5ayV
+START=2026-09-16T10:19:54Z
+SOURCE_SHA=69998d2f448287bc1336498039f1bd6df3a4367a0b70c6abdf2b95f2612a21e6
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling netns-density-295-part-d v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z)
+warning: unused import: `Write`
+ --> shared_host.rs:2:26
+  |
+2 | use std::io::{Read as _, Write as _};
+  |                          ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `netns-density-295-part-d` (bin "shared-host") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 5.95s
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+    Finished `release` profile [optimized] target(s) in 4.02s
+    Finished `release` profile [optimized] target(s) in 0.06s
+RESOURCE_PREFLIGHT nofile=1024 mem_available_kib=63228472 selected_n=8192 reason=bounded-fallback
+RESOURCE_RESULT mode=shared n=8192 registry_entries=16384 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=4024 rss_after_registry_kib=4748 registry_rss_delta_kib=724 rss_after_listeners_kib=4976 listener_task_rss_delta_kib=220 setup_ms=0.044 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=shared fd_after=10 rss_after_kib=4976 teardown_ms=101.647
+
+thread 'main' (2838914) panicked at shared_host.rs:159:5:
+socket: Too many open files (os error 24)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/run.sh: line 40: 2838914 Aborted                    (core dumped) "$host_bin" resource-compare per-allocation "$compare_n"
+     2838915 Done                       | tee "$spike_run/resource-per-allocation.log"
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 134[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

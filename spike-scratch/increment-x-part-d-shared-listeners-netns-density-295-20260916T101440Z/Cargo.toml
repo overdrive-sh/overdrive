@@ -1,0 +1,25 @@
+[workspace]
+
+[package]
+name = "netns-density-295-part-d"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libc = "0.2"
+overdrive-control-plane = { path = "../../crates/overdrive-control-plane" }
+overdrive-core = { path = "../../crates/overdrive-core" }
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+overdrive-host = { path = "../../crates/overdrive-host" }
+overdrive-sim = { path = "../../crates/overdrive-sim" }
+overdrive-worker = { path = "../../crates/overdrive-worker" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[[bin]]
+name = "shared-host"
+path = "shared_host.rs"
+
+[profile.release]
+panic = "abort"

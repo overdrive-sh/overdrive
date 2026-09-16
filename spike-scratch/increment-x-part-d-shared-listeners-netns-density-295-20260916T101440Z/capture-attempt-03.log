@@ -1,0 +1,369 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e10ea3729d7dcbeabb385891 pid=2841709
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 297,907 bytes  received 52,675 bytes  140,232.80 bytes/sec
+total size is 316,654,849  speedup is 903.23
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295d.Xhj2JXwQ
+START=2026-09-16T10:21:34Z
+SOURCE_SHA=d40d519d44b985524732bd6ab3e49be47748088b0cf7b8918221dc356aaa7fb9
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+    Finished `release` profile [optimized] target(s) in 1.54s
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+    Finished `release` profile [optimized] target(s) in 0.89s
+    Finished `release` profile [optimized] target(s) in 0.05s
+RESOURCE_PREFLIGHT nofile=524288 mem_available_kib=63211648 selected_n=16384 reason=safe-preflight
+RESOURCE_RESULT mode=shared n=16384 registry_entries=32768 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=3956 rss_after_registry_kib=5396 registry_rss_delta_kib=1440 rss_after_listeners_kib=5716 listener_task_rss_delta_kib=316 setup_ms=0.042 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=shared fd_after=10 rss_after_kib=5728 teardown_ms=101.648
+RESOURCE_RESULT mode=per-allocation n=16384 registry_entries=32768 listeners=32768 idle_accept_tasks=32768 fd_before=10 fd_after=32778 fd_delta=32768 rss_start_kib=4044 rss_after_registry_kib=5524 registry_rss_delta_kib=1480 rss_after_listeners_kib=35012 listener_task_rss_delta_kib=29484 setup_ms=405.335 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=per-allocation fd_after=10 rss_after_kib=33752 teardown_ms=330.201
+    Updating crates.io index
+     Locking 27 packages to latest Rust 1.99.0-nightly compatible versions
+      Adding aya-ebpf v0.1.1 (available: v0.2.1)
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling camino v1.2.6
+   Compiling thiserror v2.0.20
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling anyhow v1.0.104
+   Compiling memchr v2.8.3
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.23
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling semver v1.0.28
+   Compiling cargo-platform v0.3.3
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.20
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling gh295c-endpoint-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/bpf)
+    Finished `release` profile [optimized] target(s) in 9.80s
+/home/ubuntu/overdrive/target/release/shared-host:                                  ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=21240d09a4030053799e596de79c29d9fcb7dda8, not stripped
+/home/ubuntu/overdrive/target/release/tcx-loader:                                   ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=702a530546a1c3ca7aa0eb6a404a6909fee81a1c, not stripped
+/home/ubuntu/overdrive/target/x86_64-unknown-linux-musl/release/guest:              ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=200144b858982981a4ebbb7c150d15cd5a3927ab, not stripped
+/var/tmp/gh295d.Xhj2JXwQ/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf: ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295d
+Device "br295d" does not exist.
++ ip link show tap295ca
+Device "tap295ca" does not exist.
++ ip link show tap295cb
+Device "tap295cb" does not exist.
++ nft list table ip gh295d
+Error: No such file or directory
+list table ip gh295d
+              ^^^^^^
++ nft list table bridge gh295d
+Error: No such file or directory
+list table bridge gh295d
+                  ^^^^^^
++ '[' '!' -e /sys/fs/bpf/gh295d ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope ']'
++ /home/ubuntu/overdrive/target/release/shared-host cgroup-init
+PRODUCTION_CGROUP_CREATED alloc=gh295d-client scope=overdrive.slice/workloads.slice/gh295d-client.scope
+PRODUCTION_CGROUP_CREATED alloc=gh295d-server scope=overdrive.slice/workloads.slice/gh295d-server.scope
++ spike_cgroups=1
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295d type bridge
++ spike_links+=(br295d)
++ ip link set br295d address 02:00:00:95:00:01
++ ip addr add 10.95.0.1/24 dev br295d
++ ip link set br295d up
++ for tap in tap295ca tap295cb
++ ip tuntap add dev tap295ca mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295ca master br295d
++ ip link set tap295ca up
++ sysctl -qw net.ipv4.conf.tap295ca.rp_filter=0
++ for tap in tap295ca tap295cb
++ ip tuntap add dev tap295cb mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295cb master br295d
++ ip link set tap295cb up
++ sysctl -qw net.ipv4.conf.tap295cb.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295d.rp_filter=0
++ ip rule add priority 2953 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table ip gh295d
++ spike_table=1
++ nft add chain ip gh295d prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295d prerouting iifname br295d ip protocol udp udp dport 53 counter
++ nft add rule ip gh295d prerouting meta mark 0x295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295d prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295d output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295d output meta mark '!=' 0x2 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ /home/ubuntu/overdrive/target/release/tcx-loader load /sys/fs/bpf/gh295d /var/tmp/gh295d.Xhj2JXwQ/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf
+TCX_PROGRAM_LOADED id=30232 verified_insns=Some(296) memlock_bytes=4096 elapsed_ms=50.384
+TCX_LINK_PINNED iface=tap295ca ifindex=57070 pin=/sys/fs/bpf/gh295d/link-tap295ca attach_ms=9.031
+TCX_LINK_PINNED iface=tap295cb ifindex=57071 pin=/sys/fs/bpf/gh295d/link-tap295cb attach_ms=4.931
+TCX_LOADER_EXITING links_and_maps_pinned=true
++ spike_tcx=1
++ /home/ubuntu/overdrive/target/release/tcx-loader register /sys/fs/bpf/gh295d
+TCX_ENDPOINTS_REGISTERED count=2
++ /home/ubuntu/overdrive/target/release/tcx-loader inspect /sys/fs/bpf/gh295d
++ tee /var/tmp/gh295d.Xhj2JXwQ/tcx-live.log
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295d/endpoints id=34125 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295d/counters id=34126 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=0
+TCX_COUNTER intercept=0
+TCX_COUNTER map_miss=0
+TCX_COUNTER spoof_mac=0
+TCX_COUNTER spoof_ip=0
+TCX_COUNTER direct_bypass_drop=0
+TCX_COUNTER arp_pass=0
+TCX_COUNTER malformed_drop=0
++ nft list table bridge gh295d
+Error: No such file or directory
+list table bridge gh295d
+                  ^^^^^^
++ spike_host=2843112
++ /home/ubuntu/overdrive/target/release/shared-host
++ spike_pids+=("$spike_host")
++ set +x
++ grep SHARED_LISTENERS_READY /var/tmp/gh295d.Xhj2JXwQ/host.log
+SHARED_LISTENERS_READY leg_f=127.0.0.1:15294 leg_c=127.0.0.1:15295 listener_count=2 accept_task_count=2
++ grep 'SHARED_NEGATIVE\|SHARED_REUSE\|SHARED_SUCCESSOR' /var/tmp/gh295d.Xhj2JXwQ/host.log
+SHARED_NEGATIVE unknown_source=FAIL_CLOSED
+SHARED_REUSE accepted_alloc=gh295d-client accepted_generation=1 successor_alloc=gh295d-successor successor_generation=2 publish=TEARDOWN_NOT_REATTRIBUTE
+SHARED_SUCCESSOR_NEW_CONNECT alloc=gh295d-successor generation=2 identity=spiffe://overdrive.local/workload/gh295d-successor-workload/alloc/gh295d-successor
+SHARED_NEGATIVE post_removal_new_connect=FAIL_CLOSED
+SHARED_NEGATIVE unknown_destination=FAIL_CLOSED
++ spike_trace_pid=2843129
++ sleep 0.5
++ strace -ff -ttt -yy -s 512 -xx -e trace=clone,clone3,splice,write,writev,sendto,sendmsg -o /var/tmp/gh295d.Xhj2JXwQ/strace -p 2843112
++ for iface in lo tap295ca tap295cb
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni lo -w /var/tmp/gh295d.Xhj2JXwQ/lo.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni tap295ca -w /var/tmp/gh295d.Xhj2JXwQ/tap295ca.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ sleep 0.4
++ tcpdump --immediate-mode -U -s 0 -ni tap295cb -w /var/tmp/gh295d.Xhj2JXwQ/tap295cb.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_server=2843136
++ spike_pids+=("$spike_server")
++ /home/ubuntu/overdrive/target/release/shared-host cgroup-place gh295d-server 2843136
++ cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=server' --disk path=/var/tmp/gh295d.Xhj2JXwQ/server.ext4,image_type=raw --net tap=tap295cb,mac=02:00:00:95:00:03 --serial file=/var/tmp/gh295d.Xhj2JXwQ/server.console --console off
+PRODUCTION_CGROUP_PID_PLACED alloc=gh295d-server scope=overdrive.slice/workloads.slice/gh295d-server.scope pid=2843136
++ set +x
++ grep 'GUEST SERVER READY' /var/tmp/gh295d.Xhj2JXwQ/server.console
+GUEST SERVER READY
++ spike_client=2843180
++ spike_pids+=("$spike_client")
++ /home/ubuntu/overdrive/target/release/shared-host cgroup-place gh295d-client 2843180
++ cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=client' --disk path=/var/tmp/gh295d.Xhj2JXwQ/client.ext4,image_type=raw --net tap=tap295ca,mac=02:00:00:95:00:02 --serial file=/var/tmp/gh295d.Xhj2JXwQ/client.console --console off
+PRODUCTION_CGROUP_PID_PLACED alloc=gh295d-client scope=overdrive.slice/workloads.slice/gh295d-client.scope pid=2843180
++ set +x
++ grep SHARED_CONNECTIONS_ESTABLISHED /var/tmp/gh295d.Xhj2JXwQ/host.log
+SHARED_CONNECTIONS_ESTABLISHED first=F:gh295d-client:1 second=C:gh295d-server:1
++ ss -H -n -t -i -e
++ grep -A1 -B1 tcp-ulp-tls /var/tmp/gh295d.Xhj2JXwQ/ss-ktls.log
+ESTAB 0      45          10.95.0.3:9000      10.95.0.1:46102 timer:(on,190ms,0) ino:44474605 sk:b250 cgroup:/user.slice/user-1000.slice/session-17569.scope <->
+	 ts sack cubic wscale:10,10 rto:201 rtt:0.052/0.024 ato:41 mss:1448 pmtu:65535 rcvmss:1081 advmss:65483 cwnd:10 bytes_sent:1291 bytes_acked:1246 bytes_received:1343 segs_out:4 segs_in:6 data_segs_out:2 data_segs_in:3 send 2227692308bps lastsnd:11 lastrcv:32 lastack:32 pacing_rate 4455384608bps delivery_rate 158684928bps delivered:2 app_limited busy:11ms unacked:1 rcv_space:65483 rcv_ssthresh:68043 minrtt:0.049 snd_wnd:67584 rcv_wnd:68608 tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw txconf: sw
+ESTAB 0      0           10.95.0.3:9000      10.95.0.2:59656 timer:(keepalive,9.914sec,0) ino:44541994 sk:b253 cgroup:/user.slice/user-1000.slice/session-17569.scope <->
+--
+ESTAB 0      0           10.95.0.1:46102     10.95.0.3:9000  timer:(keepalive,9.956sec,0) ino:44473524 sk:b259 cgroup:/user.slice/user-1000.slice/session-17569.scope <->
+	 ts sack cubic wscale:10,10 rto:201 rtt:0.372/0.632 ato:45 mss:1448 pmtu:1500 rcvmss:1246 advmss:1448 cwnd:10 bytes_sent:1343 bytes_acked:1344 bytes_received:1291 segs_out:6 segs_in:5 data_segs_out:3 data_segs_in:2 send 311397849bps lastsnd:40 lastrcv:19 lastack:19 pacing_rate 621542584bps delivery_rate 251826080bps delivered:4 app_limited busy:3ms rcv_space:14480 rcv_ssthresh:67408 minrtt:0.046 snd_wnd:68608 rcv_wnd:67584 tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw txconf: sw     
+ESTAB 0      0           10.95.0.1:46114     10.95.0.3:9000  timer:(keepalive,9.959sec,0) ino:44541995 sk:8184 fwmark:0x2 cgroup:/user.slice/user-1000.slice/session-17569.scope <->
++ for alloc_pid in "gh295d-server:$spike_server" "gh295d-client:$spike_client"
++ alloc=gh295d-server
++ pid=2843136
++ scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope
++ grep -qx 2843136 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope/cgroup.procs
++ tee -a /var/tmp/gh295d.Xhj2JXwQ/cgroup-proof.log
+++ tr '\n' ,
+++ readlink /proc/2843136/exe
++ printf 'CGROUP_PROOF alloc=%s pid=%s scope=%s cgroup_procs=%s exe=%s\n' gh295d-server 2843136 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope 2843136, /usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295d-server pid=2843136 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope cgroup_procs=2843136, exe=/usr/local/bin/cloud-hypervisor
++ for alloc_pid in "gh295d-server:$spike_server" "gh295d-client:$spike_client"
++ alloc=gh295d-client
++ pid=2843180
++ scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope
++ grep -qx 2843180 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope/cgroup.procs
++ tee -a /var/tmp/gh295d.Xhj2JXwQ/cgroup-proof.log
+++ tr '\n' ,
+++ readlink /proc/2843180/exe
++ printf 'CGROUP_PROOF alloc=%s pid=%s scope=%s cgroup_procs=%s exe=%s\n' gh295d-client 2843180 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope 2843180, /usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295d-client pid=2843180 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope cgroup_procs=2843180, exe=/usr/local/bin/cloud-hypervisor
++ wait 2843180
++ wait 2843136
++ wait 2843112
++ grep 'GUEST STEADY ROUNDTRIP SUCCESS' /var/tmp/gh295d.Xhj2JXwQ/client.console
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.098927
++ grep 'SHARED_STOP_ISOLATION\|SHARED_SERVER_STOP\|SHARED_LISTENER_OWNER_SHUTDOWN_COMPLETE' /var/tmp/gh295d.Xhj2JXwQ/host.log
+SHARED_STOP_ISOLATION stopped_alloc=gh295d-client generation=1 drained_handles=1 server_handles_before=1 leg_f_listener_alive=true leg_c_listener_alive=true
+SHARED_SERVER_STOP drained_handles=1
+SHARED_LISTENER_OWNER_SHUTDOWN_COMPLETE
++ for pid in "${spike_captures[@]}"
++ kill -INT 2843132
++ for pid in "${spike_captures[@]}"
++ kill -INT 2843133
++ for pid in "${spike_captures[@]}"
++ kill -INT 2843134
++ for pid in "${spike_captures[@]}"
++ wait 2843132
++ for pid in "${spike_captures[@]}"
++ wait 2843133
++ for pid in "${spike_captures[@]}"
++ wait 2843134
++ spike_captures=()
++ kill -INT 2843129
++ true
++ wait 2843129
++ spike_trace_pid=
++ set +x
+WIRE_SCAN ('10.95.0.1', 46102, '10.95.0.3', 9000) stream_bytes=1405 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 46102) stream_bytes=1354 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+SHARED_L2 source_tap_steady_request=1 peer_tap_agent_steady_request=1 peer_tap_steady_response=1 guest_to_guest_bypass_packets=0
+ZERO_COPY_STRACE successful_splice_syscalls=14 steady_request_host_write_hits=0 steady_response_host_write_hits=0
+KTLS_SS bidirectional_tls13_socket_records=2
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295d/endpoints id=34125 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295d/counters id=34126 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=8
+TCX_COUNTER intercept=8
+TCX_COUNTER map_miss=0
+TCX_COUNTER spoof_mac=0
+TCX_COUNTER spoof_ip=0
+TCX_COUNTER direct_bypass_drop=12
+TCX_COUNTER arp_pass=4
+TCX_COUNTER malformed_drop=0
+Error: No such file or directory
+list table bridge gh295d
+                  ^^^^^^
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295d/link-tap295ca
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295d/link-tap295cb
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295d/endpoints
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295d/counters
+TCX_CLEANUP_QUERY iface=tap295ca programs=0
+TCX_CLEANUP_QUERY iface=tap295cb programs=0
+VERDICT=WORKS: one shared leg-F plus one shared leg-C listener preserved allocation/generation attribution, fail-closed stale/unknown handling, allocation-scoped teardown, actual production TLS1.3+kTLS+splice, TCX anti-bypass, and materially reduced T1 listener/task/FD resources
+
+HOST LOG
+SHARED_NEGATIVE unknown_source=FAIL_CLOSED
+SHARED_REUSE accepted_alloc=gh295d-client accepted_generation=1 successor_alloc=gh295d-successor successor_generation=2 publish=TEARDOWN_NOT_REATTRIBUTE
+SHARED_SUCCESSOR_NEW_CONNECT alloc=gh295d-successor generation=2 identity=spiffe://overdrive.local/workload/gh295d-successor-workload/alloc/gh295d-successor
+SHARED_NEGATIVE post_removal_new_connect=FAIL_CLOSED
+SHARED_NEGATIVE unknown_destination=FAIL_CLOSED
+SHARED_LISTENERS_READY leg_f=127.0.0.1:15294 leg_c=127.0.0.1:15295 listener_count=2 accept_task_count=2
+SHARED_LEG_F_CAPABILITY source=10.95.0.2 orig_dst=10.95.0.3:9000 alloc=gh295d-client generation=1 identity=spiffe://overdrive.local/workload/gh295d-client-workload/alloc/gh295d-client
+SHARED_LEG_C_CAPABILITY orig_dst=10.95.0.3:9000 alloc=gh295d-server generation=1 identity=spiffe://overdrive.local/workload/peer/alloc/gh295d-server
+SHARED_CONNECTIONS_ESTABLISHED first=F:gh295d-client:1 second=C:gh295d-server:1
+SHARED_STOP_ISOLATION stopped_alloc=gh295d-client generation=1 drained_handles=1 server_handles_before=1 leg_f_listener_alive=true leg_c_listener_alive=true
+SHARED_SERVER_STOP drained_handles=1
+SHARED_LISTENER_OWNER_SHUTDOWN_COMPLETE
+
+RESOURCE SHARED
+RESOURCE_RESULT mode=shared n=16384 registry_entries=32768 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=3956 rss_after_registry_kib=5396 registry_rss_delta_kib=1440 rss_after_listeners_kib=5716 listener_task_rss_delta_kib=316 setup_ms=0.042 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=shared fd_after=10 rss_after_kib=5728 teardown_ms=101.648
+
+RESOURCE PER-ALLOCATION
+RESOURCE_RESULT mode=per-allocation n=16384 registry_entries=32768 listeners=32768 idle_accept_tasks=32768 fd_before=10 fd_after=32778 fd_delta=32768 rss_start_kib=4044 rss_after_registry_kib=5524 registry_rss_delta_kib=1480 rss_after_listeners_kib=35012 listener_task_rss_delta_kib=29484 setup_ms=405.335 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=per-allocation fd_after=10 rss_after_kib=33752 teardown_ms=330.201
+
+CAPTURE STATS
+tcpdump: listening on lo, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+17 packets captured
+34 packets received by filter
+0 packets dropped by kernel
+tcpdump: listening on tap295ca, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+19 packets captured
+19 packets received by filter
+0 packets dropped by kernel
+tcpdump: listening on tap295cb, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13 packets captured
+13 packets received by filter
+0 packets dropped by kernel
+
+NFT IP COUNTERS
+table ip gh295d {
+	chain prerouting {
+		type filter hook prerouting priority mangle - 1; policy accept;
+		iifname "br295d" udp dport 53 counter packets 2 bytes 110
+		meta mark 0x0000295a tcp dport 9000 counter packets 8 bytes 486 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept
+		meta mark 0x00000295 ip daddr 10.95.0.3 tcp dport 9000 counter packets 9 bytes 1881 tproxy to 127.0.0.1:15295 accept
+	}
+
+	chain output {
+		type route hook output priority mangle - 1; policy accept;
+		meta mark != 0x00000002 ip daddr 10.95.0.3 tcp dport 9000 counter packets 9 bytes 1881 meta mark set 0x00000295 accept
+	}
+}
+FINAL_RUN_DIR=/var/tmp/gh295d.Xhj2JXwQ
+
+CLEANUP START prior_exit=0 at=2026-09-16T10:21:56Z
+PRODUCTION_CGROUP_REMOVED alloc=gh295d-client scope=overdrive.slice/workloads.slice/gh295d-client.scope
+PRODUCTION_CGROUP_REMOVED alloc=gh295d-server scope=overdrive.slice/workloads.slice/gh295d-server.scope
+OWNED_LINK_br295d=ABSENT
+OWNED_LINK_tap295ca=ABSENT
+OWNED_LINK_tap295cb=ABSENT
+OWNED_NFT_IP=ABSENT
+OWNED_NFT_BRIDGE=ABSENT
+OWNED_RULE=ABSENT
+OWNED_ROUTE=ABSENT
+OWNED_BPFFS=ABSENT
+OWNED_CGROUP_gh295d-client.scope=ABSENT
+OWNED_CGROUP_gh295d-server.scope=ABSENT
+TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=0 veth=0 etc_netns=0
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295d.Xhj2JXwQ original_exit=0
+TOTAL_ELAPSED_SECONDS=22.557271

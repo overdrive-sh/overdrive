@@ -1,0 +1,12 @@
+SHARED_NEGATIVE unknown_source=FAIL_CLOSED
+SHARED_REUSE accepted_alloc=gh295d-client accepted_generation=1 successor_alloc=gh295d-successor successor_generation=2 publish=TEARDOWN_NOT_REATTRIBUTE
+SHARED_SUCCESSOR_NEW_CONNECT alloc=gh295d-successor generation=2 identity=spiffe://overdrive.local/workload/gh295d-successor-workload/alloc/gh295d-successor
+SHARED_NEGATIVE post_removal_new_connect=FAIL_CLOSED
+SHARED_NEGATIVE unknown_destination=FAIL_CLOSED
+SHARED_LISTENERS_READY leg_f=127.0.0.1:15294 leg_c=127.0.0.1:15295 listener_count=2 accept_task_count=2
+SHARED_LEG_F_CAPABILITY source=10.95.0.2 orig_dst=10.95.0.3:9000 alloc=gh295d-client generation=1 identity=spiffe://overdrive.local/workload/gh295d-client-workload/alloc/gh295d-client
+SHARED_LEG_C_CAPABILITY orig_dst=10.95.0.3:9000 alloc=gh295d-server generation=1 identity=spiffe://overdrive.local/workload/peer/alloc/gh295d-server
+SHARED_CONNECTIONS_ESTABLISHED first=F:gh295d-client:1 second=C:gh295d-server:1
+SHARED_STOP_ISOLATION stopped_alloc=gh295d-client generation=1 drained_handles=1 server_handles_before=1 leg_f_listener_alive=true leg_c_listener_alive=true
+SHARED_SERVER_STOP drained_handles=1
+SHARED_LISTENER_OWNER_SHUTDOWN_COMPLETE

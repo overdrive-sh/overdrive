@@ -984,3 +984,358 @@ transcript.log         489734923e3ff840f022b7f54ff9b1ae0d5ee3312f44ba8ac4220704f
 Part C therefore validates the bounded same-node TCX Option-B mechanism. It
 does not prove 16k scale, throughput, cross-host routing, live-link-loss
 fail-closed behavior, or a final production API shape.
+
+---
+
+## Part D — shared listeners versus async per-allocation listeners
+
+### Part-D verdict: WORKS
+
+One node-shared leg-F listener plus one node-shared leg-C listener preserved
+the assigned transparent-mTLS semantics on the configured native metal target
+at source commit `7a00464969e98fe00764e0ab707428e8cd82a026`.
+
+The successful real path reused Part C's shared bridge, per-TAP TCX endpoint
+classifier, and IP-only nft TPROXY boundary. Two real Cloud Hypervisor
+microVMs completed credential-free plaintext DNS and a byte-distinct two-phase
+request/response journey through the production `RcgenCa`, `IdentityMgr`,
+`ServiceBackendsResolve`, `HostMtlsEnforcement`, TLS 1.3, kTLS TX/RX, four
+splice pumps, and per-VMM `CgroupManager` scopes. Exactly two transparent
+listeners and two idle accept tasks served both allocations.
+
+The shared accept owner selected an immutable allocation capability before
+calling enforcement:
+
+- leg F keyed the accepted socket's validated source guest address to
+  `(AllocationId, generation, SpiffeId)`, then recovered and resolved the
+  original destination;
+- leg C keyed the accepted socket's recovered original destination address and
+  port to the server capability;
+- the connection owner rechecked that exact capability was active before
+  enforcement and again before publishing the returned
+  `EnforcedConnection` under the allocation owner;
+- a capability retired during enforcement causes the resulting handle to be
+  torn down rather than published or re-attributed.
+
+Unknown source, unknown destination, stale predecessor capability, and a new
+connection after removal all failed closed in executable socket sequences.
+Controlled source-IP reuse retained the predecessor capability on the already
+accepted connection and selected only the successor generation and successor
+SVID on the next accepted connection. Stopping the client allocation drained
+only its enforcement handle; the server handle and both shared listener tasks
+remained live until their own owner shutdown.
+
+At the proposed T1 population (`N=16,384`), a bounded real-resource comparison
+created actual nonblocking `IP_TRANSPARENT` TCP listeners and Tokio accept
+tasks. The shared shape used 2 listener FDs and 2 tasks. The per-allocation
+shape used 32,768 listener FDs and 32,768 tasks. Its measured incremental RSS
+was about 28.8 MiB versus 316 KiB for the shared listener/task layer. These are
+single point observations, not a performance benchmark.
+
+Phase 1 only. Part D makes no architecture decision, promotion choice,
+production edit, commit, or `wave-decisions.md` change.
+
+### Scratch mechanism
+
+The Part-D source and append-only evidence live in
+[`increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z`](../../../../spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/).
+
+Its scratch-only `Registry` maintains two read paths:
+
+```text
+source guest IPv4              -> immutable Capability
+original destination IPv4:port -> immutable Capability
+
+Capability = AllocationId + generation + canonical allocation SpiffeId
+```
+
+`ConnectionOwner` maintains the active capability set and
+`Capability -> Vec<EnforcedConnection>` ownership. Accept follows:
+
+```text
+accept socket
+  -> recover source/original-destination facts
+  -> clone immutable capability
+  -> claim only if that exact generation is active
+  -> call production HostMtlsEnforcement with capability.alloc
+  -> publish only if the exact generation remains active
+     else teardown the newly returned handle immediately
+```
+
+Allocation stop removes the exact generation from the active set, takes only
+that capability's handles, and awaits production enforcement teardown. It
+does not close, replace, or cancel either node-shared accept listener.
+
+### Allocation, generation, reuse, and negative evidence
+
+Before the real microVM journey, the same registry/owner implementation drove
+real accepted TCP sockets through the transition sequence. Production
+`RcgenCa` had minted SVIDs for predecessor, server, and successor, all held by
+the real `IdentityMgr`.
+
+Actual output:
+
+```text
+SHARED_NEGATIVE unknown_source=FAIL_CLOSED
+SHARED_REUSE accepted_alloc=gh295d-client accepted_generation=1 successor_alloc=gh295d-successor successor_generation=2 publish=TEARDOWN_NOT_REATTRIBUTE
+SHARED_SUCCESSOR_NEW_CONNECT alloc=gh295d-successor generation=2 identity=spiffe://overdrive.local/workload/gh295d-successor-workload/alloc/gh295d-successor
+SHARED_NEGATIVE post_removal_new_connect=FAIL_CLOSED
+SHARED_NEGATIVE unknown_destination=FAIL_CLOSED
+```
+
+The stale sequence was:
+
+1. register predecessor generation 1 at the source address;
+2. accept a real socket and clone the predecessor capability;
+3. retire predecessor generation 1;
+4. reassign the address to successor generation 2;
+5. verify the accepted capability still names predecessor generation 1 and its
+   held predecessor SVID;
+6. verify publish is rejected and the socket is torn down rather than moved;
+7. accept a new socket and verify it selects successor generation 2 and the
+   held successor SVID;
+8. remove successor generation 2 and prove a later connect fails closed.
+
+This is the narrow capability-selection and owner-fence proof. The successor
+connection did not run a second full kTLS session; it proved the exact
+`Capability -> IdentityMgr::svid_for` input that the same shared accept loop
+passes to production enforcement. The real generation-1 microVM journey below
+independently proves that this selected capability drives the actual
+`HostMtlsEnforcement` path.
+
+### Real shared-listener journey and allocation-scoped stop
+
+The two node-shared listeners announced:
+
+```text
+SHARED_LISTENERS_READY leg_f=127.0.0.1:15294 leg_c=127.0.0.1:15295 listener_count=2 accept_task_count=2
+SHARED_LEG_F_CAPABILITY source=10.95.0.2 orig_dst=10.95.0.3:9000 alloc=gh295d-client generation=1 identity=spiffe://overdrive.local/workload/gh295d-client-workload/alloc/gh295d-client
+SHARED_LEG_C_CAPABILITY orig_dst=10.95.0.3:9000 alloc=gh295d-server generation=1 identity=spiffe://overdrive.local/workload/peer/alloc/gh295d-server
+SHARED_CONNECTIONS_ESTABLISHED first=F:gh295d-client:1 second=C:gh295d-server:1
+```
+
+The client guest completed:
+
+```text
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.098927
+```
+
+The owner then stopped the client capability before the server capability:
+
+```text
+SHARED_STOP_ISOLATION stopped_alloc=gh295d-client generation=1 drained_handles=1 server_handles_before=1 leg_f_listener_alive=true leg_c_listener_alive=true
+SHARED_SERVER_STOP drained_handles=1
+SHARED_LISTENER_OWNER_SHUTDOWN_COMPLETE
+```
+
+Thus one allocation stop neither closed a node-shared listener nor removed the
+unrelated server allocation's owned handle.
+
+### Production kTLS/splice, wire, TCX, nft, and cgroup proof
+
+`ss` observed two sockets each carrying `tcp-ulp-tls version: 1.3`,
+`rxconf: sw`, and `txconf: sw`. Strace attached after the production
+Earned-Trust probe and found 14 successful `splice(2)` calls on the real guest
+journey; neither steady-state plaintext marker appeared in any host
+`write`/`writev`/`sendto`/`sendmsg` buffer.
+
+The reassembled encrypted streams were:
+
+```text
+WIRE_SCAN ('10.95.0.1', 46102, '10.95.0.3', 9000) stream_bytes=1405 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 46102) stream_bytes=1354 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+SHARED_L2 source_tap_steady_request=1 peer_tap_agent_steady_request=1 peer_tap_steady_response=1 guest_to_guest_bypass_packets=0
+ZERO_COPY_STRACE successful_splice_syscalls=14 steady_request_host_write_hits=0 steady_response_host_write_hits=0
+KTLS_SS bidirectional_tls13_socket_records=2
+```
+
+All journey pcaps reported zero kernel drops. The Part-C aya-rs classifier
+remained attached through TCX ingress on both real TAPs, reporting
+`intercept=8`, `gateway_pass=8`, and `arp_pass=4`. No bridge-family nft table
+was installed; the owned `table ip gh295d` contained only DNS observation and
+leg-F/leg-C/output TPROXY rules.
+
+The production per-VMM cgroup owner placed the real Cloud Hypervisor PIDs:
+
+```text
+CGROUP_PROOF alloc=gh295d-server pid=2843136 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope cgroup_procs=2843136, exe=/usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295d-client pid=2843180 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope cgroup_procs=2843180, exe=/usr/local/bin/cloud-hypervisor
+```
+
+### T1-shaped listener/task/FD/RSS comparison
+
+The metal preflight observed a 524,288 soft/hard file-descriptor limit after
+raising the inherited soft limit to the permitted hard limit and about 60 GiB
+available memory. It therefore selected the requested `N=16,384` rather than
+a fallback population.
+
+Both fresh comparison processes first built the same compact 32,768-entry
+source/destination registry, then measured only the listener/task layer. Every
+listener was a real nonblocking `IP_TRANSPARENT` IPv4 TCP socket; every idle
+task was a real Tokio task blocked in `accept()`.
+
+| Observation | Node-shared | Async per-allocation | Difference |
+|---|---:|---:|---:|
+| Allocations (`N`) | 16,384 | 16,384 | same |
+| Registry entries | 32,768 | 32,768 | same |
+| Listening sockets | 2 | 32,768 | 32,766 fewer shared |
+| Idle accept tasks | 2 | 32,768 | 32,766 fewer shared |
+| Measured FD delta | 2 | 32,768 | 32,766 fewer shared |
+| Registry RSS delta | 1,440 KiB | 1,480 KiB | process-noise equivalent |
+| Listener/task RSS delta | 316 KiB | 29,484 KiB | 29,168 KiB lower shared |
+| Setup point time | 0.042 ms | 405.335 ms | point observation only |
+| Teardown point time | 101.648 ms | 330.201 ms | includes fixed 100 ms settle |
+
+Exact output:
+
+```text
+RESOURCE_RESULT mode=shared n=16384 registry_entries=32768 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=3956 rss_after_registry_kib=5396 registry_rss_delta_kib=1440 rss_after_listeners_kib=5716 listener_task_rss_delta_kib=316 setup_ms=0.042 kernel_socket_memory=not_process_attributable
+RESOURCE_RESULT mode=per-allocation n=16384 registry_entries=32768 listeners=32768 idle_accept_tasks=32768 fd_before=10 fd_after=32778 fd_delta=32768 rss_start_kib=4044 rss_after_registry_kib=5524 registry_rss_delta_kib=1480 rss_after_listeners_kib=35012 listener_task_rss_delta_kib=29484 setup_ms=405.335 kernel_socket_memory=not_process_attributable
+```
+
+The registry used compact `(u64, generation)` values to keep the comparison
+focused on listener/task cardinality; its RSS is a lower bound for a final
+typed capability registry. Kernel socket memory was not reported because the
+available `/proc/net/sockstat` counters are node-global and cannot honestly be
+attributed to one comparison process. The FD and task counts are exact
+structural T1 counts; RSS and timings are single-run observations, not a
+benchmark.
+
+### Local Cilium population diff
+
+The requested local prior-art audit used
+`/Users/marcus/Git/cilium/cilium` at commit
+`e99150f8d8f403eca51ed82138d4ae20a265c8f3`.
+
+| Question | Cilium fact from local source | Comparison to Overdrive |
+|---|---|---|
+| Endpoint TCX attachment | `pkg/datapath/loader/endpoint.go` `reloadEndpoint` attaches `FromContainer` at endpoint-device ingress and optionally `ToContainer` at egress. `pkg/datapath/loader/tcx.go` creates a TCX link, pins it in the per-endpoint bpffs link directory, updates existing pinned links, and queries by attach type. Endpoint deletion removes the links directory before the endpoint bpffs directory. | Aligns with Part C's per-TAP TCX/pinned-link lifecycle. It does not argue for per-endpoint proxy listeners. |
+| Proxy listener cardinality | `pkg/proxy/proxyports/proxyports.go` has shared HTTP/TLS ingress/egress proxy-port records with `nRedirects` reference counts. `pkg/proxy/envoyproxy.go` derives listener name from the shared proxy-port name and port. `pkg/envoy/xds_server.go` `addListener` increments `listenerCount[name]` and reuses the same listener; `removeListener` deletes it only when the count reaches zero. | Cilium's endpoint datapath programs are per endpoint, while its proxy listeners are node-shared per protocol/direction. This is direct prior art for separating endpoint classification cardinality from listener cardinality. |
+| Accepted/proxied connection identity | `bpf/lib/proxy.h` marks or socket-assigns traffic to the shared proxy. `bpf/lib/identity.h` defines the security-identity mark encoding/decoding, and `bpf/bpf_lxc.c` handles the proxy-egress endpoint-ID mark. `pkg/envoy/xds_server.go` configures the `cilium.bpf_metadata` listener filter with bpffs root, ipcache name, direction, and proxy ID. `pkg/fqdn/dnsproxy/proxy.go` independently demonstrates the userspace pattern: parse accepted remote IP, call `LookupEndpointByIP`, then key policy by endpoint ID and destination security identity. | Supports recovering an endpoint/security owner after a shared accept. Overdrive cannot copy the metadata shape verbatim: it must select a platform-held allocation SVID before rustls/kTLS enforcement, so Part D uses an immutable allocation capability rather than only numeric security identity. |
+| IP reuse / stale generation | `pkg/fqdn/lookup/endpoint.go` resolves IP through `endpointManager.LookupIP`. `pkg/endpointmanager/manager.go` stores IP references in `endpointsAux`; `unexpose` removes endpoint and auxiliary references before `Endpoint.Delete`, and `expose` installs a new endpoint under the manager lock. No explicit allocation-generation token exists in these local agent sources. | Cilium supplies useful remove-before-delete ordering but not Overdrive's exact same-IP allocation-generation contract. Part D's immutable `(AllocationId, generation, SpiffeId)` capability and publish fence are a genuine Overdrive divergence, not copied Cilium machinery. |
+| Per-endpoint teardown with shared listener | `pkg/endpoint/bpf.go` removes only obsolete endpoint redirect IDs. `pkg/proxy/proxy.go` closes that redirect implementation and releases one shared proxy-port reference. `pkg/envoy/xds_server.go` decrements listener count and preserves the listener while any redirect still references it. | Aligns with Part D's capability-scoped handle drain while shared listeners remain. Cilium delegates accepted-connection draining to Envoy; Overdrive owns concrete `EnforcedConnection` handles and must explicitly teardown kTLS/splice state. |
+| Singleton DNS ownership | `pkg/fqdn/dnsproxy/proxy.go` states one `DNSProxy` singleton always runs inside `cilium-agent`; `NewDNSProxy` owns one allowed-policy map keyed by endpoint ID. `pkg/fqdn/bootstrap/dns_proxy.go` constructs it once; `fqdn_bootstrapper.go` calls `Listen`, installs one static proxy port, and takes a reference so it is never released. | Strongly aligns with already-approved D-295-6's one shared-gateway responder. Cilium's DNS proxy enforces per-endpoint DNS policy; Overdrive's responder owns mesh naming/health answers instead, so policy semantics are not interchangeable. |
+
+Genuine divergences:
+
+1. Cilium's shared Envoy listeners enforce L7 policy; Overdrive's shared leg-F
+   and leg-C listeners must choose the correct allocation SVID before the
+   production rustls handshake and then preserve kernel kTLS/splice ownership.
+2. Cilium's local source exposes endpoint/security IDs and IP-manager ordering,
+   but no explicit allocation generation. Overdrive requires generation-aware
+   immutable capabilities because one guest address may be reused by a
+   successor while predecessor connections still exist.
+3. Cilium delegates listener/connection drain semantics to Envoy and xDS
+   reference counting. Overdrive owns `EnforcedConnection` handles directly;
+   allocation stop must fence in-flight publish and await only that
+   allocation's handles.
+4. Cilium uses several shared listeners by proxy type and direction. Part D's
+   claim is narrower: exactly one shared TCP leg F and one shared TCP leg C for
+   the current Overdrive mTLS path, not one universal listener for every future
+   protocol.
+5. Cilium's singleton DNS proxy is a policy-enforcing forward proxy. Overdrive's
+   shared DNS responder answers its own mesh-name contract and does not inherit
+   Cilium's FQDN-policy ownership.
+
+The population diff therefore supports node-shared listener cardinality but
+also identifies the generation capability and explicit kTLS-handle owner that
+Overdrive must add rather than assuming Cilium's metadata is sufficient.
+
+### Attempts retained append-only
+
+| Attempt | Observation | Disposition |
+|---|---|---|
+| 01 | The inherited metal shell soft `RLIMIT_NOFILE` was 1,024. The initial fallback calculation incorrectly selected `N=8,192`; the real per-allocation comparison correctly failed at `EMFILE` after the shared measurement. | Preserved first failure. No kernel topology was created. The next attempt raised the soft limit to the permitted hard limit and derived any fallback from the actual FD ceiling. |
+| 02 | The full `N=16,384` resource comparison passed. The Part-C loader was still hard-coded to `tap295ca`/`tap295cb`, while this first runner revision created `tap295da`/`tap295db`; load failed with `ENODEV` after pinning maps but before attaching links. | Preserved failure and normal network/cgroup cleanup. An exact recovery command removed only `/sys/fs/bpf/gh295d/{endpoints,counters}` and its empty directory. The final runner reused the classifier's real TAP names. |
+| 03 | Resource comparison, generation/reuse negatives, two-microVM shared-listener journey, allocation-scoped stop, zero-copy/wire/TCX/cgroup proof, and cleanup all passed. | **WORKS.** |
+
+### Canonical command, timing, evidence, and cleanup
+
+Final execution:
+
+```sh
+OVERDRIVE_METAL_KERNEL=/var/tmp/spike-increment-n/kernel \
+OVERDRIVE_METAL_ROOTFS=/var/tmp/spike-increment-n/rootfs.ext4 \
+OVERDRIVE_METAL_SCENARIO=netns-density-295-part-d-attempt-03 \
+cargo xtask metal run -- \
+  bash spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/run.sh
+```
+
+The canonical exclusive lease and native x86_64/non-virtualized KVM preflight
+passed. Substrate metadata: kernel `7.0.0-29-generic`, Cloud Hypervisor
+`v53.0`.
+
+Retained evidence:
+
+- final outer capture:
+  [`capture-attempt-03.log`](../../../../spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/capture-attempt-03.log);
+- raw consoles, pcaps, strace, `ss`, TCX/bpftool snapshots, cgroup evidence,
+  resource measurements, cleanup complements, and transcript:
+  [`evidence-attempt-03/`](../../../../spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/evidence-attempt-03/).
+
+Final full attempt: `22.557271 s`, including the clean BPF build, T1-shaped
+resource comparison, ext4 creation, two microVM boots, capability negatives,
+journey, capture analysis, and cleanup. Guest journey: `98.927 ms`. These are
+point timings, not benchmark claims. Work from the first attempt at 10:19:54
+UTC through final cleanup at 10:21:56 UTC remained far inside the one-hour
+maximum.
+
+Cleanup explicitly unpinned/detached only the two owned TCX links, removed the
+two owned maps, IP nft table/rule/route, bridge and TAPs, and both per-VM
+cgroups. Before/after BPF link/program/map JSON files are byte-identical.
+Netns, veth, and `/etc/netns` diffs are zero bytes. Every owned cleanup
+complement is `ABSENT`; unrelated host state was preserved.
+
+No final-path per-workload netns, veth pair, `/30`, `NetSlot`, or `host_veth`
+was created or consulted.
+
+### Precise implication for still-unapproved D-295-5 / ADR-0120
+
+The proposed ADR-0120 premise that shared listeners lack a trustworthy way to
+recover allocation identity is now experimentally closed for the bounded
+same-node path. Validated source guest address plus recovered original
+destination were sufficient to select immutable generation-aware capabilities
+before production enforcement; Cilium independently demonstrates that
+per-endpoint TCX and node-shared proxy listeners are compatible cardinality
+choices.
+
+The proposed resource consequence is also materially changed: at T1,
+async-per-allocation removes the blocking-pool ceiling but still consumes
+32,768 real listener FDs and tasks, while the shared shape consumes 2 plus the
+registry both alternatives already need. The single-run incremental RSS
+difference was about 28.5 MiB.
+
+This evidence supports revising D-295-5 toward node-shared leg-F/leg-C
+listeners with:
+
+- source and destination capability indexes;
+- immutable `(AllocationId, generation, SpiffeId)` capture at accept;
+- active-generation claim before enforcement;
+- publish-after-enforcement recheck with immediate teardown on retirement;
+- allocation-scoped handle maps and awaited stop;
+- listener lifetime owned by the node, not any allocation.
+
+It does not itself approve that revision. DESIGN must pin the exact internal
+contract, concurrency/linearization points, boot rebuild source, address-reuse
+ordering, and failure projection, then obtain user approval and independent
+review. A second full successor kTLS handshake, multi-connection stop race,
+connection-flood behavior, cross-host routing, and long-run performance remain
+unproved.
+
+### Part-D artifact hashes
+
+```text
+Cargo.toml            c8e3e61944b7015682a1e41b25a3d980ed66a1dd0ee63db76e3bb17a7472e527
+shared_host.rs        787dadeb8807a953388655857221c94cfceb4dd5b86d7bb4160f21f760206afa
+run.sh                1b9dc8c63534618719cd70759c2774a5ed62a33f9a941478b229b6d5e7bdb013
+gh295d-endpoint-bpf.o 91e889d41c6ddf9a6bd6ac3b02db014dd48f6266466c487a76078ea015516a08
+lo.pcap               66df2e85224b346462a0550ca728e2119ff574a0830772f69399132fb27cbf51
+tap295ca.pcap         34809fd66b7f0ffed0feca8d64fdad887e628b8b39cf4042ee21341be39a026e
+tap295cb.pcap         e1e58fa2128bb31488a4fced121e940aaa18f939bf8f2792973142d373192fc9
+transcript.log        48cefcfc1d9e9284ce20b35899499d03b1d6db346ee44df3963091434b938a45
+```
+
+Part D therefore validates the bounded node-shared listener mechanism and its
+material T1 cardinality advantage. It does not select or approve the final
+D-295-5 contract.

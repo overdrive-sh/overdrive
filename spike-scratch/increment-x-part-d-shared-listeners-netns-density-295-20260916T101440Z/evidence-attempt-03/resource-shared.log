@@ -1,0 +1,2 @@
+RESOURCE_RESULT mode=shared n=16384 registry_entries=32768 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=3956 rss_after_registry_kib=5396 registry_rss_delta_kib=1440 rss_after_listeners_kib=5716 listener_task_rss_delta_kib=316 setup_ms=0.042 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=shared fd_after=10 rss_after_kib=5728 teardown_ms=101.648

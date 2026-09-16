@@ -1,0 +1,16 @@
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295d/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30232 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295d/endpoints id=34125 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295d/counters id=34126 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=8
+TCX_COUNTER intercept=8
+TCX_COUNTER map_miss=0
+TCX_COUNTER spoof_mac=0
+TCX_COUNTER spoof_ip=0
+TCX_COUNTER direct_bypass_drop=12
+TCX_COUNTER arp_pass=4
+TCX_COUNTER malformed_drop=0

@@ -1,0 +1,2 @@
+RESOURCE_RESULT mode=per-allocation n=16384 registry_entries=32768 listeners=32768 idle_accept_tasks=32768 fd_before=10 fd_after=32778 fd_delta=32768 rss_start_kib=4044 rss_after_registry_kib=5524 registry_rss_delta_kib=1480 rss_after_listeners_kib=35012 listener_task_rss_delta_kib=29484 setup_ms=405.335 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=per-allocation fd_after=10 rss_after_kib=33752 teardown_ms=330.201

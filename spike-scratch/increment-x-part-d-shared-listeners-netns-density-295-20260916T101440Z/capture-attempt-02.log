@@ -1,0 +1,253 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=9f758c1baf61ee12ae370e07 pid=2839243
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 258,904 bytes  received 53,084 bytes  207,992.00 bytes/sec
+total size is 316,640,612  speedup is 1,014.91
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295d.7k99X6rv
+START=2026-09-16T10:20:35Z
+SOURCE_SHA=406d2aaa4f1b7020728564b98985aedb245c7ed7a7b566568de25a25d3a1cff7
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling netns-density-295-part-d v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-x-part-d-shared-listeners-netns-density-295-20260916T101440Z)
+    Finished `release` profile [optimized] target(s) in 3.39s
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+    Finished `release` profile [optimized] target(s) in 1.36s
+    Finished `release` profile [optimized] target(s) in 0.06s
+RESOURCE_PREFLIGHT nofile=524288 mem_available_kib=63148916 selected_n=16384 reason=safe-preflight
+RESOURCE_RESULT mode=shared n=16384 registry_entries=32768 listeners=2 idle_accept_tasks=2 fd_before=10 fd_after=12 fd_delta=2 rss_start_kib=3884 rss_after_registry_kib=5336 registry_rss_delta_kib=1452 rss_after_listeners_kib=5536 listener_task_rss_delta_kib=196 setup_ms=0.043 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=shared fd_after=10 rss_after_kib=5628 teardown_ms=100.528
+RESOURCE_RESULT mode=per-allocation n=16384 registry_entries=32768 listeners=32768 idle_accept_tasks=32768 fd_before=10 fd_after=32778 fd_delta=32768 rss_start_kib=4028 rss_after_registry_kib=5472 registry_rss_delta_kib=1444 rss_after_listeners_kib=34912 listener_task_rss_delta_kib=29436 setup_ms=400.544 kernel_socket_memory=not_process_attributable
+RESOURCE_TEARDOWN mode=per-allocation fd_after=10 rss_after_kib=32948 teardown_ms=334.882
+    Updating crates.io index
+     Locking 27 packages to latest Rust 1.99.0-nightly compatible versions
+      Adding aya-ebpf v0.1.1 (available: v0.2.1)
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling camino v1.2.6
+   Compiling thiserror v2.0.20
+   Compiling serde v1.0.229
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.23
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling cargo-platform v0.3.3
+   Compiling semver v1.0.28
+   Compiling thiserror-impl v2.0.20
+   Compiling serde_derive v1.0.229
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling gh295c-endpoint-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/bpf)
+    Finished `release` profile [optimized] target(s) in 11.63s
+/home/ubuntu/overdrive/target/release/shared-host:                                  ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=21240d09a4030053799e596de79c29d9fcb7dda8, not stripped
+/home/ubuntu/overdrive/target/release/tcx-loader:                                   ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=702a530546a1c3ca7aa0eb6a404a6909fee81a1c, not stripped
+/home/ubuntu/overdrive/target/x86_64-unknown-linux-musl/release/guest:              ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=200144b858982981a4ebbb7c150d15cd5a3927ab, not stripped
+/var/tmp/gh295d.7k99X6rv/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf: ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295d
+Device "br295d" does not exist.
++ ip link show tap295da
+Device "tap295da" does not exist.
++ ip link show tap295db
+Device "tap295db" does not exist.
++ nft list table ip gh295d
+Error: No such file or directory
+list table ip gh295d
+              ^^^^^^
++ nft list table bridge gh295d
+Error: No such file or directory
+list table bridge gh295d
+                  ^^^^^^
++ '[' '!' -e /sys/fs/bpf/gh295d ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope ']'
++ /home/ubuntu/overdrive/target/release/shared-host cgroup-init
+PRODUCTION_CGROUP_CREATED alloc=gh295d-client scope=overdrive.slice/workloads.slice/gh295d-client.scope
+PRODUCTION_CGROUP_CREATED alloc=gh295d-server scope=overdrive.slice/workloads.slice/gh295d-server.scope
++ spike_cgroups=1
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295d type bridge
++ spike_links+=(br295d)
++ ip link set br295d address 02:00:00:95:00:01
++ ip addr add 10.95.0.1/24 dev br295d
++ ip link set br295d up
++ for tap in tap295da tap295db
++ ip tuntap add dev tap295da mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295da master br295d
++ ip link set tap295da up
++ sysctl -qw net.ipv4.conf.tap295da.rp_filter=0
++ for tap in tap295da tap295db
++ ip tuntap add dev tap295db mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295db master br295d
++ ip link set tap295db up
++ sysctl -qw net.ipv4.conf.tap295db.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295d.rp_filter=0
++ ip rule add priority 2953 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table ip gh295d
++ spike_table=1
++ nft add chain ip gh295d prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295d prerouting iifname br295d ip protocol udp udp dport 53 counter
++ nft add rule ip gh295d prerouting meta mark 0x295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295d prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295d output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295d output meta mark '!=' 0x2 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ /home/ubuntu/overdrive/target/release/tcx-loader load /sys/fs/bpf/gh295d /var/tmp/gh295d.7k99X6rv/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf
+TCX_PROGRAM_LOADED id=30223 verified_insns=Some(296) memlock_bytes=4096 elapsed_ms=50.166
+Error: TcError(NetlinkError { io_error: Os { code: 19, kind: Uncategorized, message: "No such device" } })
++ cleanup
++ spike_status=1
++ trap - EXIT
++ set +e
+++ date -u +%FT%TZ
++ printf '\nCLEANUP START prior_exit=%s at=%s\n' 1 2026-09-16T10:20:53Z
+
+CLEANUP START prior_exit=1 at=2026-09-16T10:20:53Z
++ '[' -z '' ']'
++ sleep 0.5
++ '[' -z '' ']'
++ '[' 1 = 0 ']'
++ /home/ubuntu/overdrive/target/release/shared-host cgroup-clean
+PRODUCTION_CGROUP_REMOVED alloc=gh295d-client scope=overdrive.slice/workloads.slice/gh295d-client.scope
+PRODUCTION_CGROUP_REMOVED alloc=gh295d-server scope=overdrive.slice/workloads.slice/gh295d-server.scope
++ '[' 0 = 1 ']'
++ '[' 1 = 0 ']'
++ nft delete table ip gh295d
++ '[' 1 = 0 ']'
++ ip rule del priority 2953 fwmark 0x295 lookup 295
++ '[' 1 = 0 ']'
++ ip route del local 0.0.0.0/0 dev lo table 295
++ for link in "${spike_links[@]}"
++ ip link del tap295db
++ for link in "${spike_links[@]}"
++ ip link del tap295da
++ for link in "${spike_links[@]}"
++ ip link del br295d
++ sysctl -qw net.ipv4.conf.all.rp_filter=0
++ ip netns list
++ sort
++ sort
++ ip -br link show type veth
++ find /etc/netns -mindepth 1 -maxdepth 3 -print
++ sort
++ bpftool -j link show
++ bpftool -j prog show
++ bpftool -j map show
++ diff -u /var/tmp/gh295d.7k99X6rv/netns.before /var/tmp/gh295d.7k99X6rv/netns.after
++ diff -u /var/tmp/gh295d.7k99X6rv/veth.before /var/tmp/gh295d.7k99X6rv/veth.after
++ diff -u /var/tmp/gh295d.7k99X6rv/etc-netns.before /var/tmp/gh295d.7k99X6rv/etc-netns.after
++ for resource in br295d tap295da tap295db
++ printf OWNED_LINK_%s= br295d
++ ip link show br295d
++ echo ABSENT
++ for resource in br295d tap295da tap295db
++ printf OWNED_LINK_%s= tap295da
++ ip link show tap295da
++ echo ABSENT
++ for resource in br295d tap295da tap295db
++ printf OWNED_LINK_%s= tap295db
++ ip link show tap295db
++ echo ABSENT
++ printf OWNED_NFT_IP=
++ nft list table ip gh295d
++ echo ABSENT
++ printf OWNED_NFT_BRIDGE=
++ nft list table bridge gh295d
++ echo ABSENT
++ printf OWNED_RULE=
++ ip rule show
++ grep -q 'lookup 295'
++ echo ABSENT
++ printf OWNED_ROUTE=
++ ip route show table 295
++ grep -q .
++ echo ABSENT
++ printf OWNED_BPFFS=
++ '[' -e /sys/fs/bpf/gh295d ']'
++ echo PRESENT
++ for scope in gh295d-client.scope gh295d-server.scope
++ printf OWNED_CGROUP_%s= gh295d-client.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-client.scope ']'
++ echo ABSENT
++ for scope in gh295d-client.scope gh295d-server.scope
++ printf OWNED_CGROUP_%s= gh295d-server.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295d-server.scope ']'
++ echo ABSENT
++ cat /var/tmp/gh295d.7k99X6rv/cleanup-complements.log
+OWNED_LINK_br295d=ABSENT
+OWNED_LINK_tap295da=ABSENT
+OWNED_LINK_tap295db=ABSENT
+OWNED_NFT_IP=ABSENT
+OWNED_NFT_BRIDGE=ABSENT
+OWNED_RULE=ABSENT
+OWNED_ROUTE=ABSENT
+OWNED_BPFFS=PRESENT
+OWNED_CGROUP_gh295d-client.scope=ABSENT
+OWNED_CGROUP_gh295d-server.scope=ABSENT
+++ wc -c
+++ wc -c
+++ wc -c
++ printf 'TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=%s veth=%s etc_netns=%s\n' 0 0 0
+TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=0 veth=0 etc_netns=0
++ printf 'CLEANUP COMPLETE preserved_evidence=%s original_exit=%s\n' /var/tmp/gh295d.7k99X6rv 1
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295d.7k99X6rv original_exit=1
++ python3 -c 'import sys,time; print(f"TOTAL_ELAPSED_SECONDS={time.perf_counter()-float(sys.argv[1]):.6f}")' 2839842.693846253
+TOTAL_ELAPSED_SECONDS=18.631957
++ exit 1
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

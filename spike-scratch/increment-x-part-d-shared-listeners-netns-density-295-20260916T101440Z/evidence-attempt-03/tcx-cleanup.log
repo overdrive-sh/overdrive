@@ -1,0 +1,6 @@
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295d/link-tap295ca
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295d/link-tap295cb
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295d/endpoints
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295d/counters
+TCX_CLEANUP_QUERY iface=tap295ca programs=0
+TCX_CLEANUP_QUERY iface=tap295cb programs=0

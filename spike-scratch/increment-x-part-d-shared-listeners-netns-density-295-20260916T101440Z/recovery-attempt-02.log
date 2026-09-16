@@ -1,0 +1,19 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- bash -lc 'set -e; unlink /sys/fs/bpf/gh295d/endpoints; unlink /sys/fs/bpf/gh295d/counters; rmdir /sys/fs/bpf/gh295d; test '\!' -e /sys/fs/bpf/gh295d; echo PART_D_ATTEMPT_02_BPFFS_RECOVERY_COMPLETE'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8b089b099a515404a976d15e pid=2841063
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 299,826 bytes  received 52,789 bytes  141,046.00 bytes/sec
+total size is 316,653,362  speedup is 898.01
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PART_D_ATTEMPT_02_BPFFS_RECOVERY_COMPLETE
