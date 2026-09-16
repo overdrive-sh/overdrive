@@ -1,0 +1,139 @@
+document: website/content/blog/what-is-a-cgroup.mdx
+validated_on: 2026-09-14
+source_boundary:
+  approved_research: docs/research/cgroups-for-explanation-doc.md
+  scope: "Current Linux cgroup-v2 semantics and the current Overdrive VmDriver path only."
+  production_evidence:
+    - "crates/overdrive-control-plane/src/lib.rs:1670-1745"
+    - "crates/overdrive-worker/src/vm_driver.rs:1186-1280"
+    - "crates/overdrive-worker/src/vm_driver.rs:1311-1327"
+    - "crates/overdrive-worker/src/vm_driver.rs:1480-1525"
+    - "crates/overdrive-worker/src/vm_driver.rs:1424-1432"
+    - "crates/overdrive-worker/src/vm_driver.rs:1770-1820"
+classification:
+  type: Explanation
+  jtbd: "Understand why cgroups group host processes and how that host boundary differs from containers, VMs, namespaces, and guest processes."
+  signals:
+    - "Explains cgroup membership as a host-process policy selector."
+    - "Builds a mental model of the cgroup-v2 tree and controller semantics."
+    - "Distinguishes host cgroups from namespaces, identity mechanisms, KVM, and guest kernels."
+    - "Uses the current VmDriver path as a concrete architectural example."
+  type_purity_percent: 100
+explanation_checklist:
+  addresses_why:
+    result: pass
+    evidence: "Explains why a cgroup tree gives the kernel one resource-policy and lifecycle boundary for related host processes."
+  context_and_reasoning:
+    result: pass
+    evidence: "Connects membership, controller hierarchy, CPU sharing, memory pressure, cgroup kill, host socket policy, and the VM host/guest boundary."
+  discusses_alternatives:
+    result: pass
+    evidence: "Distinguishes cgroups from network and user namespaces, user/group permission mechanisms, and KVM-backed virtual machines."
+  no_task_steps:
+    result: pass
+    evidence: "Contains no numbered procedure, command sequence, or completion-oriented instruction."
+  conceptual_model:
+    result: pass
+    evidence: "Defines a cgroup as a named host-process set with a budget and stop handle, then applies that model to Cloud Hypervisor's host PID."
+collapse_checks:
+  tutorial_creep:
+    result: pass
+    evidence: "No first-success walkthrough, prerequisites, or learner steps."
+  how_to_bloat:
+    result: pass
+    evidence: "No task goal, imperative procedure, or operational completion indicator."
+  reference_narrative:
+    result: pass
+    evidence: "Control-file names support an explanatory narrative; the document is not presented as lookup reference."
+  explanation_task_drift:
+    result: pass
+    evidence: "No 'do this' ending, setup sequence, or command examples."
+  hybrid_horror:
+    result: pass
+    evidence: "Serves one reader need: conceptual understanding of the host cgroup boundary."
+current_path_checks:
+  driver_registry:
+    result: pass
+    evidence: "Research records cgroup bootstrap, Cloud Hypervisor discover/probe, VmDriver insertion, and [vm] rejection when the Vm registry entry is absent."
+  host_pid_ownership:
+    result: pass
+    evidence: "The blog says cgroup.procs receives the started Cloud Hypervisor host PID; it explicitly excludes guest process PIDs."
+  resources_and_memory_plan:
+    result: pass
+    evidence: "The blog says [resources] supplies CPU-milli and guest-memory inputs; CgroupManager derives the relative cpu.weight from CPU milli, and VmDriver writes a derived reserve-padded memory.max."
+  cpu_weight_derivation:
+    result: pass
+    evidence: "VmDriver passes spec.resources.cpu_milli to CgroupManager; cpu_weight_for derives clamp(cpu_milli / 10, 1, 10000) before write_resource_limits writes cpu.weight."
+  failure_disposition:
+    result: pass
+    evidence: "Scope creation and VMM-PID placement reject VM start; resource-file writes warn and continue."
+  teardown_boundary:
+    result: pass
+    evidence: "The blog states VM-specific termination then cgroup cleanup calls/attempts; it does not claim verified scope absence or graceful guest shutdown."
+  cgroup_bpf_boundary:
+    result: pass
+    evidence: "Cgroup-BPF remains a general host socket-policy explanation and is explicitly not presented as Overdrive VM guest networking."
+  cgroup_sock_addr_source:
+    result: pass
+    evidence: "The research replaces the sockopt citation with the Linux kernel's BPF_PROG_TYPE_CGROUP_SOCK_ADDR mapping for cgroup/connect4, cgroup/sendmsg4, and cgroup/recvmsg4."
+  source_reputation_average:
+    result: pass
+    evidence: "Five 1.0 sources and five 0.8 sources yield (5 * 1.0 + 5 * 0.8) / 10 = 0.90."
+  legacy_path_absence:
+    result: pass
+    evidence: "The blog and rewritten research contain no obsolete product-path claim."
+quality_scores:
+  accuracy:
+    score: 99
+    limitation: "Overdrive claims are limited to the cited production composition and VmDriver source; no universal controller-availability or completed-cleanup claim is made."
+  completeness:
+    score: 99
+    limitation: "Complete for the requested mental model and VM example, not a catalogue of cgroup controllers, BPF hook types, or Cloud Hypervisor configuration."
+  clarity:
+    score: 88
+    limitation: "Technical terms such as cgroup-BPF, OOM, SIGKILL, VMM, and KVM remain necessary and receive local context."
+  consistency:
+    score: 99
+    limitation: "Uses host process, Cloud Hypervisor PID, guest kernel, VmDriver, and allocation scope consistently."
+  correctness:
+    score: 99
+    limitation: "Manual source-to-claim, frontmatter, YAML, and link review pass; a site MDX parser is intentionally not run because its typecheck invokes a generator that can write unrelated generated source."
+  usability:
+    score: 97
+    limitation: "Optimized for understanding rather than for configuring a host or operating a VM allocation."
+readability:
+  flesch_reading_ease_estimate: 71.9
+  target_range: "70-80"
+  result: pass
+  method: "Flesch Reading Ease = 206.835 - 1.015(words/sentences) - 84.6(syllables/words), using a Perl vowel-group syllable heuristic over body prose after excluding YAML frontmatter, headings, fenced tree content, inline-code identifiers, and Markdown links. Corpus: 767 words, 71 sentences, 1124 estimated syllables."
+link_check:
+  status: pass
+  scope:
+    - "Local microVM concept route: source file confirmed."
+    - "Five external further-reading URLs from the approved research: HTTP 200 via redirect-following HEAD requests on 2026-09-14."
+technical_writer_style_check:
+  status: pass
+  criteria:
+    - "Conclusion-first opening: pass."
+    - "Concrete nouns and active verbs: pass."
+    - "No unsupported broad claims or decorative hedges: pass."
+    - "No filler, procedural drift, or generic tradeoff language: pass."
+    - "Manual scan found no technical-writer filler, weak hedge, generic-quantifier, or procedural-pattern match."
+verification:
+  frontmatter:
+    result: pass
+    evidence: "Contains exactly title, description, date: 2026-09-14, author: The Overdrive team, and summary; draft is absent."
+  required_claims:
+    result: pass
+    evidence: "Covers the requested opening definition, v2 tree and cgroup.procs, cpu.weight, memory.max, cgroup.kill, cgroup-BPF boundary, namespaces/identity/VM distinction, and the bounded VmDriver behavior."
+  current_behavior_boundary:
+    result: pass
+    evidence: "The VM example distinguishes Cloud Hypervisor's host PID from guest PIDs, derives cpu.weight from CPU milli and a reserve-padded cgroup maximum from guest memory, preserves reject versus warn-and-continue behavior, and makes no cleanup-completion claim."
+  mdx_parser:
+    result: not_run
+    limitation: "The repository's typecheck invokes a generator that can write unrelated generated source; structural review will check frontmatter, fenced content, headings, and Markdown links instead."
+review_history:
+  prior_state: "The general Linux research completed two approved review iterations; the former self-validation used an obsolete product path."
+  correction: "The VM-path source audit replaces all product-path claims and requires independent re-review."
+  independent_review_state: ready
+verdict: approved

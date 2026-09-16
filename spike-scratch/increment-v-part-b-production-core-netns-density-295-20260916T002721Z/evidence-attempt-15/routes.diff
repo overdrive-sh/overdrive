@@ -1,0 +1,20 @@
+--- /var/tmp/gh295b.uuT1IFBV/routes.before	2026-09-16 00:46:04.396954895 +0000
++++ /var/tmp/gh295b.uuT1IFBV/routes.after	2026-09-16 00:46:13.576960517 +0000
+@@ -12,7 +12,7 @@
+ 151.115.125.3 via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+ 151.115.99.0/24 dev eno12399np0 proto kernel scope link src 151.115.99.251 metric 100 
+ 151.115.99.1 dev eno12399np0 proto dhcp scope link src 151.115.99.251 metric 100 
+-2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591996sec pref medium
++2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591998sec pref medium
+ broadcast 10.96.255.255 dev ovd-veth-bk table local proto kernel scope link src 10.96.0.2 
+ broadcast 10.96.255.255 dev ovd-veth-cli table local proto kernel scope link src 10.96.0.1 
+ broadcast 10.99.0.3 dev ovd-hv-0000 table local proto kernel scope link src 10.99.0.1 
+@@ -21,7 +21,7 @@
+ broadcast 10.99.0.7 dev ovd-hv-0001 table local proto kernel scope link src 10.99.0.5 
+ broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+ broadcast 151.115.99.255 dev eno12399np0 table local proto kernel scope link src 151.115.99.251 
+-default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 11sec pref medium
++default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 13sec pref medium
+ default via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+ fe80::/64 dev eno12399np0 proto kernel metric 256 pref medium
+ fe80::/64 dev ovd-hv-0000 proto kernel metric 256 pref medium

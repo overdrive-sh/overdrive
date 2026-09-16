@@ -1,0 +1,490 @@
+   Compiling unicode-ident v1.0.24
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.185
+   Compiling once_cell v1.21.4
+   Compiling zerocopy v0.8.48
+   Compiling lazy_static v1.5.0
+   Compiling memchr v2.8.0
+   Compiling utf8parse v0.2.2
+   Compiling pin-project-lite v0.2.17
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling anstyle v1.0.14
+   Compiling gimli v0.32.3
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling adler2 v2.0.1
+   Compiling thread_local v1.1.9
+   Compiling anstyle-parse v1.0.0
+   Compiling sharded-slab v0.1.7
+   Compiling anstyle-query v1.1.5
+   Compiling serde_json v1.0.149
+   Compiling proc-macro2 v1.0.106
+   Compiling miniz_oxide v0.8.9
+   Compiling owo-colors v4.3.0
+   Compiling tracing-core v0.1.36
+   Compiling anstream v1.0.0
+   Compiling zmij v1.0.21
+   Compiling object v0.37.3
+   Compiling quote v1.0.45
+   Compiling tracing v0.1.44
+   Compiling tracing-subscriber v0.3.23
+   Compiling clap_lex v1.1.0
+   Compiling syn v2.0.117
+   Compiling indenter v0.3.4
+   Compiling itoa v1.0.18
+   Compiling strsim v0.11.1
+   Compiling rustc-demangle v0.1.27
+   Compiling eyre v0.6.12
+   Compiling clap_builder v4.6.0
+   Compiling dotenvy v0.15.7
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling tracing-error v0.2.1
+   Compiling color-spantrace v0.3.0
+   Compiling addr2line v0.25.1
+   Compiling camino v1.2.2
+   Compiling semver v1.0.28
+   Compiling backtrace v0.3.76
+   Compiling color-eyre v0.6.5
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.6
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling clap_derive v4.6.1
+   Compiling thiserror v1.0.69
+   Compiling clap v4.6.1
+   Compiling cargo-platform v0.1.9
+   Compiling cargo_metadata v0.18.1
+   Compiling xtask v0.0.0 (/Users/marcus/conductor/workspaces/helios/khartoum-v1/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.66s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=6a9bf48033065ffce56defd7 pid=2813526
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 22,840,239 bytes  received 905,228 bytes  9,498,186.80 bytes/sec
+total size is 314,145,757  speedup is 13.23
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295b.gW7KqRxQ
+START=2026-09-16T00:35:57Z
+SOURCE_SHA=3e6b9224b66d355a29ecee94a6978d3cf8abd9c7e6956142fe36b0fa3af39982
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND build production-linked host and static credential-free guest
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+ Downloading crates ...
+  Downloaded arrayvec v0.7.8
+  Downloaded futures-core v0.3.34
+  Downloaded async-trait v0.1.92
+  Downloaded futures-io v0.3.34
+  Downloaded idna_adapter v1.2.2
+  Downloaded potential_utf v0.1.6
+  Downloaded zerofrom v0.1.8
+  Downloaded futures-task v0.3.34
+  Downloaded futures-sink v0.3.34
+  Downloaded home v0.5.12
+  Downloaded tokio-macros v2.7.2
+  Downloaded thread_local v1.1.10
+  Downloaded http-body v1.1.0
+  Downloaded cpufeatures v0.3.1
+  Downloaded clap_lex v1.1.1
+  Downloaded zerofrom-derive v0.1.8
+  Downloaded futures-macro v0.3.34
+  Downloaded yoke-derive v0.8.3
+  Downloaded futures-executor v0.3.34
+  Downloaded fastrand v2.5.0
+  Downloaded tokio-rustls v0.26.5
+  Downloaded zerovec-derive v0.11.6
+  Downloaded pkg-config v0.3.34
+  Downloaded writeable v0.6.4
+  Downloaded rustversion v1.0.23
+  Downloaded owo-colors v4.4.0
+  Downloaded litemap v0.8.3
+  Downloaded clap_derive v4.6.7
+  Downloaded yoke v0.8.3
+  Downloaded glob v0.3.4
+  Downloaded tokio-stream v0.1.19
+  Downloaded utoipa v5.5.0
+  Downloaded zerotrie v0.2.5
+  Downloaded icu_locale_core v2.3.0
+  Downloaded zerocopy-derive v0.8.57
+  Downloaded zerovec v0.11.8
+  Downloaded tokio-util v0.7.19
+  Downloaded utoipa-gen v5.5.0
+  Downloaded regex v1.13.1
+  Downloaded portable-atomic v1.15.0
+  Downloaded blake3 v1.8.7
+  Downloaded h2 v0.4.19
+  Downloaded aws-lc-rs v1.18.1
+  Downloaded zerocopy v0.8.57
+  Downloaded icu_properties_data v2.3.0
+  Downloaded hyper v1.11.1
+  Downloaded hickory-proto v0.26.3
+  Downloaded regex-syntax v0.8.11
+  Downloaded futures-util v0.3.34
+  Downloaded rustls v0.23.45
+  Downloaded clap_builder v4.6.7
+  Downloaded rand v0.10.2
+  Downloaded icu_properties v2.3.0
+  Downloaded aho-corasick v1.1.5
+  Downloaded typenum v1.20.1
+  Downloaded mio v1.2.3
+  Downloaded http v1.5.0
+  Downloaded icu_collections v2.3.0
+  Downloaded icu_normalizer v2.3.0
+  Downloaded uuid v1.26.1
+  Downloaded rand v0.8.8
+  Downloaded icu_normalizer_data v2.3.0
+  Downloaded regex-automata v0.4.18
+  Downloaded getrandom v0.4.3
+  Downloaded clap v4.6.7
+  Downloaded arc-swap v1.9.2
+  Downloaded log v0.4.34
+  Downloaded futures v0.3.34
+  Downloaded tinyvec v1.13.3
+  Downloaded socket2 v0.6.5
+  Downloaded icu_provider v2.3.1
+  Downloaded futures-channel v0.3.34
+  Downloaded crc32fast v1.5.2
+  Downloaded clang-sys v1.9.1
+  Downloaded chacha20 v0.10.2
+  Downloaded fs-err v3.3.1
+  Downloaded eyre v0.6.14
+  Downloaded bitflags v2.13.2
+  Downloaded tokio v1.53.1
+  Downloaded jobserver v0.1.35
+  Downloaded ipnet v2.12.2
+  Downloaded tinystr v0.8.4
+  Downloaded smallvec v1.16.1
+  Downloaded either v1.18.0
+  Downloaded synstructure v0.14.0
+  Downloaded http-body-util v0.1.5
+  Downloaded aws-lc-sys v0.45.0
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.189
+   Compiling serde v1.0.229
+   Compiling memchr v2.8.3
+   Compiling pin-project-lite v0.2.17
+   Compiling smallvec v1.16.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling futures-core v0.3.34
+   Compiling shlex v2.0.1
+   Compiling portable-atomic v1.15.0
+   Compiling critical-section v1.2.0
+   Compiling futures-sink v0.3.34
+   Compiling parking_lot_core v0.9.12
+   Compiling futures-task v0.3.34
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling scopeguard v1.2.0
+   Compiling autocfg v1.5.1
+   Compiling itoa v1.0.18
+   Compiling lock_api v0.4.14
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling thiserror v2.0.20
+   Compiling version_check v0.9.5
+   Compiling log v0.4.34
+   Compiling regex-syntax v0.8.11
+   Compiling zerocopy v0.8.57
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling powerfmt v0.2.0
+   Compiling stable_deref_trait v1.2.1
+   Compiling generic-array v0.14.7
+   Compiling time-macros v0.2.32
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling typenum v1.20.1
+   Compiling once_cell v1.21.4
+   Compiling dunce v1.0.5
+   Compiling ryu v1.0.23
+   Compiling fs_extra v1.3.0
+   Compiling aho-corasick v1.1.5
+   Compiling bitflags v2.13.2
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling tracing-core v0.1.36
+   Compiling pkg-config v0.3.34
+   Compiling getrandom v0.4.3
+   Compiling cpufeatures v0.3.1
+   Compiling zeroize v1.9.0
+   Compiling num-traits v0.2.19
+   Compiling simdutf8 v0.1.5
+   Compiling jobserver v0.1.35
+   Compiling thiserror v1.0.69
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling paste v1.0.15
+   Compiling glob v0.3.4
+   Compiling cc v1.4.6
+   Compiling rustls-pki-types v1.15.1
+   Compiling untrusted v0.9.0
+   Compiling ciborium-io v0.2.2
+   Compiling percent-encoding v2.3.2
+   Compiling prettyplease v0.2.37
+   Compiling toml_write v0.1.2
+   Compiling clang-sys v1.9.1
+   Compiling aws-lc-rs v1.18.1
+   Compiling rustix v0.38.44
+   Compiling winnow v0.7.15
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.3
+   Compiling signal-hook-registry v1.4.8
+   Compiling parking_lot v0.12.5
+   Compiling regex-automata v0.4.18
+   Compiling getrandom v0.2.17
+   Compiling cmake v0.1.58
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.8
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling constant_time_eq v0.4.2
+   Compiling lazy_static v1.5.0
+   Compiling cpufeatures v0.2.17
+   Compiling linux-raw-sys v0.4.15
+   Compiling writeable v0.6.4
+   Compiling httparse v1.10.1
+   Compiling minimal-lexical v0.2.1
+   Compiling ring v0.17.14
+   Compiling aws-lc-sys v0.45.0
+   Compiling blake3 v1.8.7
+   Compiling arrayvec v0.7.8
+   Compiling litemap v0.8.3
+   Compiling libloading v0.8.9
+   Compiling nom v7.1.3
+   Compiling sha2 v0.10.9
+   Compiling uuid v1.26.1
+   Compiling time v0.3.55
+   Compiling memoffset v0.9.1
+   Compiling fnv v1.0.7
+   Compiling cfg_aliases v0.2.2
+   Compiling synstructure v0.13.2
+   Compiling icu_normalizer_data v2.3.0
+   Compiling hex v0.4.3
+   Compiling synstructure v0.14.0
+   Compiling regex v1.13.1
+   Compiling crc32fast v1.5.2
+   Compiling icu_properties_data v2.3.0
+   Compiling tower-layer v0.3.3
+   Compiling home v0.5.12
+   Compiling rustversion v1.0.23
+   Compiling either v1.18.0
+   Compiling utf8_iter v1.0.4
+   Compiling tower-service v0.3.3
+   Compiling atomic-waker v1.1.2
+   Compiling bindgen v0.66.1
+   Compiling try-lock v0.2.5
+   Compiling want v0.3.1
+   Compiling which v4.4.2
+   Compiling rusticata-macros v4.1.0
+   Compiling cexpr v0.6.0
+   Compiling nix v0.30.1
+   Compiling sharded-slab v0.1.7
+   Compiling netlink-packet-core v0.8.2
+   Compiling tracing-log v0.2.0
+   Compiling core-error v0.0.0
+   Compiling tracing-attributes v0.1.31
+   Compiling zerocopy-derive v0.8.57
+   Compiling thiserror-impl v1.0.69
+   Compiling munge_macro v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling serde_derive v1.0.229
+   Compiling futures-macro v0.3.34
+   Compiling tokio-macros v2.7.2
+   Compiling thiserror-impl v2.0.20
+   Compiling displaydoc v0.2.7
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.3
+   Compiling futures-util v0.3.34
+   Compiling tracing v0.1.44
+   Compiling ptr_meta_derive v0.3.2
+   Compiling zerovec-derive v0.11.6
+   Compiling ptr_meta v0.3.2
+   Compiling async-trait v0.1.92
+   Compiling rancor v0.1.3
+   Compiling bytecheck_derive v0.8.3
+   Compiling zerofrom v0.1.8
+   Compiling munge v0.4.7
+   Compiling rkyv_derive v0.8.18
+   Compiling matchers v0.2.0
+   Compiling yoke v0.8.3
+   Compiling asn1-rs-impl v0.2.0
+   Compiling zerotrie v0.2.5
+   Compiling asn1-rs-derive v0.6.0
+   Compiling bytecheck v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling rend v0.5.4
+   Compiling httpdate v1.0.3
+   Compiling shlex v1.3.0
+   Compiling object v0.36.7
+   Compiling lazycell v1.3.0
+   Compiling rustls v0.23.45
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling utf8parse v0.2.2
+   Compiling rustc-hash v1.1.0
+   Compiling peeking_take_while v0.1.2
+   Compiling icu_collections v2.3.0
+   Compiling object v0.37.3
+   Compiling foldhash v0.1.5
+   Compiling allocator-api2 v0.2.21
+   Compiling icu_locale_core v2.3.0
+   Compiling anstyle-parse v1.0.0
+   Compiling hashbrown v0.15.5
+   Compiling asn1-rs v0.7.2
+   Compiling tracing-subscriber v0.3.23
+   Compiling bytes v1.12.1
+   Compiling ipnet v2.12.2
+   Compiling futures-executor v0.3.34
+   Compiling serde_spanned v0.6.9
+   Compiling serde_norway v0.9.42
+   Compiling futures v0.3.34
+   Compiling toml_datetime v0.6.11
+   Compiling icu_provider v2.3.1
+   Compiling toml_edit v0.22.27
+   Compiling tokio v1.53.1
+   Compiling http v1.5.0
+   Compiling num-integer v0.1.47
+   Compiling form_urlencoded v1.2.2
+   Compiling eyre v0.6.14
+   Compiling half v2.7.1
+   Compiling http-body v1.1.0
+   Compiling base64 v0.23.1
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling ciborium-ll v0.2.2
+   Compiling subtle v2.6.1
+   Compiling adler2 v2.0.1
+   Compiling ciborium v0.2.2
+   Compiling rkyv v0.8.18
+   Compiling colorchoice v1.0.5
+   Compiling utoipa v5.5.0
+   Compiling gimli v0.32.3
+   Compiling netlink-packet-core v0.9.0
+   Compiling color-spantrace v0.3.0
+   Compiling toml v0.8.23
+   Compiling base64 v0.22.1
+   Compiling oid-registry v0.8.1
+   Compiling anstyle v1.0.14
+   Compiling anstream v1.0.0
+   Compiling miniz_oxide v0.8.9
+   Compiling pem v4.0.0
+   Compiling http-body-util v0.1.5
+   Compiling num-bigint v0.4.8
+   Compiling tracing-error v0.2.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling libsql-ffi v0.4.1
+   Compiling addr2line v0.25.1
+   Compiling yasna v0.6.0
+   Compiling netlink-packet-generic v0.4.0
+   Compiling clap_lex v1.1.1
+   Compiling owo-colors v4.4.0
+   Compiling tokio-util v0.7.19
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling netlink-sys v0.8.8
+   Compiling netlink-sys v0.9.0
+   Compiling netlink-proto v0.12.2
+   Compiling rustix v1.1.4
+   Compiling heck v0.5.0
+   Compiling indenter v0.3.4
+   Compiling rustc-demangle v0.1.28
+   Compiling h2 v0.4.19
+   Compiling data-encoding v2.11.1
+   Compiling sync_wrapper v1.0.2
+   Compiling strsim v0.11.1
+   Compiling clap_builder v4.6.7
+   Compiling clap_derive v4.6.7
+   Compiling rcgen v0.14.10
+   Compiling backtrace v0.3.76
+   Compiling aya-obj v0.2.1
+   Compiling genetlink v0.2.7
+   Compiling netlink-proto v0.13.0
+   Compiling der-parser v10.0.0
+   Compiling idna_adapter v1.2.2
+   Compiling hyper v1.11.1
+   Compiling netlink-packet-route v0.33.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling zerocopy-derive v0.7.35
+   Compiling rand_core v0.6.4
+   Compiling rustls-pemfile v2.2.0
+   Compiling fs-err v3.3.1
+   Compiling hyper-util v0.1.20
+   Compiling assert_matches v1.5.0
+   Compiling redb v2.6.3
+   Compiling linux-raw-sys v0.12.1
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling mime v0.3.17
+   Compiling byteorder v1.5.0
+   Compiling rand_core v0.10.1
+   Compiling axum-core v0.4.5
+   Compiling chacha20 v0.10.2
+   Compiling zerocopy v0.7.35
+error: failed to run custom build command for `overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)`
+
+Caused by:
+  process didn't exit successfully: `/home/ubuntu/overdrive/target/release/build/overdrive-dataplane-12c777cda4b8d642/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-env-changed=OVERDRIVE_BPF_OBJECT
+  cargo:rustc-env=CARGO_WORKSPACE_DIR=/home/ubuntu/overdrive
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/target/bpf/overdrive_bpf.o
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/shared/mod.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/shared/sanity.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/shared/build_local_service_key.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/shared/csum.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/xdp_reverse_nat.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/xdp_service_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/mod.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/programs/sanity.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/main.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/reverse_local_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/reverse_local_miss_counter.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/drop_counter.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/service_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/hash_of_maps.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/mod.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/maglev_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/local_backend_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/reverse_nat_map.rs
+  cargo:rerun-if-changed=/home/ubuntu/overdrive/crates/overdrive-bpf/src/maps/backend_map.rs
+
+  --- stderr
+  error: BPF artifact at /home/ubuntu/overdrive/target/bpf/overdrive_bpf.o is stale (older than `crates/overdrive-bpf/src/`); run `cargo xtask bpf-build` first
+warning: build failed, waiting for other jobs to finish...
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

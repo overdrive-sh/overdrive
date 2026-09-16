@@ -1,0 +1,73 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.44s
+     Running `target/debug/xtask metal run -- bash -lc 'set +e; for p in 2827513 2827537 2827530 2827533 2827534 2827535; do kill -KILL "$p" 2>/dev/null; done; /home/ubuntu/overdrive/target/release/host cgroup-clean; nft delete table ip gh295b 2>/dev/null; nft delete table bridge gh295b 2>/dev/null; ip rule del priority 2951 fwmark 0x295 lookup 295 2>/dev/null; ip route del local 0.0.0.0/0 dev lo table 295 2>/dev/null; ip link del tap295bb 2>/dev/null; ip link del tap295ba 2>/dev/null; ip link del br295b 2>/dev/null; printf "SERVER_STDERR\n"; cat /var/tmp/gh295b.mf7ihDGn/server.stderr; printf "SERVER_CONSOLE\n"; cat /var/tmp/gh295b.mf7ihDGn/server.console; printf "HOST_LOG\n"; cat /var/tmp/gh295b.mf7ihDGn/host.log; printf "CLEANUP_CHECK\n"; ip link show br295b; nft list table ip gh295b; test '\!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope; test '\!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=365263d0be7e72479bc7f80d pid=2828663
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 291,767 bytes  received 50,069 bytes  136,734.40 bytes/sec
+total size is 314,288,616  speedup is 919.41
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope
+SERVER_STDERR
+cloud-hypervisor:   0.003798s: <vmm> WARN:net_util/src/open_tap.rs:84 -- Tap tap295bb already exists. IP configuration will not be overwritten.
+SERVER_CONSOLE
+[    0.003119] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+
+thread 'main' (1) panicked at guest.rs:134:92:
+called `Result::unwrap()` on an `Err` value: Os { code: 113, kind: HostUnreachable, message: "Host is unreachable" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[    3.398888] Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b
+[    3.401315] CPU: 0 UID: 0 PID: 1 Comm: init Not tainted 7.0.0-29-generic #29-Ubuntu PREEMPT(lazy) 
+[    3.404019] Hardware name: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    3.406012] Call Trace:
+[    3.406839]  <TASK>
+[    3.407569]  show_stack+0x49/0x60
+[    3.408652]  dump_stack_lvl+0x5f/0x90
+[    3.409834]  dump_stack+0x10/0x18
+[    3.410909]  vpanic+0x262/0x4b0
+[    3.411935]  panic+0x67/0x70
+[    3.412885]  ? acct_update_integrals+0x5e/0xa0
+[    3.414307]  do_exit.cold+0x15/0x15
+[    3.415436]  do_group_exit+0x2d/0xb0
+[    3.416589]  get_signal+0x7f5/0x830
+[    3.417718]  arch_do_signal_or_restart+0x36/0x110
+[    3.419216]  irqentry_exit+0x249/0x6f0
+[    3.420421]  exc_general_protection+0x19a/0x410
+[    3.421848]  asm_exc_general_protection+0x27/0x30
+[    3.423334] RIP: 0033:0x75c1338892be
+[    3.424485] Code: 00 00 4c 89 c6 48 63 78 30 b8 c8 00 00 00 0f 05 b8 0e 00 00 00 48 8d 74 24 08 bf 01 00 00 00 48 c7 44 24 08 20 00 00 00 0f 05 <f4> bf 09 00 00 00 e8 aa 56 00 00 bf 7f 00 00 00 e8 53 99 00 00 41
+[    3.429425] RSP: 002b:00007ffe0f2f0020 EFLAGS: 00010246
+[    3.430702] RAX: 0000000000000000 RBX: 0000000000000001 RCX: 000075c1338892be
+[    3.432438] RDX: 0000000000000000 RSI: 00007ffe0f2f0028 RDI: 0000000000000001
+[    3.434177] RBP: 00007ffe0f2f0060 R08: 0000000000000006 R09: 0000000000000000
+[    3.435892] R10: 0000000000000008 R11: 0000000000000246 R12: 000075c1338b9418
+[    3.437621] R13: 000075c1338bcb58 R14: 0000000000000000 R15: 00007ffe0f2f0168
+[    3.439367]  </TASK>
+[    3.440089] Kernel Offset: 0x23600000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    3.442099] ---[ end Kernel panic - not syncing: Attempted to kill init! exitcode=0x0000000b ]---
+HOST_LOG
+PRODUCTION_IDENTITY_HELD client=spiffe://overdrive.local/workload/gh295b-client-workload/alloc/gh295b-client server=spiffe://overdrive.local/workload/peer/alloc/gh295b-server held_count=2
+PRODUCTION_RESOLVER_PROBE_OK
+PRODUCTION_MTLS_KTLS_SPLICE_PROBE_OK
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
+SCRATCH_SHARED_BRIDGE_DNS query_from=10.95.0.2:41225 name=peer.mesh qtype=1
+SCRATCH_SHARED_BRIDGE_DNS query_from=10.95.0.2:41225 name=peer.mesh qtype=28
+CLEANUP_CHECK
+Device "br295b" does not exist.
+Error: No such file or directory
+list table ip gh295b
+              ^^^^^^

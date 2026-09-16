@@ -1,0 +1,2 @@
+CGROUP_PROOF alloc=gh295b-server pid=2829925 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope cgroup_procs=2829925, exe=/usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295b-client pid=2829969 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope cgroup_procs=2829969, exe=/usr/local/bin/cloud-hypervisor

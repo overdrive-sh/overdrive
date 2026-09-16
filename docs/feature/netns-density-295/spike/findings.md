@@ -1,6 +1,6 @@
 # Spike Findings — netns-density-295
 
-## Current verdict: WORKS
+## Current verdict: WORKS (Part A and Part B)
 
 **The assigned mechanism works on the configured native metal host.** Two real
 Cloud Hypervisor microVMs used one shared Linux bridge and one `/24`, with no
@@ -394,3 +394,244 @@ configuration, GitHub issues, or commits were created or changed.
 
 Phase 1 returns a genuine blocker. No PROMOTE/DISCARD/PIVOT choice was made;
 `wave-decisions.md` was not created.
+
+---
+
+## Part B — production-core proof after Exec removal
+
+### Part-B verdict: WORKS
+
+The stronger Part-B assumption works on the configured native metal target at
+source commit `67d5adba72ad97e83ccc9cc7893f943e1a703d90`. Two real Cloud
+Hypervisor microVMs used two TAP ports on one Linux bridge and one shared `/24`.
+The client guest resolved `peer.mesh`, dialed ordinary credential-free plaintext,
+and completed a two-phase, byte-distinct request/response exchange. The second
+exchange occurred after the mTLS session was established and crossed the actual
+production zero-copy pumps.
+
+Unlike Part A's standalone reproduction of the kernel primitives, Part B linked
+and executed the production `HostMtlsEnforcement`. Its real TLS 1.3 handshake,
+kTLS TX/RX arm, and four splice pumps carried leg-B↔leg-C. The production
+`RcgenCa` issued both SVIDs from OS entropy, the production `IdentityMgr` held
+them and the trust bundle, and the production `ServiceBackendsResolve` classified
+the recovered original destination. The production `CgroupManager` over
+`RealCgroupFs` created, populated, and removed one cgroup-v2 scope per VMM.
+
+No final-path per-workload netns, veth pair, transit or guest `/30`, `NetSlot`,
+or `host_veth` was created or consulted. The host already contained unrelated
+pre-existing `ovd-ns-*`, `ovd-hv-*`, and `/30` objects from other workloads; the
+Part-B before/after snapshots prove that set was byte-identical. The claim is
+therefore precise: the successful Part-B path has no dependency on those
+objects; it is not a claim that the leased host was globally empty of unrelated
+objects.
+
+Phase 1 only: Part B makes no architecture selection, promotion decision,
+production change, commit, or `wave-decisions.md`.
+
+### Production components actually reused
+
+| Concern | Production component executed | Part-B evidence |
+|---|---|---|
+| TLS 1.3, kTLS TX/RX, zero-copy data movement | `overdrive_dataplane::mtls::HostMtlsEnforcement` through the `MtlsEnforcement` port | Earned-Trust probe passed; real outbound and inbound handles reached Established; `ss` showed two `tcp-ulp-tls version: 1.3 ... rxconf: sw txconf: sw` records; post-ready `strace` captured 14 successful `splice(2)` calls. |
+| Workload CA and SVIDs | `overdrive_host::RcgenCa` + `OsEntropy`, using `Ca::issue_intermediate`, `Ca::issue_svid`, and `Ca::trust_bundle` | Two canonical `SpiffeId::for_allocation` identities were minted and used by the real mutual handshake. |
+| Node-held identity custody | `overdrive_control_plane::identity_mgr::IdentityMgr` through `IdentityRead` | `held_count=2`; neither guest image contained a certificate or key. |
+| Mesh classification | `overdrive_control_plane::mtls_resolve_adapter::ServiceBackendsResolve` through `MtlsResolve` | `probe()` passed; recovered `10.95.0.3:9000` classified `Mesh` to the same healthy backend. A `SimObservationStore` supplied the one scratch row; the resolver itself was the production host adapter. |
+| Per-VM resource/lifecycle boundary | `overdrive_worker::CgroupManager` + `overdrive_host::RealCgroupFs` + production `CgroupPath::for_alloc` | Created two scopes, applied production resource-limit writes, placed each real Cloud Hypervisor PID, and removed both scopes during cleanup. |
+| Domain contracts | `AllocationId`, `WorkloadId`, `SpiffeId`, `ServiceId`, `ServiceBackendRow`, `Backend`, `InterceptedConnection`, `Routed`, `MtlsResolution` | The scratch assembly crossed the real production port shapes rather than reproducing them. |
+
+The production `CloudHypervisorVmm`/`VmDriver` launch surface was not reusable
+for this no-netns proof: its current `VmNetworkAttachment` still carries a
+netns and the VMM adapter launches networked VMs through `ip netns exec`.
+Changing that public API in a spike would violate the production-surface rule.
+Part B therefore launched Cloud Hypervisor directly in scratch, attached the
+host-netns TAPs, and reused the production cgroup owner independently. This is
+the concrete obsolete API seam that DESIGN must replace; it is not a mechanism
+falsification.
+
+### Scratch-only missing mechanism
+
+The only new mechanism is in
+[`increment-v-part-b-production-core-netns-density-295-20260916T002721Z`](../../../../spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/):
+
+1. `tap295ba` and `tap295bb` are ordinary ports on `br295b`, whose only subnet
+   is `10.95.0.0/24`.
+2. A bridge-prerouting rule matches the physical source TAP `tap295ba`, retains
+   the IPv4 destination and TCP port, stamps the source-port mark, rewrites only
+   the Ethernet destination to the bridge MAC, and requests host delivery.
+3. One policy route plus IP-prerouting TPROXY delivers the guest's original
+   plaintext connection to leg F. `getsockname()` recovers
+   `10.95.0.3:9000`.
+4. `ServiceBackendsResolve` returns the healthy mesh backend. The real outbound
+   `HostMtlsEnforcement` dials leg B.
+5. A scratch output classifier marks host leg-B traffic while excluding the
+   production leg-S mark `0x2`; the same policy route delivers leg B to the
+   inbound TPROXY listener as leg C.
+6. The real inbound `HostMtlsEnforcement` terminates leg C and uses its
+   production marked leg-S dial to the server guest.
+7. A minimal scratch UDP responder binds the shared bridge address
+   `10.95.0.1:53`. The guest rootfs—not any host `/etc/netns` path—names that
+   resolver and receives `10.95.0.3` for `peer.mesh`.
+
+The scratch mechanism uses nftables/TAP/bridge policy only. No production API
+surface was added and no production file under `crates/`, `xtask/`, `examples/`,
+or `verification/` was edited.
+
+### Canonical execution and retained evidence
+
+The final command was:
+
+```sh
+OVERDRIVE_METAL_KERNEL=/var/tmp/spike-increment-n/kernel \
+OVERDRIVE_METAL_ROOTFS=/var/tmp/spike-increment-n/rootfs.ext4 \
+OVERDRIVE_METAL_SCENARIO=netns-density-295-part-b-attempt-15 \
+cargo xtask metal run -- \
+  bash spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh
+```
+
+The canonical runner acquired the exclusive metal lease and passed its native
+`x86_64`, non-virtualized KVM preflight. Metadata: kernel
+`7.0.0-29-generic`, Cloud Hypervisor `v53.0`. Kernel version remains metadata,
+not a gate, per the user instruction already recorded in Part A.
+
+The local command capture is
+[`capture-attempt-15.log`](../../../../spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/capture-attempt-15.log).
+The copied raw evidence directory is
+[`evidence-attempt-15/`](../../../../spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/evidence-attempt-15/),
+including all three pcaps, per-thread strace files, `ss-ktls.log`, both guest
+consoles, host log, cgroup proof, topology snapshots/diffs, cleanup complements,
+capture statistics, and the remote transcript. Disposable ext4 build images
+were not retained in the repository evidence.
+
+Selected actual output:
+
+```text
+PRODUCTION_IDENTITY_HELD client=spiffe://overdrive.local/workload/gh295b-client-workload/alloc/gh295b-client server=spiffe://overdrive.local/workload/peer/alloc/gh295b-server held_count=2
+PRODUCTION_RESOLVER_PROBE_OK
+PRODUCTION_MTLS_KTLS_SPLICE_PROBE_OK
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+PRODUCTION_RESOLVER_MESH orig_dst=10.95.0.3:9000 backend=10.95.0.3:9000 expected_svid=None
+PRODUCTION_INBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-server#1
+PRODUCTION_OUTBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-client#0
+PRODUCTION_MTLS_BOTH_ESTABLISHED
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.096905
+WIRE_SCAN ('10.95.0.1', 44160, '10.95.0.3', 9000) stream_bytes=1403 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 44160) stream_bytes=1354 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+SHARED_L2 source_tap_steady_request=1 peer_tap_agent_steady_request=1 peer_tap_steady_response=1 guest_to_guest_bypass_packets=0
+ZERO_COPY_STRACE successful_splice_syscalls=14 steady_request_host_write_hits=0 steady_response_host_write_hits=0
+KTLS_SS bidirectional_tls13_socket_records=2
+VERDICT=WORKS: actual production HostMtlsEnforcement executed TLS1.3 kTLS TX/RX plus zero-copy splice in both directions across two real shared-bridge microVM TAPs; no netns/veth/NetSlot/host_veth or /30 final-path dependency; direct L2 bypass absent
+```
+
+The zero-copy capture began only after
+`PRODUCTION_MTLS_KTLS_SPLICE_PROBE_OK` and `HOST READY`; its 14 successful
+`splice(2)` calls therefore belong to the real guest journey, not the adapter's
+loopback Earned-Trust sentinel. The steady-state request (40 bytes) and response
+(41 bytes) appear on the guest-facing TAPs but appear zero times in any traced
+host `write`/`writev`/`sendto`/`sendmsg` buffer. The actual traces show the
+request/response lengths moving socket→pipe→socket through the production pump
+threads.
+
+### Wire confidentiality and direct-bypass proof
+
+The scanner reassembled both captured leg-B↔leg-C TCP directions, rejected
+gaps and conflicting retransmissions, consumed every byte as complete TLS
+records, required application-data record type `0x17` in both directions, and
+searched for the warmup plus steady-state request/response markers. Both streams
+had zero marker hits and zero gaps. Capture totals were loopback 17/34,
+source TAP 18/18, peer TAP 13/13, all with zero kernel drops.
+
+The guest was on the same `/24` as the peer and resolved the peer's real
+`10.95.0.3` address, so its original L2 traffic was naturally addressed toward
+the peer. The source-TAP capture contains the steady plaintext request. The
+peer-TAP capture contains only the agent's decrypted leg-S request and the
+server's response. It contains zero packet from guest A (`10.95.0.2`) directly
+to guest B (`10.95.0.3`). The bridge and IP interception counters were nonzero
+(8 guest-A TCP packets; 10 leg-B packets), independently proving the two catch
+points fired.
+
+### Per-VM cgroup proof
+
+While both VMMs were live, the production cgroup owner reported:
+
+```text
+CGROUP_PROOF alloc=gh295b-server pid=2829925 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope cgroup_procs=2829925, exe=/usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295b-client pid=2829969 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope cgroup_procs=2829969, exe=/usr/local/bin/cloud-hypervisor
+```
+
+`/proc/<pid>/cgroup` independently named the same two scopes. These were the
+real Cloud Hypervisor PIDs, not timeout wrappers. `CgroupManager::cgroup_kill`
+and `remove_workload_scope` removed both at cleanup.
+
+### Topology absence and cleanup
+
+Runtime inventory and source inspection established:
+
+- the Part-B resources were exactly `br295b`, `tap295ba`, `tap295bb`, one
+  `10.95.0.0/24` connected route, the scoped nft tables/rule/route, and two
+  per-VM cgroups;
+- scratch Rust/Cargo source contains no `NetSlot` or `host_veth` and invokes no
+  netns/veth mechanism;
+- `ip netns` and veth before/after files are byte-identical (`0`-byte diffs);
+- `/etc/netns` before/after is byte-identical (`0`-byte diff);
+- the route diff contains only unrelated IPv6 RA expiry-counter movement; the
+  explicit `lookup 295` rule and table-295 route cleanup complements are
+  `ABSENT`;
+- bridge, both TAPs, both nft tables, policy rule, policy route, and both cgroup
+  scopes are all recorded `ABSENT` after cleanup.
+
+Unrelated host netns/veth/routes were observed and preserved; no broad sweep or
+cleanup touched them.
+
+### Attempts retained append-only
+
+| Attempt | Observation | Disposition |
+|---|---|---|
+| 09 | Existing BPF object satisfied existence but failed the dataplane crate's mtime freshness check during the linked host build. | Preserved first Part-B failure. The probe does not execute the embedded BPF object, so later builds used the documented absolute `OVERDRIVE_BPF_OBJECT` override; actual mTLS code remained the linked production module. |
+| 10 | Calling `cargo xtask bpf-build` on the metal target tried to invoke Lima, which is intentionally absent there. | Rejected that target-inappropriate build path; used the existing object only to satisfy the unrelated link-time include. |
+| 11 | Scratch compile exposed the non-root `ServiceId` module path and an ambiguous `SocketAddrV4` parse. | Corrected scratch imports/type annotation; no production surface changed. |
+| 12 | Host startup rejected an empty-path CA subject. | Production evidence identified the correct canonical CA subject `spiffe://overdrive.local/overdrive/ca`; corrected scratch input. Cleanup completed. |
+| 13 | A shell quoting error stopped after topology setup. | Syntax corrected and `bash -n` re-run; exact owned resources and cgroups cleaned, with zero netns/veth diffs. |
+| 14 | Both intended server/client images booted the client role because `/proc/cmdline` was read before mounting procfs. The client then received `EHOSTUNREACH`; this was a guest-fixture role bug, not network-mechanism falsification. | Original consoles and host logs were recovered in `recovery-attempt-14.log`. Explicit PID recovery plus production cgroup cleanup removed the owned state. Procfs mount was moved before the role read. |
+| 15 | Full production-core journey passed every oracle and cleanup complement. | **WORKS**. |
+
+### Timing, wrong assumptions, and edge cases
+
+- Final run: `15.533814 s`, including cached Rust builds, fresh ext4 image
+  construction, two real microVM boots, the journey, capture analysis, and
+  cleanup. The guest DNS + warmup + steady exchange measured `96.905 ms`.
+  These are point measurements, not a benchmark.
+- Part-B execution started at 00:35:57 UTC and the successful run completed at
+  00:46:13 UTC; reporting and evidence retrieval followed. It remained well
+  inside the one-hour spike maximum.
+- A production crate dependency can require an unrelated embedded BPF object at
+  build time even when the exercised module is mTLS-only. On metal, `xtask
+  bpf-build` is not the usable refresh path because that command delegates to
+  Lima. This was a build-system edge case, not runtime evidence.
+- The actual `ServiceBackendsResolve` works unchanged against a backend on a
+  shared bridge. It is topology-neutral. The `IdentityMgr`, CA/SVID, and
+  `HostMtlsEnforcement` are likewise topology-neutral.
+- The current VMM network attachment and DNS responder are not topology-neutral:
+  the former carries a netns, while the latter's fallback constructor requires
+  `NetSlotAllocator`. Part B omitted both obsolete mechanism dependencies and
+  supplied the minimum scratch TAP launch/shared-bridge DNS home.
+- Existing node-global per-workload networking objects make a global
+  “no netns/veth exists” assertion dishonest. Before/after complement evidence
+  is the correct oracle: the successful path neither used nor changed them.
+
+### Part-B artifact hashes
+
+```text
+host.rs        07ada8b445864e9118d5d18ec64e8dff53de15b1b9c9866e388b891a1cba8833
+guest.rs       0a4a8f5a36f72b17a781398e0976d13a254870b0d08dfb429308a46e87dcb8e4
+run.sh         5eb21193f44f424e8fb907c6e3bd2eea0f593533dffb006b4151a3f8bc551afe
+Cargo.toml      4165f7e2d0d02abff862371b4fea56c7fb930178bf1675786595d585703642ba
+lo.pcap         799c5f7b8bacad66f09a4a2713674991de142dccb4fb68711834d3142a322c9c
+tap295ba.pcap   c69c7773d2675f61eeb94281cf95e85566b72bf3991e2df8a7861e6a270ec673
+tap295bb.pcap   92bc8e376059d0b3024a221cdc838ac9cb9cac5b508d263c5079ae990d462c1a
+transcript.log  0058537351620d88111042dbd8ca3fc5461094cdfabd0b00581d60f0164a8a99
+```
+
+Part B therefore validates the assigned bounded same-node mechanism with the
+actual production enforcement core and supporting identity/resolver/cgroup
+components. It does not establish cross-host routing, target density,
+throughput, or a final production API shape.

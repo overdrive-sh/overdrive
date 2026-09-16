@@ -1,0 +1,114 @@
+---
+title: What is a cgroup?
+description: A cgroup gives Linux one handle for accounting for, prioritizing, limiting, and terminating related host processes.
+date: 2026-09-14
+author: The Overdrive team
+summary: A Linux cgroup is a hierarchical process group with resource policy and lifecycle control. It is not a container, a VM, or a private network.
+---
+
+A Linux cgroup groups host processes so the kernel can account for, prioritize,
+limit, and terminate them as a unit. It is not a container. It is not a virtual
+machine. It is one Linux tool that those systems can use with other tools.
+
+Think of a cgroup as a named set of host processes with a budget and a stop
+handle. A workload platform puts a process in the set, gives the set rules, and
+can later act on the whole set. The key host question is simple: which processes
+should share these rules?
+
+## A cgroup v2 tree selects the policy a process receives
+
+Cgroup v2 has one unified tree. Its filesystem directories make that tree.
+Each process belongs to one cgroup in it. A workload scope can sit below the
+parent that holds the shared rules:
+
+```
+overdrive.slice
+└── workloads.slice
+    └── <alloc_id>.scope
+        └── Cloud Hypervisor PID
+```
+
+Each directory has control files. Writing a process ID to `cgroup.procs` moves
+that process into that cgroup. The write does not start the process. It does not
+make a sandbox. It selects the resource and lifecycle policy that applies to the
+process.
+
+Child processes start in their parent’s cgroup. A parent can make a controller
+available to its children. Sibling scopes can then get rules from the same point
+in the tree. The cgroup tells the kernel which processes count together.
+
+## CPU shares, memory limits, and forceful termination are different controls
+
+`cpu.weight` sets a relative CPU share when sibling cgroups need CPU at the
+same time. If two busy siblings have different weights, the kernel splits their
+parent’s CPU time by those weights. A weight does not reserve a core. It is not
+a quota. It does not promise part of the machine. With no sibling fight, a
+cgroup can use spare CPU.
+
+`memory.max` does a different job. It is a hard-limit mechanism for memory,
+along with memory accounting. At the limit, the kernel tries to reclaim memory.
+If it cannot reclaim enough, the cgroup can face cgroup-local OOM behavior. Use
+can briefly pass the written value in some cases. The limit also does not pick
+one fixed OOM victim. It creates a memory pressure and failure boundary.
+
+`cgroup.kill` does something else again. Writing its kill value makes the
+kernel send `SIGKILL` to the target cgroup and its child cgroups. That is a
+forceful kill of the group tree. It is not graceful shutdown. An app that must
+drain work or save state needs a separate shutdown plan before this last resort.
+
+## Cgroup membership can select network policy without creating a network
+
+A cgroup can be a point where cgroup-BPF network rules attach. The kernel has
+cgroup socket-address hooks for connect, send, and receive operations.
+Membership can therefore select network policy for a host process's socket
+operation.
+
+That does not make a private network. A cgroup does not supply an interface,
+route table, firewall, port space, or network stack. A network namespace does
+that work.
+
+This is a rule for host processes. It does not describe how an Overdrive VM
+guest reaches a network.
+
+Cgroups answer, “Which host processes share this budget and stop control?”
+Namespaces answer, “Which view of a system resource can they see?” A network
+namespace gives a separate network view. A user namespace and normal user/group
+permission rules cover IDs, powers, and access. A hypervisor such as KVM runs a
+virtual machine. A real isolation plan uses the parts it needs.
+
+## What Overdrive does with cgroups
+
+Overdrive uses this boundary for its `[vm]` workloads. Its `VmDriver` gives each
+allocation one scope:
+`overdrive.slice/workloads.slice/<alloc_id>.scope`. The scope is for the Cloud
+Hypervisor process that runs on the host. It is not a cgroup for processes in
+the guest. The guest runs its own kernel.
+
+The `[resources]` block supplies a CPU-milli input and a guest-memory input.
+The cgroup manager derives a relative CPU weight from the CPU-milli input.
+`VmDriver` derives a reserve-padded cgroup memory maximum from the guest-memory
+input. It creates the scope, writes the derived `cpu.weight` and `memory.max`,
+and gives the same scope to the VMM configuration. After Cloud Hypervisor has
+started, it puts that host VMM PID in the scope through `cgroup.procs`.
+
+Scope creation and VMM-PID placement failures reject VM start. A resource-file
+write error takes another path: Overdrive logs it and keeps going. An accepted
+VM therefore does not prove that its requested resource enforcement is in force.
+
+On stop, `VmDriver` performs VM-specific termination and then calls cgroup
+cleanup. That cleanup invokes `cgroup.kill` and attempts to remove the scope.
+The cgroup cleanup is not itself a graceful guest-shutdown protocol. It does
+not say that stop waits for the scope to go away.
+
+This is cgroups’ role in [Overdrive’s microVM model](/docs/concepts/microvms):
+one host-kernel handle around the Cloud Hypervisor process. It makes resource
+rules, process accounting, and forceful cleanup addressable at one point. It
+does not make that point a container or a VM.
+
+## Further reading
+
+- [Linux kernel documentation: Control Group v2](https://docs.kernel.org/7.1/admin-guide/cgroup-v2.html)
+- [Linux man-pages: cgroups(7)](https://man7.org/linux/man-pages/man7/cgroups.7.html)
+- [Linux man-pages: namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+- [Linux man-pages: network_namespaces(7)](https://man7.org/linux/man-pages/man7/network_namespaces.7.html)
+- [Linux man-pages: user_namespaces(7)](https://man7.org/linux/man-pages/man7/user_namespaces.7.html)

@@ -1,0 +1,374 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e824ac20774d609f9f38813d pid=2824005
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 254,873 bytes  received 50,142 bytes  203,343.33 bytes/sec
+total size is 314,172,964  speedup is 1,030.02
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295b.wKuYuayc
+START=2026-09-16T00:39:26Z
+SOURCE_SHA=541cff8311694ab3d42499be8c7162fe3c8db8a9e21b043e7273f917042d6837
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+BPF_OBJECT_OVERRIDE=/home/ubuntu/overdrive/target/bpf/overdrive_bpf.o (linked crate build requirement only; this probe executes the mTLS module, not the embedded BPF object)
+COMMAND build production-linked host and static credential-free guest
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling netns-density-295-part-b v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z)
+    Finished `release` profile [optimized] target(s) in 7.14s
+   Compiling libc v0.2.189
+   Compiling netns-density-295-part-b v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z)
+warning: unused import: `std::os::fd::FromRawFd`
+ --> guest.rs:5:5
+  |
+5 | use std::os::fd::FromRawFd;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `netns-density-295-part-b` (bin "guest") generated 1 warning (run `cargo fix --bin "guest" -p netns-density-295-part-b` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 1.06s
+/home/ubuntu/overdrive/target/release/host:                            ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=593bcd429fa2a38110e812e677a20735f196f67b, not stripped
+/home/ubuntu/overdrive/target/x86_64-unknown-linux-musl/release/guest: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=c1aa5d420c987e5d8f8829fe687a97ce0f8d6034, not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295b
+Device "br295b" does not exist.
++ ip link show tap295ba
+Device "tap295ba" does not exist.
++ ip link show tap295bb
+Device "tap295bb" does not exist.
++ nft list table ip gh295b
+Error: No such file or directory
+list table ip gh295b
+              ^^^^^^
++ nft list table bridge gh295b
+Error: No such file or directory
+list table bridge gh295b
+                  ^^^^^^
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope ']'
++ /home/ubuntu/overdrive/target/release/host cgroup-init
+PRODUCTION_CGROUP_CREATED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope
+PRODUCTION_CGROUP_CREATED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope
++ spike_cgroups=1
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295b type bridge
++ spike_links+=(br295b)
++ ip link set br295b address 02:00:00:95:00:01
++ ip addr add 10.95.0.1/24 dev br295b
++ ip link set br295b up
++ for tap in tap295ba tap295bb
++ ip tuntap add dev tap295ba mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295ba master br295b
++ ip link set tap295ba up
++ sysctl -qw net.ipv4.conf.tap295ba.rp_filter=0
++ for tap in tap295ba tap295bb
++ ip tuntap add dev tap295bb mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295bb master br295b
++ ip link set tap295bb up
++ sysctl -qw net.ipv4.conf.tap295bb.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295b.rp_filter=0
++ ip rule add priority 2951 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table bridge gh295b
++ spike_bridge_table=1
++ nft add chain bridge gh295b prerouting '{ type filter hook prerouting priority -300; policy accept; }'
++ nft add rule bridge gh295b prerouting iifname tap295ba ether type ip ip protocol tcp tcp dport 9000 counter meta nftrace set 1 meta mark set 0x295a ether daddr set 02:00:00:95:00:01 meta pkttype set host
++ nft add rule bridge gh295b prerouting iifname tap295ba ether type ip ip protocol udp udp dport 53 counter meta nftrace set 1
++ nft add table ip gh295b
++ spike_table=1
++ nft add chain ip gh295b prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295b prerouting iifname tap295ba ip protocol udp udp dport 53 counter
++ nft add rule ip gh295b prerouting meta mark 0x295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295b prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295b output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295b output meta mark '!=' 0x2 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+ovd-hv-0008@if56996 UP             10.99.0.33/30 fe80::30c3:d6ff:fe18:7f89/64 
+ovd-hv-0007@if57023 UP             10.99.0.29/30 fe80::4cc8:b5ff:fecd:da65/64 
+ovd-hv-0001@if57029 UP             10.99.0.5/30 fe80::1004:dbff:fe6b:b06c/64 
+ovd-hv-0000@if57046 UP             10.99.0.1/30 fe80::d006:2bff:fea5:bf79/64 
+br295b           DOWN           10.95.0.1/24 
+tap295ba         DOWN           
+tap295bb         DOWN           
++ ip netns list
+ovd-ns-0000 (id: 0)
+ovd-ns-0001 (id: 1)
+ovd-ns-0007 (id: 7)
+ovd-ns-0008 (id: 8)
++ ip -br link show type veth
+ovd-veth-bk@ovd-veth-cli UP             36:2a:11:a3:1f:2c <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-veth-cli@ovd-veth-bk UP             16:9f:ad:a9:86:2e <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0008@if56996 UP             32:c3:d6:18:7f:89 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0007@if57023 UP             4e:c8:b5:cd:da:65 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0001@if57029 UP             12:04:db:6b:b0:6c <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0000@if57046 UP             d2:06:2b:a5:bf:79 <BROADCAST,MULTICAST,UP,LOWER_UP> 
++ bridge link
+2: eno12399np0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 hwmode VEB 
+4: eno12409np1: <BROADCAST,MULTICAST> mtu 1500 hwmode VEB 
+57049: tap295ba: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295b state disabled priority 32 cost 2 
+57050: tap295bb: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295b state disabled priority 32 cost 2 
++ ip route show table all
+local default dev lo table 295 scope host 
+default via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+10.95.0.0/24 dev br295b proto kernel scope link src 10.95.0.1 linkdown 
+10.96.0.0/16 dev ovd-veth-cli proto kernel scope link src 10.96.0.1 
+10.96.0.0/16 dev ovd-veth-bk proto kernel scope link src 10.96.0.2 
+10.99.0.0/30 dev ovd-hv-0000 proto kernel scope link src 10.99.0.1 
+10.99.0.4/30 dev ovd-hv-0001 proto kernel scope link src 10.99.0.5 
+10.99.0.28/30 dev ovd-hv-0007 proto kernel scope link src 10.99.0.29 
+10.99.0.32/30 dev ovd-hv-0008 proto kernel scope link src 10.99.0.33 
+10.99.128.0/30 via 10.99.0.2 dev ovd-hv-0000 proto static 
+10.99.128.4/30 via 10.99.0.6 dev ovd-hv-0001 proto static 
+10.99.128.28/30 via 10.99.0.30 dev ovd-hv-0007 proto static 
+10.99.128.32/30 via 10.99.0.34 dev ovd-hv-0008 proto static 
+151.115.99.0/24 dev eno12399np0 proto kernel scope link src 151.115.99.251 metric 100 
+151.115.99.1 dev eno12399np0 proto dhcp scope link src 151.115.99.251 metric 100 
+151.115.125.3 via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+151.115.125.11 via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+local 10.95.0.1 dev br295b table local proto kernel scope host src 10.95.0.1 
+broadcast 10.95.0.255 dev br295b table local proto kernel scope link src 10.95.0.1 linkdown 
+local 10.96.0.1 dev ovd-veth-cli table local proto kernel scope host src 10.96.0.1 
+local 10.96.0.2 dev ovd-veth-bk table local proto kernel scope host src 10.96.0.2 
+broadcast 10.96.255.255 dev ovd-veth-cli table local proto kernel scope link src 10.96.0.1 
+broadcast 10.96.255.255 dev ovd-veth-bk table local proto kernel scope link src 10.96.0.2 
+local 10.99.0.1 dev ovd-hv-0000 table local proto kernel scope host src 10.99.0.1 
+broadcast 10.99.0.3 dev ovd-hv-0000 table local proto kernel scope link src 10.99.0.1 
+local 10.99.0.5 dev ovd-hv-0001 table local proto kernel scope host src 10.99.0.5 
+broadcast 10.99.0.7 dev ovd-hv-0001 table local proto kernel scope link src 10.99.0.5 
+local 10.99.0.29 dev ovd-hv-0007 table local proto kernel scope host src 10.99.0.29 
+broadcast 10.99.0.31 dev ovd-hv-0007 table local proto kernel scope link src 10.99.0.29 
+local 10.99.0.33 dev ovd-hv-0008 table local proto kernel scope host src 10.99.0.33 
+broadcast 10.99.0.35 dev ovd-hv-0008 table local proto kernel scope link src 10.99.0.33 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+local 151.115.99.251 dev eno12399np0 table local proto kernel scope host src 151.115.99.251 
+broadcast 151.115.99.255 dev eno12399np0 table local proto kernel scope link src 151.115.99.251 
+2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591996sec pref medium
+fe80::/64 dev eno12399np0 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-veth-bk proto kernel metric 256 pref medium
+fe80::/64 dev ovd-veth-cli proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0008 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0007 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0001 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0000 proto kernel metric 256 pref medium
+default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 11sec pref medium
+local ::1 dev lo table local proto kernel metric 0 pref medium
+local 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0 dev eno12399np0 table local proto kernel metric 0 pref medium
+local fe80::1004:dbff:fe6b:b06c dev ovd-hv-0001 table local proto kernel metric 0 pref medium
+local fe80::1623:f2ff:fef4:50e0 dev eno12399np0 table local proto kernel metric 0 pref medium
+local fe80::30c3:d6ff:fe18:7f89 dev ovd-hv-0008 table local proto kernel metric 0 pref medium
+local fe80::4cc8:b5ff:fecd:da65 dev ovd-hv-0007 table local proto kernel metric 0 pref medium
+local fe80::d006:2bff:fea5:bf79 dev ovd-hv-0000 table local proto kernel metric 0 pref medium
+local fe80::d8a1:6ff:fecc:cb18 dev ovd-veth-cli table local proto kernel metric 0 pref medium
+local fe80::f0ed:bfff:feba:f468 dev ovd-veth-bk table local proto kernel metric 0 pref medium
+multicast ff00::/8 dev eno12399np0 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-veth-bk table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-veth-cli table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0008 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0007 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0001 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0000 table local proto kernel metric 256 pref medium
++ rg -n 'NetSlot|host_veth|ip netns|type veth|/30' /home/ubuntu/overdrive/spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z --glob '*.rs' --glob Cargo.toml
+spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh: line 154: rg: command not found
++ true
++ spike_host=2824607
++ spike_pids+=("$spike_host")
++ /home/ubuntu/overdrive/target/release/host
+++ seq 1 600
++ for _ in $(seq 1 600)
++ grep -q 'HOST READY' /var/tmp/gh295b.wKuYuayc/host.log
++ kill -0 2824607
++ sleep 0.05
++ for _ in $(seq 1 600)
++ grep -q 'HOST READY' /var/tmp/gh295b.wKuYuayc/host.log
++ kill -0 2824607
++ sleep 0.05
++ for _ in $(seq 1 600)
++ grep -q 'HOST READY' /var/tmp/gh295b.wKuYuayc/host.log
++ kill -0 2824607
+spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh: line 161: kill: (2824607) - No such process
+spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh: line 1: 2824607 Aborted                    (core dumped) "$host_bin" > "$spike_run/host.log" 2>&1
++ cleanup
++ spike_status=1
++ trap - EXIT
++ set +e
+++ date -u +%FT%TZ
++ printf '\nCLEANUP START prior_exit=%s at=%s\n' 1 2026-09-16T00:39:35Z
+
+CLEANUP START prior_exit=1 at=2026-09-16T00:39:35Z
++ for pid in "${spike_pids[@]}"
++ kill -TERM 2824607
++ '[' -z '' ']'
++ for pid in "${spike_pids[@]}" "${spike_captures[@]}"
++ wait 2824607
++ '[' -z '' ']'
++ '[' 1 = 0 ']'
++ /home/ubuntu/overdrive/target/release/host cgroup-clean
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope
++ nft list table bridge gh295b
+table bridge gh295b {
+	chain prerouting {
+		type filter hook prerouting priority dstnat; policy accept;
+		iifname "tap295ba" ip protocol tcp tcp dport 9000 counter packets 0 bytes 0 meta nftrace set 1 meta mark set 0x0000295a ether daddr set 02:00:00:95:00:01 meta pkttype set host
+		iifname "tap295ba" ip protocol udp udp dport 53 counter packets 0 bytes 0 meta nftrace set 1
+	}
+}
++ nft list table ip gh295b
+table ip gh295b {
+	chain prerouting {
+		type filter hook prerouting priority mangle - 1; policy accept;
+		iifname "tap295ba" udp dport 53 counter packets 0 bytes 0
+		meta mark 0x0000295a tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept
+		meta mark 0x00000295 ip daddr 10.95.0.3 tcp dport 9000 counter packets 0 bytes 0 tproxy to 127.0.0.1:15295 accept
+	}
+
+	chain output {
+		type route hook output priority mangle - 1; policy accept;
+		meta mark != 0x00000002 ip daddr 10.95.0.3 tcp dport 9000 counter packets 0 bytes 0 meta mark set 0x00000295 accept
+	}
+}
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+ovd-hv-0008@if56996 UP             10.99.0.33/30 fe80::30c3:d6ff:fe18:7f89/64 
+ovd-hv-0007@if57023 UP             10.99.0.29/30 fe80::4cc8:b5ff:fecd:da65/64 
+ovd-hv-0001@if57029 UP             10.99.0.5/30 fe80::1004:dbff:fe6b:b06c/64 
+ovd-hv-0000@if57046 UP             10.99.0.1/30 fe80::d006:2bff:fea5:bf79/64 
+br295b           DOWN           10.95.0.1/24 
+tap295ba         DOWN           
+tap295bb         DOWN           
++ ip rule
+0:	from all lookup local
+2951:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
++ '[' 1 = 0 ']'
++ nft delete table ip gh295b
++ '[' 1 = 0 ']'
++ nft delete table bridge gh295b
++ '[' 1 = 0 ']'
++ ip rule del priority 2951 fwmark 0x295 lookup 295
++ '[' 1 = 0 ']'
++ ip route del local 0.0.0.0/0 dev lo table 295
++ for link in "${spike_links[@]}"
++ ip link del tap295bb
++ for link in "${spike_links[@]}"
++ ip link del tap295ba
++ for link in "${spike_links[@]}"
++ ip link del br295b
++ sysctl -qw net.ipv4.conf.all.rp_filter=0
++ ip netns list
++ sort
++ ip -br link show type veth
++ sort
++ ip -o route show table all
++ sort
++ find /etc/netns -mindepth 1 -maxdepth 3 -print
++ sort
++ diff -u /var/tmp/gh295b.wKuYuayc/netns.before /var/tmp/gh295b.wKuYuayc/netns.after
++ diff -u /var/tmp/gh295b.wKuYuayc/veth.before /var/tmp/gh295b.wKuYuayc/veth.after
++ diff -u /var/tmp/gh295b.wKuYuayc/routes.before /var/tmp/gh295b.wKuYuayc/routes.after
++ diff -u /var/tmp/gh295b.wKuYuayc/etc-netns.before /var/tmp/gh295b.wKuYuayc/etc-netns.after
++ printf OWNED_LINK_BRIDGE=
++ ip link show br295b
++ echo ABSENT
++ printf OWNED_LINK_TAP_A=
++ ip link show tap295ba
++ echo ABSENT
++ printf OWNED_LINK_TAP_B=
++ ip link show tap295bb
++ echo ABSENT
++ printf OWNED_NFT_IP=
++ nft list table ip gh295b
++ echo ABSENT
++ printf OWNED_NFT_BRIDGE=
++ nft list table bridge gh295b
++ echo ABSENT
++ printf OWNED_RULE=
++ ip rule show
++ grep -q 'lookup 295'
++ echo ABSENT
++ printf OWNED_ROUTE=
++ ip route show table 295
++ grep -q .
++ echo ABSENT
++ for scope in gh295b-client.scope gh295b-server.scope
++ printf OWNED_CGROUP_%s= gh295b-client.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope ']'
++ echo ABSENT
++ for scope in gh295b-client.scope gh295b-server.scope
++ printf OWNED_CGROUP_%s= gh295b-server.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope ']'
++ echo ABSENT
++ printf 'CLEANUP COMPLEMENTS\n'
+CLEANUP COMPLEMENTS
++ cat /var/tmp/gh295b.wKuYuayc/cleanup-complements.log
+OWNED_LINK_BRIDGE=ABSENT
+OWNED_LINK_TAP_A=ABSENT
+OWNED_LINK_TAP_B=ABSENT
+OWNED_NFT_IP=ABSENT
+OWNED_NFT_BRIDGE=ABSENT
+OWNED_RULE=ABSENT
+OWNED_ROUTE=ABSENT
+OWNED_CGROUP_gh295b-client.scope=ABSENT
+OWNED_CGROUP_gh295b-server.scope=ABSENT
+++ wc -c
+++ wc -c
+++ wc -c
++ printf 'TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=%s veth=%s etc_netns=%s\n' 0 0 0
+TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=0 veth=0 etc_netns=0
++ printf 'CLEANUP COMPLETE preserved_evidence=%s original_exit=%s\n' /var/tmp/gh295b.wKuYuayc 1
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295b.wKuYuayc original_exit=1
++ python3 -c 'import sys,time; print(f"TOTAL_ELAPSED_SECONDS={time.perf_counter()-float(sys.argv[1]):.6f}")' 2804973.493374175
+TOTAL_ELAPSED_SECONDS=8.815943
++ exit 1
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

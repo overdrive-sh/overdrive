@@ -1,0 +1,9 @@
+[    0.003093] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+GUEST WARMUP ROUNDTRIP COMPLETE
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.096905
+GUEST EXIT=0
+[    4.396032] reboot: Power down

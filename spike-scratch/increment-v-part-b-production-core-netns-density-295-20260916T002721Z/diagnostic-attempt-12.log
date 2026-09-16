@@ -1,0 +1,134 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run --no-sync -- bash -lc 'printf "HOST_LOG\n"; cat /var/tmp/gh295b.wKuYuayc/host.log; printf "TRANSCRIPT_TAIL\n"; tail -80 /var/tmp/gh295b.wKuYuayc/transcript.log'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=1b57de619dc25f84ca2f9337 pid=2825016
+
+########## [bootstrap] no-sync source identity check
+FATAL: --no-sync refused stale or mismatched metal source
+expected:
+  commit=67d5adba72ad97e83ccc9cc7893f943e1a703d90
+  workspace=/Users/marcus/conductor/workspaces/helios/khartoum-v1
+  source_digest=c0000338bdf19679e4ecb3b1f8c1a66fc7f8b3c30136df02cf9a9c8928bb8fae
+actual:
+  commit=67d5adba72ad97e83ccc9cc7893f943e1a703d90
+  workspace=/Users/marcus/conductor/workspaces/helios/khartoum-v1
+  source_digest=09545fb06b6127d4ea1707ffbd14a31e46a38865db92399bef6ffcf761ceb386
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- bash -lc 'printf "HOST_LOG\n"; cat /var/tmp/gh295b.wKuYuayc/host.log; printf "TRANSCRIPT_TAIL\n"; tail -80 /var/tmp/gh295b.wKuYuayc/transcript.log'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=30c83b8cc1217d2eecdf18b5 pid=2825390
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 257,397 bytes  received 50,013 bytes  204,940.00 bytes/sec
+total size is 314,195,271  speedup is 1,022.07
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+HOST_LOG
+
+thread 'main' (2824607) panicked at host.rs:201:51:
+called `Result::unwrap()` on an `Err` value: SpiffeEmptyPath("spiffe://overdrive.local")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+TRANSCRIPT_TAIL
++ '[' 1 = 0 ']'
++ nft delete table ip gh295b
++ '[' 1 = 0 ']'
++ nft delete table bridge gh295b
++ '[' 1 = 0 ']'
++ ip rule del priority 2951 fwmark 0x295 lookup 295
++ '[' 1 = 0 ']'
++ ip route del local 0.0.0.0/0 dev lo table 295
++ for link in "${spike_links[@]}"
++ ip link del tap295bb
++ for link in "${spike_links[@]}"
++ ip link del tap295ba
++ for link in "${spike_links[@]}"
++ ip link del br295b
++ sysctl -qw net.ipv4.conf.all.rp_filter=0
++ ip netns list
++ sort
++ ip -br link show type veth
++ sort
++ ip -o route show table all
++ sort
++ find /etc/netns -mindepth 1 -maxdepth 3 -print
++ sort
++ diff -u /var/tmp/gh295b.wKuYuayc/netns.before /var/tmp/gh295b.wKuYuayc/netns.after
++ diff -u /var/tmp/gh295b.wKuYuayc/veth.before /var/tmp/gh295b.wKuYuayc/veth.after
++ diff -u /var/tmp/gh295b.wKuYuayc/routes.before /var/tmp/gh295b.wKuYuayc/routes.after
++ diff -u /var/tmp/gh295b.wKuYuayc/etc-netns.before /var/tmp/gh295b.wKuYuayc/etc-netns.after
++ printf OWNED_LINK_BRIDGE=
++ ip link show br295b
++ echo ABSENT
++ printf OWNED_LINK_TAP_A=
++ ip link show tap295ba
++ echo ABSENT
++ printf OWNED_LINK_TAP_B=
++ ip link show tap295bb
++ echo ABSENT
++ printf OWNED_NFT_IP=
++ nft list table ip gh295b
++ echo ABSENT
++ printf OWNED_NFT_BRIDGE=
++ nft list table bridge gh295b
++ echo ABSENT
++ printf OWNED_RULE=
++ ip rule show
++ grep -q 'lookup 295'
++ echo ABSENT
++ printf OWNED_ROUTE=
++ ip route show table 295
++ grep -q .
++ echo ABSENT
++ for scope in gh295b-client.scope gh295b-server.scope
++ printf OWNED_CGROUP_%s= gh295b-client.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope ']'
++ echo ABSENT
++ for scope in gh295b-client.scope gh295b-server.scope
++ printf OWNED_CGROUP_%s= gh295b-server.scope
++ '[' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope ']'
++ echo ABSENT
++ printf 'CLEANUP COMPLEMENTS\n'
+CLEANUP COMPLEMENTS
++ cat /var/tmp/gh295b.wKuYuayc/cleanup-complements.log
+OWNED_LINK_BRIDGE=ABSENT
+OWNED_LINK_TAP_A=ABSENT
+OWNED_LINK_TAP_B=ABSENT
+OWNED_NFT_IP=ABSENT
+OWNED_NFT_BRIDGE=ABSENT
+OWNED_RULE=ABSENT
+OWNED_ROUTE=ABSENT
+OWNED_CGROUP_gh295b-client.scope=ABSENT
+OWNED_CGROUP_gh295b-server.scope=ABSENT
+++ wc -c
+++ wc -c
+++ wc -c
++ printf 'TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=%s veth=%s etc_netns=%s\n' 0 0 0
+TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=0 veth=0 etc_netns=0
++ printf 'CLEANUP COMPLETE preserved_evidence=%s original_exit=%s\n' /var/tmp/gh295b.wKuYuayc 1
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295b.wKuYuayc original_exit=1
++ python3 -c 'import sys,time; print(f"TOTAL_ELAPSED_SECONDS={time.perf_counter()-float(sys.argv[1]):.6f}")' 2804973.493374175
+TOTAL_ELAPSED_SECONDS=8.815943
++ exit 1

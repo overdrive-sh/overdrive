@@ -1,0 +1,45 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-v-part-b-production-core-netns-density-295-20260916T002721Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=2720202b7aaaac9a502c5fec pid=2821462
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 291,758 bytes  received 50,146 bytes  136,761.60 bytes/sec
+total size is 314,163,121  speedup is 918.86
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295b.QRmdfNvf
+START=2026-09-16T00:37:56Z
+SOURCE_SHA=ae7387b00085b777cbdde84ea17c2979c4bddfde6c982f8355f1ee6f53cb1ce3
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+COMMAND cargo xtask bpf-build (freshness gate for production dataplane dependency)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/xtask bpf-build`
+xtask failed: 
+   0: [91m`limactl` not found on PATH. Install it with: brew install lima  # or: curl -fsSL https://lima-vm.io/install.sh | bash[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m779[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

@@ -1,0 +1,57 @@
+10.96.0.0/16 dev ovd-veth-bk proto kernel scope link src 10.96.0.2 
+10.96.0.0/16 dev ovd-veth-cli proto kernel scope link src 10.96.0.1 
+10.99.0.0/30 dev ovd-hv-0000 proto kernel scope link src 10.99.0.1 
+10.99.0.28/30 dev ovd-hv-0007 proto kernel scope link src 10.99.0.29 
+10.99.0.32/30 dev ovd-hv-0008 proto kernel scope link src 10.99.0.33 
+10.99.0.4/30 dev ovd-hv-0001 proto kernel scope link src 10.99.0.5 
+10.99.128.0/30 via 10.99.0.2 dev ovd-hv-0000 proto static 
+10.99.128.28/30 via 10.99.0.30 dev ovd-hv-0007 proto static 
+10.99.128.32/30 via 10.99.0.34 dev ovd-hv-0008 proto static 
+10.99.128.4/30 via 10.99.0.6 dev ovd-hv-0001 proto static 
+151.115.125.11 via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+151.115.125.3 via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+151.115.99.0/24 dev eno12399np0 proto kernel scope link src 151.115.99.251 metric 100 
+151.115.99.1 dev eno12399np0 proto dhcp scope link src 151.115.99.251 metric 100 
+2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591998sec pref medium
+broadcast 10.96.255.255 dev ovd-veth-bk table local proto kernel scope link src 10.96.0.2 
+broadcast 10.96.255.255 dev ovd-veth-cli table local proto kernel scope link src 10.96.0.1 
+broadcast 10.99.0.3 dev ovd-hv-0000 table local proto kernel scope link src 10.99.0.1 
+broadcast 10.99.0.31 dev ovd-hv-0007 table local proto kernel scope link src 10.99.0.29 
+broadcast 10.99.0.35 dev ovd-hv-0008 table local proto kernel scope link src 10.99.0.33 
+broadcast 10.99.0.7 dev ovd-hv-0001 table local proto kernel scope link src 10.99.0.5 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+broadcast 151.115.99.255 dev eno12399np0 table local proto kernel scope link src 151.115.99.251 
+default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 13sec pref medium
+default via 151.115.99.1 dev eno12399np0 proto dhcp src 151.115.99.251 metric 100 
+fe80::/64 dev eno12399np0 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0000 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0001 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0007 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-hv-0008 proto kernel metric 256 pref medium
+fe80::/64 dev ovd-veth-bk proto kernel metric 256 pref medium
+fe80::/64 dev ovd-veth-cli proto kernel metric 256 pref medium
+local 10.96.0.1 dev ovd-veth-cli table local proto kernel scope host src 10.96.0.1 
+local 10.96.0.2 dev ovd-veth-bk table local proto kernel scope host src 10.96.0.2 
+local 10.99.0.1 dev ovd-hv-0000 table local proto kernel scope host src 10.99.0.1 
+local 10.99.0.29 dev ovd-hv-0007 table local proto kernel scope host src 10.99.0.29 
+local 10.99.0.33 dev ovd-hv-0008 table local proto kernel scope host src 10.99.0.33 
+local 10.99.0.5 dev ovd-hv-0001 table local proto kernel scope host src 10.99.0.5 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+local 151.115.99.251 dev eno12399np0 table local proto kernel scope host src 151.115.99.251 
+local 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0 dev eno12399np0 table local proto kernel metric 0 pref medium
+local ::1 dev lo table local proto kernel metric 0 pref medium
+local fe80::1004:dbff:fe6b:b06c dev ovd-hv-0001 table local proto kernel metric 0 pref medium
+local fe80::1623:f2ff:fef4:50e0 dev eno12399np0 table local proto kernel metric 0 pref medium
+local fe80::30c3:d6ff:fe18:7f89 dev ovd-hv-0008 table local proto kernel metric 0 pref medium
+local fe80::4cc8:b5ff:fecd:da65 dev ovd-hv-0007 table local proto kernel metric 0 pref medium
+local fe80::d006:2bff:fea5:bf79 dev ovd-hv-0000 table local proto kernel metric 0 pref medium
+local fe80::d8a1:6ff:fecc:cb18 dev ovd-veth-cli table local proto kernel metric 0 pref medium
+local fe80::f0ed:bfff:feba:f468 dev ovd-veth-bk table local proto kernel metric 0 pref medium
+multicast ff00::/8 dev eno12399np0 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0000 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0001 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0007 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-hv-0008 table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-veth-bk table local proto kernel metric 256 pref medium
+multicast ff00::/8 dev ovd-veth-cli table local proto kernel metric 256 pref medium
