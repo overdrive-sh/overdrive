@@ -1,4 +1,4 @@
-# ADR-0133 — Keep applied BackendId identity association in Service Dataplane
+# ADR-0143 — Keep applied BackendId identity association in Service Dataplane
 
 ## Status
 
@@ -23,7 +23,7 @@ association.
 Only an identity belonging to an applied selectable Dataplane generation is
 readable. While reachable by a receipt, one BackendId never denotes a different
 `Backend.alloc`. Exact Reserved/commit/Applied transaction mechanics belong to
-ADR-0125 and the feature-delta Application contract, not this Domain ADR.
+ADR-0135 and the feature-delta Application contract, not this Domain ADR.
 
 ## Lifecycle Gate Ownership
 
@@ -47,14 +47,14 @@ Allocation Running, Service Stable, future requests or the receipt owner.
   that owns backend application.
 - Gateway-client mTLS receives exact selected identity without a userspace
   backend selector or racy observer reread.
-- Receipt correlation can evolve independently under ADR-0114.
+- Receipt correlation can evolve independently under ADR-0124.
 
 ## Links
 
 - [Domain identity event model](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-event-model-and-lifecycle-gates)
 - [Exact Application identity-publication contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
-- [Application identity-publication decision](adr-0125-commit-gated-backend-identity-publication.md)
-- [Application exact-peer decision](adr-0126-exact-peer-gateway-client-mtls.md)
-- [Domain receipt decision](adr-0114-dataplane-selection-receipt-ownership.md)
-- [System generation decision](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
+- [Application identity-publication decision](adr-0135-commit-gated-backend-identity-publication.md)
+- [Application exact-peer decision](adr-0136-exact-peer-gateway-client-mtls.md)
+- [Domain receipt decision](adr-0124-dataplane-selection-receipt-ownership.md)
+- [System generation decision](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

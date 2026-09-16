@@ -1,4 +1,4 @@
-# ADR-0125 — Publish backend identity only after Dataplane map commit
+# ADR-0135 — Publish backend identity only after Dataplane map commit
 
 ## Status
 
@@ -34,13 +34,13 @@ and reservation state before the guard releases.
   applied-identity publication is commit-guarded.
 - Failed application cannot poison identity visibility or later slot reuse.
 - Gateway Application and Service Dataplane generations remain independently
-  owned per ADR-0119.
+  owned per ADR-0129.
 
 ## Links
 
 - [Exact transaction contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4 Dataplane owner](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Receipt ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md)
-- [Domain applied-identity ADR-0133](adr-0133-dataplane-applied-backend-identity-association.md)
-- [System generation ADR-0119](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
+- [Receipt ADR-0134](adr-0134-gateway-connect-selected-backend-receipt.md)
+- [Domain applied-identity ADR-0143](adr-0143-dataplane-applied-backend-identity-association.md)
+- [System generation ADR-0129](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
 - ADR-0040 and ADR-0042

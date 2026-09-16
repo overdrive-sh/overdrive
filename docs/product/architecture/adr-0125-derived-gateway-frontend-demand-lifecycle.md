@@ -1,4 +1,4 @@
-# ADR-0115 — Model Gateway Frontend Demand as derived staged/current/draining state
+# ADR-0125 — Model Gateway Frontend Demand as derived staged/current/draining state
 
 ## Status
 
@@ -56,8 +56,8 @@ independent BPF-generation meaning.
 
 - [Domain demand lifecycle](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-event-model-and-lifecycle-gates)
 - [Exact Application owner/demand contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-application-component-decomposition)
-- [Application Route/owner decision](adr-0106-public-ingress-route-and-gateway-application-owner.md)
-- [Application demand-gated TEACH decision](adr-0123-demand-gated-path-a-service-map-teach.md)
-- [System packet-entry decision](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
-- [System consistency decision](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
+- [Application Route/owner decision](adr-0116-public-ingress-route-and-gateway-application-owner.md)
+- [Application demand-gated TEACH decision](adr-0133-demand-gated-path-a-service-map-teach.md)
+- [System packet-entry decision](adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+- [System consistency decision](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

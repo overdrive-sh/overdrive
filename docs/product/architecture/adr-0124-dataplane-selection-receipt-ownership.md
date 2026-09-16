@@ -1,4 +1,4 @@
-# ADR-0114 — Keep the gateway selection receipt in Service Dataplane
+# ADR-0124 — Keep the gateway selection receipt in Service Dataplane
 
 ## Status
 
@@ -20,8 +20,8 @@ neither it nor the connector owns receipt state or backend choice.
 
 The receipt is a per-connect correlation fact, never Route intent, a persisted
 backend cache or a userspace selection input. Applied BackendId identity
-publication is a separate Domain decision in ADR-0133. Exact cookie/ServiceKey,
-outcome and cleanup representation belongs to ADR-0124 and the linked feature
+publication is a separate Domain decision in ADR-0143. Exact cookie/ServiceKey,
+outcome and cleanup representation belongs to ADR-0134 and the linked feature
 contract.
 
 ## Lifecycle Gate Ownership
@@ -52,7 +52,7 @@ and XDP forwarding are unaffected.
 
 - [Domain connect event model](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-event-model-and-lifecycle-gates)
 - [Exact Application receipt contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
-- [Application receipt decision](adr-0124-gateway-connect-selected-backend-receipt.md)
-- [Domain applied-identity decision](adr-0133-dataplane-applied-backend-identity-association.md)
-- [System packet-entry decision](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+- [Application receipt decision](adr-0134-gateway-connect-selected-backend-receipt.md)
+- [Domain applied-identity decision](adr-0143-dataplane-applied-backend-identity-association.md)
+- [System packet-entry decision](adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

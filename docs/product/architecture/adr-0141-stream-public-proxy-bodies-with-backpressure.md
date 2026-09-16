@@ -1,4 +1,4 @@
-# ADR-0131 — Stream public proxy bodies with backpressure
+# ADR-0141 — Stream public proxy bodies with backpressure
 
 ## Status
 
@@ -29,11 +29,11 @@ body octets.
 
 - Slow clients and workloads naturally constrain their opposite proxy leg.
 - Finite no-progress and whole-request deadlines still bound stalled streams.
-- Retry/replay remains independently governed by ADR-0132.
+- Retry/replay remains independently governed by ADR-0142.
 
 ## Links
 
 - [Exact streaming contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4 HTTP stream](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Runtime limits ADR-0130](adr-0130-fixed-finite-public-runtime-limits.md)
-- [Single-attempt ADR-0132](adr-0132-single-upstream-attempt-per-public-request.md)
+- [Runtime limits ADR-0140](adr-0140-fixed-finite-public-runtime-limits.md)
+- [Single-attempt ADR-0142](adr-0142-single-upstream-attempt-per-public-request.md)

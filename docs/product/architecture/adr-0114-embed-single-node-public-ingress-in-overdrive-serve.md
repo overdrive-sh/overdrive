@@ -1,4 +1,4 @@
-# ADR-0104 — Embed the first public ingress gateway in `overdrive serve`
+# ADR-0114 — Embed the first public ingress gateway in `overdrive serve`
 
 ## Status
 
@@ -42,9 +42,9 @@ This ADR decides only node placement and the process failure domain.
 
 - [System decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-system-decisions)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [ADR-0106](adr-0106-public-ingress-route-and-gateway-application-owner.md)
-- [ADR-0117](adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md)
-- [ADR-0118](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
-- [ADR-0119](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
-- [ADR-0120](adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md)
-- [ADR-0121](adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md)
+- [ADR-0116](adr-0116-public-ingress-route-and-gateway-application-owner.md)
+- [ADR-0127](adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md)
+- [ADR-0128](adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+- [ADR-0129](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
+- [ADR-0130](adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md)
+- [ADR-0131](adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md)

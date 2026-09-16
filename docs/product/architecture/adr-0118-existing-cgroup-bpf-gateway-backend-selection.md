@@ -1,4 +1,4 @@
-# ADR-0108 — Keep gateway backend selection in the existing cgroup-BPF Dataplane
+# ADR-0118 — Keep gateway backend selection in the existing cgroup-BPF Dataplane
 
 ## Status
 
@@ -33,14 +33,14 @@ userspace backend selection. XDP wire ingress remains unchanged.
 - Existing unregistered cgroup traffic and XDP wire forwarding keep their
   current behavior.
 - Demand, selection receipt and applied-identity publication remain separate
-  decisions in ADR-0123, ADR-0124 and ADR-0125.
+  decisions in ADR-0133, ADR-0134 and ADR-0135.
 
 ## Links
 
 - [Exact Dataplane contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4 selection path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Demand ADR-0123](adr-0123-demand-gated-path-a-service-map-teach.md)
-- [Receipt ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md)
-- [Identity publication ADR-0125](adr-0125-commit-gated-backend-identity-publication.md)
-- [System packet-entry ADR-0118](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+- [Demand ADR-0133](adr-0133-demand-gated-path-a-service-map-teach.md)
+- [Receipt ADR-0134](adr-0134-gateway-connect-selected-backend-receipt.md)
+- [Identity publication ADR-0135](adr-0135-commit-gated-backend-identity-publication.md)
+- [System packet-entry ADR-0128](adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
 - ADR-0040, ADR-0042 and ADR-0053

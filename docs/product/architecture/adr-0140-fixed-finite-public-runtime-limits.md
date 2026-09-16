@@ -1,4 +1,4 @@
-# ADR-0130 — Use one fixed finite first-slice public runtime limit policy
+# ADR-0140 — Use one fixed finite first-slice public runtime limit policy
 
 ## Status
 
@@ -38,5 +38,5 @@ second limit source.
 
 - [Exact limit policy](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4 public runtime](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [HTTP/1.1 ADR-0127](adr-0127-public-http11-only.md)
-- [Streaming ADR-0131](adr-0131-stream-public-proxy-bodies-with-backpressure.md)
+- [HTTP/1.1 ADR-0137](adr-0137-public-http11-only.md)
+- [Streaming ADR-0141](adr-0141-stream-public-proxy-bodies-with-backpressure.md)

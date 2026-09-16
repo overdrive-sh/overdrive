@@ -12,12 +12,12 @@
 > Interaction mode: PROPOSE. Density: lean, Tier-1 `[REF]` only
 > (`explicit_override`; optional expansions were not emitted). Stage 3 pins the
 > public/config/persistence/application surfaces that current evidence supports.
-> System ADR-0104/0117–0121 resolve former `DESIGN-GAP-PIG-1` with
+> System ADR-0114/0127–0131 resolve former `DESIGN-GAP-PIG-1` with
 > node-embedded placement, acquisition-neutral certificate consumption,
 > demand-gated cgroup-BPF Service forwarding, independent Gateway/BPF
 > generations, the public-TLS→gateway-SVID-mTLS trust transition and narrow
-> public-listener gates. Route ADR-0105, Domain ADR-0112–0116/0133 and Application
-> ADR-0106–0111/0122–0132 pin the compatible downstream choices; exact API
+> public-listener gates. Route ADR-0115, Domain ADR-0122–0126/0143 and Application
+> ADR-0116–0121/0132–0142 pin the compatible downstream choices; exact API
 > contracts live only in the Application `[REF]` sections below. The complete cross-owner flow remains
 > `AT-PIG-E2E-1`, a production Tier-3 acceptance boundary—not a spike.
 
@@ -95,7 +95,7 @@ prose:
 | **Implemented fact** | The gateway surfaces are absent, but accepted foundations exist: ServiceMapHydrator partitions Path-A to neither map, same-host non-mesh to LOCAL_BACKEND_MAP and remote to SERVICE_MAP; `cgroup_connect4_service` fires for Path-A; shared Service maps and rustls chain/single-SPIFFE-SAN verification exist; the reserved `expected_peer`/mismatch contract is not exercised because current production always supplies `None`; allocation-keyed identity cannot represent the gateway unchanged. |
 | **Whitepaper** | Historical illustration only. It establishes no binding API, owner, ordering or traffic-path contract. |
 | **This SYSTEM proposal** | One `serve`-owned working gateway: IPv4-A/TCP/443 public TLS/HTTP; Public Route Set resolves exact Service Frontend; the gateway connector registers that frontend against its socket cookie with the Dataplane owner, then its `connect(2)` enters the already-attached `cgroup_connect4_service` hook; the hook selects from the existing `SERVICE_MAP` Maglev inner table and `BACKEND_MAP`, rewrites the destination, and records the actual `BackendId`; Dataplane joins that receipt to the exact applied `Backend.alloc`; gateway-held SVID mTLS pins that identity; no userspace selection. |
-| **Later DESIGN resolution** | Route ADR-0105 owns only the singleton Public Route Set. Domain ADR-0112–0116/0133 own custody/identity/receipt/applied-identity/demand/state-model decisions. Application ADR-0106–0111/0122–0132 separately own Route/application admission, custody, preserve-old replacement, demand, BPF selection, receipt, identity publication, Gateway SVID, exact-peer mTLS, public TLS/HTTP/routing/header/limit/streaming/attempt policy and operator status. Exact schemas, signatures, config, records/codecs, errors and crate/module contracts live only in the Application `[REF]` sections below. SYSTEM copies use those names without redefining them. |
+| **Later DESIGN resolution** | Route ADR-0115 owns only the singleton Public Route Set. Domain ADR-0122–0126/0143 own custody/identity/receipt/applied-identity/demand/state-model decisions. Application ADR-0116–0121/0132–0142 separately own Route/application admission, custody, preserve-old replacement, demand, BPF selection, receipt, identity publication, Gateway SVID, exact-peer mTLS, public TLS/HTTP/routing/header/limit/streaming/attempt policy and operator status. Exact schemas, signatures, config, records/codecs, errors and crate/module contracts live only in the Application `[REF]` sections below. SYSTEM copies use those names without redefining them. |
 
 The research's operator-supplied-certificate recommendation is restored by the
 latest explicit scope ruling. Its userspace `ServiceBackendRow` selection
@@ -182,8 +182,8 @@ surface authorizes numbers here.
 | **D. Userspace backend selection** | Gateway watches `ServiceBackendRow` and round-robins. | Makes identity available before connect. | Forbidden second LB; duplicates ServiceMapHydrator/BPF choice and can diverge. | Rejected by constraint |
 
 **Decisions D-SYS-6/D-SYS-7:** select Option A as the smallest working packet-
-entry topology; [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
-owns that choice. Separately, D-SYS-3/[ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md)
+entry topology; [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+owns that choice. Separately, D-SYS-3/[ADR-0127](../../product/architecture/adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md)
 keeps manual Public Certified Key input first and GH #57 on the same
 acquisition-neutral custody boundary.
 
@@ -205,7 +205,7 @@ acquisition-neutral custody boundary.
   with Public Route Set + resolved Service Frontend as one atomic Gateway
   Application admission object.
   Manual operator input is the first producer.
-  Gateway listeners/handlers never read manual file paths or raw PEM. ADR-0107
+  Gateway listeners/handlers never read manual file paths or raw PEM. ADR-0117
   pins the storage/API shape. ACME acquisition/renewal is excluded under GH #57
   and must later call the same producer-neutral install boundary.
 - **D-SYS-4 — Three independent trust domains:** the ephemeral operator HTTPS
@@ -285,8 +285,8 @@ acquisition-neutral custody boundary.
   separately exposes active application/custody and
   relevant BPF hydration status as `GatewayStatusResponse` over operator-mTLS
   `GET /v1/gateway/status` (200 when readable, 500 on observation read error).
-  receipt [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
-  selected identity [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md)
+  receipt [ADR-0124](../../product/architecture/adr-0124-dataplane-selection-receipt-ownership.md),
+  selected identity [ADR-0143](../../product/architecture/adr-0143-dataplane-applied-backend-identity-association.md)
   and the Application HTTP contract own the exact cause/error mapping.
 - **D-SYS-11 — Restart/drain:** boot rebuilds ServiceMapHydrator state and the
   Dataplane applied-id association, then may run the sentinel-ServiceKey
@@ -305,7 +305,7 @@ The canonical Level-1 view is maintained once in
 [Public ingress gateway canonical C4](../../product/architecture/c4-diagrams.md#public-ingress-gateway-canonical-c4).
 It shows the external user and operator boundaries, operator-managed certified-
 key files, public IPv4 DNS/TCP-443 reachability, the embedded Overdrive node and
-the identity-unaware Service workload. System ADR-0104/0117–0121 own the node,
+the identity-unaware Service workload. System ADR-0114/0127–0131 own the node,
 credential-consumption, packet-entry, consistency, trust and listener-gate
 choices; this feature delta does not duplicate the diagram source.
 
@@ -595,7 +595,7 @@ These are responsibilities, not approved Rust types or module names.
 |---|---|---|
 | `overdrive serve` | Compose/probe prerequisites, bind TCP/443, own runtime/drain | Existing production entry point |
 | `overdrive deploy <SERVICE_SPEC>` | Produce the existing Service/listener/workload intent and resulting ServiceLifecycle backend observations | Existing surface unchanged |
-| `overdrive deploy <ROUTE_SPEC>` | Produce `PublicRouteSetV1` under [ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md) through the [exact Application driving-port contract](#wave-design--ref-exact-driving-and-driven-ports) | Required operator journey; workload deploy arms remain unchanged |
+| `overdrive deploy <ROUTE_SPEC>` | Produce `PublicRouteSetV1` under [ADR-0116](../../product/architecture/adr-0116-public-ingress-route-and-gateway-application-owner.md) through the [exact Application driving-port contract](#wave-design--ref-exact-driving-and-driven-ports) | Required operator journey; workload deploy arms remain unchanged |
 | Operator-mTLS `GET /v1/gateway/status` | `GatewayControl` reads active application/custody plus relevant BPF hydration status on control-plane HTTPS | `GatewayStatusResponse`; 200 when observations are readable, 500 on read error; separate from public response status |
 | Public TLS + HTTP/1.1 TCP/443 | Serve external users | Active after prerequisite gate |
 | Manual certified-key publication | `ManualCertifiedKeySource` validates files and calls producer-neutral `PublicCertifiedKeyCustodyHandle::install` | Custody builds+seals, persists complete `PublicCertifiedKeyV1`, publishes Current/Usable, then writes redacted status; handlers/status never read paths/raw PEM |
@@ -614,7 +614,7 @@ These are responsibilities, not approved Rust types or module names.
 | Public TLS/HTTP | rustls/hyper | TLS 1.3 + bounded HTTP/1.1 |
 | Gateway SVID lifecycle/hold/use | `GatewaySvidLifecycle` + action executor + `GatewayIdentitySlot` | `ensure_current` before bind, restart/near-expiry reissue, and `disable_after_drain`; no public/private-material getter |
 | Selected-peer mTLS | `HostGatewayClientMtls` implementing `GatewayClientMtls` | Present `GatewayIdentitySlot` SVID and require exact receipt-selected workload SAN; transparent kTLS/`MtlsEnforcement` is not this L7 client's API |
-| Clock/entropy | Existing injected `Clock` plus `PublicCertifiedKeyAeadCodec` ring `SystemRandom` | ADR-0107/0122, ADR-0109/0126 and ADR-0110/0127–0132 own the custody, SVID/mTLS and public-runtime choices; exact clock/entropy contracts are in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction), [Gateway Application/status/HTTP](#wave-design--ref-gateway-application-status-and-http-contract), and [gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration) |
+| Clock/entropy | Existing injected `Clock` plus `PublicCertifiedKeyAeadCodec` ring `SystemRandom` | ADR-0117/0132, ADR-0119/0136 and ADR-0120/0137–0142 own the custody, SVID/mTLS and public-runtime choices; exact clock/entropy contracts are in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction), [Gateway Application/status/HTTP](#wave-design--ref-gateway-application-status-and-http-contract), and [gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration) |
 
 ## Wave: DESIGN / [REF] Technology choices
 
@@ -656,11 +656,11 @@ that justifies them.
 | Existing component | File / accepted record | Overlap | Decision | Justification |
 |---|---|---|---|---|
 | `run_server_with_obs_and_drivers` / `ServerHandle` | `crates/overdrive-control-plane/src/lib.rs` | Composition, probes, task ownership, bounded shutdown | **EXTEND** | The gateway is node infrastructure in the same process/failure domain; a second supervisor duplicates lifecycle ownership. |
-| `Kek`/typed-codec protection pattern | ADR-0063/0048, `overdrive-host::ca` | Protect canonical secret input | **EXTEND per [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md)** | Exact `PublicCertifiedKeyAeadCodec`/record contracts live in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction); the private AEAD engine is reused with distinct KEK/HKDF/AAD and public Web-PKI remains separate from both private CAs. |
+| `Kek`/typed-codec protection pattern | ADR-0063/0048, `overdrive-host::ca` | Protect canonical secret input | **EXTEND per [ADR-0117](../../product/architecture/adr-0117-producer-neutral-public-certified-key-custody.md)** | Exact `PublicCertifiedKeyAeadCodec`/record contracts live in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction); the private AEAD engine is reused with distinct KEK/HKDF/AAD and public Web-PKI remains separate from both private CAs. |
 | `IdentityMgr` / `IdentityRead` | ADR-0067 | Allocation-keyed holder pattern | **REUSE PATTERN, CREATE SEPARATE GATEWAY SLOT** | Avoids corrupting AllocationId API while reusing locking/redaction/bundle discipline |
 | `ServiceLifecycle` / `ServiceBackendRow` | ADR-0101, `service_lifecycle.rs` | Backend membership and eligibility | **REUSE AS INDIRECT AUTHORITY** | Sole health publisher; gateway is not a backend-row consumer. |
 | `ServiceMapHydrator` | ADR-0042/0101/0053 | Sole backend application owner | **EXTEND DEMAND-GATED TEACH** | Replace Path-A GATE only for exact live gateway frontend demand; apply its Path-A set to `SERVICE_MAP` plus Dataplane identity association; other Path-A remains gated and gateway still does not consume rows |
-| `ListenerFactStore` | ADR-0062 | ServiceId-to-listener projection and workload cleanup index | **DO NOT EXTEND** | [ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md) owns Route/application resolution; the [exact driven-port contract](#wave-design--ref-exact-driving-and-driven-ports) pins `IntentServiceFrontendResolver` over `WorkloadIntent` + `ServiceVipView`, because ListenerFactStore has the wrong derived key/absence semantics. |
+| `ListenerFactStore` | ADR-0062 | ServiceId-to-listener projection and workload cleanup index | **DO NOT EXTEND** | [ADR-0116](../../product/architecture/adr-0116-public-ingress-route-and-gateway-application-owner.md) owns Route/application resolution; the [exact driven-port contract](#wave-design--ref-exact-driving-and-driven-ports) pins `IntentServiceFrontendResolver` over `WorkloadIntent` + `ServiceVipView`, because ListenerFactStore has the wrong derived key/absence semantics. |
 | mTLS `client_config`/SPIFFE verifier + reserved `expected_peer` contract | ADR-0069/0071, `mtls/tls_config.rs`, `mtls_enforcement.rs` | rustls chain validation, one-SPIFFE-URI parsing, required intended-peer shape | **REUSE VERIFIER; EXTEND EQUALITY; CREATE GATEWAY-CLIENT ENTRY UNDER SAME OWNER** | Current production is authn-only (`expected_peer=None`) and the public `MtlsEnforcement` port requires an intercepted leg + `AllocationId`. The L7 gateway must not fabricate either or route through the transparent kTLS pump; its new client entry consumes gateway-held material + receipt-selected identity and requires exact SAN equality in the reused verifier. |
 | `rustls` + `hyper` server experience | `tls_bootstrap`, control-plane listener | TLS config/server serving/drain mechanics | **REUSE LIBRARIES/PATTERN** | Public cert trust/authority and HTTP proxy behavior are new; the operator CA/router are not reusable identities or handlers. |
 | `cgroup_connect4_service` + shared Service maps | ADR-0053/0040 | Host connect-time destination rewrite; ancestor attach already covers `serve` | **EXTEND TEACH + REGISTERED RECEIPT** | Empirically fires for Path-A. Cookie-scoped intent selects the new Service-map arm; unregistered sockets preserve current `LOCAL_BACKEND_MAP` behavior; no child cgroup/netns/XDP entry is needed. |
@@ -674,33 +674,33 @@ IntentStore/ObservationStore.
 
 | ID | Locked system-level verdict | Owning decision record(s) |
 |---|---|---|
-| D-SYS-1 | `serve` owns working in-process gateway, connector, listener and drain | [ADR-0104](../../product/architecture/adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md) |
-| D-SYS-2 | IPv4-A/TCP/443 binds after initial application/BPF/identity prerequisites | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) |
-| D-SYS-3 | `PublicCertifiedKeyCustody` validates/builds+seals, persists complete `PublicCertifiedKeyV1`, atomically publishes the opaque Current/Usable snapshot, then writes `PublicCertifiedKeyStatusRowV1`; `GatewayApplicationOwner` atomically publishes Route/frontend/resolver admission and writes `GatewayApplicationStatusRowV1`; ACME #57 later uses the same install boundary | System boundary [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md); custody [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md); replacement [ADR-0122](../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md) |
-| D-SYS-4 | Public Web-PKI certified key, operator HTTPS CA, and internal workload/gateway SPIFFE CA remain three distinct credential domains | [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md), [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md) |
-| D-SYS-5 | Dedicated gateway identity lifecycle/holder owns non-allocation SVID issue/hold/use/reissue/drop | System trust [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md); realization [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md) |
-| D-SYS-6 | Connector registers `(SO_COOKIE, ServiceKey)` with Dataplane, then the already-attached cgroup BPF hook selects/rewrites through `SERVICE_MAP` Maglev inner + `BACKEND_MAP` and records actual BackendId | System packet entry [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md); selection [ADR-0108](../../product/architecture/adr-0108-existing-cgroup-bpf-gateway-backend-selection.md); receipt [ADR-0124](../../product/architecture/adr-0124-gateway-connect-selected-backend-receipt.md) |
-| D-SYS-7 | Gateway Application publishes only exact live-frontend demand; ServiceLifecycle publishes eligibility; ServiceMapHydrator demand-gates Path-A TEACH; under the Dataplane guard identity is Reserved before BPF work, the outer swap commits selection, then identity becomes Applied; gateway has no backend watch/cursor | [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md), [ADR-0123](../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md), [ADR-0125](../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md) |
-| D-SYS-8 | Gateway Applied and BPF applied generations remain independent; the transient receipt pins actual BackendId and its identity read blocks on the commit guard until the process-lifetime association is Applied | [ADR-0119](../../product/architecture/adr-0119-keep-gateway-and-service-dataplane-generations-independent.md) |
-| D-SYS-9 | Strict HTTP/1.1; one BPF-owned frontend handoff; no retry/replay/userspace LB | HTTP [ADR-0127](../../product/architecture/adr-0127-public-http11-only.md); single attempt [ADR-0132](../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md); packet entry [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) |
-| D-SYS-10 | Public 404 Route miss; only `NoBackend`, including an empty eligible set/no selectable BPF backend, is 503; selected-receipt identity missing/mismatch and connect/receipt/mTLS/upstream failures are 502; separate operator-mTLS `GatewayControl` status reads active application/custody/hydration observations as `GatewayStatusResponse` 200/500 | Route [ADR-0128](../../product/architecture/adr-0128-canonical-public-route-match-key.md); attempt/error [ADR-0132](../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md); status [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md); receipt [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md); applied identity [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md) |
-| D-SYS-11 | Boot sentinel `NoBackend` may prove connect/receipt capability before Gateway Identity Current; actual-frontend `NoBackend` is bind-valid/503-capable, while `Selected` waits for Gateway Identity Current and exact-peer mTLS; graceful drain joins connector/listener and clears receipts | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) |
+| D-SYS-1 | `serve` owns working in-process gateway, connector, listener and drain | [ADR-0114](../../product/architecture/adr-0114-embed-single-node-public-ingress-in-overdrive-serve.md) |
+| D-SYS-2 | IPv4-A/TCP/443 binds after initial application/BPF/identity prerequisites | [ADR-0131](../../product/architecture/adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md) |
+| D-SYS-3 | `PublicCertifiedKeyCustody` validates/builds+seals, persists complete `PublicCertifiedKeyV1`, atomically publishes the opaque Current/Usable snapshot, then writes `PublicCertifiedKeyStatusRowV1`; `GatewayApplicationOwner` atomically publishes Route/frontend/resolver admission and writes `GatewayApplicationStatusRowV1`; ACME #57 later uses the same install boundary | System boundary [ADR-0127](../../product/architecture/adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md); custody [ADR-0117](../../product/architecture/adr-0117-producer-neutral-public-certified-key-custody.md); replacement [ADR-0132](../../product/architecture/adr-0132-preserve-last-usable-public-certified-key-replacement.md) |
+| D-SYS-4 | Public Web-PKI certified key, operator HTTPS CA, and internal workload/gateway SPIFFE CA remain three distinct credential domains | [ADR-0127](../../product/architecture/adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md), [ADR-0130](../../product/architecture/adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md) |
+| D-SYS-5 | Dedicated gateway identity lifecycle/holder owns non-allocation SVID issue/hold/use/reissue/drop | System trust [ADR-0130](../../product/architecture/adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md); realization [ADR-0119](../../product/architecture/adr-0119-dedicated-gateway-svid-identity-lifecycle.md) |
+| D-SYS-6 | Connector registers `(SO_COOKIE, ServiceKey)` with Dataplane, then the already-attached cgroup BPF hook selects/rewrites through `SERVICE_MAP` Maglev inner + `BACKEND_MAP` and records actual BackendId | System packet entry [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md); selection [ADR-0118](../../product/architecture/adr-0118-existing-cgroup-bpf-gateway-backend-selection.md); receipt [ADR-0134](../../product/architecture/adr-0134-gateway-connect-selected-backend-receipt.md) |
+| D-SYS-7 | Gateway Application publishes only exact live-frontend demand; ServiceLifecycle publishes eligibility; ServiceMapHydrator demand-gates Path-A TEACH; under the Dataplane guard identity is Reserved before BPF work, the outer swap commits selection, then identity becomes Applied; gateway has no backend watch/cursor | [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md), [ADR-0133](../../product/architecture/adr-0133-demand-gated-path-a-service-map-teach.md), [ADR-0135](../../product/architecture/adr-0135-commit-gated-backend-identity-publication.md) |
+| D-SYS-8 | Gateway Applied and BPF applied generations remain independent; the transient receipt pins actual BackendId and its identity read blocks on the commit guard until the process-lifetime association is Applied | [ADR-0129](../../product/architecture/adr-0129-keep-gateway-and-service-dataplane-generations-independent.md) |
+| D-SYS-9 | Strict HTTP/1.1; one BPF-owned frontend handoff; no retry/replay/userspace LB | HTTP [ADR-0137](../../product/architecture/adr-0137-public-http11-only.md); single attempt [ADR-0142](../../product/architecture/adr-0142-single-upstream-attempt-per-public-request.md); packet entry [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) |
+| D-SYS-10 | Public 404 Route miss; only `NoBackend`, including an empty eligible set/no selectable BPF backend, is 503; selected-receipt identity missing/mismatch and connect/receipt/mTLS/upstream failures are 502; separate operator-mTLS `GatewayControl` status reads active application/custody/hydration observations as `GatewayStatusResponse` 200/500 | Route [ADR-0138](../../product/architecture/adr-0138-canonical-public-route-match-key.md); attempt/error [ADR-0142](../../product/architecture/adr-0142-single-upstream-attempt-per-public-request.md); status [ADR-0121](../../product/architecture/adr-0121-redacted-operator-gateway-status.md); receipt [ADR-0124](../../product/architecture/adr-0124-dataplane-selection-receipt-ownership.md); applied identity [ADR-0143](../../product/architecture/adr-0143-dataplane-applied-backend-identity-association.md) |
+| D-SYS-11 | Boot sentinel `NoBackend` may prove connect/receipt capability before Gateway Identity Current; actual-frontend `NoBackend` is bind-valid/503-capable, while `Selected` waits for Gateway Identity Current and exact-peer mTLS; graceful drain joins connector/listener and clears receipts | [ADR-0131](../../product/architecture/adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md) |
 
 ## Wave: DESIGN / [REF] System traceability
 
 | System obligation | Current authority/evidence | Status |
 |---|---|---|
-| Node-agent-embedded `hyper` + `rustls`, in-process BPF access | GH #54 (no comments) + [ADR-0104](../../product/architecture/adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md) | Feature intent plus approved single-node/process placement; gateway absent in current production |
-| Production public trust from manual Public Certified Key producer | Explicit user ruling + [ADR-0117](../../product/architecture/adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md) + [ADR-0107](../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md) + [ADR-0122](../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md) | `ManualCertifiedKeySource` → `PublicCertifiedKeyCustodyHandle::install` → validate/build+seal → persisted `PublicCertifiedKeyV1` → Current/Usable opaque resolver publication → redacted status |
-| Gateway observability | [ADR-0111](../../product/architecture/adr-0111-redacted-operator-gateway-status.md) | `GatewayControl` uses the [exact Application status contract](#wave-design--ref-gateway-application-status-and-http-contract) for ObservationStore point reads of `GatewayApplicationStatusRowV1`/`PublicCertifiedKeyStatusRowV1` and relevant hydration; 200/500, secrets/raw dataplane failure strings omitted |
+| Node-agent-embedded `hyper` + `rustls`, in-process BPF access | GH #54 (no comments) + [ADR-0114](../../product/architecture/adr-0114-embed-single-node-public-ingress-in-overdrive-serve.md) | Feature intent plus approved single-node/process placement; gateway absent in current production |
+| Production public trust from manual Public Certified Key producer | Explicit user ruling + [ADR-0127](../../product/architecture/adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md) + [ADR-0117](../../product/architecture/adr-0117-producer-neutral-public-certified-key-custody.md) + [ADR-0132](../../product/architecture/adr-0132-preserve-last-usable-public-certified-key-replacement.md) | `ManualCertifiedKeySource` → `PublicCertifiedKeyCustodyHandle::install` → validate/build+seal → persisted `PublicCertifiedKeyV1` → Current/Usable opaque resolver publication → redacted status |
+| Gateway observability | [ADR-0121](../../product/architecture/adr-0121-redacted-operator-gateway-status.md) | `GatewayControl` uses the [exact Application status contract](#wave-design--ref-gateway-application-status-and-http-contract) for ObservationStore point reads of `GatewayApplicationStatusRowV1`/`PublicCertifiedKeyStatusRowV1` and relevant hydration; 200/500, secrets/raw dataplane failure strings omitted |
 | ACME acquisition/renewal | Existing GH #57 | Excluded from first slice; additive producer only |
-| Route resolves exact Service frontend | ADR-0049/0060/0062 + Route [ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md) + Application [ADR-0106](../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md) | Existing inputs; approved Route/application resolution boundary (2026-09-13) |
+| Route resolves exact Service frontend | ADR-0049/0060/0062 + Route [ADR-0115](../../product/architecture/adr-0115-singleton-public-route-set-aggregate.md) + Application [ADR-0116](../../product/architecture/adr-0116-public-ingress-route-and-gateway-application-owner.md) | Existing inputs; approved Route/application resolution boundary (2026-09-13) |
 | Backend Eligibility publication | ADR-0101 / ServiceLifecycle | Existing sole owner; unchanged |
-| Backend-set application | ADR-0042/0101/0053 + [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) + [ADR-0123](../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md) + [ADR-0125](../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md) | ServiceMapHydrator remains sole owner; exact Gateway Application live-frontend demand triggers Path-A TEACH while undemanded Path-A stays gated; Dataplane records exact applied identity association |
-| Backend selection/DNAT | ADR-0053 cgroup hook + ADR-0040 maps + [ADR-0118](../../product/architecture/adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) | Existing ancestor hook gains a registered gateway-connect arm over the existing Maglev table and a cookie-keyed outcome; XDP wire path remains unchanged |
-| Gateway/BPF consistency | [ADR-0119](../../product/architecture/adr-0119-keep-gateway-and-service-dataplane-generations-independent.md) | Gateway Applied and BPF Hydrated remain independently owned; one connect receipt correlates actual selection without a unified generation |
-| Gateway SVID and selected-peer verification | ADR-0063/0067/0069/0071 + [ADR-0120](../../product/architecture/adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md) + [ADR-0109](../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md) + [ADR-0126](../../product/architecture/adr-0126-exact-peer-gateway-client-mtls.md) | `GatewaySvidLifecycle`/`GatewayIdentitySlot` + Dataplane selected-id owner + `HostGatewayClientMtls`; exact signatures live in [Application gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration), with SAN equality and no fabricated Allocation identity/private-material getter |
-| Public listener gates | [ADR-0121](../../product/architecture/adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md) | Gateway-owned bind/admission prerequisites never redefine Allocation Running, Service Stable, Backend Eligibility, BPF Hydrated or operator HTTPS readiness |
+| Backend-set application | ADR-0042/0101/0053 + [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) + [ADR-0133](../../product/architecture/adr-0133-demand-gated-path-a-service-map-teach.md) + [ADR-0135](../../product/architecture/adr-0135-commit-gated-backend-identity-publication.md) | ServiceMapHydrator remains sole owner; exact Gateway Application live-frontend demand triggers Path-A TEACH while undemanded Path-A stays gated; Dataplane records exact applied identity association |
+| Backend selection/DNAT | ADR-0053 cgroup hook + ADR-0040 maps + [ADR-0128](../../product/architecture/adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md) | Existing ancestor hook gains a registered gateway-connect arm over the existing Maglev table and a cookie-keyed outcome; XDP wire path remains unchanged |
+| Gateway/BPF consistency | [ADR-0129](../../product/architecture/adr-0129-keep-gateway-and-service-dataplane-generations-independent.md) | Gateway Applied and BPF Hydrated remain independently owned; one connect receipt correlates actual selection without a unified generation |
+| Gateway SVID and selected-peer verification | ADR-0063/0067/0069/0071 + [ADR-0130](../../product/architecture/adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md) + [ADR-0119](../../product/architecture/adr-0119-dedicated-gateway-svid-identity-lifecycle.md) + [ADR-0136](../../product/architecture/adr-0136-exact-peer-gateway-client-mtls.md) | `GatewaySvidLifecycle`/`GatewayIdentitySlot` + Dataplane selected-id owner + `HostGatewayClientMtls`; exact signatures live in [Application gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration), with SAN equality and no fabricated Allocation identity/private-material getter |
+| Public listener gates | [ADR-0131](../../product/architecture/adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md) | Gateway-owned bind/admission prerequisites never redefine Allocation Running, Service Stable, Backend Eligibility, BPF Hydrated or operator HTTPS readiness |
 | Whitepaper §11 | Historical prose | Context only; non-authoritative |
 
 ## Wave: DESIGN / [REF] Handoff and open questions
@@ -816,14 +816,14 @@ crafter to invent surface and not optional feature deferrals.
 ## Wave: DESIGN / [REF] Domain decisions
 
 Stage 2 preserves D-SYS-1…D-SYS-11 and records the Route choice in
-[ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md)
+[ADR-0115](../../product/architecture/adr-0115-singleton-public-route-set-aggregate.md)
 plus independently reversible Domain choices in
-[ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md),
-[ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md),
-[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
-[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md),
-[ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md)
-and [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md),
+[ADR-0122](../../product/architecture/adr-0122-public-certified-key-custody-domain-boundary.md),
+[ADR-0123](../../product/architecture/adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md),
+[ADR-0124](../../product/architecture/adr-0124-dataplane-selection-receipt-ownership.md),
+[ADR-0125](../../product/architecture/adr-0125-derived-gateway-frontend-demand-lifecycle.md),
+[ADR-0126](../../product/architecture/adr-0126-state-based-public-ingress-domain-ownership.md)
+and [ADR-0143](../../product/architecture/adr-0143-dataplane-applied-backend-identity-association.md),
 all **Approved — user ratification 2026-09-13**. GitHub issue #54 plus the user's corrections govern; the
 whitepaper is contextual, the missing DISCUSS/SPIKE artifacts are not invented,
 and no absent story, KPI or capacity claim is inferred.
@@ -833,16 +833,16 @@ and no absent story, KPI or capacity claim is inferred.
 | **D-DOM-1** | Create **Public Ingress** and **Public Certified-Key Custody** bounded contexts; extend existing **Service Dataplane** and **Workload Identity** contexts. Public Route Set, Public Certified Key and Gateway Identity Slot are the only new aggregates. |
 | **D-DOM-2** | A Route has one exact Public Hostname, one exact-or-segment-prefix Path Match, one exact TCP Service Listener Reference and one Public Certified-Key Reference. |
 | **D-DOM-3** | Route intent references the stable Service listener as `(WorkloadId, port, tcp)`. Resolution yields the exact existing Service Frontend `(ServiceVip, port, tcp)`; the Route never stores derived `ServiceId`, VIP, backend address, Allocation ID or SPIFFE ID. |
-| **D-DOM-4** | [ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md): the singleton Public Route Set makes first-slice one-Route cardinality/ownership atomic on one aggregate key. A different Route ID cannot claim an occupied slot; it is rejected rather than last-write-wins. |
-| **D-DOM-5** | [ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md): create the distinct **Public Certified-Key Custody** context and **Public Certified Key** aggregate so Route, operator HTTPS, internal SPIFFE and allocation `IdentityMgr` remain non-owners. Protection/replacement/currentness mechanics belong to their decision-specific System/Application records and exact feature contract. |
+| **D-DOM-4** | [ADR-0115](../../product/architecture/adr-0115-singleton-public-route-set-aggregate.md): the singleton Public Route Set makes first-slice one-Route cardinality/ownership atomic on one aggregate key. A different Route ID cannot claim an occupied slot; it is rejected rather than last-write-wins. |
+| **D-DOM-5** | [ADR-0122](../../product/architecture/adr-0122-public-certified-key-custody-domain-boundary.md): create the distinct **Public Certified-Key Custody** context and **Public Certified Key** aggregate so Route, operator HTTPS, internal SPIFFE and allocation `IdentityMgr` remain non-owners. Protection/replacement/currentness mechanics belong to their decision-specific System/Application records and exact feature contract. |
 | **D-DOM-6** | Manual operator input is the sole first-slice Certified Key producer. ACME account/order/challenge/renewal and TCP/80 are absent; GH #57 may later invoke the same custody command without changing runtime consumption. |
-| **D-DOM-7** | [ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md): Workload Identity owns a dedicated single-slot **Gateway Identity Slot** and **Gateway Identity Lifecycle** for `spiffe://overdrive.local/gateway/<node-id>`. It reuses issue/audit/profile policy, renews/restarts/drops explicitly, permits only gateway-client mTLS use and never fabricates `AllocationId`. |
-| **D-DOM-8** | [ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md): `GatewayApplicationOwner` atomically publishes one Route/frontend/opaque-resolver generation and derives exact **Staged**, **Current** and **Draining Gateway Frontend Demand**. Demand is not persisted and carries no backend rows/candidates. |
-| **D-DOM-9** | ServiceLifecycle remains sole Backend Eligibility publisher and existing Service Dataplane/BPF remains the backend selector. [ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md) assigns only the transient BPF Selection Receipt to Service Dataplane. The gateway never selects or reads backend rows/maps. |
+| **D-DOM-7** | [ADR-0123](../../product/architecture/adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md): Workload Identity owns a dedicated single-slot **Gateway Identity Slot** and **Gateway Identity Lifecycle** for `spiffe://overdrive.local/gateway/<node-id>`. It reuses issue/audit/profile policy, renews/restarts/drops explicitly, permits only gateway-client mTLS use and never fabricates `AllocationId`. |
+| **D-DOM-8** | [ADR-0125](../../product/architecture/adr-0125-derived-gateway-frontend-demand-lifecycle.md): `GatewayApplicationOwner` atomically publishes one Route/frontend/opaque-resolver generation and derives exact **Staged**, **Current** and **Draining Gateway Frontend Demand**. Demand is not persisted and carries no backend rows/candidates. |
+| **D-DOM-9** | ServiceLifecycle remains sole Backend Eligibility publisher and existing Service Dataplane/BPF remains the backend selector. [ADR-0124](../../product/architecture/adr-0124-dataplane-selection-receipt-ownership.md) assigns only the transient BPF Selection Receipt to Service Dataplane. The gateway never selects or reads backend rows/maps. |
 | **D-DOM-10** | A Gateway Connect Intent is exactly `(Socket Cookie, ServiceKey)`. `cgroup_connect4_service` chooses through existing `SERVICE_MAP` Maglev + `BACKEND_MAP`; its receipt is `Selected(BackendId)` or `NoBackend`. This host-connect path is distinct from unchanged XDP wire forwarding. |
-| **D-DOM-11** | [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md): Selected Backend Identity is the receipt's `BackendId` resolved through Service Dataplane's exact Applied association. Gateway-client rustls presents the Gateway SVID and requires exact peer SPIFFE SAN equality before body delivery. |
+| **D-DOM-11** | [ADR-0143](../../product/architecture/adr-0143-dataplane-applied-backend-identity-association.md): Selected Backend Identity is the receipt's `BackendId` resolved through Service Dataplane's exact Applied association. Gateway-client rustls presents the Gateway SVID and requires exact peer SPIFFE SAN equality before body delivery. |
 | **D-DOM-12** | `Route Accepted`, `References Resolved`, `Certified Key Usable`, `Gateway Identity Current`, `Gateway Frontend Demand Applied`, `Gateway Applied Generation`, `BPF Hydrated`, `Public Listener Bound` and `Selected Peer Authenticated` are distinct owned promises; none is shorthand for `Ready`/`Healthy`/`Programmed`. |
-| **D-DOM-13** | [ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md): Public Route Set, Public Certified Key and Gateway Identity Slot are state-based; frontend demand, BackendId identity association and connect receipts are derived/process-local state. No Event Sourcing, CQRS subsystem, ACME workflow, new deployed process or userspace load balancer is introduced. |
+| **D-DOM-13** | [ADR-0126](../../product/architecture/adr-0126-state-based-public-ingress-domain-ownership.md): Public Route Set, Public Certified Key and Gateway Identity Slot are state-based; frontend demand, BackendId identity association and connect receipts are derived/process-local state. No Event Sourcing, CQRS subsystem, ACME workflow, new deployed process or userspace load balancer is introduced. |
 
 ## Wave: DESIGN / [REF] Bounded contexts and context map
 
@@ -1114,20 +1114,20 @@ introduced.
 | Direct currentness; no temporal query; transient demand/receipts die on restart | State-based aggregates + reconcilers + derived views, reusing Intent/Observation/View boundaries | Event streams require secret/receipt replay, retention/upcasting and cross-owner ordering; CQRS adds projection lag and another source without scale/query need |
 
 Detailed decision-specific trade-offs are in Route
-[ADR-0105](../../product/architecture/adr-0105-singleton-public-route-set-aggregate.md)
+[ADR-0115](../../product/architecture/adr-0115-singleton-public-route-set-aggregate.md)
 and Domain
-[ADR-0112](../../product/architecture/adr-0112-public-certified-key-custody-domain-boundary.md),
-[ADR-0113](../../product/architecture/adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md),
-[ADR-0114](../../product/architecture/adr-0114-dataplane-selection-receipt-ownership.md),
-[ADR-0115](../../product/architecture/adr-0115-derived-gateway-frontend-demand-lifecycle.md),
-[ADR-0116](../../product/architecture/adr-0116-state-based-public-ingress-domain-ownership.md)
-and [ADR-0133](../../product/architecture/adr-0133-dataplane-applied-backend-identity-association.md).
+[ADR-0122](../../product/architecture/adr-0122-public-certified-key-custody-domain-boundary.md),
+[ADR-0123](../../product/architecture/adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md),
+[ADR-0124](../../product/architecture/adr-0124-dataplane-selection-receipt-ownership.md),
+[ADR-0125](../../product/architecture/adr-0125-derived-gateway-frontend-demand-lifecycle.md),
+[ADR-0126](../../product/architecture/adr-0126-state-based-public-ingress-domain-ownership.md)
+and [ADR-0143](../../product/architecture/adr-0143-dataplane-applied-backend-identity-association.md).
 None changes manual certificate first, later GH #57 ACME, BPF-owned selection,
 exact-peer mTLS or the active walking skeleton.
 
 ## Wave: DESIGN / [REF] Active flow and production acceptance handoff
 
-System ADR-0104/0117–0121 resolve the former `DESIGN-GAP-PIG-1`; it is not a remaining gate or
+System ADR-0114/0127–0131 resolve the former `DESIGN-GAP-PIG-1`; it is not a remaining gate or
 implementation permission. The complete active domain flow is:
 
 ```text
@@ -1176,55 +1176,55 @@ No roadmap is produced in DESIGN.
 ## Wave: DESIGN / [REF] Application decisions
 
 Stage 3 preserves D-SYS-1…11 and D-DOM-1…13. Seventeen independently
-reversible Application choices are Approved in ADR-0106–0111 and
-ADR-0122–0132; the table below links every decision to its one-decision record.
+reversible Application choices are Approved in ADR-0116–0121 and
+ADR-0132–0142; the table below links every decision to its one-decision record.
 This feature delta—not those decision records—is the implementation-contract
 SSOT for every exact Rust signature, variant, persistence key, lifecycle
-ordering, error and verification handoff. System ADR-0104/0117–0121 resolve the
+ordering, error and verification handoff. System ADR-0114/0127–0131 resolve the
 former system gap; Application pins active production contracts without a spike or
 placeholder seam.
 
 | ID | Application verdict |
 |---|---|
-| **D-APP-1** | [ADR-0106] creates one non-deployable `overdrive-gateway` adapter-host library; `overdrive-control-plane` remains sole `serve` composition/ServerHandle owner and activates the real GatewayApplicationOwner/listener. |
+| **D-APP-1** | [ADR-0116] creates one non-deployable `overdrive-gateway` adapter-host library; `overdrive-control-plane` remains sole `serve` composition/ServerHandle owner and activates the real GatewayApplicationOwner/listener. |
 | **D-APP-2** | Add parser-side `DeploySpecInput = Workload(WorkloadSpecInput) | Route(PublicRouteSpecInput)`, distinct HTTP `PublicRouteInput`, and persisted `Route`; never add Route to workload `SubmitSpecInput`, `WorkloadIntent`, `WorkloadKind`, `/v1/workloads`, or workload streaming. |
 | **D-APP-3** | Persist the singleton `PublicRouteSetEnvelope::V1` at exact key `public-ingress/route-set`; persist even the empty Route set. A bounded `PublicRouteSetOwner` is the sole serialized writer. |
 | **D-APP-4** | A Route carries exact validated `RouteId`, deterministic `RouteGeneration`, `PublicHostname`, `PathMatch`, `ServiceListenerReference(service: WorkloadId, NonZeroU16, Proto::Tcp)` and `PublicCertifiedKeyId`. The public target member is `service`; the internal identifier type remains `WorkloadId`, never allocator-derived `ServiceId`. |
 | **D-APP-5** | A new read-only `ServiceFrontendResolve` port reads current Service intent plus the already-probed `ServiceVipView` and returns the exact existing `ServiceFrontend`; control-plane wraps its existing mutex-held allocator in a private read adapter. It never reads backend/health/BPF state. |
 | **D-APP-6** | `ServerConfig.gateway: Option<GatewayConfig>` is the only enablement gate. CLI `--gateway-address`, `--gateway-certified-key-id`, `--gateway-certificate-chain` and `--gateway-private-key` construct IPv4 TCP/443 only as an all-present set; all absent means disabled. Public bind occurs only after connect/mTLS/identity/demand/application gates. |
 | **D-APP-7** | Manual certificate/key paths are host-local `serve` configuration, like VM kernel/rootfs references only at the artifact boundary. The source validates then installs through producer-neutral custody; paths/raw PEM never enter Route, status or request state. |
-| **D-APP-8** | [ADR-0107] makes Public Certified-Key Custody the one configured-ID producer-neutral owner; [ADR-0122] makes replacement validate/build/seal/persist/publish/status ordered so an unusable candidate never replaces the last usable generation. Its ID-free `install` accepts `Manual | Workflow { correlation }` provenance and is #57's future producer boundary. |
+| **D-APP-8** | [ADR-0117] makes Public Certified-Key Custody the one configured-ID producer-neutral owner; [ADR-0132] makes replacement validate/build/seal/persist/publish/status ordered so an unusable candidate never replaces the last usable generation. Its ID-free `install` accepts `Manual | Workflow { correlation }` provenance and is #57's future producer boundary. |
 | **D-APP-9** | One active `GatewayApplicationOwner` atomically owns staged/current/draining demand, one ArcSwap Current generation, dynamic TCP/443 bind/unbind, RAII connection/request leases, the join set and application status. Shutdown force-joins leases before demand/SVID release. |
 | **D-APP-10** | `IntentStore::watch` changes in one cut to `Changed|Lagged`; owner subscribes-before-list and clears admission before gap/closure recovery. |
-| **D-APP-11** | [ADR-0109] adds the dedicated non-allocation Gateway Identity Slot + `GatewaySvidLifecycle`, Issue/Drop actions and exact-current control. The slot atomically owns a checked desired epoch so a stale Issue cannot re-hold after disable; [ADR-0126] gives gateway-client mTLS alone the private access token and exact receipt-selected peer check. No fake AllocationId. |
-| **D-APP-12** | [ADR-0123] extends ServiceMapHydrator with exact frontend demand read/ack and the existing `ServiceId::derive(...,"service-map")`; a pre-effect exact-revision guard prevents stale Path-A TEACH while BPF Hydrated remains independent. |
-| **D-APP-13** | [ADR-0108] keeps BPF as the gateway backend selector; [ADR-0124] adds registered `(SocketCookie, ServiceKey)` intent plus `Selected(BackendId)|NoBackend` receipt and cleanup; [ADR-0125] commit-gates immutable BackendId→applied `Backend.alloc` identity publication. |
-| **D-APP-14** | [ADR-0110], [ADR-0127], [ADR-0128], [ADR-0129], [ADR-0130], [ADR-0131] and [ADR-0132] activate strict rustls TLS1.3, Hyper HTTP/1.1, exact authority/raw-path routing, proxy-header policy, finite limits, streaming/backpressure and one upstream attempt; [ADR-0126] requires exact-peer mTLS. Existing 404 Route miss, 503 NoBackend and 502 internal/upstream mappings remain exact. |
+| **D-APP-11** | [ADR-0119] adds the dedicated non-allocation Gateway Identity Slot + `GatewaySvidLifecycle`, Issue/Drop actions and exact-current control. The slot atomically owns a checked desired epoch so a stale Issue cannot re-hold after disable; [ADR-0136] gives gateway-client mTLS alone the private access token and exact receipt-selected peer check. No fake AllocationId. |
+| **D-APP-12** | [ADR-0133] extends ServiceMapHydrator with exact frontend demand read/ack and the existing `ServiceId::derive(...,"service-map")`; a pre-effect exact-revision guard prevents stale Path-A TEACH while BPF Hydrated remains independent. |
+| **D-APP-13** | [ADR-0118] keeps BPF as the gateway backend selector; [ADR-0134] adds registered `(SocketCookie, ServiceKey)` intent plus `Selected(BackendId)|NoBackend` receipt and cleanup; [ADR-0135] commit-gates immutable BackendId→applied `Backend.alloc` identity publication. |
+| **D-APP-14** | [ADR-0120], [ADR-0137], [ADR-0138], [ADR-0139], [ADR-0140], [ADR-0141] and [ADR-0142] activate strict rustls TLS1.3, Hyper HTTP/1.1, exact authority/raw-path routing, proxy-header policy, finite limits, streaming/backpressure and one upstream attempt; [ADR-0136] requires exact-peer mTLS. Existing 404 Route miss, 503 NoBackend and 502 internal/upstream mappings remain exact. |
 | **D-APP-15** | Full composition is `AT-PIG-E2E-1`, a recurring built-binary Tier-3 walking skeleton, not an expectation or spike; it hand-installs no map, rule, identity, snapshot or credential outside production inputs. |
-| **D-APP-16** | [ADR-0111] keeps operator-mTLS `GET /v1/gateway/status` as a separate redacted projection of application/custody and relevant independent hydration rows; public request status, receipts, secrets and a unified generation never enter it. |
+| **D-APP-16** | [ADR-0121] keeps operator-mTLS `GET /v1/gateway/status` as a separate redacted projection of application/custody and relevant independent hydration rows; public request status, receipts, secrets and a unified generation never enter it. |
 
 Formal TLA+ is not introduced: this slice adds no new consensus,
 cross-node transaction or replication protocol. Atomic snapshot/watch and
 certificate-validity ordering are more directly verified through pure
 properties and seeded DST.
 
-[ADR-0106]: ../../product/architecture/adr-0106-public-ingress-route-and-gateway-application-owner.md
-[ADR-0107]: ../../product/architecture/adr-0107-producer-neutral-public-certified-key-custody.md
-[ADR-0108]: ../../product/architecture/adr-0108-existing-cgroup-bpf-gateway-backend-selection.md
-[ADR-0109]: ../../product/architecture/adr-0109-dedicated-gateway-svid-identity-lifecycle.md
-[ADR-0110]: ../../product/architecture/adr-0110-public-listener-tls13-only.md
-[ADR-0111]: ../../product/architecture/adr-0111-redacted-operator-gateway-status.md
-[ADR-0122]: ../../product/architecture/adr-0122-preserve-last-usable-public-certified-key-replacement.md
-[ADR-0123]: ../../product/architecture/adr-0123-demand-gated-path-a-service-map-teach.md
-[ADR-0124]: ../../product/architecture/adr-0124-gateway-connect-selected-backend-receipt.md
-[ADR-0125]: ../../product/architecture/adr-0125-commit-gated-backend-identity-publication.md
-[ADR-0126]: ../../product/architecture/adr-0126-exact-peer-gateway-client-mtls.md
-[ADR-0127]: ../../product/architecture/adr-0127-public-http11-only.md
-[ADR-0128]: ../../product/architecture/adr-0128-canonical-public-route-match-key.md
-[ADR-0129]: ../../product/architecture/adr-0129-public-proxy-header-policy.md
-[ADR-0130]: ../../product/architecture/adr-0130-fixed-finite-public-runtime-limits.md
-[ADR-0131]: ../../product/architecture/adr-0131-stream-public-proxy-bodies-with-backpressure.md
-[ADR-0132]: ../../product/architecture/adr-0132-single-upstream-attempt-per-public-request.md
+[ADR-0116]: ../../product/architecture/adr-0116-public-ingress-route-and-gateway-application-owner.md
+[ADR-0117]: ../../product/architecture/adr-0117-producer-neutral-public-certified-key-custody.md
+[ADR-0118]: ../../product/architecture/adr-0118-existing-cgroup-bpf-gateway-backend-selection.md
+[ADR-0119]: ../../product/architecture/adr-0119-dedicated-gateway-svid-identity-lifecycle.md
+[ADR-0120]: ../../product/architecture/adr-0120-public-listener-tls13-only.md
+[ADR-0121]: ../../product/architecture/adr-0121-redacted-operator-gateway-status.md
+[ADR-0132]: ../../product/architecture/adr-0132-preserve-last-usable-public-certified-key-replacement.md
+[ADR-0133]: ../../product/architecture/adr-0133-demand-gated-path-a-service-map-teach.md
+[ADR-0134]: ../../product/architecture/adr-0134-gateway-connect-selected-backend-receipt.md
+[ADR-0135]: ../../product/architecture/adr-0135-commit-gated-backend-identity-publication.md
+[ADR-0136]: ../../product/architecture/adr-0136-exact-peer-gateway-client-mtls.md
+[ADR-0137]: ../../product/architecture/adr-0137-public-http11-only.md
+[ADR-0138]: ../../product/architecture/adr-0138-canonical-public-route-match-key.md
+[ADR-0139]: ../../product/architecture/adr-0139-public-proxy-header-policy.md
+[ADR-0140]: ../../product/architecture/adr-0140-fixed-finite-public-runtime-limits.md
+[ADR-0141]: ../../product/architecture/adr-0141-stream-public-proxy-bodies-with-backpressure.md
+[ADR-0142]: ../../product/architecture/adr-0142-single-upstream-attempt-per-public-request.md
 
 ## Wave: DESIGN / [REF] Application component decomposition
 
@@ -4574,7 +4574,7 @@ SPIFFE ID/serial/expiry only.
 
 This epoch is the Application concurrency realization of DDD's existing
 Ensure/Reissue/Drop commands, not a new domain identity or persisted fact;
-[ADR-0109] and [ADR-0126] supersede any unguarded Application shorthand while
+[ADR-0119] and [ADR-0136] supersede any unguarded Application shorthand while
 D-DOM-1…13's semantic owner/invariants remain unchanged.
 
 Gateway-client mTLS accepts a connected fd plus the receipt-selected exact
@@ -5156,8 +5156,8 @@ boundary, production composition and non-substitution rule.
 
 ### Full-stack handoff status
 
-System ADR-0104/0117–0121, Route ADR-0105, Domain ADR-0112–0116/0133 and
-Application ADR-0106–0111/0122–0132 document one approved integrated contract
+System ADR-0114/0127–0131, Route ADR-0115, Domain ADR-0122–0126/0143 and
+Application ADR-0116–0121/0132–0142 document one approved integrated contract
 and constitute the approved full-stack DESIGN handoff. The user explicitly
 approved the complete DESIGN on 2026-09-13; no pending design-approval gate
 remains. The cgroup-BPF hook—not XDP—
@@ -5211,7 +5211,7 @@ arguments and `ServeArgs` fields, the `PathMatch`/authority/header pure
 functions, the exact Gateway Application invariant activation boundary, the
 operator-controlled E14 hostname/build provenance, and the structured
 `gateway.upstream.receipt.validated` occurrence all have exact names, owners
-and signatures. The one-decision ADR split through ADR-0133 changes no
+and signatures. The one-decision ADR split through ADR-0143 changes no
 behavior or API shape; DISTILL re-read those records and retained this feature
 delta as the approved implementation-contract SSOT. DISTILL-to-DELIVER
 handoff remains blocked only by the documented C4a acceptance gap; DESIGN

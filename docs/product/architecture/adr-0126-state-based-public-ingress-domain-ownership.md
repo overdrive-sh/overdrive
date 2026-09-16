@@ -1,4 +1,4 @@
-# ADR-0116 — Use state-based aggregates, reconcilers and derived views for public ingress
+# ADR-0126 — Use state-based aggregates, reconcilers and derived views for public ingress
 
 ## Status
 
@@ -52,7 +52,7 @@ the decision-specific ADRs and feature delta.
 - [Domain state/event model](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-event-model-and-lifecycle-gates)
 - [Domain reuse and ES/CQRS assessment](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-domain-reuse-and-escqrs-assessment)
 - [Exact Application persistence contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
-- [Operator status decision](adr-0111-redacted-operator-gateway-status.md)
-- [System consistency decision](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
-- [System listener-gate decision](adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md)
+- [Operator status decision](adr-0121-redacted-operator-gateway-status.md)
+- [System consistency decision](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
+- [System listener-gate decision](adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

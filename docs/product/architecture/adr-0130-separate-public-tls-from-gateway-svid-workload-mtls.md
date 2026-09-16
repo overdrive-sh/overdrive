@@ -1,4 +1,4 @@
-# ADR-0120 — Separate public TLS from gateway-SVID workload mTLS
+# ADR-0130 — Separate public TLS from gateway-SVID workload mTLS
 
 ## Status
 
@@ -20,8 +20,8 @@ backend identity before application bytes cross the internal trust boundary.
 Public Web-PKI, operator/control-plane HTTPS and internal SPIFFE credentials
 remain three non-substitutable domains.
 
-This ADR decides only the System trust-boundary transition. ADR-0109 owns the
-dedicated Gateway SVID lifecycle; ADR-0126 owns exact-peer authentication.
+This ADR decides only the System trust-boundary transition. ADR-0119 owns the
+dedicated Gateway SVID lifecycle; ADR-0136 owns exact-peer authentication.
 
 ## Alternatives considered
 
@@ -41,9 +41,9 @@ dedicated Gateway SVID lifecycle; ADR-0126 owns exact-peer authentication.
 
 ## Links
 
-- [ADR-0109](adr-0109-dedicated-gateway-svid-identity-lifecycle.md)
-- [ADR-0126](adr-0126-exact-peer-gateway-client-mtls.md)
-- [ADR-0113](adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md)
-- [Applied-identity ownership ADR-0133](adr-0133-dataplane-applied-backend-identity-association.md)
+- [ADR-0119](adr-0119-dedicated-gateway-svid-identity-lifecycle.md)
+- [ADR-0136](adr-0136-exact-peer-gateway-client-mtls.md)
+- [ADR-0123](adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md)
+- [Applied-identity ownership ADR-0143](adr-0143-dataplane-applied-backend-identity-association.md)
 - [Exact Application identity contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-identity-and-lifecycle-integration)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)

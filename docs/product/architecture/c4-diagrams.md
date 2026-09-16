@@ -1547,7 +1547,7 @@ row; failure produces the existing later dominating `Failed` result and
 withholds the guest command.
 <a id="public-ingress-gateway-route-domain-context"></a>
 
-## Public ingress gateway Route/domain context map (Route ADR-0105; Domain ADR-0112–0116/0133, Accepted 2026-09-13)
+## Public ingress gateway Route/domain context map (Route ADR-0115; Domain ADR-0122–0126/0143, Accepted 2026-09-13)
 
 This map records domain ownership and Published Language only. Exact Rust/API
 contracts remain in the public-ingress feature delta's Application `[REF]`
@@ -1583,37 +1583,37 @@ Workload Identity are extended at their existing selection/trust boundaries.
 The gateway connector owns the socket; Service Dataplane owns receipt/identity
 state; Workload Identity owns the SVID and peer authentication. The cgroup hook
 selects this host-originated socket while XDP remains unchanged for wire ingress.
-Receipt ownership is [ADR-0114](adr-0114-dataplane-selection-receipt-ownership.md);
+Receipt ownership is [ADR-0124](adr-0124-dataplane-selection-receipt-ownership.md);
 Applied Backend Identity Association ownership is
-[ADR-0133](adr-0133-dataplane-applied-backend-identity-association.md).
+[ADR-0143](adr-0143-dataplane-applied-backend-identity-association.md).
 
 ---
 
 <a id="public-ingress-gateway-canonical-c4"></a>
 
-## Public ingress gateway canonical System and Application C4 (System ADR-0104/0117–0121; Application ADR-0106–0111, 0122–0132, Accepted 2026-09-13)
+## Public ingress gateway canonical System and Application C4 (System ADR-0114/0127–0131; Application ADR-0116–0121, 0132–0142, Accepted 2026-09-13)
 
 Application decision sources: admission
-[ADR-0106](adr-0106-public-ingress-route-and-gateway-application-owner.md) and
-status [ADR-0111](adr-0111-redacted-operator-gateway-status.md); custody
-[ADR-0107](adr-0107-producer-neutral-public-certified-key-custody.md) plus
+[ADR-0116](adr-0116-public-ingress-route-and-gateway-application-owner.md) and
+status [ADR-0121](adr-0121-redacted-operator-gateway-status.md); custody
+[ADR-0117](adr-0117-producer-neutral-public-certified-key-custody.md) plus
 replacement
-[ADR-0122](adr-0122-preserve-last-usable-public-certified-key-replacement.md);
+[ADR-0132](adr-0132-preserve-last-usable-public-certified-key-replacement.md);
 BPF selection
-[ADR-0108](adr-0108-existing-cgroup-bpf-gateway-backend-selection.md), demand
-[ADR-0123](adr-0123-demand-gated-path-a-service-map-teach.md), receipt
-[ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md) and identity
-publication [ADR-0125](adr-0125-commit-gated-backend-identity-publication.md);
+[ADR-0118](adr-0118-existing-cgroup-bpf-gateway-backend-selection.md), demand
+[ADR-0133](adr-0133-demand-gated-path-a-service-map-teach.md), receipt
+[ADR-0134](adr-0134-gateway-connect-selected-backend-receipt.md) and identity
+publication [ADR-0135](adr-0135-commit-gated-backend-identity-publication.md);
 Gateway SVID lifecycle
-[ADR-0109](adr-0109-dedicated-gateway-svid-identity-lifecycle.md) plus exact-peer
-mTLS [ADR-0126](adr-0126-exact-peer-gateway-client-mtls.md); public TLS
-[ADR-0110](adr-0110-public-listener-tls13-only.md), HTTP version
-[ADR-0127](adr-0127-public-http11-only.md), Route matching
-[ADR-0128](adr-0128-canonical-public-route-match-key.md), headers
-[ADR-0129](adr-0129-public-proxy-header-policy.md), limits
-[ADR-0130](adr-0130-fixed-finite-public-runtime-limits.md), streaming
-[ADR-0131](adr-0131-stream-public-proxy-bodies-with-backpressure.md) and attempt
-policy [ADR-0132](adr-0132-single-upstream-attempt-per-public-request.md).
+[ADR-0119](adr-0119-dedicated-gateway-svid-identity-lifecycle.md) plus exact-peer
+mTLS [ADR-0136](adr-0136-exact-peer-gateway-client-mtls.md); public TLS
+[ADR-0120](adr-0120-public-listener-tls13-only.md), HTTP version
+[ADR-0137](adr-0137-public-http11-only.md), Route matching
+[ADR-0138](adr-0138-canonical-public-route-match-key.md), headers
+[ADR-0139](adr-0139-public-proxy-header-policy.md), limits
+[ADR-0140](adr-0140-fixed-finite-public-runtime-limits.md), streaming
+[ADR-0141](adr-0141-stream-public-proxy-bodies-with-backpressure.md) and attempt
+policy [ADR-0142](adr-0142-single-upstream-attempt-per-public-request.md).
 
 The complete working path is production acceptance boundary `AT-PIG-E2E-1`,
 not a spike. The existing ancestor cgroup hook selects the host-originated

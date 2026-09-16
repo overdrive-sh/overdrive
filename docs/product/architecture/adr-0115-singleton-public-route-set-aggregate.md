@@ -1,4 +1,4 @@
-# ADR-0105 — Use a singleton Public Route Set aggregate
+# ADR-0115 — Use a singleton Public Route Set aggregate
 
 ## Status
 
@@ -52,6 +52,6 @@ the feature delta's Domain event/lifecycle section.
 
 - [Domain aggregate and lifecycle contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-aggregate-contracts)
 - [Exact Application Route/owner contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
-- [Application ownership decision](adr-0106-public-ingress-route-and-gateway-application-owner.md)
+- [Application ownership decision](adr-0116-public-ingress-route-and-gateway-application-owner.md)
 - [Route/domain architecture summary](brief.md#public-ingress-gateway-route-domain-model)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)

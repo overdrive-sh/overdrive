@@ -15,7 +15,7 @@ readable over operator mTLS and contains no credential material.
 
 - Anchor: AT-PIG-E2E-1 in the public-ingress feature delta.
 - Anchor: OUT-PIG-PUBLIC-REQUEST in docs/product/outcomes/registry.yaml.
-- Anchor: ADR-0104, ADR-0117 through ADR-0121, and ADR-0122 through ADR-0132.
+- Anchor: ADR-0114, ADR-0127 through ADR-0131, and ADR-0132 through ADR-0142.
 
 ## Verification
 

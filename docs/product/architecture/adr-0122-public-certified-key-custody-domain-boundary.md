@@ -1,4 +1,4 @@
-# ADR-0112 — Keep Public Certified-Key Custody as a distinct domain boundary
+# ADR-0122 — Keep Public Certified-Key Custody as a distinct domain boundary
 
 ## Status
 
@@ -51,8 +51,8 @@ owned by the linked feature contract and decision-specific Application ADRs.
 
 - [Domain aggregate contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-aggregate-contracts)
 - [Exact Application custody contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
-- [Application custody ownership](adr-0107-producer-neutral-public-certified-key-custody.md)
-- [Application replacement transaction](adr-0122-preserve-last-usable-public-certified-key-replacement.md)
-- [System acquisition/consumption decision](adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md)
+- [Application custody ownership](adr-0117-producer-neutral-public-certified-key-custody.md)
+- [Application replacement transaction](adr-0132-preserve-last-usable-public-certified-key-replacement.md)
+- [System acquisition/consumption decision](adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)
 - [GitHub #57](https://github.com/overdrive-sh/overdrive/issues/57)

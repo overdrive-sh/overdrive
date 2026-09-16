@@ -1,4 +1,4 @@
-# ADR-0122 — Preserve the last usable Public Certified Key during replacement
+# ADR-0132 — Preserve the last usable Public Certified Key during replacement
 
 ## Status
 
@@ -35,12 +35,12 @@ to an older one.
   prior generation while it remains time-usable.
 - A crash after durable persistence is recovered by adopting that complete
   generation; a post-publication status failure is retried without rollback.
-- Custody ownership itself remains ADR-0107.
+- Custody ownership itself remains ADR-0117.
 
 ## Links
 
 - [Exact replacement and crash-order contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
 - [Canonical C4 custody transaction](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Custody ownership ADR-0107](adr-0107-producer-neutral-public-certified-key-custody.md)
-- [Domain custody ADR-0112](adr-0112-public-certified-key-custody-domain-boundary.md)
-- [System acquisition boundary ADR-0117](adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md)
+- [Custody ownership ADR-0117](adr-0117-producer-neutral-public-certified-key-custody.md)
+- [Domain custody ADR-0122](adr-0122-public-certified-key-custody-domain-boundary.md)
+- [System acquisition boundary ADR-0127](adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md)

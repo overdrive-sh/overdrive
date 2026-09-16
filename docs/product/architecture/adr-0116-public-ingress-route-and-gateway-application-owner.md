@@ -1,4 +1,4 @@
-# ADR-0106 — Use one owner for coherent Gateway Application admission
+# ADR-0116 — Use one owner for coherent Gateway Application admission
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted. 2026-09-13. User explicitly approved the complete `public-ingress-gate
 
 ## Context
 
-ADR-0105 already owns the singleton Public Route Set. Application runtime must
+ADR-0115 already owns the singleton Public Route Set. Application runtime must
 turn its accepted Route plus independently changing Service Frontend and Public
 Certified Key facts into one coherent value for new connections. Splitting
 that authority among handlers or resource-specific tasks permits torn
@@ -48,7 +48,7 @@ and operator status are independently reversible decisions recorded elsewhere.
 - [Implementation-facing Route/owner contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Component ownership and lifecycle](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-application-component-decomposition)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [ADR-0104](adr-0104-embed-single-node-public-ingress-in-overdrive-serve.md)
-- [ADR-0105](adr-0105-singleton-public-route-set-aggregate.md)
-- [System consistency ADR-0119](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
-- [System listener-gate ADR-0121](adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md)
+- [ADR-0114](adr-0114-embed-single-node-public-ingress-in-overdrive-serve.md)
+- [ADR-0115](adr-0115-singleton-public-route-set-aggregate.md)
+- [System consistency ADR-0129](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
+- [System listener-gate ADR-0131](adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md)

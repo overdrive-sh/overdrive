@@ -1,4 +1,4 @@
-# ADR-0129 — Apply one explicit public proxy-header policy
+# ADR-0139 — Apply one explicit public proxy-header policy
 
 ## Status
 
@@ -37,5 +37,5 @@ product token after hop-by-hop removal. Consume rather than forward trailers.
 
 - [Exact header transformation contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4 HTTP runtime](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [HTTP/1.1 ADR-0127](adr-0127-public-http11-only.md)
-- [Streaming ADR-0131](adr-0131-stream-public-proxy-bodies-with-backpressure.md)
+- [HTTP/1.1 ADR-0137](adr-0137-public-http11-only.md)
+- [Streaming ADR-0141](adr-0141-stream-public-proxy-bodies-with-backpressure.md)

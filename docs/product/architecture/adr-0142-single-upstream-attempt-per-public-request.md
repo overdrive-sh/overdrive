@@ -1,4 +1,4 @@
-# ADR-0132 — Perform one upstream attempt per public request
+# ADR-0142 — Perform one upstream attempt per public request
 
 ## Status
 
@@ -37,6 +37,6 @@ attempt.
 
 - [Exact request/error contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4 request path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [BPF selection ADR-0108](adr-0108-existing-cgroup-bpf-gateway-backend-selection.md)
-- [Receipt ADR-0124](adr-0124-gateway-connect-selected-backend-receipt.md)
-- [Streaming ADR-0131](adr-0131-stream-public-proxy-bodies-with-backpressure.md)
+- [BPF selection ADR-0118](adr-0118-existing-cgroup-bpf-gateway-backend-selection.md)
+- [Receipt ADR-0134](adr-0134-gateway-connect-selected-backend-receipt.md)
+- [Streaming ADR-0141](adr-0141-stream-public-proxy-bodies-with-backpressure.md)

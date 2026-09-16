@@ -1,4 +1,4 @@
-# ADR-0113 — Use a dedicated Gateway Identity Slot and lifecycle
+# ADR-0123 — Use a dedicated Gateway Identity Slot and lifecycle
 
 ## Status
 
@@ -55,8 +55,8 @@ Eligibility and BPF Hydrated are unaffected.
 
 - [Domain identity aggregate/lifecycle](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-aggregate-contracts)
 - [Exact Application identity contracts](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-identity-and-lifecycle-integration)
-- [Application Gateway SVID lifecycle](adr-0109-dedicated-gateway-svid-identity-lifecycle.md)
-- [Application exact-peer mTLS](adr-0126-exact-peer-gateway-client-mtls.md)
-- [System trust-boundary decision](adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md)
+- [Application Gateway SVID lifecycle](adr-0119-dedicated-gateway-svid-identity-lifecycle.md)
+- [Application exact-peer mTLS](adr-0136-exact-peer-gateway-client-mtls.md)
+- [System trust-boundary decision](adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md)
 - [Route/domain context map](c4-diagrams.md#public-ingress-gateway-route-domain-context)
 - ADR-0063 and ADR-0067

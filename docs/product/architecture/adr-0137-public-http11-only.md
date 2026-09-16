@@ -1,4 +1,4 @@
-# ADR-0127 — Serve HTTP/1.1 only on public ingress
+# ADR-0137 — Serve HTTP/1.1 only on public ingress
 
 ## Status
 
@@ -28,12 +28,12 @@ enable HTTP/2 or HTTP/3 in this first slice.
 - One connection uses HTTP/1.1 request/response framing.
 - Hyper remains the sole framing parser.
 - Route selection, headers, limits, streaming and upstream-attempt policy are
-  independently decided in ADR-0128–ADR-0132.
+  independently decided in ADR-0138–ADR-0142.
 
 ## Links
 
 - [Exact HTTP protocol contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Canonical C4 public runtime](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [TLS 1.3 ADR-0110](adr-0110-public-listener-tls13-only.md)
-- [Route selection ADR-0128](adr-0128-canonical-public-route-match-key.md)
+- [TLS 1.3 ADR-0120](adr-0120-public-listener-tls13-only.md)
+- [Route selection ADR-0138](adr-0138-canonical-public-route-match-key.md)
 - [GitHub #54](https://github.com/overdrive-sh/overdrive/issues/54)

@@ -1,4 +1,4 @@
-# ADR-0121 — Gate the public listener without redefining workload or Service readiness
+# ADR-0131 — Gate the public listener without redefining workload or Service readiness
 
 ## Status
 
@@ -22,7 +22,7 @@ Eligibility, BPF Hydrated or operator HTTPS readiness.
 
 This ADR decides only public-listener gate ownership and its relationship to
 existing lifecycle states. Exact gates and status shapes live in the feature
-delta and ADR-0111.
+delta and ADR-0121.
 
 ## Alternatives considered
 
@@ -44,6 +44,6 @@ delta and ADR-0111.
 ## Links
 
 - [Lifecycle Gate Ownership](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-lifecycle-gate-ownership)
-- [ADR-0106](adr-0106-public-ingress-route-and-gateway-application-owner.md)
-- [ADR-0111](adr-0111-redacted-operator-gateway-status.md)
+- [ADR-0116](adr-0116-public-ingress-route-and-gateway-application-owner.md)
+- [ADR-0121](adr-0121-redacted-operator-gateway-status.md)
 - [Canonical C4](c4-diagrams.md#public-ingress-gateway-canonical-c4)

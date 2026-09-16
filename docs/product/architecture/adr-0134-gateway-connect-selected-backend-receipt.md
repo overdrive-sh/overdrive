@@ -1,4 +1,4 @@
-# ADR-0124 — Correlate each gateway connect with its selected BackendId receipt
+# ADR-0134 — Correlate each gateway connect with its selected BackendId receipt
 
 ## Status
 
@@ -32,13 +32,13 @@ persisted backend cache or userspace selection input.
 - The connector can distinguish canonical `NoBackend` from a selected backend
   without enumerating candidates.
 - Cookie intent and receipt cleanup become part of connection ownership.
-- Backend identity publication is independently governed by ADR-0125.
+- Backend identity publication is independently governed by ADR-0135.
 
 ## Links
 
 - [Exact connect/receipt contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4 receipt path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [BPF selection ADR-0108](adr-0108-existing-cgroup-bpf-gateway-backend-selection.md)
-- [Identity publication ADR-0125](adr-0125-commit-gated-backend-identity-publication.md)
-- [Domain receipt ADR-0114](adr-0114-dataplane-selection-receipt-ownership.md)
-- [System generation ADR-0119](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
+- [BPF selection ADR-0118](adr-0118-existing-cgroup-bpf-gateway-backend-selection.md)
+- [Identity publication ADR-0135](adr-0135-commit-gated-backend-identity-publication.md)
+- [Domain receipt ADR-0124](adr-0124-dataplane-selection-receipt-ownership.md)
+- [System generation ADR-0129](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)

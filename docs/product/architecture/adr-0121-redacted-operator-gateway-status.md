@@ -1,4 +1,4 @@
-# ADR-0111 — Report gateway lifecycle through a separate redacted operator status projection
+# ADR-0121 — Report gateway lifecycle through a separate redacted operator status projection
 
 ## Status
 
@@ -47,10 +47,10 @@ be replaced without changing public TLS/HTTP request semantics.
 - [Exact status rows, DTOs and caller contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Status persistence boundary](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
 - [Canonical C4 operator status path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [ADR-0112](adr-0112-public-certified-key-custody-domain-boundary.md),
-  [ADR-0113](adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md),
-  [ADR-0115](adr-0115-derived-gateway-frontend-demand-lifecycle.md), and
-  [ADR-0116](adr-0116-state-based-public-ingress-domain-ownership.md)
-- [Route ADR-0105](adr-0105-singleton-public-route-set-aggregate.md)
-- [System consistency ADR-0119](adr-0119-keep-gateway-and-service-dataplane-generations-independent.md)
-- [System listener-gate ADR-0121](adr-0121-gate-public-listener-without-redefining-workload-service-readiness.md)
+- [ADR-0122](adr-0122-public-certified-key-custody-domain-boundary.md),
+  [ADR-0123](adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md),
+  [ADR-0125](adr-0125-derived-gateway-frontend-demand-lifecycle.md), and
+  [ADR-0126](adr-0126-state-based-public-ingress-domain-ownership.md)
+- [Route ADR-0115](adr-0115-singleton-public-route-set-aggregate.md)
+- [System consistency ADR-0129](adr-0129-keep-gateway-and-service-dataplane-generations-independent.md)
+- [System listener-gate ADR-0131](adr-0131-gate-public-listener-without-redefining-workload-service-readiness.md)

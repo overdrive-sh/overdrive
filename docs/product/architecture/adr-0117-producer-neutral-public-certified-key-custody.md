@@ -1,4 +1,4 @@
-# ADR-0107 — Use producer-neutral Public Certified-Key Custody
+# ADR-0117 — Use producer-neutral Public Certified-Key Custody
 
 ## Status
 
@@ -33,13 +33,13 @@ which receive only an opaque current resolver snapshot.
   evolvable.
 - Paths and plaintext private-key material do not enter Route, status or
   request state.
-- Replacement ordering is an independent decision recorded in ADR-0122.
+- Replacement ordering is an independent decision recorded in ADR-0132.
 
 ## Links
 
 - [Exact custody contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-persistence-custody-and-redaction)
 - [Canonical C4 custody boundary](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Replacement transaction ADR-0122](adr-0122-preserve-last-usable-public-certified-key-replacement.md)
-- [Domain custody ADR-0112](adr-0112-public-certified-key-custody-domain-boundary.md)
-- [System acquisition boundary ADR-0117](adr-0117-separate-public-certificate-acquisition-from-runtime-consumption.md)
+- [Replacement transaction ADR-0132](adr-0132-preserve-last-usable-public-certified-key-replacement.md)
+- [Domain custody ADR-0122](adr-0122-public-certified-key-custody-domain-boundary.md)
+- [System acquisition boundary ADR-0127](adr-0127-separate-public-certificate-acquisition-from-runtime-consumption.md)
 - [GitHub #57](https://github.com/overdrive-sh/overdrive/issues/57)

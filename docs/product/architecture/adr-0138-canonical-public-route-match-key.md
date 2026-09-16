@@ -1,4 +1,4 @@
-# ADR-0128 — Use one canonical Public Route match key
+# ADR-0138 — Use one canonical Public Route match key
 
 ## Status
 
@@ -32,12 +32,12 @@ remains 404.
 
 - Host/path selection is deterministic and independent of backend state.
 - Query bytes survive forwarding but do not affect Route identity.
-- Header transformation remains independently governed by ADR-0129.
+- Header transformation remains independently governed by ADR-0139.
 
 ## Links
 
 - [Exact Route matching contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
 - [Exact Route aggregate contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4 request path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Singleton Route ADR-0105](adr-0105-singleton-public-route-set-aggregate.md)
-- [HTTP/1.1 ADR-0127](adr-0127-public-http11-only.md)
+- [Singleton Route ADR-0115](adr-0115-singleton-public-route-set-aggregate.md)
+- [HTTP/1.1 ADR-0137](adr-0137-public-http11-only.md)

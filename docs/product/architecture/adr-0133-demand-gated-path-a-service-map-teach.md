@@ -1,4 +1,4 @@
-# ADR-0123 — Demand-gate Path-A Service-map teaching for public ingress
+# ADR-0133 — Demand-gate Path-A Service-map teaching for public ingress
 
 ## Status
 
@@ -33,13 +33,13 @@ truth.
 - A replacement frontend is taught before admission changes, while draining
   generations keep their frontend taught until retained users leave.
 - Existing undemanded Path-A behavior remains unchanged.
-- Backend selection remains ADR-0108; demand lifecycle vocabulary remains
-  ADR-0115.
+- Backend selection remains ADR-0118; demand lifecycle vocabulary remains
+  ADR-0125.
 
 ## Links
 
 - [Exact demand contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-exact-driving-and-driven-ports)
 - [Canonical C4 demand path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [BPF selection ADR-0108](adr-0108-existing-cgroup-bpf-gateway-backend-selection.md)
-- [Domain demand ADR-0115](adr-0115-derived-gateway-frontend-demand-lifecycle.md)
-- [System packet-entry ADR-0118](adr-0118-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)
+- [BPF selection ADR-0118](adr-0118-existing-cgroup-bpf-gateway-backend-selection.md)
+- [Domain demand ADR-0125](adr-0125-derived-gateway-frontend-demand-lifecycle.md)
+- [System packet-entry ADR-0128](adr-0128-use-existing-cgroup-bpf-service-dataplane-for-gateway-upstream.md)

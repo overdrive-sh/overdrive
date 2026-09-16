@@ -1,4 +1,4 @@
-# ADR-0109 — Use a dedicated Gateway SVID identity lifecycle
+# ADR-0119 — Use a dedicated Gateway SVID identity lifecycle
 
 ## Status
 
@@ -33,13 +33,13 @@ users drain.
 - Allocation SVID ownership and transparent workload mTLS remain unchanged.
 - A checked desired epoch prevents a stale issue completion from re-holding
   identity after disable.
-- Exact workload-peer authentication is independently decided in ADR-0126.
+- Exact workload-peer authentication is independently decided in ADR-0136.
 
 ## Links
 
 - [Exact Gateway SVID lifecycle contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-identity-and-lifecycle-integration)
 - [Canonical C4 identity path](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [Exact-peer mTLS ADR-0126](adr-0126-exact-peer-gateway-client-mtls.md)
-- [Domain identity ADR-0113](adr-0113-dedicated-gateway-identity-slot-and-lifecycle.md)
-- [System trust boundary ADR-0120](adr-0120-separate-public-tls-from-gateway-svid-workload-mtls.md)
+- [Exact-peer mTLS ADR-0136](adr-0136-exact-peer-gateway-client-mtls.md)
+- [Domain identity ADR-0123](adr-0123-dedicated-gateway-identity-slot-and-lifecycle.md)
+- [System trust boundary ADR-0130](adr-0130-separate-public-tls-from-gateway-svid-workload-mtls.md)
 - ADR-0063 and ADR-0067
