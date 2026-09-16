@@ -1,0 +1,8 @@
+/etc/netns/ovd-ns-0000
+/etc/netns/ovd-ns-0000/resolv.conf
+/etc/netns/ovd-ns-0001
+/etc/netns/ovd-ns-0001/resolv.conf
+/etc/netns/ovd-ns-0007
+/etc/netns/ovd-ns-0007/resolv.conf
+/etc/netns/ovd-ns-0008
+/etc/netns/ovd-ns-0008/resolv.conf

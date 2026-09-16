@@ -1,0 +1,199 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4173155dd1932f47b0b36627 pid=2830987
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 662,984 bytes  received 58,498 bytes  288,592.80 bytes/sec
+total size is 315,530,283  speedup is 437.34
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295c.M1zviCMk
+START=2026-09-16T01:47:41Z
+SOURCE_SHA=d87d30bf24315962e62a126524f87cd9071358a9398fe5d78b6644d92a5a1c34
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+bpf-linker 0.0.0
+COMMAND build Part-B production-core host, TCX aya loader, static guest
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling netns-density-295-part-c v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z)
+error[E0603]: struct `FdLink` is private
+   --> tcx_loader.rs:12:21
+    |
+ 12 | use aya::programs::{FdLink, LinkOrder, SchedClassifier, TcAttachType, links::PinnedLink};
+    |                     ^^^^^^ private struct
+    |
+note: the struct `FdLink` is defined here
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/programs/mod.rs:120:16
+    |
+120 |     programs::{links::*, perf_attach::*},
+    |                ^^^^^
+help: import `FdLink` directly
+    |
+ 12 | use aya::programs::{aya::programs::links::FdLink, LinkOrder, SchedClassifier, TcAttachType, links::PinnedLink};
+    |                     ++++++++++++++++++++++
+
+warning: unused imports: `AsRawFd as _` and `OwnedFd`
+ --> tcx_loader.rs:6:19
+  |
+6 | use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+  |                   ^^^^^^^^^^^^                  ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: the trait bound `aya::maps::HashMap<MapData, u32, Endpoint>: TryFrom<MapData>` is not satisfied
+   --> tcx_loader.rs:110:25
+    |
+110 |     let mut endpoints = HashMap::<MapData, u32, Endpoint>::try_from(data)?;
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<MapData>` is not implemented for `aya::maps::HashMap<MapData, u32, Endpoint>`
+    |
+help: the following other types implement trait `TryFrom<T>`
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/maps/mod.rs:460:9
+    |
+460 | /         impl<$($l,)? $($ty_param: Pod),*> TryFrom<$(&$l $($m)?)? Map>
+461 | |             for $ty<$(&$l $($m)?)? MapData, $($ty_param),*>
+    | |                                                           ^
+    | |                                                           |
+    | |                                                           `aya::maps::HashMap<&MapData, K, V>` implements `TryFrom<&aya::maps::Map>`
+    | |___________________________________________________________`aya::maps::HashMap<&mut MapData, K, V>` implements `TryFrom<&mut aya::maps::Map>`
+    |                                                             `aya::maps::HashMap<MapData, K, V>` implements `TryFrom<aya::maps::Map>`
+...
+504 | / impl_try_from_map!((K, V) {
+505 | |     HashMap from HashMap|LruHashMap,
+506 | |     LpmTrie,
+507 | |     PerCpuHashMap from PerCpuHashMap|PerCpuLruHashMap,
+508 | | });
+    | |__- in this macro invocation
+    = note: required for `MapData` to implement `Into<aya::maps::HashMap<MapData, u32, Endpoint>>`
+    = note: required for `aya::maps::HashMap<MapData, u32, Endpoint>` to implement `TryFrom<MapData>`
+    = note: this error originates in the macro `impl_try_from_map` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `aya::maps::HashMap<MapData, u32, Endpoint>: From<MapData>` is not satisfied
+   --> tcx_loader.rs:110:25
+    |
+110 |     let mut endpoints = HashMap::<MapData, u32, Endpoint>::try_from(data)?;
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<MapData>` is not implemented for `aya::maps::HashMap<MapData, u32, Endpoint>`
+    |
+help: the following other types implement trait `TryFrom<T>`
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/maps/mod.rs:460:9
+    |
+460 | /         impl<$($l,)? $($ty_param: Pod),*> TryFrom<$(&$l $($m)?)? Map>
+461 | |             for $ty<$(&$l $($m)?)? MapData, $($ty_param),*>
+    | |                                                           ^
+    | |                                                           |
+    | |                                                           `aya::maps::HashMap<&MapData, K, V>` implements `TryFrom<&aya::maps::Map>`
+    | |___________________________________________________________`aya::maps::HashMap<&mut MapData, K, V>` implements `TryFrom<&mut aya::maps::Map>`
+    |                                                             `aya::maps::HashMap<MapData, K, V>` implements `TryFrom<aya::maps::Map>`
+...
+504 | / impl_try_from_map!((K, V) {
+505 | |     HashMap from HashMap|LruHashMap,
+506 | |     LpmTrie,
+507 | |     PerCpuHashMap from PerCpuHashMap|PerCpuLruHashMap,
+508 | | });
+    | |__- in this macro invocation
+    = note: required for `MapData` to implement `Into<aya::maps::HashMap<MapData, u32, Endpoint>>`
+    = note: required for `aya::maps::HashMap<MapData, u32, Endpoint>` to implement `TryFrom<MapData>`
+    = note: this error originates in the macro `impl_try_from_map` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `aya::maps::Array<MapData, u64>: TryFrom<MapData>` is not satisfied
+   --> tcx_loader.rs:119:20
+    |
+119 |     let counters = Array::<MapData, u64>::try_from(data)?;
+    |                    ^^^^^^^^^^^^^^^^^^^^^ the trait `From<MapData>` is not implemented for `aya::maps::Array<MapData, u64>`
+    |
+help: the following other types implement trait `TryFrom<T>`
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/maps/mod.rs:460:9
+    |
+460 | /         impl<$($l,)? $($ty_param: Pod),*> TryFrom<$(&$l $($m)?)? Map>
+461 | |             for $ty<$(&$l $($m)?)? MapData, $($ty_param),*>
+    | |                                                           ^
+    | |                                                           |
+    | |                                                           `aya::maps::Array<&MapData, V>` implements `TryFrom<&aya::maps::Map>`
+    | |___________________________________________________________`aya::maps::Array<&mut MapData, V>` implements `TryFrom<&mut aya::maps::Map>`
+    |                                                             `aya::maps::Array<MapData, V>` implements `TryFrom<aya::maps::Map>`
+...
+495 | / impl_try_from_map!((V) {
+496 | |     Array,
+497 | |     BloomFilter,
+498 | |     PerCpuArray,
+...   |
+501 | |     Stack,
+502 | | });
+    | |__- in this macro invocation
+    = note: required for `MapData` to implement `Into<aya::maps::Array<MapData, u64>>`
+    = note: required for `aya::maps::Array<MapData, u64>` to implement `TryFrom<MapData>`
+    = note: this error originates in the macro `impl_try_from_map` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `aya::maps::Array<MapData, u64>: From<MapData>` is not satisfied
+   --> tcx_loader.rs:119:20
+    |
+119 |     let counters = Array::<MapData, u64>::try_from(data)?;
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `From<MapData>` is not implemented for `aya::maps::Array<MapData, u64>`
+    |
+help: the following other types implement trait `TryFrom<T>`
+   --> /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/maps/mod.rs:460:9
+    |
+460 | /         impl<$($l,)? $($ty_param: Pod),*> TryFrom<$(&$l $($m)?)? Map>
+461 | |             for $ty<$(&$l $($m)?)? MapData, $($ty_param),*>
+    | |                                                           ^
+    | |                                                           |
+    | |                                                           `aya::maps::Array<&MapData, V>` implements `TryFrom<&aya::maps::Map>`
+    | |___________________________________________________________`aya::maps::Array<&mut MapData, V>` implements `TryFrom<&mut aya::maps::Map>`
+    |                                                             `aya::maps::Array<MapData, V>` implements `TryFrom<aya::maps::Map>`
+...
+495 | / impl_try_from_map!((V) {
+496 | |     Array,
+497 | |     BloomFilter,
+498 | |     PerCpuArray,
+...   |
+501 | |     Stack,
+502 | | });
+    | |__- in this macro invocation
+    = note: required for `MapData` to implement `Into<aya::maps::Array<MapData, u64>>`
+    = note: required for `aya::maps::Array<MapData, u64>` to implement `TryFrom<MapData>`
+    = note: this error originates in the macro `impl_try_from_map` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0502]: cannot borrow `bytes` as immutable because it is also borrowed as mutable
+   --> tcx_loader.rs:184:38
+    |
+184 |     bytes[16..18].copy_from_slice(&((bytes.len() - 14) as u16).to_be_bytes());
+    |     -----         ---------------    ^^^^^ immutable borrow occurs here
+    |     |             |
+    |     |             mutable borrow later used by call
+    |     mutable borrow occurs here
+
+warning: unnecessary `unsafe` block
+   --> tcx_loader.rs:215:5
+    |
+215 |     unsafe {
+    |     ^^^^^^ unnecessary `unsafe` block
+    |
+    = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0277, E0502, E0603.
+For more information about an error, try `rustc --explain E0277`.
+warning: `netns-density-295-part-c` (bin "tcx-loader") generated 2 warnings
+error: could not compile `netns-density-295-part-c` (bin "tcx-loader") due to 6 previous errors; 2 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

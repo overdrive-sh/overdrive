@@ -635,3 +635,352 @@ Part B therefore validates the assigned bounded same-node mechanism with the
 actual production enforcement core and supporting identity/resolver/cgroup
 components. It does not establish cross-host routing, target density,
 throughput, or a final production API shape.
+
+---
+
+## Part C — TCX production-core proof
+
+### Part-C verdict: WORKS
+
+The assigned TCX assumption works on the configured native metal target at
+source commit `cadfd1aea827afc14146b762dfb1207f0a6db9e7`. A Rust/aya-rs
+`BPF_PROG_TYPE_SCHED_CLS` endpoint classifier attached through TCX ingress to
+each real microVM TAP replaced Part B's nftables bridge-family classifier. The
+only nftables table owned by the final run was `table ip gh295c`, limited to
+IP-prerouting/output TPROXY and shared-gateway DNS observation.
+
+Two real Cloud Hypervisor microVMs on `tap295ca` and `tap295cb`, attached to
+one `br295c` and one `10.95.0.0/24`, completed the credential-free plaintext
+DNS plus two-phase byte-distinct request/response journey through the same
+actual production identity, resolver, `HostMtlsEnforcement`, kTLS, splice, and
+cgroup components used in Part B. Both captured leg-B↔leg-C directions were
+complete TLS streams with application-data records, zero application
+cleartext, and zero gaps. No direct guest-A→guest-B packet reached the peer
+TAP.
+
+The TCX program also failed closed on the endpoint states assigned by this
+probe: an absent endpoint-map registration, a wrong source MAC, a wrong source
+IPv4 address, and non-TCP direct guest-to-guest traffic each incremented its
+own counter. None of the four injected frames reached loopback or the peer
+TAP. The two TCX links and both maps remained live after the original aya
+loader process exited, were independently adopted from bpffs, and were
+explicitly unpinned/detached during cleanup.
+
+Phase 1 only. Part C makes no promotion choice, architecture decision,
+production edit, commit, or `wave-decisions.md` change.
+
+### Classifier program, maps, and exact verdicts
+
+The scratch classifier is
+[`bpf/main.rs`](../../../../spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/bpf/main.rs).
+It is a `#![no_std]`, `#![no_main]` aya-ebpf Rust binary; no C, clang BPF
+source, or userspace packet-forwarding loop exists.
+
+The one `#[classifier]` program, `gh295c_endpoint`, runs at TCX ingress and:
+
+1. keys `ENDPOINTS` by the real ingress ifindex;
+2. drops before bridge delivery when the ifindex is unregistered;
+3. validates the source Ethernet MAC and IPv4/ARP sender address against the
+   registered endpoint;
+4. allows validated host/gateway-destined traffic unchanged;
+5. allows validated ARP so an on-subnet peer MAC can be resolved;
+6. drops validated non-TCP traffic whose destination MAC is not the bridge;
+7. for validated TCP addressed toward a peer MAC, rewrites only Ethernet
+   destination to `02:00:00:95:00:01`, sets skb mark `0x295a`, changes packet
+   type to `PACKET_HOST`, and returns `TC_ACT_OK` so the bridge hands the
+   original IPv4 destination and TCP port to host IP prerouting.
+
+The program has two maps:
+
+| Map | Shape | Final measured metadata |
+|---|---|---|
+| `ENDPOINTS` | `HashMap<ifindex, Endpoint>` where `Endpoint` is expected IPv4, expected MAC, and bridge MAC | key 4 B, value 20 B, 16 maximum entries in the bounded probe, `3,840` B memlock |
+| `COUNTERS` | eight-slot `Array<u64>` | key 4 B, value 8 B, 8 entries, `368` B memlock |
+
+The loaded program reported `296` verified instructions, `2,640` translated
+bytes, `1,468` JITed bytes, and `4,096` B memlock. This is one kernel/toolchain
+observation, not a cross-kernel budget baseline.
+
+### TCX link lifecycle proof
+
+The aya 0.13.1 loader explicitly used
+`TcAttachOptions::TcxOrder(LinkOrder::first())`; it did not use or fall back to
+legacy clsact/netlink attachment. It attached one link to each TAP and pinned
+the links plus maps under `/sys/fs/bpf/gh295c`:
+
+```text
+TCX_PROGRAM_LOADED id=30155 verified_insns=Some(296) memlock_bytes=4096 elapsed_ms=50.811
+TCX_LINK_PINNED iface=tap295ca ifindex=57064 pin=/sys/fs/bpf/gh295c/link-tap295ca attach_ms=7.624
+TCX_LINK_PINNED iface=tap295cb ifindex=57065 pin=/sys/fs/bpf/gh295c/link-tap295cb attach_ms=7.943
+TCX_LOADER_EXITING links_and_maps_pinned=true
+```
+
+After that process exited, a separate `tcx-loader inspect` process opened both
+pins with `PinnedLink::from_pin`, queried the kernel TCX multi-program API, and
+found one program on each interface at revision 2:
+
+```text
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+```
+
+`bpftool link show pinned` independently rendered both as link type `tcx`,
+attach type `tcx_ingress`, targeting the exact owned TAP ifindices. Cleanup
+adopted both pinned links again, removed each pin, closed the returned FDs, and
+queried zero TCX programs on both TAPs before the TAPs were deleted.
+
+### Security-negative proof
+
+The negative population ran against the real attached program after the
+original loader exited:
+
+- before endpoint registration, a correctly shaped source frame produced
+  `map_miss=1`;
+- after registering both real TAP endpoint facts, a wrong source MAC produced
+  `spoof_mac=1`;
+- the correct MAC with source `10.95.0.99` produced `spoof_ip=1`;
+- a correctly sourced UDP frame addressed directly to the peer MAC produced
+  `direct_bypass_drop=1`.
+
+The counters immediately after those four single-frame injections were:
+
+```text
+TCX_COUNTER gateway_pass=0
+TCX_COUNTER intercept=0
+TCX_COUNTER map_miss=1
+TCX_COUNTER spoof_mac=1
+TCX_COUNTER spoof_ip=1
+TCX_COUNTER direct_bypass_drop=1
+TCX_COUNTER arp_pass=0
+TCX_COUNTER malformed_drop=0
+TCX_NEGATIVE_WIRE iface=lo escaped_packets=0
+TCX_NEGATIVE_WIRE iface=tap295cb escaped_packets=0
+```
+
+The source-TAP negative pcap contains the injected frames, providing the
+capture-works positive control. The loopback and peer-TAP negative pcaps are
+24-byte header-only pcaps with zero packet records. Thus the counter evidence
+is paired with an external no-escape oracle; it is not program bookkeeping
+alone.
+
+After the real journey the cumulative classifier counters were:
+
+```text
+TCX_COUNTER gateway_pass=8
+TCX_COUNTER intercept=8
+TCX_COUNTER map_miss=1
+TCX_COUNTER spoof_mac=1
+TCX_COUNTER spoof_ip=1
+TCX_COUNTER direct_bypass_drop=13
+TCX_COUNTER arp_pass=4
+TCX_COUNTER malformed_drop=0
+```
+
+The extra direct-bypass drops are fail-closed non-IPv4/non-ARP or non-TCP
+peer-destined guest traffic observed during real guest boot; they do not weaken
+the exact one-per-negative proof captured before boot.
+
+### Bridge-nft boundary and valid journey
+
+No bridge-family nft table or rule was installed. During the live TCX journey:
+
+```text
+$ nft list tables
+table ip gh295c
+
+$ nft list table bridge gh295c
+Error: No such file or directory
+
+BRIDGE_NFT_CLASSIFIER_ABSENT=true
+```
+
+The retained IP table did only what transparent socket delivery requires:
+
+- source mark `0x295a` → leg F at `127.0.0.1:15294`;
+- output leg-B mark/re-route → leg C at `127.0.0.1:15295`;
+- production leg-S mark `0x2` excluded from leg-B recapture;
+- UDP `:53` observed on `br295c` and delivered to the shared bridge socket.
+
+The valid journey produced nonzero TCX `intercept=8`, IP leg-F TPROXY `8`
+packets, output/leg-C TPROXY `10` packets, and shared DNS `2` packets. The
+production resolver recovered and classified the unchanged original
+`10.95.0.3:9000` destination.
+
+### Production components reused and zero-copy proof
+
+Part C includes the complete Part-B host and credential-free guest source
+directly, so the following production components executed unchanged:
+
+- `RcgenCa` + `OsEntropy` and two real workload SVIDs;
+- `IdentityMgr` through `IdentityRead`;
+- `ServiceBackendsResolve` through `MtlsResolve`;
+- `HostMtlsEnforcement` through `MtlsEnforcement` for outbound and inbound;
+- `CgroupManager`, `RealCgroupFs`, and production `CgroupPath` for each VMM.
+
+Actual output:
+
+```text
+PRODUCTION_IDENTITY_HELD client=spiffe://overdrive.local/workload/gh295b-client-workload/alloc/gh295b-client server=spiffe://overdrive.local/workload/peer/alloc/gh295b-server held_count=2
+PRODUCTION_RESOLVER_PROBE_OK
+PRODUCTION_MTLS_KTLS_SPLICE_PROBE_OK
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+PRODUCTION_RESOLVER_MESH orig_dst=10.95.0.3:9000 backend=10.95.0.3:9000 expected_svid=None
+PRODUCTION_INBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-server#1
+PRODUCTION_OUTBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-client#0
+PRODUCTION_MTLS_BOTH_ESTABLISHED
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.091131
+```
+
+`ss` showed two live sockets each carrying `tcp-ulp-tls version: 1.3 cipher:
+aes-gcm-256 rxconf: sw txconf: sw`. Strace attached only after the production
+Earned-Trust probe and captured 14 successful `splice(2)` calls on the real
+guest journey. The 40-byte steady request and 41-byte steady response occurred
+zero times in host `write`/`writev`/`sendto`/`sendmsg` buffers.
+
+The two reconstructed leg-B↔leg-C streams reported:
+
+```text
+WIRE_SCAN ('10.95.0.1', 38042, '10.95.0.3', 9000) stream_bytes=1404 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 38042) stream_bytes=1353 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+SHARED_L2 source_tap_steady_request=1 peer_tap_agent_steady_request=1 peer_tap_steady_response=1 guest_to_guest_bypass_packets=0
+ZERO_COPY_STRACE successful_splice_syscalls=14 steady_request_host_write_hits=0 steady_response_host_write_hits=0
+KTLS_SS bidirectional_tls13_socket_records=2
+```
+
+All three journey pcaps reported zero kernel capture drops.
+
+### Per-VM cgroups
+
+The real Cloud Hypervisor PIDs, not wrapper processes, were owned by the two
+production-shaped scopes:
+
+```text
+CGROUP_PROOF alloc=gh295b-server pid=2834928 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope cgroup_procs=2834928, exe=/usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295b-client pid=2834971 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope cgroup_procs=2834971, exe=/usr/local/bin/cloud-hypervisor
+```
+
+Both scopes were killed/removed by the production `CgroupManager` during
+cleanup.
+
+### Canonical command, evidence, and timing
+
+Final execution:
+
+```sh
+OVERDRIVE_METAL_KERNEL=/var/tmp/spike-increment-n/kernel \
+OVERDRIVE_METAL_ROOTFS=/var/tmp/spike-increment-n/rootfs.ext4 \
+OVERDRIVE_METAL_SCENARIO=netns-density-295-part-c-attempt-03 \
+cargo xtask metal run -- \
+  bash spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/run.sh
+```
+
+The runner acquired the canonical exclusive metal lease and passed native
+`x86_64`, non-virtualized KVM preflight. Metadata: kernel
+`7.0.0-29-generic`, Cloud Hypervisor `v53.0`.
+
+Retained artifacts:
+
+- scratch source and all append-only attempt captures:
+  [`increment-w-part-c-tcx-netns-density-295-20260916T014247Z`](../../../../spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/);
+- final outer capture:
+  [`capture-attempt-03.log`](../../../../spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/capture-attempt-03.log);
+- raw final evidence, including BPF ELF, bpftool JSON, pin/adoption records,
+  negative and journey pcaps, strace, `ss`, consoles, counters, cgroups,
+  topology complements, and transcript:
+  [`evidence-attempt-03/`](../../../../spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/evidence-attempt-03/).
+
+Point timings:
+
+- aya object load + verifier: `50.811 ms`;
+- TCX attach/pin on `tap295ca`: `7.624 ms`;
+- TCX attach/pin on `tap295cb`: `7.943 ms`;
+- guest DNS + warmup + steady-state exchange: `91.131 ms`;
+- complete final attempt, including clean BPF build, ext4 construction, two
+  microVM boots, negatives, journey, capture analysis, and cleanup:
+  `27.297022 s`.
+
+These are individual observations, not a benchmark and not evidence for 16k
+ports or a throughput distribution. Part-C work from the first 01:47:41 UTC
+attempt through the successful 01:49:44 UTC cleanup remained well inside the
+one-hour spike maximum.
+
+### Attempts retained append-only
+
+| Attempt | Observation | Disposition |
+|---|---|---|
+| 01 | The first userspace-loader compile exposed aya 0.13.1 API details: `FdLink` is exported under `programs::links`, and typed `HashMap`/`Array` adapters accept a `Map` variant rather than bare pinned `MapData`. A local borrow in the synthetic-frame builder also needed a separate length value. | Corrected scratch-only imports/conversions/borrow. No kernel state was created. |
+| 02 | The program loaded at 296 verified instructions, both TCX links attached and survived loader exit, and independent adoption/query succeeded. `bpftool link show pinned` rendered the valid TCX link but returned exit 255 on this bpftool build, causing the pipefail runner to stop. | Preserved the failure and complete cleanup. Kept the load/adoption evidence; treated bpftool's rendered output as diagnostic and relied on aya's query/adoption plus bpftool JSON for the gate. |
+| 03 | Every security, lifecycle, wire, zero-copy, cgroup, topology, and cleanup oracle passed. | **WORKS.** |
+
+### Cleanup and topology complement
+
+Cleanup explicitly adopted/unpinned/detached only the two owned TCX links,
+removed only the two owned maps, removed the owned IP nft table/rule/route,
+deleted the two TAPs and bridge, and removed the two per-VM cgroups. It did not
+sweep node-global BPF or network state.
+
+The before/after `bpftool -j` link, program, and map snapshots are pairwise
+byte-identical. Netns, veth, and `/etc/netns` snapshots are also byte-identical
+with zero-byte diffs. Cleanup complements recorded every owned link, nft table,
+policy rule/route, bpffs directory, and cgroup as `ABSENT`.
+
+No final-path per-workload netns, veth pair, transit/guest `/30`, `NetSlot`, or
+`host_veth` was created or consulted. Unrelated pre-existing host objects were
+observed and preserved.
+
+### Wrong assumptions and precise D-295-2 implications
+
+1. Aya 0.13.1 already has the required high-level TCX support. No raw
+   `BPF_LINK_CREATE` hand-roll was necessary: explicit TCX ordering, link
+   conversion, bpffs pinning, pinned-link adoption, and TCX query all worked.
+2. `TcContext::change_type(PACKET_HOST)`, Ethernet destination rewrite, and
+   skb mark at TAP ingress were sufficient to reproduce Part B's working
+   bridge-local delivery shape. TCX did not need to redirect or copy packets
+   into userspace.
+3. Endpoint identity is naturally keyed by ingress ifindex, allowing separate
+   observable map-miss, MAC-spoof, and IP-spoof verdicts with one shared
+   program and map family.
+4. Pinned TCX links remove loader-process lifetime as an attachment hazard,
+   but they do not by themselves make an intentionally unpinned/detached TAP
+   fail closed. The proposed Option-B text's bridge-level default-drop guard
+   remains a separate architecture requirement if DESIGN selects TCX; this
+   spike proved map-miss fail-closed and pin survival/adoption, not safe live
+   operation after deliberate link removal.
+5. The still-PROPOSED D-295-2 evidence statements that TCX is unexercised and
+   that only Option A has real-metal catch-point evidence are now false. Part C
+   establishes Option B as a real-metal-feasible alternative with concrete
+   verifier, memory, attach, security-negative, pin-lifecycle, and production-
+   core evidence.
+6. Feasibility does not itself select Option B over Option A. DESIGN must now
+   compare two measured functional catch mechanisms on their actual costs:
+   Option B adds a 296-verified-instruction program, 4,208 B measured map
+   memlock in this bounded probe, 4,096 B program memlock, and one TCX link per
+   TAP; it provides per-endpoint source validation and explicit counters.
+   Option A retains nft-only lifecycle and still lacks the proposed set/vmap
+   scale measurement. The user must choose the revised D-295-2 after this
+   evidence is incorporated and independently reviewed.
+
+### Part-C artifact hashes
+
+```text
+Cargo.toml             97a5134d6c4ac7dfc16fb17cb758aecf793b1a82e7bd1b8fcc0aad21a807c608
+host.rs                4d7efb1ec09595bc0cf9685101155c0557ac87fe3e1d4209546400f401f1a0e6
+guest.rs               356a990f3995f0c0ef5877b5faaa4babd0096509f51beba387b357f96edb1f48
+tcx_loader.rs          fd48ff87299b631f46cbb73defa7bec95cef70989a5a11dfdd6318c3f389dae1
+run.sh                 b8418422667ff6d32fe604ee96070eff78402d9f517fbc50a02dff802f7f3eb1
+bpf/Cargo.toml         6a675581c5be245f14f67c5b3fb5c801db94502d2021406bad1a367ab5c2b3c2
+bpf/main.rs            4e79cd11f92612e8ab3e6f267cf8566204b650e445ae09912233e8dc8f400edc
+gh295c-endpoint-bpf.o  91e889d41c6ddf9a6bd6ac3b02db014dd48f6266466c487a76078ea015516a08
+lo.pcap                bf5657c396260525314574721f3c2e718e82a5a48f261313e3e0e23ad50b7305
+tap295ca.pcap          376b878e87821dc9e1e9be34fe2b5f511c534ee89af061959a15421991c1c754
+tap295cb.pcap          322cb93f5a41aa91066fc46b4bf1b55b023d127ad6fddf5e03095abf9c94f604
+transcript.log         489734923e3ff840f022b7f54ff9b1ae0d5ee3312f44ba8ac4220704f503f053
+```
+
+Part C therefore validates the bounded same-node TCX Option-B mechanism. It
+does not prove 16k scale, throughput, cross-host routing, live-link-loss
+fail-closed behavior, or a final production API shape.

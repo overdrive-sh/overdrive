@@ -1,0 +1,50 @@
+[workspace]
+
+[package]
+name = "netns-density-295-part-c"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["host"]
+host = [
+  "dep:aya",
+  "dep:overdrive-control-plane",
+  "dep:overdrive-core",
+  "dep:overdrive-dataplane",
+  "dep:overdrive-host",
+  "dep:overdrive-sim",
+  "dep:overdrive-worker",
+  "dep:rustls",
+  "dep:tokio",
+]
+
+[dependencies]
+aya = { version = "=0.13.1", optional = true }
+libc = "0.2"
+overdrive-control-plane = { path = "../../crates/overdrive-control-plane", optional = true }
+overdrive-core = { path = "../../crates/overdrive-core", optional = true }
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane", optional = true }
+overdrive-host = { path = "../../crates/overdrive-host", optional = true }
+overdrive-sim = { path = "../../crates/overdrive-sim", optional = true }
+overdrive-worker = { path = "../../crates/overdrive-worker", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"], optional = true }
+
+[[bin]]
+name = "guest"
+path = "guest.rs"
+
+[[bin]]
+name = "host"
+path = "host.rs"
+required-features = ["host"]
+
+[[bin]]
+name = "tcx-loader"
+path = "tcx_loader.rs"
+required-features = ["host"]
+
+[profile.release]
+panic = "abort"

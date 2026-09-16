@@ -1,0 +1,496 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- bash spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=5100d3cf8ad241060f53b7fc pid=2833537
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/khartoum-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 257,739 bytes  received 51,666 bytes  206,270.00 bytes/sec
+total size is 315,557,272  speedup is 1,019.88
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SPIKE_RUN=/var/tmp/gh295c.J8aUwdtW
+START=2026-09-16T01:49:17Z
+SOURCE_SHA=27dcec03d2ee44efe0c0321c02d0de42f9ff2ab60942807373dabbc6f86c51d2
+7.0.0-29-generic
+x86_64
+none
+cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+bpf-linker 0.0.0
+COMMAND build Part-B production-core host, TCX aya loader, static guest
+    Updating crates.io index
+     Locking 353 packages to latest Rust 1.95.0 compatible versions
+      Adding aya v0.13.1 (available: v0.14.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+    Finished `release` profile [optimized] target(s) in 6.41s
+    Finished `release` profile [optimized] target(s) in 0.06s
+COMMAND build aya-rs SCHED_CLS object
+    Updating crates.io index
+     Locking 27 packages to latest Rust 1.99.0-nightly compatible versions
+      Adding aya-ebpf v0.1.1 (available: v0.2.1)
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling camino v1.2.6
+   Compiling serde_json v1.0.151
+   Compiling thiserror v2.0.20
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling anyhow v1.0.104
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.23
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling semver v1.0.28
+   Compiling cargo-platform v0.3.3
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.20
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling gh295c-endpoint-bpf v0.0.0 (/home/ubuntu/overdrive/spike-scratch/increment-w-part-c-tcx-netns-density-295-20260916T014247Z/bpf)
+    Finished `release` profile [optimized] target(s) in 10.40s
+/home/ubuntu/overdrive/target/release/host:                                         ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=d220ff3c8c7a2ad80f09f319312e6786482e84db, not stripped
+/home/ubuntu/overdrive/target/release/tcx-loader:                                   ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=702a530546a1c3ca7aa0eb6a404a6909fee81a1c, not stripped
+/home/ubuntu/overdrive/target/x86_64-unknown-linux-musl/release/guest:              ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=200144b858982981a4ebbb7c150d15cd5a3927ab, not stripped
+/var/tmp/gh295c.J8aUwdtW/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf: ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+mke2fs 1.47.2 (1-Jan-2025)
+Discarding device blocks:     0/16384           done                            
+Creating filesystem with 16384 4k blocks and 16384 inodes
+
+Allocating group tables: 0/1   done                            
+Writing inode tables: 0/1   done                            
+Creating journal (1024 blocks): done
+Copying files into the device: done
+Writing superblocks and filesystem accounting information: 0/1   done
+
++ ip link show br295c
+Device "br295c" does not exist.
++ ip link show tap295ca
+Device "tap295ca" does not exist.
++ ip link show tap295cb
+Device "tap295cb" does not exist.
++ nft list table ip gh295c
+Error: No such file or directory
+list table ip gh295c
+              ^^^^^^
++ nft list table bridge gh295c
+Error: No such file or directory
+list table bridge gh295c
+                  ^^^^^^
++ '[' '!' -e /sys/fs/bpf/gh295c ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope ']'
++ '[' '!' -e /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope ']'
++ /home/ubuntu/overdrive/target/release/host cgroup-init
+PRODUCTION_CGROUP_CREATED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope
+PRODUCTION_CGROUP_CREATED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope
++ spike_cgroups=1
++ modprobe nft_tproxy
++ modprobe tls
++ ip link add br295c type bridge
++ spike_links+=(br295c)
++ ip link set br295c address 02:00:00:95:00:01
++ ip addr add 10.95.0.1/24 dev br295c
++ ip link set br295c up
++ for tap in tap295ca tap295cb
++ ip tuntap add dev tap295ca mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295ca master br295c
++ ip link set tap295ca up
++ sysctl -qw net.ipv4.conf.tap295ca.rp_filter=0
++ for tap in tap295ca tap295cb
++ ip tuntap add dev tap295cb mode tap
++ spike_links=("$tap" "${spike_links[@]}")
++ ip link set tap295cb master br295c
++ ip link set tap295cb up
++ sysctl -qw net.ipv4.conf.tap295cb.rp_filter=0
++ sysctl -qw net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.br295c.rp_filter=0
++ ip rule add priority 2952 fwmark 0x295 lookup 295
++ spike_rule=1
++ ip route add local 0.0.0.0/0 dev lo table 295
++ spike_route=1
++ nft add table ip gh295c
++ spike_table=1
++ nft add chain ip gh295c prerouting '{ type filter hook prerouting priority -151; policy accept; }'
++ nft add rule ip gh295c prerouting iifname br295c ip protocol udp udp dport 53 counter
++ nft add rule ip gh295c prerouting meta mark 0x295a ip protocol tcp tcp dport 9000 counter tproxy to 127.0.0.1:15294 meta mark set 0x295 accept
++ nft add rule ip gh295c prerouting meta mark 0x295 ip daddr 10.95.0.3 tcp dport 9000 counter tproxy to 127.0.0.1:15295 accept
++ nft add chain ip gh295c output '{ type route hook output priority -151; policy accept; }'
++ nft add rule ip gh295c output meta mark '!=' 0x2 ip daddr 10.95.0.3 tcp dport 9000 counter meta mark set 0x295 accept
++ nft list table bridge gh295c
+Error: No such file or directory
+list table bridge gh295c
+                  ^^^^^^
++ /home/ubuntu/overdrive/target/release/tcx-loader load /sys/fs/bpf/gh295c /var/tmp/gh295c.J8aUwdtW/bpf-target/bpfel-unknown-none/release/gh295c-endpoint-bpf
+TCX_PROGRAM_LOADED id=30155 verified_insns=Some(296) memlock_bytes=4096 elapsed_ms=50.811
+TCX_LINK_PINNED iface=tap295ca ifindex=57064 pin=/sys/fs/bpf/gh295c/link-tap295ca attach_ms=7.624
+TCX_LINK_PINNED iface=tap295cb ifindex=57065 pin=/sys/fs/bpf/gh295c/link-tap295cb attach_ms=7.943
+TCX_LOADER_EXITING links_and_maps_pinned=true
++ spike_tcx=1
++ printf 'LOADER_PROCESS_EXITED_CHECK pinned_links_must_survive\n'
+LOADER_PROCESS_EXITED_CHECK pinned_links_must_survive
++ /home/ubuntu/overdrive/target/release/tcx-loader inspect /sys/fs/bpf/gh295c
++ tee /var/tmp/gh295c.J8aUwdtW/tcx-after-loader-exit.log
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295c/endpoints id=34106 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295c/counters id=34107 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=0
+TCX_COUNTER intercept=0
+TCX_COUNTER map_miss=0
+TCX_COUNTER spoof_mac=0
+TCX_COUNTER spoof_ip=0
+TCX_COUNTER direct_bypass_drop=0
+TCX_COUNTER arp_pass=0
+TCX_COUNTER malformed_drop=0
++ bpftool link show pinned /sys/fs/bpf/gh295c/link-tap295ca
++ tee /var/tmp/gh295c.J8aUwdtW/bpftool-link-a.log
+11906: tcx  prog 30155  
+	ifindex tap295ca(57064)  attach_type tcx_ingress  
++ true
++ bpftool link show pinned /sys/fs/bpf/gh295c/link-tap295cb
++ tee /var/tmp/gh295c.J8aUwdtW/bpftool-link-b.log
+11907: tcx  prog 30155  
+	ifindex tap295cb(57065)  attach_type tcx_ingress  
++ true
++ bpftool -j prog show
++ bpftool -j map show
++ bpftool net
++ for iface in lo tap295ca tap295cb
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni lo -w /var/tmp/gh295c.J8aUwdtW/negative-lo.pcap 'ip and (tcp port 9000 or udp port 9999)'
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni tap295ca -w /var/tmp/gh295c.J8aUwdtW/negative-tap295ca.pcap 'ip and (tcp port 9000 or udp port 9999)'
++ spike_captures+=("$!")
++ sleep 0.3
++ tcpdump --immediate-mode -U -s 0 -ni tap295cb -w /var/tmp/gh295c.J8aUwdtW/negative-tap295cb.pcap 'ip and (tcp port 9000 or udp port 9999)'
++ /home/ubuntu/overdrive/target/release/tcx-loader inject /sys/fs/bpf/gh295c tap295ca map-miss
+TCX_INJECT iface=tap295ca kind=map-miss bytes=54
++ /home/ubuntu/overdrive/target/release/tcx-loader register /sys/fs/bpf/gh295c
+TCX_ENDPOINTS_REGISTERED count=2
++ /home/ubuntu/overdrive/target/release/tcx-loader inject /sys/fs/bpf/gh295c tap295ca spoof-mac
+TCX_INJECT iface=tap295ca kind=spoof-mac bytes=54
++ /home/ubuntu/overdrive/target/release/tcx-loader inject /sys/fs/bpf/gh295c tap295ca spoof-ip
+TCX_INJECT iface=tap295ca kind=spoof-ip bytes=54
++ /home/ubuntu/overdrive/target/release/tcx-loader inject /sys/fs/bpf/gh295c tap295ca direct-bypass
+TCX_INJECT iface=tap295ca kind=direct-bypass bytes=42
++ sleep 0.5
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834876
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834877
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834878
++ for pid in "${spike_captures[@]}"
++ wait 2834876
++ for pid in "${spike_captures[@]}"
++ wait 2834877
++ for pid in "${spike_captures[@]}"
++ wait 2834878
++ spike_captures=()
++ /home/ubuntu/overdrive/target/release/tcx-loader inspect /sys/fs/bpf/gh295c
++ tee /var/tmp/gh295c.J8aUwdtW/tcx-security-counters.log
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295c/endpoints id=34106 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295c/counters id=34107 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=0
+TCX_COUNTER intercept=0
+TCX_COUNTER map_miss=1
+TCX_COUNTER spoof_mac=1
+TCX_COUNTER spoof_ip=1
+TCX_COUNTER direct_bypass_drop=1
+TCX_COUNTER arp_pass=0
+TCX_COUNTER malformed_drop=0
++ python3 - /var/tmp/gh295c.J8aUwdtW
+TCX_NEGATIVE_WIRE iface=lo escaped_packets=0
+TCX_NEGATIVE_WIRE iface=tap295cb escaped_packets=0
++ grep -q 'TCX_COUNTER map_miss=1' /var/tmp/gh295c.J8aUwdtW/tcx-security-counters.log
++ grep -q 'TCX_COUNTER spoof_mac=1' /var/tmp/gh295c.J8aUwdtW/tcx-security-counters.log
++ grep -q 'TCX_COUNTER spoof_ip=1' /var/tmp/gh295c.J8aUwdtW/tcx-security-counters.log
++ grep -q 'TCX_COUNTER direct_bypass_drop=1' /var/tmp/gh295c.J8aUwdtW/tcx-security-counters.log
++ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eno12399np0      UP             151.115.99.251/24 metric 100 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0/64 fe80::1623:f2ff:fef4:50e0/64 
+eno8303          DOWN           
+eno12409np1      DOWN           
+ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 fe80::f0ed:bfff:feba:f468/64 
+ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 fe80::d8a1:6ff:fecc:cb18/64 
+ovd-hv-0008@if56996 UP             10.99.0.33/30 fe80::30c3:d6ff:fe18:7f89/64 
+ovd-hv-0007@if57023 UP             10.99.0.29/30 fe80::4cc8:b5ff:fecd:da65/64 
+ovd-hv-0001@if57029 UP             10.99.0.5/30 fe80::1004:dbff:fe6b:b06c/64 
+ovd-hv-0000@if57046 UP             10.99.0.1/30 fe80::d006:2bff:fea5:bf79/64 
+br295c           UP             10.95.0.1/24 fe80::ff:fe95:1/64 
+tap295ca         DOWN           fe80::8886:feff:fe54:f970/64 
+tap295cb         DOWN           
++ ip netns list
+ovd-ns-0000 (id: 0)
+ovd-ns-0001 (id: 1)
+ovd-ns-0007 (id: 7)
+ovd-ns-0008 (id: 8)
++ ip -br link show type veth
+ovd-veth-bk@ovd-veth-cli UP             36:2a:11:a3:1f:2c <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-veth-cli@ovd-veth-bk UP             16:9f:ad:a9:86:2e <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0008@if56996 UP             32:c3:d6:18:7f:89 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0007@if57023 UP             4e:c8:b5:cd:da:65 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0001@if57029 UP             12:04:db:6b:b0:6c <BROADCAST,MULTICAST,UP,LOWER_UP> 
+ovd-hv-0000@if57046 UP             d2:06:2b:a5:bf:79 <BROADCAST,MULTICAST,UP,LOWER_UP> 
++ bridge link
+2: eno12399np0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 hwmode VEB 
+4: eno12409np1: <BROADCAST,MULTICAST> mtu 1500 hwmode VEB 
+57064: tap295ca: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295c state disabled priority 32 cost 2 
+57065: tap295cb: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 master br295c state disabled priority 32 cost 2 
++ nft list tables
++ tee /var/tmp/gh295c.J8aUwdtW/nft-tables-live.log
+table ip gh295c
++ grep -q 'table bridge gh295c' /var/tmp/gh295c.J8aUwdtW/nft-tables-live.log
++ spike_host=2834903
++ /home/ubuntu/overdrive/target/release/host
++ spike_pids+=("$spike_host")
++ set +x
++ grep 'HOST READY' /var/tmp/gh295c.J8aUwdtW/host.log
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
++ spike_trace_pid=2834920
++ sleep 0.5
++ strace -ff -ttt -yy -s 512 -xx -e trace=clone,clone3,splice,write,writev,sendto,sendmsg -o /var/tmp/gh295c.J8aUwdtW/strace -p 2834903
++ for iface in lo tap295ca tap295cb
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni lo -w /var/tmp/gh295c.J8aUwdtW/lo.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ for iface in lo tap295ca tap295cb
++ tcpdump --immediate-mode -U -s 0 -ni tap295ca -w /var/tmp/gh295c.J8aUwdtW/tap295ca.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_captures+=("$!")
++ sleep 0.4
++ tcpdump --immediate-mode -U -s 0 -ni tap295cb -w /var/tmp/gh295c.J8aUwdtW/tap295cb.pcap 'net 10.95.0.0/24 and (tcp port 9000 or udp port 53)'
++ spike_server=2834928
++ spike_pids+=("$spike_server")
++ /home/ubuntu/overdrive/target/release/host cgroup-place gh295b-server 2834928
++ cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=server' --disk path=/var/tmp/gh295c.J8aUwdtW/server.ext4,image_type=raw --net tap=tap295cb,mac=02:00:00:95:00:03 --serial file=/var/tmp/gh295c.J8aUwdtW/server.console --console off
+PRODUCTION_CGROUP_PID_PLACED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope pid=2834928
++ set +x
++ grep 'GUEST SERVER READY' /var/tmp/gh295c.J8aUwdtW/server.console
+GUEST SERVER READY
++ spike_client=2834971
++ cloud-hypervisor --cpus boot=1 --memory size=256M --kernel /var/tmp/spike-increment-n/kernel --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=0 loglevel=4 spike_role=client' --disk path=/var/tmp/gh295c.J8aUwdtW/client.ext4,image_type=raw --net tap=tap295ca,mac=02:00:00:95:00:02 --serial file=/var/tmp/gh295c.J8aUwdtW/client.console --console off
++ spike_pids+=("$spike_client")
++ /home/ubuntu/overdrive/target/release/host cgroup-place gh295b-client 2834971
+PRODUCTION_CGROUP_PID_PLACED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope pid=2834971
++ set +x
++ grep PRODUCTION_MTLS_BOTH_ESTABLISHED /var/tmp/gh295c.J8aUwdtW/host.log
+PRODUCTION_MTLS_BOTH_ESTABLISHED
++ ss -H -n -t -i -e
++ grep -A1 -B1 tcp-ulp-tls /var/tmp/gh295c.J8aUwdtW/ss-ktls.log
+ESTAB    0      45          10.95.0.3:9000       10.95.0.1:38042 timer:(on,190ms,0) ino:44364000 sk:61a3 cgroup:/user.slice/user-1000.slice/session-17508.scope <->
+	 ts sack cubic wscale:10,10 rto:201 rtt:0.042/0.019 ato:41 mss:1448 pmtu:65535 rcvmss:1080 advmss:65483 cwnd:10 bytes_sent:1290 bytes_acked:1245 bytes_received:1342 segs_out:4 segs_in:6 data_segs_out:2 data_segs_in:3 send 2758095238bps lastsnd:11 lastrcv:30 lastack:30 pacing_rate 5483550288bps delivery_rate 199724136bps delivered:2 app_limited busy:11ms unacked:1 rcv_space:65483 rcv_ssthresh:68044 minrtt:0.04 snd_wnd:67584 rcv_wnd:68608 tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw txconf: sw
+SYN-RECV 0      0      151.115.99.251:22    222.167.35.115:30366 timer:(on,1.462sec,2) ino:0 sk:61a5
+--
+ESTAB    0      0           10.95.0.1:38042      10.95.0.3:9000  timer:(keepalive,9.958sec,0) ino:44368906 sk:61b5 cgroup:/user.slice/user-1000.slice/session-17508.scope <->
+	 ts sack cubic wscale:10,10 rto:201 rtt:0.474/0.661 ato:41 mss:1448 pmtu:1500 rcvmss:1245 advmss:1448 cwnd:10 bytes_sent:1404 bytes_acked:1405 bytes_received:1353 segs_out:7 segs_in:6 data_segs_out:4 data_segs_in:3 send 244388186bps lastsnd:1 pacing_rate 488647504bps delivery_rate 313081080bps delivered:5 app_limited busy:5ms rcv_space:14480 rcv_ssthresh:67408 minrtt:0.037 snd_wnd:68608 rcv_wnd:67584 tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw txconf: sw                           
+ESTAB    0      0           10.95.0.1:38052      10.95.0.3:9000  timer:(keepalive,9.961sec,0) ino:44365080 sk:a1a6 fwmark:0x2 cgroup:/user.slice/user-1000.slice/session-17508.scope <->
++ for alloc_pid in "gh295b-server:$spike_server" "gh295b-client:$spike_client"
++ alloc=gh295b-server
++ pid=2834928
++ scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope
++ grep -qx 2834928 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope/cgroup.procs
++ tee -a /var/tmp/gh295c.J8aUwdtW/cgroup-proof.log
+++ tr '\n' ,
+++ readlink /proc/2834928/exe
++ printf 'CGROUP_PROOF alloc=%s pid=%s scope=%s cgroup_procs=%s exe=%s\n' gh295b-server 2834928 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope 2834928, /usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295b-server pid=2834928 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-server.scope cgroup_procs=2834928, exe=/usr/local/bin/cloud-hypervisor
++ for alloc_pid in "gh295b-server:$spike_server" "gh295b-client:$spike_client"
++ alloc=gh295b-client
++ pid=2834971
++ scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope
++ grep -qx 2834971 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope/cgroup.procs
++ tee -a /var/tmp/gh295c.J8aUwdtW/cgroup-proof.log
+++ tr '\n' ,
+++ readlink /proc/2834971/exe
++ printf 'CGROUP_PROOF alloc=%s pid=%s scope=%s cgroup_procs=%s exe=%s\n' gh295b-client 2834971 /sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope 2834971, /usr/local/bin/cloud-hypervisor
+CGROUP_PROOF alloc=gh295b-client pid=2834971 scope=/sys/fs/cgroup/overdrive.slice/workloads.slice/gh295b-client.scope cgroup_procs=2834971, exe=/usr/local/bin/cloud-hypervisor
++ wait 2834971
++ wait 2834928
++ wait 2834903
++ grep 'GUEST STEADY ROUNDTRIP SUCCESS' /var/tmp/gh295c.J8aUwdtW/client.console
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.091131
++ grep PRODUCTION_MTLS_TEARDOWN_COMPLETE /var/tmp/gh295c.J8aUwdtW/host.log
+PRODUCTION_MTLS_TEARDOWN_COMPLETE
++ sleep 0.3
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834923
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834924
++ for pid in "${spike_captures[@]}"
++ kill -INT 2834925
++ for pid in "${spike_captures[@]}"
++ wait 2834923
++ for pid in "${spike_captures[@]}"
++ wait 2834924
++ for pid in "${spike_captures[@]}"
++ wait 2834925
++ spike_captures=()
++ kill -INT 2834920
++ true
++ wait 2834920
++ spike_trace_pid=
++ set +x
+WIRE_SCAN ('10.95.0.1', 38042, '10.95.0.3', 9000) stream_bytes=1404 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+WIRE_SCAN ('10.95.0.3', 9000, '10.95.0.1', 38042) stream_bytes=1353 tls_records={20: 1, 22: 1, 23: 3} application_data_0x17=3 plaintext=0 gaps=0
+SHARED_L2 source_tap_steady_request=1 peer_tap_agent_steady_request=1 peer_tap_steady_response=1 guest_to_guest_bypass_packets=0
+ZERO_COPY_STRACE successful_splice_syscalls=14 steady_request_host_write_hits=0 steady_response_host_write_hits=0
+KTLS_SS bidirectional_tls13_socket_records=2
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295c/endpoints id=34106 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295c/counters id=34107 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=8
+TCX_COUNTER intercept=8
+TCX_COUNTER map_miss=1
+TCX_COUNTER spoof_mac=1
+TCX_COUNTER spoof_ip=1
+TCX_COUNTER direct_bypass_drop=13
+TCX_COUNTER arp_pass=4
+TCX_COUNTER malformed_drop=0
+Error: No such file or directory
+list table bridge gh295c
+                  ^^^^^^
+BRIDGE_NFT_CLASSIFIER_ABSENT=true
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295c/link-tap295ca
+TCX_LINK_UNPINNED_AND_DETACHED pin=/sys/fs/bpf/gh295c/link-tap295cb
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295c/endpoints
+TCX_MAP_UNPINNED pin=/sys/fs/bpf/gh295c/counters
+TCX_CLEANUP_QUERY iface=tap295ca programs=0
+TCX_CLEANUP_QUERY iface=tap295cb programs=0
+VERDICT=WORKS: real aya-rs SCHED_CLS/TCX endpoint classifier replaced Part-B bridge nft classification, survived loader exit through pinned links, enforced map/spoof/direct-bypass drops, and fed the actual production identity/resolver/TLS1.3+kTLS+splice/cgroup path
+
+HOST LOG
+PRODUCTION_IDENTITY_HELD client=spiffe://overdrive.local/workload/gh295b-client-workload/alloc/gh295b-client server=spiffe://overdrive.local/workload/peer/alloc/gh295b-server held_count=2
+PRODUCTION_RESOLVER_PROBE_OK
+PRODUCTION_MTLS_KTLS_SPLICE_PROBE_OK
+HOST READY legF=127.0.0.1:15294 legC=127.0.0.1:15295 dns=10.95.0.1:53
+SCRATCH_SHARED_BRIDGE_DNS query_from=10.95.0.2:47687 name=peer.mesh qtype=1
+SCRATCH_SHARED_BRIDGE_DNS query_from=10.95.0.2:47687 name=peer.mesh qtype=28
+LEG_F owner=tap295a GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.2:37106
+PRODUCTION_RESOLVER_MESH orig_dst=10.95.0.3:9000 backend=10.95.0.3:9000 expected_svid=None
+LEG_C owner=tap295b GETSOCKNAME_ORIGINAL=10.95.0.3:9000 PEER=10.95.0.1:38042
+PRODUCTION_INBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-server#1
+PRODUCTION_OUTBOUND_KTLS_SPLICE_ESTABLISHED id=gh295b-client#0
+PRODUCTION_MTLS_BOTH_ESTABLISHED
+PRODUCTION_MTLS_TEARDOWN_COMPLETE
+
+CLIENT CONSOLE
+[    0.002836] KHO: Failed to reserve nid 0 scratch buffer
+GUEST CONFIG ip=10.95.0.2/24 gateway=10.95.0.1 role=client PID=1 NO_CREDENTIALS
+GUEST RESOLV_CONF=nameserver 10.95.0.1
+options timeout:2 attempts:1
+GUEST DNS RESOLVED peer.mesh=10.95.0.3:9000
+GUEST WARMUP ROUNDTRIP COMPLETE
+GUEST STEADY ROUNDTRIP SUCCESS request_bytes=40 response_bytes=41 elapsed_seconds=0.091131
+GUEST EXIT=0
+[    4.390133] reboot: Power down
+
+SERVER CONSOLE
+[    0.003088] KHO: Failed to reserve lowmem scratch buffer
+GUEST CONFIG ip=10.95.0.3/24 gateway=10.95.0.1 role=server PID=1 NO_CREDENTIALS
+GUEST SERVER READY
+GUEST SERVER ACCEPT peer=10.95.0.1:38052
+GUEST SERVER TWO-PHASE BYTE-DISTINCT EXCHANGE COMPLETE
+GUEST EXIT=0
+[    4.947448] reboot: Power down
+
+TCX COUNTERS
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295ca live=true
+TCX_LINK_ADOPTED pin=/sys/fs/bpf/gh295c/link-tap295cb live=true
+TCX_QUERY iface=tap295ca revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295ca id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_QUERY iface=tap295cb revision=2 programs=1
+TCX_QUERY_PROGRAM iface=tap295cb id=30155 name=gh295c_endpoint verified_insns=Some(296) memlock_bytes=4096
+TCX_MAP pin=/sys/fs/bpf/gh295c/endpoints id=34106 type=Hash key_size=4 value_size=20 max_entries=16
+TCX_MAP pin=/sys/fs/bpf/gh295c/counters id=34107 type=Array key_size=4 value_size=8 max_entries=8
+TCX_COUNTER gateway_pass=8
+TCX_COUNTER intercept=8
+TCX_COUNTER map_miss=1
+TCX_COUNTER spoof_mac=1
+TCX_COUNTER spoof_ip=1
+TCX_COUNTER direct_bypass_drop=13
+TCX_COUNTER arp_pass=4
+TCX_COUNTER malformed_drop=0
+
+CAPTURE STATS
+tcpdump: listening on lo, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+18 packets captured
+36 packets received by filter
+0 packets dropped by kernel
+tcpdump: listening on tap295ca, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+18 packets captured
+18 packets received by filter
+0 packets dropped by kernel
+tcpdump: listening on tap295cb, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+13 packets captured
+13 packets received by filter
+0 packets dropped by kernel
+
+NFT IP COUNTERS
+table ip gh295c {
+	chain prerouting {
+		type filter hook prerouting priority mangle - 1; policy accept;
+		iifname "br295c" udp dport 53 counter packets 2 bytes 110
+		meta mark 0x0000295a tcp dport 9000 counter packets 8 bytes 486 tproxy to 127.0.0.1:15294 meta mark set 0x00000295 accept
+		meta mark 0x00000295 ip daddr 10.95.0.3 tcp dport 9000 counter packets 10 bytes 1932 tproxy to 127.0.0.1:15295 accept
+	}
+
+	chain output {
+		type route hook output priority mangle - 1; policy accept;
+		meta mark != 0x00000002 ip daddr 10.95.0.3 tcp dport 9000 counter packets 10 bytes 1932 meta mark set 0x00000295 accept
+	}
+}
+FINAL_RUN_DIR=/var/tmp/gh295c.J8aUwdtW
+
+CLEANUP START prior_exit=0 at=2026-09-16T01:49:44Z
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-client scope=overdrive.slice/workloads.slice/gh295b-client.scope
+PRODUCTION_CGROUP_REMOVED alloc=gh295b-server scope=overdrive.slice/workloads.slice/gh295b-server.scope
+CLEANUP COMPLEMENTS
+OWNED_LINK_br295c=ABSENT
+OWNED_LINK_tap295ca=ABSENT
+OWNED_LINK_tap295cb=ABSENT
+OWNED_NFT_IP=ABSENT
+OWNED_NFT_BRIDGE=ABSENT
+OWNED_RULE=ABSENT
+OWNED_ROUTE=ABSENT
+OWNED_BPFFS=ABSENT
+OWNED_CGROUP_gh295b-client.scope=ABSENT
+OWNED_CGROUP_gh295b-server.scope=ABSENT
+TOPOLOGY_COMPLEMENT_DIFF_BYTES netns=0 veth=0 etc_netns=0
+CLEANUP COMPLETE preserved_evidence=/var/tmp/gh295c.J8aUwdtW original_exit=0
+TOTAL_ELAPSED_SECONDS=27.297022
