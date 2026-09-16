@@ -4,7 +4,9 @@
 
 Accepted. 2026-08-01 (rev 6, same day — three factual corrections to § 7c / § 7d
 applied in place, mandated by ADR-0077 § D6); amended 2026-09-01 by
-ADR-0089 §7 for the action-shim allocation-lifecycle boundary only.
+ADR-0089 §7 for the action-shim allocation-lifecycle boundary only; amended
+2026-09-16 by the user-authorized GH #295 solution-review F-03 remediation for
+node-shared listener ownership only.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -91,7 +93,7 @@ deliberate. The pointer is an accepted in-repo ADR, not a promised slice, so
 CLAUDE.md § "Deferrals require GitHub issues" is satisfied without an issue.
 
 **Rev 7 changes** (2026-09-01, bounded amendment by ADR-0089 §7): the
-lower-level three-method `MtlsIntercept` port and every worker-internal
+then-three-method `MtlsIntercept` port and every worker-internal
 ordering decision in this ADR remain unchanged. The former statement that the
 action-shim signatures remain concrete, and Alt-B's blanket rejection of any
 shim-level port, are superseded for one later responsibility: the action
@@ -99,6 +101,32 @@ shim's complete allocation `start_alloc`/`stop_alloc` orchestration now uses
 the two-method `MtlsInterceptLifecycle` port pinned by ADR-0089 §7. This does
 not permit an install-order test to replace the worker; it gives the distinct
 same-ID cross-component ordering invariant a pure lifecycle boundary.
+
+**Rev 8 changes** (2026-09-16, bounded amendment by GH #295 F-03): listener
+bind/task lifetime moves from per-allocation `start_alloc` to one worker-owned
+boot lifecycle. The same port grows exactly two node-owner operations—shared
+rule/set converge and non-repairing audit—because otherwise the worker would
+have to bypass its adapter or invent a second port to make boot ownership real.
+The old exact `host_veth` method block and four-argument worker constructor
+block are removed here so they cannot compete with the complete post-#295 signatures in
+`docs/feature/netns-density-295/feature-delta.md`. This ADR continues to record
+the decision intent: the port wraps transparent bind plus node-global rule/set
+and allocation-element effects, constructor injection stays mandatory, and no
+generic `probe()` method is added. The worker exposes the user-approved shared-owner
+start/failure-observation/converge/audit/shutdown lifecycle; the composition
+root invokes that real owner before use. No second worker, listener owner, or
+adapter is introduced.
+
+**Rev 9 changes** (2026-09-16, user-authorized GH #295 solution-review
+S2-F01): fresh-process owner start is distinguished from runtime recovery.
+Only after VMM/stale-attachment reclamation proves zero managed TAPs and the
+paired EXEC gate remains BootClosed may the worker identify prior owned
+constant rules, bind fresh ephemeral F/C listeners, and ask the same adapter to
+atomically replace owned target ports. Complete read-back precedes admission;
+failed post-commit read-back rolls back to the captured prior program or refuses
+startup with rollback uncertainty. Foreign/conflicting objects never mutate.
+Runtime still rebinds only recorded ports and never rewrites targets. Exact
+methods/errors remain single-sourced in the #295 feature delta.
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -244,25 +272,23 @@ authority.** Neither is cited anywhere in this ADR as justification:
 
 ## Decision
 
-### 1. Extract a 3-method `MtlsIntercept` driven port, sync, in `overdrive-worker`
+### 1. Extract the synchronous `MtlsIntercept` driven port in `overdrive-worker`
 
-A new module `crates/overdrive-worker/src/mtls_intercept_port.rs` declares:
+A new module `crates/overdrive-worker/src/mtls_intercept_port.rs` declares one
+guard marker and the synchronous `MtlsIntercept` port. Its original three
+responsibilities remain transparent listener bind, outbound membership
+installation, and inbound destination membership installation. GH #295 changes
+the outbound key from deleted `host_veth` identity to the accepted guest source
+address, changes both allocation guards from per-rule ownership to shared-set-
+element ownership, and adds the minimum two node-owner operations: idempotent
+shared-rule/set convergence plus non-repairing audit. Exact current method
+signatures and closed error vocabularies live only in
+`docs/feature/netns-density-295/feature-delta.md` § *C-295-C* and
+§ *PORT-295-C*.
 
-```rust
-pub trait InterceptGuard: Send + Sync {}
-
-pub trait MtlsIntercept: Send + Sync + 'static {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<std::net::TcpListener>;
-    fn install_outbound(&self, host_veth: &str, agent_leg_f_port: u16)
-        -> Result<Box<dyn InterceptGuard>>;
-    fn install_inbound(&self, virt: SocketAddrV4, agent_leg_c_port: u16)
-        -> Result<Box<dyn InterceptGuard>>;
-}
-```
-
-**Three methods, no `probe()`** — the boot probe is struck from scope
-(§ Decision 4). "3-method" is now literal, where revs 1–3 said "3 methods + a
-probe".
+**Five cohesive methods, no generic `probe()`** after GH #295. Converge/audit
+operate only on node-global rules, sets, and the exact F/C targets; install
+methods operate only on allocation elements. No second port or host bypass.
 
 `Result` is the existing `crate::mtls_intercept::Result<T, E = InterceptError>`.
 Every method carries the four-section rustdoc contract
@@ -271,17 +297,19 @@ by `.claude/rules/development.md` § "Trait definitions specify behavior, not
 just signature"; the contract text is pinned verbatim in the feature's
 `design/architecture.md` § 4.1.
 
-**Three methods, not one.** A single `install(spec) -> Result<InstalledIntercept, _>`
+**Separated methods, not one.** A single `install(spec) -> Result<InstalledIntercept, _>`
 would move `start_alloc`'s ordering and fail-closed partial-teardown discipline
 into the adapter, so a test double would *replace* logic we own — collapsing
 this decision into the shim-level substitution rejected for GH #250's
-install-ordering evidence. Three methods put this ADR's boundary exactly at
-the un-ownable `libc` / `nft` surface and keep the worker's ordering exercised.
+install-ordering evidence. The separated methods put this ADR's boundary exactly at
+the un-ownable `libc` / `nft` surface and keep the worker's ordering exercised;
+GH #295's two node-owner methods stay at that same boundary.
 ADR-0089 §7's later, separate complete-lifecycle port does not change this
 worker-level contract.
 
 **Sync, not `#[async_trait]`.** Every underlying primitive is a blocking syscall
-or a blocking `std::process::Command`, `start_alloc` is itself `pub fn`, and the
+or synchronous netlink bridge, `start_alloc` is async only around wider worker
+ownership, and the
 contract awaits no store I/O — the criterion already recorded on `MtlsResolve`.
 Sync keeps the trait dyn-compatible with no `Pin<Box<dyn Future>>` allocation
 per install.
@@ -294,20 +322,21 @@ real `nft` — on a `crate_class = "core"` compile path, an ADR-0003 / dst-lint
 violation. Relocating `InterceptError` is *possible*, so the choice is a
 trade-off rather than an impossibility: core placement would require minting a
 duplicate core-side intercept-error type, and reusing the existing typed error
-beside the four functions the port wraps is worth the non-core placement. The
+beside the host intercept effects the port wraps is worth the non-core placement. The
 precedent for a port trait outside `core` already exists: `SimViewStore` in
 `overdrive-sim` implements `overdrive_control_plane::view_store::ViewStore`.
 
 ### 1a. The trait contract states only what EVERY sanctioned adapter can honour
 
 Substrate specifics are documented on `HostMtlsIntercept`, not on the trait:
-`IP_TRANSPARENT` + `IP_FREEBIND` on the bound socket; "exactly ONE `nft` rule
-appended to the shared prerouting chain"; the shared-routing-infra convergence;
-"the guard's `Drop` removes that rule by handle". The **trait** states only:
-a bound-and-listening listener whose `local_addr()` port is non-zero when `addr`
-carried 0; distinct listeners per call; a guard owning exactly what its call
-acquired, whose `Drop` neither panics nor errors; and nothing acquired by a
-failing call outliving it.
+`IP_TRANSPARENT` + `IP_FREEBIND` on the bound socket; normalized nft rule/set
+encoding; and kernel read-back mechanics. The **trait** states only: a
+bound-and-listening listener whose `local_addr()` port is non-zero when `addr`
+carried 0; distinct listeners per call; node-global converge is idempotent for
+identical F/C targets and returns one guard owning only shared objects; audit is
+read-only; allocation installs return guards owning only their declared
+elements; guard `Drop` neither panics nor errors; and nothing acquired by a
+failing call outlives it.
 
 This matters because the simulation adapter binds a plain listener and appends
 no rule, **both by necessity** (§ Decision 5, § Decision 2). Stating the
@@ -328,28 +357,24 @@ its `Drop` would execute a real `nft` rule deletion. Giving
 `TproxyInterceptGuard` an `inert()` constructor, or making the worker's guard
 fields optional, would be production code shaped by simulation.
 
-`AllocIntercept`'s two guard fields widen accordingly
-(`Option<Box<dyn InterceptGuard>>`, `Vec<Box<dyn InterceptGuard>>`).
+The post-#295 worker holds one node-scoped `Box<dyn InterceptGuard>` for shared
+rules/sets. Each allocation retains one outbound element-group guard plus its
+inbound destination-element guards. No allocation can drop the node guard.
 
-### 3. Fourth mandatory constructor parameter on `MtlsInterceptWorker::new`
-
-```rust
-pub fn new(
-    enforcement: Arc<dyn MtlsEnforcement>,
-    resolve: Arc<dyn MtlsResolve>,
-    clock: Arc<dyn Clock>,
-    intercept: Arc<dyn MtlsIntercept>,
-) -> Self
-```
+### 3. `MtlsIntercept` remains a mandatory `MtlsInterceptWorker` dependency
 
 Mandatory, appended last, no builder — `.claude/rules/development.md`
 § "Port-trait dependencies": *"a builder makes the dependency optional, and
 'optional' means 'tests can forget'."* The compiler enforces every call site is
-explicit.
+explicit. The complete current worker constructor is single-sourced in the GH
+#295 feature delta's F-03 contract rather than duplicated here.
 
-`start_alloc` changes at exactly four lines (the three free-function calls
-become `self.intercept.*`); its signature, error mapping, ordering, and
-fail-closed partial-teardown discipline are unchanged.
+For the original GH #250 cut, `start_alloc` changed at exactly four lines (the
+three free-function calls became `self.intercept.*`) and preserved
+fail-closed partial teardown. GH #295 now calls transparent bind at the
+worker-owned boot boundary and uses the two install operations for shared
+element membership; per-allocation `start_alloc` keeps capability/element
+activation and its fail-closed cleanup but binds no listener.
 
 **Historical GH #250 boundary, superseded only as stated here.** Revs 1–6 kept
 `action_shim::dispatch` / `dispatch_single` unchanged, with `mtls_worker` as
@@ -358,48 +383,32 @@ worker's real ordering. ADR-0089 §7 now replaces that dispatcher parameter
 with `Option<&dyn MtlsInterceptLifecycle>` for the distinct, complete
 allocation-lifecycle responsibility. Production implements the new trait for
 the same `Arc<MtlsInterceptWorker>` and delegates to the same inherent
-methods; the worker constructor, this ADR's `MtlsIntercept` field, and all
-worker-internal install/partial-teardown ordering remain unchanged. Tests of
-the behavior owned by this ADR must still exercise the real worker rather than
-substitute the lifecycle port.
+methods. GH #295 later preserves this ADR's mandatory `MtlsIntercept` field
+while moving listener bind/task ownership to the worker's boot lifecycle; the
+exact post-cut worker methods are in the #295 feature delta. Tests of behavior
+owned by this ADR must still exercise the real worker rather than substitute
+the lifecycle port.
 
-### 4. NO boot `probe()` — the `CAP_NET_ADMIN` gate is struck from this decision's scope
+### 4. The port still has no `probe()`; GH #295 starts and audits the real owner
 
-`MtlsIntercept` carries **no** `probe()` method. There is no boot gate, no
-`run_server` step, no `InterceptError::Probe` variant, no
-`MtlsBootError::InterceptProbe` variant, and no probe scripting on the
-simulation adapter. Revs 1–3 designed all of these; rev 4 removes them.
+`MtlsIntercept` carries no `probe()` method, `InterceptError::Probe` remains
+absent, and the simulation adapter gains no probe scripting. That GH #250
+decision remains exact.
 
-The rationale, recorded once so it is not re-litigated:
+GH #295 changes a different boundary: one real node-shared listener owner must
+exist before any allocation can register against it. The composition root
+therefore invokes the concrete worker's shared-owner start contract, which
+performs the two real transparent binds, converges the constant rule targets,
+starts exactly two accept tasks, and audits socket/rule identity before use.
+Failure maps to the dedicated shared-owner boot error and refuses startup.
+Runtime recovery invokes the same worker's converge/audit contract. These are
+owner lifecycle operations, not a fourth method on the lower-level
+`MtlsIntercept` port and not a generic capability probe.
 
-- **It is a production behaviour change, not a test seam.** `overdrive serve`
-  would refuse to start where it previously started. That is a change to the
-  binary's failure surface and it is **outside GH #250's scope**, which is a
-  fault-injection seam for an existing fail-closed path.
-- **It buys a better boot-time diagnosis, not a new safety property** — the
-  correction rev 2 already made and rev 3 propagated. A capability-less node
-  already fails **every** deploy at the upstream netns-provision seam
-  (`action_shim/mod.rs:830`, gated on the same `mtls_worker.is_some()` flag and
-  running at `:1169` / `:1376`, strictly before `:1305` / `:1505`), because
-  `ip netns add` / `ip link add type veth` need the same capability. The probe
-  would replace unbounded wrong-cause per-deploy refusals with one
-  correctly-caused boot refusal. Real, but it is diagnosability, and it is not
-  what #250 asked for.
-- **Striking it costs the decision nothing**, because this ADR already rests on
-  the call-site-ordering testability alone (§ Context, § Decision 6). Rev 3
-  recorded the probe as "separable and strikeable"; this is that strike.
-
-Per CLAUDE.md § "Deferrals require GitHub issues", this is recorded as **out of
-scope**, not as a deferral: there is no forward pointer, no promise of a future
-slice, and no issue number. Unstated knobs are out of scope by default.
-
-This is a deliberate, recorded departure from the `wire → probe → use`
-composition-root invariant that ADR-0071 established for `MtlsResolve` and
-`MtlsEnforcement`. The departure is defensible on the substance rather than on
-convenience: the capability this port depends on is already proven per-deploy
-at a seam that runs strictly upstream of it, so the probe would be re-proving
-at boot what the deploy path proves anyway. The two sibling mTLS ports probe
-substrates with no such upstream proof.
+The older netns-upstream justification is historical after #295 deletes that
+topology; it no longer governs the current boot contract. Rev 8 preserves the
+useful boundary from rev 4—no generic port probe—without using it to suppress
+the separately accepted real-owner start/read-back obligation.
 
 ### 5. `SimMtlsIntercept` in `overdrive-sim`, with standing per-method faults
 
@@ -413,8 +422,14 @@ Faults are scripted through a small `Clone` descriptor,
 expressed in the **real** error shapes the substrate produces rather than a
 generic boolean flag. Faults are **standing** (fire on every call while armed),
 not consume-on-use: a missing `CAP_NET_ADMIN` or an absent `nft` binary fails
-every call, and standing faults remove call-order dependence (`start_alloc`
-calls `bind_transparent` twice).
+every call, and standing faults remove call-order dependence (the post-#295
+`start_shared_owner` boot lifecycle calls `bind_transparent` twice).
+
+GH #295 extends the descriptor with distinct shared-converge and shared-audit
+fault slots so runtime repair/read-back can fail independently of allocation
+element installation. Exact sim test APIs belong to DISTILL; the production
+trait's five method-level fault partitions are fixed here and in the feature
+delta.
 
 Fault arms short-circuit before any syscall and are therefore **pure**
 (default-lane-safe). The `Ok` arm of `bind_transparent` binds a real, **plain**
@@ -857,11 +872,11 @@ production type, the same objection that sinks Alt-C in miniature.
   non-supersede call sites pass byte-identical values, so their behaviour is
   unchanged.
 
-  Everything else in this ADR remains behaviour-preserving: with the boot probe
-  struck (§ Decision 4), `HostMtlsIntercept`'s three methods are one-line
-  delegations to the free functions `start_alloc` already called, and
-  `run_server` gains no gate. Revs 1–3 carried a refuse-to-boot behaviour
-  change; rev 4 removed it; rev 5 adds only the defect repair.
+  Through rev 7, everything else in this ADR remained behavior-preserving and
+  `run_server` gained no intercept gate. Rev 8 is a separately user-authorized
+  #295 application change: the same adapter gains node-rule converge/audit and
+  the composition root starts the concrete shared listener owner before use.
+  It still gains no generic `MtlsIntercept::probe`.
 
 - **The `no production behaviour change` framing shaped downstream artifacts
   that must now be read with rev 5 in hand.** The DELIVER roadmap's `notes`
@@ -872,10 +887,10 @@ production type, the same objection that sinks Alt-C in miniature.
   (no scenario satisfies the walking-skeleton litmus) does not depend on the
   withdrawn premise — the fix is a durable-record repair, not a new
   operator-facing capability.
-- **The `CAP_NET_ADMIN` misdiagnosis remains.** A capability-less node still
-  refuses every deploy under `WorkloadNetnsProvisionFailed` rather than a cause
-  naming the missing capability. This decision knowingly leaves that in place as
-  out of scope (§ Decision 4); it is not tracked as a deferral.
+- **Historical `CAP_NET_ADMIN` diagnosis.** Before #295, a capability-less node
+  refused deploy at the netns seam. #295 deletes that seam and replaces the
+  relevant guarantee with typed shared-owner boot bind/converge/read-back. The
+  historical limitation no longer describes the target architecture.
 - **One `Arc<dyn>` indirection and one mandatory constructor parameter**, with
   **1 production + 9 non-production** `MtlsInterceptWorker::new` call sites
   across 7 files to update (rev 2 — the first revision under-counted at
@@ -883,9 +898,9 @@ production type, the same objection that sinks Alt-C in miniature.
   `crates/overdrive-control-plane/tests/integration/alloc_netns_lifecycle.rs:118`).
   Every pre-existing site takes `HostMtlsIntercept`, which preserves today's
   behaviour byte-for-byte; only new tests wire the simulation adapter.
-- **`Box<dyn InterceptGuard>` replaces the concrete `TproxyInterceptGuard`** on
-  the worker's guard fields — one boxing per installed rule, on a path that
-  already spawns `nft`.
+- **`Box<dyn InterceptGuard>` replaces the concrete host guard** on the worker's
+  guard fields: one node-scoped shared-object guard plus allocation element-
+  group guards. The indirection keeps host and simulation ownership honest.
 - **A new cross-crate dependency edge** `overdrive-sim → overdrive-worker`
   (`[dependencies]`). Not a new edge *class* — `overdrive-sim` already reaches
   `overdrive-worker` transitively through `overdrive-control-plane` — but the

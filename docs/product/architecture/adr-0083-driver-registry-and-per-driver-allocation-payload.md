@@ -93,14 +93,14 @@ Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
 application-arch, GH-42.
 
-**Executes the migration [ADR-0022](adr-0022-appstate-driver-registry-deferred.md)
+**Executes the migration [ADR-0022](adr-0022-app-state-driver-extension.md)
 pre-committed** — *"Phase 2+ adds the second driver class … and the registry
 pattern earns its keep at that point."* This is that point. ADR-0022 § "Decision"
 (a single `AppState.driver: Arc<dyn Driver>`) is **superseded**; its reasoning
 for deferring is preserved and unamended.
 
-Extends [ADR-0030](adr-0030-allocation-spec-args.md) §6 (per-driver-class spec
-types, pre-sanctioned) and [ADR-0031](adr-0031-tagged-workload-driver-and-driver-input.md)
+Extends [ADR-0030](adr-0030-exec-driver-and-allocation-spec-args.md) §6 (per-driver-class spec
+types, pre-sanctioned) and [ADR-0031](adr-0031-job-spec-exec-block.md)
 (the tagged `WorkloadDriver` / `DriverInput` shape, and the deliberate
 irrefutable-destructure tripwires at `:197`).
 
@@ -124,6 +124,14 @@ surface", § "Deferrals require GitHub issues"; intake **I-5** (one VM driver,
 `[vm]`, single cut).
 
 ---
+
+**Constructor-SSOT amendment 2026-09-16 — user-authorized GH #295
+solution-review S2-F02.** This ADR retains the registry/capability-gate and
+mandatory composition meaning. Constructor calls shown in historical
+composition snippets are superseded as complete API shapes. The only exact
+post-#295 `VmDriver::new` signature is in
+`docs/feature/netns-density-295/feature-delta.md` § *EXEC-close
+linearization*.
 
 ## Context
 
@@ -256,7 +264,10 @@ match CloudHypervisorVmm::discover(&vm_layout).await {
             tracing::warn!(name: "health.startup.refused", reason = "vmm.probe", error = %source, ..);
             return Err(ControlPlaneError::VmmBoot(VmmBootError::Probe { source }));
         }
-        drivers.insert(Arc::new(VmDriver::new(Arc::new(vmm), clock, fs, vm_layout)));
+        // Compose VmDriver with every mandatory dependency, then insert it.
+        // Exact current constructor shape is single-sourced in GH #295.
+        let driver = /* complete current VmDriver composition */;
+        drivers.insert(Arc::new(driver));
     }
     Err(source) => return Err(ControlPlaneError::VmmBoot(VmmBootError::Discovery { source })),
 }
@@ -1384,7 +1395,11 @@ match discovered {
         // function — the composition root calls the same trait method
         // either way.
         if let Err(source) = vmm.probe().await { /* unchanged */ }
-        drivers.insert(Arc::new(VmDriver::new(vmm, clock, fs, cgroup_accounting, vm_layout)));
+        // The cgroup-accounting dependency added by this amendment remains
+        // mandatory. Later probe/gate dependencies are included by the current
+        // composition; exact constructor shape lives in GH #295.
+        let driver = /* complete current VmDriver composition */;
+        drivers.insert(Arc::new(driver));
     }
     Err(source) => { /* unchanged */ }
 }

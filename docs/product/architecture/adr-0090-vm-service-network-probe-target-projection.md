@@ -3,20 +3,27 @@
 ## Status
 
 **Accepted** (2026-09-06), user-selected during guided DESIGN and approved by
-independent architecture review iteration 2. GH #257.
+independent architecture review iteration 2. GH #257. **Amended 2026-09-16 by
+the user-authorized GH #295 solution-review F-01 remediation:** the probe target
+policy remains, while the stale six-argument `VmDriver` constructor contract is
+removed in favor of the #295 feature delta's complete post-cut constructor.
+**Amended again 2026-09-16 by user-authorized S2-F04:** netns/veth evidence is
+strictly historical; the live proof uses the shared bridge/direct host TAP.
 
 Extends ADR-0054 (ProbeRunner), ADR-0055/0080 (probe-role lifecycle), and
 ADR-0088/0089 (VM guest addressing and provision-before-start ordering).
 
 ## Context
 
-`ProbeRunner` currently translates omitted HTTP hosts and the TCP wildcard
-`0.0.0.0` to host loopback inside every probe tick. That is correct for the
-existing Exec/process Service path. It is wrong for a VM Service: the listener
-runs inside the guest and the action shim has already materialized its routed
-guest address as `AllocationSpec.workload_addr`.
+At the time of the original decision, `ProbeRunner` translated omitted HTTP
+hosts and the TCP wildcard `0.0.0.0` to host loopback inside every probe tick;
+that matched the then-live Exec/process Service path. GH #293 deleted that
+driver and its probe surface, so this fact is historical rationale only. The
+operative problem is VM-only: the listener runs inside the guest and the action
+shim materializes its routed guest address in the grouped network assignment.
 
-The production owner path is:
+The following production owner path is **pre-#295 historical context**, retained
+to explain why this decision originally selected the allocation address:
 
 1. `provision_and_inject_netns` always assigns a network for `DriverType::Vm`;
 2. `inject_workload_network` writes `Some(tap.guest_addr)` to the allocation
@@ -27,7 +34,16 @@ The production owner path is:
 
 Native-metal spike H6 independently proved that a host-originated TCP
 connection reaches this address through the production veth/netns/TAP path.
-The spike establishes reachability, not component ownership.
+That spike establishes historical reachability, not the post-#295 substrate or
+component ownership.
+
+After #295, the same semantic value arrives through the grouped guest-network
+assignment. The action shim provisions one direct host-netns TAP on the shared
+bridge before `VmDriver::start`; `overdrive-init` applies that assignment before
+READY; the action shim commits Running and calls the unchanged probe-registration
+hook afterward. The persisted observation remains `AllocStatusRow.workload_addr`.
+No netns, veth, `/30`, `NetSlot`, or `host_veth` participates in the live target
+path.
 
 ## Decision
 
@@ -43,39 +59,36 @@ The projection is immutable for the task lifetime:
 
 | Declaration | Allocation driver | Effective destination |
 |---|---|---|
-| Non-wildcard explicit host | Any | Explicit host unchanged |
-| Omitted HTTP host or `0.0.0.0` | VM | That allocation's provisioned `workload_addr` |
-| Omitted HTTP host or `0.0.0.0` | Exec/process | `127.0.0.1` |
+| Non-wildcard explicit host | VM | Explicit host unchanged |
+| Omitted HTTP host or `0.0.0.0` | VM | That allocation's grouped guest-network assignment address; the same value persists as `AllocStatusRow.workload_addr` |
 
 The declared `ProbeDescriptor` remains persisted intent. Effective runtime
 targets are private task inputs and are not written back to intent or
 observation schemas.
 
-The already-trusted production `Arc<ProbeRunner>` is shared with `VmDriver` as
-a required constructor dependency in this exact order:
+The already-trusted production `Arc<ProbeRunner>` remains a mandatory
+`VmDriver` constructor dependency immediately before the GH #295 EXEC-gate
+capability; host layout remains last. GH #295 adds that gate so the
+control-plane shared-owner supervisor and worker release path linearize on one
+dependency-neutral capability. The exact complete constructor is intentionally
+single-sourced in
+`docs/feature/netns-density-295/feature-delta.md` § *EXEC-close
+linearization*; the prior six-argument code block here is removed rather than
+left as a competing stale signature.
 
-```rust
-pub fn new(
-    vmm: Arc<dyn Vmm>,
-    clock: Arc<dyn Clock>,
-    fs: Arc<dyn CgroupFs>,
-    cgroup_accounting: Arc<dyn CgroupAccounting>,
-    probe_runner: Arc<ProbeRunner>,
-    layout: VmHostLayout,
-) -> Self;
-```
-
-`VmDriver` overrides the same three existing `Driver` hooks as `ExecDriver`:
-Running registers all roles, Stable stops Startup only, and terminal stops the
-whole allocation supervisor. No new `Driver` method, optional builder, or
-VM-specific probe runner is introduced.
+`VmDriver` uses the existing three `Driver` hooks: Running registers all roles,
+Stable stops Startup only, and terminal stops the whole allocation supervisor.
+No new `Driver` method, optional builder, or VM-specific probe runner is
+introduced. The old comparison to `ExecDriver` is historical and carries no
+live branch or compatibility requirement.
 
 ### VM address precondition
 
-`Some(workload_addr)` is a precondition for VM probe registration, guaranteed
-by the production path above. `Vm + None` is representable only because the
-shared `AllocationSpec` also models allocations for which the field can be
-absent; it has no producer on the real VM `serve` + `deploy` path.
+`Some(network)` on `AllocationSpec`, with the address carried inside the
+grouped assignment, is a precondition for VM probe registration, guaranteed by
+the post-#295 production path. `Vm + None` remains representable only because
+the shared transient specification supports a not-yet-provisioned value; it has
+no producer at the registration point on the real VM `serve` + `deploy` path.
 
 Consequently this ADR defines no fallback, scheduled probe failure, silent
 skip, allocation transition, public error/state, or test for `Vm + None`.
@@ -121,23 +134,26 @@ probe is failing. Probe health never delays, revokes, or reinterprets Running.
 
 - Positive: HTTP/TCP probes reach the guest through the address the platform
   already provisions and exposes.
-- Positive: explicit-host and Exec/process behavior remain unchanged.
+- Positive: explicit VM hosts remain unchanged; omitted/wildcard VM targets use
+  the provisioned guest address.
 - Positive: no new storage, adapter, protocol, lifecycle state, or dependency.
 - Negative: `ProbeRunner::start_alloc` now accepts the full allocation spec,
   and every bounded call site must migrate in one cut.
-- Negative: `VmDriver::new` gains one mandatory dependency, requiring neutral
-  compiler fallout at its existing construction sites.
+- Negative: the 2026-09-06 six-argument constructor record is no longer
+  complete after GH #295; the feature delta pins the additional mandatory gate
+  and bounded compiler fallout while preserving the `Driver` trait.
 
 ## Evidence obligations
 
-- Pure projection properties over supported production inputs: explicit host,
-  VM default with provisioned address, and Exec/process default.
+- Pure projection properties over the complete live production input set:
+  explicit VM host and VM default with provisioned grouped-assignment address.
 - Component evidence that both TCP and HTTP adapters receive the projected
   destination while the stored descriptor is unchanged.
 - Lifecycle evidence that Running is unaffected by failing guest probes and
   Stable/readiness/liveness retain their existing owners.
 - Native-metal, built-default-feature `serve` + `deploy` evidence through the
-  production TAP/netns path; no test-installed address, route, or listener.
+  production shared bridge and direct host-TAP path; no workload netns/veth and
+  no test-installed address, route, TAP, classifier, or listener.
 - Existing terminal-wins-over-late-probe invariant. No `Vm + None` scenario.
 
 ## References
@@ -149,6 +165,9 @@ probe is failing. Probe health never delays, revokes, or reinterprets Running.
 
 ## Amendment — 2026-09-07
 
+**Historical after GH #293 removed the Exec driver.** The text below records the
+then-valid Exec/process refinement; it is not a live post-#293 branch.
+
 ADR-0097 supersedes this ADR's `Exec/process -> 127.0.0.1` default/wildcard
 row only when the existing action-shim composition has provisioned an Exec
 allocation network and supplied `Some(workload_addr)`. Such an Exec probe is
@@ -156,3 +175,15 @@ host-originated while its process is in that allocation netns, so the
 registration-time effective target is its provisioned transit address. An
 unnetworked Exec allocation retains this ADR's loopback normalization, and all
 non-wildcard explicit hosts remain unchanged.
+
+## Amendment — 2026-09-16 (GH #295 application composition)
+
+The VM target-projection policy is unchanged: an omitted/wildcard HTTP/TCP
+target resolves once to that allocation's provisioned guest address when probe
+supervision starts. The live producer is now the grouped network assignment on
+the shared-bridge/direct-host-TAP path, not the historical netns/veth path.
+Native evidence must drive the default-feature product through real `serve` +
+`deploy` and observe the shared bridge/TAP/classifier path the product creates;
+a test-created address, route, TAP, TCX attachment, nft rule, or listener is not
+substitute evidence. This amendment changes no probe state, health owner, or
+lifecycle gate.

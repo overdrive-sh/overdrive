@@ -8,6 +8,13 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Constructor-SSOT amendment 2026-09-16 — user-authorized GH #295
+solution-review S2-F02.** This ADR continues to own the `Vmm`/`VmConfig`
+boundary and mandatory-injection decisions. Its historical constructor arities
+are no longer normative. The only exact post-#295 `VmDriver::new` signature is
+in `docs/feature/netns-density-295/feature-delta.md` § *EXEC-close
+linearization*.
+
 **Proposed amendment 2026-09-11 — allocation-TAP sysfs read grant;
 PENDING INDEPENDENT ARCHITECTURE REVIEW and not yet operative.** This is an
 ad hoc DESIGN reconciliation between this ADR's accepted run-directory-only
@@ -1076,11 +1083,14 @@ per-allocation `DriverError` or `TransitionReason`.
 process-spawn machinery for a second workload class. `VmDriver` is
 allocation-shaped and therefore belongs beside `ExecDriver` per ADR-0029.
 
-**Required, not defaulted, at the call site.** `VmDriver::new(vmm: Arc<dyn Vmm>,
-clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>, layout: VmHostLayout)` — every
-port is a mandatory constructor parameter. No `with_vmm` builder override: per
-§ "Port-trait dependencies", a builder makes the dependency optional and
-"optional" means "tests can forget".
+**Required, not defaulted, at the call site.** Every `VmDriver` dependency is a
+mandatory constructor parameter. No `with_vmm` builder override: per §
+"Port-trait dependencies", a builder makes the dependency optional and
+"optional" means "tests can forget". The original GH #42 arity is historical;
+later accepted features added cgroup accounting, probe supervision, and the
+#295 EXEC-gate capability. The only normative post-#295 constructor signature
+is in `docs/feature/netns-density-295/feature-delta.md` § *EXEC-close
+linearization*.
 
 ### D2 — `VmConfig` is a value whose *derivations* make three substrate lies structurally discouraged and lint-enforced
 
@@ -2249,13 +2259,12 @@ reclamation must clean up a node that has since **uninstalled** CH.
 exit-watcher, which exists only when `VmDriver` is composed. It rides SD-5's
 same composition gate (ADR-0083 § D2): probed alongside `Vmm`, refusing the
 node on the same substrate-lie / capability-absence split. `VmDriver::new`
-gains a required parameter, extending the constructor already shown in
-ADR-0083 § D2:
-
-```rust
-// was: VmDriver::new(Arc::new(vmm), clock, fs, vm_layout)
-VmDriver::new(Arc::new(vmm), clock, fs, cgroup_accounting, vm_layout)
-```
+gained a mandatory cgroup-accounting parameter at this amendment. That
+historical delta remains authoritative as a dependency decision, not as a
+complete current signature: probe supervision and the #295 EXEC gate were
+added later. The exact post-#295 constructor is single-sourced in
+`docs/feature/netns-density-295/feature-delta.md` § *EXEC-close
+linearization*.
 
 **Why not widen `CgroupFs`.** ADR-0083 § A8 already rejected this once, for
 `VmHostState`'s need, on the trait's own contract — *"deliberately
