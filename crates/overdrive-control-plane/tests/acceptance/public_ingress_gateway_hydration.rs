@@ -37,7 +37,7 @@ async fn disabled_and_malformed_targets_hydrate_through_the_exact_gateway_identi
     let intent = Arc::new(LocalIntentStore::open(&intent_path).expect("intent store"));
     let observation: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("writer-1").expect("node ID"), 51));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&intent) as Arc<dyn IntentStore>
     );

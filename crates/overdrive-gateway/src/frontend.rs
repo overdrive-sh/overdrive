@@ -51,8 +51,7 @@ mod acceptance {
     use bytes::Bytes;
     use futures::Stream;
     use overdrive_core::aggregate::{
-        CronExpr, Exec, IntentKey, Job, Listener, Schedule, ServiceV2, WorkloadDriver,
-        WorkloadIntent,
+        CronExpr, IntentKey, Job, Listener, Schedule, ServiceV1, Vm, WorkloadDriver, WorkloadIntent,
     };
     use overdrive_core::dataplane::Proto;
     use overdrive_core::id::{ContentHash, IdParseError, ServiceVip, WorkloadId};
@@ -178,21 +177,25 @@ mod acceptance {
             id: id.clone(),
             replicas: NonZeroU32::MIN,
             resources: Resources { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-            driver: WorkloadDriver::Exec(Exec {
+            driver: WorkloadDriver::Vm(Vm {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
         }
     }
 
     fn service(id: &WorkloadId, listeners: Vec<Listener>) -> WorkloadIntent {
-        WorkloadIntent::Service(ServiceV2 {
+        WorkloadIntent::Service(ServiceV1 {
             id: id.clone(),
             replicas: NonZeroU32::MIN,
             resources: Resources { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-            driver: WorkloadDriver::Exec(Exec {
+            driver: WorkloadDriver::Vm(Vm {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners,
             startup_probes: Vec::new(),

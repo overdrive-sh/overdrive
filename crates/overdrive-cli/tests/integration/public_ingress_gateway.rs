@@ -19,7 +19,7 @@ use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use overdrive_control_plane::{
     ServerConfig, ServerHandle, run_server, run_server_with_obs_and_driver,
 };
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::public_ingress::{
@@ -97,7 +97,7 @@ async fn spawn_gateway_with_observation(
     let handle = if let Some(observation) = observation {
         let obs: Arc<dyn ObservationStore> = observation;
         let driver: Arc<dyn Driver> =
-            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Exec));
+            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Vm));
         run_server_with_obs_and_driver(config, obs, driver)
             .await
             .expect("run_server_with_obs_and_driver")
@@ -146,9 +146,11 @@ async fn deploy_referenced_service_and_wait_for_frontend(running: &RunningGatewa
                 id: "api".to_owned(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(VmInput {
                     command: "/bin/sleep".to_owned(),
                     args: vec!["30".to_owned()],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
                 listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
                 startup_probes: vec![],
@@ -341,9 +343,11 @@ async fn disabled_gateway_rejects_invalid_route_before_parse_and_preserves_exist
                 id: "disabled-gateway-control".to_owned(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(VmInput {
                     command: "/bin/true".to_owned(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
             }),
         })

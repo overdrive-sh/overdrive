@@ -734,6 +734,8 @@ async fn dispatch_one(
         &SimCa::new(Arc::new(SimEntropy::new(SEED))),
         &SimClock::new(),
         &IdentityMgr::new(None),
+        &overdrive_control_plane::gateway_composition::GatewayIdentityActionComposition::disabled(),
+        None,
         &bus,
         &tick(),
         &nid("writer"),
@@ -1183,6 +1185,26 @@ struct RejectFreshPublication {
 impl ObservationStore for RejectFreshPublication {
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
+    }
+
+    async fn public_certified_key_status_row(
+        &self,
+        id: &overdrive_core::public_ingress::PublicCertifiedKeyId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node: &overdrive_core::id::NodeId,
+    ) -> Result<
+        Option<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>,
+        ObservationStoreError,
+    > {
+        self.inner.gateway_application_status_row(node).await
     }
 
     async fn write_alloc_lifecycle(

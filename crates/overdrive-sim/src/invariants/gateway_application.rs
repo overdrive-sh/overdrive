@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, ServiceV1, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::{Proto, ServiceFrontend};
@@ -474,13 +474,15 @@ impl ScenarioWorld {
         );
         let vip = ServiceVip::new("127.0.0.1".parse().expect("IPv4"))
             .map_err(|error| format!("Service VIP: {error}"))?;
-        let service = ServiceV2::from_submit(ServiceSpecInput {
+        let service = ServiceV1::from_submit(ServiceSpecInput {
             id: SERVICE_NAME.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(VmInput {
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners: [8080_u16, 8081, 8082]
                 .into_iter()

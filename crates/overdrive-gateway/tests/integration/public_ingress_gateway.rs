@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, ResourcesInput, ServiceV1, VmInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::Proto;
@@ -691,11 +691,16 @@ struct C6World {
 }
 
 async fn persist_c6_service(intent: &LocalIntentStore) -> Arc<SimServiceVipView> {
-    let service = ServiceV2::from_submit(ServiceSpecInput {
+    let service = ServiceV1::from_submit(ServiceSpecInput {
         id: "api".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_owned(), args: Vec::new() }),
+        driver: DriverInput::Vm(VmInput {
+            command: "/bin/true".to_owned(),
+            args: Vec::new(),
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: Vec::new(),
         readiness_probes: Vec::new(),
