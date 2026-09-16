@@ -48,7 +48,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -65,9 +65,9 @@ impl WorkloadNetworkProvisioner for RecordingNetworkProvisioner {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
-        assert!(vm_tap.is_some(), "the VM allocation receives its tap plan");
+        let _ = vm_tap;
         self.provisions.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -91,7 +91,6 @@ fn probe_runner() -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::new(SimClock::new()),
         Arc::new(SimObservationStore::single_peer(
             NodeId::new("vm-artifact-disposal").expect("valid node ID"),

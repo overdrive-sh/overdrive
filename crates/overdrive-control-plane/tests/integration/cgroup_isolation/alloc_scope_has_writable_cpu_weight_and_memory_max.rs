@@ -3,7 +3,7 @@
 //!
 //! Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
 //! § "Regression test": after both inits run against real
-//! `/sys/fs/cgroup`, an alloc started by `ExecDriver` MUST see
+//! `/sys/fs/cgroup`, an allocation scope created through `CgroupManager` MUST see
 //! writable `cpu.weight` and `memory.max` under its scope directory.
 //!
 //! Pre-fix (RED, step 01-01) this file held two `#[should_panic
@@ -35,12 +35,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::cgroup_manager::create_and_enrol_control_plane_slice_at;
-use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
-use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
-use overdrive_host::SystemClock;
-use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::CgroupManager;
+use overdrive_core::traits::driver::Resources;
+use overdrive_worker::cgroup_manager::{CgroupManager, CgroupPath};
 use serial_test::serial;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
@@ -100,9 +98,8 @@ where
 }
 
 /// Best-effort cleanup of the alloc scope this test creates. Mirrors
-/// the `AllocCleanup` pattern from `tests/integration/workload_lifecycle/cleanup.rs`,
-/// but inlined because we don't have an obs store handle to enumerate
-/// (we know the single `AllocationId` we care about).
+/// the real cgroup-fs cleanup pattern, but inlined because this test knows
+/// the single `AllocationId` it owns and has no observation-store handle.
 struct ScopeCleanup {
     cgroup_root: std::path::PathBuf,
     alloc: AllocationId,
@@ -138,35 +135,9 @@ impl Drop for ScopeCleanup {
     }
 }
 
-fn build_spec(alloc: &AllocationId) -> AllocationSpec {
-    AllocationSpec {
-        alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/regression/alloc/0")
-            .expect("valid SpiffeId"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/sleep".to_owned(),
-                args: vec!["60".to_owned()],
-            },
-        ),
-        resources: Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 },
-        probe_descriptors: Vec::new(),
-        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-        netns: None,
-        host_veth: None,
-        service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
-    }
-}
-
 /// AC2 — boots both inits against real `/sys/fs/cgroup`, drives
-/// `ExecDriver::start` for an alloc with `cpu_milli=2000,
-/// memory_bytes=128MiB`, asserts `cpu.weight=200` AND `memory.max=
+/// `CgroupManager` for an alloc with `cpu_milli=2000, memory_bytes=128MiB`,
+/// asserts `cpu.weight=200` AND `memory.max=
 /// 134217728`. With the production fix in place, the per-alloc
 /// resource-limit writes succeed because `overdrive.slice` and
 /// `workloads.slice` both have the relevant controllers delegated.
@@ -183,13 +154,17 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
         .await
         .expect("workloads.slice bootstrap succeeds");
 
-    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SystemClock), fs));
+    let manager = CgroupManager::new(cgroup_root.to_path_buf(), fs);
     let alloc = AllocationId::new("alloc-subtree-control-regression").expect("valid AllocationId");
-    let spec = build_spec(&alloc);
     let _cleanup = ScopeCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
+    let scope = CgroupPath::for_alloc(&alloc);
+    let resources = Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 };
 
-    let handle =
-        driver.start(&spec).await.expect("ExecDriver::start succeeds against real cgroupfs");
+    manager.create_workload_scope(&scope).await.expect("alloc scope creation succeeds");
+    manager
+        .write_resource_limits(&scope, &resources)
+        .await
+        .expect("resource-limit writes succeed against real cgroupfs");
 
     let scope_dir = cgroup_root.join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
     let cpu_weight = std::fs::read_to_string(scope_dir.join("cpu.weight"))
@@ -207,12 +182,12 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
         "memory.max must match the spec's memory_bytes",
     );
 
-    driver.stop(&handle).await.expect("ExecDriver::stop succeeds");
+    manager.remove_workload_scope(&scope).await.expect("alloc scope removal succeeds");
 }
 
 /// AC3 — companion regression: the WARN log line "cgroup
 /// resource-limit write failed" (emitted from
-/// `crates/overdrive-worker/src/driver.rs:299-305` per the RCA) MUST
+/// `CgroupManager` per the RCA) MUST
 /// NOT fire on the success path with the production fix landed.
 ///
 /// Captures `tracing` events via a `CaptureLayer` scoped to this test
@@ -235,14 +210,16 @@ async fn alloc_start_does_not_emit_resource_limit_warning() {
     let events = layer.events.clone();
     let _guard = tracing_subscriber::registry().with(layer).set_default();
 
-    let driver = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SystemClock), fs));
+    let manager = CgroupManager::new(cgroup_root.to_path_buf(), fs);
     let alloc =
         AllocationId::new("alloc-subtree-control-warn-regression").expect("valid AllocationId");
-    let spec = build_spec(&alloc);
     let _cleanup = ScopeCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
+    let scope = CgroupPath::for_alloc(&alloc);
+    let resources = Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 };
 
-    let handle = driver.start(&spec).await.expect("ExecDriver::start succeeds");
-    driver.stop(&handle).await.expect("ExecDriver::stop succeeds");
+    manager.create_workload_scope(&scope).await.expect("alloc scope creation succeeds");
+    manager.write_resource_limits_warn_on_error(&scope, &resources).await;
+    manager.remove_workload_scope(&scope).await.expect("alloc scope removal succeeds");
 
     let captured = events.lock().expect("events mutex").clone();
     assert!(

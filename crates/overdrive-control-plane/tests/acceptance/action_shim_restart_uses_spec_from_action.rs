@@ -21,6 +21,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+    VmPayload,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
@@ -59,7 +61,7 @@ impl RecordingDriver {
 #[async_trait]
 impl Driver for RecordingDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -148,12 +150,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let restart_spec = AllocationSpec {
         alloc: successor_id,
         identity,
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/opt/x/y".to_string(),
-                args: vec!["--mode=fast".to_string()],
-            },
-        ),
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
+            command: "/opt/x/y".to_string(),
+            args: vec!["--mode=fast".to_string()],
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

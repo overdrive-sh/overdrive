@@ -49,8 +49,6 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
             .prop_map(|(host, port)| ProbeMechanic::Tcp { host, port }),
         ("/[a-zA-Z0-9_./-]{0,60}", 1u16..=65535, proptest::option::of("[a-zA-Z0-9._-]{1,40}"),)
             .prop_map(|(path, port, host)| ProbeMechanic::Http { path, port, host }),
-        proptest::collection::vec("[a-zA-Z0-9_./-]{1,30}", 1..=4)
-            .prop_map(|command| ProbeMechanic::Exec { command }),
     ]
 }
 

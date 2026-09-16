@@ -76,14 +76,14 @@ struct InertDriver;
 #[async_trait::async_trait]
 impl Driver for InertDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         Err(DriverError::StartRejected {
             failure: overdrive_core::traits::driver::DriverStartFailure {
                 class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
-                    driver: DriverType::Exec,
+                    driver: DriverType::Vm,
                 },
                 detail: "InertDriver: start() not expected on FinalizeFailed dispatch".to_owned(),
             },

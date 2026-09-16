@@ -43,7 +43,7 @@ impl WorkloadNetworkProvisioner for RecordingProvisioner {
     fn provision(
         &self,
         _workload: &WorkloadNetnsPlan,
-        _vm_tap: Option<&VmTapPlan>,
+        _vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         Ok(())
     }

@@ -27,23 +27,21 @@
 //! over-gates it, which is a layout fact rather than a property of that
 //! scenario.
 //!
-//! Steps 03-03 and 03-04 (S-VM-38, S-VM-39, S-VM-40) close the whole of AC-10.
-//! Step 03-03 (S-VM-38) and step 03-04's S-VM-39 are activated; S-VM-40 alone
+//! Steps 03-04 (S-VM-39, S-VM-40) close the whole of AC-10.
+//! Step 03-04's S-VM-39 is activated; S-VM-40 alone
 //! stays scaffolded RED at the bottom of this file — not for want of work, but
 //! because no production Schedule execution path exists to drive (see its own
 //! doc comment for the five refusing stages and the ADR-0051 OQ-5 / ADR-0064
 //! OQ-5 deferral behind them). Their capability truth is mixed once more:
-//! S-VM-39 genuinely boots a guest and reaches Running, while S-VM-38 is an
-//! in-process semantic rejection that spawns no VMM at all and would run
-//! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
-//! over-gates it too.
+//! S-VM-39 genuinely boots a guest and reaches Running. VM Service admission
+//! is covered by the checked-in Service walking skeleton.
 //!
 //! Step 03-08 (S-VM-82, DWD-25 / AC-21) is a live `#[tokio::test]` at the
 //! bottom of this file (activated in 03-08 from its original RED scaffold).
 //! It closes AC-21's error half: a node whose VM
 //! capability probe did not pass must tell the operator WHAT is absent and
 //! WHERE the specific reason was recorded, rather than presenting a node's own
-//! limit as an internal platform error. Like S-VM-37 and S-VM-38 it needs no
+//! limit as an internal platform error. Like S-VM-37 it needs no
 //! guest and no KVM — its whole premise is a host that cannot boot one — so
 //! the file-level `kvm-tests` gate over-gates it for the third time, a layout
 //! fact rather than a capability claim.
@@ -73,7 +71,6 @@ use std::time::Duration;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
-use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
@@ -394,23 +391,6 @@ fn vm_job_toml_with_command(id: &str, command: &str, kernel: &Path, rootfs: &Pat
 
 fn vm_job_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
     vm_job_toml_with_command(id, "/sbin/true", kernel, rootfs)
-}
-
-/// [`vm_job_toml`]'s `[service]` twin: the SAME `[vm]` driver table and
-/// `[resources]` block, with the kind section swapped and a single valid
-/// `[[listener]]` added so the spec is well-formed in every respect
-/// EXCEPT the `[service]` + `[vm]` combination S-VM-38 rejects. A spec
-/// that were otherwise invalid could be refused for the wrong reason and
-/// the scenario would prove nothing.
-fn vm_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
-    format!(
-        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 8080\n\
-         protocol = \"tcp\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-         memory_bytes = 134217728\n",
-        kernel.display(),
-        rootfs.display(),
-    )
 }
 
 fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -1013,10 +993,18 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
     );
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
     if let Some(tail) = console_tail.as_deref() {
-        assert!(
-            rendered.contains(tail),
-            "the rendered operator view must carry the captured console tail:\n{rendered}",
-        );
+        // The renderer preserves the complete tail while adding its
+        // human-readable indentation and normalising line endings. Assert
+        // each captured line rather than requiring the raw multi-line byte
+        // sequence to survive those presentation-only delimiters.
+        for line in tail.lines().map(str::trim_end) {
+            if !line.is_empty() {
+                assert!(
+                    rendered.contains(line),
+                    "the rendered operator view must carry captured console line {line:?}:\n{rendered}",
+                );
+            }
+        }
     }
 
     // An aborted boot leaves nothing behind, hypervisor included.
@@ -1498,130 +1486,6 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
 // by omission.
 // ---------------------------------------------------------------------------
 
-/// S-VM-38 / `@contract-shape:bounded-change` `@error_path` `@ac-10` `@tier3`
-/// `@real-io` — a spec declaring both `[service]` and `[vm]` is rejected before
-/// anything is scheduled, and the rejection tells the operator which
-/// capabilities are missing and where they are tracked.
-///
-/// ```gherkin
-/// Given Ana has written a spec declaring both [service] and [vm]
-/// When she runs "overdrive deploy web.toml"
-/// Then the deploy is rejected before anything is scheduled
-/// And the error names guest networking, guest probes and guest-stack mTLS as
-///   missing, citing GH #257 and GH #222
-/// ```
-///
-/// A semantic rejection with guidance, not a parse error — the established
-/// precedent is `ParseError::ProbesNotAllowedOnKind`
-/// (`crates/overdrive-core/src/aggregate/workload_spec.rs`), which rejects
-/// `[[health_check.*]]` on a non-Service workload and carries per-kind
-/// `guidance` text so the operator learns *why* rather than merely being
-/// refused. This scenario is the mirror image of that shape: Service is the
-/// kind being refused rather than the kind being required.
-///
-/// Unlike every other scenario in this file, nothing here needs a hypervisor,
-/// a guest, or KVM: the rejection happens in-process before an intent is
-/// committed. It lives here for cohesion with the rest of AC-09/AC-10 and
-/// therefore inherits the file-level `integration-tests,kvm-tests` gate. That
-/// over-gating is a layout consequence, not a capability claim about this
-/// scenario (roadmap 03-03).
-///
-/// The three missing capabilities the rejection must name, asserted
-/// INDEPENDENTLY below: a single `contains` on one phrase would pass against
-/// a message that silently dropped the other two.
-///
-/// `assert_no_allocation_scoped_vm_residue` deliberately does NOT apply here
-/// and is not forced: no `AllocationId` is ever minted, which is precisely
-/// what this scenario proves. Asserting on residue for an allocation that does
-/// not exist would be vacuous.
-#[tokio::test]
-#[serial(cgroup)]
-async fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
-    const MISSING_CAPABILITIES: [&str; 3] =
-        ["guest networking", "guest-reachable probes", "guest-stack mtls interception"];
-    const TRACKING_ISSUES: [&str; 2] = ["#257", "#222"];
-    const WORKLOAD_ID: &str = "vm-service-rejected";
-
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-    // Both artifacts are VALID and PRESENT throughout: the rejection is
-    // provably about the [service] + [vm] combination, never about a
-    // broken or absent artifact (which is what S-VM-33/34/41 cover).
-    assert!(
-        fixture.kernel_path.exists() && fixture.rootfs_path.exists(),
-        "S-VM-38 precondition: both configured artifacts must be present, so nothing but the \
-         kind/driver combination can explain the rejection",
-    );
-
-    let (handle, server_tmp) = spawn_vm_server().await;
-    let cfg = config_path(server_tmp.path());
-    let spec_path = write_toml(
-        server_tmp.path(),
-        "vm-service-rejected.toml",
-        &vm_service_toml(WORKLOAD_ID, &fixture.kernel_path, &fixture.rootfs_path),
-    );
-
-    // ---- The scoping control. The IDENTICAL [vm] driver table under
-    // [job] still parses, so a failure below is the [service] rejection
-    // firing and not this fixture's [vm] block being unacceptable
-    // anywhere. Steps 03-04's two scenarios prove the positive paths
-    // reach Running; this line only fixes the blame for THIS one. ----
-    overdrive_core::aggregate::WorkloadSpecInput::from_toml_str(&vm_job_toml(
-        WORKLOAD_ID,
-        &fixture.kernel_path,
-        &fixture.rootfs_path,
-    ))
-    .expect("the same [vm] driver table under [job] must still parse — the rejection is scoped");
-
-    // ---- The rejection, off the production deploy surface. ----
-    let rejection = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
-        .await
-        .expect_err("a spec declaring both [service] and [vm] must be rejected");
-    let message = rejection.to_string();
-    let lowered = message.to_lowercase();
-
-    for capability in MISSING_CAPABILITIES {
-        assert!(
-            lowered.contains(capability),
-            "the rejection must name {capability:?} as a missing capability:\n{message}",
-        );
-    }
-    for issue in TRACKING_ISSUES {
-        assert!(
-            message.contains(issue),
-            "the rejection must cite GH {issue} by number so the operator can find the tracking \
-             issue:\n{message}",
-        );
-    }
-
-    // ---- Nothing was scheduled. The half a parser-level unit test
-    // cannot reach, and the reason this scenario is Tier 3 at all: the
-    // describe surface reports the workload as unknown, so no intent was
-    // committed and no allocation row exists to describe. ----
-    let described =
-        describe(DescribeArgs { id: WORKLOAD_ID.to_owned(), config_path: cfg.clone() }).await;
-    match described {
-        Err(CliError::HttpStatus { status, body }) => {
-            assert_eq!(
-                status, 404,
-                "a rejected deploy must commit no intent, so the workload must be unknown",
-            );
-            assert_eq!(body.error, "not_found", "error class must be `not_found`");
-        }
-        Ok(out) => panic!(
-            "a rejected deploy must schedule nothing, but describe found the workload with {} \
-             allocation row(s)",
-            out.allocations_total,
-        ),
-        Err(other) => {
-            panic!("expected HTTP 404 for the never-committed workload, got {other:?}")
-        }
-    }
-
-    handle.shutdown().await.expect("clean shutdown");
-}
-
-// ---------------------------------------------------------------------------
 // Step 03-04 — RED scaffolds (S-VM-39, S-VM-40): AC-10's positive half.
 //
 // Shape per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
@@ -1653,8 +1517,8 @@ async fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
 /// And its VM allocation reaches Running through the production VmDriver path
 /// ```
 ///
-/// One of the two regression guards proving S-VM-38's rejection stayed scoped
-/// to `[service]`. That guard only holds if this allocation genuinely RUNS: a
+/// This positive-path guard proves the VM driver reaches Running for a real
+/// allocation. That guard only holds if this allocation genuinely RUNS: a
 /// spec that merely parses proves the rejection did not fire, but says nothing
 /// about whether the positive path still reaches a guest. DWD-24 made this
 /// explicit — "the test must drive real serve composition and the production
@@ -1738,8 +1602,7 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
         &vm_job_toml_with_command(WORKLOAD_ID, "/sbin/spinjobvm", &fixture.kernel_path, &rootfs),
     );
 
-    // ---- Accepted, not rejected. The `[service]` + `[vm]` refusal S-VM-38
-    // proves must not reach the `[job]` family. ----
+    // ---- Accepted and scheduled through the supported VM path. ----
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
         .expect("a spec declaring both [job] and [vm] must be ACCEPTED, never rejected");
@@ -1842,8 +1705,8 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 ///   the production VmDriver path
 /// ```
 ///
-/// The second regression guard for S-VM-38's scoping, and the one that closes
-/// Slice 02's "accepted and run" promise for the Schedule kind. DWD-24 promoted
+/// The Schedule-kind guard that closes Slice 02's "accepted and run" promise.
+/// DWD-24 promoted
 /// this scenario's Then from "accepted" to "reaches Running", which is what
 /// makes it the 46th `@requires-kvm` scenario — the guest boot is the point,
 /// not an incidental cost.
@@ -1897,7 +1760,7 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 ///    (ADR-0051 OQ-5)".
 /// 3. The server's submit handler rejects `SubmitSpecInput::Schedule(_)` with
 ///    the same message (`overdrive-control-plane/src/handlers.rs`).
-/// 4. `ScheduleV2::from_submit` and `ScheduleV2::to_describe`
+/// 4. `Schedule::from_submit` and `Schedule::to_describe`
 ///    (`overdrive-core/src/aggregate/mod.rs`) are both `todo!()` RED
 ///    scaffolds — no Schedule intent can be persisted or described.
 /// 5. Nothing evaluates a `CronExpr` at runtime. There is no schedule
@@ -1917,9 +1780,8 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 ///
 /// The scaffold therefore stays RED and discoverable
 /// (`grep -rn 'should_panic.*RED scaffold' crates/`) pending a scope ruling.
-/// S-VM-38's scoping is NOT left unguarded meanwhile: S-VM-39 above is the
-/// regression guard, and it is litmus-proven — widening the `[service]`
-/// rejection to the job family reddens it at the acceptance assertion.
+/// VM Service admission is covered by the Service-kind VM walking skeleton;
+/// this scenario remains the Schedule scaffold until its execution path exists.
 #[test]
 #[should_panic(expected = "RED scaffold")]
 fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {

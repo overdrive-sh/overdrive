@@ -17,8 +17,8 @@
 //! `Schedule` arms. The CLI projects parsed TOML onto a
 //! `SubmitSpecInput` variant; the server deserialises the same type
 //! out of JSON; both route through the per-kind validating
-//! constructors (`JobV2::from_submit` / `ServiceV2::from_submit` /
-//! `ScheduleV2::from_submit`) at the wire → intent boundary.
+//! constructors (`Job::from_submit` / `Service::from_submit` /
+//! `Schedule::from_submit`) at the wire → intent boundary.
 
 // The `utoipa::OpenApi` derive on `OverdriveApi` below expands to code
 // using `.for_each(...)` on the collected schemas. The lint fires on
@@ -28,7 +28,7 @@
 #![allow(clippy::needless_for_each)]
 
 use overdrive_core::TransitionReason;
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::describe::{DescribeSpecOutput, ScheduleSpecOutput, ServiceSpecOutput};
 use overdrive_core::api::submit::{
     ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
@@ -45,8 +45,8 @@ use utoipa::ToSchema;
 /// spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
 /// dispatches on the [`SubmitSpecInput`] variant and routes each
 /// arm through the per-kind validating constructor
-/// (`JobV2::from_submit` / `ServiceV2::from_submit` /
-/// `ScheduleV2::from_submit`) to derive the intent key / digest.
+/// (`Job::from_submit` / `Service::from_submit` /
+/// `Schedule::from_submit`) to derive the intent key / digest.
 ///
 /// Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
 /// is the SOLE workload-kind discriminator carrier — the previous
@@ -544,7 +544,6 @@ pub struct ErrorBody {
         ErrorBody,
         JobSpecInput,
         ResourcesInput,
-        ExecInput,
         DriverInput,
         // ADR-0051 wire-shape — `SubmitSpecInput` is the discriminated
         // `oneOf` body now carried by `SubmitWorkloadRequest.spec`.

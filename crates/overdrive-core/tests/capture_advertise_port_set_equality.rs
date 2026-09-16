@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use proptest::prelude::*;
 
-use overdrive_core::aggregate::{Exec, Listener, ServiceV2, WorkloadDriver, WorkloadIntent};
+use overdrive_core::aggregate::{Listener, Service, Vm, WorkloadDriver, WorkloadIntent};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::reconcilers::Action;
@@ -55,14 +55,19 @@ fn tick(counter: u64) -> TickContext {
     }
 }
 
-/// Build a `ServiceV2` carrying exactly `ports` as TCP listeners, in the given
+/// Build a `Service` carrying exactly `ports` as TCP listeners, in the given
 /// order. This is the single intent source both read paths bottom out in.
-fn service_with_ports(ports: &[NonZeroU16]) -> ServiceV2 {
-    ServiceV2 {
+fn service_with_ports(ports: &[NonZeroU16]) -> Service {
+    Service {
         id: workload_id(),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/svc".to_string(), args: Vec::new() }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/svc".to_string(),
+            args: Vec::new(),
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: ports.iter().map(|p| Listener { port: *p, protocol: Proto::Tcp }).collect(),
         startup_probes: Vec::new(),
         readiness_probes: Vec::new(),
@@ -71,14 +76,14 @@ fn service_with_ports(ports: &[NonZeroU16]) -> ServiceV2 {
 }
 
 /// CAPTURE path (01-02): the inbound-rule port-set the nft-TPROXY rule keys on.
-fn capture_port_set(svc: &ServiceV2) -> BTreeSet<NonZeroU16> {
+fn capture_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
     let intent = WorkloadIntent::Service(svc.clone());
     project_service_listen_ports(&intent).into_iter().collect()
 }
 
 /// ADVERTISE path: structural reconcile input for the same intent's listeners.
 /// Canonical allocation-IP hydration has its separate retained boundary test.
-fn advertise_port_set(svc: &ServiceV2) -> BTreeSet<NonZeroU16> {
+fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
     let vip = service_vip();
     let mut state = ServiceLifecycleState::default();
     for listener in &svc.listeners {

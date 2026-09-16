@@ -14,7 +14,7 @@ journey:
   name: "Run a workload that needs its own kernel"
   goal: >
     Ana declares a Job, Schedule, or Service in the same TOML with a `[vm]`
-    table instead of `[exec]`, deploys it with the same `overdrive deploy`
+    table, deploys it with the `overdrive deploy`
     verb, and reads its outcome with the same `overdrive workload describe` —
     and every lifecycle or health state the platform reports is true of the
     GUEST workload, not merely of the hypervisor process wrapping it.
@@ -30,14 +30,12 @@ journey:
     end: "Trusting — lifecycle and Service health came from the guest workload, never from the VMM standing in for it."
 
   scope_note: >
-    Job-kind and Schedule-kind are delivered by GH #42. The production parser
-    currently rejects `[vm]` plus `[service]`; service-kind-vm-workloads (GH
-    #257) removes that rejection after guest-grounded health is wired through
-    the production path. GH #222 has delivered tap-in-netns provisioning,
-    routed `workload_addr`, and guest-stack mesh interception. HTTP/TCP probes
-    can therefore be host-originated against the guest address. VM specs that
-    declare Exec probes remain a parse-time rejection with an actionable
-    reference to GH #280; no guest-control mechanism is part of GH #257.
+    Job, Schedule, and Service VM workloads use the same `[vm]` execution
+    contract. GH #222 has delivered tap-in-netns provisioning, routed
+    `workload_addr`, and guest-stack mesh interception. HTTP/TCP probes are
+    host-originated against the guest address. Guest command probes remain a
+    separately scoped GH #280 concern; this journey has no second health
+    language or replacement interception mechanism.
     Isolation posture is feature-delta decision [D7]: KVM boundary + default-on
     seccomp + Landlock + cgroup/netns confinement, and NO jailer-equivalent
     chroot and NO PID namespace. The remainder is GH #258. Nothing in this
@@ -85,13 +83,12 @@ steps:
     name: "Deploy it with the verb she already uses"
     command: "overdrive deploy render.toml"
     summary: >
-      The parser accepts exactly one driver table — `[exec]` xor `[vm]`. The
-      composition root routes to the VM driver rather than the single
-      hardcoded ExecDriver. No new verb, no new flag, no separate VM
-      subcommand. Today a `[vm]` plus `[service]` spec is rejected here before
-      intent is committed. GH #257 removes that rejection for HTTP/TCP-only
-      VM Services; a VM spec declaring Exec remains rejected and names GH
-      #280 before intent commit.
+      The parser accepts the supported `[vm]` table and the composition root
+      routes to the Cloud Hypervisor VM driver. No new verb, no new flag, and
+      no separate VM subcommand are introduced. VM Services with HTTP/TCP
+      probes follow the same intent and lifecycle path as VM Jobs and
+      Schedules; guest command probes remain outside this journey under GH
+      #280.
     emotional_state:
       entry: "Curious — 'will it need a different command?'"
       exit: "Confident — 'same verb, and its health signal belongs to my guest workload.'"
@@ -101,7 +98,7 @@ steps:
     command: "overdrive workload describe batch-render"
     summary: >
       Running means the guest kernel booted AND the in-guest agent ran —
-      strictly stronger than the exec driver's "a process was spawned", and
+      strictly stronger than merely accepting a VMM process, and
       never the reference implementation's "the boot API returned 2xx". A
       rootfs whose init never runs reaches Failed WITHOUT passing through
       Running. Boot failures are named individually: kernel artifact missing,
@@ -192,9 +189,9 @@ related_features:
   - id: phase-1-first-workload
     role: "Established the lifecycle contract (Running / Terminated / Failed, restart+backoff) that this journey must re-earn across the guest boundary rather than redefine."
   - id: service-health-check-probes
-    role: "Established J-OPS-004's startup/readiness/liveness roles and HTTP/TCP/Exec mechanics for Exec-backed Services."
+    role: "Established J-OPS-004's startup/readiness/liveness roles and HTTP/TCP mechanics for VM-backed Services."
   - id: service-kind-vm-workloads
-    role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP probes (GH #257); optional in-guest Exec is GH #280."
+    role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP probes (GH #257); guest command probes remain GH #280."
 
 changelog:
   - date: 2026-08-01

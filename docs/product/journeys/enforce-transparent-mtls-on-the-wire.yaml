@@ -31,15 +31,10 @@ schema_version: 1
 # per connection. Empirically settled by 6 committed Tier-3 spikes
 # (docs/feature/transparent-mtls-host-socket/spike/findings*.md).
 #
-# SCOPE — v1 WORKLOAD KINDS = process/exec ONLY (the only driver that exists is
-# ExecDriver). There is NO distinct WASM mTLS path: WASM host-socket workloads
-# are auto-covered by the SAME outbound proxy once a WASM driver lands (a
-# separate roadmap concern). Guest-stack (microVM / unikernel — TCP terminates
-# in the GUEST kernel) is the STAGED guest-stack intercept ADAPTER of this ONE
-# universal proxy (#222 — repurposed by ADR-0069 from "a separate mechanism" to
-# "the guest-stack intercept adapter of the #26 universal proxy"). The adapter
-# feeds the SAME MtlsEnforcement port from a tap/TPROXY/TC source; it is NOT a
-# second enforcement mechanism.
+# SCOPE — the supported workload path is VM/microVM (TCP terminates in the
+# guest kernel) and uses the existing guest-stack intercept boundary. Future
+# workload classes may reuse this universal proxy when their drivers land; no
+# replacement interception or second enforcement mechanism is selected here.
 #
 # SECURITY CLAIM — HONEST (ADR-0069): v1 = chain-to-trust-bundle transport
 # AUTHENTICATION + ENCRYPTION, with NO intended-peer identity pinning. Both
@@ -92,12 +87,12 @@ schema_version: 1
 journey:
   name: "Encrypt every workload's wire with its own SVID via an agent-light L4 proxy, in-kernel, both directions"
   goal: >
-    For v1 host-socket (process/exec) workloads, the Overdrive node agent turns a
+    For supported VM/microVM workloads, the Overdrive node agent turns a
     plaintext TCP connection into a kernel-encrypted TLS 1.3 session carrying the
     workload's own SVID via ONE universal agent-light L4 proxy (ADR-0069),
     BIDIRECTIONALLY, with both workloads holding nothing and the agent
     agent-light (not a per-byte userspace proxy). OUTBOUND: the workload's
-    connect() is transparently intercepted (cgroup_connect4 rewrite) to the
+    connect() is transparently intercepted to the
     agent's plaintext leg F; the agent drains the pre-arm plaintext losslessly,
     does a rustls TLS 1.3 CLIENT handshake on its peer-facing leg B presenting
     the held SVID (read via the IdentityRead port J-SEC-002/#35 ships) and
@@ -150,7 +145,7 @@ steps:
       kTLS-TX steady-state splice (increment-f, agent-idle) — but on SEPARATE
       harnesses. So the walking skeleton is an INTEGRATION gate, the BLOCKING first
       DELIVER slice, that COMPOSES the spike-proven pieces into ONE bidirectional
-      flow on the real netns/veth topology: a real cgroup_connect4 OUTBOUND
+      flow on the real netns/veth topology: a real VM outbound
       intercept AND a real TPROXY INBOUND intercept -> workload pre-arm write ->
       the agent's leg-B/leg-C handshake -> kTLS arm -> post-arm BIDIRECTIONAL
       multi-record transfer with NO RST, under BOTH normal AND traced/delayed
@@ -167,11 +162,11 @@ steps:
 
   - id: 1
     name: "The workload's traffic is transparently intercepted to the agent and the agent owns the legs (no recursion, no self-exempt)"
-    command: "(internal — outbound cgroup_connect4 rewrite to leg F; inbound TPROXY to the agent's IP_TRANSPARENT leg C; the agent's own leg-B dial is exempt)"
+    command: "(internal — outbound VM intercept to leg F; inbound TPROXY to the agent's IP_TRANSPARENT leg C; the agent's own leg-B dial is exempt)"
     summary: >
       The workload is identity-unaware and never reaches the real peer
       un-intercepted. OUTBOUND, the workload's connect() is transparently
-      rewritten (cgroup_connect4) to the agent's node-local plaintext leg F; the
+      rewritten to the agent's node-local plaintext leg F; the
       agent accepts it and drains the pre-arm plaintext losslessly into a bounded
       userspace buffer (no dropped bytes, no RESET — the lossless handshake-window
       capture). INBOUND, the connection aimed at a server workload's logical
@@ -179,7 +174,7 @@ steps:
       and getsockname() recovers the original destination, which selects the
       SERVER workload's AllocationId -> its held SVID. The agent's OWN outbound
       dial (leg B to the real peer) is NOT re-intercepted by the same
-      cgroup_connect4 program (the agent's egress carries a narrowly-scoped,
+      intercept program (the agent's egress carries a narrowly-scoped,
       agent-private bypass — SO_MARK or cgroup scoping — outside the workload
       attach subtree), and the workload CANNOT self-exempt (the bypass is
       unreachable from the workload's sockets). The IP_TRANSPARENT listener +
@@ -187,7 +182,7 @@ steps:
       the workload holds nothing and is unprivileged.
     emotional_state:
       entry: "Focused — 'is the workload's traffic actually captured by the platform before it can reach the peer un-encrypted — both an outbound connect and an inbound arrival — and can a workload sidestep the intercept?'"
-      exit: "Reassured — 'cgroup_connect4 rewrites the outbound connect and TPROXY redirects the inbound arrival, both transparently; the agent owns both legs; the agent's own dial does not recurse; and the bypass is agent-private — a workload cannot evade interception.'"
+      exit: "Reassured — 'the VM intercept rewrites the outbound connect and TPROXY redirects the inbound arrival, both transparently; the agent owns both legs; the agent's own dial does not recurse; and the bypass is agent-private — a workload cannot evade interception.'"
 
   - id: 2
     name: "The agent handshakes on its peer-facing leg presenting the held SVID; in BOTH client and server roles"
@@ -306,15 +301,15 @@ related_jobs: [J-SEC-003]
 
 related_features:
   - id: transparent-mtls-host-socket
-    role: "Ships the UNIVERSAL agent-light L4 proxy mTLS ENFORCEMENT mechanism (GH #26, roadmap 2.4; ADR-0069): transparent intercept (cgroup_connect4 outbound / TPROXY inbound) -> rustls TLS 1.3 handshake on the agent's peer-facing leg presenting the held SVID -> kTLS arms on the agent's leg -> the kernel carries steady-state crypto (forward agent-idle, return/deliver agent-light). BIDIRECTIONAL host-socket v1. The consumer that finally encrypts the wire with the minted+held SVID, both directions."
+    role: "Ships the UNIVERSAL agent-light L4 proxy mTLS ENFORCEMENT mechanism (GH #26, roadmap 2.4; ADR-0069): VM intercept -> rustls TLS 1.3 handshake on the agent's peer-facing leg presenting the held SVID -> kTLS arms on the agent's leg -> the kernel carries steady-state crypto (forward agent-idle, return/deliver agent-light). BIDIRECTIONAL VM/microVM path. The consumer that finally encrypts the wire with the minted+held SVID, both directions."
   - id: workload-identity-manager
     role: "Ships the IdentityRead port + Arc<IdentityMgr> held store this journey READS from (GH #35, roadmap 2.13). J-SEC-002 holds/reads/drops; J-SEC-003 consumes it on the wire (client AND server roles)."
   - id: built-in-ca
     role: "Mints the SVID hierarchy (Root -> per-node Intermediate -> workload SVID) + leaf key (GH #28, ADR-0063) that this journey presents in the handshake. J-SEC-001 mints; J-SEC-003 enforces on the wire."
 
 deferred_outside_this_journey:
-  - "Guest-stack workloads (microVM via Cloud Hypervisor, unikernel via Unikraft) — TCP terminates in the GUEST kernel, invisible to host cgroup_connect4/TPROXY -> GH #222, the STAGED guest-stack intercept ADAPTER of the #26 universal agent-light L4 proxy (NOT a separate enforcement mechanism). ADR-0069 (2026-06-12) FOLDED #222 into #26: there is now ONE universal mechanism (the agent-light L4 proxy) for ALL workload kinds. The guest-stack adapter feeds the SAME MtlsEnforcement port + InterceptedConnection contract from a tap/TPROXY/TC intercept source (instead of host cgroup_connect4/TPROXY); host-socket (#26 v1) and guest-stack (#222, staged) share ONE SPIFFE identity plane AND ONE enforcement mechanism, differing only in the intercept SOURCE. Staged to a follow-up; the v1 port boundary makes it a non-breaking addition. (This corrects the prior 'one identity model, two enforcement mechanisms' / '#222 is a SEPARATE feature' framing, which ADR-0069 superseded.)"
-  - "WASM workloads as a DISTINCT mTLS path — there is NO separate WASM mTLS slice in v1. Only ExecDriver exists (no WASM driver). WASM host-socket workloads (TCP terminating in the host kernel) are auto-covered by the SAME outbound proxy the moment a WASM driver lands — a separate roadmap concern, not a #26 deliverable. v1 workload kinds = process/exec ONLY."
+  - "Additional workload classes beyond the supported VM/microVM path remain deferred until their drivers and interception sources are delivered. This journey does not select a replacement mTLS mechanism or claim cross-host behavior."
+  - "Future non-VM workload classes remain outside this journey until their drivers and intercept sources are delivered; this path makes no claim about their execution or wire behavior."
   - "Intended-peer identity pinning (verify the authenticated peer is the INTENDED destination, not merely SOME valid cluster workload chaining to the bundle) -> GH #178 (native east-west SPIFFE-ID resolution, which supplies the expected peer; VIP path #61). v1 = chain-to-bundle transport authn + encryption ONLY; a routing bug / VIP collision / valid-but-unintended SVID is NOT prevented in v1. The wrong-but-valid-peer (PeerIdentityMismatch) SAN-match is the #178 UPGRADE. Docs/tests MUST NOT call that case 'protected' until #178 lands."
   - "Authorization (allow/deny WHO may connect to WHOM) -> the BPF-LSM socket_connect hook (GH #27) fed by compiled policy_verdicts (GH #38; related #49) — a SEPARATE subsystem. The mTLS proxy does AUTHENTICATION + ENCRYPTION only and MUST NOT embed a policy engine / read policy_verdicts (two sources of authorization truth would drift). A connection that authenticates here can still be DENIED by #27's LSM hook before it is established."
   - "In-band restart-survival of in-flight sessions + 1-socket-per-connection density -> the SUPERSEDED in-band kTLS-on-the-workload's-own-socket model's unique win (ADR-0069 A1), tracked as a post-v1 optimization in #231. v1 = 2 sockets/connection, NO restart-survival (the agent owns both legs + the kTLS state; an agent restart drops in-flight sessions, which re-handshake on reconnect). New-connection re-handshake is the documented behaviour."

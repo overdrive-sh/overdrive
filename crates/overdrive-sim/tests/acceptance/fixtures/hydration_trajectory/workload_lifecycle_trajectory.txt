@@ -27,10 +27,12 @@ emitted_actions:
                 canonical: "spiffe://overdrive.local/workload/traj-job/alloc/alloc-traj-job-0",
                 path_start: 24,
             },
-            driver: Exec(
-                ExecPayload {
+            driver: Vm(
+                VmPayload {
                     command: "/bin/serve",
                     args: [],
+                    kernel: "/kernel",
+                    rootfs: "/rootfs",
                 },
             ),
             resources: Resources {

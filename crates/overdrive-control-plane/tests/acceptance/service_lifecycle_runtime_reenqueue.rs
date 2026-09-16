@@ -30,7 +30,7 @@ use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_converg
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::eval_broker::Evaluation;
@@ -79,7 +79,7 @@ async fn build_state(
     runtime.register(service_lifecycle()).await.expect("register service-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -115,7 +115,7 @@ fn startup_probe(port: u16) -> ProbeDescriptor {
     }
 }
 
-async fn persist_service(state: &AppState, svc: &ServiceV2) {
+async fn persist_service(state: &AppState, svc: &Service) {
     let w = svc.id.clone();
     let intent = WorkloadIntent::Service(svc.clone());
     let archived = intent.archive_for_store().expect("rkyv archive");
@@ -229,11 +229,16 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     // which would emit Stable on tick 1 without ever needing a Pass row
     // and defeat the Shape B re-enqueue property under test. With a
     // declared probe the reconciler waits for the Pass row.
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: vec![startup_probe(8080)],
         readiness_probes: vec![],

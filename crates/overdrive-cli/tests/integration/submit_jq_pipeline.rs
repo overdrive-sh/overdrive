@@ -24,10 +24,8 @@
 //! We exercise that property in-process by:
 //!
 //! 1. Spinning up the real `serve::run` control plane (real
-//!    `LocalIntentStore`, real `LocalObservationStore`, real
-//!    `ExecDriver`) — same shape as
-//!    `streaming_submit_happy_path.rs` and the JSON-ack
-//!    `deploy.rs`.
+//!    `LocalIntentStore` and real `LocalObservationStore`) — the same
+//!    production composition shape as the JSON-ack `deploy.rs` path.
 //! 2. Driving the dispatch decision through `should_stream(detach=false,
 //!    is_terminal=false)` — `false` simulates the pipe-redirected
 //!    stdout the real shell pipeline produces. This is the same
@@ -45,9 +43,9 @@
 //! handler IS the wire-level witness — short of `Command::spawn`,
 //! which CLAUDE.md forbids.
 //!
-//! Linux-gated because the production `ExecDriver` requires
-//! `tokio::process::Command::spawn` against a real binary path; macOS
-//! dev runs via `cargo xtask lima run --` per `crates/overdrive-cli/CLAUDE.md`.
+//! Linux-gated because the production server uses Linux-only runtime
+//! facilities; macOS dev runs via `cargo xtask lima run --` per
+//! `crates/overdrive-cli/CLAUDE.md`.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -99,9 +97,11 @@ replicas = 1
 cpu_milli = 500
 memory_bytes = 536870912
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 "#
 }
 

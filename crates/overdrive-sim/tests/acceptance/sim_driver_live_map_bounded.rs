@@ -20,17 +20,20 @@
 //! `git commit --no-verify` so the GREEN-next-commit loop in Step
 //! 01-02 has a target to flip.
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_sim::adapters::driver::SimDriver;
 
 const CYCLES: usize = 8;
 
 #[tokio::test]
 async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
 
     // Pre-condition: the allocations map starts empty.
     assert_eq!(
@@ -52,12 +55,12 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
         let spec = AllocationSpec {
             alloc: alloc.clone(),
             identity,
-            driver: overdrive_core::traits::driver::DriverPayload::Exec(
-                overdrive_core::traits::driver::ExecPayload {
-                    command: "registry/livemap:1.0".to_owned(),
-                    args: vec![],
-                },
-            ),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "registry/livemap:1.0".to_owned(),
+                args: vec![],
+                kernel: PathBuf::from("/nonexistent/kernel"),
+                rootfs: PathBuf::from("/nonexistent/rootfs"),
+            }),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

@@ -25,7 +25,7 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
-use super::super::exec_driver::cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::AllocCleanup;
 
 #[tokio::test]
 #[serial(cgroup)]
@@ -44,10 +44,8 @@ async fn cgroup_kill_terminates_every_pid_within_two_seconds() {
     fs.create_dir(&scope_dir).await.expect("create alloc scope");
 
     // Spawn `/bin/sleep 3600` and move it into the scope via
-    // `cgroup.procs`. Mirrors the production wiring in
-    // `ExecDriver::start` (post-spawn PID move) but without the rest
-    // of the driver machinery — this test exercises ONLY the
-    // cgroup.kill semantic, not the full driver surface.
+    // `cgroup.procs`. This test exercises ONLY the cgroup.kill
+    // semantic, not a workload-driver surface.
     let child =
         tokio::process::Command::new("/bin/sleep").arg("3600").spawn().expect("spawn /bin/sleep");
     // Linux PIDs are non-negative integers bounded by the kernel's

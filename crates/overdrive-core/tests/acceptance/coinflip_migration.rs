@@ -40,5 +40,4 @@ fn s_07_01_migrated_coinflip_parses_as_job_kind() {
 
     assert_eq!(parsed.kind(), WorkloadKind::Job, "coinflip.toml must be a Job kind");
     assert_eq!(parsed.id_as_str(), "coinflip");
-    assert_eq!(parsed.exec_command(), "/bin/bash");
 }

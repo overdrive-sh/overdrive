@@ -386,9 +386,11 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
                 "cpu_milli": 100,
                 "memory_bytes": 67_108_864_u64,
             },
-            "exec": {
+            "vm": {
                 "command": "/bin/true",
                 "args": [],
+                "kernel": "/kernel",
+                "rootfs": "/rootfs",
             },
         },
     });

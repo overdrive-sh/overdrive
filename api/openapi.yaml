@@ -778,14 +778,6 @@ components:
     DriverInput:
       oneOf:
       - type: object
-        description: Native binary under cgroups v2 — the `[exec]` table in TOML.
-        required:
-        - exec
-        properties:
-          exec:
-            $ref: '#/components/schemas/ExecInput'
-            description: Native binary under cgroups v2 — the `[exec]` table in TOML.
-      - type: object
         description: |-
           Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
           ADR-0083, GH #42).
@@ -801,23 +793,16 @@ components:
         Driver dispatch on a [`JobSpecInput`].
 
         Per ADR-0031 §2 a tagged enum with `#[serde(flatten)]` on the field
-        surfaces the table name as the discriminator in TOML / JSON: `[exec]`
-        → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
-        unknown driver tables.
-
-        Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
-        `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
-        variants additively; no shape change to surrounding code.
+        surfaces the supported `[vm]` table as `DriverInput::Vm(...)`.
+        `deny_unknown_fields` on the enum rejects unsupported driver tables.
     DriverType:
       type: string
       description: |-
         Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 
         Stable: new drivers are appended; existing variants never change their
-        wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
-        `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
-        with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
-        amendment 2026-04-28).
+        wire form. [`Display`] and [`FromStr`] emit `vm`, `unikernel`, `wasm` —
+        matching `docs/whitepaper.md` §6.
 
         `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
         migration (step 01-10, GH #42 — `docs/feature/
@@ -834,7 +819,6 @@ components:
         transitively (DWD-03). `utoipa` is a declarative-derive crate with no
         runtime I/O — the dst-lint banned-API list does not enumerate it.
       enum:
-      - exec
       - vm
       - unikernel
       - wasm
@@ -859,27 +843,6 @@ components:
           - 'null'
         message:
           type: string
-    ExecInput:
-      type: object
-      description: Operator-facing `[exec]` table fields per ADR-0031 §2.
-      required:
-      - command
-      - args
-      properties:
-        args:
-          type: array
-          items:
-            type: string
-          description: |-
-            Argv passed verbatim. Required field — an absent `args` is a
-            parse error, not "default to no args" (per ADR-0031 §8). Empty
-            `Vec` is the legitimate zero-args case.
-        command:
-          type: string
-          description: |-
-            Host filesystem path to the binary. Validated non-empty (after
-            trim) at `JobV2::from_submit` per ADR-0031 §4.
-      additionalProperties: false
     IdempotencyOutcome:
       type: string
       description: |-
@@ -938,7 +901,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
+        Input shape for `Job::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -1051,7 +1014,7 @@ components:
         `protocol: Proto` after TOML decoding; the wire side carries
         `port: u16` and `protocol: String` for JSON deserialise tolerance,
         with validation deferred to
-        [`crate::aggregate::ServiceV2::from_submit`].
+        [`crate::aggregate::Service::from_submit`].
       required:
       - port
       - protocol
@@ -1061,14 +1024,14 @@ components:
           format: int32
           description: |-
             Listener port — 1..=65535. `port == 0` is rejected at admission
-            inside `ServiceV2::from_submit`.
+            inside `Service::from_submit`.
           maximum: 65535
           minimum: 1
         protocol:
           type: string
           description: |-
             L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
-            admission inside `ServiceV2::from_submit`.
+            admission inside `Service::from_submit`.
       additionalProperties: false
     NodeList:
       type: object
@@ -1134,8 +1097,8 @@ components:
           $ref: '#/components/schemas/ProbeIdx'
           description: |-
             0-indexed position within THIS descriptor's role array
-            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV3`
-            construction and carried verbatim into `ServiceV2`; never
+            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV1`
+            construction and carried verbatim into `Service`; never
             re-derived downstream.
 
             Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
@@ -1229,30 +1192,11 @@ components:
             type: string
             enum:
             - http
-      - type: object
-        description: |-
-          Spawn `command[0]` with `command[1..]` as args, inside the
-          workload's cgroup per ADR-0059 / C7. Exit 0 = Pass.
-        required:
-        - command
-        - type
-        properties:
-          command:
-            type: array
-            items:
-              type: string
-          type:
-            type: string
-            enum:
-            - exec
       description: |-
         Concrete mechanic for a probe attempt.
 
-        Per ADR-0054: three mechanics, each backed by a distinct port
-        trait (`TcpProber` / `HttpProber` / `ExecProber`). Step 01-02
-        lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
-        in step 02-02 — all three are part of the enum so the
-        `ServiceSpec` envelope shape is stable across slices.
+        Per ADR-0054, each mechanic is backed by a distinct port trait. The
+        supported mechanics are TCP-connect and plain HTTP GET.
     ProbeResultRowJson:
       type: object
       description: |-
@@ -1373,8 +1317,7 @@ components:
           type: string
           description: |-
             Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
-            `"http GET http://0.0.0.0:8080/healthz"`,
-            `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
+            `"http GET http://0.0.0.0:8080/healthz"`). Reconciler
             composes from `ProbeDescriptor.mechanic` at the deciding
             tick.
         probe_idx:
@@ -1452,7 +1395,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `Job::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -1531,7 +1474,7 @@ components:
       description: |-
         HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
 
-        The per-fire instance is a [`crate::aggregate::JobV2`] per ADR-0047
+        The per-fire instance is a [`crate::aggregate::Job`] per ADR-0047
         § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
         inner job body uses the same wire shape standalone Jobs use —
         operators write the schedule body and the inner job body in the
@@ -1545,7 +1488,7 @@ components:
           type: string
           description: |-
             Cron expression. String-shaped on the wire; validated and
-            projected onto `CronExpr` inside `ScheduleV2::from_submit`.
+            projected onto `CronExpr` inside `Schedule::from_submit`.
         id:
           type: string
         job:
@@ -1851,7 +1794,7 @@ components:
               $ref: '#/components/schemas/ListenerInput'
             description: |-
               Operator-declared listeners in declaration order. Validated at
-              admission inside [`crate::aggregate::ServiceV2::from_submit`]:
+              admission inside [`crate::aggregate::Service::from_submit`]:
               at least one element; no two share `(port, protocol)`; protocol
               is `tcp` / `udp` only.
           liveness_probes:
@@ -1939,7 +1882,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared liveness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
               surfaced on describe so a Service's liveness probes round-trip.
           readiness_probes:
@@ -1948,7 +1891,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared readiness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
               surfaced on describe so a Service's readiness probes round-trip.
           replicas:
@@ -1963,7 +1906,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared startup probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
+              persisted [`crate::aggregate::Service`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::startup_probes`].
               Surfaced today so an operator who declared a
               `[[health_check.startup]]` probe sees it reflected on describe
@@ -2262,8 +2205,8 @@ components:
         spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
         dispatches on the [`SubmitSpecInput`] variant and routes each
         arm through the per-kind validating constructor
-        (`JobV2::from_submit` / `ServiceV2::from_submit` /
-        `ScheduleV2::from_submit`) to derive the intent key / digest.
+        (`Job::from_submit` / `Service::from_submit` /
+        `Schedule::from_submit`) to derive the intent key / digest.
 
         Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
         is the SOLE workload-kind discriminator carrier — the previous
@@ -2769,112 +2712,6 @@ components:
             - stopped
       - type: object
         description: |-
-          `spawn(2)` returned ENOENT for the configured binary path.
-          Replaces the previous state-class `DriverStartFailed` for the
-          missing-binary case; the broken-binary regression target
-          (US-02 KPI-02) emits this variant.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned ENOENT for the configured binary path.
-              Replaces the previous state-class `DriverStartFailed` for the
-              missing-binary case; the broken-binary regression target
-              (US-02 KPI-02) emits this variant.
-            required:
-            - path
-            properties:
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_binary_not_found
-      - type: object
-        description: |-
-          `spawn(2)` returned EACCES — the binary exists but is not
-          executable by the running uid.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned EACCES — the binary exists but is not
-              executable by the running uid.
-            required:
-            - path
-            properties:
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_permission_denied
-      - type: object
-        description: |-
-          `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
-          not a valid executable for this kernel/architecture.
-          `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
-          `"bad_elf"`, `"wrong_arch"`).
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
-              not a valid executable for this kernel/architecture.
-              `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
-              `"bad_elf"`, `"wrong_arch"`).
-            required:
-            - path
-            - kind
-            properties:
-              kind:
-                type: string
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - exec_binary_invalid
-      - type: object
-        description: |-
-          Cgroup setup failed (scope mkdir, PID enrolment, limit write).
-          `kind` is one of `"create_scope"`, `"place_pid"`,
-          `"write_limits"`; `source` is the verbatim `std::io::Error`
-          `Display`.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              Cgroup setup failed (scope mkdir, PID enrolment, limit write).
-              `kind` is one of `"create_scope"`, `"place_pid"`,
-              `"write_limits"`; `source` is the verbatim `std::io::Error`
-              `Display`.
-            required:
-            - kind
-            - source
-            properties:
-              kind:
-                type: string
-              source:
-                type: string
-          kind:
-            type: string
-            enum:
-            - cgroup_setup_failed
-      - type: object
-        description: |-
           Driver returned an uncategorised failure that did not fit any
           of the more specific cause variants. Falls back on the verbatim
           driver `Display` text in `detail`. Operators seeing this variant
@@ -3015,41 +2852,9 @@ components:
             - no_capacity
       - type: object
         description: |-
-          Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
-          cgroup-events subscription; defined now for wire-shape forward-
-          compatibility.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: |-
-              Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
-              cgroup-events subscription; defined now for wire-shape forward-
-              compatibility.
-            required:
-            - peak_bytes
-            - limit_bytes
-            properties:
-              limit_bytes:
-                type: integer
-                format: int64
-                minimum: 0
-              peak_bytes:
-                type: integer
-                format: int64
-                minimum: 0
-          kind:
-            type: string
-            enum:
-            - out_of_memory
-      - type: object
-        description: |-
           Workload exited with a non-zero status or signal within the
-          post-spawn settle window. Emitted by the `ExitObserver` when
-          `ExitKind::Crashed` is received from the driver — `ExecDriver`
-          already performs `child.wait()` in Phase 1 and that is exactly
+          post-start settle window. Emitted by the `ExitObserver` when
+          `ExitKind::Crashed` is received from the VM driver — that is exactly
           how `ExitKind::Crashed` is produced. The `exit_code` field
           carries the process exit status (`None` for signal-only exits);
           `signal` carries the signal number cast to `u8` (`None` when
@@ -3063,9 +2868,8 @@ components:
             type: object
             description: |-
               Workload exited with a non-zero status or signal within the
-              post-spawn settle window. Emitted by the `ExitObserver` when
-              `ExitKind::Crashed` is received from the driver — `ExecDriver`
-              already performs `child.wait()` in Phase 1 and that is exactly
+              post-start settle window. Emitted by the `ExitObserver` when
+              `ExitKind::Crashed` is received from the VM driver — that is exactly
               how `ExitKind::Crashed` is produced. The `exit_code` field
               carries the process exit status (`None` for signal-only exits);
               `signal` carries the signal number cast to `u8` (`None` when
@@ -3099,8 +2903,7 @@ components:
           `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
           that failed; `detail` is the verbatim `Display` of the underlying
           `MtlsInterceptInstallError` (which names the privilege / kernel-feature
-          remediation an operator acts on). Mirrors the `CgroupSetupFailed {
-          kind, source }` cause-class shape — `stage` is a `String` carrying a
+          remediation an operator acts on). The `stage` is a `String` carrying a
           closed vocabulary, NOT a sub-enum.
         required:
         - data
@@ -3115,8 +2918,7 @@ components:
               `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
               that failed; `detail` is the verbatim `Display` of the underlying
               `MtlsInterceptInstallError` (which names the privilege / kernel-feature
-              remediation an operator acts on). Mirrors the `CgroupSetupFailed {
-              kind, source }` cause-class shape — `stage` is a `String` carrying a
+              remediation an operator acts on). The `stage` is a `String` carrying a
               closed vocabulary, NOT a sub-enum.
             required:
             - stage
@@ -3200,9 +3002,9 @@ components:
 
           **Additive position**: appended after `WorkloadNetnsProvisionFailed`
           to keep every pre-existing rkyv discriminant stable — the same
-          discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
-          never populates `ExitEvent::oom`, so every Exec crash falls
-          through unchanged to `WorkloadCrashedImmediately`.
+          discipline `StoppedBy` states verbatim at `:237-241`. VM exits
+          without OOM facts fall through unchanged to
+          `WorkloadCrashedImmediately`.
         required:
         - data
         - kind
@@ -3227,9 +3029,9 @@ components:
 
               **Additive position**: appended after `WorkloadNetnsProvisionFailed`
               to keep every pre-existing rkyv discriminant stable — the same
-              discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
-              never populates `ExitEvent::oom`, so every Exec crash falls
-              through unchanged to `WorkloadCrashedImmediately`.
+              discipline `StoppedBy` states verbatim at `:237-241`. VM exits
+              without OOM facts fall through unchanged to
+              `WorkloadCrashedImmediately`.
             required:
             - limit_bytes
             - oom_kill_count
@@ -3449,8 +3251,8 @@ components:
 
         Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
         `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
-        gives a self-describing wire shape: `{"kind": "exec_binary_not_found",
-        "data": {"path": "/usr/local/bin/payments"}}` for cause-class variants;
+        gives a self-describing wire shape: `{"kind": "vm_kernel_not_found",
+        "data": {"path": "/boot/vmlinux"}}` for cause-class variants;
         `{"kind": "scheduling"}` for progress markers (serde elides the empty
         `data` for unit variants by default).
 
@@ -3458,19 +3260,14 @@ components:
         |---|---|---|---|
         | `Scheduling` | progress | reconciler — placement decided, action emitted | yes |
         | `Starting` | progress | reconciler — driver invocation underway | yes |
-        | `Started` | progress | driver(exec) — driver returned `Ok(handle)` | yes |
+        | `Started` | progress | VM driver — driver returned `Ok(handle)` | yes |
         | `BackoffPending { attempt }` | progress | reconciler — holding off restart | yes |
         | `Stopped { by }` | progress | reconciler — observed terminal stop | yes |
-        | `ExecBinaryNotFound { path }` | cause | `ExecDriver` — `spawn(2)` ENOENT | yes |
-        | `ExecPermissionDenied { path }` | cause | `ExecDriver` — `spawn(2)` EACCES | yes |
-        | `ExecBinaryInvalid { path, kind }` | cause | `ExecDriver` — `spawn(2)` ENOEXEC / ELIBBAD | yes |
-        | `CgroupSetupFailed { kind, source }` | cause | `ExecDriver` — cgroup mkdir / write failure | yes |
-        | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
+        | `DriverInternalError { detail }` | cause | driver — uncategorised failure | yes |
         | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
         | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
-        | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | VM driver — post-start exit-code observation | yes |
         | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
         | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
         | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
@@ -3483,10 +3280,8 @@ components:
         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 
-        **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
-        subscription not yet present in the Phase 1 `ExecDriver`; it is defined
-        now for wire-shape forward-compatibility and will be emitted in Phase 2.
-        `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+        **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
+        capacity accounting exists, and until 2026-08-11
         this table claimed it was emitted. It is not: nothing in production
         constructs `TransitionReason::NoCapacity` — only two acceptance tests do
         (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
@@ -3495,8 +3290,8 @@ components:
         what let the false claim stand: a grep for `NoCapacity` appears to
         confirm it. Emitting this variant needs real node capacity and
         cross-workload accounting to exist first — GH #261.
-        `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
-        performs `child.wait()` and produces `ExitKind::Crashed`; the
+        `WorkloadCrashedImmediately` is emitted by the VM exit observer when a
+        guest produces `ExitKind::Crashed`; the
         `ExitObserver` maps that to this variant directly.
 
         **Cause-class payloads carry typed cause-specific data**, NOT a
@@ -3611,7 +3406,7 @@ components:
         Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
         Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
         not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
-        shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+        shape). Per-VM volumes are out
         of scope for this feature (deferred to overdrive-fs, GH #97 /
         virtiofsd, GH #43).
       required:

@@ -10,21 +10,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::compose_production_driver;
+use overdrive_control_plane::probe_runner_boot::compose_and_probe_runner_gate;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, ExecPayload, Resources, VmPayload,
-};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{ProbeFailure, ProbeOutcome, TcpProber};
 use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber};
+use overdrive_sim::adapters::probers::SimHttpProber;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::{VmDriver, VmHostLayout};
 
@@ -71,24 +69,21 @@ fn allocation_spec(
 
 /// S-SVM-22 — one `overdrive serve` boot performs the existing ProbeRunner
 /// Earned-Trust probe exactly once, retains that returned `Arc`, gives clones
-/// to both production drivers, and preserves all existing VM-capability
+/// to the sole production VM driver, and preserves all existing VM-capability
 /// success/refusal outcomes.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drivers() {
+async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver() {
     let tcp = Arc::new(CountingTcpProber { calls: AtomicUsize::new(0) });
     let clock = Arc::new(SimClock::default());
     let observation_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("svm-22-composition").expect("valid node ID"),
         0,
     ));
-    let (exec_driver, runner) = compose_production_driver(
+    let runner = compose_and_probe_runner_gate(
         Arc::clone(&tcp) as Arc<dyn TcpProber>,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
-        PathBuf::from("/tmp/svm-22-cgroup"),
         Arc::clone(&clock) as Arc<dyn Clock>,
-        Arc::new(SimCgroupFs::new()),
         observation_store,
     )
     .await
@@ -113,11 +108,6 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drive
             ),
         },
     );
-    let exec = allocation_spec(
-        "svm-22-exec",
-        DriverPayload::Exec(ExecPayload { command: "/bin/true".to_owned(), args: Vec::new() }),
-        Vec::new(),
-    );
     let vm = allocation_spec(
         "svm-22-vm",
         DriverPayload::Vm(VmPayload {
@@ -139,11 +129,9 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_both_drive
         }],
     );
 
-    exec_driver.on_alloc_running(&exec);
     vm_driver.on_alloc_running(&vm);
-    assert_eq!(runner.active_alloc_count(), 2, "both production drivers share the trusted runner");
+    assert_eq!(runner.active_alloc_count(), 1, "the VM driver uses the trusted runner");
     assert_eq!(tcp.calls.load(Ordering::SeqCst), 1, "sharing does not repeat the trust probe");
-    exec_driver.on_alloc_terminal(&exec.alloc);
     vm_driver.on_alloc_terminal(&vm.alloc);
     assert_eq!(runner.active_alloc_count(), 0);
 }

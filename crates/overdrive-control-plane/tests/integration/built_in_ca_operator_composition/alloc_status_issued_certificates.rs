@@ -40,9 +40,7 @@ use overdrive_control_plane::api::AllocStatusResponse;
 use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -82,7 +80,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(writer_node(), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -109,9 +107,11 @@ fn sample_spec() -> JobSpecInput {
         id: JOB_ID.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/usr/local/bin/ws".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     }
 }

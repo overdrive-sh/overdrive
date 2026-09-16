@@ -23,23 +23,41 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::LifecycleEvent;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+use overdrive_control_plane::action_shim::{LifecycleEvent, WorkloadNetworkProvisioner};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
 };
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// Async bootstrap — wires runtime, store, obs, driver, and state with
 /// a broadcast subscriber attached BEFORE any tick runs so no
@@ -47,6 +65,7 @@ use tokio::sync::broadcast;
 /// async.
 async fn bootstrap_async(
     tmp: &TempDir,
+    fail_starts: bool,
 ) -> (AppState, broadcast::Receiver<LifecycleEvent>, Arc<overdrive_sim::adapters::clock::SimClock>)
 {
     let mut runtime =
@@ -59,11 +78,13 @@ async fn bootstrap_async(
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock.clone(),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let simulated_driver = SimDriver::with_clock(DriverType::Vm, sim_clock.clone());
+    let simulated_driver = if fail_starts {
+        simulated_driver.fail_on_start_with("simulated VM start rejection".to_owned())
+    } else {
+        simulated_driver
+    };
+    let driver: Arc<dyn Driver> = Arc::new(simulated_driver);
 
     // SimClock is passed at construction so the convergence-tick's
     // `tick.now_unix` snapshot advances with simulation time. The
@@ -121,7 +142,7 @@ fn drain(rx: &mut broadcast::Receiver<LifecycleEvent>) -> Vec<LifecycleEvent> {
 #[tokio::test]
 async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, true).await;
 
     // Background ticker — advances logical time so any clock.sleep(...)
     // parked inside the driver wakes promptly.
@@ -142,9 +163,11 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         id: "backoff-exhaust".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/nonexistent/binary".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -165,13 +188,14 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // emit FinalizeFailed) plus headroom for backoff timer ticks.
     let mut terminal_row = None;
     for tick_n in 0..200_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -221,7 +245,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 #[tokio::test]
 async fn terminal_stopped_appears_on_both_surfaces() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {
@@ -237,9 +261,11 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         id: "term-stop".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -258,13 +284,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // Drive until Running.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -288,13 +315,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // and the row + event must carry terminal=Stopped{by:Operator}.
     let mut terminal_row = None;
     for tick_n in 30..120_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -336,7 +364,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 #[tokio::test]
 async fn non_terminal_transitions_emit_none() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp).await;
+    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {
@@ -353,9 +381,11 @@ async fn non_terminal_transitions_emit_none() {
         id: "non-term".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -374,13 +404,14 @@ async fn non_terminal_transitions_emit_none() {
     // Drive until Running, then stop early.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
+    DriverInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::id::WorkloadId;
 use overdrive_core::reconcilers::TickContext;
@@ -43,7 +43,12 @@ fn payments_job() -> Job {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid Job spec")
 }

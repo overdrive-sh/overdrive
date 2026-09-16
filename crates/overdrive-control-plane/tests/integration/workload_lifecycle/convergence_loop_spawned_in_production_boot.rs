@@ -45,7 +45,7 @@ use overdrive_control_plane::api::{
     SubmitWorkloadResponse,
 };
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -117,7 +117,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     let clock = Arc::new(SimClock::new());
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     // The `clock` and `tick_cadence` field references below are
     // load-bearing for the RED scaffold — they do NOT exist on
@@ -201,7 +201,12 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         id: "payments".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
     let resp = client
         .post(&submit_url)

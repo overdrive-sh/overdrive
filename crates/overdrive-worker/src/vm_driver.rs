@@ -68,7 +68,7 @@ const VM_BOOT_DEADLINE: Duration = Duration::from_secs(30);
 const VM_SHUTDOWN_REQUEST_DEADLINE: Duration = Duration::from_secs(2);
 
 /// ADR-0082 §D4 — bounds `stop`'s step 2 (`Vmm::terminate`'s grace
-/// window). Mirrors `ExecDriver`'s `DEFAULT_STOP_GRACE` role rather
+/// window). Mirrors the previous process-driver stop-grace role rather
 /// than inventing a new policy shape.
 const VM_STOP_GRACE: Duration = Duration::from_secs(10);
 
@@ -855,7 +855,7 @@ struct LiveVm {
     rootfs: RootfsPlan,
     /// "Running-confirmed" gate sender — the [`Driver::start`]
     /// post-condition every `ExitEvent`-emitting driver must honour
-    /// (`overdrive_core::traits::driver`), mirroring `ExecDriver`'s
+    /// (`overdrive_core::traits::driver`), retaining the same
     /// `LiveAllocation::gate_sender`. The action shim takes it via
     /// [`Driver::release_for_exit_emission`] after
     /// `obs.write(AllocStatus::Running)` commits Ok (or after the May-2
@@ -1148,17 +1148,7 @@ impl VmDriver {
         // binding reaches them and states the routing precondition in the
         // same breath — no accessor is added to `DriverPayload`.
         //
-        // A non-`Vm` payload reaching `VmDriver` is a registry-ROUTING
-        // defect, not a VM-start failure, so it takes the existing
-        // `DriverStartClass::Unclassified` fallback rather than minting a
-        // class of its own. It runs before step 0 below: nothing has been
-        // claimed or provisioned yet, so there is nothing to release.
-        let DriverPayload::Vm(payload) = &spec.driver else {
-            return Err(start_rejected_unclassified(format!(
-                "VmDriver received a {} payload",
-                spec.driver.driver_type()
-            )));
-        };
+        let DriverPayload::Vm(payload) = &spec.driver;
         let composed_network = compose_vm_network(self.layout.arch, spec.into())?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
@@ -1256,7 +1246,7 @@ impl VmDriver {
         // ceiling, never the guest's declared RAM directly (ADR-0082
         // §D2.3 lie 3 — the whole reason `MemoryPlan` exists). CPU
         // share passes through from the spec unchanged. Warn-and-continue
-        // on write failure, mirroring ExecDriver's ADR-0026 D9 discipline
+        // on write failure, retaining the ADR-0026 D9 discipline
         // — a limit-write failure must not abort a boot that is
         // otherwise healthy.
         let memory = MemoryPlan::derive(spec.resources.memory_bytes);
@@ -1556,7 +1546,7 @@ impl Driver for VmDriver {
                 let exec_message = BeaconMessage::Exec { argv };
 
                 // Mint the Running-confirmed gate (the `Driver::start`
-                // post-condition, mirroring `ExecDriver`). The sender is
+                // post-condition). The sender is
                 // stashed on the `LiveVm` entry; the action shim takes it
                 // via `Driver::release_for_exit_emission` after
                 // `obs.write(Running)` commits Ok (or via the exit
@@ -1713,7 +1703,7 @@ impl Driver for VmDriver {
             // watcher's `gate_receiver.await` to `Err(RecvError)` when the
             // action shim never fired it (`obs.write(Running)` failed).
             // That is the `Driver::start` "Sender drop" orphan path and the
-            // same explicit gate ownership used by `ExecDriver::stop`;
+            // same explicit gate ownership used by the VM stop path;
             // `release_supervision` releases the gate by removing the entry.
             // `@mandatory:mutation_target` — a mutant that drops or
             // no-ops this insert leaves the entry `Live` after `stop`
@@ -2087,7 +2077,7 @@ async fn read_one_line(
 /// Race the guest's `EXIT <status>` beacon line against the VMM's own
 /// process exit, with the read side preferred (`biased;`) and a bounded
 /// cooperative-yield drain if the VMM's exit resolves first at a poll —
-/// mirrors `ExecDriver`'s stderr-drain-before-emit shape
+/// preserves the driver's stderr-drain-before-emit shape
 /// (`driver.rs::spawn_exit_watcher`), never a `Clock::sleep`. Returns
 /// `(guest_reported_status, vmm_own_signal)`; the caller,
 /// `classify_vm_exit`, never reads the VMM's own `exit_code`.
@@ -2252,7 +2242,7 @@ mod tests {
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
-    use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+    use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
     use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
     use tokio::net::UnixStream;
 
@@ -2262,7 +2252,6 @@ mod tests {
         Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
-            Arc::new(SimExecProber::new()),
             Arc::new(SimClock::new()),
             Arc::new(SimObservationStore::single_peer(
                 NodeId::new("vm-driver-unit").expect("valid node ID"),

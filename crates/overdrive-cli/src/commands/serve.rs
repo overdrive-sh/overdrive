@@ -276,7 +276,7 @@ async fn run_inner(
         );
         return Err(CliError::ProbeRefused { cause });
     }
-    // Same Arc cloned into run_server → ExecDriver::new — probed
+    // Same Arc cloned into run_server → VmDriver composition — probed
     // substrate IS used substrate (Earned Trust per ADR-0054 §
     // Composition root). The CLI constructs `fs` ONCE; the probe
     // succeeded against THIS exact handle, and the worker subsystem

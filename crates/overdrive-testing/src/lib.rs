@@ -6,6 +6,7 @@
 //!
 //! - **What lives here**: real-OS test fixtures (network namespace
 //!   manipulation, veth pair setup, ip-route plumbing, sysctl tweaks;
+//!   cross-process CIDR leases for hand-built topologies;
 //!   Cloud-Hypervisor microVM boot provisioning — pinned kernel + ext4
 //!   rootfs staging, `FICLONE` capability, `/dev/kvm` preflight, see
 //!   [`vm_fixture`]) used by ≥ 2 crates' integration tests OR
@@ -27,5 +28,7 @@
 
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
+#[cfg(target_os = "linux")]
+pub mod cidr_lease;
 pub mod netns;
 pub mod vm_fixture;

@@ -73,7 +73,6 @@ check_source() {
     README.md guest_server.rs client.rs prepare.sh run-example.sh
     service.toml tcp-startup-failure.toml
     http-vm-204.toml http-vm-302.toml http-vm-404.toml http-vm-503.toml
-    http-exec-204.toml http-exec-302.toml http-exec-404.toml http-exec-503.toml
     readiness-recovery.toml liveness-restart.toml
     zero-probes.toml zero-probes-failure.toml
     client-healthy.toml client-tcp-failure.toml
@@ -100,8 +99,6 @@ check_source() {
       || die "peer client must declare exactly one [job]: $spec"
     [[ "$(grep -Fxc '[vm]' "$spec")" -eq 1 ]] \
       || die "peer client must declare exactly one [vm]: $spec"
-    ! grep -Fxq '[exec]' "$spec" \
-      || die "peer client must not declare [exec]: $spec"
     grep -Fq "command = \"$GUEST_CLIENT\"" "$spec" \
       || die "peer client guest command differs from preparation contract: $spec"
     grep -Fq "kernel = \"$KERNEL\"" "$spec" \
@@ -122,8 +119,6 @@ check_source() {
       || die "VM Service fixture must declare exactly one [service]: $spec"
     [[ "$(grep -Fxc '[vm]' "$spec")" -eq 1 ]] \
       || die "VM Service fixture must declare exactly one [vm]: $spec"
-    ! grep -Fxq '[exec]' "$spec" \
-      || die "VM Service fixture must not declare [exec]: $spec"
     grep -Fq "command = \"$GUEST_SERVER\"" "$spec" \
       || die "VM Service guest command differs from preparation contract: $spec"
     grep -Fq "kernel = \"$KERNEL\"" "$spec" \
@@ -132,34 +127,10 @@ check_source() {
       || die "VM Service rootfs differs from preparation contract: $spec"
   done
 
-  local exec_control_specs=(
-    http-exec-204.toml http-exec-302.toml
-    http-exec-404.toml http-exec-503.toml
-  )
-  for spec in "${exec_control_specs[@]}"; do
-    spec="$EXAMPLE_DIR/$spec"
-    [[ "$(grep -Fxc '[service]' "$spec")" -eq 1 ]] \
-      || die "E10 control must declare exactly one [service]: $spec"
-    [[ "$(grep -Fxc '[exec]' "$spec")" -eq 1 ]] \
-      || die "E10 control must retain exactly one [exec]: $spec"
-    ! grep -Fxq '[vm]' "$spec" \
-      || die "E10 Exec control must not declare [vm]: $spec"
-    ! grep -Fxq '[job]' "$spec" \
-      || die "E10 Exec control is a Service, not a peer client Job: $spec"
-    grep -Fq "command = \"$SERVER\"" "$spec" \
-      || die "E10 Exec control command differs from preparation contract: $spec"
-  done
-
   grep -Fq 'SVM-E08-GUEST-OK' "$EXAMPLE_DIR/guest_server.rs" \
     || die "guest server reply sentinel is absent"
   grep -Fq 'SVM-E08-GUEST-OK' "$EXAMPLE_DIR/client.rs" \
     || die "VM client reply oracle is absent"
-  grep -Fq 'SVM-E10-FAILURE-BODY-MUST-NOT-LEAK' "$EXAMPLE_DIR/guest_server.rs" \
-    || die "E10 failure-body sentinel is absent"
-  grep -Fq 'if status == 503' "$EXAMPLE_DIR/guest_server.rs" \
-    || die "E10 failure-body fixture is not attached to a failing response"
-  [[ "$(grep -Fc 'FAILURE_DIAGNOSTIC_SENTINEL' "$EXAMPLE_DIR/guest_server.rs")" -ge 2 ]] \
-    || die "E10 failure-body sentinel is not wired into a failing response"
   grep -Fq 'service-vm-e08.svc.overdrive.local' \
     "$EXAMPLE_DIR/client-healthy.toml" \
     || die "healthy VM client does not resolve the checked-in Service name"

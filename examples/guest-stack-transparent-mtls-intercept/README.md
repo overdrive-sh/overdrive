@@ -1,8 +1,8 @@
-# One VM Job calls one Exec Service (E07)
+# One VM Job calls one VM Service (E07)
 
 This directory contains the feature's one checked-in operator journey and it
 supports exactly one expectation: E07. `callee.toml` deploys one `[service]` +
-`[exec]` callee; `caller.toml` deploys one `[job]` + `[vm]` caller. The VM
+`[vm]` callee; `caller.toml` deploys one `[job]` + `[vm]` caller. The VM
 resolves `gti-e07-callee.svc.overdrive.local` and its Job can succeed only after
 receiving the byte-exact reply.
 

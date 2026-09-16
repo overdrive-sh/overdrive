@@ -20,10 +20,10 @@
 //!
 //! Topology (mirrors the spike EXACTLY):
 //!
-//!   netns nsW:  workload client; vethW 10.99.0.2/24; default via .1
+//!   netns nsW:  workload client; vethW <lease workload>/24; default via <lease gateway>
 //!                 connect(10.200.0.1:18777)
 //!     <== veth ==>
-//!   host netns: vethH 10.99.0.1/24
+//!   host netns: vethH <lease gateway>/24
 //!                 PREROUTING (priority mangle):
 //!                   meta mark 0x2 accept            <- F5 exemption (chain head)
 //!                   iifname vethH meta l4proto tcp tproxy to 127.0.0.1:<legF>
@@ -79,6 +79,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{
     accept_outbound_and_recover_orig_dst, install_outbound_tproxy, make_transparent_listener,
 };
@@ -87,9 +88,10 @@ use overdrive_worker::mtls_intercept::{
 const NS_W: &str = "nsW-egr0303";
 const VETH_W: &str = "vethW-egr03";
 const VETH_H: &str = "vethH-egr03";
-const HOST_GW: &str = "10.99.0.1";
-const WL_ADDR: &str = "10.99.0.2";
-const SUBNET_LEN: &str = "24";
+// The topology requests a `/24` from overdrive-testing's global
+// `10.250.0.0/16` pool under this stable owner name. The pool is disjoint from
+// production's `10.99.0.0/16`; the lease supplies the gateway/workload pair.
+const CIDR_LEASE_NAME: &str = "worker-egress-tproxy-capture";
 /// The "real backend" the workload dials — a host-side lo-bound address the
 /// workload routes to via the gateway, so its egress genuinely INGRESSES vethH
 /// and hits PREROUTING (not loopback-to-self inside the netns).
@@ -230,16 +232,20 @@ fn teardown_topology() {
 /// the increment-b spike does. The real backend lives on host `lo`; the workload
 /// routes to it via the gateway so its egress ingresses vethH and hits
 /// PREROUTING.
-fn setup_topology() {
+fn setup_topology(lease: &TestCidrLease) {
     // Start from a clean slate (a prior crashed run leaves residue).
     teardown_topology();
+
+    let host_gateway = lease.host_gateway().to_string();
+    let workload_addr = lease.workload_addr().to_string();
+    let prefix_len = lease.prefix_len().to_string();
 
     ip(&["netns", "add", NS_W]);
     ip(&["link", "add", VETH_W, "type", "veth", "peer", "name", VETH_H]);
     ip(&["link", "set", VETH_W, "netns", NS_W]);
 
     // Host side: address + up.
-    ip(&["addr", "add", &format!("{HOST_GW}/{SUBNET_LEN}"), "dev", VETH_H]);
+    ip(&["addr", "add", &format!("{host_gateway}/{prefix_len}"), "dev", VETH_H]);
     ip(&["link", "set", VETH_H, "up"]);
 
     // Workload side (inside netns): lo up + address + up + default route.
@@ -251,12 +257,12 @@ fn setup_topology() {
         "ip",
         "addr",
         "add",
-        &format!("{WL_ADDR}/{SUBNET_LEN}"),
+        &format!("{workload_addr}/{prefix_len}"),
         "dev",
         VETH_W,
     ]);
     ip(&["netns", "exec", NS_W, "ip", "link", "set", VETH_W, "up"]);
-    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", HOST_GW]);
+    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", &host_gateway]);
 
     // The real-backend address lives on host lo so the host can bind+listen on
     // it; the workload routes to it via the gateway.
@@ -523,7 +529,9 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // body (the lock is shared with the inbound suite).
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
-    setup_topology();
+    let lease =
+        TestCidrLease::acquire(CIDR_LEASE_NAME).expect("acquire egress topology CIDR lease");
+    setup_topology(&lease);
 
     let backend = backend_addr();
 
@@ -549,8 +557,9 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // The accepted peer is the workload's veth address (it came through the veth,
     // not loopback-to-self) — confirms a genuine remote dial.
     assert!(
-        matches!(control_peer, std::net::SocketAddr::V4(v4) if *v4.ip() == WL_ADDR.parse::<Ipv4Addr>().unwrap()),
-        "control: backend peer must be the workload's veth addr {WL_ADDR}, got {control_peer}"
+        matches!(control_peer, std::net::SocketAddr::V4(v4) if *v4.ip() == lease.workload_addr()),
+        "control: backend peer must be the workload's veth addr {}, got {control_peer}",
+        lease.workload_addr()
     );
     drop(control_backend); // free the port before the redirect phase rebinds it
 

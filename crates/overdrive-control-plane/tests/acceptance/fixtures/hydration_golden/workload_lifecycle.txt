@@ -11,7 +11,7 @@ WorkloadLifecycle(
             "job-app",
         ),
         job: Some(
-            JobV2 {
+            JobV1 {
                 id: WorkloadId(
                     "job-app",
                 ),
@@ -20,12 +20,14 @@ WorkloadLifecycle(
                     cpu_milli: 100,
                     memory_bytes: 134217728,
                 },
-                driver: Exec(
-                    Exec {
+                driver: Vm(
+                    Vm {
                         command: "/bin/serve",
                         args: [
                             "--job",
                         ],
+                        kernel: "/kernel",
+                        rootfs: "/rootfs",
                     },
                 ),
             },
@@ -84,7 +86,7 @@ WorkloadLifecycle(
         allocations: {
             AllocationId(
                 "job-app-0",
-            ): AllocStatusRowV3 {
+            ): AllocStatusRowV1 {
                 alloc_id: AllocationId(
                     "job-app-0",
                 ),

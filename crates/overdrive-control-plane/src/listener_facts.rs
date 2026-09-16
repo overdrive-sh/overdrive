@@ -133,7 +133,7 @@ impl ListenerFactStore {
             // reframed post-widening). Two listeners IN THIS SAME upsert
             // call deriving the SAME ServiceId would silently overwrite
             // one another (last-writer-wins). Admission
-            // (`ServiceV2::from_submit`) already rejects duplicate
+            // (`Service::from_submit`) already rejects duplicate
             // `(port, protocol)` listeners, so a collision here is a
             // STRUCTURAL INVARIANT VIOLATION — a malformed listener set
             // that bypassed admission — not a legitimate runtime state.
@@ -155,7 +155,7 @@ impl ListenerFactStore {
                     !ids.contains(&service_id),
                     "listener_facts: two listeners of workload {workload_id} derived the same \
                      ServiceId {service_id} within one upsert — admission must reject duplicate \
-                     (port, proto) listeners (ServiceV2::from_submit); a collision here is a \
+                     (port, proto) listeners (Service::from_submit); a collision here is a \
                      structural invariant violation"
                 );
                 tracing::warn!(
@@ -352,7 +352,7 @@ mod tests {
     use std::sync::Arc;
 
     use overdrive_core::aggregate::{
-        DriverInput, ExecInput, IntentKey, Listener, ResourcesInput, WorkloadIntent, WorkloadKind,
+        DriverInput, IntentKey, Listener, ResourcesInput, WorkloadIntent, WorkloadKind,
     };
     use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
     use overdrive_core::dataplane::backend_key::Proto;
@@ -417,7 +417,7 @@ mod tests {
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
         let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
-            Arc::new(SimDriver::new(DriverType::Exec));
+            Arc::new(SimDriver::new(DriverType::Vm));
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
         // The fixture seeds intent AFTER construction, so the
         // boot-rebuild at this point would be empty regardless — pass a
@@ -456,13 +456,15 @@ mod tests {
             .iter()
             .map(|(port, proto)| ListenerInput { port: *port, protocol: proto_str(*proto).into() })
             .collect();
-        let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
+        let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
             id: id.to_string(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/serve".to_string(),
                 args: vec![],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners: listener_inputs,
             startup_probes: vec![],
@@ -489,18 +491,19 @@ mod tests {
     /// Persist a Job intent (no VIP allocation) — a negative case for
     /// rebuild: Job intents contribute no listener facts.
     async fn persist_job(state: &AppState, id: &str) {
-        let job = overdrive_core::aggregate::JobV2::from_submit(
-            overdrive_core::aggregate::JobSpecInput {
+        let job =
+            overdrive_core::aggregate::Job::from_submit(overdrive_core::aggregate::JobSpecInput {
                 id: id.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/run".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
-            },
-        )
-        .expect("valid job spec");
+            })
+            .expect("valid job spec");
         let wid = job.id.clone();
         persist_intent_and_kind(state, WorkloadIntent::Job(job), &wid, WorkloadKind::Job).await;
     }
@@ -696,7 +699,7 @@ mod tests {
 
     /// Defensive-invariant guard: two listeners with the SAME
     /// `(port, protocol)` in ONE `upsert` call derive the same
-    /// `ServiceId`. Admission (`ServiceV2::from_submit`) rejects such a
+    /// `ServiceId`. Admission (`Service::from_submit`) rejects such a
     /// duplicate, so reaching `upsert` with one is a STRUCTURAL
     /// INVARIANT VIOLATION — the guard's `debug_assert!` fires in debug
     /// / test builds. We construct the malformed `Listener` set directly
@@ -780,13 +783,15 @@ mod tests {
                 .await;
         // (b) Service WITHOUT a VIP allocation → contributes nothing.
         {
-            let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
+            let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
                 id: "novip".to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/serve".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
                 listeners: vec![ListenerInput { port: 7000, protocol: "tcp".into() }],
                 startup_probes: vec![],
@@ -929,7 +934,7 @@ mod tests {
             // only ever composes a single Exec entry.
             state
                 .drivers
-                .get(overdrive_core::traits::driver::DriverType::Exec)
+                .get(overdrive_core::traits::driver::DriverType::Vm)
                 .cloned()
                 .unwrap_or_else(|| {
                     unreachable!("test fixture always composes a single Exec driver")
@@ -1048,7 +1053,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(i, listeners)| {
-                    // `ServiceV2::from_submit` rejects duplicate
+                    // `Service::from_submit` rejects duplicate
                     // (port, protocol) listener triples
                     // (ParseError::ListenerDuplicate), so the generator
                     // must emit a unique-per-service listener set or the
@@ -1105,13 +1110,15 @@ mod tests {
                     protocol: proto_str(l.protocol).into(),
                 })
                 .collect();
-            let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
+            let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
                 id: name.clone(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/serve".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
                 listeners: listener_inputs,
                 startup_probes: vec![],
@@ -1245,9 +1252,11 @@ mod tests {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/serve".to_string(),
                 args: vec![],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners: listeners
                 .iter()
@@ -1267,7 +1276,12 @@ mod tests {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput { command: "/bin/run".to_string(), args: vec![] }),
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                command: "/bin/run".to_string(),
+                args: vec![],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
+            }),
         })
     }
 
@@ -1305,7 +1319,7 @@ mod tests {
         // The allocator issued the VIP under the same spec_digest the
         // handler used — recover it the same way the edge / rebuild does.
         let svc = WorkloadIntent::Service(
-            overdrive_core::aggregate::ServiceV2::from_submit(
+            overdrive_core::aggregate::Service::from_submit(
                 match wire_service("web", &[(80, Proto::Tcp), (53, Proto::Udp)]) {
                     SubmitSpecInput::Service(s) => s,
                     _ => unreachable!(),

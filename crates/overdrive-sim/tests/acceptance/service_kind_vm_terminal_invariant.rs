@@ -22,15 +22,19 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{
     AppState, InterestRouterBroker, build_interest_table, service_lifecycle, spawn_interest_router,
     workload_lifecycle,
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -60,11 +64,28 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 const SEED: u64 = 25_717;
 
@@ -401,13 +422,14 @@ async fn run_owner_tick(
 ) {
     let reconciler = overdrive_core::reconcilers::ReconcilerName::new(owner)
         .expect("static reconciler name is valid");
-    run_convergence_tick(
+    run_convergence_tick_with_network_provisioner_for_test(
         state,
         &reconciler,
         target,
         clock.now(),
         tick,
         clock.now() + Duration::from_secs(30),
+        &NoopNetworkProvisioner,
     )
     .await
     .unwrap_or_else(|error| panic!("seed={SEED}: {owner} convergence failed: {error:?}"));
@@ -479,7 +501,6 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let probes = Arc::new(ProbeRunner::new(
         tcp.clone(),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         clock.clone(),
         obs.clone(),
     ));
@@ -516,7 +537,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let (startup, readiness) = vm_probe_descriptors();
     let workload_id =
         overdrive_core::WorkloadId::new("service-vm-readiness-25717").expect("workload ID");
-    let spec = ServiceV2::from_submit(ServiceSpecInput {
+    let spec = Service::from_submit(ServiceSpecInput {
         id: workload_id.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

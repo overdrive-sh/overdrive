@@ -103,9 +103,7 @@ async fn stored_vm_driver(tmp: &Path) -> WorkloadDriver {
 }
 
 fn assert_vm_driver_preserved(driver: WorkloadDriver) {
-    let WorkloadDriver::Vm(vm) = driver else {
-        panic!("the selected VM driver arm must not be collapsed to Exec");
-    };
+    let WorkloadDriver::Vm(vm) = driver;
     assert_eq!(vm.command, "/bin/server");
     assert_eq!(vm.args, ["--serve"]);
     assert_eq!(vm.kernel, "/kernel");
@@ -113,9 +111,7 @@ fn assert_vm_driver_preserved(driver: WorkloadDriver) {
 }
 
 fn assert_vm_driver_input_preserved(driver: DriverInput) {
-    let DriverInput::Vm(vm) = driver else {
-        panic!("the selected VM driver arm must not be collapsed to Exec");
-    };
+    let DriverInput::Vm(vm) = driver;
     assert_eq!(vm.command, "/bin/server");
     assert_eq!(vm.args, ["--serve"]);
     assert_eq!(vm.kernel, "/kernel");

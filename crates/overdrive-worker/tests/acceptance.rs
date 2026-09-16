@@ -22,7 +22,6 @@ mod acceptance {
     // service-health-check-probes — Tier 1 acceptance (Sim adapters)
     // for the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
-    mod probe_runner_exec_outcome;
     mod probe_runner_http_outcome;
     // GAP-7 closure — `ProbeRunner::start_alloc` spawns per-descriptor
     // supervised tick tasks. See

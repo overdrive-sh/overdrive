@@ -19,6 +19,29 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+
+/// In-memory network adapter for simulator compositions. The production
+/// action shim still receives the complete VM plan; this adapter keeps the
+/// simulator's driven boundary free of host netns I/O.
+#[derive(Debug, Default)]
+pub(crate) struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 /// Build a TCP `ServiceFrontend` for `vip` on a fixed listener port —
 /// the default shape for invariant evaluators that exercised the legacy
 /// proto-agnostic `update_service(vip, ...)` surface. The port (8080) is

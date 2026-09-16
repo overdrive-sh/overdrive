@@ -1,6 +1,6 @@
-# E10 — HTTP startup status classes agree for Exec and VM Services
+# E10 — historical pre-cut Exec/VM comparison expectation
 
-Status: `satisfied` — the [step 01-03 different-fox evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
+Status: `out-of-scope` — pre-cut cross-driver artifact; historical evidence retained. The prior [step 01-03 different-fox evidence review](../../../docs/feature/vm-lifecycle-latency/deliver/review-01-03-evidence.md)
 approved the 2026-09-12 point-in-time capture at `a3ebd296f2b4a8bfac5fc85145ababc313da1f84`
 plus its dirty-state receipt: exactly 8/8 token-matched raw cells support the
 healthy/failure CLI outcomes, same-allocation history and probe preservation,

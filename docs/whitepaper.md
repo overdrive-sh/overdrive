@@ -6,7 +6,7 @@
 
 ## Abstract
 
-Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. It unifies virtual machines, processes, unikernels, and serverless WASM functions under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
+Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. Its current shipped execution path is VM/microVM workloads under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability. Additional workload families remain future driver work — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
 
 The foundational thesis: the primitives required to build a genuinely better orchestration platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes, and kTLS offload — only reached maturity in the last two years. Overdrive makes different architectural choices than Kubernetes, not better ones for 2014, but definitively better ones for 2026.
 
@@ -84,8 +84,10 @@ All network policy enforcement, load balancing, service routing, flow telemetry,
 **3. Security is structural, not configurable.**
 mTLS between all workloads is not an option — it is the default and cannot be disabled. Every packet carries cryptographic workload identity. Policy is enforced in the kernel, not by application cooperation.
 
-**4. All workload types are first class.**
-Virtual machines, processes, unikernels, containers, and WASM functions share one control plane, one identity model, one policy system, and one dataplane. Not one model bolted onto another.
+**4. VM/microVM workloads are first class on the shipped path.**
+They share one control plane, one identity model, one policy system, and one
+dataplane. Other workload families are added only when their drivers are
+independently delivered, not implied by this current execution path.
 
 **5. Observability is native, not retrofitted.**
 eBPF gives the platform kernel-level visibility into every workload with full identity context from day one. The LLM observability layer operates on this data, not on logs scraped after the fact.
@@ -134,9 +136,10 @@ Cluster state divides cleanly along a consistency boundary. *Intent* — workloa
 │  │  BPF LSM (MAC) · kprobes (telemetry)                    │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌────────────────┐   │
-│  │ Process  │ │ MicroVM  │ │ Unikernel  │ │ WASM           │   │
+│  │ VM       │ │ MicroVM  │ │ Unikernel  │ │ WASM           │   │
 │  │ Driver   │ │ (Cloud   │ │ (Cloud HV  │ │ Driver         │   │
-│  │          │ │  HV)     │ │ + Unikraft)│ │ (Wasmtime)     │   │
+│  │ (Cloud   │ │  HV)     │ │ + Unikraft)│ │ (future)       │   │
+│  │ HV)      │ │          │ │ (future)   │ │                │   │
 │  └──────────┘ └──────────┘ └────────────┘ └────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  Gateway Subsystem  (optional, node.gateway.enabled)     │   │
@@ -492,7 +495,7 @@ The node agent is a single Rust binary that runs on every worker node. It is res
 - Loading and managing eBPF programs via aya-rs
 - Subscribing to Corrosion tables and materialising BPF maps (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`) on row change — there is no push path for dataplane state
 - Requesting and distributing workload SVIDs from the built-in CA
-- Running workloads via the appropriate driver
+- Running supported VM/microVM workloads via the Cloud Hypervisor driver
 - Collecting telemetry from the eBPF ringbuf and forwarding to DuckLake
 - Responding to reconciler actions (start, stop, migrate, resize) — control-flow RPCs still arrive via bidirectional streaming from the regional control plane (tarpc / postcard-rpc over HTTP/2 with rustls, pure-Rust throughout per design principle 7; no protoc toolchain)
 
@@ -502,7 +505,8 @@ The agent is event-driven throughout. BPF ringbuf events push telemetry without 
 
 ## 6. Workload Drivers
 
-Overdrive treats every workload type as a first-class citizen through a unified driver interface:
+The shipped VM/microVM path uses a unified driver interface; future workload
+families reuse the same boundary only when their drivers are delivered:
 
 ```rust
 trait Driver: Send + Sync {
@@ -515,13 +519,11 @@ trait Driver: Send + Sync {
 
 | Driver | Backend | Use Case |
 |---|---|---|
-| `exec` | tokio::process + cgroups v2 | Native binaries, daemons |
-| `microvm` | Cloud Hypervisor | Fast-boot (~200ms), strong isolation |
-| `vm` | Cloud Hypervisor | Full OS, hotplug, virtiofs, AArch64 |
+| `vm` | Cloud Hypervisor | Current microVM/full-VM workloads with guest-level lifecycle evidence |
 | `unikernel` | Cloud Hypervisor + Unikraft | Extreme density, virtiofs-capable |
 | `wasm` | Wasmtime | Serverless functions, plugins |
 
-All drivers share the same identity model, the same eBPF dataplane, the same policy system, and the same telemetry pipeline. A network policy that governs a process workload governs a VM workload identically.
+The current shipped execution path is the VM/microVM driver. Planned workload families will reuse the same identity model, eBPF dataplane, policy system, and telemetry pipeline when their drivers land.
 
 ### Cloud Hypervisor as the Unified VMM
 
@@ -572,14 +574,14 @@ impl Driver for CloudHypervisorDriver {
 }
 ```
 
-### virtiofs and Cross-Workload Volume Sharing
+### virtiofs and VM Volume Sharing
 
-Cloud Hypervisor's virtiofs support (backed by a `virtiofsd` daemon per VM) enables shared filesystem volumes between workload types — a capability Firecracker permanently forecloses:
+Cloud Hypervisor's virtiofs support (backed by a `virtiofsd` daemon per VM) enables shared filesystem volumes for VM workloads:
 
 ```
 VM workload writes to /shared-volume  (virtiofs mount)
-Process workload reads /shared-volume (bind mount)
-    → same volume, same data, different workload types
+Another VM workload reads /shared-volume (virtiofs mount)
+    → same volume, same data, independently managed VM workloads
     → lifecycle managed by the storage reconciler
 ```
 
@@ -587,7 +589,7 @@ Unikraft added virtiofs support to mainline (`lib/ukfs-virtiofs`, December 2025)
 
 ### Live VM Right-Sizing
 
-Cloud Hypervisor's CPU and memory hotplug integrates directly with the right-sizing subsystem. Where process workloads are right-sized via live cgroup adjustment, VM workloads are right-sized via hotplug — no restart, no workload disruption:
+Cloud Hypervisor's CPU and memory hotplug integrates directly with the right-sizing subsystem. VM workloads are right-sized via hotplug — no restart, no workload disruption:
 
 ```
 eBPF detects VM memory pressure approaching limit
@@ -598,7 +600,7 @@ Tier 1: node agent issues vm.resize via CH API
 No VM restart. No workload interruption.
 ```
 
-Firecracker cannot do this for CPU — issue #2609 (*Hot-plug vCPUs*) is parked at low priority. Firecracker did gain virtio-mem memory hotplug in 2024, so the gap is narrower than it was a year ago; CPU hotplug, virtiofs, and Windows guest support remain the genuine Cloud Hypervisor differentiators. The right-sizing story is uniform across all workload types at the control-plane layer; the mechanisms differ per class — see §14.
+The right-sizing story is uniform across the supported VM workload path at the control-plane layer; the mechanical path depends on the guest and VMM — see §14.
 
 ### Persistent MicroVMs — Long-Lived Stateful Workloads
 
@@ -735,7 +737,8 @@ one `IDENTITY_MAP`, one cluster trust bundle, one SPIFFE-ID-based
 that enforces it is an implementation detail the operator does not see.
 
 The **enforcement mechanism is also universal**: a single **agent-light L4
-proxy** for every workload kind — process/exec, WASM, microVM, unikernel.
+proxy** for the supported VM/microVM path, with the same boundary available to
+future workload families when their drivers land.
 This unifies the two-mechanism split this section previously carried (an
 in-band host-socket kTLS path plus a separate guest-stack tap proxy). The
 unification was settled empirically — six Tier-3 spikes on the pinned-floor
@@ -768,15 +771,17 @@ both directions**. See **ADR-0069** and
    (**agent-light**).
 
 The application is completely unaware; no sidecar is injected; the workload
-holds nothing. This is the **universal transparent-mTLS L4 proxy** —
+holds nothing. This is the **transparent-mTLS L4 proxy for the supported VM/microVM path** —
 [#26](https://github.com/overdrive-sh/overdrive/issues/26) (which now folds
 in the former guest-stack tap proxy,
 [#222](https://github.com/overdrive-sh/overdrive/issues/222)).
 
-**Why one mechanism, not two.** Host-socket workloads (process/WASM) terminate
-TCP in the host kernel; guest-stack workloads (microVM/unikernel) terminate in
-the guest. The earlier design installed in-band kTLS on the host-socket
-workload's *own* socket and used a separate host tap proxy for the guest case.
+**Why one mechanism, not two.** Supported VM/microVM workloads terminate TCP in
+the guest. The node agent owns the corresponding host tap and peer-facing host
+socket, so the current path has one interception boundary. Future workload
+families can reuse that boundary when their drivers land. The earlier design
+installed in-band kTLS on a workload's *own* socket and used a separate host tap
+proxy for the guest case.
 The in-band model uniquely wins **restart-survival** (kTLS state is
 socket-owned) and **1-socket density**, but it has **no lossless
 client-speaks-first path** on runtime-loadable BPF (no `sk_msg` HOLD;
@@ -933,7 +938,7 @@ the handshake on the workload's behalf:
 ```
 Workload A calls connect() to Workload B
     │
-connect() transparently rewritten to the agent's plaintext leg (cgroup/connect4 / TPROXY)
+connect() transparently intercepted to the agent's plaintext leg (VM tap / TPROXY)
 sockops detects ESTABLISHED; agent drains A's pre-arm plaintext losslessly
 node agent fetches SVID for A, trust bundle for cluster
 rustls performs TLS 1.3 handshake on the peer-facing leg (A presents SVID, verifies B's SVID)
@@ -946,12 +951,11 @@ kTLS handles all encrypt/decrypt in-kernel
 optional NIC offload for crypto operations
 ```
 
-**Host-socket workloads** (process, WASM) terminate TCP in the host kernel;
-**guest-stack workloads** (microVM, unikernel) terminate in the guest and are
+**Supported VM/microVM workloads** terminate TCP in the guest and are
 intercepted at the virtio-net tap the host owns (the host knows which
-allocation owns which tap). Both land on the same proxy: the agent's
-peer-facing leg is a host socket carrying host kTLS, so the mechanism is
-identical regardless of where the workload's own TCP terminates.
+allocation owns which tap). The agent's peer-facing leg is a host socket
+carrying host kTLS, so the current mechanism is explicit about the guest
+boundary; future workload classes may reuse it when their drivers land.
 
 **The host is the trust root for every workload class.** The SVID private
 key is held by the host node agent (read via the in-process `IdentityRead`
@@ -1725,7 +1729,7 @@ Overdrive observes actual resource consumption at the kernel level via eBPF kpro
 
 This enables four subsystems:
 
-**Live resizing, mechanism per workload class.** Process, container, and WASM workloads are right-sized by writing the cgroup limit directly (`/sys/fs/cgroup/.../memory.max`). This is a cgroups v2 kernel feature and has no dependency on the VMM. VM and unikernel workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which *does* require Cloud Hypervisor and a guest kernel that recognises the new capacity (Linux ≥5.8 for virtio-mem). The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action. The mechanical path differs sharply; the §14 novelty is that one reconciler and one pressure signal drive both.
+**Live resizing for VM workloads.** VM workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which requires Cloud Hypervisor and a guest kernel that recognises the new capacity. The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action.
 
 **Resource profiles** — the reconciler accumulates p95 CPU and memory utilization per workload, per hour-of-week, over a rolling 30-day window stored in libSQL. Right-sizing recommendations carry a confidence score based on sample count.
 
@@ -1755,7 +1759,9 @@ When the idle-eviction reconciler marks an allocation for suspension:
 
 Resume is the inverse: Cloud Hypervisor `restore()` with `userfaultfd` lazy memory paging — pages materialise on access, not upfront. A VMGenID counter update on restore reseeds the guest kernel RNG to prevent entropy-reuse hazards across snapshot forks (§6 *Persistent MicroVMs*).
 
-This composes with the WASM scale-to-zero pool (§16) — the mechanism differs per driver (Cloud Hypervisor snapshot/restore vs Wasmtime instantiation) but the control-plane contract is identical: `suspended` is a first-class allocation state, and the resume trigger is the gateway or the reconciler, not the workload itself. Process-driver workloads opt out — processes cannot be checkpointed safely without userspace cooperation; they remain running or terminate.
+This composes with future workload-family drivers when they are delivered. For
+the supported VM path, `suspended` is a first-class allocation state and the
+resume trigger is the gateway or reconciler, not the workload itself.
 
 ### Proxy-Triggered Resume
 
@@ -1989,7 +1995,11 @@ The design is deliberately narrower than a general distributed filesystem. `over
 
 Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
 
-Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `overdrive-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `overdrive-fs` is specifically the rootfs store for persistent microVMs.
+VM shared volumes — the virtiofs use case in §6 where supported VM workloads
+share `/shared-volume` — do **not** go through `overdrive-fs`. Those are
+short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly
+by the storage reconciler against local or Garage-backed volumes.
+`overdrive-fs` is specifically the rootfs store for persistent microVMs.
 
 Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Overdrive actually has.
 
@@ -2750,10 +2760,10 @@ A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical
 role = "worker"   # "control-plane" | "worker" | "control-plane+worker"
 
 [drivers]
-process   = true
-microvm   = true    # Cloud Hypervisor
-unikernel = false   # Unikraft (optional, increases image size)
-wasm      = true    # Wasmtime
+vm       = true    # Cloud Hypervisor (the shipped execution path)
+microvm  = true    # Cloud Hypervisor
+unikernel = false   # future driver
+wasm      = false   # future driver
 
 [kernel]
 extra_args = ["intel_iommu=on", "iommu=pt"]
@@ -2868,7 +2878,7 @@ This section records material drift in the whitepaper's framing as the platform'
 
 **What was deliberately not edited.**
 
-- TOML kind discriminators (`[service]`, `[job]`, `[schedule]`) — these tag the workload kind per ADR-0047 §1 and stay as section names in the wire shape. Workload-level concerns are siblings at the top level (`[exec]`, `[resources]`, `[[listener]]`, `[microvm]`, `[[sidecars]]`, `[[policies]]`, `[security]`) — flattened from the prior `[job.*]` nesting per ADR-0031 Amendment 2's section-as-discriminator convention. The operator-facing CLI verb `overdrive job submit` stays for continuity (ADR-0047 §1a).
+- TOML kind discriminators (`[service]`, `[job]`, `[schedule]`) — these tag the workload kind per ADR-0047 §1 and stay as section names in the wire shape. Workload-level concerns are siblings at the top level (`[vm]`, `[resources]`, `[[listener]]`, `[[sidecars]]`, `[[policies]]`, `[security]`) — flattened from the prior `[job.*]` nesting per ADR-0031 Amendment 2's section-as-discriminator convention. The operator-facing CLI verb is `overdrive deploy <SPEC>`.
 - SPIFFE ID literals (`spiffe://overdrive.local/job/payments/...`) and the per-service VIP DNS pattern (`<job>.svc.overdrive.local`) — the `job/<name>` path component is the canonical workload-identity scheme and applies to all three kinds.
 - Code identifiers (`job_id`, `job_name`, `JobLifecycleState`), Rego policy input fields (`input.src.job`, `input.dst.job`), and SQL column names — these are governed by ADR-0011 / ADR-0031 / ADR-0033 amendments, not whitepaper concerns.
 - Generic English uses of "job" (CI job nomenclature in §22; "the kernel's job"; "Spark-style jobs"; "no separate archival job") — these mean "task" in colloquial English, not the workload primitive.

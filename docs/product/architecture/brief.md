@@ -3574,6 +3574,10 @@ Rules to enforce:
 | 0107 | **Withdrawn successor-owned-effect consumption boundary** — would have separated durable reservation from identity consumption; superseded before acceptance when the user selected P-105-5A. GH #284 | Withdrawn before acceptance 2026-09-13; never implementation authority |
 | 0108 | **Durable reservation consumes successor identity** — the View fsync consumes the fresh ID even if dispatch never reaches a successor effect; later successors use a higher ID. Exact View contract lives in the feature delta. GH #284 | User-ratified as P-105-5A; iteration-2 technical check passed; complete DESIGN final verdict `CHANGES_REQUESTED` |
 | 0109 | **Replacement requires terminal predecessor handoff** — only accepted numeric-current `Failed` or `Terminated` is eligible; `Draining` is insufficient. Exact predicate lives in the feature delta. GH #284 | User-ratified as P-105-4A; focused ADR added after final review F-05; no third review under user cap |
+| 0110 | **Live workload execution is microVM-only while driver routing remains extensible** — delete every live Exec driver route and concrete adapter; retain VM-only tagged unions, `DriverRegistry`, `AllocDriverIndex`, and per-composed-driver exit observers; preserve ordinary empty-registry boot on VMM absence. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
+| 0111 | **Exec-affected specification and intent envelopes reset forward-only to V1** — only `ServiceSpecEnvelope` and `WorkloadIntentEnvelope`; no legacy version, reader, conversion, fixture, error branch, or migration. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
+| 0112 | **Exec-affected lifecycle evidence resets forward-only to V1** — delete Exec-only `DriverType`/`TransitionReason` vocabulary and reset only `AllocStatusRowEnvelope` plus `AllocLifecycleOccurrenceRowEnvelope`; unrelated envelopes remain unchanged. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
+| 0113 | **Remove the host Exec health-probe surface** — delete `ProbeMechanic::Exec`, `ExecProber`, host/sim adapters, runner/parser/error arms and VM rejection shim; HTTP/TCP remain; future in-guest command probing stays GH #280. Supersedes only ADR-0054's Exec-specific clauses and ADR-0059's host Exec-probe decision; ADR-0054's HTTP/TCP task/row/supervision contract remains. | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
 
 ---
 
@@ -10838,6 +10842,86 @@ Greptile's network-leak claim remains an unproven hypothesis and adds no
 cleanup, persistence, retry or network mechanism.
 ---
 
+## MicroVM-only workload execution after Exec removal (GH #293; ADR-0110/0111/0112/0113)
+
+**Status: all material decisions user-approved on 2026-09-14; the corrected
+DESIGN was independently `APPROVED` after overall review iteration 4 on
+2026-09-14 and is authoritative for the complete #293 DESIGN bundle.**
+
+GH #293 removes the host-process Exec workload driver from the live product
+surface. The user-approved application architecture retains the existing
+ports-and-adapters driver boundary, tagged driver intent/payload unions,
+`DriverRegistry`, allocation-to-driver routing index, and one exit observer per
+composed driver. Their live set contains only the current VM adapter until a
+later, independently designed microVM-family adapter exists. No scalar
+`VmDriver` field, concrete-driver match in the control plane, new action, or
+new lifecycle owner is introduced. ADR-0083's capability-absence result also
+remains: ordinary VMM absence may leave the registry empty while `overdrive
+serve` boots; a present-but-lying VMM retains its existing startup refusal.
+
+[ADR-0110](adr-0110-microvm-only-live-driver-contract.md) records the
+live execution choice. Operator/parser/wire/live-intent/runtime-payload Exec
+arms and `ExecDriver` are removed; `Driver`, `DriverRegistry`,
+`AllocDriverIndex`, `VmDriver`, `Vmm`, and the public allocation actions retain
+their current ownership. The accepted driver-neutral replacement contract in
+ADR-0105/0106/0108/0109 remains exact: one `AllocationId` names one physical
+execution and every replacement carries a distinct, durably reserved
+successor regardless of adapter.
+
+The post-cut parser recognizes only `[vm]`; it has no Exec field/table/type,
+presence check, dedicated retired-driver `ParseError`, or special message.
+Input without a supported driver follows the existing generic
+`MissingDriverSection` path, and unsupported wire spellings follow the existing
+generic serde/HTTP decode path. Active production, public, wire/schema,
+configuration, and runtime surfaces retain zero dedicated Exec vocabulary. No
+replacement API or permanent legacy-rejection contract is added.
+
+[ADR-0111](adr-0111-forward-only-exec-affected-spec-intent-envelopes.md)
+records the user-approved specification/intent schema cut. The parser-Service
+and workload-intent envelopes each reset to one incompatible VM-only V1;
+all old versions, readers, conversions, fixtures, and legacy Exec payload types
+are deleted. No old VM or Exec data is preserved.
+
+[ADR-0112](adr-0112-forward-only-exec-affected-lifecycle-envelopes.md)
+records the user-approved lifecycle-evidence cut. Exec-only failure reasons and
+the Exec driver-source label are deleted; allocation-row and lifecycle-
+occurrence envelopes reset to new incompatible V1 shapes. No historical label,
+reader, translation, or fixture remains. These are the only two lifecycle
+envelopes affected; unrelated observation, CA, and workflow envelopes remain
+unchanged.
+
+[ADR-0113](adr-0113-remove-host-exec-health-probe-surface.md) records
+the recommended disposition of the now-unreachable host Exec health-probe
+surface: delete `ProbeMechanic::Exec`, `ExecProber`, the host/sim adapters,
+runner/parser/error arms, and the VM rejection shim. HTTP/TCP probes remain
+unchanged. GH #280 keeps sole ownership of any future in-guest command probe;
+no guest-control mechanism is pulled forward or preserved as a placeholder.
+
+The current VM netns/veth/two-`/30`/TAP/`host_veth` path remains temporarily
+because production VM start and transparent mTLS currently use it. This is not
+a permanent compatibility decision. Everything under GH #293's “Required
+handoff to #295” is a constraint on the state #293 leaves, not #293
+implementation: shared switching, per-tap classification/interception,
+shared-bridge DNS, transparent-mTLS re-homing, and the associated deletion of
+the current network mechanism remain exclusively GH #295.
+
+The existing lifecycle order is preserved precisely: current VM network
+provision/injection and guest-ready `Driver::start` precede acceptance of the
+initial `Running` row; transparent-mTLS intercept installation follows that
+accepted row. Intercept success therefore does **not** gate `Running`. It gates
+only the later VM beacon `EXEC` command/exit-event release. An install failure
+authors the existing dominating `Failed` row, performs existing cleanup, and
+withholds guest-command release. #293 moves no lifecycle gate and imports no
+#295 mechanism.
+
+Exact public/internal contracts, reuse classifications, lifecycle-gate
+ownership, boundary obligations, and the approval questions live in the
+[feature delta](../../feature/remove-legacy-exec-workload-driver/feature-delta.md).
+The L1/L2 diagrams are in
+[C4 diagrams](c4-diagrams.md#microvm-only-workload-execution-after-exec-removal-gh-293).
+
+---
+
 ## Historical VM-only recreation identity record (GH #284, ADR-0104)
 
 ADR-0104 was accepted on 2026-09-12 and implemented by PR #292, but the user
@@ -10856,6 +10940,8 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-09-14 | **remove-legacy-exec-workload-driver bounded DESIGN correction after iteration-2 approval (GH #293).** The completed independent iteration-2 review remains recorded as `APPROVED` for the prior bundle. A later user correction identified that bundle's unsanctioned `ParseError::RetiredExecDriver` compatibility API. The revised exact contract deletes that proposed variant/message and every special legacy-driver parser branch: `[vm]` is the sole live grammar; unsupported, unknown, invalid, or missing driver input uses only existing ordinary generic parser/serde behavior. Dedicated rejection matrices and tests of deleted symbols are not DESIGN obligations. P-293-1 through P-293-6, exactly four incompatible V1 resets, host Exec-probe deletion, P-105, and the #295 constraint-only boundary are unchanged. This bounded correction awaits fresh independent DESIGN re-review; existing DISTILL artifacts are not edited by this pass and do not authorize DELIVER. — Morgan. |
+| 2026-09-14 | **remove-legacy-exec-workload-driver DESIGN user-approval and iteration-1 remediation (GH #293; ADR-0110/0111/0112/0113).** P-293-1 through P-293-6 are user-approved. Live execution is VM/microVM-only while the existing registry/index/observer routing remains; the full host Exec health-probe surface is deleted; exactly four Exec-coupled envelopes reset forward-only to incompatible V1 with no legacy reader/migration/fixture; P-105 allocation identity and replacement remain unchanged; and every #295 shared-switch/per-tap/shared-DNS/transparent-mTLS handoff bullet remains a constraint only, not #293 implementation. Iteration-1 F-01–F-04 are remediated without changing those decisions: Reuse Analysis now declares bounded composition/observer/probe universes, `Running` is factually separated from post-Running intercept installation, `WorkloadSpecInput::exec_command` is deleted without replacement, and ADR-0113 explicitly supersedes only ADR-0054's Exec clauses plus ADR-0059. Outcome SSOT registers four #293 outcomes, supersedes the old combined Service-admission promise, and narrows the surviving VM target projection. Independent DESIGN re-review is still required; no implementation, roadmap, DISTILL, or DELIVER authority is granted. — Morgan. |
 | 2026-09-13 | **Corrective driver-neutral allocation replacement DESIGN ratification and final review remediation (GH #284; ADR-0105/0106/0108/0109).** The user explicitly approved P-105-1 through P-105-7 with P-105-4A (`Failed \| Terminated` handoff; `Draining` insufficient), P-105-5A (durable View reservation consumes the successor ID; ADR-0107 withdrawn) and P-105-6A (successor outcome first, then one exact-old cleanup attempt with successor-error precedence and existing typed cleanup errors). Final review iteration 2 closed F-01/F-02 and returned `CHANGES_REQUESTED` on F-03…F-06; the final architect pass preserved SystemGc resubmit action semantics, completed Lifecycle Gate Ownership/boundary lanes, split P-105-4A into focused ADR-0109 and corrected ADR-0106's both-fail consequence. The two-cycle cap forbids a third review, so explicit user disposition remains required. C4 retains CLI → `overdrive serve` HTTP handler → IntentStore. PR #292 is non-mergeable; Greptile's separate leak claim remains unproven. — Morgan. |
 | 2026-09-12 | **VM recreation allocation identity (GH #284; ADR-0104 accepted after independent DESIGN review iteration 2; approved design commit `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`).** Automatic VM Workload Failure and Platform Reclamation replacement uses the existing `StartAllocation` action with a fresh execution `AllocationId`; every VM ID is reserved in the existing fsynced WorkloadLifecycle View before dispatch so rejected publication/restart cannot reuse it. Retry policy remains candidate-keyed under the explicit ADR-0102/public-View amendment; `WorkloadId` remains stable, retained rows preserve predecessor history, and existing cleanup/lifecycle/network/observation surfaces remain. ADR-0100 is clarified as VM-only; Exec same-ID `RestartAllocation` is unchanged. Full identity, exact signatures, Lifecycle Gate Ownership and evidence obligations are recorded above and in ADR-0104. — Morgan. |
 | 2026-09-11 (DESIGN amendment proposed) | **Networked-VM Landlock rule-set reconciliation (ADR-0082/0089).** A bounded production-path spike removed the allocation TAP's sysfs grant and reproduced Cloud Hypervisor's `Failed to read the TAP flags from sysfs` / `Permission denied`, no `Running`, and terminal `VmGuestExitUnreported` after 90.86 s. The proposed minimum keeps every public API unchanged: private `LandlockAccess { ReadOnly, ReadWrite }`; existing `VmRunDir::landlock_grant` fixed to run-dir `rw`; one private `VmNetworkAttachment::tap_sysfs_landlock_grant`; and existing `VmConfig::landlock_rules` as the sole deterministic composer (`network: Some` => selected TAP sysfs leaf `r`, then run dir `rw`; `None` => run dir only). `CloudHypervisorVmm` deletes its parallel formatter and renders only the returned values. Broader `/sys/class/net`, other TAPs, parent/glob/alternate paths and TAP write access are rejected; TAP provisioning, public surface and every lifecycle gate remain unchanged. Awaiting independent DESIGN review before becoming implementation authority. — Morgan. |

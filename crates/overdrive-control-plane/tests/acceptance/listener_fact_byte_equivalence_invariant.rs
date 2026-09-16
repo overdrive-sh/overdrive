@@ -39,7 +39,7 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::listener_facts::ListenerFactStore;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -65,7 +65,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>> =
         Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
             VipRange::default(),
@@ -95,7 +95,12 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> SubmitSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: listeners
             .into_iter()
             .map(|(port, protocol)| ListenerInput { port, protocol: protocol.to_owned() })
@@ -111,7 +116,12 @@ fn job_spec(id: &str) -> SubmitSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 67_108_864 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/run".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/run".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
 }
 

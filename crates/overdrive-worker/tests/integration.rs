@@ -164,37 +164,14 @@ mod integration {
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
     mod probe_runner {
-        mod real_exec_probe_cgroup;
         mod real_http_probe;
         mod real_tcp_probe;
     }
 
-    pub mod exec_driver {
-        mod cgroup_procs;
-        // Per-alloc RAII cleanup helper used by every real-cgroupfs test
-        // below. Phase 02 of `fix-cgroup-subtree-control-delegation`
-        // migrated the suite off `tempfile::TempDir` onto real
-        // `/sys/fs/cgroup`; this guard reaps any leftover scope on
-        // panic / SIGKILL so the next test's mkdir does not hit EEXIST.
-        //
-        // Re-used cross-sibling by the Class C real_cgroup_fs tests
-        // (step 01-08), the cgroup_manager
-        // write_to_readonly_cgroup_file test, and the probe_runner
-        // Tier-3 suite (`real_exec_probe_cgroup.rs`, step 02-02) —
-        // `pub` so siblings under the `integration` mod can import it
-        // via `super::super::exec_driver::cleanup::AllocCleanup`. The
-        // AllocCleanup shape is the canonical cgroup-leak-hygiene
-        // primitive for the crate's real-cgroupfs tests.
-        pub mod cleanup;
-        mod limit_write_failure_warns;
-        mod live_map_bounded;
-        mod missing_binary;
-        mod netns_entry;
-        mod resize_updates_limits;
-        mod resource_enforcement;
-        mod start_and_running;
-        mod stop_escalates_to_sigkill;
-        mod stop_pid_none_handle_delivers_sigterm;
-        mod stop_with_grace;
-    }
+    // Per-allocation RAII cleanup helper shared by the real cgroup-fs and
+    // cgroup-manager integration modules. It is intentionally not nested
+    // under a driver-specific module: the removed driver-specific suite no
+    // longer owns this helper, while cgroup-manager and VM tests still need
+    // leak cleanup.
+    pub mod cgroup_cleanup;
 }

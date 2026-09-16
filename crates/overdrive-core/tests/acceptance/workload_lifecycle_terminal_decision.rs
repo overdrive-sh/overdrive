@@ -35,7 +35,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
@@ -82,7 +82,12 @@ fn make_job(id: &str) -> Job {
         id: jid(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

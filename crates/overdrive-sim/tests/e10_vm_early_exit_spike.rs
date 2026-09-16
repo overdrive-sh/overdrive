@@ -33,7 +33,7 @@ use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, W
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::cgroup::CgroupPath;
@@ -65,7 +65,7 @@ use overdrive_sim::adapters::{
     dataplane::SimDataplane,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
     view_store::SimViewStore,
     vm_host_state::SimVmHostState,
 };
@@ -89,9 +89,9 @@ impl WorkloadNetworkProvisioner for Network {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
-        self.provisions.lock().push((workload.clone(), vm_tap.cloned()));
+        self.provisions.lock().push((workload.clone(), Some(vm_tap.clone())));
         Ok(())
     }
     fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
@@ -334,13 +334,8 @@ async fn drive(seed: u64, restart: bool) {
     });
     let http = Arc::new(SimHttpProber::new());
     http.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
-    let probes = Arc::new(ProbeRunner::new(
-        Arc::new(SimTcpProber::new()),
-        http,
-        Arc::new(SimExecProber::new()),
-        clock.clone(),
-        obs.clone(),
-    ));
+    let probes =
+        Arc::new(ProbeRunner::new(Arc::new(SimTcpProber::new()), http, clock.clone(), obs.clone()));
     let driver = Arc::new(VmDriver::new(
         vmm.clone(),
         clock.clone(),
@@ -383,7 +378,7 @@ async fn drive(seed: u64, restart: bool) {
         state.lifecycle_events.clone(),
         clock.clone(),
     );
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "e10-vm-early-exit".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

@@ -22,8 +22,8 @@
 #![allow(clippy::expect_fun_call)]
 
 use overdrive_core::aggregate::{
-    Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput, Node,
-    NodeSpecInput, ResourcesInput,
+    Allocation, AllocationSpecInput, DriverInput, Job, JobSpecInput, Node, NodeSpecInput,
+    ResourcesInput,
 };
 use overdrive_core::id::ContentHash;
 use proptest::prelude::*;
@@ -38,9 +38,11 @@ fn sample_job() -> Job {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 1500, memory_bytes: 512 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/opt/payments/bin/payments-server".to_string(),
             args: vec!["--port".to_string(), "8080".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("canonical JobSpecInput constructs a Job")
@@ -317,9 +319,11 @@ fn arb_job() -> impl Strategy<Value = Job> {
                 id,
                 replicas,
                 resources: ResourcesInput { cpu_milli, memory_bytes },
-                driver: DriverInput::Exec(ExecInput {
+                driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     command: "/bin/true".to_string(),
                     args: vec![],
+                    kernel: "/kernel".to_owned(),
+                    rootfs: "/rootfs".to_owned(),
                 }),
             })
             .expect("generator yields valid Job")

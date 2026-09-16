@@ -46,7 +46,7 @@ use overdrive_core::vm::config::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -63,7 +63,6 @@ fn probe_runner() -> std::sync::Arc<ProbeRunner> {
     std::sync::Arc::new(ProbeRunner::new(
         std::sync::Arc::new(SimTcpProber::new()),
         std::sync::Arc::new(SimHttpProber::new()),
-        std::sync::Arc::new(SimExecProber::new()),
         std::sync::Arc::new(SimClock::new()),
         std::sync::Arc::new(SimObservationStore::single_peer(
             NodeId::new("vm-stop-totality").expect("valid node ID"),
@@ -1028,9 +1027,7 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
 
     let alloc = AllocationId::new("alloc-stop-backpressured-exec").expect("valid alloc id");
     let mut spec = build_spec(&alloc, &tmp);
-    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
-        unreachable!("build_spec always returns a VM payload")
-    };
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
     payload.args.push("x".repeat(16 * 1024 * 1024));
 
     let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
@@ -1324,9 +1321,7 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
 
     let alloc = AllocationId::new("alloc-cancel-backpressured-exec").expect("valid alloc id");
     let mut spec = build_spec(&alloc, &tmp);
-    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
-        unreachable!("build_spec always returns a VM payload")
-    };
+    let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
     payload.args.push("y".repeat(16 * 1024 * 1024));
 
     let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
@@ -2121,9 +2116,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
             build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
         let alloc = AllocationId::new("s08-writer-backpressure").expect("valid allocation");
         let mut spec = build_spec(&alloc, &tmp);
-        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
-            unreachable!("fixture is always VM")
-        };
+        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("z".repeat(16 * 1024 * 1024));
         let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
         let receive_bytes: libc::c_int = 4 * 1024;
@@ -2187,9 +2180,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
             build_driver_with_cgroup_fs(std::sync::Arc::new(vmm.clone()), layout);
         let alloc = AllocationId::new("s08-early-vmm-exit").expect("valid allocation");
         let mut spec = build_spec(&alloc, &tmp);
-        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver else {
-            unreachable!("fixture is always VM")
-        };
+        let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("e".repeat(16 * 1024 * 1024));
         let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
         let receive_bytes: libc::c_int = 4 * 1024;

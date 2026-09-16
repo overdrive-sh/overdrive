@@ -38,12 +38,12 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
 fn alloc_id(s: &str) -> AllocationId {
@@ -54,14 +54,16 @@ fn node_id_for_obs_store() -> NodeId {
     NodeId::new("supervised-tick-test").expect("node id parses")
 }
 
-fn exec_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
+fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-runner/alloc/test")
             .expect("valid SPIFFE ID"),
-        driver: DriverPayload::Exec(ExecPayload {
+        driver: DriverPayload::Vm(VmPayload {
             command: "/bin/true".to_owned(),
             args: Vec::new(),
+            kernel: "/kernel".into(),
+            rootfs: "/rootfs".into(),
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
@@ -154,14 +156,12 @@ async fn given_start_alloc_with_one_tcp_descriptor_when_clock_ticks_interval_the
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Pass);
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
 
     let runner = ProbeRunner::new(
         tcp,
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -179,7 +179,7 @@ async fn given_start_alloc_with_one_tcp_descriptor_when_clock_ticks_interval_the
 
     // ACT: start the alloc with the descriptor. This registers a
     // per-alloc supervisor AND spawns one tick task per descriptor.
-    let _token = runner.start_alloc(&exec_spec(&alloc, vec![descriptor]));
+    let _token = runner.start_alloc(&vm_spec(&alloc, vec![descriptor]));
     assert_eq!(
         runner.active_alloc_count(),
         1,
@@ -243,14 +243,12 @@ async fn given_started_alloc_when_stop_alloc_then_no_further_probe_result_rows()
         tcp.enqueue_outcome(ProbeOutcome::Pass);
     }
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
 
     let runner = ProbeRunner::new(
         tcp,
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -258,7 +256,7 @@ async fn given_started_alloc_when_stop_alloc_then_no_further_probe_result_rows()
     let alloc = alloc_id("alloc-supervised-tick-2");
     let descriptor = descriptor_tcp_1s("127.0.0.1", 9999);
 
-    let _token = runner.start_alloc(&exec_spec(&alloc, vec![descriptor]));
+    let _token = runner.start_alloc(&vm_spec(&alloc, vec![descriptor]));
     yield_for_task_poll().await;
 
     // Fire one tick so we have a known-non-zero baseline before
@@ -326,14 +324,12 @@ async fn given_started_alloc_when_stop_alloc_then_no_further_probe_result_rows()
 async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
     let tcp = Arc::new(SimTcpProber::new());
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
 
     let runner = ProbeRunner::new(
         Arc::clone(&tcp) as Arc<dyn overdrive_core::traits::prober::TcpProber>,
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -342,10 +338,10 @@ async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
     let descriptor = descriptor_tcp_1s("127.0.0.1", 9999);
 
     // First start — spawns 1 task.
-    let token1 = runner.start_alloc(&exec_spec(&alloc, vec![descriptor.clone()]));
+    let token1 = runner.start_alloc(&vm_spec(&alloc, vec![descriptor.clone()]));
 
     // Second start — MUST be a no-op (same alloc_id).
-    let token2 = runner.start_alloc(&exec_spec(&alloc, vec![descriptor]));
+    let token2 = runner.start_alloc(&vm_spec(&alloc, vec![descriptor]));
 
     assert_eq!(
         runner.active_alloc_count(),
@@ -422,7 +418,6 @@ async fn start_alloc_writes_each_probe_at_its_per_role_index_not_its_flat_positi
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -436,7 +431,7 @@ async fn start_alloc_writes_each_probe_at_its_per_role_index_not_its_flat_positi
         descriptor_at(ProbeRole::Readiness, 0, 9002),
     ];
 
-    let _token = runner.start_alloc(&exec_spec(&alloc, descriptors));
+    let _token = runner.start_alloc(&vm_spec(&alloc, descriptors));
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
 
@@ -481,7 +476,6 @@ async fn start_alloc_preserves_per_role_indices_across_a_multi_probe_role() {
     let runner = ProbeRunner::new(
         tcp,
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -493,7 +487,7 @@ async fn start_alloc_preserves_per_role_indices_across_a_multi_probe_role() {
         descriptor_at(ProbeRole::Readiness, 0, 9003),
     ];
 
-    let _token = runner.start_alloc(&exec_spec(&alloc, descriptors));
+    let _token = runner.start_alloc(&vm_spec(&alloc, descriptors));
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
 

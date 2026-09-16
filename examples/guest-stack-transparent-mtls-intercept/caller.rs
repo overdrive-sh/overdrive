@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const REQUEST: &[u8] = b"GTI_E07_REQUEST_guest_to_exec_service\n";
-const RESPONSE: &[u8] = b"GTI_E07_REPLY_exec_service_to_guest\n";
+const REQUEST: &[u8] = b"GTI_E07_REQUEST_guest_to_vm_service\n";
+const RESPONSE: &[u8] = b"GTI_E07_REPLY_vm_service_to_guest\n";
 const TOTAL_DEADLINE: Duration = Duration::from_secs(90);
 const RESOLVE_DEADLINE: Duration = Duration::from_secs(3);
 const CONNECT_DEADLINE: Duration = Duration::from_secs(3);

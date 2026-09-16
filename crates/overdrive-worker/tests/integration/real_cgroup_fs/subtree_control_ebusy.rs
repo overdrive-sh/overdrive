@@ -54,7 +54,7 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::{CgroupManager, WorkloadsBootstrapError};
 use serial_test::serial;
 
-use super::super::exec_driver::cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::AllocCleanup;
 
 /// RAII guard that SIGKILLs and reaps the spawned sleep PID on test
 /// exit, regardless of outcome. `AllocCleanup` covers a workload-scope

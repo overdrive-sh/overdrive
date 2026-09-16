@@ -36,6 +36,10 @@ crate_class = "adapter-host"
 integration-tests = []
 
 [dependencies]
+# `cidr_lease` uses the Linux `flock(2)` and process identity syscalls for
+# cross-process test allocation. This remains a test-only support crate; no
+# production crate depends on it.
+libc.workspace = true
 # `vm_fixture` reuses the pure `KernelImage`/`HostArch` validation family
 # from `overdrive-core` rather than re-deriving kernel-format checks here.
 overdrive-core.workspace = true

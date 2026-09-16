@@ -10,8 +10,10 @@ cat >"$tmp/job-with-probe.toml" <<'TOML'
 [job]
 name = "batch-thing"
 
-[exec]
-command = ["/bin/true"]
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 
 [[health_check.startup]]
 type = "tcp"
@@ -23,8 +25,10 @@ cat >"$tmp/schedule-with-probe.toml" <<'TOML'
 name = "nightly-thing"
 cron = "0 2 * * *"
 
-[exec]
-command = ["/bin/true"]
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 
 [[health_check.startup]]
 type = "tcp"
@@ -35,8 +39,10 @@ cat >"$tmp/service-with-probe.toml" <<'TOML'
 [service]
 name = "payments"
 
-[exec]
-command = ["/bin/sleep", "3600"]
+[vm]
+command = "/opt/overdrive/examples/svm/e08-server"
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 
 [[listener]]
 port = 8080

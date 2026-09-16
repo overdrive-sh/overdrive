@@ -12,8 +12,9 @@ After the declared failure threshold, describe must publish a terminal
 allocation row before the existing WorkloadLifecycle restart policy produces
 an ordinary replacement. The replacement follows the ordinary VM
 Running/startup path and no VM-specific lifecycle state appears. The ledger
-records the same allocation identity before, at, and after the restart, the
-liveness response bytes, the probe role/status, the observed failure count,
+retains the predecessor allocation identity before and at the terminal
+liveness observation, then records a distinct fresh successor after restart,
+along with the liveness response bytes, the probe role/status, the observed failure count,
 and the allocation `Since` and startup observation timestamps. Replacement
 startup is accepted only when both timestamps differ from the pre-restart
 observation. The terminal attribution is derived from the observed liveness
@@ -37,7 +38,7 @@ cleanup delta. The replacement's liveness result may already be failed when
 its ordinary startup completes because the checked-in guest is intentionally
 configured to fail `/live` after a bounded delay; startup and readiness must
 still pass. Passing requires a visible terminal liveness stop at or beyond the
-declared threshold, a fresh ordinary same-ID replacement, no readiness-owned
+declared threshold, a fresh ordinary successor allocation, no readiness-owned
 restart, no revival of the dead allocation, and zero leaks. `runner.sh` parses
 the executed ledger and public describe transcript; it does not invoke Rust
 tests or link an Overdrive crate.

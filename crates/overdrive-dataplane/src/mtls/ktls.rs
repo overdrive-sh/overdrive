@@ -8,10 +8,9 @@
 //! lands on the AGENT's leg (leg B outbound / leg C inbound), NEVER the workload's
 //! socket (workload-holds-nothing, D-MTLS-9).
 
-use std::os::fd::RawFd;
-
 use overdrive_core::traits::mtls_enforcement::MtlsEnforcementError;
 use rustls::{ConnectionTrafficSecrets, ExtractedSecrets};
+use std::os::fd::RawFd;
 
 /// `tls12_crypto_info_aes_gcm_256` (the in-tree UAPI shape). `#[repr(C)]`, no
 /// padding — fed to `setsockopt(SOL_TLS, TLS_TX|TLS_RX)`.

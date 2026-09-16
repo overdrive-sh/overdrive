@@ -55,14 +55,9 @@ So sub-claim 2 ("a probe row shows a role + mechanic summary") would render,
 but every row's status would be a namespace artefact rather than an honest
 health signal.
 
-**An `exec`-mechanic probe is the only mechanic that can currently express
-workload health on the production path** — an exec probe joins only the
-workload *cgroup*, never a network or mount namespace, and is verified scored
-correctly end-to-end (`exit 0` → 0 restarts, `exit 1` → 106 restarts from an
-identical 19 executions) in
-`docs/analysis/root-cause-analysis-probe-runner-exec-inert-and-ungated-restart-loop.md`
-§ 2.2. A future capture wanting a truthful `Pass` should use an exec-probe
-fixture, or wait for the netns gap to close.
+The supported VM/microVM path expresses workload health with HTTP/TCP probes
+against the guest address. Host-process probe mechanics are historical and are
+not part of the current operator surface.
 
 **Status is unchanged and deliberately so.** Setting it requires a fresh
 capture plus a different-fox adversarial audit per `.claude/rules/verification.md`;

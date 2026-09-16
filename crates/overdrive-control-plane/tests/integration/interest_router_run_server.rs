@@ -45,7 +45,7 @@ async fn production_boot_spawns_the_interest_router() {
     let clock = Arc::new(SimClock::new());
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),

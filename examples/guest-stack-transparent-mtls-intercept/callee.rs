@@ -2,8 +2,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 
-const REQUEST: &[u8] = b"GTI_E07_REQUEST_guest_to_exec_service\n";
-const RESPONSE: &[u8] = b"GTI_E07_REPLY_exec_service_to_guest\n";
+const REQUEST: &[u8] = b"GTI_E07_REQUEST_guest_to_vm_service\n";
+const RESPONSE: &[u8] = b"GTI_E07_REPLY_vm_service_to_guest\n";
 
 fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(("0.0.0.0", 18_951))?;

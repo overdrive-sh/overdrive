@@ -90,13 +90,9 @@ mod acceptance {
     mod scheduler_free_capacity_strict_inequality;
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries
-    // explicit `[exec]` block (command + args) and the projection
+    // explicit `[vm]` block (command, args, kernel, rootfs) and the projection
     // flows end-to-end through Job::from_submit → Action::Start/Restart.
     // Per ADR-0031.
-    mod exec_constructors;
-    mod exec_reconciler_purity;
-    mod exec_roundtrip;
-    mod exec_validation;
 
     // issue-141-persist-backoff-inputs — `UnixInstant` newtype for
     // portable wall-clock deadlines. Step 01-01 covers arithmetic +
@@ -241,8 +237,8 @@ mod acceptance {
     // service-health-check-probes — GAP-6 corrective patch.
     // Probe descriptors persist end-to-end through the parser →
     // wire (ServiceSpecInput) → intent (WorkloadIntent::Service /
-    // ServiceV2) → IntentStore rkyv-archived bytes round-trip.
-    // Pre-corrective state: ServiceV2::from_submit had zero
+    // Service) → IntentStore rkyv-archived bytes round-trip.
+    // Pre-corrective state: Service::from_submit had zero
     // probe-related code and silently dropped operator-declared
     // probes between admission and IntentStore. Surfaced when the
     // GAP-1 corrective crafter found hydrate_desired had no probe
@@ -335,7 +331,6 @@ mod acceptance {
     // `tests/integration/vm_resources_sizing.rs`.
     mod vm_reclamation_plan_purity; // S-VM-31, S-VM-32, S-VM-92 — ADR-0083 §D7, brief §105a
     mod vm_resources_derivation; // S-VM-73 — ADR-0082 §D2 / US-VM-5
-    mod vm_spec_driver_table_dispatch; // S-VM-06, S-VM-07 — ADR-0083 §D4
 
     // `CgroupPath` RELOCATED here from `overdrive-worker/tests/acceptance/`
     // (review remediation, step 01-01 F6) alongside the type itself

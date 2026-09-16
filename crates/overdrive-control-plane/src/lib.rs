@@ -202,10 +202,10 @@ pub struct AppState {
     /// `driver: Arc<dyn Driver>` field. **Absence of a key is a
     /// first-class answer, not an error state** — a node with no
     /// `cloud-hypervisor` installed simply has no `DriverType::Vm` entry
-    /// (SD-5's capability gate). Production composes `ExecDriver` always
-    /// and `VmDriver` when the discover→probe Earned-Trust sequence
-    /// succeeds (`compose_production_driver`); DST/test fixtures compose
-    /// a registry holding whichever `Sim*`/test driver(s) they need.
+    /// (SD-5's capability gate). Production composes the `VmDriver` only
+    /// when the discover→probe Earned-Trust sequence succeeds; DST/test
+    /// fixtures compose a registry holding whichever `Sim*`/test driver(s)
+    /// they need.
     pub drivers: Arc<DriverRegistry>,
     /// The host-observation-driven port `VmReclamation` hydrates its
     /// `actual` half from (ADR-0083 §D7, brief.md §105a.2, GH #42).
@@ -213,7 +213,7 @@ pub struct AppState {
     /// `Vm` entry — so a node that uninstalled `cloud-hypervisor` still
     /// observes and still reclaims (S-VM-30). Production wires
     /// `Arc::new(overdrive_host::RealVmHostState::new(..))`; the broad
-    /// Exec-only fixture surface ([`AppState::new`]) default-composes
+    /// fixture surface ([`AppState::new`]) default-composes
     /// [`NoopVmHostState`] (observes nothing, ripple-free — mirrors the
     /// `mtls_worker: None` / empty-registry `workflow_engine` defaults on
     /// that constructor).
@@ -352,7 +352,7 @@ pub struct AppState {
     /// (transparent-mtls-host-socket, D-MTLS-16/17, GH #26; step 06-03).
     /// The action-shim fires it alongside the driver hooks
     /// (`on_alloc_running` → `start_alloc`, `on_alloc_terminal` →
-    /// `stop_alloc`); `ExecDriver` is UNTOUCHED.
+    /// `stop_alloc`).
     ///
     /// `Option` (the sanctioned `ProbeRunner` shape, NOT a port-trait
     /// dodge): `Some(worker)` ONLY on the production `run_server` boot
@@ -486,7 +486,7 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(90);
 
 /// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
-/// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
+/// [`AppState::new`]'s broad fixture callers (ripple-free —
 /// mirrors the `mtls_worker: None` / empty-registry `workflow_engine`
 /// defaults on that constructor). Observes nothing, refuses nothing;
 /// correct for a fixture surface that never seeds VM host state.
@@ -564,10 +564,9 @@ impl AppState {
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         // `driver` stays a single `Arc<dyn Driver>` on this convenience
         // constructor — it is wrapped into a fresh single-entry
-        // `DriverRegistry` below (ADR-0083 §D1, GH #42) so every existing
-        // Exec-only fixture caller is unaffected. Multi-driver composition
-        // (production `run_server`, or a test that needs both Exec and Vm
-        // registered) goes through [`Self::new_with_workflow_engine`]
+        // `DriverRegistry` below (ADR-0083 §D1, GH #42) so existing
+        // single-driver fixture callers remain simple. Multi-driver
+        // composition goes through [`Self::new_with_workflow_engine`]
         // directly with a caller-built `Arc<DriverRegistry>`.
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
@@ -594,8 +593,8 @@ impl AppState {
         let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
         // Wrap the single driver into a fresh, single-entry `DriverRegistry`
         // (ADR-0083 §D1, GH #42) — the field-level migration this
-        // convenience constructor absorbs so its ~50 existing Exec-only
-        // fixture callers stay unchanged.
+        // convenience constructor absorbs so existing fixture callers stay
+        // unchanged.
         let mut registry = DriverRegistry::new();
         registry.insert(driver);
         let drivers = Arc::new(registry);
@@ -621,9 +620,8 @@ impl AppState {
             workflow_engine,
             None,
             // Fixture surface: a ripple-free no-op VmHostState (see
-            // `NoopVmHostState`'s own doc comment) — the ~50 Exec-only
-            // fixture callers of this convenience constructor need no
-            // change.
+            // `NoopVmHostState`'s own doc comment) — fixture callers of this
+            // convenience constructor need no change.
             Arc::new(NoopVmHostState),
             // Fixture surface: a fresh empty per-host frontend-address allocator
             // (ripple-free, same posture as the `None` mtls_worker default). The
@@ -654,8 +652,7 @@ impl AppState {
         // replaces the former single `driver: Arc<dyn Driver>` parameter.
         // Callers that only ever run one driver build a single-entry
         // registry (see [`Self::new`]); the production boot path and any
-        // Vm-aware test build one with both `ExecDriver` and `VmDriver`
-        // composed.
+        // VM-aware tests build a registry with the VM capability composed.
         drivers: Arc<DriverRegistry>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
@@ -1445,8 +1442,7 @@ impl ServerHandle {
         // 4. Cancel the observer's shutdown token, then await the
         //    observer task. The observer's `tokio::select!`
         //    biased-resolves the cancellation branch and exits
-        //    cleanly even when watcher tasks (production
-        //    `ExecDriver` watchers awaiting `child.wait()`) or test
+        //    cleanly even when driver watcher tasks or test
         //    harness `Arc<dyn Driver>` refs still hold `exit_tx`
         //    clones. Without this token, a workload that did not
         //    reap before convergence was cancelled — or a SimDriver
@@ -1611,8 +1607,8 @@ pub async fn run_server(
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     // Wire the Phase 1 observation store (`LocalObservationStore`
     // single-node per ADR-0012, revised 2026-04-24) internally and the
-    // production `ExecDriver` from the worker subsystem (ADR-0029),
-    // then delegate to `run_server_with_obs_and_driver`. The split
+    // production driver registry at this composition root, then delegate
+    // to `run_server_with_obs_and_drivers`. The split
     // exists so integration tests can hold a shared `Arc<dyn ObservationStore>`
     // handle for the canary-injection Fixture-Theater defence without
     // introducing a test-only hook into the production boot path.
@@ -1673,35 +1669,19 @@ pub async fn run_server(
         .map_err(error::ControlPlaneError::from)?;
 
     // Service-health-check-probes step 01-03d / ADR-0054 § 7 — the
-    // probe-runner Earned-Trust gate runs here, at the binary
-    // composition root, and the resulting `Arc<ProbeRunner>` is
-    // threaded into the production `ExecDriver` via the
-    // `compose_production_driver` helper below. Acceptance test
-    // `probe_runner_composition` drives the helper with `SimProber`
-    // adapters to assert the threading structurally — closes
-    // GAP-4 + GAP-5 from `.context/01-03-structural-gap-audit.md`.
-    // Keep the one trusted runner returned by the composition gate: the
-    // Exec and optional VM drivers each receive a clone of this same Arc.
-    //
-    // The driver shares the SAME cgroup root + probed `Arc<dyn CgroupFs>`
-    // substrate the workloads-slice bootstrap above used (Earned Trust
-    // invariant per ADR-0054 § Composition root wiring): `cgroup_root_path`
-    // and `fs` are threaded through rather than re-deriving the literal
-    // `/sys/fs/cgroup`.
+    // probe-runner Earned-Trust gate runs here, at the binary composition
+    // root. Keep the one trusted runner returned by the gate and pass it to
+    // the VM driver's existing lifecycle hooks.
     let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
-    let (driver, probe_runner) = compose_production_driver(
+    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
-        Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
-        cgroup_root_path.clone(),
         Arc::clone(&clock),
-        Arc::clone(&fs),
         Arc::clone(&obs),
     )
     .await?;
 
     let mut registry = DriverRegistry::new();
-    registry.insert(driver);
 
     // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09, §D3c): discover ->
     // probe -> insert `cloud-hypervisor`. UNCONDITIONAL — no `#[cfg]`, no
@@ -2021,70 +2001,13 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
     })?
 }
 
-/// Compose the production `ExecDriver` with its Earned-Trust-vetted
-/// `Arc<ProbeRunner>` already threaded via `with_probe_runner(...)`.
-///
-/// This is the single composition site for the production driver +
-/// probe-runner threading per service-health-check-probes
-/// step 01-03d / ADR-0054 § 7 + § 2. The Earned-Trust gate
-/// (`probe_runner_boot::compose_and_probe_runner_gate`) runs FIRST;
-/// on success the returned `Arc<ProbeRunner>` is cloned into the
-/// driver builder so `ExecDriver::on_alloc_running` /
-/// `on_alloc_terminal` fire the per-alloc supervisor lifecycle in
-/// production. Without this threading the driver's lifecycle hooks
-/// fall through to the trait-default no-op and the probe subsystem
-/// is structurally dead — the failure mode `.context/01-03-structural-
-/// gap-audit.md` GAP-4 + GAP-5 documents.
-///
-/// Returns `(Arc<dyn Driver>, Arc<ProbeRunner>)` so acceptance tests
-/// can capture both halves of the composition and assert on
-/// observable state (`runner.active_alloc_count()` before and after
-/// `driver.on_alloc_running(...)` fires).
-///
-/// # Errors
-///
-/// Propagates `ControlPlaneError::ProbeRunnerBoot` from the
-/// Earned-Trust gate — the helper emits the canonical
-/// `health.startup.refused` tracing event before returning so the
-/// CLI binary boundary surfaces a structured refusal.
-pub async fn compose_production_driver(
-    tcp_prober: Arc<dyn overdrive_core::traits::prober::TcpProber>,
-    http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
-    exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
-    cgroup_root: std::path::PathBuf,
-    clock: Arc<dyn Clock>,
-    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
-    observation_store: Arc<dyn ObservationStore>,
-) -> Result<
-    (Arc<dyn Driver>, Arc<overdrive_worker::probe_runner::ProbeRunner>),
-    error::ControlPlaneError,
-> {
-    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
-        tcp_prober,
-        http_prober,
-        exec_prober,
-        Arc::clone(&clock),
-        observation_store,
-    )
-    .await?;
-
-    let driver: Arc<dyn Driver> = Arc::new(
-        overdrive_worker::ExecDriver::new(cgroup_root, clock, fs)
-            .with_probe_runner(Arc::clone(&probe_runner)),
-    );
-
-    Ok((driver, probe_runner))
-}
-
 /// Start the control-plane server with caller-supplied observation store
 /// and a SINGLE driver, wrapped into a fresh single-entry
 /// [`DriverRegistry`] (ADR-0083 §D1, GH #42). Convenience sibling of
-/// [`run_server_with_obs_and_drivers`] — kept so this crate's ~11 existing
-/// Exec-only integration-test callers are unaffected by the registry
-/// migration. Multi-driver composition (production `run_server`, or a
-/// test that needs both `ExecDriver` and `VmDriver` registered) calls
-/// [`run_server_with_obs_and_drivers`] directly with a caller-built
-/// registry.
+/// [`run_server_with_obs_and_drivers`] for callers that already own one
+/// driver. Production composition and tests that need more than one
+/// capability call [`run_server_with_obs_and_drivers`] directly with a
+/// caller-built registry.
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
@@ -2099,10 +2022,8 @@ pub async fn run_server_with_obs_and_driver(
 /// store and driver registry.
 ///
 /// Per ADR-0022 (amended by ADR-0029) / ADR-0083 §D1 (GH #42), the
-/// binary owns the composition: the CLI's `serve` subcommand composes
-/// `DriverRegistry` (always `ExecDriver`; `VmDriver` when the
-/// discover→probe Earned-Trust sequence succeeds) and threads it through
-/// this function.
+/// binary owns the composition: the CLI's `serve` subcommand composes the
+/// available driver registry and threads it through this function.
 ///
 /// Used by integration tests that need to retain a handle to the
 /// observation store the server is reading from.
@@ -2124,7 +2045,7 @@ pub async fn run_server_with_obs_and_drivers(
     // need real cgroupfs (typically they run on a properly configured
     // Lima VM — see the integration suite under
     // `crates/overdrive-control-plane/tests/integration/cgroup_isolation/`
-    // and `crates/overdrive-worker/tests/integration/exec_driver/`).
+    // and `crates/overdrive-worker/tests/integration/`).
 
     // Per ADR-0025 step 5 (amended by ADR-0029): the worker subsystem
     // writes the local node's `NodeHealthRow` to the ObservationStore
@@ -2415,20 +2336,11 @@ pub async fn run_server_with_obs_and_drivers(
         resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref()),
         config.dataplane_override.is_some(),
     )?;
-    // Service-health-check-probes — the `ProbeRunner` Earned-Trust
-    // gate and the threading of `Arc<ProbeRunner>` into the
-    // production `ExecDriver` now live at the binary composition
-    // root (`run_server`) per ADR-0054 § 7. This split function
-    // accepts a caller-supplied driver and intentionally bypasses
-    // the gate: production drivers come in already-wired (the
-    // composition-root threaded the runner via
-    // `ExecDriver::with_probe_runner(...)` before delegating here);
-    // test callers that pass a non-`ExecDriver` (`SimDriver` etc.)
-    // are not exercising the probe path. A test caller that
-    // genuinely needs the gate's behaviour with a custom driver
-    // calls `probe_runner_boot::compose_and_probe_runner_gate(...)`
-    // itself and applies `.with_probe_runner(...)` before passing
-    // the driver in.
+    // Service-health-check-probes — the `ProbeRunner` Earned-Trust gate is
+    // owned by `run_server`; this split function accepts a caller-supplied
+    // registry and intentionally does not repeat the boot gate. Test callers
+    // that need the gate call `probe_runner_boot::compose_and_probe_runner_gate`
+    // at their own composition boundary.
 
     // UI-05 — register the downstream hydrator before ServiceLifecycle's
     // authoritative backend-row publisher. ServiceLifecycle emits the
@@ -2560,9 +2472,8 @@ pub async fn run_server_with_obs_and_drivers(
     // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) —
     // compose the production transparent-mTLS layer HERE, AFTER
     // `IdentityMgr` (so `HostMtlsEnforcement` can read the held identity)
-    // and BEFORE `AppState`. This is the (3a) resequencing: the mTLS port
-    // is NOT a `compose_production_driver` param (that runs before
-    // `IdentityMgr`); instead a separate `MtlsInterceptWorker` is
+    // and BEFORE `AppState`. The mTLS port is not a driver-composition
+    // parameter; instead a separate `MtlsInterceptWorker` is
     // constructed here with both ports as REQUIRED params and threaded
     // into `AppState` as the `Option` field the action-shim fires.
     //
@@ -4081,7 +3992,7 @@ mod tests {
 
         use overdrive_sim::adapters::clock::SimClock;
         use overdrive_sim::adapters::observation_store::SimObservationStore;
-        use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+        use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
         use overdrive_worker::probe_runner::ProbeRunner;
 
@@ -4093,7 +4004,6 @@ mod tests {
             Arc::new(ProbeRunner::new(
                 Arc::new(SimTcpProber::new()),
                 Arc::new(SimHttpProber::new()),
-                Arc::new(SimExecProber::new()),
                 Arc::new(SimClock::new()),
                 Arc::new(SimObservationStore::single_peer(
                     overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),

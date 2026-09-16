@@ -6,9 +6,7 @@
 //!
 //! # What this asserts
 //!
-//! * `TcpProber` / `HttpProber` / `ExecProber` are object-safe
-//!   (dyn-compatible) — required by the `ProbeRunner` per ADR-0054
-//!   §3. See `compile_pass/prober_traits_are_dyn_compatible.rs`.
+//! * The surviving prober traits are object-safe (dyn-compatible).
 
 #[test]
 fn compile_pass_cases() {

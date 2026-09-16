@@ -55,7 +55,9 @@ exit 0
 #   # 1. boot the node (separate Lima-routed terminal). Launch `overdrive
 #   #    serve` from the REPO ROOT ($REPO_ROOT) — the a/b specs' `command`
 #   #    runs the script by the repo-root-relative path
-#   #    "examples/dial-by-name-responder/ping_pong.py", and `ExecDriver` sets
+#   #    "examples/dial-by-name-responder/ping_pong.py" is retained as the
+#   #    historical client sketch; the supported VM path uses the checked-in
+#   #    guest bundle instead of a retired legacy execution artifact.
 #   #    no `current_dir` (it enters only CLONE_NEWNET, no mount ns), so the
 #   #    workload inherits serve's cwd. Pin it so the capture can't drift on the
 #   #    relative path:

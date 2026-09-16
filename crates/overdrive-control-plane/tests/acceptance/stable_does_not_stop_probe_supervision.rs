@@ -28,13 +28,14 @@
 //! # PORT-TO-PORT litmus
 //!
 //! Enters through TWO production driving ports composed together —
-//! `compose_production_driver` (the sole composition site `run_server`
-//! calls) and `action_shim::dispatch` (the runtime's action driving
-//! port) — and asserts on the `ProbeRunner`'s own inspection surface
-//! (`active_alloc_count` / `is_role_live`). No test-only wiring stands
-//! in for a production call site: the shim decides which hook to fire,
-//! the production `ExecDriver` decides what that hook does, and the
-//! production `ProbeRunner` owns the supervisor being asserted on.
+//! `probe_runner_boot::compose_and_probe_runner_gate` (the same
+//! Earned-Trust gate `run_server` calls) and `action_shim::dispatch`
+//! (the runtime's action driving port) — and asserts on the
+//! `ProbeRunner`'s own inspection surface (`active_alloc_count` /
+//! `is_role_live`). No test-only wiring stands in for a production call
+//! site: the shim decides which hook to fire, the VM driver's hooks forward
+//! to the production `ProbeRunner`, and the supervisor owns the state being
+//! asserted on.
 //!
 //! `is_role_live` reports TOKEN liveness. That is a valid proxy for
 //! task liveness only because `supervised_probe_loop` has exactly one
@@ -52,7 +53,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::dispatch;
-use overdrive_control_plane::compose_production_driver;
+use overdrive_control_plane::probe_runner_boot::compose_and_probe_runner_gate;
 use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
@@ -61,19 +62,22 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
+use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
-use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
+use overdrive_worker::{VmDriver, VmHostLayout};
 use tempfile::TempDir;
 
 /// A TCP descriptor at the given per-role array position (ADR-0080
@@ -96,12 +100,12 @@ fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> A
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/svc").expect("valid SpiffeId"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/true".to_owned(),
-                args: vec![],
-            },
-        ),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/sbin/init".to_owned(),
+            args: Vec::new(),
+            kernel: "/kernel".into(),
+            rootfs: "/rootfs".into(),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
         netns: None,
@@ -146,7 +150,7 @@ fn stable_terminal_startup_pass() -> TerminalCondition {
 }
 
 /// Everything the shim needs, composed the way `run_server` composes
-/// it. Returns the production driver, its wired `ProbeRunner`, and the
+/// it. Returns the VM driver, its wired `ProbeRunner`, and the
 /// observation store the shim writes through.
 struct Harness {
     driver: Arc<dyn Driver>,
@@ -171,26 +175,42 @@ async fn harness() -> Harness {
     let intent: Arc<dyn IntentStore> =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent"));
 
-    let (driver, runner) = compose_production_driver(
+    let sim_clock = Arc::new(SimClock::new());
+    let runner = compose_and_probe_runner_gate(
         // Empty prober queues → every attempt Passes. The probe tasks
         // park on `SimClock::sleep` between ticks and never reach an
         // adapter during these assertions.
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
-        PathBuf::from("/tmp/overdrive-test-stable-probe"),
         // `SimClock::sleep` PARKS on a deadline and only resolves when
         // the harness calls `tick()`, which this test never does. Each
         // spawned probe task therefore sits in its `select!` with the
         // cancellation arm live — the steady state the observable
         // assumes.
-        Arc::new(SimClock::new()),
-        Arc::new(SimCgroupFs::new()),
+        sim_clock.clone(),
         Arc::clone(&obs),
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");
 
+    let driver: Arc<dyn Driver> = Arc::new(VmDriver::new(
+        Arc::new(overdrive_sim::SimVmm::new()),
+        sim_clock,
+        Arc::new(overdrive_sim::SimCgroupFs::new()),
+        Arc::new(overdrive_sim::SimCgroupAccounting::new()),
+        Arc::clone(&runner),
+        VmHostLayout {
+            cgroup_root: PathBuf::from("/tmp/stable-probe-cgroup"),
+            run_dir_root: PathBuf::from("/tmp/stable-probe-run"),
+            clone_index_dir: PathBuf::from("/tmp/stable-probe-index"),
+            clone_staging_dir: PathBuf::from("/tmp/stable-probe-staging"),
+            arch: HostArch::X86_64,
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: Vec::new() },
+                1024,
+            ),
+        },
+    ));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -309,7 +329,7 @@ async fn stable_from_startup_pass_retires_startup_only_and_keeps_readiness_super
             tcp_descriptor(ProbeRole::Readiness, 0, 8080),
         ],
     ));
-    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
+    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Startup), "startup supervised pre-Stable");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Readiness), "readiness supervised pre-Stable");
@@ -363,7 +383,7 @@ async fn stable_from_empty_startup_optout_keeps_readiness_supervised() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
-    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
+    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -413,7 +433,7 @@ async fn genuine_terminal_still_stops_the_whole_supervisor() {
             tcp_descriptor(ProbeRole::Liveness, 0, 8080),
         ],
     ));
-    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
+    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -444,7 +464,7 @@ async fn stop_allocation_still_stops_the_whole_supervisor() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
-    h.alloc_drivers.lock().insert(alloc.clone(), overdrive_core::traits::driver::DriverType::Exec);
+    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;

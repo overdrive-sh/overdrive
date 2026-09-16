@@ -67,13 +67,14 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationWrite, ServiceBackendRow, TransitionSource,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalObservationStore;
 use rcgen::string::Ia5String;
@@ -775,11 +776,7 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(LocalObservationStore::open(&obs_path).expect("open LocalObservationStore"));
 
-    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        Arc::new(overdrive_host::SystemClock),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),

@@ -15,17 +15,19 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
 use overdrive_control_plane::streaming::{
     ServiceSubmitEvent, build_service_accepted, build_service_stream,
 };
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
@@ -45,12 +47,29 @@ use overdrive_sim::adapters::{
     driver::SimDriver,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
 };
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// Existing driven-port composition: simulated process lifecycle plus the same
 /// production probe lifecycle hooks that ExecDriver and VmDriver forward.
@@ -64,7 +83,7 @@ struct ProbedDriver {
 #[async_trait]
 impl Driver for ProbedDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         self.inner.start(spec).await
@@ -111,13 +130,14 @@ async fn tick(
     target: &TargetResource,
     count: u64,
 ) {
-    run_convergence_tick(
+    run_convergence_tick_with_network_provisioner_for_test(
         state,
         &ReconcilerName::new(owner).unwrap(),
         target,
         clock.now(),
         count,
         clock.now() + Duration::from_secs(30),
+        &NoopNetworkProvisioner,
     )
     .await
     .unwrap();
@@ -136,16 +156,10 @@ async fn drive(overlap: bool) {
         tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "connection refused".into() });
     }
     let driver = Arc::new(ProbedDriver {
-        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         clock: clock.clone(),
         stopping,
-        probes: ProbeRunner::new(
-            tcp,
-            Arc::new(SimHttpProber::new()),
-            Arc::new(SimExecProber::new()),
-            clock.clone(),
-            obs.clone(),
-        ),
+        probes: ProbeRunner::new(tcp, Arc::new(SimHttpProber::new()), clock.clone(), obs.clone()),
     });
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
@@ -177,9 +191,11 @@ async fn drive(overlap: bool) {
         id: "e09-v2-failure-stream".into(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".into(),
             args: vec!["3600".into()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
         listeners: vec![ListenerInput { port: 18081, protocol: "tcp".into() }],
         startup_probes: vec![ProbeDescriptor {
@@ -332,7 +348,7 @@ async fn drive(overlap: bool) {
         ended.terminal, recovered.alloc_id, recovered.state,
     );
     // Stop tasks have completed; cleanly retire only our remaining supervisor.
-    state.drivers.get(DriverType::Exec).unwrap().on_alloc_terminal(&recovered.alloc_id);
+    state.drivers.get(DriverType::Vm).unwrap().on_alloc_terminal(&recovered.alloc_id);
     assert!(
         matches!(
             terminal,
@@ -349,7 +365,7 @@ async fn submit(
     state: &AppState,
     input: ServiceSpecInput,
 ) -> (overdrive_core::WorkloadId, TargetResource, ServiceSubmitEvent) {
-    let svc = ServiceV2::from_submit(input).unwrap();
+    let svc = Service::from_submit(input).unwrap();
     let id = svc.id.clone();
     let key = IntentKey::for_workload(&id);
     let intent = WorkloadIntent::Service(svc);

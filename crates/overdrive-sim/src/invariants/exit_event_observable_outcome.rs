@@ -94,12 +94,14 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput,
 };
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -117,6 +119,7 @@ use crate::adapters::driver::SimDriver;
 use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::SimObservationStore;
 use crate::harness::{InvariantResult, InvariantStatus};
+use crate::invariants::NoopNetworkProvisioner;
 use overdrive_store_local::LocalIntentStore;
 
 /// Drive both scenarios and return an `InvariantResult` pinned to the
@@ -269,13 +272,14 @@ async fn drive_happy_path(
     );
 
     for tick_n in 0_u64..60 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -328,13 +332,14 @@ async fn drive_degraded_escalation(
     );
 
     for tick in tick_n..(tick_n + 60) {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick.saturating_mul(100)),
             tick,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick}: {e:?}"))?;
@@ -364,13 +369,14 @@ async fn drive_to_running(
     let mut tick_n: u64 = 0;
     let mut reached_running = false;
     while tick_n < 30 && !reached_running {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &h.state,
             workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -470,7 +476,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     let sim_obs = Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
     let obs: Arc<dyn ObservationStore> = sim_obs.clone();
     let sim_clock = Arc::new(SimClock::new());
-    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
     let allocator = overdrive_control_plane::test_default_allocator(
@@ -495,10 +501,9 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     exit_observer::spawn(
         state.obs.clone(),
         // `AppState::new` wraps its single `driver` param into a
-        // single-entry `DriverRegistry` keyed on `DriverType::Exec`
-        // (ADR-0083 §D1, GH #42) — the same entry `driver` bound above.
-        state.drivers.get(DriverType::Exec).cloned().unwrap_or_else(|| {
-            unreachable!("AppState::new always composes a single-entry Exec registry")
+        // single-entry `DriverRegistry` keyed on `DriverType::Vm`.
+        state.drivers.get(DriverType::Vm).cloned().unwrap_or_else(|| {
+            unreachable!("AppState::new always composes a single-entry VM registry")
         }),
         state.lifecycle_events.clone(),
         sim_clock.clone(),
@@ -508,9 +513,11 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         id: "exit-event-observable-outcome".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
-            command: "/bin/sleep".to_string(),
-            args: vec!["3600".to_string()],
+        driver: DriverInput::Vm(VmInput {
+            command: "/sbin/init".to_string(),
+            args: vec!["--quiet".to_string()],
+            kernel: "/kernel".to_string(),
+            rootfs: "/rootfs".to_string(),
         }),
     })
     .map_err(|e| format!("valid job spec: {e:?}"))?;

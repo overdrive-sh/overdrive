@@ -50,7 +50,7 @@ async fn submit_json(
     Ok(serde_json::from_slice(&bytes).expect("JSON SubmitWorkloadResponse"))
 }
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -69,7 +69,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -97,7 +97,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -106,7 +111,12 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

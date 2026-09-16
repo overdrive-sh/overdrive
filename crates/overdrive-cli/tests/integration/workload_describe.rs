@@ -904,15 +904,11 @@ fn job_alloc_status_surfaces_issued_certificate_summary() {
 // ---------------------------------------------------------------------------
 // Probes section — the declaration × observation join (US-06 / K4).
 //
-// The end-to-end proof that probe state reaches the operator lives in
-// `workload_describe_probes.rs`, which drives a real `serve` + a real
-// deployed Service. These tests cover the join branches that a Tier-3
+// These tests cover the join branches that a Tier-3
 // test cannot reach DETERMINISTICALLY — a probe that has not yet ticked
 // (a sub-2s race against the probe interval) and a multi-allocation
 // Service — through the same single live `workload_describe` renderer
-// via `render_live`. They are complementary to the Tier-3 test, not a
-// substitute for it: a renderer-only suite is what let
-// `render::probes_section` ship with zero production callers.
+// via `render_live`.
 // ---------------------------------------------------------------------------
 
 /// Build a probe descriptor for the render-layer join fixtures.

@@ -29,7 +29,7 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
-use super::super::exec_driver::cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::AllocCleanup;
 
 #[tokio::test]
 #[serial(cgroup)]

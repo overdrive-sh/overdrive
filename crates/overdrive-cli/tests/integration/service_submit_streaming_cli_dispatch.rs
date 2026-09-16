@@ -3,13 +3,9 @@
 //! 01-03e3 (commit `db4fccc5`) migrated the CLI consumer match arms
 //! to `ServiceSubmitEvent` but missed the submit-side dispatch path
 //! at `crates/overdrive-cli/src/commands/deploy.rs::deploy_streaming`.
-//! Today (pre-fix) a Service-kind TOML falls through every Service
-//! TOML wrapped in `SubmitSpecInput::Job(spec_input)` — actually,
-//! because `JobSpecInput` is `deny_unknown_fields` and a Service
-//! TOML carries a `[service]` table the legacy parser does not
-//! recognise, the production submit path returns
-//! `CliError::InvalidSpec` synchronously instead of routing to a
-//! Service-kind streaming consumer.
+//! Before the fix, a Service-kind TOML was routed through the Job
+//! submission path and returned `CliError::InvalidSpec` synchronously
+//! instead of reaching a Service-kind streaming consumer.
 //!
 //! This file pins the corrective contract:
 //!
@@ -20,20 +16,16 @@
 //!     `ServiceSubmitEvent::Accepted` as the first wire line; the
 //!     test does not wait for terminal — it asserts the dispatch
 //!     reached the in-process server).
-//!   * **S-SHCP-CLI-DISPATCH-02** — a Job-kind TOML fed through the
-//!     same `deploy_streaming` entrypoint MUST route to
-//!     `deploy_streaming_job` and produce a Job-vocabulary summary
-//!     (regression guard against accidental cross-routing).
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no
 //! subprocess": this file spawns a real in-process control-plane
 //! server via `commands::serve::run_with_dataplane(...)` and calls
 //! `commands::deploy::deploy_streaming(...)` directly.
 //!
-//! Linux-gated because the production submit path eventually drives
-//! `ExecDriver` against `/bin/sh`. The macOS `--no-run` gate
-//! compiles this file via `cargo check --features integration-tests`
-//! per `.claude/rules/testing.md`.
+//! Linux-gated because the integration path uses the production server
+//! and network lifecycle. The macOS `--no-run` gate compiles this file
+//! via `cargo check --features integration-tests` per
+//! `.claude/rules/testing.md`.
 
 #![cfg(target_os = "linux")]
 
@@ -90,26 +82,11 @@ replicas = 1
 port = 18080
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/bin/sleep"
 args = ["300"]
-
-[resources]
-cpu_milli = 100
-memory_bytes = 67108864
-"#;
-
-// A valid Job-kind TOML — the `[job]` table is the kind
-// discriminator and triggers the `WorkloadSpecInput::Job(_)` arm.
-// `/bin/sh -c "exit 0"` exits cleanly so the streaming consumer
-// reaches `JobSubmitEvent::Succeeded` quickly.
-const JOB_TOML: &str = r#"
-[job]
-id = "job-dispatch-1"
-
-[exec]
-command = "/bin/sh"
-args = ["-c", "exit 0"]
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -122,12 +99,8 @@ memory_bytes = 67108864
 
 /// A Service-kind TOML fed through `deploy_streaming` MUST route to
 /// `deploy_streaming_service` (the `ServiceSubmitEvent` consumer
-/// surface). Today the production path returns
-/// `CliError::InvalidSpec` synchronously because the Service TOML
-/// falls through to a legacy `JobSpecInput`-deserialise that
-/// rejects `[service]` as an unknown field. This test pins the
-/// post-fix contract: the call MUST NOT return `InvalidSpec`
-/// synchronously; the dispatch reached the server.
+/// surface). The call MUST NOT return `CliError::InvalidSpec`
+/// synchronously; the dispatch must reach the server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(workload_cgroup)]
 async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() {
@@ -136,10 +109,8 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
 
     let spec_path = write_toml(tmp.path(), "svc-dispatch-1.toml", SERVICE_TOML);
 
-    // Drive submit_streaming on a Service TOML. Pre-fix this returns
-    // `Err(CliError::InvalidSpec)` synchronously because the legacy
-    // path tries `toml::from_str::<JobSpecInput>` and `[service]` is
-    // an unknown field under `deny_unknown_fields`. Post-fix this
+    // Drive submit_streaming on a Service TOML. The current parser
+    // projects the Service arm and the deploy path
     // routes to the new `deploy_streaming_service` function which
     // POSTs to the in-process server; the streaming consumer awaits
     // terminal — we cap the await with a short timeout and assert
@@ -156,14 +127,11 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
 
     // Give the submit a generous window to:
     //   1. Parse the TOML (post-fix: WorkloadSpecInput::Service)
-    //   2. Validate ServiceV2::from_submit client-side
+    //   2. Validate Service::from_submit client-side
     //   3. POST to the in-process server
     //   4. Receive the streaming `Accepted` first wire line
     //
-    // Pre-fix the call returns InvalidSpec in <100ms — the timeout
-    // is irrelevant on the RED path. Post-fix the call WILL block
-    // (server-side Service-kind end-to-end is RED scaffold per
-    // `service_honest_stable.rs`) waiting for terminal — the timeout
+    // The call may block waiting for a terminal event — the timeout
     // fires and we issue an operator stop to free the streaming
     // consumer.
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -198,7 +166,7 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
         Ok(Ok(Err(CliError::InvalidSpec { field, message }))) => {
             panic!(
                 "S-SHCP-CLI-DISPATCH-01: Service TOML returned CliError::InvalidSpec — \
-                 the legacy JobSpecInput fall-through is still wired. field={field}, \
+                 the submit-side Service dispatch did not run. field={field}, \
                  message={message}",
             );
         }
@@ -206,7 +174,7 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
             // Other errors (Transport, Validation) are acceptable —
             // they mean the dispatch reached the server which then
             // failed for a different reason. The load-bearing
-            // assertion is "NOT InvalidSpec from legacy parser".
+            // assertion is "NOT InvalidSpec from the submit-side parser".
             // Tolerate so the test focuses on the dispatch.
             tracing::debug!("Service submit returned non-InvalidSpec error: {other:?}");
         }
@@ -219,52 +187,6 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
             // contract is satisfied.
         }
     }
-
-    drop(handle);
-}
-
-// ===========================================================================
-// S-SHCP-CLI-DISPATCH-02 — Job TOML routes to JobSubmitEvent (regression)
-// ===========================================================================
-
-/// A Job-kind TOML fed through `deploy_streaming` MUST route to
-/// `deploy_streaming_job` (the `JobSubmitEvent` consumer surface).
-/// Regression guard against accidental cross-routing when the new
-/// Service-kind branch is added.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial(workload_cgroup)]
-async fn cli_submit_streaming_job_still_routes_to_job_submit_event_consumer() {
-    let (handle, tmp) = spawn_server().await;
-    let cfg = config_path(tmp.path());
-
-    let spec_path = write_toml(tmp.path(), "job-dispatch-1.toml", JOB_TOML);
-
-    let output = overdrive_cli::commands::deploy::deploy_streaming(DeployArgs {
-        spec: spec_path,
-        config_path: cfg,
-    })
-    .await
-    .expect("Job submit must complete");
-
-    // Job-vocabulary terminal summary — the dispatch reached the
-    // Job consumer. `format_job_succeeded_summary` emits `Job
-    // '<name>' succeeded.` (verbatim) for an exit-0 workload.
-    assert!(
-        output.summary.contains("Job 'job-dispatch-1' succeeded."),
-        "S-SHCP-CLI-DISPATCH-02: Job TOML must route to the Job consumer and \
-         render Job-vocabulary terminal summary; got: {summary:?}",
-        summary = output.summary,
-    );
-    // Anti-cross-route check: the summary must NOT contain the
-    // Service-vocabulary phrase `is stable` (which the
-    // `format_service_stable_summary` would emit).
-    assert!(
-        !output.summary.contains("is stable"),
-        "S-SHCP-CLI-DISPATCH-02: Job TOML must NOT produce a Service-vocabulary \
-         summary; got: {summary:?}",
-        summary = output.summary,
-    );
-    assert_eq!(output.exit_code, 0, "exit-0 Job → CLI exit 0 per KPI K1");
 
     drop(handle);
 }

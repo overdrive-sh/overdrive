@@ -171,8 +171,7 @@ mod acceptance {
     // from the `/stop` check-exists read (S-BIR-HANDLER-OUTCOME-RESUMED /
     // -RESTARTED, DDD-11). Per ADR-0073 § "The six pinned signatures"
     // items 2 + 4 + 6. Default-lane: the handler is invoked directly over a
-    // real `LocalIntentStore`-backed `AppState` (the
-    // `submit_job_handler_rejects_empty_exec_command_with_400.rs` pattern);
+    // real `LocalIntentStore`-backed `AppState`);
     // observable outcomes are read back at the `IntentStore` boundary and
     // the runtime broker counter.
     mod restart_workload_intent_key;
@@ -193,11 +192,8 @@ mod acceptance {
     #[cfg(feature = "integration-tests")]
     mod generation_read_coupling;
 
-    // wire-exec-spec-end-to-end — operator-facing job spec carries
-    // `[exec]` block end-to-end. Per ADR-0031.
+    // wire-spec end-to-end — retained VM wire-shape and action projections.
     mod action_shim_restart_uses_spec_from_action;
-    mod openapi_exec_block;
-    mod submit_job_handler_rejects_empty_exec_command_with_400;
 
     // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-01.
     // S-CP-04 broadcast property test + S-CP-05 classifier scenarios.
@@ -318,13 +314,6 @@ mod acceptance {
     /// Service-health-check-probes step 01-03d — composition-root
     /// `ProbeRunner` Earned-Trust gate per ADR-0054 § 7.
     mod probe_runner_boot_gate;
-    /// GAP-4 + GAP-5 corrective AT — production `ExecDriver` carries
-    /// a wired `ProbeRunner` and its lifecycle hooks drive the
-    /// supervisor on the runner. Closes the structural gap that pre-
-    /// patch let the production composition root discard
-    /// `Arc<ProbeRunner>` into an underscore-binding. See
-    /// `.context/01-03-structural-gap-audit.md`.
-    mod probe_runner_composition;
     // ADR-0080 § D4 / § D7 items 4 + 5 — `Stable` is NON-terminal, so
     // the action shim routes it to `on_alloc_stable` (retire the
     // startup role, keep the supervisor) rather than

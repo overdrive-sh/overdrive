@@ -1,11 +1,11 @@
-# E07 — A VM Job calls an Exec Service and receives the expected reply
+# E07 — one VM Job calls one VM Service and receives the expected reply
 
-**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `captured — independent review pending`
+**Surface:** E (end-to-end) · **KPI:** Q9 · **Status:** `pending`
 
 ## Expectation
 
 Using the built default-feature operator binary, deploy exactly one
-`[service]` + `[exec]` callee and one `[job]` + `[vm]` caller from the
+`[service]` + `[vm]` callee and one `[job]` + `[vm]` caller from the
 checked-in `examples/guest-stack-transparent-mtls-intercept/` bundle. The VM
 resolves `gti-e07-callee.svc.overdrive.local`, sends its byte-distinct request,
 and exits successfully only after receiving the exact reply. Built `serve`,
@@ -76,17 +76,16 @@ internal guarantees.
 
 ## Captured evidence
 
-`verification/harness/run-expectation.sh E07` completed successfully on the
-qualified native-metal host on 2026-08-30 UTC. The manifest pins the source
-commit, complete dirty patch, harness revision, native-metal substrate, seed,
-and zero runner exit. The verbatim product output records:
+The current VM-to-VM expectation has no post-cut capture yet. The retained
+files under `evidence/` are a historical pre-cut receipt captured on a
+qualified native-metal host on 2026-08-30 UTC; they remain byte-identical and
+must not be used to mark this current expectation `satisfied`. A new capture
+must run the checked-in VM-to-VM bundle and be independently audited before
+the status changes.
 
-- the Exec Service reaching `Running` with replicas `1/1`;
-- the VM Job reaching `Terminated` with `Verdict: Succeeded` and exit `0`;
-- the example's reply-dependent `E07 PASS` result;
-- successful public stops for the exact caller and callee workload IDs; and
-- removal of the marker-owned example materialization.
-
-The evidence makes no internal D7, kernel-program, capture, counter, TLS/kTLS,
-or product-private cleanup claim. This capture is not self-stamped
-`satisfied`; an independent reviewer must audit it before that status is used.
+The historical receipt records the pre-cut callee reaching `Running` with
+replicas `1/1`, the caller reaching `Terminated` with `Verdict: Succeeded` and
+exit `0`, the reply-dependent `E07 PASS` result, successful public stops for
+the exact caller and callee workload IDs, and removal of the marker-owned
+example materialization. Those files make no current D7, kernel-program,
+capture, counter, TLS/kTLS, or product-private cleanup claim.

@@ -32,41 +32,36 @@ use crate::traits::intent_store::{IntentStore, IntentStoreError};
 // ---------------------------------------------------------------------------
 // Re-exports for the workload-kind-discriminator parser surface.
 //
-// `WorkloadSpec` and friends ship as part of Slice 01 of
-// `workload-kind-discriminator` per ADR-0047. The legacy `Job` aggregate
-// and `JobSpecInput` remain in this module as the production path until
-// downstream slices (02–06) migrate every reader.
+// `WorkloadSpec` and friends are the parser-side inputs for the current
+// VM-only workload aggregates per ADR-0047.
 // ---------------------------------------------------------------------------
 pub use self::probe_descriptor::{
     JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
 };
-pub use self::service_spec::{ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV3};
+pub use self::service_spec::{ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1};
 
-// Re-export the parser-side `ExecInput` / `ResourcesInput` from
-// `workload_spec` under disambiguating aliases. The wire-shape twins
-// (`ExecInput` / `ResourcesInput` defined directly in this module)
-// remain the canonical wire-side types; the parser-side variants are
-// what `ServiceSpecV{1,2}` carry and what schema-evolution fixtures
-// construct.
+// Re-export the parser-side `ResourcesInput` and VM input under
+// disambiguating aliases. The parser-side variants are what
+// `ServiceSpec` carries and what its schema-evolution fixture constructs.
 pub use self::workload_spec::{
     CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceVip, WorkloadKind, WorkloadSpec,
     WorkloadSpecInput,
 };
 pub use self::workload_spec::{
-    DriverInput as ParserDriverInput, ExecInput as ParserExecInput,
-    ResourcesInput as ParserResourcesInput, VmInput as ParserVmInput,
+    DriverInput as ParserDriverInput, ResourcesInput as ParserResourcesInput,
+    VmInput as ParserVmInput,
 };
 
 mod workload_spec;
 
 // `ProbeDescriptor` aggregate type per ADR-0057. Lands additively
-// across slices 01 / 02 / 03 + 04 / 05 / 07 — TCP mechanic in 01-02,
-// HTTP in 02-01, Exec in 02-02.
+// across the parser's startup, readiness, and liveness roles — TCP and
+// HTTP are the supported mechanics.
 pub mod probe_descriptor;
 
 // `ServiceSpec` parser-side aggregate + per-type rkyv envelope per
-// ADR-0048 + ADR-0057. Step 01-02 lands the V1 → V2 envelope bump
-// with the three `Vec<ProbeDescriptor>` fields.
+// ADR-0048 + ADR-0057. The current VM-only V1 carries the three
+// `Vec<ProbeDescriptor>` fields.
 mod service_spec;
 
 // ---------------------------------------------------------------------------
@@ -104,14 +99,9 @@ pub enum AggregateError {
 ///
 /// Per ADR-0031 Amendment 1 the aggregate carries a tagged-enum
 /// `driver: WorkloadDriver` field instead of flat `command` / `args`.
-/// `WorkloadDriver::Exec(Exec { command, args })` is the Phase-1
-/// variant; `WorkloadDriver::Vm(Vm { .. })` is the Phase-2 microVM
-/// variant (ADR-0083 Amendment 2026-08-12, GH #42). Future variants
-/// (`Wasm(Wasm)`) append additively. The driver passes the inner
-/// `Exec.command` / `Exec.args` to
-/// `tokio::process::Command::new(impl AsRef<OsStr>).args(...)` — no
-/// newtype is warranted (per `.claude/rules/development.md` § Newtypes),
-/// and validation lives in `JobV2::from_submit`.
+/// `WorkloadDriver::Vm(Vm { .. })` is the current microVM execution
+/// contract. Future microVM-family variants append additively; validation
+/// lives in `JobV1::from_submit`.
 ///
 /// # Canonicalisation (rkyv)
 ///
@@ -128,40 +118,30 @@ pub enum AggregateError {
 /// serde is NOT substitutable for rkyv in hashing contexts — see
 /// ADR-0002.
 ///
-/// # Envelope wrapping (ADR-0050, forked V1->V2 by ADR-0083 Amendment
-/// 2026-08-12)
+/// # Envelope wrapping (ADR-0050)
 ///
 /// Per ADR-0050 single-cut migration: the `Job` payload is wrapped
 /// at the persistence boundary by [`WorkloadIntentEnvelope`] via
-/// the [`WorkloadIntentV2::Job`] variant — NOT by a per-type
-/// `JobEnvelope`. Public callers construct `Job { ... }` (=
-/// `JobV2 { ... }`) values via struct-literal syntax and wrap with
+/// the [`WorkloadIntentV1::Job`] variant — NOT by a per-type
+/// `JobEnvelope`. Public callers construct `Job { ... }` (= `JobV1`
+/// values) via struct-literal syntax and wrap with
 /// `WorkloadIntent::Job(job)` at the persistence boundary; the
-/// codec ([`WorkloadIntentV2::archive_for_store`]) is the SOLE
+/// codec ([`WorkloadIntentV1::archive_for_store`]) is the SOLE
 /// wrapping site.
-pub type Job = JobV2;
+pub type Job = JobV1;
 
 /// Validated intent-side counterpart to wire-shape [`DriverInput`].
-/// Forked V1 -> V2 by ADR-0083 Amendment 2026-08-12 (GH #42) — this
-/// alias always points at the live/latest fork member
-/// ([`WorkloadDriverV2`]); [`WorkloadDriverV1`] is the frozen sibling
-/// embedded only by the historical V1 payloads.
+/// Current VM-only tagged workload driver declaration.
 ///
 /// Naming: `WorkloadDriver`, not `Driver`, to disambiguate from the
 /// `Driver` *trait* at `crates/overdrive-core/src/traits/driver.rs`
 /// (per ADR-0030 §1). The trait is the driver implementation surface
 /// (`Driver::start(&AllocationSpec)`); this enum is the operator's
 /// declared driver-class intent on the [`Job`] aggregate.
-pub type WorkloadDriver = WorkloadDriverV2;
+pub type WorkloadDriver = WorkloadDriverV1;
 
-/// **FROZEN.** Embedded only by the frozen V1 payloads ([`JobV1`],
-/// [`ServiceV1`], [`ScheduleV1`]) — byte-identical to the
-/// pre-ADR-0083 single-variant `WorkloadDriver`. Never touched again:
-/// growing this enum would shift the archived layout of every V1
-/// payload and break the pinned `FIXTURE_V1_*` golden-bytes fixtures
-/// in `tests/schema_evolution/workload_intent.rs`. New driver classes
-/// append to [`WorkloadDriverV2`] instead (ADR-0083 Amendment
-/// 2026-08-12, GH #42).
+/// Current workload driver declaration persisted in the VM-only intent
+/// envelope.
 #[derive(
     Debug,
     Clone,
@@ -174,72 +154,14 @@ pub type WorkloadDriver = WorkloadDriverV2;
     rkyv::Deserialize,
 )]
 pub enum WorkloadDriverV1 {
-    /// Native binary under cgroups v2. Mirrors wire-shape
-    /// [`DriverInput::Exec`].
-    Exec(Exec),
-}
-
-/// **LIVE.** Embedded by the live V2 payloads ([`JobV2`],
-/// [`ServiceV2`], [`ScheduleV2`]) — the [`WorkloadDriver`] alias
-/// points here. Adds the [`Vm`] microVM variant (ADR-0083 Amendment
-/// 2026-08-12, GH #42) alongside the original [`Exec`] variant.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum WorkloadDriverV2 {
-    /// Native binary under cgroups v2. Mirrors wire-shape
-    /// [`DriverInput::Exec`].
-    Exec(Exec),
-    /// Cloud Hypervisor microVM driver per ADR-0082 / ADR-0083. The
-    /// wire-side parser/admission surface (`[vm]` table dispatch,
-    /// `DriverPayload::Vm`, `AllocationSpec.driver`) lands in step
-    /// 01-08 — this variant carries only the intent-side invocation
-    /// fields.
+    /// Cloud Hypervisor microVM driver.
     Vm(Vm),
-    // Future Phase 2+: Wasm(Wasm).
-}
-
-/// Exec-driver invocation fields. Mirrors wire-shape [`ExecInput`] on
-/// the intent side. Shared, byte-identical, by both
-/// [`WorkloadDriverV1::Exec`] and [`WorkloadDriverV2::Exec`].
-///
-/// Naming: bare `Exec`, not `ExecSpec` / `ExecInvocation` — the
-/// `WorkloadDriver::Exec(Exec)` qualified path disambiguates from the
-/// `[exec]` TOML table identifier and from the `ExecDriver` trait impl
-/// in `overdrive-worker`. The bare noun reads cleanest in context.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct Exec {
-    /// Host filesystem path to the binary the driver execs. Per ADR-0031
-    /// this is mandatory and validated non-empty (after trim) at
-    /// `JobV2::from_submit`.
-    pub command: String,
-    /// Argv passed verbatim to the binary. No per-element validation —
-    /// argv is opaque to the platform per ADR-0031 §4.
-    pub args: Vec<String>,
 }
 
 /// microVM-driver invocation fields (ADR-0083 Amendment 2026-08-12,
 /// GH #42). Mirrors the runtime `VmPayload` shape (ADR-0083 § D3) —
 /// `String`, not `PathBuf`, for both `kernel` and `rootfs`
-/// (rkyv/serde-clean, matches `Exec.command`'s shape). Per-VM volumes
+/// (rkyv/serde-clean). Per-VM volumes
 /// are out of scope for this feature (deferred to overdrive-fs, GH #97
 /// / virtiofsd, GH #43).
 #[derive(
@@ -267,8 +189,7 @@ pub struct Vm {
 }
 
 // ---------------------------------------------------------------------------
-// Job inner payload (envelope relocated to WorkloadIntent per ADR-0050;
-// forked V1 -> V2 by ADR-0083 Amendment 2026-08-12, GH #42)
+// Job inner payload (envelope relocated to WorkloadIntent per ADR-0050)
 // ---------------------------------------------------------------------------
 //
 // Per ADR-0050 single-cut migration: the persistence-boundary
@@ -276,27 +197,14 @@ pub struct Vm {
 // `Job::archive_for_store`, `Job::from_store_bytes`,
 // `Job::spec_digest`) was deleted in this commit. The `Job` payload
 // is now persisted as the inner variant of
-// [`WorkloadIntentV2::Job`]; the codec lives on
-// [`WorkloadIntentV2`].
-//
-// Per ADR-0083 Amendment 2026-08-12: `JobV1` is now the FROZEN
-// payload embedded only by `WorkloadIntentV1` (byte-identical to the
-// pre-fork shape — its `driver` field re-points to the single-variant
-// `WorkloadDriverV1`, so the archived layout is unchanged and
-// `FIXTURE_V1_*` still decode). `JobV2` carries the validating
-// constructor and is what the `Job` alias (= `JobV2`) resolves to —
-// every CLI handler and every server handler routes through
-// `JobV2::from_submit`. Callers wrap the value via
+// [`WorkloadIntent::Job`]; the codec lives on
+// [`WorkloadIntent`]. `JobV1` carries the validating constructor and is
+// the current payload behind the `Job` alias. Every CLI and server
+// handler routes through `Job::from_submit`. Callers wrap the value via
 // `WorkloadIntent::Job(job)` at the persistence boundary.
 
 /// **FROZEN.** Inner V1 payload of the intent-side workload
-/// aggregate. Embedded only by [`WorkloadIntentV1::Job`] — exists
-/// solely so [`WorkloadIntentEnvelope::V1`] can decode the pinned
-/// `FIXTURE_V1_*` golden bytes in
-/// `tests/schema_evolution/workload_intent.rs`. Never constructed at
-/// runtime; never touched again (rkyv archives are fixed positional
-/// layouts — see [`JobV2`] for the live, behaviour-carrying
-/// counterpart).
+/// aggregate. The current VM-only workload intent payload.
 #[derive(
     Debug,
     Clone,
@@ -315,46 +223,7 @@ pub struct JobV1 {
     pub driver: WorkloadDriverV1,
 }
 
-/// **LIVE.** Inner V2 payload of the [`Job`] aggregate — the [`Job`]
-/// alias points here. Identical shape to [`JobV1`] except `driver` is
-/// the Vm-capable [`WorkloadDriverV2`] (ADR-0083 Amendment
-/// 2026-08-12, GH #42).
-///
-/// rkyv archives are **fixed positional layouts** — appending a
-/// field to this struct shifts every subsequent offset and renders
-/// previously-archived bytes unreadable. Layout-changing edits
-/// require minting a new outer envelope variant per
-/// `.claude/rules/development.md` § "Version-bump procedure". The
-/// envelope today is [`WorkloadIntentEnvelope`] (per ADR-0050, forked
-/// V1 -> V2 by ADR-0083 Amendment 2026-08-12).
-///
-/// Per ADR-0031 Amendment 1, `driver` is a tagged enum
-/// (`WorkloadDriver`) carrying the operator's invocation shape;
-/// the projection from wire-shape `DriverInput::Exec` →
-/// `WorkloadDriver::Exec` happens inside
-/// [`JobV2::from_submit`](JobV2::from_submit).
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct JobV2 {
-    pub id: WorkloadId,
-    pub replicas: NonZeroU32,
-    pub resources: Resources,
-    /// Driver-class declaration carrying the operator's invocation
-    /// shape. Per ADR-0031 Amendment 1 this is a tagged enum
-    /// mirroring the wire-shape `DriverInput`.
-    pub driver: WorkloadDriverV2,
-}
-
-impl JobV2 {
+impl JobV1 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Job`] payload per
     /// ADR-0051 § 4 / OQ-6. Renames the legacy `from_spec` entry point
@@ -363,8 +232,8 @@ impl JobV2 {
     /// intent-side `Job` aggregate; every CLI handler and every server
     /// handler routes through here.
     ///
-    /// Rejects zero replicas, zero-byte memory capacity, and (per
-    /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
+    /// Rejects zero replicas, zero-byte memory capacity, and empty or
+    /// whitespace-only VM commands. Wraps
     /// [`WorkloadId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
     pub fn from_submit(spec: JobSpecInput) -> Result<Self, AggregateError> {
@@ -408,37 +277,27 @@ impl JobV2 {
 // Per OQ-5 (single-cut), every workload-scoped row sits at
 // `workloads/<id>` — see `IntentKey::for_workload*`.
 //
-// Per ADR-0083 Amendment 2026-08-12 (GH #42): forked V1 -> V2 to add
-// `WorkloadDriverV2::Vm` without breaking the frozen V1 archived
-// layout. `WorkloadIntentV1` (and its embedded `JobV1` / `ServiceV1`
-// / `ScheduleV1`) is FROZEN — byte-identical to the pre-fork shape,
-// existing solely so `WorkloadIntentEnvelope::V1` can decode the
-// pinned `FIXTURE_V1_*` golden bytes. `WorkloadIntentV2` (and its
-// embedded `JobV2` / `ServiceV2` / `ScheduleV2`) is LIVE — every
-// public alias (`WorkloadIntent`, `Job`, `Service`, `Schedule`,
-// `WorkloadDriver`) points here.
+// The greenfield cut keeps one current VM-only payload family and one
+// incompatible V1 envelope. No historical payload family is decoded.
 
 /// Public payload alias for the intent-side workload aggregate.
 ///
-/// Per ADR-0050 the alias points at the latest payload variant —
-/// per ADR-0083 Amendment 2026-08-12, today `WorkloadIntentV2`.
+/// The alias points at the current VM-only V1 payload.
 /// Callers construct values via `WorkloadIntent::Job(job)` /
 /// `WorkloadIntent::Service(svc)` / `WorkloadIntent::Schedule(sched)`
 /// and pass the value to the persistence-boundary codec
-/// ([`WorkloadIntentV2::archive_for_store`]).
-pub type WorkloadIntent = WorkloadIntentV2;
+/// ([`WorkloadIntentV1::archive_for_store`]).
+pub type WorkloadIntent = WorkloadIntentV1;
 
 /// Documentation alias for "the latest payload variant of
-/// [`WorkloadIntentEnvelope`]". Mirrors the [`Job`] = [`JobV2`]
-/// alias-to-payload pattern from ADR-0048 UI-02.
-pub type WorkloadIntentLatest = WorkloadIntentV2;
+/// [`WorkloadIntentEnvelope`].
+pub type WorkloadIntentLatest = WorkloadIntentV1;
 
 /// Per-type rkyv versioned envelope for the intent-side workload
-/// aggregate per ADR-0048 § 4 + ADR-0050 § 4, forked V1 -> V2 by
-/// ADR-0083 Amendment 2026-08-12 (GH #42, `WorkloadDriverV2::Vm`).
+/// aggregate per ADR-0048 § 4 + ADR-0050 § 4.
 ///
 /// Codec-internal — named only inside the typed
-/// [`WorkloadIntentV2::archive_for_store`] / [`WorkloadIntentV2::from_store_bytes`]
+/// [`WorkloadIntentV1::archive_for_store`] / [`WorkloadIntentV1::from_store_bytes`]
 /// codec methods and the persistence-boundary call sites that consume
 /// them. Public callers use the [`WorkloadIntent`] alias and
 /// construct payloads via the per-variant struct-literal syntax;
@@ -457,19 +316,11 @@ pub type WorkloadIntentLatest = WorkloadIntentV2;
 )]
 pub enum WorkloadIntentEnvelope {
     V1(WorkloadIntentV1),
-    V2(WorkloadIntentV2),
 }
 
-/// **FROZEN.** Inner V1 payload of the intent-side workload aggregate
-/// per ADR-0050 § 1. Exists solely so [`WorkloadIntentEnvelope::V1`]
-/// can decode the pinned `FIXTURE_V1_*` golden bytes in
-/// `tests/schema_evolution/workload_intent.rs`. Never constructed at
-/// runtime; never touched again. See [`WorkloadIntentV2`] for the
-/// live, behaviour-carrying counterpart.
-///
-/// rkyv archives are **fixed positional layouts** — this enum's
-/// variant SET is frozen; new workload kinds append to
-/// [`WorkloadIntentV2`] instead.
+/// Current VM-only workload intent payload. Its three variants preserve
+/// the workload-kind discriminator while the driver declaration is
+/// constrained to the supported microVM family.
 #[derive(
     Debug,
     Clone,
@@ -491,49 +342,8 @@ pub enum WorkloadIntentV1 {
     Schedule(ScheduleV1),
 }
 
-/// **LIVE.** Inner V2 payload of the intent-side workload aggregate.
-/// The [`WorkloadIntent`] alias points here. Three variants tracking
-/// the parser-side [`WorkloadSpec`]: `Job` (run-to-completion),
-/// `Service` (long-running supervised), `Schedule` (cron-fired Job) —
-/// identical shape to [`WorkloadIntentV1`] except each inner payload
-/// carries the Vm-capable [`WorkloadDriverV2`] (ADR-0083 Amendment
-/// 2026-08-12, GH #42).
-///
-/// rkyv archives are **fixed positional layouts** — appending a
-/// variant to this enum is additive and does not shift discriminant
-/// tags for existing variants per ADR-0048 § "Why a per-type rkyv
-/// enum is forward-compatible". Layout-changing edits to embedded
-/// per-kind payloads (e.g. adding a field to [`ServiceV2`]) require
-/// minting a new envelope variant per `.claude/rules/development.md`
-/// § "Version-bump procedure".
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum WorkloadIntentV2 {
-    /// Run-to-completion workload.
-    Job(JobV2),
-    /// Long-running supervised workload — Phase 1 minimal shape per
-    /// ADR-0050 OQ-3.
-    Service(ServiceV2),
-    /// Cron-scheduled Job — embedded-job shape per ADR-0050 OQ-4.
-    Schedule(ScheduleV2),
-}
-
-/// **FROZEN.** Phase 1 minimal `Service` V1 payload per ADR-0050 § 2 +
-/// OQ-3, extended with health-check probe descriptors per ADR-0057.
-/// Embedded only by [`WorkloadIntentV1::Service`] — exists solely so
-/// [`WorkloadIntentEnvelope::V1`] can decode the pinned
-/// `FIXTURE_V1_SERVICE` golden bytes. Never constructed at runtime;
-/// never touched again. See [`ServiceV2`] for the live,
-/// behaviour-carrying counterpart.
+/// Current VM-only `Service` payload per ADR-0050 § 2 + OQ-3, extended
+/// with health-check probe descriptors per ADR-0057.
 #[derive(
     Debug,
     Clone,
@@ -557,88 +367,9 @@ pub struct ServiceV1 {
 }
 
 /// Public payload alias for the intent-side `Service` aggregate.
-/// Minted by ADR-0083 Amendment 2026-08-12 (GH #42) — points at the
-/// live/latest payload variant, [`ServiceV2`], mirroring the
-/// [`Job`] = [`JobV2`] alias-to-payload pattern from ADR-0048 UI-02.
-pub type Service = ServiceV2;
+pub type Service = ServiceV1;
 
-/// **LIVE.** Phase 1 minimal `Service` payload per ADR-0050 § 2 +
-/// OQ-3, extended with health-check probe descriptors per ADR-0057
-/// and the Vm-capable driver per ADR-0083 Amendment 2026-08-12
-/// (GH #42). The [`Service`] alias points here.
-///
-/// Mirrors [`JobV2`]'s `(id, replicas, resources, driver)` shape and
-/// adds `listeners` plus three `Vec<ProbeDescriptor>` slots (startup
-/// / readiness / liveness). The probe vecs carry the parsed-and-
-/// validated descriptors the operator declared under
-/// `[[health_check.startup]]` / `[[health_check.readiness]]` /
-/// `[[health_check.liveness]]` (plus any platform-synthesised
-/// default-TCP probe per ADR-0058). Persisting the descriptors
-/// themselves is correct per § "Persist inputs, not derived state":
-/// the reconciler recomputes derived values (startup deadline,
-/// inferred-flag rendering, mechanic summary) every tick from the
-/// descriptors + the live policy, never persisting them as cached
-/// outputs.
-///
-/// # rkyv schema-evolution note
-///
-/// Per `.claude/rules/development.md` § "rkyv schema evolution" the
-/// archived layout of this struct is positional. Under the Phase-1
-/// greenfield single-cut migration policy ("delete the on-disk redb
-/// file" is the official upgrade path, per
-/// `feedback_single_cut_greenfield_migrations.md`), the historical
-/// golden-bytes fixtures under `tests/schema_evolution/workload_intent.rs`
-/// are the structural defense — every persisted layout has a pinned
-/// golden-bytes fixture, and this struct's own layout change (the
-/// `driver` field widening to [`WorkloadDriverV2`]) is exactly what
-/// forced the ADR-0083 Amendment 2026-08-12 V1 -> V2 envelope bump.
-///
-/// Carries no VIP — VIPs are platform-issued via
-/// `ServiceVipAllocator` per ADR-0049 § 5. The aggregate carries
-/// what the operator declared; the allocated VIP lives in the
-/// allocator's persisted state and is projected onto listener rows
-/// at dataplane-render time.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ServiceV2 {
-    pub id: WorkloadId,
-    pub replicas: NonZeroU32,
-    pub resources: Resources,
-    pub driver: WorkloadDriverV2,
-    /// Operator-declared listeners in declaration order. Reuses the
-    /// parser-layer [`Listener`] newtype — `(port, protocol)` only.
-    pub listeners: Vec<Listener>,
-    /// Operator-declared startup probes plus any platform-synthesised
-    /// default per ADR-0058. Empty IFF the operator wrote
-    /// `[[health_check.startup]] = []` (explicit opt-out, preserves
-    /// Phase-1 first-Running semantics). The reconciler reads these
-    /// descriptors and recomputes `max_attempts × interval` →
-    /// startup-deadline on every tick (NOT a cached value).
-    pub startup_probes: Vec<ProbeDescriptor>,
-    /// Operator-declared readiness probes. Populated by future
-    /// slices (02-01); reserved here for ServiceV2 layout stability.
-    pub readiness_probes: Vec<ProbeDescriptor>,
-    /// Operator-declared liveness probes. Populated by future
-    /// slices (02-02); reserved here for ServiceV2 layout stability.
-    pub liveness_probes: Vec<ProbeDescriptor>,
-}
-
-/// **FROZEN.** Phase 1 `Schedule` V1 payload per ADR-0050 § 2 + OQ-4
-/// (embedded inner job). Embedded only by
-/// [`WorkloadIntentV1::Schedule`] — exists solely so
-/// [`WorkloadIntentEnvelope::V1`] can decode the pinned
-/// `FIXTURE_V1_SCHEDULE` golden bytes. Never constructed at runtime;
-/// never touched again. See [`ScheduleV2`] for the live,
-/// behaviour-carrying counterpart.
+/// Current VM-only `Schedule` payload per ADR-0050 § 2 + OQ-4.
 #[derive(
     Debug,
     Clone,
@@ -656,116 +387,19 @@ pub struct ScheduleV1 {
     pub cron_expr: CronExpr,
 }
 
-/// Public payload alias for the intent-side `Schedule` aggregate.
-/// Minted by ADR-0083 Amendment 2026-08-12 (GH #42) — points at the
-/// live/latest payload variant, [`ScheduleV2`], mirroring the
-/// [`Job`] = [`JobV2`] alias-to-payload pattern from ADR-0048 UI-02.
-pub type Schedule = ScheduleV2;
+pub type Schedule = ScheduleV1;
 
-/// **LIVE.** Phase 1 `Schedule` payload per ADR-0050 § 2 + OQ-4
-/// (embedded inner job), extended with the Vm-capable driver per
-/// ADR-0083 Amendment 2026-08-12 (GH #42, via the embedded
-/// [`JobV2`]). The [`Schedule`] alias points here.
-///
-/// The schedule's per-fire instance IS a [`JobV2`] — embedded
-/// directly rather than carried as deferred bytes (alternative
-/// rejected per OQ-4 — every reader would otherwise pay a second
-/// envelope decode). The cron expression is the schedule-only
-/// addition.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ScheduleV2 {
-    pub id: WorkloadId,
-    pub job: JobV2,
-    pub cron_expr: CronExpr,
-}
-
-// ---------------------------------------------------------------------------
-// V1 -> V2 structural conversion (ADR-0083 Amendment 2026-08-12, GH #42)
-// ---------------------------------------------------------------------------
-//
-// Every conversion is a structural field-by-field projection; the
-// only semantic step is `WorkloadDriverV1::Exec ->
-// WorkloadDriverV2::Exec` (the sole V1 variant maps onto its V2
-// sibling of the same name).
-
-impl From<WorkloadDriverV1> for WorkloadDriverV2 {
-    fn from(v1: WorkloadDriverV1) -> Self {
-        match v1 {
-            WorkloadDriverV1::Exec(exec) => Self::Exec(exec),
-        }
-    }
-}
-
-impl From<JobV1> for JobV2 {
-    fn from(v1: JobV1) -> Self {
-        let JobV1 { id, replicas, resources, driver } = v1;
-        Self { id, replicas, resources, driver: driver.into() }
-    }
-}
-
-impl From<ServiceV1> for ServiceV2 {
-    fn from(v1: ServiceV1) -> Self {
-        let ServiceV1 {
-            id,
-            replicas,
-            resources,
-            driver,
-            listeners,
-            startup_probes,
-            readiness_probes,
-            liveness_probes,
-        } = v1;
-        Self {
-            id,
-            replicas,
-            resources,
-            driver: driver.into(),
-            listeners,
-            startup_probes,
-            readiness_probes,
-            liveness_probes,
-        }
-    }
-}
-
-impl From<ScheduleV1> for ScheduleV2 {
-    fn from(v1: ScheduleV1) -> Self {
-        let ScheduleV1 { id, job, cron_expr } = v1;
-        Self { id, job: job.into(), cron_expr }
-    }
-}
-
-impl From<WorkloadIntentV1> for WorkloadIntentV2 {
-    fn from(v1: WorkloadIntentV1) -> Self {
-        match v1 {
-            WorkloadIntentV1::Job(job) => Self::Job(job.into()),
-            WorkloadIntentV1::Service(svc) => Self::Service(svc.into()),
-            WorkloadIntentV1::Schedule(sched) => Self::Schedule(sched.into()),
-        }
-    }
-}
-
-impl ServiceV2 {
+impl ServiceV1 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Service`] payload per
-    /// ADR-0051 § 4. Mirrors [`JobV2::from_submit`]'s validation
+    /// ADR-0051 § 4. Mirrors [`Job::from_submit`]'s validation
     /// surface plus Service-specific listener rules:
     ///
     /// * `id` non-empty after trim → [`WorkloadId::new`].
     /// * `replicas > 0` → [`NonZeroU32`].
     /// * `resources.memory_bytes != 0`.
-    /// * Driver validation (`exec.command` or `vm.command` non-empty after
-    ///   trim, per ADR-0031 § 4 / ADR-0083).
+    /// * Driver validation (`vm.command` non-empty after trim, per
+    ///   ADR-0083).
     /// * `listeners.len() >= 1`
     ///   ([`crate::aggregate::ParseError::ListenerMissing`] projected
     ///   onto [`AggregateError::Validation`]).
@@ -791,7 +425,7 @@ impl ServiceV2 {
             liveness_probes,
         } = input;
 
-        // Identity + scalar field validation — mirrors `JobV2::from_submit`.
+        // Identity + scalar field validation — mirrors `Job::from_submit`.
         let id = WorkloadId::new(&id)?;
         let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
             field: "replicas",
@@ -847,11 +481,6 @@ impl ServiceV2 {
             validated.push(Listener { port, protocol });
         }
 
-        if matches!(driver, WorkloadDriver::Vm(_)) {
-            validate_vm_service_probe_mechanics(&startup_probes, "startup_probes")?;
-            validate_vm_service_probe_mechanics(&readiness_probes, "readiness_probes")?;
-            validate_vm_service_probe_mechanics(&liveness_probes, "liveness_probes")?;
-        }
         validate_probe_mechanics(&startup_probes, "startup_probes")?;
         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
@@ -885,23 +514,12 @@ impl ServiceV2 {
     }
 }
 
-const VM_EXEC_PROBE_DIAGNOSTIC: &str = "exec probes are not supported for VM Service workloads; use HTTP or TCP; optional VM Exec probes are tracked by GH #280";
-
-/// Project either existing wire driver arm into its intent representation.
+/// Project the supported wire driver arm into its intent representation.
 ///
 /// Commands must be non-empty after trimming. Kernel and rootfs path
 /// existence remains a VMM create-time concern.
 fn validate_driver_input(driver: DriverInput) -> Result<WorkloadDriver, AggregateError> {
     match driver {
-        DriverInput::Exec(exec) => {
-            if exec.command.trim().is_empty() {
-                return Err(AggregateError::Validation {
-                    field: "exec.command",
-                    message: "command must be non-empty".to_string(),
-                });
-            }
-            Ok(WorkloadDriver::Exec(Exec { command: exec.command, args: exec.args }))
-        }
         DriverInput::Vm(vm) => {
             if vm.command.trim().is_empty() {
                 return Err(AggregateError::Validation {
@@ -919,27 +537,10 @@ fn validate_driver_input(driver: DriverInput) -> Result<WorkloadDriver, Aggregat
     }
 }
 
-fn validate_vm_service_probe_mechanics(
-    probes: &[ProbeDescriptor],
-    field: &'static str,
-) -> Result<(), AggregateError> {
-    if let Some((position, _)) = probes
-        .iter()
-        .enumerate()
-        .find(|(_, probe)| matches!(probe.mechanic, ProbeMechanic::Exec { .. }))
-    {
-        return Err(AggregateError::Validation {
-            field,
-            message: format!("[{position}]: {VM_EXEC_PROBE_DIAGNOSTIC}"),
-        });
-    }
-    Ok(())
-}
-
 /// Re-assign every descriptor's `idx` from its 0-based position in
 /// its own role vector, per ADR-0080 § D1.
 ///
-/// The TOML parser assigns `idx` at `ServiceSpecV3` construction and
+/// The TOML parser assigns `idx` at `ServiceSpecV1` construction and
 /// the projection carries it verbatim, so for the CLI path this is an
 /// identity transform. For the API/wire path it is the enforcement
 /// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a
@@ -960,7 +561,7 @@ fn reindex_probes_by_position(probes: Vec<ProbeDescriptor>) -> Vec<ProbeDescript
 /// Validate probe mechanic content at the API admission boundary.
 ///
 /// The TOML parser validates at parse time in `parse_http_mechanic` /
-/// `parse_exec_mechanic`; the API path deserialises `ProbeDescriptor`
+/// the API path deserialises `ProbeDescriptor`
 /// from JSON and must validate here. Both paths converge on
 /// `ProbeMechanic::validate()`.
 fn validate_probe_mechanics(
@@ -976,7 +577,7 @@ fn validate_probe_mechanics(
     Ok(())
 }
 
-impl ScheduleV2 {
+impl ScheduleV1 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Schedule`] payload per
     /// ADR-0051 § 4 / OQ-5.
@@ -989,78 +590,44 @@ impl ScheduleV2 {
     /// Schedule streaming endpoint ships.
     #[expect(
         clippy::todo,
-        reason = "RED scaffold for ScheduleV2::from_submit — lands in a future slice per ADR-0051 OQ-5"
+        reason = "RED scaffold for ScheduleV1::from_submit — lands in a future slice per ADR-0051 OQ-5"
     )]
     pub fn from_submit(
         _input: crate::api::submit::ScheduleSpecInput,
     ) -> Result<Self, AggregateError> {
         todo!(
-            "RED scaffold: ScheduleV2::from_submit lands in a future slice — Schedule wire-arm wiring is intentionally deferred per ADR-0051 OQ-5"
+            "RED scaffold: ScheduleV1::from_submit lands in a future slice — Schedule wire-arm wiring is intentionally deferred per ADR-0051 OQ-5"
         )
     }
 }
 
 impl VersionedEnvelope for WorkloadIntentEnvelope {
-    type Latest = WorkloadIntentV2;
+    type Latest = WorkloadIntentV1;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V2(payload)
+        Self::V1(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        match self {
-            // ADR-0083 Amendment 2026-08-12 (GH #42): V1 up-converts
-            // through the structural `From<WorkloadIntentV1> for
-            // WorkloadIntentV2` impl.
-            Self::V1(v1) => Ok(v1.into()),
-            Self::V2(v2) => Ok(v2),
-        }
+        let Self::V1(payload) = self;
+        Ok(payload)
     }
 
     // mutants: skip — `discriminant_offset_from_end` is intentionally
-    // `None`. Per ADR-0050 step 02-03a the empirical re-pin was
-    // originally deferred "until V2 lands"; V2 landed at the
-    // ADR-0083 Amendment 2026-08-12 fork (GH #42,
-    // `WorkloadDriverV2::Vm`) and the re-pin was explicitly WAIVED
-    // for that landing, NOT silently skipped — the outer envelope
-    // still wraps a 3-variant inner enum per driver kind, so the
-    // JobEnvelope-style 64-byte from-end pin does not trivially
-    // transfer, and re-deriving the offset empirically was judged
-    // not worth the investment for this fork (the golden-bytes
-    // fixtures below are the load-bearing defense either way — see
-    // the body comment). The pre-decode probe is structurally a
-    // no-op while this returns `None`, so `Some(0)` and `None`
-    // produce indistinguishable behaviour — there is no test that
-    // can distinguish them.
+    // `None`. The pre-decode probe remains unavailable for this envelope, so
+    // malformed bytes are classified by the decoder itself.
     //
     // COUPLING: this method and `known_discriminants()` immediately
     // below MUST move together. A future re-pin MUST (1) set this to
     // `Some(N)`, (2) confirm `known_discriminants()` already lists
-    // every live tag (today `&[0, 1]`), and (3) add a golden-bytes
+    // every live tag, and (3) add a golden-bytes
     // test that fires on the newly-`Some` offset — do not re-pin one
     // without the other.
     fn discriminant_offset_from_end() -> Option<usize> {
-        // Empirically-pinned offset remains DEFERRED for
-        // `WorkloadIntentEnvelope` — waived (not merely "not yet
-        // reached") at both the original ADR-0050 step 02-03a
-        // landing and the ADR-0083 Amendment 2026-08-12 V1->V2 fork
-        // (GH #42). The outer envelope wraps a 3-variant inner enum
-        // (`WorkloadIntentV1::{Job, Service, Schedule}` /
-        // `WorkloadIntentV2::{Job, Service, Schedule}`) whose
-        // archived layout shifts the trailing root region in ways
-        // that the JobEnvelope-style 64-byte from-end pin cannot
-        // trivially adopt. Returning `None` makes the pre-decode
-        // probe a no-op; unknown-future-variant bytes still surface
-        // as `EnvelopeError::Malformed` via rkyv's bytecheck
-        // (operator-facing remediation is the same: "delete the
-        // redb file"). The structural defense against future-binary
-        // surface IS preserved by the round-trip golden-bytes
-        // fixtures for BOTH `V1` (`FIXTURE_V1_JOB` / `_SERVICE` /
-        // `_SCHEDULE`) and `V2` (`FIXTURE_V2_JOB_VM`) in
-        // `tests/schema_evolution/workload_intent.rs`; the targeted
-        // `UnknownVersion` classification is the only diagnostic
-        // surface that degrades. Re-pin when the empirical offset
-        // becomes worth investing in.
+        // Empirically-pinned offset remains unavailable for
+        // `WorkloadIntentEnvelope`; returning `None` leaves malformed
+        // bytes to the decoder's bytecheck path. The current V1
+        // golden-byte fixtures pin the supported archive layout.
         None
     }
 
@@ -1068,17 +635,13 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
     // `discriminant_offset_from_end` returns `None` (see the
     // COUPLING note on that method above — the two are pinned
     // together and must be re-derived together). Mutations that
-    // replace the `&[0, 1]` slice with `Vec::leak(vec![])` /
-    // `Vec::leak(vec![0])` / `Vec::leak(vec![1])` produce no
+    // replace the `&[0]` slice with `Vec::leak(vec![])` /
+    // `Vec::leak(vec![1])` produce no
     // observable behaviour change while the offset probe is a
     // no-op.
     fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0, V2 carries 1 (ADR-0083
-        // Amendment 2026-08-12, GH #42). Kept accurate even though
-        // `discriminant_offset_from_end` returning `None` makes the
-        // probe skip this slice today — a future re-pin reads this
-        // value as-is rather than also needing to backfill it.
-        &[0, 1]
+        // The sole current V1 variant carries rkyv discriminant 0.
+        &[0]
     }
 
     // mutants: skip — `type_name` feeds only the `EnvelopeError`
@@ -1094,14 +657,14 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
     }
 }
 
-impl WorkloadIntentV2 {
+impl WorkloadIntentV1 {
     /// Archive a [`WorkloadIntent`] for persistence through the
     /// [`IntentStore`].
     ///
     /// # Postconditions
     ///
     /// On `Ok(bytes)`, `bytes` is the canonical rkyv-archived byte
-    /// sequence of `WorkloadIntentEnvelope::V2(self.clone())`. Two
+    /// sequence of `WorkloadIntentEnvelope::V1(self.clone())`. Two
     /// archivals of the same logical [`WorkloadIntent`] produce
     /// byte-identical output. Callers pass `bytes.as_ref()` to the
     /// `IntentStore` trait's `&[u8]` write surface.
@@ -1190,7 +753,7 @@ impl WorkloadIntentV2 {
     }
 }
 
-/// Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
+/// Input shape for `Job::from_submit`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
 ///
@@ -1221,7 +784,7 @@ pub struct JobSpecInput {
 /// hygiene: the rkyv-archived intent-side `Resources` is kept clean of
 /// serde-only / utoipa-only concerns; this twin carries the wire-side
 /// derives. The projection onto `Resources` is field-by-field inside
-/// `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+/// `Job::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
 /// and the validation rules — `memory_bytes != 0` — must fire on the
 /// way through anyway).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1234,41 +797,21 @@ pub struct ResourcesInput {
 /// Driver dispatch on a [`JobSpecInput`].
 ///
 /// Per ADR-0031 §2 a tagged enum with `#[serde(flatten)]` on the field
-/// surfaces the table name as the discriminator in TOML / JSON: `[exec]`
-/// → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
-/// unknown driver tables.
-///
-/// Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
-/// `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
-/// variants additively; no shape change to surrounding code.
+/// surfaces the supported `[vm]` table as `DriverInput::Vm(...)`.
+/// `deny_unknown_fields` on the enum rejects unsupported driver tables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum DriverInput {
-    /// Native binary under cgroups v2 — the `[exec]` table in TOML.
-    Exec(ExecInput),
     /// Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
     /// ADR-0083, GH #42).
     Vm(VmInput),
     // Future: Wasm(WasmInput)
 }
 
-/// Operator-facing `[exec]` table fields per ADR-0031 §2.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ExecInput {
-    /// Host filesystem path to the binary. Validated non-empty (after
-    /// trim) at `JobV2::from_submit` per ADR-0031 §4.
-    pub command: String,
-    /// Argv passed verbatim. Required field — an absent `args` is a
-    /// parse error, not "default to no args" (per ADR-0031 §8). Empty
-    /// `Vec` is the legitimate zero-args case.
-    pub args: Vec<String>,
-}
-
 /// Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
 /// Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
 /// not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
-/// shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+/// shape). Per-VM volumes are out
 /// of scope for this feature (deferred to overdrive-fs, GH #97 /
 /// virtiofsd, GH #43).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1290,22 +833,14 @@ pub struct VmInput {
 /// rkyv access + deserialize.
 ///
 /// Non-fallible by construction: every field in `JobSpecInput` is a
-/// projection of a field already validated by `JobV2::from_submit`. Cloning
+/// projection of a field already validated by `Job::from_submit`. Cloning
 /// the `id` is cheap — `WorkloadId::to_string()` is an owned ASCII string.
 impl From<&Job> for JobSpecInput {
     fn from(job: &Job) -> Self {
         // Per ADR-0031 Amendment 1, project the intent-shape
-        // `WorkloadDriver` back to the wire-shape `DriverInput`,
-        // preserving the driver KIND rather than collapsing to a flat
-        // (command, args) tuple and always rewrapping as `Exec` — that
-        // would silently mis-render a Vm-driven Job as Exec-driven on
-        // `GET /v1/workloads/{id}`. `DriverInput::Vm` lands here per
-        // ADR-0083 Amendment 2026-08-12 (GH #42, step 01-08).
+        // `WorkloadDriver` back to the wire-shape `DriverInput` while
+        // preserving the VM driver kind.
         let driver = match &job.driver {
-            WorkloadDriver::Exec(exec) => DriverInput::Exec(ExecInput {
-                command: exec.command.clone(),
-                args: exec.args.clone(),
-            }),
             WorkloadDriver::Vm(vm) => DriverInput::Vm(VmInput {
                 command: vm.command.clone(),
                 args: vm.args.clone(),
@@ -1333,18 +868,18 @@ impl From<&Job> for JobSpecInput {
 // `crate::api::describe`.
 // ---------------------------------------------------------------------------
 
-impl JobV2 {
-    /// Project a persisted `JobV2` onto its describe-wire shape per
+impl JobV1 {
+    /// Project a persisted `Job` onto its describe-wire shape per
     /// ADR-0064 § 3. The Job arm carries no platform-derived field, so
     /// this delegates to the existing [`From<&Job>`] impl. (`Job =
-    /// JobV2`.)
+    /// Job`.)
     #[must_use]
     pub fn to_describe(&self) -> JobSpecInput {
         JobSpecInput::from(self)
     }
 }
 
-impl ServiceV2 {
+impl ServiceV1 {
     /// The **single source** for this Service's operator-declared
     /// listener-port set, in declaration order (D-BLOCKER1
     /// one-source/two-readers, GH #241).
@@ -1361,7 +896,7 @@ impl ServiceV2 {
         self.listeners.iter().map(|l| l.port).collect()
     }
 
-    /// Project a persisted `ServiceV2` plus its platform-issued VIP onto
+    /// Project a persisted `Service` plus its platform-issued VIP onto
     /// the describe-wire [`crate::api::describe::ServiceSpecOutput`] per
     /// ADR-0064 § 3.
     ///
@@ -1376,7 +911,7 @@ impl ServiceV2 {
     /// Listeners project from the intent shape (`NonZeroU16` / `Proto`)
     /// back to the wire shape (`u16` / lowercase protocol string), in
     /// declaration order — the inverse of the projection
-    /// [`ServiceV2::from_submit`] applies.
+    /// [`Service::from_submit`] applies.
     ///
     /// The three probe vectors (`startup_probes`, `readiness_probes`,
     /// `liveness_probes`) project read-only from the persisted intent so
@@ -1391,10 +926,6 @@ impl ServiceV2 {
     ) -> crate::api::describe::ServiceSpecOutput {
         // Both persisted driver arms reuse the existing describe union.
         let driver = match &self.driver {
-            WorkloadDriver::Exec(exec) => DriverInput::Exec(ExecInput {
-                command: exec.command.clone(),
-                args: exec.args.clone(),
-            }),
             WorkloadDriver::Vm(vm) => DriverInput::Vm(VmInput {
                 command: vm.command.clone(),
                 args: vm.args.clone(),
@@ -1427,10 +958,10 @@ impl ServiceV2 {
     }
 }
 
-impl ScheduleV2 {
+impl ScheduleV1 {
     /// RED scaffold per `.claude/rules/testing.md` § "Production-side
     /// scaffolds": Schedule describe is unreachable in Phase 1 (no
-    /// Schedule can be persisted — [`ScheduleV2::from_submit`] is itself
+    /// Schedule can be persisted — [`Schedule::from_submit`] is itself
     /// a scaffold). The describe handler returns a structured rejection
     /// on `WorkloadIntent::Schedule`, so this body is unreachable from
     /// any existing test. Lands GREEN when the Schedule submit path
@@ -1439,7 +970,7 @@ impl ScheduleV2 {
     #[must_use]
     pub fn to_describe(&self) -> crate::api::describe::ScheduleSpecOutput {
         todo!(
-            "RED scaffold: ScheduleV2::to_describe lands with the Schedule submit path per ADR-0064 OQ-5"
+            "RED scaffold: Schedule::to_describe lands with the Schedule submit path per ADR-0064 OQ-5"
         )
     }
 }

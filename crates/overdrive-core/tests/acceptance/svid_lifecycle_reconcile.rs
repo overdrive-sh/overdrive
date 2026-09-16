@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, Region, SpiffeId, WorkloadId,
 };
@@ -802,7 +802,12 @@ fn wl_make_job(id: &str) -> Job {
         id: wl_workload(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 fn wl_one_node_map(node_id: &str) -> BTreeMap<NodeId, Node> {

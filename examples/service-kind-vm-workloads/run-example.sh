@@ -129,13 +129,6 @@ capture_resource_snapshot() {
   printf '[materialization]\n%s\n' "$([[ -e "$OUTPUT_ROOT" ]] && printf present || printf absent)"
 }
 
-capture_e10_resource_snapshot() {
-  local id="$1"
-  capture_resource_snapshot
-  echo '[allocation-hypervisors]'
-  probe_hypervisors_for_alloc "alloc-$id-0"
-}
-
 snapshot_before() {
   SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/svm-e08-snapshot.XXXXXX")"
   probe_hypervisors >"$SNAPSHOT_DIR/hypervisors"
@@ -145,56 +138,6 @@ snapshot_before() {
   probe_overdrive_network_names >"$SNAPSHOT_DIR/network-names"
   probe_loops >"$SNAPSHOT_DIR/loops"
   probe_mounts >"$SNAPSHOT_DIR/mounts"
-}
-
-capture_e10_current_owned_resources() {
-  local id="$1"
-  local alloc_id="alloc-$id-0"
-  printf 'allocation=%s\n' "$alloc_id"
-  grep -Fxq "$alloc_id.scope" <(probe_scopes) \
-    && printf 'cgroup=%s.scope\n' "$alloc_id" || true
-  grep -Fxq "$alloc_id" <(probe_run_dirs) \
-    && printf 'run-directory=%s\n' "$alloc_id" || true
-  probe_hypervisors_for_alloc "$alloc_id" \
-    | while IFS= read -r pid; do
-        [[ -z "$pid" ]] || printf 'hypervisor=%s\n' "$pid"
-      done
-  comm -13 "$SNAPSHOT_DIR/network-names" <(probe_overdrive_network_names) \
-    | while IFS= read -r name; do
-        [[ -z "$name" ]] || printf 'network=%s\n' "$name"
-      done
-}
-
-e10_named_runtime_resources_absent() {
-  local id="$1"
-  local observed="$2"
-  local alloc_id="alloc-$id-0"
-  local kind name
-
-  # These allocation-bearing resources have stable external names. Their
-  # absence is required even when cleanup won the race before the pre-stop
-  # resource observation and therefore no positive delta was captured.
-  ! grep -Fxq "$alloc_id.scope" <(probe_scopes) || return 1
-  ! grep -Fxq "$alloc_id" <(probe_run_dirs) || return 1
-  [[ -z "$(probe_hypervisors_for_alloc "$alloc_id")" ]] || return 1
-
-  # Network names are learned from the current-session snapshot because the
-  # slot is not part of the public allocation row. A name observed there must
-  # disappear; an already-clean snapshot does not have to invent a delta.
-  while IFS='=' read -r kind name; do
-    [[ "$kind" == "network" ]] || continue
-    ! grep -Fxq "$name" <(probe_overdrive_network_names) || return 1
-  done <"$observed"
-}
-
-wait_for_e10_named_runtime_cleanup() {
-  local id="$1"
-  local observed="$2"
-  local deadline=$((SECONDS + 45))
-  while [[ "$SECONDS" -lt "$deadline" ]]; do
-    e10_named_runtime_resources_absent "$id" "$observed" && return 0
-  done
-  return 1
 }
 
 new_delta_count() {
@@ -228,161 +171,7 @@ stop_workload() {
     cat "$describe" >&2
     return 1
   fi
-  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-    local settled="$OUTPUT_ROOT/${id}-stopped-settled.log"
-    local observed_resources="$OUTPUT_ROOT/current-session-owned-resources.log"
-    wait_for_e10_named_runtime_cleanup "$id" "$observed_resources" || return 1
-    capture_e10_resource_snapshot "$id" \
-      >"$OUTPUT_ROOT/post-runtime-cleanup-resources.log"
-    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-      "$BIN" workload describe "$id" >"$settled" 2>&1 || return 1
-    [[ "$(first_service_alloc_state <"$settled")" == "Terminated" ]] \
-      && [[ "$(first_service_alloc_id <"$settled")" \
-        == "$(first_service_alloc_id <"$describe")" ]] \
-      && [[ "$(first_service_restart_count <"$settled")" \
-        == "$(first_service_restart_count <"$describe")" ]] \
-      && grep -Fq '    reason: stopped' "$settled" \
-      || return 1
-    cp -- "$describe" "$OUTPUT_ROOT/after-stop-describe.log"
-    cp -- "$settled" "$OUTPUT_ROOT/post-cleanup-describe.log"
-    {
-      printf 'after_stop_allocation=%s\n' \
-        "$(first_service_alloc_id <"$describe")"
-      printf 'after_stop_restart_count=%s\n' \
-        "$(first_service_restart_count <"$describe")"
-      printf 'after_cleanup_allocation=%s\n' \
-        "$(first_service_alloc_id <"$settled")"
-      printf 'after_cleanup_restart_count=%s\n' \
-        "$(first_service_restart_count <"$settled")"
-    } >"$OUTPUT_ROOT/stale-session-refusal.log"
-  fi
   cat "$output"
-}
-
-request_stop_intent() {
-  local id="$1"
-  local stop_output="$OUTPUT_ROOT/${id}-preserve-stop.log"
-  local stdout="$OUTPUT_ROOT/stop-stdout.log"
-  local stderr="$OUTPUT_ROOT/stop-stderr.log"
-  local exit_file="$OUTPUT_ROOT/stop-exit.log"
-  printf 'env OVERDRIVE_CONFIG_DIR=%q %q job stop %q\n' \
-    "$CONFIG_DIR" "$BIN" "$id" >"$OUTPUT_ROOT/stop-command.log"
-  local stop_rc
-  set +e
-  bounded 30s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-    "$BIN" job stop "$id" >"$stdout" 2>"$stderr"
-  stop_rc=$?
-  set -e
-  printf '%s\n' "$stop_rc" >"$exit_file"
-  { cat "$stdout"; cat "$stderr"; } >"$stop_output"
-  if [[ "$stop_rc" -ne 0 ]]; then
-      cat "$stop_output" >&2
-      return 1
-  fi
-}
-
-stop_recovered_service_after_startup_failure() {
-  local id="$1"
-  local before="$OUTPUT_ROOT/service-describe.log"
-  local before_state before_alloc before_restarts before_history before_probe
-  before_state="$(first_service_alloc_state <"$before")"
-  before_alloc="$(first_service_alloc_id <"$before")"
-  before_restarts="$(first_service_restart_count <"$before")"
-  before_history="$(first_service_last_terminated_line <"$before")"
-  before_probe="$(first_service_startup_probe_line <"$before")"
-  [[ -n "$before_alloc" && "$before_restarts" =~ ^[0-9]+$ ]] || return 1
-  [[ -n "$before_probe" ]] || return 1
-  [[ "$before_state" == "Running" ]] || return 1
-  [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] || return 1
-  has_prior_failed_snapshot <"$before" || return 1
-
-  request_stop_intent "$id"
-  local stop_output="$OUTPUT_ROOT/${id}-preserve-stop.log"
-  local output="$OUTPUT_ROOT/${id}-preserved-failure.log"
-  local settled="$OUTPUT_ROOT/${id}-preserved-failure-settled.log"
-  local observations="$OUTPUT_ROOT/${id}-preserved-failure-observations.log"
-  local deadline=$((SECONDS + 45))
-  : >"$observations"
-  while [[ "$SECONDS" -lt "$deadline" ]]; do
-    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-      "$BIN" workload describe "$id" >"$output" 2>&1 || true
-    local state
-    state="$(first_service_alloc_state <"$output")"
-    {
-      printf 'observed_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}"
-      cat "$output"
-    } >>"$observations"
-
-    local outcome_ok=1
-    [[ "$state" == "Terminated" ]] \
-      && [[ "$(first_service_alloc_id <"$output")" == "$before_alloc" ]] \
-      && [[ "$(first_service_restart_count <"$output")" == "$before_restarts" ]] \
-      && has_prior_failed_snapshot <"$output" \
-      && [[ "$(first_service_last_terminated_line <"$output")" == "$before_history" ]] \
-      && e10_failed_probe_is_preserved \
-        "$before_probe" "$(first_service_startup_probe_line <"$output")" \
-      && grep -Fq '    reason: stopped' "$output" \
-      || outcome_ok=0
-
-    local observed_resources="$OUTPUT_ROOT/current-session-owned-resources.log"
-    if [[ "$outcome_ok" -eq 1 ]] \
-      && e10_named_runtime_resources_absent "$id" "$observed_resources"; then
-      # Observe once more after the owned runtime is gone. A stale accepted-
-      # session watcher must not replace the recovered incarnation's operator
-      # termination or the retained failure snapshot after cleanup settles.
-      capture_e10_resource_snapshot "$id" \
-        >"$OUTPUT_ROOT/post-runtime-cleanup-resources.log"
-      bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-        "$BIN" workload describe "$id" >"$settled" 2>&1 || true
-      {
-        printf 'settled_utc=%s state=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          "$(first_service_alloc_state <"$settled")"
-        cat "$settled"
-      } >>"$observations"
-      if [[ "$(first_service_alloc_state <"$settled")" == "$state" ]] \
-        && [[ "$(first_service_alloc_id <"$settled")" == "$before_alloc" ]] \
-        && [[ "$(first_service_restart_count <"$settled")" == "$before_restarts" ]] \
-        && e10_failed_probe_is_preserved \
-          "$(first_service_startup_probe_line <"$output")" \
-          "$(first_service_startup_probe_line <"$settled")" \
-        && has_prior_failed_snapshot <"$settled" \
-        && [[ "$(first_service_last_terminated_line <"$settled")" == "$before_history" ]] \
-        && grep -Fq '    reason: stopped' "$settled"; then
-        cp -- "$output" "$OUTPUT_ROOT/after-stop-describe.log"
-        cp -- "$settled" "$OUTPUT_ROOT/post-cleanup-describe.log"
-        cp -- "$observations" "$OUTPUT_ROOT/stop-observations.log"
-        {
-          printf 'before_stop_allocation=%s\n' "$before_alloc"
-          printf 'before_stop_restart_count=%s\n' "$before_restarts"
-          printf 'before_stop_prior_failure=%s\n' "$before_history"
-          printf 'before_stop_probe=%s\n' "$before_probe"
-          printf 'after_stop_probe=%s\n' \
-            "$(first_service_startup_probe_line <"$output")"
-          printf 'after_cleanup_allocation=%s\n' \
-            "$(first_service_alloc_id <"$settled")"
-          printf 'after_cleanup_restart_count=%s\n' \
-            "$(first_service_restart_count <"$settled")"
-          printf 'after_cleanup_prior_failure=%s\n' \
-            "$(first_service_last_terminated_line <"$settled")"
-          printf 'after_cleanup_probe=%s\n' \
-            "$(first_service_startup_probe_line <"$settled")"
-        } >"$OUTPUT_ROOT/stale-session-refusal.log"
-        cat "$stop_output"
-        cat "$output"
-        cat "$settled"
-        return 0
-      fi
-      cat "$stop_output" >&2
-      cat "$output" >&2
-      cat "$settled" >&2
-      echo "svm-e08 run: state changed after owned runtime cleanup: $id" >&2
-      return 1
-    fi
-  done
-  cat "$stop_output" >&2
-  cat "$output" >&2
-  echo "svm-e08 run: recovered startup-failure incarnation did not stop with preserved history: $id" >&2
-  return 1
 }
 
 stop_serve() {
@@ -500,28 +289,6 @@ first_service_last_terminated_line() {
 
 first_service_startup_probe_line() {
   awk '/^  startup probe\[0\] / { print; exit }'
-}
-
-# E10 preserves the failure evidence carried by a ProbeResultRow, not the
-# byte rendering of its observation time. The probe role/index, mechanic,
-# method, target, failed status, and failure reason must be identical. The
-# LWW observation timestamp may stay equal or advance when the same failed
-# result is observed again, but it must never regress.
-e10_failed_probe_is_preserved() {
-  local before_line="$1"
-  local after_line="$2"
-  local pattern='^([[:space:]]*startup[[:space:]]+probe\[0\][[:space:]]+http[[:space:]]+GET[[:space:]]+[^[:space:]]+[[:space:]]+last=fail[[:space:]]+\(.*\))[[:space:]]+last_observed_at=([0-9]+)$'
-  local before_semantics before_observed_at after_semantics after_observed_at
-
-  [[ "$before_line" =~ $pattern ]] || return 1
-  before_semantics="${BASH_REMATCH[1]}"
-  before_observed_at="${BASH_REMATCH[2]}"
-  [[ "$after_line" =~ $pattern ]] || return 1
-  after_semantics="${BASH_REMATCH[1]}"
-  after_observed_at="${BASH_REMATCH[2]}"
-
-  [[ "$after_semantics" == "$before_semantics" ]] \
-    && [[ "$after_observed_at" -ge "$before_observed_at" ]]
 }
 
 first_service_terminal() {
@@ -1098,8 +865,8 @@ run_liveness_restart() {
     || die "E12 replacement omitted its liveness observation"
   local replacement_alloc
   replacement_alloc="$(first_service_alloc_id <"$replacement_describe")"
-  [[ "$replacement_alloc" == "$original_alloc" ]] \
-    || die "E12 restart changed the allocation identity unexpectedly"
+  [[ "$replacement_alloc" != "$original_alloc" ]] \
+    || die "E12 restart did not allocate a distinct successor identity"
   grep -Fq 'last terminated:' "$replacement_describe" \
     || die "E12 replacement did not retain the prior terminal observation"
   ! grep -Eqi 'last terminated:.*readiness|readiness probe\[0\].*last=fail' \
@@ -1163,17 +930,16 @@ run_liveness_restart() {
     "$restart_count" "$after_probe_status" "$terminal_reason" "$after_response" \
     "$replacement_startup_observed_at" "$replacement_started_at" "$LIVENESS_FAILURE_COUNT"
   echo '--- E12 ledger end ---'
-  echo 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival'
+  echo 'E12 PASS: liveness stop, fresh-successor replacement, no readiness restart, no dead revival'
 
   cleanup
 }
 
 copy_case_captures() {
   [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]] || return 0
-  local mode=0700
-  [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || mode=0755
-  install -d -m "$mode" "$SVM_E08_CASE_CAPTURE_DIR"
-  find "$OUTPUT_ROOT" -maxdepth 1 -type f -name '*.log' -exec cp -- {} "$SVM_E08_CASE_CAPTURE_DIR" \;
+  install -d -m 0700 "$SVM_E08_CASE_CAPTURE_DIR"
+  find "$OUTPUT_ROOT" -maxdepth 1 -type f -name '*.log' \
+    -exec cp -- {} "$SVM_E08_CASE_CAPTURE_DIR" \;
 }
 
 case_cleanup() {
@@ -1181,69 +947,15 @@ case_cleanup() {
   trap - EXIT HUP INT TERM
   local failed=0
   [[ "$CLIENT_DEPLOYED" -eq 0 ]] || stop_workload "$CLIENT_ID" || failed=1
-  if [[ "$SERVICE_DEPLOYED" -ne 0 ]]; then
-    case "$CASE_CLEANUP_POLICY" in
-      operator-stop)
-        stop_workload "$SERVICE_ID" || failed=1
-        ;;
-      preserve-startup-failure)
-        stop_recovered_service_after_startup_failure "$SERVICE_ID" || failed=1
-        ;;
-      *)
-        echo "svm-e08 run: unknown case cleanup policy: $CASE_CLEANUP_POLICY" >&2
-        failed=1
-        ;;
-    esac
-  fi
-  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-    wait_for_e10_named_runtime_cleanup "$SERVICE_ID" \
-      "$OUTPUT_ROOT/current-session-owned-resources.log" || failed=1
-  else
-    wait_for_owned_runtime_cleanup || failed=1
-  fi
+  [[ "$SERVICE_DEPLOYED" -eq 0 ]] || stop_workload "$SERVICE_ID" || failed=1
+  wait_for_owned_runtime_cleanup || failed=1
   stop_serve || failed=1
   copy_case_captures || failed=1
   [[ "$PREPARED" -eq 0 ]] || bounded 45s "$PREPARE" cleanup || failed=1
   if [[ -n "$SNAPSHOT_DIR" ]]; then
     if [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]]; then
-      if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-        capture_e10_resource_snapshot "$SERVICE_ID" \
-          >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"
-      else
-        capture_resource_snapshot >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"
-      fi
-      if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-        # Keep the whole-host delta as diagnostic context, but E10's oracle is
-        # the absolute absence of this cell's named resources. Unrelated host
-        # activity must not manufacture a cleanup failure for this allocation.
-        report_cleanup_deltas \
-          >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" 2>&1 || true
-        if e10_named_runtime_resources_absent "$SERVICE_ID" \
-          "$SVM_E08_CASE_CAPTURE_DIR/current-session-owned-resources.log" \
-          && [[ -z "$SERVE_PID" ]] \
-          && [[ -z "$(probe_loops)" ]] && [[ -z "$(probe_mounts)" ]] \
-          && grep -Fxq 'absent' \
-            "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"; then
-          local observed_count
-          observed_count="$(awk -F= '$1 != "allocation" { count++ } END { print count + 0 }' \
-            "$SVM_E08_CASE_CAPTURE_DIR/current-session-owned-resources.log")"
-          printf 'E10 named cleanup: observed-before-stop=%s post-stop=absent serve=stopped preparation=absent\n' \
-            "$observed_count" \
-            >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
-          cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
-        else
-          echo 'E10 named cleanup: residual owned resource' \
-            >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log"
-          cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-complement.log" >&2
-          failed=1
-        fi
-      elif ! report_cleanup_deltas \
-        >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" 2>&1; then
-        cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" >&2
-        failed=1
-      else
-        cat "$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log"
-      fi
+      capture_resource_snapshot >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-after.log"
+      report_cleanup_deltas >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resource-delta.log" 2>&1 || failed=1
     else
       report_cleanup_deltas || failed=1
     fi
@@ -1252,7 +964,6 @@ case_cleanup() {
   [[ "$incoming_rc" -ne 0 || "$failed" -eq 0 ]] || exit 1
   exit "$incoming_rc"
 }
-
 wait_for_service_result() {
   local expected="$1"
   local stream="$2"
@@ -1266,48 +977,10 @@ wait_for_service_result() {
       grep -Eq 'COMMAND_EXIT_CODE="[1-9][0-9]*"' "$stream"
       grep -Fq 'StartupProbeFailed' "$stream"
       grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$describe"
-      if [[ "$CASE_CLEANUP_POLICY" == "preserve-startup-failure" ]]; then
-        wait_for_e10_recovered_running "$SERVICE_ID" "$describe"
-      else
-        [[ "$(first_service_alloc_state <"$describe")" == "Failed" ]]
-      fi
+      [[ "$(first_service_alloc_state <"$describe")" == "Failed" ]]
       ;;
     *) die "unknown expected Service result: $expected" ;;
   esac
-}
-
-wait_for_e10_recovered_running() {
-  local id="$1"
-  local output="$2"
-  local observations="$OUTPUT_ROOT/${id}-recovery-observations.log"
-  local alloc_id
-  alloc_id="$(first_service_alloc_id <"$output")"
-  [[ -n "$alloc_id" ]] || return 1
-  local deadline=$((SECONDS + 45))
-  : >"$observations"
-  while [[ "$SECONDS" -lt "$deadline" ]]; do
-    local state restarts
-    state="$(first_service_alloc_state <"$output")"
-    restarts="$(first_service_restart_count <"$output")"
-    {
-      printf 'observed_utc=%s state=%s restarts=%s\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${state:-unrecognized}" "${restarts:-unrecognized}"
-      cat "$output"
-    } >>"$observations"
-    if [[ "$state" == "Running" ]] \
-      && [[ "$(first_service_alloc_id <"$output")" == "$alloc_id" ]] \
-      && [[ "$restarts" =~ ^[1-9][0-9]*$ ]] \
-      && has_prior_failed_snapshot <"$output" \
-      && grep -Eqi 'startup probe\[0\].*last=fail|last=fail.*startup probe\[0\]' "$output"; then
-      cp -- "$observations" "$OUTPUT_ROOT/recovery-observations.log"
-      return 0
-    fi
-    bounded 10s env OVERDRIVE_CONFIG_DIR="$CONFIG_DIR" \
-      "$BIN" workload describe "$id" >"$output" 2>&1 || true
-  done
-  cat "$observations" >&2
-  echo "svm-e08 run: startup-failed Service did not settle on its recovered Running incarnation: $id" >&2
-  return 1
 }
 
 run_case() {
@@ -1318,7 +991,7 @@ run_case() {
   local client_id="${5:-}"
   local cleanup_policy="${6:-operator-stop}"
   case "$cleanup_policy" in
-    operator-stop|preserve-startup-failure) ;;
+    operator-stop) ;;
     *) die "unknown case cleanup policy: $cleanup_policy" ;;
   esac
   CASE_CLEANUP_POLICY="$cleanup_policy"
@@ -1333,11 +1006,9 @@ run_case() {
   snapshot_before
   if [[ -n "${SVM_E08_CASE_CAPTURE_DIR:-}" ]]; then
     local capture_mode=0700
-    [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || capture_mode=0755
     install -d -m "$capture_mode" "$SVM_E08_CASE_CAPTURE_DIR"
     capture_resource_snapshot >"$SVM_E08_CASE_CAPTURE_DIR/cleanup-resources-before.log"
-    printf '%s\n' "${SVM_E10_CAPTURE_TOKEN:-not-an-e10-capture}" \
-      >"$SVM_E08_CASE_CAPTURE_DIR/capture-token.log"
+    printf '%s\n' 'vm-service-capture' >"$SVM_E08_CASE_CAPTURE_DIR/capture-token.log"
   fi
   trap case_cleanup EXIT
   trap 'exit 130' HUP INT TERM
@@ -1393,16 +1064,7 @@ run_case() {
     die "Service did not reach expected result: $expected"
   }
   cp -- "$service_describe" "$OUTPUT_ROOT/before-stop-describe.log"
-  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-    capture_e10_resource_snapshot "$SERVICE_ID" \
-      >"$OUTPUT_ROOT/current-session-resources.log"
-  else
-    capture_resource_snapshot >"$OUTPUT_ROOT/current-session-resources.log"
-  fi
-  if [[ -n "${SVM_E10_CAPTURE_TOKEN:-}" ]]; then
-    capture_e10_current_owned_resources "$SERVICE_ID" \
-      >"$OUTPUT_ROOT/current-session-owned-resources.log"
-  fi
+  capture_resource_snapshot >"$OUTPUT_ROOT/current-session-resources.log"
   {
     printf 'allocation_id=%s\n' "$(first_service_alloc_id <"$service_describe")"
     printf 'current_state=%s\n' "$(first_service_alloc_state <"$service_describe")"
@@ -1460,7 +1122,6 @@ require_matrix_capture_root() {
   [[ -n "${SVM_E08_MATRIX_CAPTURE_ROOT:-}" ]] \
     || die "matrix capture root is required"
   local mode=0700
-  [[ -z "${SVM_E10_CAPTURE_TOKEN:-}" ]] || mode=0755
   install -d -m "$mode" "$SVM_E08_MATRIX_CAPTURE_ROOT"
 }
 
@@ -1487,134 +1148,6 @@ run_tcp_truthfulness_100() {
   cat "$ledger"
   echo '--- E09 ledger end ---'
   echo 'E09 PASS: 100/100 truthful TCP success/failure pairs; no retries or discarded trials'
-}
-
-run_http_status_cross_driver() {
-  require_native_metal
-  require_matrix_capture_root
-  bounded 600s cargo build -p overdrive-cli --bin overdrive
-  local ledger="$SVM_E08_MATRIX_CAPTURE_ROOT/http-status-cross-driver.tsv"
-  printf 'driver\tstatus\tdeploy_exit\tallocation_id\tbefore_stop\trestart_before\tfailure_surface\tafter_stop\trestart_after\tsettled_state\ttrajectory\tprobe_result\tstdout_bytes\tstderr_bytes\tdescribe_bytes\tsentinel_deploy_stdout\tsentinel_deploy_stderr\tsentinel_describe\tsentinel_probe\tcleanup\n' >"$ledger"
-  local driver status spec id expected label transcript describe sentinel
-  local cleanup_policy final_describe settled_describe terminal trajectory
-  local alloc_id before_state before_restarts after_restarts settled_state failure_surface
-  local deploy_stdout deploy_stderr deploy_exit deploy_stdout_sentinel deploy_stderr_sentinel
-  local describe_sentinel probe_sentinel probe_line
-  for driver in exec vm; do
-    for status in 204 302 404 503; do
-      spec="http-${driver}-${status}.toml"
-      id="service-${driver}-http-${status}"
-      expected=startup-failed
-      cleanup_policy=preserve-startup-failure
-      [[ "$status" == 204 ]] && expected=stable
-      [[ "$status" == 204 ]] && cleanup_policy=operator-stop
-      label="e10-${driver}-${status}"
-      settled_describe=''
-      capture_isolated_case "$label" "$spec" "$id" "$expected" "" "" "$cleanup_policy"
-      transcript="$SVM_E08_MATRIX_CAPTURE_ROOT/$label.transcript"
-      describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-describe.log"
-      deploy_stdout="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-stdout.log"
-      deploy_stderr="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-stderr.log"
-      deploy_exit="$(tr -d '[:space:]' \
-        <"$SVM_E08_MATRIX_CAPTURE_ROOT/$label/service-deploy-exit.log")"
-      alloc_id="$(first_service_alloc_id <"$describe")"
-      before_state="$(first_service_alloc_state <"$describe")"
-      before_restarts="$(first_service_restart_count <"$describe")"
-      if [[ "$status" == 204 ]]; then
-        [[ "$deploy_exit" == 0 ]] \
-          || die "E10 healthy deploy did not exit zero: $driver/$status"
-        grep -Fq ' is stable ' "$transcript"
-        [[ "$before_state" == "Running" && "$before_restarts" == "0" ]] \
-          || die "E10 healthy Service was not a first-incarnation Running allocation: $driver/$status"
-        final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-stopped.log"
-        [[ -f "$final_describe" ]] || die "E10 missing operator-stop describe for $driver/$status"
-        terminal="$(first_service_alloc_state <"$final_describe")"
-        after_restarts="$(first_service_restart_count <"$final_describe")"
-        [[ "$terminal" == "Terminated" ]] \
-          || die "E10 running Service did not become Terminated after stop: $driver/$status"
-        [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" \
-          && "$after_restarts" == "$before_restarts" ]] \
-          || die "E10 healthy Service stop changed allocation identity or restart count: $driver/$status"
-        settled_state="$terminal"
-        failure_surface=none
-        trajectory=operator-stop-running
-      else
-        [[ "$deploy_exit" == 1 ]] \
-          || die "E10 startup-failed deploy did not exit one: $driver/$status"
-        grep -Fq "Error: workload '$id' did not converge to stable." "$transcript" \
-          || die "E10 deploy stream omitted the typed terminal failure: $driver/$status"
-        grep -Fq "HTTP ${status}" "$transcript" \
-          || die "E10 deploy stream omitted HTTP status $status: $driver/$status"
-        if grep -Fq 'Accepted.' "$transcript"; then
-          die "E10 failed Service rendered the success-only Accepted prefix: $driver/$status"
-        fi
-        grep -Fq "HTTP ${status}" "$describe" \
-          || die "E10 describe omitted HTTP status $status: $driver/$status"
-        if [[ "$status" == 302 ]]; then
-          grep -Fq 'HTTP 302 (redirect not followed)' "$transcript" \
-            || die "E10 deploy stream did not classify the redirect without following it: $driver/$status"
-          grep -Fq 'HTTP 302 (redirect not followed)' "$describe" \
-            || die "E10 describe did not retain the redirect classification: $driver/$status"
-        fi
-        final_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure.log"
-        settled_describe="$SVM_E08_MATRIX_CAPTURE_ROOT/$label/${id}-preserved-failure-settled.log"
-        [[ -f "$final_describe" ]] || die "E10 missing preserved-failure describe for $driver/$status"
-        [[ -f "$settled_describe" ]] || die "E10 missing post-cleanup settled describe for $driver/$status"
-        terminal="$(first_service_alloc_state <"$final_describe")"
-        after_restarts="$(first_service_restart_count <"$final_describe")"
-        settled_state="$(first_service_alloc_state <"$settled_describe")"
-        if [[ "$before_state" == "Running" ]] \
-          && [[ "$before_restarts" =~ ^[1-9][0-9]*$ ]] \
-          && has_prior_failed_snapshot <"$describe" \
-          && [[ "$terminal" == "Terminated" && "$settled_state" == "Terminated" ]] \
-          && [[ "$after_restarts" == "$before_restarts" ]] \
-          && [[ "$(first_service_alloc_id <"$final_describe")" == "$alloc_id" ]] \
-          && [[ "$(first_service_alloc_id <"$settled_describe")" == "$alloc_id" ]] \
-          && [[ "$(first_service_last_terminated_line <"$final_describe")" \
-            == "$(first_service_last_terminated_line <"$describe")" ]] \
-          && [[ "$(first_service_last_terminated_line <"$settled_describe")" \
-            == "$(first_service_last_terminated_line <"$describe")" ]] \
-          && grep -Fq '    reason: stopped' "$final_describe" \
-          && grep -Fq '    reason: stopped' "$settled_describe"; then
-          failure_surface=deploy-exit-1+prior-failed+probe
-          trajectory=recovered-running-operator-stop
-        else
-          die "E10 startup-failure cleanup followed an unrecognized trajectory: $driver/$status"
-        fi
-      fi
-      grep -Eq '^E10 named cleanup: observed-before-stop=[0-9]+ post-stop=absent serve=stopped preparation=absent$' \
-        "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/cleanup-resource-complement.log" \
-        || die "E10 named cleanup complement failed for $driver/$status"
-      sentinel='SVM-E10-FAILURE-BODY-MUST-NOT-LEAK'
-      deploy_stdout_sentinel="$({ grep -Foh "$sentinel" "$deploy_stdout" || true; } \
-        | wc -l | tr -d ' ')"
-      deploy_stderr_sentinel="$({ grep -Foh "$sentinel" "$deploy_stderr" || true; } \
-        | wc -l | tr -d ' ')"
-      describe_sentinel="$({ grep -Foh "$sentinel" "$describe" "$final_describe" \
-        "$SVM_E08_MATRIX_CAPTURE_ROOT/$label/post-cleanup-describe.log" || true; } \
-        | wc -l | tr -d ' ')"
-      probe_line="$(first_service_startup_probe_line <"$describe")"
-      probe_sentinel="$({ grep -Foh "$sentinel" <<<"$probe_line" || true; } \
-        | wc -l | tr -d ' ')"
-      [[ "$deploy_stdout_sentinel" -eq 0 && "$deploy_stderr_sentinel" -eq 0 \
-        && "$describe_sentinel" -eq 0 && "$probe_sentinel" -eq 0 ]] \
-        || die "E10 sentinel leaked for $driver/$status"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tstatus-%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tnamed-absent\n' \
-        "$driver" "$status" "$deploy_exit" "$alloc_id" "$before_state" "$before_restarts" \
-        "$failure_surface" "$terminal" "$after_restarts" "$settled_state" \
-        "$trajectory" "$status" \
-        "$(wc -c <"$deploy_stdout" | tr -d ' ')" \
-        "$(wc -c <"$deploy_stderr" | tr -d ' ')" \
-        "$(wc -c <"$describe" | tr -d ' ')" \
-        "$deploy_stdout_sentinel" "$deploy_stderr_sentinel" \
-        "$describe_sentinel" "$probe_sentinel" >>"$ledger"
-    done
-  done
-  [[ "$(($(wc -l <"$ledger") - 1))" -eq 8 ]] || die "E10 ledger does not contain all eight cells"
-  echo '--- E10 ledger begin ---'
-  cat "$ledger"
-  echo '--- E10 ledger end ---'
-  echo 'E10 PASS: 8/8 Exec/VM HTTP status cells with zero failure-body sentinel exposure'
 }
 
 run_zero_probes() {
@@ -1647,14 +1180,13 @@ case "${1:-}" in
     case "${2:-}" in
       healthy) run_healthy ;;
       tcp-truthfulness-100) run_tcp_truthfulness_100 ;;
-      http-status-cross-driver) run_http_status_cross_driver ;;
       zero-probes) run_zero_probes ;;
       readiness-recovery) run_readiness_recovery ;;
       case) shift 2; run_case "$@" ;;
       liveness-restart)
         run_liveness_restart
         ;;
-      *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|http-status-cross-driver|readiness-recovery|liveness-restart|zero-probes' ;;
+      *) die 'usage: run-example.sh run healthy|tcp-truthfulness-100|readiness-recovery|liveness-restart|zero-probes' ;;
     esac
     ;;
   *)

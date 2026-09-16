@@ -10,7 +10,7 @@
 //! a non-zero CLI exit.
 //!
 //! This module is the single composition-root call site that wires
-//! the three probe adapters into a [`ProbeRunner`], runs its
+//! the two probe adapters into a [`ProbeRunner`], runs its
 //! Earned-Trust gate, and emits the canonical refusal event on
 //! failure. The structural defense against the call site being
 //! removed is the `xtask::dst_lint` ProbeRunner-declaration scanner
@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::traits::prober::{ExecProber, HttpProber, TcpProber};
+use overdrive_core::traits::prober::{HttpProber, TcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
 use crate::error::{ControlPlaneError, ProbeRunnerBootError};
@@ -54,12 +54,10 @@ use crate::error::{ControlPlaneError, ProbeRunnerBootError};
 pub async fn compose_and_probe_runner_gate(
     tcp_prober: Arc<dyn TcpProber>,
     http_prober: Arc<dyn HttpProber>,
-    exec_prober: Arc<dyn ExecProber>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
 ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
-    let runner =
-        Arc::new(ProbeRunner::new(tcp_prober, http_prober, exec_prober, clock, observation_store));
+    let runner = Arc::new(ProbeRunner::new(tcp_prober, http_prober, clock, observation_store));
     match runner.probe().await {
         Ok(()) => Ok(runner),
         Err(source) => {

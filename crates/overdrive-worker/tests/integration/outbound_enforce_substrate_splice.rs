@@ -153,6 +153,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
@@ -171,9 +172,10 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 const NS_W: &str = "nsW-asym0503";
 const VETH_W: &str = "vethW-asym05";
 const VETH_H: &str = "vethH-asym05";
-const HOST_GW: &str = "10.99.0.1";
-const WL_ADDR: &str = "10.99.0.2";
-const SUBNET_LEN: &str = "24";
+// The topology requests a `/24` from overdrive-testing's global
+// `10.250.0.0/16` pool under this stable owner name. The pool is disjoint from
+// production's `10.99.0.0/16`; the lease supplies the gateway/workload pair.
+const CIDR_LEASE_NAME: &str = "worker-outbound-enforce-substrate-splice";
 
 /// The mesh backend the OUTBOUND workload dials — a host-side lo-bound address it
 /// routes to via the gateway, so its egress genuinely INGRESSES vethH and hits
@@ -398,15 +400,19 @@ fn teardown_topology() {
 /// Stand up the netns + veth pair + addresses + host routing hygiene EXACTLY as the
 /// increment-b egress spike does, plus the lo-bound mesh backend the OUTBOUND dial
 /// targets.
-fn setup_topology() {
+fn setup_topology(lease: &TestCidrLease) {
     teardown_topology();
+
+    let host_gateway = lease.host_gateway().to_string();
+    let workload_addr = lease.workload_addr().to_string();
+    let prefix_len = lease.prefix_len().to_string();
 
     ip(&["netns", "add", NS_W]);
     ip(&["link", "add", VETH_W, "type", "veth", "peer", "name", VETH_H]);
     ip(&["link", "set", VETH_W, "netns", NS_W]);
 
     // Host side: address + up.
-    ip(&["addr", "add", &format!("{HOST_GW}/{SUBNET_LEN}"), "dev", VETH_H]);
+    ip(&["addr", "add", &format!("{host_gateway}/{prefix_len}"), "dev", VETH_H]);
     ip(&["link", "set", VETH_H, "up"]);
 
     // Workload side (inside netns): lo up + address + up + default route.
@@ -418,12 +424,12 @@ fn setup_topology() {
         "ip",
         "addr",
         "add",
-        &format!("{WL_ADDR}/{SUBNET_LEN}"),
+        &format!("{workload_addr}/{prefix_len}"),
         "dev",
         VETH_W,
     ]);
     ip(&["netns", "exec", NS_W, "ip", "link", "set", VETH_W, "up"]);
-    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", HOST_GW]);
+    ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", &host_gateway]);
 
     // The OUTBOUND dial target lives on host lo (the host binds+listens on it; the
     // workload routes to it via the gateway).
@@ -639,10 +645,12 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
     AllocationSpec {
         alloc: pki.client_alloc.clone(),
         identity: pki.client_leaf.spiffe.clone(),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(
+            overdrive_core::traits::driver::VmPayload {
                 command: "/bin/true".to_owned(),
                 args: vec![],
+                kernel: "/nonexistent/kernel".into(),
+                rootfs: "/nonexistent/rootfs".into(),
             },
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
@@ -1227,7 +1235,9 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
     // Cross-process exclusion + clean baseline.
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
-    setup_topology();
+    let lease = TestCidrLease::acquire(CIDR_LEASE_NAME)
+        .expect("acquire outbound substrate topology CIDR lease");
+    setup_topology(&lease);
 
     let pki = TestPki::mint();
     let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));

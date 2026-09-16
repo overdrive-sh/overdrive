@@ -48,9 +48,11 @@ const JOB_WITH_STARTUP_PROBE: &str = r#"
 [job]
 id = "batch"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -68,9 +70,11 @@ id = "nightly"
 [schedule]
 cron = "0 0 * * *"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100
@@ -90,9 +94,11 @@ replicas = 1
 port = 8080
 protocol = "tcp"
 
-[exec]
+[vm]
 command = "/usr/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 100

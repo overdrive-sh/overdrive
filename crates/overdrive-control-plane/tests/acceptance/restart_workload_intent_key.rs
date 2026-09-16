@@ -40,7 +40,7 @@ use overdrive_control_plane::api::RestartWorkloadResponse;
 use overdrive_control_plane::handlers::restart_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
 };
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -61,7 +61,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -88,7 +88,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

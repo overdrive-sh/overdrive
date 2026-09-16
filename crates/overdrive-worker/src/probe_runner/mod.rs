@@ -8,11 +8,9 @@
 //!   C1).
 //! - Per-alloc supervisor + per-probe-instance tokio task shape
 //!   (matches K8s prober.Manager archetype; D-02).
-//! - Three port traits per ADR-0054 §3 (`TcpProber` / `HttpProber` /
-//!   `ExecProber`); each backed by a production adapter
-//!   (`TokioTcpProber` / `HyperHttpProber` / `CgroupExecProber`)
-//!   and a sim adapter (in `crates/overdrive-sim/src/adapters/
-//!   probers.rs`).
+//! - Two port traits per ADR-0054 §3 (`TcpProber` / `HttpProber`), each
+//!   backed by a production adapter and a sim adapter (in
+//!   `crates/overdrive-sim/src/adapters/probers.rs`).
 //! - Earned Trust gate at composition root (DDD-21): [`ProbeRunner::probe`]
 //!   runs after construction and before serving any request; failure
 //!   refuses startup via `health.startup.refused` (invocation at the
@@ -27,12 +25,10 @@
     reason = "shared docstring style for the ProbeRunner subsystem"
 )]
 
-pub mod exec_prober;
 pub mod http_prober;
 pub mod supervisor;
 pub mod tcp_prober;
 
-pub use exec_prober::CgroupExecProber;
 pub use http_prober::HyperHttpProber;
 pub use supervisor::{AllocSupervisor, ProbeTaskHandle};
 pub use tcp_prober::TokioTcpProber;
@@ -47,9 +43,7 @@ use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStat
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::traits::prober::{
-    ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
-};
+use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome, TcpProber};
 use parking_lot::Mutex;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -64,8 +58,8 @@ use tokio_util::sync::CancellationToken;
 ///
 /// Production wiring at the composition root passes
 /// `Arc<TokioTcpProber>` / `Arc<HyperHttpProber>` /
-/// `Arc<CgroupExecProber>` plus the production `Clock` and
-/// `ObservationStore`. Tests pass the sim equivalents.
+/// plus the production `Clock` and `ObservationStore`. Tests pass the
+/// sim equivalents.
 #[allow(
     clippy::struct_field_names,
     reason = "Per-mechanic prober field naming is operator-readable; renaming loses the per-mechanic split documented in ADR-0054 §3"
@@ -73,11 +67,8 @@ use tokio_util::sync::CancellationToken;
 pub struct ProbeRunner {
     tcp_prober: Arc<dyn TcpProber>,
     // `http_prober` is wired into `probe_tick`'s `ProbeMechanic::Http`
-    // dispatch arm as of slice 02-01; `exec_prober` into the
-    // `ProbeMechanic::Exec` arm as of slice 02-02. All three mechanic
-    // arms now dispatch to a live adapter.
+    // dispatch arm; both live mechanic arms dispatch to a live adapter.
     http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
-    exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
     /// Injected clock. Required by `start_alloc`'s spawned tick
     /// tasks (`clock.sleep(interval)` in the supervised loop) and by
     /// `probe_once_and_record` (timestamps the `ProbeResultRow`).
@@ -109,14 +100,12 @@ impl ProbeRunner {
     pub fn new(
         tcp_prober: Arc<dyn TcpProber>,
         http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
-        exec_prober: Arc<dyn overdrive_core::traits::prober::ExecProber>,
         clock: Arc<dyn Clock>,
         observation_store: Arc<dyn ObservationStore>,
     ) -> Self {
         Self {
             tcp_prober,
             http_prober,
-            exec_prober,
             clock,
             observation_store,
             supervisors: Mutex::new(BTreeMap::new()),
@@ -176,11 +165,6 @@ impl ProbeRunner {
                     reason: format!("sacrificial probe rejected by adapter: {reason}"),
                 })
             }
-            Err(ProbeFailure::ExecSpawnFailed { reason }) => {
-                Err(ProbeRunnerError::EarnedTrustFailure {
-                    reason: format!("sacrificial probe spawn failed: {reason}"),
-                })
-            }
         }
     }
 
@@ -194,8 +178,7 @@ impl ProbeRunner {
     /// spinning up a long-lived supervisor.
     ///
     /// # Behaviour
-    /// - Resolves the appropriate adapter (today: only `Tcp`;
-    ///   `Http` / `Exec` bodies land in slice 02 / 03).
+    /// - Resolves the appropriate HTTP or TCP adapter.
     /// - Calls `prober.probe(...)` with the descriptor's mechanic
     ///   parameters.
     /// - Translates the outcome to a [`ProbeResultRow`] keyed by
@@ -223,7 +206,6 @@ impl ProbeRunner {
         probe_tick(
             self.tcp_prober.as_ref(),
             self.http_prober.as_ref(),
-            self.exec_prober.as_ref(),
             clock,
             observation_store,
             alloc_id,
@@ -241,7 +223,7 @@ impl ProbeRunner {
     ///
     /// Idempotent: re-registering the same `alloc_id` returns the
     /// existing supervisor's [`CancellationToken`] without disturbing
-    /// running tasks. This is the shape the worker's exec-driver
+    /// running tasks. This is the shape the worker driver
     /// integration uses to attach probes lazily after the alloc
     /// reaches Running.
     pub fn register_alloc(&self, alloc_id: &AllocationId) -> CancellationToken {
@@ -288,8 +270,8 @@ impl ProbeRunner {
     /// allocation reaching `Running`, so re-spawning would
     /// duplicate the supervised loops.
     ///
-    /// All three mechanic bodies (TCP / HTTP / Exec) dispatch to a
-    /// live adapter as of slice 02-02; the spawned per-descriptor
+    /// Both supported mechanic bodies (TCP / HTTP) dispatch to a
+    /// live adapter; the spawned per-descriptor
     /// loops invoke the matching prober every tick and write the
     /// resulting `ProbeResultRow`. A per-tick adapter or store error
     /// is logged at warn level and the loop continues until cancelled
@@ -332,7 +314,6 @@ impl ProbeRunner {
             let child_token = handle.cancellation_token();
             let tcp_prober = Arc::clone(&self.tcp_prober);
             let http_prober = Arc::clone(&self.http_prober);
-            let exec_prober = Arc::clone(&self.exec_prober);
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
             let alloc_id_for_task = spec.alloc.clone();
@@ -340,7 +321,6 @@ impl ProbeRunner {
                 supervised_probe_loop(
                     tcp_prober,
                     http_prober,
-                    exec_prober,
                     clock,
                     observation_store,
                     alloc_id_for_task,
@@ -453,7 +433,6 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
     let needs_guest_address = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
         ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
-        ProbeMechanic::Exec { .. } => false,
     };
     if !needs_guest_address {
         return;
@@ -470,36 +449,12 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
                 .expect("VM probe registration requires a provisioned workload address")
                 .to_string()
         }
-        DriverType::Exec => match spec.workload_addr {
-            Some(workload_addr) => workload_addr.to_string(),
-            None => return,
-        },
         DriverType::Unikernel | DriverType::Wasm => return,
     };
     match &mut descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => *host = workload_addr,
         ProbeMechanic::Http { host, .. } => *host = Some(workload_addr),
-        ProbeMechanic::Exec { .. } => unreachable!("Exec probes do not need a network target"),
     }
-}
-
-/// Production cgroupfs mount. Exec probes place their child PID into
-/// the workload's scope under this root per ADR-0026 / ADR-0059 §2 —
-/// the same mount `ExecDriver` writes workload PIDs into.
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
-
-/// Resolve the absolute cgroup scope path for an allocation's exec
-/// probe: `<CGROUP_ROOT>/overdrive.slice/workloads.slice/<alloc>.scope`.
-/// Per ADR-0059 §2 the probe child is a member of the WORKLOAD's scope
-/// (the canonical `CgroupPath::for_alloc` shape), NOT the worker's —
-/// the load-bearing prod/sim divergence the Tier-3 membership test
-/// pins. The `CgroupExecProber` consumes this absolute path; the Sim
-/// adapter ignores its content (membership is a Tier-3 concern).
-fn exec_scope_path(alloc_id: &AllocationId) -> String {
-    crate::cgroup_manager::CgroupPath::for_alloc(alloc_id)
-        .resolve(std::path::Path::new(CGROUP_ROOT))
-        .to_string_lossy()
-        .into_owned()
 }
 
 /// Wall-clock to UNIX-epoch milliseconds, sourced from the injected
@@ -521,12 +476,11 @@ fn unix_ms_from_clock(clock: &dyn Clock) -> u64 {
 /// silently.
 #[allow(
     clippy::too_many_arguments,
-    reason = "per-mechanic prober dispatch needs each injected adapter (tcp + http + exec) plus the clock, store, and per-tick identity; bundling them into a struct would hide the explicit-injection contract the call sites rely on"
+    reason = "per-mechanic prober dispatch needs each injected adapter (tcp + http) plus the clock, store, and per-tick identity; bundling them into a struct would hide the explicit-injection contract the call sites rely on"
 )]
 async fn probe_tick(
     tcp_prober: &dyn TcpProber,
     http_prober: &dyn HttpProber,
-    exec_prober: &dyn ExecProber,
     clock: &dyn Clock,
     observation_store: &dyn ObservationStore,
     alloc_id: &AllocationId,
@@ -559,42 +513,6 @@ async fn probe_tick(
                     source: err,
                 }
             })?
-        }
-        ProbeMechanic::Exec { command } => {
-            // The probe child is placed in the WORKLOAD's cgroup scope
-            // per ADR-0059 §2 — the scope is the canonical
-            // `overdrive.slice/workloads.slice/<alloc>.scope` under the
-            // production cgroupfs mount, a deterministic function of the
-            // alloc id (the same shape `ExecDriver` writes the workload
-            // PID into). The `CgroupExecProber` reuses
-            // `place_pid_in_scope` + `cgroup_kill` against this path.
-            let scope_path = exec_scope_path(alloc_id);
-            match exec_prober.probe(command, &scope_path, timeout).await {
-                Ok(outcome) => outcome,
-                Err(err) => {
-                    // Cgroup-placement failures (EACCES / ENOENT /
-                    // EBUSY) are runtime infrastructure errors. Write
-                    // a Fail row so the reconciler observes the
-                    // failure and can fire StartupProbeFailed once
-                    // the budget exhausts. Without this row,
-                    // startup_attempts_per_alloc stays at 0 and the
-                    // startup window hangs indefinitely.
-                    let fail_row = ProbeResultRow {
-                        alloc_id: alloc_id.clone(),
-                        probe_idx,
-                        role: descriptor.role,
-                        status: ProbeStatus::Fail { last_fail_reason: err.to_string() },
-                        last_observed_at_unix_ms: unix_ms_from_clock(clock),
-                        inferred: descriptor.inferred,
-                    };
-                    let _ = observation_store.write_probe_result(fail_row).await;
-                    return Err(ProbeRunnerError::ProbeAdapterFailed {
-                        alloc_id: alloc_id.clone(),
-                        probe_idx,
-                        source: err,
-                    });
-                }
-            }
         }
     };
     let status = match outcome {
@@ -635,12 +553,11 @@ async fn probe_tick(
 /// the cancellation token, not to the first error.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the spawned task owns cloned Arcs for each injected adapter (tcp + http + exec) plus the clock, store, per-tick identity, and cancellation token; the explicit list keeps the spawn site's ownership transfer auditable"
+    reason = "the spawned task owns cloned Arcs for each injected adapter (tcp + http) plus the clock, store, per-tick identity, and cancellation token; the explicit list keeps the spawn site's ownership transfer auditable"
 )]
 async fn supervised_probe_loop(
     tcp_prober: Arc<dyn TcpProber>,
     http_prober: Arc<dyn HttpProber>,
-    exec_prober: Arc<dyn ExecProber>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
     alloc_id: AllocationId,
@@ -657,7 +574,6 @@ async fn supervised_probe_loop(
                 if let Err(err) = probe_tick(
                     tcp_prober.as_ref(),
                     http_prober.as_ref(),
-                    exec_prober.as_ref(),
                     clock.as_ref(),
                     observation_store.as_ref(),
                     &alloc_id,

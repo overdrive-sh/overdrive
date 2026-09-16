@@ -148,24 +148,19 @@ jobs:
     situation: >
       When I, an Overdrive platform engineer, submit a Service-kind
       workload via `overdrive deploy <spec>` against a single-node dev
-      host, backed by either a host process or a Cloud Hypervisor VM,
-      possibly with declared health-check probes (HTTP / TCP / Exec for a
-      host process; HTTP / TCP for a VM, across startup / readiness /
-      liveness roles) or omitting them entirely (default TCP-connect
-      inference),
+      host, backed by the supported Cloud Hypervisor VM, with optional
+      HTTP/TCP health-check probes across startup / readiness / liveness roles
+      or no explicit probes (default TCP-connect inference),
     motivation: >
       I want the streaming wire to emit ServiceSubmitEvent::Stable only
       after probe-derived operator-meaningful liveness has been reached in
-      the workload's real execution context — including host-originated
-      HTTP/TCP probes against a VM's guest address — and
-      ServiceSubmitEvent::Failed (with an actionable
-      reason: StartupProbeFailed | EarlyExit { exit_code }) when the
-      Service does not stabilise within startup_deadline OR when the
-      workload exits before any startup probe passes,
+      the VM guest's real execution context — including host-originated
+      HTTP/TCP probes against its guest address — and
+      ServiceSubmitEvent::Failed with an actionable StartupProbeFailed reason
+      when the Service does not stabilise within startup_deadline,
     outcome: >
-      so the platform never reports a Service as "stable" while its
-      workload is actually exiting with code 1 within milliseconds of
-      exec (RCA root cause A,
+      so the platform never reports a Service as "stable" while its VM guest
+      has failed startup (RCA root cause A,
       docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md),
       readiness probes can flip Backend.healthy continuously to remove
       unhealthy backends from the dataplane fingerprint, liveness
@@ -173,7 +168,7 @@ jobs:
       can inspect current probe state via `overdrive workload describe
       <id>`. Extends J-OPS-003 to the Service workload kind
       with operator-declared liveness contracts.
-    source: GH #170; GH #257; GH #280 (deferred optional VM Exec probes); RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
+    source: GH #170; GH #257; GH #280 (deferred guest command probes); RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
     served_by_phase: 1
     status: active
 
@@ -182,21 +177,18 @@ jobs:
     situation: >
       When I, an Overdrive platform engineer, submit a workload through
       the walking-skeleton control plane on my single-node dev host
-      (control plane and worker co-located on one machine) — a host
-      process today, or a workload that cannot BE a host process because
-      it needs its own kernel, its own OS, or hardware-level isolation
-      (whitepaper §6 / vision.md design principle 4: "all workload types
-      are first class ... one control plane"),
+      (control plane and worker co-located on one machine) — a VM workload
+      that needs its own kernel, its own OS, or hardware-level isolation
+      (whitepaper §6 / vision.md design principle 4),
     motivation: >
       I want the platform to schedule the job onto the local host, start
-      it under cgroup-isolated supervision (a real OS process for the exec
-      driver; a real Cloud Hypervisor VM for the vm driver), and converge
+      it under cgroup-isolated supervision as a real Cloud Hypervisor VM, and converge
       the running set to the declared replica count — across the FULL set
       of lifecycle transitions: starting on submit, restarting on crash,
       stopping cleanly on `overdrive job stop`, AND replacing the current
       instance with a fresh one (a new AllocationId + new workload_addr)
       while the workload's intent stays declared — without me having to
-      babysit the process or invent ad-hoc supervision,
+      babysit the VM or invent ad-hoc supervision,
     outcome: >
       so the §18 reconciler primitive moves from "registered and idle"
       to "actively converging declared intent into running workloads",
@@ -220,7 +212,7 @@ jobs:
       hardware boundary or it silently becomes a lie the operator cannot
       detect — a VMM that accepted a boot request is NOT operator-
       meaningful liveness (the VM-class analogue of J-OPS-004's
-      "kernel-accepted exec is not liveness"), and a host hypervisor
+      "kernel-accepted start is not liveness"), and a host hypervisor
       process exiting 0 is NOT the guest workload succeeding (GH #42).
       That honesty rule binds EVERY process the platform supervises on a
       workload's behalf, not only the hypervisor: a storage daemon
@@ -234,9 +226,8 @@ jobs:
       design (feature-delta [D8] / intake I-6). For a VM-backed Service, the
       same honesty rule extends to health: HTTP/TCP probes reach the guest
       address rather than treating VMM health as evidence about the guest
-      workload (GH #257). Optional in-guest Exec probes are deferred to GH
-      #280.
-    source: whitepaper §6 (Process driver + VM driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); vision.md design principle 4 (all workload types are first class); phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition); GH #42 (Cloud Hypervisor `vm` driver — the workload-class dimension); GH #257 (VM Service health across the guest boundary)
+      workload (GH #257). Guest command probes are deferred to GH #280.
+    source: whitepaper §6 (Cloud Hypervisor VM driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); vision.md design principle 4; phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition); GH #42 (Cloud Hypervisor `vm` driver — the workload-class dimension); GH #257 (VM Service health across the guest boundary)
     relates_to: J-OPS-004
     served_by_phase: 1
     status: active
@@ -397,8 +388,7 @@ jobs:
     title: "Transparently encrypt every workload's traffic with its own SVID, in-kernel, via an agent-light L4 proxy the workload can't disable — no sidecar, no cleartext on the peer wire, both directions"
     relates_to: J-SEC-002
     situation: >
-      When a host-socket workload I run (a process via the exec driver — the
-      only workload kind in v1) opens an outbound connection, OR an inbound
+      When a VM/microVM workload I run opens an outbound connection, OR an inbound
       connection arrives at one of my server workloads — and design principle 3
       says "every packet carries cryptographic workload identity" and principle
       2 says mTLS is in-kernel and undisableable — and the platform already
@@ -410,8 +400,8 @@ jobs:
     motivation: >
       I want every node's agent to enforce both halves of every flow it touches
       via a single universal agent-light L4 proxy (ADR-0069). OUTBOUND, the
-      workload's connect() is transparently intercepted (cgroup_connect4 rewrite)
-      to a node-local agent leg; the agent drains the workload's plaintext
+      workload's connect() is transparently intercepted to a node-local agent
+      leg; the agent drains the workload's plaintext
       losslessly into a bounded userspace buffer, performs the rustls TLS 1.3
       CLIENT handshake with the real peer presenting the workload's held SVID
       (read via IdentityRead, leaf key per ADR-0063 D9), arms kTLS on the
@@ -432,8 +422,8 @@ jobs:
       absent SVID (the client side) or a missing/untrusted client cert (the
       server side) fails closed — no cleartext reaches the peer wire,
     outcome: >
-      so design principle 3 is OPERATIONALLY TRUE ON THE WIRE for v1 host-socket
-      (process/exec) workloads, in BOTH directions — provable by a wire capture
+      so design principle 3 is OPERATIONALLY TRUE ON THE WIRE for the supported
+      VM/microVM workload path, in BOTH directions — provable by a wire capture
       showing TLS 1.3 records (content type 0x17), zero cleartext of the payload
       on the peer-facing leg, between two workloads — and principle 2's "mTLS is
       in-kernel and cannot be disabled" is real, not aspirational: the SAME TLS
@@ -448,11 +438,9 @@ jobs:
       is NOT prevented in v1 — that gap closes with the #178 SAN-match upgrade,
       not a v1 prereq). This is the on-the-wire ENFORCEMENT peer of the
       mint(J-SEC-001)/hold(J-SEC-002) chain — 001 mints identity, 002 holds/reads
-      it, 003 consumes it to encrypt the wire. The proxy is UNIVERSAL across
-      workload kinds by construction (ADR-0069 folded #222 into #26): a future
-      WASM driver's host-socket workloads are auto-covered by the same outbound
-      mechanism, and guest-stack (microVM/unikernel) routes through the same
-      proxy via a STAGED guest-stack intercept adapter (#222). v1 does NOT
+      it, 003 consumes it to encrypt the wire. The proxy follows the existing
+      VM guest-stack boundary; future workload families may reuse it when their
+      drivers land. v1 does NOT
       provide restart-survival (the agent owns both legs + the kTLS state; an
       agent restart drops in-flight sessions, which re-handshake on reconnect)
       and carries a 2-sockets-per-connection density cost — both are the accepted
@@ -461,7 +449,7 @@ jobs:
     job_dimensions:
       functional: >
         OUTBOUND (client side): (a) the workload's connect() is transparently
-        intercepted (cgroup_connect4 rewrite) to the agent's plaintext leg
+        intercepted to the agent's plaintext leg
         (leg F); (b) the agent drains the pre-arm plaintext losslessly into a
         bounded userspace buffer, performs a rustls TLS 1.3 CLIENT handshake on
         the peer-facing leg (leg B) presenting the held SVID (read via the
@@ -521,14 +509,14 @@ jobs:
         cleartext.
       pull: >
         A single universal agent-light L4 proxy (ADR-0069) enforces both
-        directions: transparent intercept (cgroup_connect4 outbound / TPROXY
-        inbound) → the agent does the rustls TLS 1.3 handshake presenting the
+        directions: transparent VM tap/TPROXY intercept → the agent does the
+        rustls TLS 1.3 handshake presenting the
         workload's held SVID → kTLS arms on the agent's peer-facing leg → the
         kernel carries steady-state crypto (forward agent-idle, return/deliver
         agent-light) → the peer wire carries TLS 1.3 records, with both workloads
-        holding nothing. ONE mechanism for ALL workload kinds (process/exec now;
-        WASM auto-covered when a WASM driver lands; guest-stack via the staged
-        #222 adapter) — strictly better than ztunnel/Istio (whose userspace proxy
+        holding nothing. The supported VM/microVM path uses this boundary; future
+        workload families may reuse it when their drivers land — strictly better
+        than ztunnel/Istio (whose userspace proxy
         copies every byte for the connection's life) on the steady-state path,
         and lossless for client-speaks-first flows (the in-band model could not
         be made lossless).
@@ -557,8 +545,8 @@ jobs:
     source: >
       ADR-0069 (transparent mTLS via a universal agent-light L4 proxy — the
       LOCKED mechanism, 2026-06-12; supersedes the in-band sockops+kTLS-on-the-
-      workload's-own-socket model as v1; folds #222 into #26 as the staged
-      guest-stack intercept adapter; bidirectional host-socket v1); whitepaper
+      workload's-own-socket model as v1; current VM/microVM guest-stack path);
+      whitepaper
       §7/§8 (amended by ADR-0069 — "one identity model, two enforcement
       mechanisms" collapses to one universal mechanism), §6 addendum; vision.md
       design principles 2 (in-kernel undisableable mTLS) + 3 (every packet

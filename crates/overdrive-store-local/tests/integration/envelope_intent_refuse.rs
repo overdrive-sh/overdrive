@@ -16,7 +16,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput};
 use overdrive_core::aggregate::{Job, JobSpecInput, WorkloadIntentEnvelope};
 use overdrive_core::codec::{EnvelopeError, VersionedEnvelope};
 use overdrive_core::traits::intent_store::IntentStoreError;
@@ -71,9 +71,11 @@ fn sample_job_spec(id: &str) -> JobSpecInput {
         id: id.to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     }
 }

@@ -78,9 +78,11 @@ replicas = 1
     }
     s.push_str(
         r#"
-[exec]
+[vm]
 command = "/opt/frontend/bin/server"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 
 [resources]
 cpu_milli = 500

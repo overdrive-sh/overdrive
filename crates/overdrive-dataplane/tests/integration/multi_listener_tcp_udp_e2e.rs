@@ -90,6 +90,16 @@ const UDP_PORT: u16 = 8081;
 /// The `edge.toml` added-on-resubmit UDP listener port (S-05-C).
 const UDP_PORT_2: u16 = 8082;
 
+/// Dependency-free UDP echo responder for the backend netns. Python 3 is
+/// present on the qualified metal runner for its preflight tooling; `socat`
+/// is not guaranteed, so the fixture must not rely on that optional package.
+const UDP_ECHO_SCRIPT: &str = concat!(
+    "import socket,sys\n",
+    "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n",
+    "s.bind(('0.0.0.0',int(sys.argv[1])))\n",
+    "while True:\n d,a=s.recvfrom(65535)\n s.sendto(d,a)\n",
+);
+
 /// Build a TCP `ServiceFrontend` for `vip` on `port`. The proto=`Tcp`
 /// discriminator threads through `update_service` into the REVERSE_NAT
 /// key (ADR-0060 D1a/D7) with proto byte = 6.
@@ -355,14 +365,14 @@ fn spawn_tcp_echo(topo: &ThreeIfaceTopology, port: u16, payload: &str) -> std::p
     child
 }
 
-/// Spawn a UDP echo listener on the backend. `socat
-/// UDP4-LISTEN:<port>,fork,reuseaddr PIPE` echoes each received datagram
-/// straight back to its sender — a true per-datagram UDP echo (the
-/// connectionless reply S-05 asserts on). Same tool the single-UDP
-/// walking skeleton uses.
+/// Spawn a dependency-free UDP echo listener in the backend netns. Python 3
+/// is present on the qualified runner, while `socat` is optional; each
+/// received datagram is returned to its sender for the per-datagram reply
+/// S-05 asserts on.
 fn spawn_udp_echo(topo: &ThreeIfaceTopology, port: u16) -> std::process::Child {
+    let port = port.to_string();
     topo.backend_ns
-        .command("socat", [&format!("UDP4-LISTEN:{port},fork,reuseaddr"), "PIPE"])
+        .command("python3", ["-u", "-c", UDP_ECHO_SCRIPT, port.as_str()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

@@ -67,7 +67,7 @@
 //!      modelled directly; the `VmOutOfMemory` *diagnosis* is S-VM-19's
 //!      separate concern, whereas S-VM-43's claim is purely that a host kill
 //!      is a **crash**, not a clean exit.
-//!   2. A microVM is **Job-only** (`[service] + [vm]` is rejected — S-VM-38)
+//!   2. A microVM can back the supported workload kinds, including Service
 //!      and a Job crash **finalises without restarting** by design (the
 //!      run-once contract; `workload_lifecycle.rs` Job-kind natural-exit
 //!      handler, `is_natural_exit`). So the Gherkin's "same *ceiling*, same
@@ -1030,7 +1030,7 @@ async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
 /// NOTE (design-vs-Gherkin, surfaced to acceptance-designer): the scenario's
 /// original second Then said "same *ceiling*, same *backoff curve*", which
 /// describes the Service restart-budget branch. A microVM is Job-only
-/// (`[service] + [vm]` is rejected by S-VM-38) and a Job crash finalises
+/// (a VM Service follows its guest-grounded lifecycle) and a Job crash finalises
 /// without restart by design, so that sub-clause is unobservable for a VM.
 /// The observable **parity** asserted here is that a host-killed VM Job is
 /// treated identically to a crashed process Job — Failed,
@@ -1247,7 +1247,7 @@ async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
     poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
 
     // The operator stop verb (`overdrive job stop`, per crates/overdrive-cli
-    // CLAUDE.md the same `commands::deploy::stop` handler an [exec] workload
+    // CLAUDE.md the same `commands::deploy::stop` handler every workload
     // uses).
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
@@ -1359,8 +1359,8 @@ async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
 
     // The operator stop verb drives VmDriver::stop's §D4 sequence: the
     // SHUTDOWN write on the beacon, then VM_SHUTDOWN_REQUEST_DEADLINE, then
-    // Vmm::terminate. Same `commands::deploy::stop` handler an [exec]
-    // workload uses (crates/overdrive-cli CLAUDE.md).
+    // Vmm::terminate. Same `commands::deploy::stop` handler every workload
+    // uses (crates/overdrive-cli CLAUDE.md).
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop the running VM workload with the operator stop verb");
@@ -3057,7 +3057,7 @@ async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfin
 /// # What "no new surface" is proved by
 ///
 /// * **No new flag / verb.** The deploy is the SAME `DeployArgs { spec,
-///   config_path }` an `[exec]` workload uses (there is no confinement
+///   config_path }` every workload uses (there is no confinement
 ///   parameter to pass — a compile-time fact), and the `[job]`+`[vm]` spec
 ///   carries NO confinement stanza (`vm_job_toml` emits none).
 /// * **Terminal + exit code unchanged.** A guest that exits 0 and reports it
@@ -3097,7 +3097,7 @@ async fn confinement_adds_no_new_operator_surface() {
         &vm_job_toml("vm-nosurface", "/sbin/exit0", &fixture.kernel_path, &rootfs),
     );
 
-    // The SAME DeployArgs an [exec] workload uses — there is no confinement
+    // The SAME DeployArgs every workload uses — there is no confinement
     // parameter to pass (a compile-time fact: no new flag/verb).
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await

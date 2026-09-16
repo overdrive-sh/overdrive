@@ -1,4 +1,4 @@
-//! Sim bindings for the three Prober port traits.
+//! Sim bindings for the two Prober port traits.
 //!
 //! Per ADR-0054 §2 + `.claude/rules/development.md` § "Production
 //! code is not shaped by simulation": sim adapters are queue-driven
@@ -7,9 +7,6 @@
 //! Production uses real sockets / hyper / Command; neither side
 //! imposes structural concessions on the other.
 //!
-//! Per ADR-0059 §2 / DDD-17: [`SimExecProber`] does NOT assert
-//! cgroup membership — that's a Tier 3 concern. Membership is the
-//! production-adapter contract.
 //!
 //! Sim adapters MUST validate inputs identically to the production
 //! adapter per `nw-tdd-methodology` § "Integration Test Contract:
@@ -29,9 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_core::traits::prober::{
-    ExecProber, HttpProber, ProbeFailure, ProbeOutcome, TcpProber,
-};
+use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome, TcpProber};
 
 /// Queue-driven [`TcpProber`] sim binding.
 ///
@@ -156,63 +151,6 @@ impl HttpProber for SimHttpProber {
         }
         let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(guard.pop_front().unwrap_or(ProbeOutcome::Pass))
-    }
-}
-
-/// Queue-driven [`ExecProber`] sim binding.
-///
-/// Does NOT assert cgroup membership (per ADR-0059 §2 — that's a
-/// Tier 3 concern, asserted by the production-adapter integration
-/// test).
-pub struct SimExecProber {
-    queue: Mutex<VecDeque<Result<ProbeOutcome, ProbeFailure>>>,
-}
-
-impl SimExecProber {
-    #[must_use]
-    pub fn new() -> Self {
-        Self { queue: Mutex::new(VecDeque::new()) }
-    }
-
-    /// Enqueue the outcome the next `probe()` call will return.
-    pub fn enqueue_outcome(&self, outcome: ProbeOutcome) {
-        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(Ok(outcome));
-    }
-
-    /// Enqueue a probe-adapter error the next `probe()` call will
-    /// return — exercises infrastructure-failure paths (e.g.
-    /// cgroup-placement EACCES) that `enqueue_outcome` cannot reach.
-    pub fn enqueue_error(&self, err: ProbeFailure) {
-        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(Err(err));
-    }
-}
-
-impl Default for SimExecProber {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl ExecProber for SimExecProber {
-    async fn probe(
-        &self,
-        command: &[String],
-        cgroup_scope_path: &str,
-        _timeout: Duration,
-    ) -> Result<ProbeOutcome, ProbeFailure> {
-        if command.is_empty() {
-            return Err(ProbeFailure::InvalidTarget {
-                reason: "exec probe command must be non-empty".to_string(),
-            });
-        }
-        if cgroup_scope_path.is_empty() {
-            return Err(ProbeFailure::InvalidTarget {
-                reason: "exec probe cgroup_scope_path must be non-empty".to_string(),
-            });
-        }
-        let mut guard = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.pop_front().unwrap_or(Ok(ProbeOutcome::Pass))
     }
 }
 

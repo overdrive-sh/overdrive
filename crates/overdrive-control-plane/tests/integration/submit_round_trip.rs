@@ -27,7 +27,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput,
 };
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
@@ -161,7 +161,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -171,7 +176,12 @@ fn payments_spec_alt() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -276,9 +286,11 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
 // AC — invalid spec (zero replicas) -> HTTP 400 with field-pointing body
 // -----------------------------------------------------------------------
 
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(clippy::doc_markdown, reason = "repository-required Contract Shape declaration")]
 #[tokio::test]
 async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field() {
-    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
@@ -288,7 +300,12 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
         id: "payments".to_owned(),
         replicas: 0,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(VmInput {
+            command: "/sbin/init".to_string(),
+            args: vec![],
+            kernel: "/srv/vm/kernel".to_string(),
+            rootfs: "/srv/vm/rootfs.ext4".to_string(),
+        }),
     };
 
     let resp = client
@@ -308,6 +325,13 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
     );
 
     handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
+
+    let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
+    let key = IntentKey::for_workload(&workload_id);
+    assert!(
+        read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes()).await.is_none(),
+        "ordinary validation failure must leave the workload intent key absent"
+    );
 }
 
 // -----------------------------------------------------------------------

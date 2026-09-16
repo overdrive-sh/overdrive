@@ -73,7 +73,7 @@ fn given_stable_service_with_three_probes_pass_when_render_then_probes_section_o
         pass_row(
             ProbeRole::Liveness,
             0,
-            ProbeMechanic::Exec { command: vec!["/usr/local/bin/check.sh".to_string()] },
+            ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port: 8082 },
             3000,
         ),
     ];
@@ -90,10 +90,6 @@ fn given_stable_service_with_three_probes_pass_when_render_then_probes_section_o
     assert!(
         rendered.contains("http GET http://127.0.0.1:8080/healthz"),
         "expected HTTP summary; got:\n{rendered}",
-    );
-    assert!(
-        rendered.contains("exec /usr/local/bin/check.sh"),
-        "expected Exec summary; got:\n{rendered}",
     );
     // Last status + observed timestamp present.
     assert!(rendered.contains("last=pass"), "expected last=pass; got:\n{rendered}");
@@ -292,16 +288,14 @@ fn arb_workload_kind() -> impl Strategy<Value = WorkloadKind> {
     prop_oneof![Just(WorkloadKind::Service), Just(WorkloadKind::Job), Just(WorkloadKind::Schedule),]
 }
 
-/// Strategy over the three concrete probe mechanics, with arbitrary
-/// host/port/path/command content.
+/// Strategy over the two concrete probe mechanics, with arbitrary
+/// host/port/path content.
 fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
     prop_oneof![
         ("[a-z0-9.]{1,12}", 1u16..=65535)
             .prop_map(|(host, port)| ProbeMechanic::Tcp { host, port }),
         ("/[a-z]{1,8}", 1u16..=65535, proptest::option::of("[a-z0-9.]{1,12}"))
             .prop_map(|(path, port, host)| ProbeMechanic::Http { path, port, host }),
-        proptest::collection::vec("[a-z./]{1,10}", 1..=3)
-            .prop_map(|command| ProbeMechanic::Exec { command }),
     ]
 }
 

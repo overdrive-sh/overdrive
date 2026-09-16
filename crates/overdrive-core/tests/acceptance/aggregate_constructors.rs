@@ -26,8 +26,8 @@ use std::any::{TypeId, type_name};
 use std::num::NonZeroU32;
 
 use overdrive_core::aggregate::{
-    Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput, Node,
-    NodeSpecInput, ResourcesInput,
+    Allocation, AllocationSpecInput, DriverInput, Job, JobSpecInput, Node, NodeSpecInput,
+    ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::driver::Resources;
@@ -43,7 +43,12 @@ fn job_from_spec_accepts_canonical_input() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     // When Ana calls the validating constructor.
@@ -130,7 +135,12 @@ fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("canonical Job input");
     let node = Node::new(NodeSpecInput {
@@ -257,7 +267,12 @@ fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("canonical input");
 

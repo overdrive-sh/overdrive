@@ -51,11 +51,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent,
-    WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -69,6 +72,23 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` + `workload-lifecycle`) — the `run_server` boot shape.
 /// The `SimClock` is held by the caller to source the tick's `now`.
@@ -81,7 +101,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -124,7 +144,12 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("rkyv archive");
@@ -161,9 +186,17 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
     let target = TargetResource::new("workload/payments").expect("valid target");
     let now = clock.now();
     let deadline = now + Duration::from_millis(100);
-    run_convergence_tick(&state, &name, &target, now, 0, deadline)
-        .await
-        .expect("convergence tick succeeds");
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &name,
+        &target,
+        now,
+        0,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .expect("convergence tick succeeds");
 
     // THEN the reconciler observed generation 1 — the restart-pending
     // fresh-placement tick stamps `observed_generation = desired.generation`,

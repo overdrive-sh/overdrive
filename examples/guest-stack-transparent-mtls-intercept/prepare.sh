@@ -22,6 +22,7 @@ readonly CONFIG_DIR="$OUTPUT_ROOT/config"
 readonly CREDS_DIR="$OUTPUT_ROOT/credentials"
 readonly KEK_FILE="$CREDS_DIR/overdrive-ca-root"
 readonly GUEST_CALLER="/opt/overdrive/examples/gti/e07-caller"
+readonly GUEST_CALLEE="/opt/overdrive/examples/gti/e07-callee"
 readonly STATIC_TARGET="x86_64-unknown-linux-musl"
 readonly OWNERSHIP_TOKEN="${GTI_E07_OWNERSHIP_TOKEN:-}"
 
@@ -80,7 +81,7 @@ check_source() {
     || die "caller.toml kernel path differs from the preparation contract"
   grep -Fq "rootfs = \"$ROOTFS\"" "$EXAMPLE_DIR/caller.toml" \
     || die "caller.toml rootfs path differs from the preparation contract"
-  grep -Fq "command = \"$CALLEE\"" "$EXAMPLE_DIR/callee.toml" \
+  grep -Fq "command = \"$GUEST_CALLEE\"" "$EXAMPLE_DIR/callee.toml" \
     || die "callee.toml command path differs from the preparation contract"
   grep -Fq 'command = "/opt/overdrive/examples/gti/e07-caller"' \
     "$EXAMPLE_DIR/caller.toml" \
@@ -249,9 +250,11 @@ prepare() {
 
   mount_private_rootfs
   install -d -m 0755 "$MOUNT_DIR$(dirname "$GUEST_CALLER")"
+  install -m 0755 "$CALLEE" "$MOUNT_DIR$GUEST_CALLEE"
   install -m 0755 "$CALLER" "$MOUNT_DIR$GUEST_CALLER"
+  verify_static_binary "$MOUNT_DIR$GUEST_CALLEE"
   verify_static_binary "$MOUNT_DIR$GUEST_CALLER"
-  sync "$MOUNT_DIR$GUEST_CALLER"
+  sync "$MOUNT_DIR$GUEST_CALLEE" "$MOUNT_DIR$GUEST_CALLER"
   unmount_private_rootfs || die "bounded rootfs unmount/loop detach failed"
 
   head -c 32 /dev/urandom >"$KEK_FILE"
@@ -275,6 +278,7 @@ check() {
   trap on_prepare_exit EXIT
   trap 'exit 130' HUP INT TERM
   mount_private_rootfs
+  verify_static_binary "$MOUNT_DIR$GUEST_CALLEE"
   verify_static_binary "$MOUNT_DIR$GUEST_CALLER"
   unmount_private_rootfs || die "bounded rootfs unmount/loop detach failed"
   PREPARE_COMMITTED=1

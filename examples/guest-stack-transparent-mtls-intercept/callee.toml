@@ -2,21 +2,22 @@
 id = "gti-e07-callee"
 replicas = 1
 
-[exec]
-command = "/srv/vm/overdrive-testing/gti-e07/bin/e07-callee"
+[vm]
+command = "/opt/overdrive/examples/gti/e07-callee"
 args = []
+kernel = "/srv/vm/overdrive-testing/gti-e07/kernel"
+rootfs = "/srv/vm/overdrive-testing/gti-e07/rootfs.ext4"
 
 [resources]
-cpu_milli = 250
-memory_bytes = 67108864
+cpu_milli = 500
+memory_bytes = 134217728
 
 [[listener]]
 port = 18951
 protocol = "tcp"
 
 [health_check]
-# The production probe runner cannot reach an allocation's network namespace.
-# This explicit, supported opt-out prevents the known-unreachable inferred TCP
-# startup probe; first Running is therefore immediately deployment-stable for
-# this narrow example. The describe surface reports the allocation as Running.
+# The VM Service uses the checked-in guest caller as the health oracle; this
+# explicit opt-out keeps the current host-originated inferred probe from
+# claiming guest health before the VM path is connected.
 startup = []

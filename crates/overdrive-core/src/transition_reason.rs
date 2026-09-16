@@ -12,8 +12,8 @@
 //      Emitted on healthy progress.
 //
 //   2. **Cause-class failure variants** — typed payloads naming the
-//      structured cause (`ExecBinaryNotFound { path }`,
-//      `ExecPermissionDenied { path }`, etc.). Emitted on failure
+//      structured cause (`VmKernelNotFound { path }`,
+//      `VmRootfsNotFound { path }`, etc.). Emitted on failure
 //      transitions; the payload IS the cause-specific data the operator
 //      needs and a free-form `detail: String` cannot encode without
 //      stringly-typing.
@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::traits::driver::{
-    ConfinementControl, DriverStartClass, DriverStartFailure, ExecStartFailure, VmStartFailure,
+    ConfinementControl, DriverStartClass, DriverStartFailure, VmStartFailure,
 };
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
 
@@ -38,8 +38,8 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 ///
 /// Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
 /// `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
-/// gives a self-describing wire shape: `{"kind": "exec_binary_not_found",
-/// "data": {"path": "/usr/local/bin/payments"}}` for cause-class variants;
+/// gives a self-describing wire shape: `{"kind": "vm_kernel_not_found",
+/// "data": {"path": "/boot/vmlinux"}}` for cause-class variants;
 /// `{"kind": "scheduling"}` for progress markers (serde elides the empty
 /// `data` for unit variants by default).
 ///
@@ -47,19 +47,14 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// |---|---|---|---|
 /// | `Scheduling` | progress | reconciler — placement decided, action emitted | yes |
 /// | `Starting` | progress | reconciler — driver invocation underway | yes |
-/// | `Started` | progress | driver(exec) — driver returned `Ok(handle)` | yes |
+/// | `Started` | progress | VM driver — driver returned `Ok(handle)` | yes |
 /// | `BackoffPending { attempt }` | progress | reconciler — holding off restart | yes |
 /// | `Stopped { by }` | progress | reconciler — observed terminal stop | yes |
-/// | `ExecBinaryNotFound { path }` | cause | `ExecDriver` — `spawn(2)` ENOENT | yes |
-/// | `ExecPermissionDenied { path }` | cause | `ExecDriver` — `spawn(2)` EACCES | yes |
-/// | `ExecBinaryInvalid { path, kind }` | cause | `ExecDriver` — `spawn(2)` ENOEXEC / ELIBBAD | yes |
-/// | `CgroupSetupFailed { kind, source }` | cause | `ExecDriver` — cgroup mkdir / write failure | yes |
-/// | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
+/// | `DriverInternalError { detail }` | cause | driver — uncategorised failure | yes |
 /// | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
 /// | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
 /// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
-/// | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-/// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+/// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | VM driver — post-start exit-code observation | yes |
 /// | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
 /// | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
 /// | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
@@ -72,10 +67,8 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
 /// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 ///
-/// **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
-/// subscription not yet present in the Phase 1 `ExecDriver`; it is defined
-/// now for wire-shape forward-compatibility and will be emitted in Phase 2.
-/// `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+/// **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
+/// capacity accounting exists, and until 2026-08-11
 /// this table claimed it was emitted. It is not: nothing in production
 /// constructs `TransitionReason::NoCapacity` — only two acceptance tests do
 /// (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
@@ -84,8 +77,8 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// what let the false claim stand: a grep for `NoCapacity` appears to
 /// confirm it. Emitting this variant needs real node capacity and
 /// cross-workload accounting to exist first — GH #261.
-/// `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
-/// performs `child.wait()` and produces `ExitKind::Crashed`; the
+/// `WorkloadCrashedImmediately` is emitted by the VM exit observer when a
+/// guest produces `ExitKind::Crashed`; the
 /// `ExitObserver` maps that to this variant directly.
 ///
 /// **Cause-class payloads carry typed cause-specific data**, NOT a
@@ -130,26 +123,8 @@ pub enum TransitionReason {
     Stopped { by: StoppedBy },
 
     // -----------------------------------------------------------------
-    // Cause-class failure variants (Phase 1 ExecDriver-observable)
+    // Cause-class failure variants.
     // -----------------------------------------------------------------
-    /// `spawn(2)` returned ENOENT for the configured binary path.
-    /// Replaces the previous state-class `DriverStartFailed` for the
-    /// missing-binary case; the broken-binary regression target
-    /// (US-02 KPI-02) emits this variant.
-    ExecBinaryNotFound { path: String },
-    /// `spawn(2)` returned EACCES — the binary exists but is not
-    /// executable by the running uid.
-    ExecPermissionDenied { path: String },
-    /// `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
-    /// not a valid executable for this kernel/architecture.
-    /// `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
-    /// `"bad_elf"`, `"wrong_arch"`).
-    ExecBinaryInvalid { path: String, kind: String },
-    /// Cgroup setup failed (scope mkdir, PID enrolment, limit write).
-    /// `kind` is one of `"create_scope"`, `"place_pid"`,
-    /// `"write_limits"`; `source` is the verbatim `std::io::Error`
-    /// `Display`.
-    CgroupSetupFailed { kind: String, source: String },
     /// Driver returned an uncategorised failure that did not fit any
     /// of the more specific cause variants. Falls back on the verbatim
     /// driver `Display` text in `detail`. Operators seeing this variant
@@ -186,16 +161,11 @@ pub enum TransitionReason {
     NoCapacity { requested: ResourceEnvelope, free: ResourceEnvelope },
 
     // -----------------------------------------------------------------
-    // Cause-class failure variants (Phase 2 emit-deferred)
+    // Cause-class failure variants.
     // -----------------------------------------------------------------
-    /// Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
-    /// cgroup-events subscription; defined now for wire-shape forward-
-    /// compatibility.
-    OutOfMemory { peak_bytes: u64, limit_bytes: u64 },
     /// Workload exited with a non-zero status or signal within the
-    /// post-spawn settle window. Emitted by the `ExitObserver` when
-    /// `ExitKind::Crashed` is received from the driver — `ExecDriver`
-    /// already performs `child.wait()` in Phase 1 and that is exactly
+    /// post-start settle window. Emitted by the `ExitObserver` when
+    /// `ExitKind::Crashed` is received from the VM driver — that is exactly
     /// how `ExitKind::Crashed` is produced. The `exit_code` field
     /// carries the process exit status (`None` for signal-only exits);
     /// `signal` carries the signal number cast to `u8` (`None` when
@@ -212,8 +182,7 @@ pub enum TransitionReason {
     /// `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
     /// that failed; `detail` is the verbatim `Display` of the underlying
     /// `MtlsInterceptInstallError` (which names the privilege / kernel-feature
-    /// remediation an operator acts on). Mirrors the `CgroupSetupFailed {
-    /// kind, source }` cause-class shape — `stage` is a `String` carrying a
+    /// remediation an operator acts on). The `stage` is a `String` carrying a
     /// closed vocabulary, NOT a sub-enum.
     MtlsInterceptInstallFailed { stage: String, detail: String },
     /// The alloc's per-workload network namespace + veth could NOT be
@@ -249,9 +218,9 @@ pub enum TransitionReason {
     ///
     /// **Additive position**: appended after `WorkloadNetnsProvisionFailed`
     /// to keep every pre-existing rkyv discriminant stable — the same
-    /// discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
-    /// never populates `ExitEvent::oom`, so every Exec crash falls
-    /// through unchanged to `WorkloadCrashedImmediately`.
+    /// discipline `StoppedBy` states verbatim at `:237-241`. VM exits
+    /// without OOM facts fall through unchanged to
+    /// `WorkloadCrashedImmediately`.
     VmOutOfMemory { limit_bytes: u64, oom_kill_count: u64 },
 
     // -----------------------------------------------------------------
@@ -296,8 +265,8 @@ pub enum TransitionReason {
 /// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
 ///
 /// This is the ONLY driver-start path into [`TransitionReason`]. It is
-/// exhaustive over the closed `DriverStartClass` / `ExecStartFailure` /
-/// `VmStartFailure` variant set, so adding a class without extending this
+/// exhaustive over the closed `DriverStartClass` / `VmStartFailure` variant
+/// set, so adding a class without extending this
 /// conversion fails at COMPILE time rather than silently degrading an
 /// operator's diagnosis to the unknown fallback.
 ///
@@ -307,27 +276,11 @@ pub enum TransitionReason {
 ///    `failure.detail` is copied into the unknown fallback and nowhere
 ///    else, so changing a driver's diagnostic prose can never change the
 ///    operator-visible cause.
-/// 2. **Exec parity.** Every pre-existing Exec classification maps to the
-///    identical `TransitionReason` payload it produced under the retired
-///    text grammar — `kind == "exec_format_error"` for ENOEXEC, and
-///    `"create_scope"` / `"place_pid"` for cgroup setup.
+/// 2. **VM classification.** Every VM classification maps directly to its
+///    typed `TransitionReason` payload without reparsing diagnostic text.
 impl From<&DriverStartFailure> for TransitionReason {
     fn from(failure: &DriverStartFailure) -> Self {
         match &failure.class {
-            DriverStartClass::Exec(exec) => match exec {
-                ExecStartFailure::BinaryNotFound { path } => {
-                    Self::ExecBinaryNotFound { path: path.clone() }
-                }
-                ExecStartFailure::PermissionDenied { path } => {
-                    Self::ExecPermissionDenied { path: path.clone() }
-                }
-                ExecStartFailure::BinaryInvalid { path, kind } => {
-                    Self::ExecBinaryInvalid { path: path.clone(), kind: kind.clone() }
-                }
-                ExecStartFailure::CgroupSetupFailed { kind, source } => {
-                    Self::CgroupSetupFailed { kind: kind.clone(), source: source.clone() }
-                }
-            },
             DriverStartClass::Vm(vm) => match vm {
                 VmStartFailure::AllocationAlreadyOwned { alloc } => Self::DriverInternalError {
                     detail: format!("allocation {alloc} already has an active VM owner"),
@@ -844,8 +797,7 @@ pub struct ProbeWitness {
     /// reconciler's emission site).
     pub role: String,
     /// Operator-facing summary (e.g. `"tcp 0.0.0.0:8080"`,
-    /// `"http GET http://0.0.0.0:8080/healthz"`,
-    /// `"exec /usr/local/bin/healthcheck.sh"`). Reconciler
+    /// `"http GET http://0.0.0.0:8080/healthz"`). Reconciler
     /// composes from `ProbeDescriptor.mechanic` at the deciding
     /// tick.
     pub mechanic_summary: String,
@@ -929,16 +881,11 @@ impl TransitionReason {
     /// | `Stopped { by: Operator }` | `"stopped (by operator)"` |
     /// | `Stopped { by: Reconciler }` | `"stopped"` |
     /// | `Stopped { by: Process }` | `"stopped (by process)"` |
-    /// | `ExecBinaryNotFound { path }` | `format!("binary not found: {path}")` |
-    /// | `ExecPermissionDenied { path }` | `format!("permission denied: {path}")` |
-    /// | `ExecBinaryInvalid { path, kind }` | `format!("binary invalid ({kind}): {path}")` |
-    /// | `CgroupSetupFailed { kind, source }` | `format!("cgroup {kind} failed: {source}")` |
     /// | `DriverInternalError { detail }` | `format!("driver internal error: {detail}")` |
     /// | `RestartBudgetExhausted { attempts, last_cause_summary }` | `format!("restart budget exhausted after {attempts} attempts (last: {last_cause_summary})")` |
     /// | `Cancelled { by: Operator }` | `"cancelled (by operator)"` |
     /// | `Cancelled { by: Cluster }` | `"cancelled (by cluster)"` |
     /// | `NoCapacity { requested, free }` | `format!("no capacity (requested {requested:?} / free {free:?})")` |
-    /// | `OutOfMemory { peak_bytes, limit_bytes }` | `format!("OOM-killed (peak {peak_bytes} / limit {limit_bytes})")` |
     /// | `WorkloadCrashedImmediately { exit_code, signal, .. }` | `format!("crashed (exit {exit_code:?}, signal {signal:?})")` |
     #[must_use]
     pub fn human_readable(&self) -> String {
@@ -959,15 +906,7 @@ impl TransitionReason {
             }
             Self::Stopped { by: StoppedBy::LivenessProbe } => "stopped (liveness probe)".to_owned(),
 
-            // Cause-class failures (Phase 1 emit)
-            Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
-            Self::ExecPermissionDenied { path } => format!("permission denied: {path}"),
-            Self::ExecBinaryInvalid { path, kind } => {
-                format!("binary invalid ({kind}): {path}")
-            }
-            Self::CgroupSetupFailed { kind, source } => {
-                format!("cgroup {kind} failed: {source}")
-            }
+            // Cause-class failures
             Self::DriverInternalError { detail } => {
                 format!("driver internal error: {detail}")
             }
@@ -988,10 +927,6 @@ impl TransitionReason {
                 )
             }
 
-            // Cause-class failures (Phase 2 emit-deferred forward-compat)
-            Self::OutOfMemory { peak_bytes, limit_bytes } => {
-                format!("OOM-killed (peak {peak_bytes} / limit {limit_bytes})")
-            }
             Self::WorkloadCrashedImmediately { exit_code, signal, .. } => {
                 format!("crashed (exit {exit_code:?}, signal {signal:?})")
             }
@@ -1050,15 +985,10 @@ impl TransitionReason {
             | Self::BackoffPending { .. }
             | Self::Stopped { .. } => false,
             // Cause-class failures.
-            Self::ExecBinaryNotFound { .. }
-            | Self::ExecPermissionDenied { .. }
-            | Self::ExecBinaryInvalid { .. }
-            | Self::CgroupSetupFailed { .. }
-            | Self::DriverInternalError { .. }
+            Self::DriverInternalError { .. }
             | Self::RestartBudgetExhausted { .. }
             | Self::Cancelled { .. }
             | Self::NoCapacity { .. }
-            | Self::OutOfMemory { .. }
             | Self::WorkloadCrashedImmediately { .. }
             | Self::MtlsInterceptInstallFailed { .. }
             | Self::WorkloadNetnsProvisionFailed { .. }

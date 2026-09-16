@@ -76,9 +76,7 @@ use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status, submit_w
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadIntent,
-};
+use overdrive_core::aggregate::{DriverInput, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{CorrelationKey, NodeId};
 use overdrive_core::reconcilers::{Action, TickContext};
@@ -121,7 +119,7 @@ fn build_state_with_range(
     // `AppState::new` (below) wraps `driver` into its own single-entry
     // registry internally (ADR-0083 §D1, GH #42) — no separate registry
     // needed at this call site.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         vip_range,
         Arc::clone(&store) as Arc<dyn IntentStore>,
@@ -165,7 +163,12 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port, protocol: "tcp".to_owned() }],
         startup_probes: vec![],
         readiness_probes: vec![],
@@ -181,7 +184,12 @@ fn service_spec_proto(id: &str, port: u16, protocol: &str) -> ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port, protocol: protocol.to_owned() }],
         startup_probes: vec![],
         readiness_probes: vec![],
@@ -209,14 +217,14 @@ async fn fetch_alloc_status(state: AppState, workload_id: &str) -> AllocStatusRe
 
 /// Derive the `spec_digest` of the Service spec the way the production
 /// `submit_workload` handler does — wrap into `WorkloadIntent::Service`
-/// via `ServiceV2::from_submit` and call `spec_digest()`. This is the
+/// via `Service::from_submit` and call `spec_digest()`. This is the
 /// SAME digest the handler hands to `allocator.allocate(...)`, so the
 /// hand-constructed `Action::ReleaseServiceVip` carries the digest the
 /// allocator's memo is actually keyed by — the integration would pass
 /// trivially against a bogus digest if this projection drifted, hence
 /// the careful mirror of the handler's path.
 fn digest_for_spec(spec: ServiceSpecInput) -> [u8; 32] {
-    let service = ServiceV2::from_submit(spec).expect("Service spec must validate");
+    let service = Service::from_submit(spec).expect("Service spec must validate");
     let intent = WorkloadIntent::Service(service);
     let hash = intent.spec_digest().expect("spec_digest of WorkloadIntent");
     *hash.as_bytes()
@@ -245,7 +253,7 @@ async fn dispatch_release(
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     // The dispatch path's Driver port is not touched by the
     // ReleaseServiceVip arm — a SimDriver is sufficient.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
         r.insert(Arc::clone(&driver));
@@ -591,7 +599,7 @@ async fn build_state_with_range_and_reconciler(
     // `AppState::new` (below) wraps `driver` into its own single-entry
     // registry internally (ADR-0083 §D1, GH #42) — no separate registry
     // needed at this call site.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         vip_range,
         Arc::clone(&store) as Arc<dyn IntentStore>,

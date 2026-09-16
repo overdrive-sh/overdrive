@@ -3,9 +3,9 @@
 //! driving ports.
 //!
 //! The file name is retained for feature-history continuity. Its contract is
-//! no longer VM-specific: one stable `WorkloadId` owns policy while every
-//! physical execution receives a fresh `AllocationId`, including legacy Exec
-//! until GH #293 removes that adapter. Accepted allocation rows define the
+//! no longer tied to a particular adapter: one stable `WorkloadId` owns
+//! policy while every physical execution receives a fresh `AllocationId`.
+//! Accepted allocation rows define the
 //! numeric-current predecessor; `WorkloadLifecycleView::restart_counts` keys
 //! are the driver-neutral durable issued-ID ledger. Tests observe only Actions,
 //! the returned View, and immutable input rows. No private helper or new
@@ -18,7 +18,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::SpiffeId;
-use overdrive_core::aggregate::{Exec, Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources};
@@ -33,26 +33,19 @@ use proptest::test_runner::FileFailurePersistence;
 
 #[derive(Clone, Copy, Debug)]
 enum ComposedDriver {
-    Exec,
     Vm,
 }
 
 impl ComposedDriver {
-    const ALL: [Self; 2] = [Self::Exec, Self::Vm];
+    const ALL: [Self; 1] = [Self::Vm];
 
-    fn job(self, workload: &str) -> Job {
-        let driver = match self {
-            Self::Exec => WorkloadDriver::Exec(Exec {
-                command: "/bin/workload".to_owned(),
-                args: vec!["--serve".to_owned()],
-            }),
-            Self::Vm => WorkloadDriver::Vm(Vm {
-                command: "/sbin/workload".to_owned(),
-                args: vec!["--serve".to_owned()],
-                kernel: "/srv/vm/kernel".to_owned(),
-                rootfs: "/srv/vm/rootfs.ext4".to_owned(),
-            }),
-        };
+    fn job(workload: &str) -> Job {
+        let driver = WorkloadDriver::Vm(Vm {
+            command: "/sbin/workload".to_owned(),
+            args: vec!["--serve".to_owned()],
+            kernel: "/srv/vm/kernel".to_owned(),
+            rootfs: "/srv/vm/rootfs.ext4".to_owned(),
+        });
         Job {
             id: wid(workload),
             replicas: NonZeroU32::new(1).expect("one replica"),
@@ -62,10 +55,7 @@ impl ComposedDriver {
     }
 
     const fn matches_payload(self, payload: &DriverPayload) -> bool {
-        matches!(
-            (self, payload),
-            (Self::Exec, DriverPayload::Exec(_)) | (Self::Vm, DriverPayload::Vm(_))
-        )
+        matches!((self, payload), (Self::Vm, DriverPayload::Vm(_)))
     }
 }
 
@@ -262,19 +252,16 @@ fn assert_restart_identity(
 }
 
 /// S-284-PURE-01 — the existing `RestartAllocation` fields carry a distinct
-/// predecessor and successor for every currently composed driver.
+/// predecessor and successor for the composed VM driver.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn replacement_identity_is_driver_neutral_for_exec_and_vm() {
+fn replacement_identity_is_driver_neutral_for_vm() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-replacement",
-            ComposedDriver::Vm => "vm-replacement",
-        };
+        let workload = "vm-replacement";
         let predecessor = failed_row(workload, 0);
         let predecessor_id = predecessor.alloc_id.clone();
         let successor = aid(&format!("alloc-{workload}-1"));
-        let (desired, actual) = states(driver.job(workload), [predecessor]);
+        let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
 
         let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
 
@@ -292,15 +279,12 @@ fn replacement_identity_is_driver_neutral_for_exec_and_vm() {
 #[test]
 fn workload_failure_charges_only_the_fresh_successor_candidate() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-budget",
-            ComposedDriver::Vm => "vm-budget",
-        };
+        let workload = "vm-budget";
         let predecessor = failed_row(workload, 4);
         let predecessor_id = predecessor.alloc_id.clone();
         let before_predecessor = predecessor.clone();
         let successor = aid(&format!("alloc-{workload}-5"));
-        let (desired, actual) = states(driver.job(workload), [predecessor]);
+        let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
         let mut view = WorkloadLifecycleView::default();
         view.restart_counts.insert(predecessor_id.clone(), 2);
         view.last_failure_seen_at.insert(predecessor_id.clone(), instant(10));
@@ -322,14 +306,11 @@ fn workload_failure_charges_only_the_fresh_successor_candidate() {
 #[test]
 fn platform_reclamation_carries_policy_without_failure_charge_for_every_driver() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-reclaimed",
-            ComposedDriver::Vm => "vm-reclaimed",
-        };
+        let workload = "vm-reclaimed";
         let predecessor = reclaimed_row(workload, 4);
         let predecessor_id = predecessor.alloc_id.clone();
         let successor = aid(&format!("alloc-{workload}-5"));
-        let (desired, actual) = states(driver.job(workload), [predecessor]);
+        let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
         let mut view = WorkloadLifecycleView::default();
         view.restart_counts.insert(predecessor_id.clone(), 4);
         view.last_failure_seen_at.insert(predecessor_id.clone(), instant(41));
@@ -351,14 +332,11 @@ fn platform_reclamation_carries_policy_without_failure_charge_for_every_driver()
 #[test]
 fn desired_generation_replacement_carries_policy_without_failure_charge() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-generation",
-            ComposedDriver::Vm => "vm-generation",
-        };
+        let workload = "vm-generation";
         let predecessor = operator_stopped_row(workload, 0);
         let predecessor_id = predecessor.alloc_id.clone();
         let successor = aid(&format!("alloc-{workload}-1"));
-        let (mut desired, mut actual) = states(driver.job(workload), [predecessor]);
+        let (mut desired, mut actual) = states(ComposedDriver::job(workload), [predecessor]);
         desired.generation = 1;
         actual.generation = 1;
         let mut view = WorkloadLifecycleView { observed_generation: 0, ..Default::default() };
@@ -382,12 +360,9 @@ fn desired_generation_replacement_carries_policy_without_failure_charge() {
 #[test]
 fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
     for driver in ComposedDriver::ALL {
-        let prefix = match driver {
-            ComposedDriver::Exec => "exec-handoff",
-            ComposedDriver::Vm => "vm-handoff",
-        };
+        let prefix = "vm-handoff";
         let draining = draining_row(prefix, 0);
-        let (desired, actual) = states(driver.job(prefix), [draining]);
+        let (desired, actual) = states(ComposedDriver::job(prefix), [draining]);
         let view = WorkloadLifecycleView::default();
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
         assert!(allocation_actions(&actions).is_empty(), "Draining must not hand off: {actions:?}");
@@ -397,7 +372,7 @@ fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
         let current = reclaimed_row(prefix, 10);
         let current_id = current.alloc_id.clone();
         let successor = aid(&format!("alloc-{prefix}-11"));
-        let (desired, actual) = states(driver.job(prefix), [historical, current]);
+        let (desired, actual) = states(ComposedDriver::job(prefix), [historical, current]);
         let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
         assert_restart_identity(driver, prefix, &current_id, &successor, &actions);
     }
@@ -409,33 +384,25 @@ fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement() {
-    for driver in ComposedDriver::ALL {
-        let initial_workload = match driver {
-            ComposedDriver::Exec => "exec-initial",
-            ComposedDriver::Vm => "vm-initial",
-        };
-        let (desired, actual) = states(driver.job(initial_workload), []);
-        let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
-        let (initial, spec) = only_start(&actions);
-        assert_eq!(initial.as_str(), format!("alloc-{initial_workload}-0"));
-        assert_eq!(&spec.alloc, initial);
-        assert_eq!(spec.identity, SpiffeId::for_allocation(&wid(initial_workload), initial));
-        assert_eq!(next.restart_counts.get(initial), Some(&0));
-        assert!(!next.last_failure_seen_at.contains_key(initial));
+    let initial_workload = "vm-initial";
+    let (desired, actual) = states(ComposedDriver::job(initial_workload), []);
+    let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
+    let (initial, spec) = only_start(&actions);
+    assert_eq!(initial.as_str(), format!("alloc-{initial_workload}-0"));
+    assert_eq!(&spec.alloc, initial);
+    assert_eq!(spec.identity, SpiffeId::for_allocation(&wid(initial_workload), initial));
+    assert_eq!(next.restart_counts.get(initial), Some(&0));
+    assert!(!next.last_failure_seen_at.contains_key(initial));
 
-        let gc_workload = match driver {
-            ComposedDriver::Exec => "exec-gc",
-            ComposedDriver::Vm => "vm-gc",
-        };
-        let predecessor = system_gc_row(gc_workload, 0);
-        let predecessor_id = predecessor.alloc_id.clone();
-        let (desired, actual) = states(driver.job(gc_workload), [predecessor]);
-        let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
-        let (fresh, spec) = only_start(&actions);
-        assert_eq!(fresh.as_str(), format!("alloc-{gc_workload}-1"));
-        assert_ne!(fresh, &predecessor_id);
-        assert_eq!(&spec.alloc, fresh);
-    }
+    let gc_workload = "vm-gc";
+    let predecessor = system_gc_row(gc_workload, 0);
+    let predecessor_id = predecessor.alloc_id.clone();
+    let (desired, actual) = states(ComposedDriver::job(gc_workload), [predecessor]);
+    let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
+    let (fresh, spec) = only_start(&actions);
+    assert_eq!(fresh.as_str(), format!("alloc-{gc_workload}-1"));
+    assert_ne!(fresh, &predecessor_id);
+    assert_eq!(&spec.alloc, fresh);
 }
 
 /// S-284-PURE-07 — an accepted failed successor becomes numeric-current; a
@@ -445,10 +412,7 @@ fn initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement(
 #[test]
 fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-current",
-            ComposedDriver::Vm => "vm-current",
-        };
+        let workload = "vm-current";
         // Lexical iteration yields suffix 1 before suffix 10; numeric-current
         // must nevertheless choose 10 for both drivers.
         let historical = failed_row(workload, 1);
@@ -456,7 +420,8 @@ fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
         let current_id = current.alloc_id.clone();
         let reservation = aid(&format!("alloc-{workload}-12"));
         let successor = aid(&format!("alloc-{workload}-13"));
-        let (desired, actual) = states(driver.job(workload), [historical.clone(), current]);
+        let (desired, actual) =
+            states(ComposedDriver::job(workload), [historical.clone(), current]);
         let mut view = WorkloadLifecycleView::default();
         view.restart_counts.insert(historical.alloc_id.clone(), 4);
         view.last_failure_seen_at.insert(historical.alloc_id.clone(), instant(1));
@@ -482,32 +447,27 @@ fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn retry_deadline_is_derived_only_from_numeric_current_accepted_candidate() {
-    for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-deadline",
-            ComposedDriver::Vm => "vm-deadline",
-        };
-        // Lexical iteration yields suffix 1 before suffix 10; numeric-current
-        // must nevertheless choose 10 for both drivers.
-        let historical = failed_row(workload, 1);
-        let current = failed_row(workload, 10);
-        let historical_id = historical.alloc_id.clone();
-        let current_id = current.alloc_id.clone();
-        let reservation = aid(&format!("alloc-{workload}-12"));
-        let (desired, actual) = states(driver.job(workload), [historical, current]);
-        let mut view = WorkloadLifecycleView::default();
-        view.restart_counts.insert(historical_id.clone(), 4);
-        view.last_failure_seen_at.insert(historical_id, instant(100));
-        view.restart_counts.insert(current_id.clone(), 2);
-        view.last_failure_seen_at.insert(current_id, instant(200));
-        view.restart_counts.insert(reservation.clone(), 0);
-        view.last_failure_seen_at.insert(reservation, instant(900));
+    let workload = "vm-deadline";
+    // Lexical iteration yields suffix 1 before suffix 10; numeric-current
+    // must nevertheless choose 10.
+    let historical = failed_row(workload, 1);
+    let current = failed_row(workload, 10);
+    let historical_id = historical.alloc_id.clone();
+    let current_id = current.alloc_id.clone();
+    let reservation = aid(&format!("alloc-{workload}-12"));
+    let (desired, actual) = states(ComposedDriver::job(workload), [historical, current]);
+    let mut view = WorkloadLifecycleView::default();
+    view.restart_counts.insert(historical_id.clone(), 4);
+    view.last_failure_seen_at.insert(historical_id, instant(100));
+    view.restart_counts.insert(current_id.clone(), 2);
+    view.last_failure_seen_at.insert(current_id, instant(200));
+    view.restart_counts.insert(reservation.clone(), 0);
+    view.last_failure_seen_at.insert(reservation, instant(900));
 
-        let deadline =
-            WorkloadLifecycle::canonical().next_evaluation_at(&desired, &actual, &view, &tick(200));
+    let deadline =
+        WorkloadLifecycle::canonical().next_evaluation_at(&desired, &actual, &view, &tick(200));
 
-        assert_eq!(deadline, Some(instant(200) + backoff_for_attempt(2)));
-    }
+    assert_eq!(deadline, Some(instant(200) + backoff_for_attempt(2)));
 }
 
 /// S-284-PURE-09 — unparseable accepted rows and reservation keys do not
@@ -515,27 +475,22 @@ fn retry_deadline_is_derived_only_from_numeric_current_accepted_candidate() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn unparseable_attempts_do_not_participate_in_allocation() {
-    for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-unparseable",
-            ComposedDriver::Vm => "vm-unparseable",
-        };
-        let mut malformed = failed_row(workload, 0);
-        malformed.alloc_id = aid(&format!("legacy-{workload}-attempt"));
-        let malformed_id = malformed.alloc_id.clone();
-        let malformed_reservation = aid(&format!("reserved-{workload}-not-a-number"));
-        let (desired, actual) = states(driver.job(workload), [malformed]);
-        let mut view = WorkloadLifecycleView::default();
-        view.restart_counts.insert(malformed_reservation, 3);
+    let workload = "vm-unparseable";
+    let mut malformed = failed_row(workload, 0);
+    malformed.alloc_id = aid(&format!("legacy-{workload}-attempt"));
+    let malformed_id = malformed.alloc_id.clone();
+    let malformed_reservation = aid(&format!("reserved-{workload}-not-a-number"));
+    let (desired, actual) = states(ComposedDriver::job(workload), [malformed]);
+    let mut view = WorkloadLifecycleView::default();
+    view.restart_counts.insert(malformed_reservation, 3);
 
-        let (actions, next) = reconcile(&desired, &actual, &view, 20);
-        let (fresh, spec) = only_start(&actions);
+    let (actions, next) = reconcile(&desired, &actual, &view, 20);
+    let (fresh, spec) = only_start(&actions);
 
-        assert_eq!(fresh.as_str(), format!("alloc-{workload}-0"));
-        assert_ne!(fresh, &malformed_id);
-        assert_eq!(&spec.alloc, fresh);
-        assert_eq!(next.restart_counts.get(fresh), Some(&0));
-    }
+    assert_eq!(fresh.as_str(), format!("alloc-{workload}-0"));
+    assert_ne!(fresh, &malformed_id);
+    assert_eq!(&spec.alloc, fresh);
+    assert_eq!(next.restart_counts.get(fresh), Some(&0));
 }
 
 /// S-284-PURE-10 — `u32::MAX - 1` issues the last identity once and a
@@ -545,20 +500,17 @@ fn unparseable_attempts_do_not_participate_in_allocation() {
 #[test]
 fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
     for driver in ComposedDriver::ALL {
-        let workload = match driver {
-            ComposedDriver::Exec => "exec-exhaustion",
-            ComposedDriver::Vm => "vm-exhaustion",
-        };
+        let workload = "vm-exhaustion";
         let predecessor = failed_row(workload, u32::MAX - 1);
         let predecessor_id = predecessor.alloc_id.clone();
         let final_id = aid(&format!("alloc-{workload}-{}", u32::MAX));
-        let (desired, actual) = states(driver.job(workload), [predecessor]);
+        let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
         let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
         assert_restart_identity(driver, workload, &predecessor_id, &final_id, &actions);
         assert!(next.restart_counts.contains_key(&final_id));
 
         let exhausted = failed_row(workload, u32::MAX);
-        let (desired, actual) = states(driver.job(workload), [exhausted]);
+        let (desired, actual) = states(ComposedDriver::job(workload), [exhausted]);
         let view = WorkloadLifecycleView::default();
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
         assert!(allocation_actions(&actions).is_empty(), "exhaustion must emit no allocation");
@@ -575,8 +527,8 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// S-284-PROP-01 — for arbitrary gaps below the checked ceiling, both
-    /// composed drivers choose exactly one above the maximum accepted-row or
+    /// S-284-PROP-01 — for arbitrary gaps below the checked ceiling, the
+    /// composed VM driver chooses exactly one above the maximum accepted-row or
     /// issued-reservation suffix and retain the accepted row as predecessor.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
@@ -586,13 +538,10 @@ proptest! {
     ) {
         let reserved_suffix = accepted_suffix.saturating_add(reservation_gap);
         for driver in ComposedDriver::ALL {
-            let workload = match driver {
-                ComposedDriver::Exec => "exec-property",
-                ComposedDriver::Vm => "vm-property",
-            };
+            let workload = "vm-property";
             let predecessor = failed_row(workload, accepted_suffix);
             let predecessor_id = predecessor.alloc_id.clone();
-            let (desired, actual) = states(driver.job(workload), [predecessor]);
+            let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
             let reserved = aid(&format!("alloc-{workload}-{reserved_suffix}"));
             let mut view = WorkloadLifecycleView::default();
             view.restart_counts.insert(predecessor_id.clone(), 0);

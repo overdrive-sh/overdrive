@@ -4,7 +4,7 @@
 //! `[[health_check.startup]]` / `[[health_check.readiness]]` /
 //! `[[health_check.liveness]]`. After parse-time validation, each
 //! row becomes a `ProbeDescriptor` and is rkyv-archived as part of
-//! the `ServiceSpec` aggregate (envelope V1→V2 bump per ADR-0057).
+//! the current VM-only `ServiceSpec` aggregate.
 //!
 //! Per ADR-0058 §1 ("honest by default"): if zero startup probes are
 //! declared AND at least one `[[listener]]` is present, the parser
@@ -43,11 +43,8 @@ pub const SCHEDULE_PROBES_GUIDANCE: &str =
 
 /// Concrete mechanic for a probe attempt.
 ///
-/// Per ADR-0054: three mechanics, each backed by a distinct port
-/// trait (`TcpProber` / `HttpProber` / `ExecProber`). Step 01-02
-/// lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
-/// in step 02-02 — all three are part of the enum so the
-/// `ServiceSpec` envelope shape is stable across slices.
+/// Per ADR-0054, each mechanic is backed by a distinct port trait. The
+/// supported mechanics are TCP-connect and plain HTTP GET.
 #[derive(
     Debug,
     Clone,
@@ -70,9 +67,6 @@ pub enum ProbeMechanic {
     /// HTTP only per C6. Method = GET only per US-02. 3xx → Fail
     /// per US-02 AC (no redirect-follow).
     Http { path: String, port: u16, host: Option<String> },
-    /// Spawn `command[0]` with `command[1..]` as args, inside the
-    /// workload's cgroup per ADR-0059 / C7. Exit 0 = Pass.
-    Exec { command: Vec<String> },
 }
 
 impl ProbeMechanic {
@@ -81,7 +75,7 @@ impl ProbeMechanic {
     ///
     /// Centralises the invariants so the TOML parser path
     /// (`parse_http_mechanic` in `workload_spec.rs`) and the API
-    /// admission path (`ServiceV2::from_submit`) converge on the same
+    /// admission path (`Service::from_submit`) converge on the same
     /// checks. Neither path can drift independently.
     pub fn validate(&self) -> Result<(), String> {
         match self {
@@ -105,11 +99,6 @@ impl ProbeMechanic {
             Self::Tcp { port, .. } => {
                 if *port == 0 {
                     return Err("tcp probe `port` must be in 1..=65535".to_owned());
-                }
-            }
-            Self::Exec { command } => {
-                if command.is_empty() {
-                    return Err("exec probe `command` must be a non-empty array".to_owned());
                 }
             }
         }
@@ -146,8 +135,8 @@ impl ProbeMechanic {
 )]
 pub struct ProbeDescriptor {
     /// 0-indexed position within THIS descriptor's role array
-    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV3`
-    /// construction and carried verbatim into `ServiceV2`; never
+    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV1`
+    /// construction and carried verbatim into `Service`; never
     /// re-derived downstream.
     ///
     /// Per ADR-0080 § D1 this is the field ADR-0057:172 specified and

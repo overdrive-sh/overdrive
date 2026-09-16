@@ -91,9 +91,11 @@ replicas = 3
 cpu_milli = 500
 memory_bytes = 536870912
 
-[exec]
+[vm]
 command = "/bin/true"
 args = []
+kernel = "/kernel"
+rootfs = "/rootfs"
 "#;
     let path = dir.join("payments.toml");
     std::fs::write(&path, spec).expect("write payments.toml");

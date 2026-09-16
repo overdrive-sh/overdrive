@@ -1,0 +1,16 @@
+expectation_id: "E14"
+date_utc: "2026-09-15T01:57:09Z"
+overdrive_sha: "3f628ed08865aa0cdb3fbacd1f2cf989707d4a7a"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "028033556472d5790acef651b3bdf81797791904"
+harness_invocation: "manual capture: OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy"
+runner_invoked: false
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["S-SVM-01 in `docs/feature/service-kind-vm-workloads/distill/test-scenarios.md`.","US-SVM-1 and US-SVM-2 in `docs/feature/service-kind-vm-workloads/feature-delta.md`.","Post-cut black-box event in `docs/feature/remove-legacy-exec-workload-driver/feature-delta.md`.","DELIVER step 03-01 in `docs/feature/remove-legacy-exec-workload-driver/deliver/roadmap.json`."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

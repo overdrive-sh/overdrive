@@ -17,7 +17,7 @@ use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
@@ -53,7 +53,7 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -121,11 +121,16 @@ async fn persist_service_and_allocate_vip(
     listener_port: u16,
     protocol: &str,
 ) -> (ServiceVip, u16, overdrive_core::dataplane::backend_key::Proto) {
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: listener_port, protocol: protocol.to_string() }],
         startup_probes: vec![],
         readiness_probes: vec![],

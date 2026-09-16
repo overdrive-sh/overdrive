@@ -17,7 +17,7 @@ use overdrive_control_plane::api::{
     IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_host::RealCgroupFs;
 use serde::Deserialize;
@@ -89,7 +89,12 @@ fn payments_spec() -> JobSpecInput {
         id: "payments".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 

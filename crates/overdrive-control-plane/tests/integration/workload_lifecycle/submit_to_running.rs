@@ -1,33 +1,50 @@
 //! Step 02-03 / Slice 3A.3 scenario 3.1 — walking-skeleton:
-//! `submitted_job_reaches_running_via_real_exec_driver`.
+//! `submitted_job_reaches_running_via_simulated_vm_driver`.
 //!
 //! Submits a 1-replica job through the in-process server with a real
-//! `Arc<ExecDriver>`, drives the convergence tick loop until the
-//! alloc reaches `Running`, then asserts cgroup membership of the
-//! workload PID.
+//! `SimDriver(DriverType::Vm)`, and drives the convergence tick loop until the
+//! allocation reaches `Running`.
 //!
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
 };
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 
-use super::cleanup::AllocCleanup;
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 #[tokio::test]
-async fn submitted_job_reaches_running_via_real_exec_driver() {
+async fn submitted_job_reaches_running_via_simulated_vm_driver() {
     let tmp = TempDir::new().expect("tempdir");
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
@@ -39,11 +56,8 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock.clone(),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
 
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
@@ -66,24 +80,17 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
         std::net::Ipv4Addr::LOCALHOST,
     );
 
-    // Cleanup guard — fires on test exit (panic or success) and
-    // mass-kills every workload cgroup the test created via
-    // `cgroup.kill` + `waitpid`. Prevents the `LEAK` flag from
-    // nextest. See `cleanup` module for why we don't reuse
-    // `Driver::stop` here (tokio runtime cross-runtime hang).
-    let _cleanup = AllocCleanup {
-        obs: state.obs.clone(),
-        cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),
-    };
-
-    // Submit a 1-replica job that runs `/bin/sleep` for a long time.
+    // Submit a 1-replica VM job. The simulated VM driver makes the
+    // production lifecycle path observable without a host process.
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -104,13 +111,14 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     // cadence). We expect convergence within a handful of ticks.
     let mut converged = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

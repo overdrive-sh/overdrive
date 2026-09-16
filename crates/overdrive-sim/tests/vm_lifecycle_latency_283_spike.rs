@@ -11,13 +11,13 @@
 
 use async_trait::async_trait;
 use base64::Engine;
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, JobSpecInput, ResourcesInput, WorkloadKind,
-};
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
@@ -44,6 +44,23 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
 static SERVER_SCENARIO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 struct CapturedEvent {
@@ -229,7 +246,7 @@ enum DriverEvent {
 #[async_trait]
 impl Driver for DelayedDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         self.events.lock().push(DriverEvent::Entered(Effect::Start, spec.alloc.clone()));
@@ -308,9 +325,11 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
         }),
     };
@@ -325,9 +344,11 @@ async fn submit_service(client: &reqwest::Client, base: &str, id: &str) {
             id: id.to_owned(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
             }),
             listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
             startup_probes: vec![ProbeDescriptor {
@@ -424,7 +445,7 @@ async fn drive(effect: Effect) {
     let obs = Arc::new(SimObservationStore::single_peer(node, seed));
     let (entered, mut entries) = mpsc::unbounded_channel();
     let driver = Arc::new(DelayedDriver {
-        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         effect,
         entered,
         release: Semaphore::new(0),
@@ -534,7 +555,7 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
     let clock = Arc::new(SimClock::new());
     let node = NodeId::new("local").unwrap();
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
-    let driver = Arc::new(SimDriver::with_clock(DriverType::Exec, clock.clone()));
+    let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
     let config_dir = directory.path().join("operator");
     let config = ServerConfig {
         data_dir: directory.path().join("data"),
@@ -637,7 +658,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").unwrap(), seed));
     let (entered, mut entries) = mpsc::unbounded_channel();
     let driver = Arc::new(DelayedDriver {
-        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         effect,
         entered,
         release: Semaphore::new(0),
@@ -984,7 +1005,7 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     use overdrive_control_plane::AppState;
     use overdrive_control_plane::identity_mgr::IdentityMgr;
     use overdrive_control_plane::reconciler_runtime::{
-        ConvergenceError, ReconcilerRuntime, run_convergence_tick,
+        ConvergenceError, ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
     };
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -1005,7 +1026,7 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     let store = Arc::new(LocalIntentStore::open(&path).unwrap());
     let node = NodeId::new("local").unwrap();
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
-    let driver = Arc::new(SimDriver::with_clock(DriverType::Exec, clock.clone()));
+    let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
     let state = AppState::new(
@@ -1030,7 +1051,17 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     runtime_job_input(&state, "fsync-subject").await;
     let now = clock.now();
     let deadline = now + Duration::from_secs(1);
-    run_convergence_tick(&state, &name, &control, now, 0, deadline).await.unwrap();
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &name,
+        &control,
+        now,
+        0,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .unwrap();
     assert!(running(&obs, "control").await, "seed={seed}: healthy composition must dispatch");
     assert_eq!(driver.live_count(), 1);
 
@@ -1041,7 +1072,16 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
         views.bulk_load("workload-lifecycle").await.unwrap();
     let mut lifecycle = state.lifecycle_events.subscribe();
     views.inject_fsync_failure();
-    let failure = run_convergence_tick(&state, &name, &subject, now, 1, deadline).await;
+    let failure = run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &name,
+        &subject,
+        now,
+        1,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await;
     assert!(matches!(failure, Err(ConvergenceError::ViewPersist(_))), "seed={seed}: {failure:?}");
     assert_eq!(
         obs.alloc_status_rows().await.unwrap(),
@@ -1063,7 +1103,17 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     assert_eq!(stored_after, stored_before);
 
     views.clear_fsync_failure();
-    run_convergence_tick(&state, &name, &subject, now, 2, deadline).await.unwrap();
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &name,
+        &subject,
+        now,
+        2,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .unwrap();
     assert!(running(&obs, "fsync-subject").await, "seed={seed}: same-input recovery must dispatch");
     assert_eq!(driver.live_count(), 2);
     let recovered = state.runtime.loaded_workload_lifecycle_views_for_test(&name).unwrap();
@@ -1071,7 +1121,17 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     let durable: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
         views.bulk_load("workload-lifecycle").await.unwrap();
     assert_eq!(durable, recovered, "seed={seed}: recovered View is durable");
-    run_convergence_tick(&state, &name, &subject, now, 3, deadline).await.unwrap();
+    run_convergence_tick_with_network_provisioner_for_test(
+        &state,
+        &name,
+        &subject,
+        now,
+        3,
+        deadline,
+        &NoopNetworkProvisioner,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         driver.started_specs().len(),
         2,
@@ -1089,9 +1149,11 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_owned(),
             args: vec!["3600".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .unwrap();
@@ -1132,7 +1194,7 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").unwrap(), seed));
     let (entered, mut entries) = mpsc::unbounded_channel();
     let driver = Arc::new(DelayedDriver {
-        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         effect: Effect::Start,
         entered,
         release: Semaphore::new(0),
@@ -1295,11 +1357,9 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         .get(&target)
         .cloned()
         .unwrap_or_default();
-    assert_eq!(
-        workload_view,
-        overdrive_reconcilers::WorkloadLifecycleView::default(),
-        "seed={seed}: complete workload target View"
-    );
+    let mut expected_workload = overdrive_reconcilers::WorkloadLifecycleView::default();
+    expected_workload.restart_counts.insert(alloc.clone(), 0);
+    assert_eq!(workload_view, expected_workload, "seed={seed}: complete workload target View");
     let service_view = persisted
         .loaded_service_lifecycle_views_for_test(&service_name)
         .unwrap()
@@ -1346,7 +1406,7 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
     });
     let (entered, mut entries) = mpsc::unbounded_channel();
     let driver = Arc::new(DelayedDriver {
-        inner: SimDriver::with_clock(DriverType::Exec, clock.clone()),
+        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         effect: Effect::Start,
         entered,
         release: Semaphore::new(0),

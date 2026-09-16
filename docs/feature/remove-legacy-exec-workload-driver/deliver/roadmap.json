@@ -1,0 +1,306 @@
+{
+  "roadmap": {
+    "project_id": "remove-legacy-exec-workload-driver",
+    "created_at": "2026-09-14T09:54:20Z",
+    "total_steps": 6
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Remove live Exec contracts and execution",
+      "description": "Baseline: 37 production Rust files contain affected symbols; six steps give a 0.16 decomposition ratio. Configuration-only disabling removes none of the compatibility surface; scalar-driver collapse violates the retained registry contract.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Cut admission, probes, and archived intent to VM",
+          "description": "Atomically remove Exec admission and host-command probing, preserve HTTP/TCP probing, delete the public Exec accessor, and reset the affected Service-spec and workload-intent envelopes to current VM-only V1.",
+          "criteria": [
+            "Valid VM Job, Service, and Schedule TOML plus HTTP request/description values preserve workload kind and complete typed payloads through roundtrip.",
+            "Missing supported-driver input and generated unsupported driver keys use existing generic parser/serde behavior; invalid VM HTTP submission writes no intent.",
+            "VM HTTP/TCP probes retain target, role/index, thresholds, result publication, cancellation, re-registration, and the existing Earned-Trust boot gate.",
+            "Current VM-only Service specifications and all three workload-intent kinds roundtrip through their new sole V1 envelopes.",
+            "No old reader, fixture, compatibility diagnostic, guest-probe placeholder, or replacement for WorkloadSpecInput::exec_command remains; unrelated envelopes stay unchanged."
+          ],
+          "deps": [],
+          "estimated_hours": 12,
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs",
+          "scenario_name": "submit_request_rejects_unknown_driver_keys",
+          "files_to_modify": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs",
+            "crates/overdrive-core/src/aggregate/service_spec.rs",
+            "crates/overdrive-core/src/aggregate/probe_descriptor.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/api/submit.rs",
+            "crates/overdrive-core/src/api/describe.rs",
+            "crates/overdrive-core/src/traits/prober.rs",
+            "crates/overdrive-core/src/traits/mod.rs",
+            "crates/overdrive-worker/src/probe_runner/",
+            "crates/overdrive-worker/src/driver.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-host/src/cgroup_fs.rs",
+            "crates/overdrive-sim/src/adapters/probers.rs",
+            "crates/overdrive-sim/src/adapters/mod.rs",
+            "crates/overdrive-control-plane/src/probe_runner_boot.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/listener_facts.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-cli/src/commands/deploy.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_spec.rs",
+            "crates/overdrive-core/tests/schema_evolution/workload_intent.rs",
+            "crates/overdrive-core/tests/acceptance/",
+            "crates/overdrive-worker/tests/",
+            "crates/overdrive-control-plane/tests/",
+            "crates/overdrive-store-local/tests/",
+            "crates/overdrive-sim/src/",
+            "crates/overdrive-sim/tests/",
+            "api/openapi.yaml"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): retain the authored unsupported-key proptest with exact `/// CONTRACT_SHAPE: pure-function.`; bounded-change tests declare intent/probe universes and assert unchanged complements. Unit examples require `// bypass:`; integration remains single-example wiring evidence. Probe-algebra and driver-input changes share archived payloads, so atomically reset ServiceSpecEnvelope and WorkloadIntentEnvelope. Delete dedicated parser/probe/codec/accessor tests with their subjects; add no removed-name, source-shape, trybuild, compile-pass, old-byte, or absence test. Follow ADR-0110/0111/0113 exactly."
+        },
+        {
+          "id": "01-02",
+          "name": "Delete ExecDriver and production composition",
+          "description": "Delete the concrete host-process driver, export, composition helper, dedicated worker tests, and its netns error while preserving optional VM capability composition, registry/index ownership, and per-composed-driver exit observation.",
+          "criteria": [
+            "One server boot yields registry empty on ordinary VMM absence, {Vm} on successful probe, and startup refusal on present-but-failing VMM capability.",
+            "A composed VM allocation receives the boot-trusted probe runner; guest exit publishes VM provenance and releases its supervision claim.",
+            "Server shutdown remains bounded and clean for empty and VM-populated registries without losing VM exit publication or supervision release.",
+            "No concrete host-process driver is exported or composed, and its dedicated production code and tests disappear in the same commit.",
+            "Driver, DriverRegistry, AllocDriverIndex, VmDriver, Vmm, and shared VM cgroup contracts remain unchanged."
+          ],
+          "deps": [
+            "01-01"
+          ],
+          "estimated_hours": 5,
+          "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+          "scenario_name": "vm_registry_reports_vm_supported_when_cloud_hypervisor_present_and_healthy",
+          "files_to_modify": [
+            "crates/overdrive-worker/src/driver.rs",
+            "crates/overdrive-worker/src/lib.rs",
+            "crates/overdrive-worker/src/cgroup_manager.rs",
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-cli/src/commands/serve.rs",
+            "crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs",
+            "crates/overdrive-worker/tests/integration/exec_driver/",
+            "crates/overdrive-worker/tests/compile_fail/exec_driver_missing_fs.rs",
+            "crates/overdrive-worker/tests/compile_fail/exec_driver_no_default.rs",
+            "crates/overdrive-control-plane/tests/acceptance/probe_runner_composition.rs",
+            "crates/overdrive-control-plane/tests/acceptance/vm_reclamation_claim_lifecycle.rs",
+            "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): pure tests remain proptest properties; bounded production-boundary tests cover registry outcomes, trusted-runner delivery, VM exit publication/provenance, supervision release, and clean shutdown. Integration/Tier-3 stays single-example. EXEMPT FROM NEW PROPERTY: deletion adds no behavior. Exact observer-task cardinality, shared-token identity, and join-all ownership are reviewer diff audit only; add no test seam, function, private import, or source-shape check. Delete driver and dedicated suites together; retain registry/index/observer ownership and VMM absence/probe semantics."
+        },
+        {
+          "id": "01-03",
+          "name": "Collapse runtime dispatch onto the VM path",
+          "description": "Remove the inactive Exec payload route and network branch, make the current VM TAP plan mandatory, and preserve P-105 successor-first dispatch plus Running-to-intercept-to-guest-command ordering.",
+          "criteria": [
+            "Every admitted allocation receives the current netns, veth, TAP, address, MAC, gateway, prefix, and DNS plan before VM start.",
+            "Accepted Running follows VM guest readiness; successful interception follows Running and precedes guest-command release.",
+            "Interception failure after Running writes the existing dominating Failed result, withholds guest-command release, and completes existing cleanup.",
+            "RestartAllocation retains the accepted predecessor ID, distinct durably reserved successor, successor-first result precedence, and one exact-old cleanup attempt.",
+            "The runtime payload has only VM; current VM network fields remain and no shared-switch, per-tap, shared-DNS, or replacement-mTLS mechanism appears."
+          ],
+          "deps": [
+            "01-02"
+          ],
+          "estimated_hours": 8,
+          "test_file": "crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs",
+          "scenario_name": "start_allocation_install_failure_supersedes_running_with_failed",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-sim/src/adapters/driver.rs",
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs",
+            "crates/overdrive-control-plane/tests/integration/alloc_netns_lifecycle.rs",
+            "crates/overdrive-control-plane/tests/acceptance/",
+            "crates/overdrive-reconcilers/tests/acceptance/vm_recreation_allocation_identity.rs",
+            "crates/overdrive-sim/tests/driver_neutral_allocation_replacement.rs",
+            "crates/overdrive-sim/tests/integration/service_backend_projection.rs",
+            "crates/overdrive-worker/tests/"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): preserve the P-105 proptests and exact `/// CONTRACT_SHAPE: pure-function.` lines; bounded-change tests declare network, rows, interception, release, successor, predecessor, and cleanup universes with unchanged complements. Integration/Tier-3 tests remain single-example wiring evidence. Implement only the feature-delta shapes: non-optional VmTapPlan provisioning/injection, no network-assignment predicate, AllocationAttemptEvent::Dispatch, and guest_command_release_permitted. Private renames receive no shape test. Leave the schedule-racy P-105 oracle untouched and outside evidence. #295 is constraint-only."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Reset lifecycle evidence and operator artifacts",
+      "description": "Reset the remaining Exec-coupled lifecycle vocabulary and two envelope owners, then migrate current operator documentation/examples without rewriting historical records or implementing #295.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Reset lifecycle evidence to current V1",
+          "description": "Delete Exec-only driver/start/reason vocabulary, migrate surviving consumers to VM or generic variants, and atomically reset allocation-status and lifecycle-occurrence envelopes to their new current V1 baselines.",
+          "criteria": [
+            "Surviving VM and generic start, crash, stop, cgroup, stderr, OOM, and internal-error evidence retains current rendering and lifecycle behavior.",
+            "Current allocation-status and lifecycle-occurrence payloads roundtrip through their new sole V1 envelopes using surviving source and reason vocabulary.",
+            "Exactly those two lifecycle envelopes reset; all unrelated observation, CA, workflow, probe, and service-backend envelope fixtures remain byte-identical.",
+            "Generated OpenAPI reflects the reduced current driver/reason/source vocabulary without aliases or deprecated spellings.",
+            "VM exits retain VM source, lifecycle publication, supervision release, and clean bounded server shutdown."
+          ],
+          "deps": [
+            "01-03"
+          ],
+          "estimated_hours": 8,
+          "test_file": "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+          "scenario_name": "alloc_status_row_v1_decodes_through_current_envelope",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+            "crates/overdrive-core/tests/schema_evolution/alloc_lifecycle_occurrence_row.rs",
+            "crates/overdrive-core/tests/acceptance/driver_start_failure.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-control-plane/src/listener_facts.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-sim/src/harness.rs",
+            "crates/overdrive-sim/src/invariants/",
+            "crates/overdrive-worker/src/probe_runner/mod.rs",
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-sim/tests/",
+            "crates/overdrive-control-plane/tests/",
+            "crates/overdrive-cli/tests/",
+            "api/openapi.yaml"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): pure lifecycle tests remain proptest properties; production-boundary tests cover VM exit provenance/publication, lifecycle rows, supervision release, and clean shutdown. Exact observer-task cardinality, shared-token identity, and join-all ownership are reviewer diff audit only; add no test seam, function, private import, or source-shape check. EXEMPT FROM PROPERTY: reset only AllocStatusRowEnvelope and AllocLifecycleOccurrenceRowEnvelope with one current-V1 roundtrip each. Delete old fixtures/tests. Remove only DriverType::Exec, DriverStartClass::Exec/ExecStartFailure, and the five approved TransitionReason variants."
+        },
+        {
+          "id": "02-02",
+          "name": "Migrate current operator artifacts to microVMs",
+          "description": "Migrate current examples and product guidance to the supported microVM model, delete host-process-only examples, and retain the checked-in healthy VM Service journey that will drive E14.",
+          "criteria": [
+            "Current supported examples, README, whitepaper, jobs, journeys, and persona guidance use VM/microVM execution; host-process-only examples are removed.",
+            "The checked-in healthy VM Service example remains operator-runnable and source-valid without a deleted-spelling absence check.",
+            "Current guidance preserves HTTP/TCP probes, P-105 allocation identity, and Running-to-intercept-to-guest-command ordering.",
+            "Historical ADR/evolution prose plus E06 and E08 receipts remain unchanged and are not presented as post-cut evidence.",
+            "No documentation or example claims shared switching, per-tap interception, shared-bridge DNS, replacement mTLS, cross-host routing, density, or throughput."
+          ],
+          "deps": [
+            "02-01"
+          ],
+          "estimated_hours": 4,
+          "test_file": "examples/service-kind-vm-workloads/run-example.sh",
+          "scenario_name": "check-source",
+          "files_to_modify": [
+            "README.md",
+            "docs/whitepaper.md",
+            ".claude/rules/testing.md",
+            "docs/product/jobs.yaml",
+            "docs/product/journeys/run-a-vm-workload.yaml",
+            "docs/product/journeys/submit-a-service.yaml",
+            "docs/product/journeys/enforce-transparent-mtls-on-the-wire.yaml",
+            "docs/product/personas/sam-platform-security-engineer.yaml",
+            "examples/coinflip.toml",
+            "examples/coinflip-as-service.toml",
+            "examples/dns-resolver.toml",
+            "examples/doomed.toml",
+            "examples/nightly-backup.toml",
+            "examples/quick-bind-service.toml",
+            "examples/liveness-absent-service.toml",
+            "examples/liveness-fails-service.toml",
+            "examples/liveness-holds-service.toml",
+            "examples/never-binds-service.toml",
+            "examples/dial-by-name-responder/",
+            "examples/guest-stack-transparent-mtls-intercept/",
+            "examples/service-kind-vm-workloads/"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): no application logic or new test is added. EXEMPT FROM PARADIGM: this step changes examples and current documentation; use existing structural validation for surviving VM requirements, not deleted-name tokens. Delete host-process-only examples; migrate general examples to existing VM artifact preparation. Update only active whitepaper claims. Do not rewrite historical ADR/evolution material or E06/E08, or add #295 claims. Paths are guidance; include only current artifacts whose active promise or runnable spec changes."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Capture post-cut VM Service evidence",
+      "description": "Capture one post-cut black-box VM Service event after implementation review. E14 is a SHA-pinned receipt, not a recurring test; the single final DELIVER mutation gate runs separately after all step reviews.",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Capture E14 from the checked-in VM example",
+          "description": "Capture E14 through the checked-in healthy VM Service journey using the built default-feature binary on native metal, retaining only stakeholder-visible success and owned cleanup evidence.",
+          "criteria": [
+            "E14 drives the checked-in healthy VM Service example through the built default-feature binary on native metal.",
+            "The capture records stakeholder-visible VM Service success and owned cleanup against the exact post-cut SHA.",
+            "E14 preserves actual commands, output, substrate, SHA, and dirty state without inline specs, Rust crate imports, test harnesses, or integration assertions.",
+            "E06 and E08 remain unchanged historical receipts and are not cited as proof of the post-cut implementation.",
+            "A different reviewer evaluates E14; the implementation/capture author does not mark its own evidence satisfied."
+          ],
+          "deps": [
+            "02-02"
+          ],
+          "estimated_hours": 4,
+          "test_file": "examples/service-kind-vm-workloads/run-example.sh",
+          "scenario_name": "run healthy (E14-vm-service-post-greenfield-cut)",
+          "files_to_modify": [
+            "verification/expectations/INDEX.md",
+            "verification/expectations/E14-vm-service-post-greenfield-cut/"
+          ],
+          "implementation_notes": "TEST PARADIGM (mandatory, Rust adaptation): no application test is added; earlier proptest/state-delta and integration steps own code contracts. EXEMPT FROM PARADIGM: E14 is one SHA-pinned black-box capture, not a recurring test. Drive only `examples/service-kind-vm-workloads/run-example.sh run healthy` through the built default-feature product on native metal. Do not recreate specs, invoke tests, import/link crates, duplicate integration assertions, overwrite E06/E08, or self-approve evidence. A permanent runner is optional."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-host/src/",
+      "crates/overdrive-cli/src/",
+      "api/",
+      "examples/",
+      "README.md",
+      "docs/whitepaper.md",
+      ".claude/rules/testing.md",
+      "docs/product/",
+      "verification/expectations/E14-vm-service-post-greenfield-cut/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-worker/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-reconcilers/tests/",
+      "crates/overdrive-sim/tests/",
+      "crates/overdrive-cli/tests/",
+      "verification/expectations/"
+    ],
+    "excluded_patterns": [
+      "AGENTS.md",
+      "docs/evolution/**",
+      "docs/product/architecture/adr-*.md",
+      "verification/expectations/E06-vm-job-deploy-reaches-running/**",
+      "verification/expectations/E08-vm-service-guest-health/**",
+      "new remove_*.rs, trybuild, compile-pass, compile-fail, source-token, source-shape, or absence-test fixtures",
+      "shared-switch, per-tap interception, shared-bridge DNS, replacement transparent-mTLS, or other GH #295 implementation",
+      "compatibility aliases, readers, fallbacks, disabled variants, retired-driver diagnostics, old envelope fixtures, or deleted-name/source-shape tests",
+      "the pre-existing schedule-racy P-105 oracle or any production fix for it"
+    ]
+  },
+  "final_mutation_gate": {
+    "runs_after": "All six step reviews are approved and E14 has independent evidence review.",
+    "command": "cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests",
+    "pass_condition": "Command exits 0; target/xtask/mutants-summary.json reports status=pass, kill_rate_pct>=80, and total_mutants/caught/missed/timeout/unviable counts.",
+    "evidence": "Retain the complete target/xtask/mutants-summary.json as structured final DELIVER evidence.",
+    "constraints": "Run once as the DELIVER-wave background exception, never per-step; do not modify exclusions without explicit approval."
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-solution-architect-reviewer",
+    "approved_at": "2026-09-14"
+  }
+}

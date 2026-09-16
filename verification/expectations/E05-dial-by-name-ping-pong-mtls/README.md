@@ -64,8 +64,10 @@ immutable OS) on **#75** (the OS image). Neither has landed, so this expectation
 is `pending` and its `runner.sh` self-reports `pending` rather than narrating a
 capture it cannot execute.
 
-The example specs and the client program are READY for the capture: the two
-`[service]`/`[exec]`/`[resources]`/`[[listener]]` specs
+The historical example specs and client program are retained as a pre-cut
+record. Current supported VM evidence uses the checked-in VM Service bundle;
+the two
+`[service]`/`[vm]`/`[resources]`/`[[listener]]` specs
 `examples/dial-by-name-responder/{a,b}.toml` are landed, and their `command`
 runs the checked-in `examples/dial-by-name-responder/ping_pong.py` via
 `/usr/bin/python3` (K3 — a real on-disk file next to the specs, no phantom path,

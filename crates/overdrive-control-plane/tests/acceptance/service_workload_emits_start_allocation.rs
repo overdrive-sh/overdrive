@@ -17,7 +17,7 @@
 //! an empty actual-set; S-BDB-01 was structurally impossible.
 //!
 //! This test enters through the post-fix shape: `read_job` projects
-//! `ServiceV2.{id, replicas, resources, driver}` into a kind-agnostic
+//! `Service.{id, replicas, resources, driver}` into a kind-agnostic
 //! `Job` value, the existing `Some(job) => ...` arm at
 //! `reconciler.rs:1466` emits `Action::StartAllocation`, the action
 //! shim drives `SimDriver::start`, and an `AllocStatusRow` with
@@ -30,9 +30,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, ResourcesInput, WorkloadKind};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
@@ -47,6 +51,23 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
@@ -56,7 +77,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -90,7 +111,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// reconciler's `None`-arm fires every tick → zero `StartAllocation`
 /// actions emitted → zero `alloc_status` rows written.
 ///
-/// Post-fix: `read_job` projects `ServiceV2` into a kind-agnostic
+/// Post-fix: `read_job` projects `Service` into a kind-agnostic
 /// `Job`-shape → `Some(job)`-arm fires → `StartAllocation` emitted
 /// with `kind: WorkloadKind::Service` → action shim drives
 /// `SimDriver::start` → one Running row written with
@@ -101,11 +122,16 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     let clock = Arc::new(SimClock::new());
     let state = build_state(&tmp, clock.clone()).await;
 
-    let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
+    let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: vec![],
         readiness_probes: vec![],
@@ -140,6 +166,7 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     // action shim invokes SimDriver::start which returns Ok; the row
     // lands as Running. Subsequent ticks observe the converged state.
     let mut saw_running = false;
+    let network = NoopNetworkProvisioner;
     for tick_n in 0..10_u64 {
         let now = clock.now();
         let deadline = now + Duration::from_millis(100);
@@ -153,9 +180,17 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
-                .await
-                .expect("convergence tick succeeds for Service workload");
+            run_convergence_tick_with_network_provisioner_for_test(
+                &state,
+                &eval.reconciler,
+                &eval.target,
+                now,
+                tick_n,
+                deadline,
+                &network,
+            )
+            .await
+            .expect("convergence tick succeeds for Service workload");
         }
         clock.tick(Duration::from_millis(100));
 

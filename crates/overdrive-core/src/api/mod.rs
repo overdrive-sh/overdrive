@@ -13,9 +13,9 @@
 //! ADR-0048's rkyv envelope discipline does NOT apply here. Validation
 //! happens at the wire → intent boundary inside per-kind validating
 //! constructors on the intent payloads — see
-//! [`crate::aggregate::JobV2::from_submit`],
-//! [`crate::aggregate::ServiceV2::from_submit`], and
-//! [`crate::aggregate::ScheduleV2::from_submit`].
+//! [`crate::aggregate::Job::from_submit`],
+//! [`crate::aggregate::Service::from_submit`], and
+//! [`crate::aggregate::Schedule::from_submit`].
 
 pub mod describe;
 pub mod submit;

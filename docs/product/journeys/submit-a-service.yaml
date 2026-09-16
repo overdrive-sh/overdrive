@@ -15,13 +15,13 @@ journey:
   name: "Submit a Service and trust the stable / failed signal"
   goal: >
     An operator runs `overdrive deploy <spec>` for a Service-kind workload
-    backed by either `[exec]` or `[vm]`, declares probes (HTTP / TCP / Exec for
-    a host process; HTTP / TCP for a VM, on startup / readiness / liveness
-    roles) OR omits them entirely (default TCP-connect inference), and receives
+    backed by the supported `[vm]` execution model, declares HTTP / TCP probes
+    on startup / readiness / liveness roles OR omits them entirely (default
+    TCP-connect inference), and receives
     a streaming wire signal that reflects
     the Service workload's probe-derived operator-meaningful liveness — Stable
-    when healthy, Failed with an actionable reason (StartupProbeFailed |
-    EarlyExit { exit_code }) when not. Probes run in the workload's real
+    when healthy, Failed with an actionable StartupProbeFailed reason when not.
+    Probes run in the workload's real
     context: VM HTTP/TCP reaches the guest address rather than treating the VMM
     as workload health. Closes RCA root cause A from
     docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md
@@ -35,14 +35,11 @@ journey:
   job_id: J-OPS-004
 
   scope_note: >
-    Exec-backed Service health is delivered by GH #170. VM Jobs/Schedules and
-    their guest lifecycle are delivered by GH #42, while routed guest
-    networking and guest-stack mesh interception are delivered by GH #222.
-    Until service-kind-vm-workloads (GH #257) lands, the production parser
-    still rejects `[vm]` plus `[service]`; this journey records the accepted
-    target behavior, not a claim that the feature is already implemented. VM
-    Exec probes remain rejected before intent commit with an actionable
-    reference to GH #280; no guest-control mechanism is part of GH #257.
+    VM Jobs, Schedules, and Services use the same guest-grounded lifecycle;
+    routed guest networking and guest-stack mesh interception are delivered by
+    GH #222. HTTP/TCP probes target the guest `workload_addr`. Guest command
+    probes remain a separately scoped GH #280 concern; no replacement health
+    or interception mechanism is introduced here.
 
   emotional_arc:
     start: >
@@ -60,14 +57,14 @@ steps:
     name: "Submit Service spec"
     command: "overdrive deploy payments.toml"
     summary: >
-      CLI reads TOML with `[service]` plus exactly one driver table, `[exec]`
-      xor `[vm]` (per ADR-0047). Spec MAY
+      CLI reads TOML with `[service]` plus the supported `[vm]` table (per
+      ADR-0047). Spec MAY
       carry [[health_check.startup|readiness|liveness]] arrays; if
       absent, platform infers a default TCP-connect startup probe
       against listener[0].port. Server validates, commits via
-      IntentStore, and dispatches StartAllocation. GH #257 removes the
-      VM-Service admission rejection for HTTP/TCP-only specs. A VM spec
-      declaring Exec remains rejected before intent commit and names GH #280.
+      IntentStore, and dispatches StartAllocation. HTTP/TCP-only VM Services
+      follow the same production path as VM Jobs and Schedules. Guest command
+      probes remain outside this journey under GH #280.
     emotional_state:
       entry: "Anxious"
       exit: "Skeptical — Accepted landed, stream continues."
@@ -79,9 +76,8 @@ steps:
       Worker's ProbeRunner schedules each declared/inferred probe on
       its interval. Each tick writes ProbeResultRow (LWW per
       (alloc_id, probe_idx)) with status Pass | Fail and last_fail_reason.
-      HTTP plain GET; TCP connect; for an Exec-backed Service, an Exec probe
-      runs in its host cgroup. For a VM-backed Service, HTTP/TCP are
-      host-originated against the allocation's guest `workload_addr` when host
+      HTTP plain GET and TCP connect are host-originated against the
+      allocation's guest `workload_addr` when host
       is omitted/wildcarded. An explicit network-probe host retains its
       existing meaning.
     emotional_state:
@@ -97,8 +93,7 @@ steps:
       shim writes AllocStatusRow.terminal AND broadcasts
       LifecycleEvent.terminal (ADR-0037 byte-equality). Streaming
       forwards onto ServiceSubmitEvent::Stable { settled_in, witness }
-      or ServiceSubmitEvent::Failed { reason: EarlyExit |
-      StartupProbeFailed }.
+      or ServiceSubmitEvent::Failed { reason: StartupProbeFailed }.
     emotional_state:
       entry: "Focused"
       exit: "Trusting (happy) OR Relieved (sad) — both honest."
@@ -132,9 +127,8 @@ integration_validation:
       LifecycleEvent.terminal carry byte-equal TerminalCondition values
       from the same action-shim call site (ADR-0037 §3 guarantee).
     - >
-      vm_exec_boundary — the parser rejects an Exec probe paired with `[vm]`
-      before intent commit and names GH #280. The host-process Exec path is
-      unchanged and no VMM status is substituted for guest health.
+      vm_guest_boundary — HTTP/TCP probes are evaluated against the guest
+      address; guest command probes remain outside this journey under GH #280.
     - >
       probe_network_target — the allocation's `workload_addr` is the default
       HTTP/TCP target for a VM when the probe host is omitted or wildcarded.
@@ -151,7 +145,7 @@ related_features:
   - id: microvm-driver-cloud-hypervisor
     role: "Ships the VM lifecycle substrate for Job-kind and Schedule-kind workloads (GH #42)."
   - id: service-kind-vm-workloads
-    role: "Extends this journey to VM-backed Services with guest-grounded HTTP/TCP probes (GH #257); optional in-guest Exec is GH #280."
+    role: "Extends this journey to VM-backed Services with guest-grounded HTTP/TCP probes (GH #257); guest command probes remain GH #280."
 
 changelog:
   - date: 2026-05-24

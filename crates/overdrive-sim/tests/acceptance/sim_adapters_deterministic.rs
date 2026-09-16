@@ -19,6 +19,7 @@
 //!   a tool-choice deviation returns a `TranscriptMismatch` error.
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -26,7 +27,9 @@ use bytes::Bytes;
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::{Backend, Dataplane, FlowEvent, PolicyKey, Verdict};
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, DriverType, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverError, DriverPayload, DriverType, Resources, VmPayload,
+};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::llm::{
     Completion, Llm, LlmError, Message, Prompt, Role, ToolCall, Usage,
@@ -315,12 +318,12 @@ fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("workload/payments/alloc/a1b2c3"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "registry/payments:1.0".to_owned(),
-                args: vec![],
-            },
-        ),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "registry/payments:1.0".to_owned(),
+            args: vec![],
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
+        }),
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
@@ -338,7 +341,7 @@ fn sample_spec() -> AllocationSpec {
 
 #[tokio::test]
 async fn sim_driver_start_stop_status_round_trip() {
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
     let spec = sample_spec();
 
     let handle = driver.start(&spec).await.expect("start succeeds");
@@ -529,7 +532,7 @@ async fn sim_clock_clone_shares_logical_counter() {
 
 #[tokio::test]
 async fn sim_driver_resize_returns_error_for_unknown_allocation() {
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
     let unknown_handle = overdrive_core::traits::driver::AllocationHandle {
         alloc: alloc("alloc-unknown"),
         pid: None,
@@ -547,7 +550,7 @@ async fn sim_driver_resize_succeeds_for_running_allocation() {
     // Guards against `resize -> Ok(())` mutation AND the `!contains`
     // flip: a running allocation's resize must succeed; missing must
     // fail. Together with the previous test, both branches are covered.
-    let driver = SimDriver::new(DriverType::Exec);
+    let driver = SimDriver::new(DriverType::Vm);
     let handle = driver.start(&sample_spec()).await.expect("start succeeds");
 
     driver

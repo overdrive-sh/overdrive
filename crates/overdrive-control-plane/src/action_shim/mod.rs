@@ -28,8 +28,8 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverRegistry,
-    DriverStartClass, DriverStartFailure, DriverType, VmStartFailure,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverStartClass,
+    DriverStartFailure, DriverType, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow, CrashFacts,
@@ -132,7 +132,7 @@ impl MtlsInterceptLifecycle for Arc<MtlsInterceptWorker> {
     }
 }
 
-const fn exec_release_permitted(
+const fn guest_command_release_permitted(
     running_committed: bool,
     intercept_required: bool,
     stable_exact_rule_baseline: bool,
@@ -741,7 +741,7 @@ pub type AllocDriverIndex =
 /// it acknowledges the exact derived plans and the shim still injects every
 /// field before `Driver::start`.
 pub trait WorkloadNetworkProvisioner: Send + Sync {
-    /// Converge the derived workload plan and optional VM TAP plan.
+    /// Converge the derived workload plan and its VM TAP plan.
     ///
     /// # Errors
     ///
@@ -749,7 +749,7 @@ pub trait WorkloadNetworkProvisioner: Send + Sync {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError>;
 
     /// Tear down the derived workload plan.
@@ -767,12 +767,10 @@ impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
     fn provision(
         &self,
         workload: &WorkloadNetnsPlan,
-        vm_tap: Option<&VmTapPlan>,
+        vm_tap: &VmTapPlan,
     ) -> Result<(), VethProvisionError> {
         provision_workload_netns(workload)?;
-        if let Some(tap) = vm_tap {
-            provision_vm_tap(workload, tap)?;
-        }
+        provision_vm_tap(workload, vm_tap)?;
         Ok(())
     }
 
@@ -1159,17 +1157,13 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
 /// C3 PROVISION SEAM (transparent-mtls-enrollment D-TME-12 G1/G2/G3 + JOIN-2,
 /// step 04-01). At the TOP of each `Start`/`RestartAllocation` arm, BEFORE
 /// `Driver::start`: assign the per-host network slot, derive the netns+veth
-/// plan (responder = the per-netns gateway, G1), provision the netns+veth
-/// (fail-closed — G2), then branch on [`DriverPayload`]. Exec receives the
-/// transit address; VM derives and converges the same-slot [`VmTapPlan`],
-/// receives the guest address as `workload_addr`, and receives the guest-net
-/// attachment channel. Both arms receive the slot-derived netns and host-veth
-/// names.
+/// plan (responder = the per-netns gateway, G1), derive the same-slot
+/// [`VmTapPlan`], provision the netns+veth+TAP (fail-closed — G2), and inject
+/// the complete VM network channel into the transient allocation spec.
 ///
-/// Every VM is assigned its guest-network channel, independently of whether
-/// the optional mTLS interception worker is composed. Exec keeps its legacy
-/// host-network behaviour when interception is absent; when interception is
-/// present it receives the same per-allocation transit network as before.
+/// Every admitted allocation is a VM allocation and receives the complete
+/// current network plan independently of whether the optional mTLS
+/// interception worker is composed.
 ///
 /// # Errors
 ///
@@ -1177,23 +1171,11 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
 ///   rather than dropped onto a shared veth/subnet).
 /// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth/tap provision failed
 ///   (fail-closed: the workload must not spawn without its netns).
-fn network_assignment_required(driver_type: DriverType, mtls_composed: bool) -> bool {
-    mtls_composed || driver_type == DriverType::Vm
-}
-
 fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
-    mtls_composed: bool,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    // A VM cannot boot without the C3 guest-network channel. This remains true
-    // when a caller substitutes or omits the optional dataplane worker. Exec
-    // retains its pre-join host-netns behaviour when interception is absent.
-    let network_required = network_assignment_required(spec.driver.driver_type(), mtls_composed);
-    if !network_required {
-        return Ok(());
-    }
     // G3: assign the smallest-free slot (idempotent re-entry for an already-
     // held alloc — a Restart reuses the same slot). Exhaustion REFUSES.
     let slot = net_slot_allocator.assign(spec.alloc.clone())?;
@@ -1207,43 +1189,31 @@ fn provision_and_inject_netns(
     // provision failure aborts the start (the `?` surfaces
     // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
     // re-provision under the same slot (Restart) is a no-op.
-    // ADR-0089 C3 VM branch: reuse the SAME slot as the transit plan, derive
-    // and converge the guest-half tap wire, then inject the guest address and
-    // guest-net inputs. Exec keeps the pre-existing transit address and no
-    // guest-net fields.
-    let vm_tap = matches!(&spec.driver, DriverPayload::Vm(_))
-        .then(|| derive_vm_tap_plan(slot, plan.responder_addr));
-    network_provisioner.provision(&plan, vm_tap.as_ref())?;
-    inject_workload_network(spec, &plan, vm_tap.as_ref());
+    // ADR-0089 C3 VM path: reuse the SAME slot as the transit plan, derive
+    // and converge the guest-half TAP wire, then inject the guest address and
+    // guest-net inputs.
+    let vm_tap = derive_vm_tap_plan(slot, plan.responder_addr);
+    network_provisioner.provision(&plan, &vm_tap)?;
+    inject_workload_network(spec, &plan, &vm_tap);
     Ok(())
 }
 
 /// Pure C3 handoff from converged network plans into the transient driver
 /// spec. The VM arm replaces the transit forwarding hop with the guest address
-/// as the canonical workload address and fills the guest-net channel; Exec
-/// retains the existing transit address and leaves that channel absent.
+/// as the canonical workload address and fills the complete guest-net channel.
 fn inject_workload_network(
     spec: &mut AllocationSpec,
     workload: &WorkloadNetnsPlan,
-    vm_tap: Option<&VmTapPlan>,
+    vm_tap: &VmTapPlan,
 ) {
     spec.netns = Some(workload.netns.clone());
     spec.host_veth = Some(workload.host_veth.clone());
-    if let Some(tap) = vm_tap {
-        spec.workload_addr = Some(tap.guest_addr);
-        spec.guest_tap = Some(tap.tap.clone());
-        spec.guest_mac = Some(tap.mac);
-        spec.guest_gateway = Some(tap.tap_gateway);
-        spec.guest_prefix_len = Some(tap.guest_network.prefix_len());
-        spec.guest_dns = Some(tap.responder_addr);
-    } else {
-        spec.workload_addr = Some(workload.workload_addr);
-        spec.guest_tap = None;
-        spec.guest_mac = None;
-        spec.guest_gateway = None;
-        spec.guest_prefix_len = None;
-        spec.guest_dns = None;
-    }
+    spec.workload_addr = Some(vm_tap.guest_addr);
+    spec.guest_tap = Some(vm_tap.tap.clone());
+    spec.guest_mac = Some(vm_tap.mac);
+    spec.guest_gateway = Some(vm_tap.tap_gateway);
+    spec.guest_prefix_len = Some(vm_tap.guest_network.prefix_len());
+    spec.guest_dns = Some(vm_tap.responder_addr);
 }
 
 #[cfg(test)]
@@ -1252,9 +1222,7 @@ mod vm_tap_spec_injection_tests {
     use std::path::PathBuf;
 
     use overdrive_core::SpiffeId;
-    use overdrive_core::traits::driver::{
-        AllocationSpec, DriverPayload, ExecPayload, Resources, VmPayload,
-    };
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 
     use super::{
         derive_vm_tap_plan, derive_workload_netns_plan, inject_workload_network,
@@ -1301,7 +1269,7 @@ mod vm_tap_spec_injection_tests {
 
         let before = spec.clone();
 
-        inject_workload_network(&mut spec, &workload, Some(&tap));
+        inject_workload_network(&mut spec, &workload, &tap);
 
         assert_eq!(spec.netns.as_ref(), Some(&workload.netns));
         assert_eq!(spec.host_veth.as_deref(), Some(workload.host_veth.as_str()));
@@ -1324,45 +1292,6 @@ mod vm_tap_spec_injection_tests {
         assert_eq!(
             spec, expected,
             "VM injection may change only its declared network handoff fields",
-        );
-    }
-
-    /// Exec retains the transit address and the VM-only channel remains fully
-    /// absent.
-    /// CONTRACT_SHAPE: bounded-change (netns, host_veth, workload_addr only).
-    #[test]
-    fn exec_injection_keeps_transit_address_and_no_guest_net_channel() {
-        let slot = NetSlot::new(8).expect("valid slot");
-        let responder = responder_addr_for_slot(slot);
-        let workload = derive_workload_netns_plan(slot, responder);
-        let mut spec = spec(DriverPayload::Exec(ExecPayload {
-            command: "/bin/true".to_owned(),
-            args: Vec::new(),
-        }));
-
-        let before = spec.clone();
-
-        inject_workload_network(&mut spec, &workload, None);
-
-        assert_eq!(spec.workload_addr, Some(workload.workload_addr));
-        assert_eq!(
-            (
-                spec.guest_tap.as_deref(),
-                spec.guest_mac,
-                spec.guest_gateway,
-                spec.guest_prefix_len,
-                spec.guest_dns,
-            ),
-            (None, None, None, None, None),
-        );
-
-        let mut expected = before;
-        expected.netns = Some(workload.netns.clone());
-        expected.host_veth = Some(workload.host_veth.clone());
-        expected.workload_addr = Some(workload.workload_addr);
-        assert_eq!(
-            spec, expected,
-            "Exec injection may change only its declared network handoff fields",
         );
     }
 }
@@ -1892,7 +1821,7 @@ async fn dispatch_single(
             // `prior_updated_at` clones the stamp rather than moving it.
             let prior_row = find_prior_alloc_row(obs, &alloc_id).await?;
             if prior_row.as_ref().is_some_and(|row| {
-                allocation_attempt_transition(row, AllocationAttemptEvent::Exec)
+                allocation_attempt_transition(row, AllocationAttemptEvent::Dispatch)
                     == AllocationAttemptTransition::NoChange
             }) {
                 return Ok(());
@@ -1907,8 +1836,8 @@ async fn dispatch_single(
             // and inject `spec.netns` + `spec.host_veth` — all BEFORE
             // `driver.start` so the workload is spawned INTO its netns. Fail-
             // closed: a provision failure (or slot exhaustion) aborts the start.
-            // Off the mTLS gate this remains mandatory for VM and is a no-op
-            // only for Exec.
+            // The current VM path owns the complete network plan regardless of
+            // whether the optional mTLS worker is composed.
             //
             // AC14 sub-claim 4: a PERSISTENT provision failure (slot exhaustion,
             // EPERM creating the netns/veth) must drive the alloc to a `Failed`
@@ -1922,12 +1851,9 @@ async fn dispatch_single(
             // alloc is Pending → Failed, never Running). A non-provision
             // `ShimError` (unreachable here, but kept exhaustive) propagates
             // unchanged.
-            if let Err(err) = provision_and_inject_netns(
-                &mut spec,
-                net_slot_allocator,
-                mtls_lifecycle.is_some(),
-                network_provisioner,
-            ) {
+            if let Err(err) =
+                provision_and_inject_netns(&mut spec, net_slot_allocator, network_provisioner)
+            {
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
                 };
@@ -1985,8 +1911,7 @@ async fn dispatch_single(
             // separate, earlier check; this is the dispatch-time
             // fallback for whatever reaches here regardless.
             let driver_kind = spec.driver.driver_type();
-            let intercept_required = mtls_lifecycle.is_some()
-                && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm);
+            let intercept_required = mtls_lifecycle.is_some();
             if intercept_required
                 && let Err(issue_error) = ensure_intercept_identity(
                     &alloc_id,
@@ -2176,7 +2101,7 @@ async fn dispatch_single(
             // sits after this Running write. The obs store that just rejected
             // the write cannot durably record anything, so recovery is
             // teardown-now + re-dispatch-later. Symmetric across every
-            // `ExitEvent`-emitting driver — Exec and VM both honour the gate
+            // `ExitEvent`-emitting VM driver honours the gate
             // contract and both strand identically without this.
             // `@mandatory:mutation_target` — a mutant that drops the
             // `driver.stop` leaves the started workload orphaned;
@@ -2215,7 +2140,7 @@ async fn dispatch_single(
                         // pairing. Safe: `stop` has fully awaited teardown, so
                         // there is no live process for reclamation to race;
                         // idempotent and a no-op for drivers on the trait
-                        // default (Exec/Sim keep the phase-less `stop`).
+                        // default implementation keeps the phase-less `stop`.
                         // `@mandatory:mutation_target` — dropping this leaks the
                         // `EndingInFlight` supervision entry the greptile P1
                         // flagged.
@@ -2267,9 +2192,7 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                if let Some(mtls_lifecycle) = mtls_lifecycle
-                    && matches!(spec.driver.driver_type(), DriverType::Exec | DriverType::Vm)
-                {
+                if let Some(mtls_lifecycle) = mtls_lifecycle {
                     if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
                         return fail_closed_on_mtls_install(
                             driver.as_ref(),
@@ -2294,8 +2217,11 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
-                if exec_release_permitted(true, intercept_required, stable_exact_rule_baseline)
-                    && let Some(handle) = &handle_opt
+                if guest_command_release_permitted(
+                    true,
+                    intercept_required,
+                    stable_exact_rule_baseline,
+                ) && let Some(handle) = &handle_opt
                 {
                     // For VmDriver this existing hook first releases the
                     // deferred BeaconMessage::Exec reply, then the exit-event
@@ -2345,18 +2271,14 @@ async fn dispatch_single(
             let successor_alloc_id = spec.alloc.clone();
             let prior_state: AllocStateWire = prior_row.state.into();
             let driver_kind = spec.driver.driver_type();
-            let intercept_required = mtls_lifecycle.is_some()
-                && matches!(driver_kind, DriverType::Exec | DriverType::Vm);
+            let intercept_required = mtls_lifecycle.is_some();
 
             // The successor path is complete before the predecessor cleanup
             // attempt. A failed provision is represented at the successor key
             // and its structural ownership is unwound before old cleanup.
-            let successor_outcome = if let Err(error) = provision_and_inject_netns(
-                &mut spec,
-                net_slot_allocator,
-                mtls_lifecycle.is_some(),
-                network_provisioner,
-            ) {
+            let successor_outcome = if let Err(error) =
+                provision_and_inject_netns(&mut spec, net_slot_allocator, network_provisioner)
+            {
                 let Some(cause) = netns_provision_cause(&error) else {
                     return finish_restart(
                         Err(error),
@@ -3204,22 +3126,12 @@ mod tests {
     use futures::Stream;
     use overdrive_core::aggregate::IntentKey;
     use overdrive_core::id::{ContentHash, CorrelationKey};
-    use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::intent_store::{
         IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
     };
     use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
-    use super::{Action, ShimError, network_assignment_required, persist_workflow_intents};
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn every_vm_requires_network_assignment_even_without_mtls_composition() {
-        assert!(network_assignment_required(DriverType::Vm, false));
-        assert!(network_assignment_required(DriverType::Vm, true));
-        assert!(network_assignment_required(DriverType::Exec, true));
-        assert!(!network_assignment_required(DriverType::Exec, false));
-    }
+    use super::{Action, ShimError, persist_workflow_intents};
 
     /// In-memory `IntentStore` that fails `put` for one configured
     /// "poison" key and otherwise stores the bytes. `get` reflects what
@@ -3414,18 +3326,19 @@ mod tests {
 }
 
 #[cfg(test)]
-mod guest_exec_release_tests {
+mod guest_command_release_tests {
     #![allow(clippy::doc_markdown)]
 
-    use super::exec_release_permitted;
+    use super::guest_command_release_permitted;
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    fn exec_release_requires_a_stable_exact_rule_baseline() {
+    fn guest_command_release_requires_a_stable_exact_rule_baseline() {
         for running in [false, true] {
             for required in [false, true] {
                 for stable_exact in [false, true] {
-                    let permitted = exec_release_permitted(running, required, stable_exact);
+                    let permitted =
+                        guest_command_release_permitted(running, required, stable_exact);
                     assert_eq!(
                         permitted,
                         running && (!required || stable_exact),
@@ -3434,8 +3347,8 @@ mod guest_exec_release_tests {
                 }
             }
         }
-        assert!(!exec_release_permitted(true, true, false));
-        assert!(exec_release_permitted(true, true, true));
+        assert!(!guest_command_release_permitted(true, true, false));
+        assert!(guest_command_release_permitted(true, true, true));
     }
 }
 
@@ -3562,13 +3475,13 @@ mod fail_closed_mtls_tests {
     #[async_trait::async_trait]
     impl Driver for RecordingDriver {
         fn r#type(&self) -> DriverType {
-            DriverType::Exec
+            DriverType::Vm
         }
 
         async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
             Err(DriverError::StartRejected {
                 failure: DriverStartFailure {
-                    class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+                    class: DriverStartClass::Unclassified { driver: DriverType::Vm },
                     detail: "RecordingDriver: start() is not on the fail-closed path".to_owned(),
                 },
             })

@@ -21,9 +21,7 @@ use async_trait::async_trait;
 
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
-};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
@@ -56,7 +54,7 @@ impl AlwaysFailDriver {
 #[async_trait]
 impl Driver for AlwaysFailDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Exec
+        DriverType::Vm
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -67,7 +65,7 @@ impl Driver for AlwaysFailDriver {
         Err(DriverError::StartRejected {
             failure: overdrive_core::traits::driver::DriverStartFailure {
                 class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
-                    driver: DriverType::Exec,
+                    driver: DriverType::Vm,
                 },
                 detail: "deliberate failure injection for backoff test".to_string(),
             },
@@ -144,7 +142,12 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())

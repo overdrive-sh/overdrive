@@ -1,4 +1,4 @@
-//! Workload-cgroup management for `ExecDriver`.
+//! Workload-cgroup management for the VM driver.
 //!
 //! Creates and tears down
 //! `overdrive.slice/workloads.slice/<alloc_id>.scope` directories,

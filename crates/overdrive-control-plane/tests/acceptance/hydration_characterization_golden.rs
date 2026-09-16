@@ -87,8 +87,8 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, ServiceV2,
-    WorkloadIntent, WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, Service, WorkloadIntent,
+    WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -142,7 +142,7 @@ async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppSt
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(
@@ -169,20 +169,27 @@ fn exec_job(id: &str) -> Job {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/serve".to_owned(),
             args: vec!["--job".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec")
 }
 
-fn service_with_startup_probe(id: &str) -> ServiceV2 {
-    ServiceV2::from_submit(ServiceSpecInput {
+fn service_with_startup_probe(id: &str) -> Service {
+    Service::from_submit(ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_owned(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_owned(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
         startup_probes: vec![ProbeDescriptor {
             idx: ProbeIdx::new(0),

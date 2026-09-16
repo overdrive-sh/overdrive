@@ -1,5 +1,5 @@
-//! Overdrive worker subsystem — `ExecDriver`, workload-cgroup
-//! management, and the boot-time `node_health` row writer.
+//! Overdrive worker subsystem — `VmDriver`, workload-cgroup management,
+//! and the boot-time `node_health` row writer.
 //!
 //! Per ADR-0029, the worker subsystem is its own crate (class
 //! `adapter-host`) so that the boundary between the control-plane and
@@ -18,7 +18,6 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod cgroup_manager;
-pub mod driver;
 // transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
 // the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
 // leg-C listener, the inbound nft-TPROXY install (+ ip rule/route
@@ -34,7 +33,7 @@ pub mod mtls_intercept_port;
 // transparent-mtls-host-socket (D-MTLS-16 / D-MTLS-17, GH #26; step 06-03) —
 // the (β) worker-side mTLS intercept-and-enforce lifecycle component the
 // action-shim fires alongside the driver hooks. Held by `AppState` as
-// `Option<Arc<MtlsInterceptWorker>>`; `ExecDriver` is UNTOUCHED.
+// `Option<Arc<MtlsInterceptWorker>>`.
 pub mod mtls_intercept_worker;
 pub mod node_health;
 // SCAFFOLD: true — service-health-check-probes feature.
@@ -46,7 +45,6 @@ pub mod probe_runner;
 pub mod vm_driver;
 
 pub use cgroup_manager::{CgroupManager, CgroupPath};
-pub use driver::ExecDriver;
 pub use node_health::{NodeConfig, NodeHealthWriteError};
 pub use vm_driver::{VmDriver, VmHostLayout};
 

@@ -373,7 +373,7 @@ run() {
   grep -Fq 'Verdict: Succeeded' "$OUTPUT_ROOT/caller-describe.log" \
     || die "caller terminal result was not successful"
 
-  echo "E07 PASS: one VM Job called one Exec Service and received the exact reply"
+  echo "E07 PASS: one VM Job called one VM Service and received the exact reply"
 }
 
 case "${1:-run}" in

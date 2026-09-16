@@ -210,7 +210,7 @@ mod tests {
                 0,
             ));
         let driver: Arc<dyn Driver> =
-            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Exec));
+            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Unikernel));
         let allocator = crate::test_default_allocator(
             Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
         );
@@ -248,8 +248,8 @@ mod tests {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
         let alloc = overdrive_core::AllocationId::new("vm-boot-orphan-0").expect("valid id");
-        // The fixture's driver is `SimDriver::new(DriverType::Exec)` — no
-        // `Vm` registry entry at all, so supervision reads
+        // The fixture composes a non-VM driver, so there is no `Vm`
+        // registry entry and supervision reads
         // Observed(∅) -> reclamation_authorised(alloc) is true.
         host.set_run_dir(alloc.clone());
         let state = app_state(&tmp, Arc::new(host.clone()));
@@ -434,7 +434,7 @@ mod tests {
     /// only `DiscardStrandedArtifacts` was reachable; see this module's
     /// own docs). A non-terminal `AllocStatusRow` owned by a Vm-driven
     /// `Job` intent, with a live cgroup scope and no `Vm` registry entry
-    /// (`SimDriver::new(DriverType::Exec)` — the same fixture the
+    /// (a non-VM simulated driver — the same fixture the
     /// `converge_discards_a_run_dir_orphan_...` test above uses),
     /// authorises reclamation: `supervision` reads `Observed(∅)`, the
     /// join finds `desired.allocations[alloc] = VmAllocFacts { terminal:

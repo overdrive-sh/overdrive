@@ -487,6 +487,41 @@ fn clone_link_path(index_dir: &Path, alloc_id: &str) -> PathBuf {
     index_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
 }
 
+fn artifact_path_is_absent(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => panic!("failed to inspect cleanup artifact {}: {error}", path.display()),
+    }
+}
+
+/// Waits for the per-allocation exit watcher to finish its target-then-link
+/// cleanup. The watcher is owned by the VM driver rather than
+/// `ServerHandle`, so server shutdown is not a completion signal for these
+/// artifacts. Polling the actual clone/index condition avoids coupling the
+/// assertion to an arbitrary scheduler delay.
+async fn poll_until_vm_artifacts_reclaimed(
+    staging_dir: &Path,
+    index_dir: &Path,
+    alloc_id: &str,
+    max_wait: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let clone_gone = artifact_path_is_absent(&clone_path(staging_dir, alloc_id));
+        let link_gone = artifact_path_is_absent(&clone_link_path(index_dir, alloc_id));
+        if clone_gone && link_gone {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "VM clone/index cleanup did not complete within {max_wait:?} for {alloc_id}: \
+             clone_gone={clone_gone} link_gone={link_gone}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// A real, reflink-capable directory the artificial-strand scenarios use
 /// to hold a stranded clone FILE. Under DWD-26 (ADR-0083 §§D3f-D3h) the
 /// reclamation sweep no longer enumerates any single node-level staging
@@ -1449,24 +1484,13 @@ async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-84 (step 03-09, DWD-26 / ADR-0083 §§D3f-D3h) — RED scaffolds:
-// a VM that ends WITHOUT `VmDriver::stop` leaves no rootfs clone behind,
-// on all three without-stop endings.
-//
-// Shape per `.claude/rules/testing.md` § "RED scaffolds and
-// intentionally-failing commits": `#[should_panic(expected = "RED
-// scaffold")]` plus a panic body naming the scenario, so the bar stays
-// green and the scaffold stays discoverable via
-// `grep -rn 'should_panic.*RED scaffold' crates/`. `#[test]` (sync)
-// TODAY because a body that is a single panic awaits nothing, boots no
-// server and touches no cgroup; the rustdoc names the `#[tokio::test]` +
-// `#[serial(cgroup)]` attributes the activated form must carry, so the
-// swap happens together with the assertions. The file-level
-// `integration-tests,kvm-tests` gate carries the `@requires-kvm` tag —
-// same gating as every activated scenario above, so these compile only
-// under `kvm-tests` and run only on the metal box, never Lima.
-//
-// The eight activated scenarios above are untouched.
+// S-VM-84 (step 03-09, DWD-26 / ADR-0083 §§D3f-D3h) — a VM that ends
+// WITHOUT `VmDriver::stop` leaves no rootfs clone behind on all three
+// without-stop endings. The exit observer performs the immediate cleanup;
+// the boot-epoch `VmReclamation` pass below is an idempotent recovery check
+// for the same durable surfaces after a restart. These are active Tier-3
+// scenarios, not intentionally failing scaffolds, and retain the
+// `integration-tests,kvm-tests` gate and `#[serial(cgroup)]`.
 //
 // ## Shared shape (all three fns)
 //
@@ -1522,14 +1546,10 @@ async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
 /// S-VM-84 ending (1) — the guest exits on its own. Reuse
 /// `build_exit0_binary` (the natural-exit shape S-VM-25(a) already
 /// stages): the guest execs, exits 0, and `run_exit_watcher` emits an
-/// `ExitEvent` — but per DWD-26 nothing in that path removes the
-/// per-launch clone, so it strands in the operator directory. Deploy
+/// `ExitEvent` after reclaiming the per-launch clone and index entry. Deploy
 /// through `spawn_vm_server` + `deploy`, poll to a terminal row via
-/// `poll_until_terminal`, then drive the reclamation pass (a `serve`
-/// restart's boot-epoch drive, or the steady-state sweep — either is
-/// legitimate for this ending; the restart arm is scenario (3)) and
-/// assert the operator clone AND the clone-index entry are both gone,
-/// with scope/run-dir reclaimed as before. MUST NOT call `stop`.
+/// `poll_until_terminal`, then drive the idempotent boot-epoch reclamation
+/// pass and assert every cleanup complement. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
 #[tokio::test]
 #[serial(cgroup)]
@@ -1570,22 +1590,24 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
         deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
     poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
-    // The clone and its durable index link both survive the guest exit —
-    // no `stop` ran to remove them.
+    // The exit observer owns the natural-exit cleanup path, so both the
+    // platform clone and its durable index link are already gone even though
+    // no `stop` ran. The boot-epoch pass below remains an idempotent recovery
+    // check for the same surfaces after a control-plane restart.
     assert!(
-        clone_path(&staging_dir, &alloc_id).exists(),
-        "sanity: the platform-staged clone must survive a guest exit that never called stop"
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "a natural guest exit must not leave the platform-staged clone behind"
     );
     assert!(
-        clone_link_path(&index_dir, &alloc_id).exists(),
-        "sanity: the durable clone-index link must survive the guest exit"
+        !clone_link_path(&index_dir, &alloc_id).exists(),
+        "a natural guest exit must not leave a durable clone-index link behind"
     );
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
     wait_for_data_dir_release().await;
 
     // Boot #2 — the boot-epoch VmReclamation drive runs synchronously
-    // inside run_server, reading the durable index under data_dir and
-    // reclaiming the operator clone.
+    // inside run_server and remains idempotent when the natural-exit watcher
+    // already reclaimed the clone and index.
     let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
     assert!(
         !clone_path(&staging_dir, &alloc_id).exists(),
@@ -1604,10 +1626,10 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
 /// (`build_spin_binary`), reach Running, then capture the real
 /// `cloud-hypervisor` pid with `find_cloud_hypervisor_pid` and kill it
 /// directly (SIGKILL) so the allocation ends via a dead VMM rather than
-/// `stop`. The row goes non-terminal-then-observed; the clone strands.
-/// Drive the reclamation pass and assert the operator clone AND the
-/// clone-index entry are both gone, scope/run-dir reclaimed. `pid_is_alive`
-/// confirms the VMM is genuinely gone first. MUST NOT call `stop`.
+/// `stop`. The exit observer reclaims the clone and index entry while
+/// preserving the terminal observation. Drive the boot-epoch pass and assert
+/// every cleanup complement. `pid_is_alive` confirms the VMM is genuinely
+/// gone first. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
 #[tokio::test]
 #[serial(cgroup)]
@@ -1646,18 +1668,27 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
     // VMM rather than `VmDriver::stop`.
     let vmm_pid = find_cloud_hypervisor_pid().expect("a real cloud-hypervisor process is running");
     let _ = Command::new("kill").arg("-9").arg(vmm_pid.to_string()).status();
-    // Shut down boot #1 promptly so nothing removes the stranded clone or
-    // its index link (no stop; the survivor is reclaimed at the next boot).
+    // The per-allocation exit watcher owns VMM-death cleanup. Wait for its
+    // clone/index condition while the serve owner is still alive; shutting
+    // down the server only joins the observer consumer, not this watcher.
+    poll_until_vm_artifacts_reclaimed(&staging_dir, &index_dir, &alloc_id, Duration::from_secs(30))
+        .await;
+    // Shut down boot #1 promptly. No `stop` is used; the exit observer's
+    // VMM-death cleanup has already removed the clone and index entry.
     handle.shutdown().await.expect("shutdown boot #1 after the hypervisor died");
     wait_for_data_dir_release().await;
     assert!(!pid_is_alive(vmm_pid), "the hypervisor process is genuinely gone");
     assert!(
-        clone_link_path(&index_dir, &alloc_id).exists(),
-        "sanity: the durable clone-index link survives a hypervisor death with no stop"
+        artifact_path_is_absent(&clone_path(&staging_dir, &alloc_id)),
+        "a hypervisor death must not leave the platform-staged clone behind"
+    );
+    assert!(
+        artifact_path_is_absent(&clone_link_path(&index_dir, &alloc_id)),
+        "a hypervisor death must not leave a durable clone-index link behind"
     );
 
-    // Boot #2 — the boot-epoch drive reads the durable index and reclaims
-    // the operator clone the dead hypervisor left behind.
+    // Boot #2 — the boot-epoch drive remains idempotent after the death
+    // observer has already reclaimed the clone and index.
     let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
     assert!(
         !clone_path(&staging_dir, &alloc_id).exists(),

@@ -49,6 +49,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -57,7 +58,7 @@ use overdrive_core::id::{AllocationId, NodeId, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
@@ -67,7 +68,7 @@ use overdrive_reconcilers::service_lifecycle::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::probers::{SimExecProber, SimHttpProber, SimTcpProber};
+use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
 fn alloc_id(s: &str) -> AllocationId {
@@ -88,14 +89,16 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
     }
 }
 
-fn exec_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
+fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
             .expect("valid SPIFFE ID"),
-        driver: DriverPayload::Exec(ExecPayload {
+        driver: DriverPayload::Vm(VmPayload {
             command: "/bin/true".to_owned(),
             args: Vec::new(),
+            kernel: PathBuf::from("/nonexistent/kernel"),
+            rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
@@ -144,7 +147,6 @@ fn fact_from_row_and_intent(
         ProbeMechanic::Http { host, port, path } => {
             format!("http {}:{port}{path}", host.as_deref().unwrap_or(""))
         }
-        ProbeMechanic::Exec { command } => format!("exec {command:?}"),
     };
     ServiceAllocFact {
         alloc_id: row.alloc_id.clone(),
@@ -211,7 +213,6 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let tcp = Arc::new(SimTcpProber::new());
     tcp.enqueue_outcome(ProbeOutcome::Pass);
     let http = Arc::new(SimHttpProber::new());
-    let exec = Arc::new(SimExecProber::new());
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(
         NodeId::new("probe-to-stable-test").expect("valid NodeId"),
@@ -221,7 +222,6 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let runner = ProbeRunner::new(
         tcp,
         http,
-        exec,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
     );
@@ -240,7 +240,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     // ACT 1 — start the supervised tick loop, advance the clock past
     // one interval, wait for the row to land in the obs store.
     // -----------------------------------------------------------------
-    let _token = runner.start_alloc(&exec_spec(&alloc, vec![descriptor.clone()]));
+    let _token = runner.start_alloc(&vm_spec(&alloc, vec![descriptor.clone()]));
     yield_for_task_poll().await;
     clock.tick(Duration::from_secs(1));
 

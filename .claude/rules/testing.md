@@ -593,6 +593,39 @@ async fn honours_home_env_var_fallback() {
 
 ---
 
+## Node-global kernel state requires a catch-all nextest group
+
+`serial_test` and an in-process lock cannot protect node-global kernel state:
+nextest launches tests from different binaries in separate processes. This
+includes shared nft tables and policy routes, root-cgroup or bpffs
+attachments, and production netns/veth resources. A module-specific filter is
+easy to leave stale when a new test is added, so it is not a sufficient
+isolation boundary.
+
+When any test in an integration binary mutates one of these resources, assign
+the **entire package/binary pair** to the existing `host-kernel-shared` group
+(`max-threads = 1`) in the nextest profile used by that lane. Narrower
+module- or test-level assignments may remain as explanatory documentation, but
+they MUST NOT be the only assignment. This deliberately serializes pure tests
+in the same binary; the cost is preferable to allowing an unlisted fixture to
+erase a sibling's live kernel state.
+
+After changing a group filter, verify the effective profile rather than only
+reading the TOML:
+
+```bash
+cargo xtask lima run -- cargo nextest show-config test-groups --profile default
+cargo xtask lima run -- cargo nextest show-config test-groups --profile ci
+```
+
+The `ci` and `mutants` profiles inherit the repository's default overrides;
+still inspect each profile that runs the affected binary. A green isolated
+test does not discharge this rule: run the smallest multi-binary lane that
+shares the kernel resources, because a first failure can leave state that makes
+later failures misleading.
+
+---
+
 ## Net slots are partitioned across parallel tests — draw from the registry, never a fresh allocator
 
 Integration tests that provision REAL workload network namespaces derive
@@ -674,11 +707,48 @@ band.
 - A flake report shaped "different test each run, same assertion line,
   ~ms failure, green serially" — that is this class.
 
+### Hand-built real-netns fixtures must be route-disjoint from production
+
+Some Tier-3 tests construct a veth/netns topology directly instead of using
+the production `NetSlotAllocator`. A unique namespace or interface name is not
+enough: the host route selected for the fixture can still overlap a retained
+production VM route. If both sides use the same gateway/workload CIDR, the
+kernel may send the test packet into the production namespace and the failure
+looks like a missing TPROXY listener or a dead backend.
+
+For every hand-built real-netns fixture:
+
+- Request a named lease with
+  `overdrive_testing::cidr_lease::TestCidrLease::acquire(owner)` rather than
+  embedding a CIDR literal. The shared fixture allocator draws `/24`s from its
+  documented `10.250.0.0/16` pool, which is disjoint from the production
+  workload subnet (`WORKLOAD_SUBNET_BASE`, currently `10.99.0.0/16`). Its
+  cross-process registry records owner/PID/process-start identity and checks
+  live kernel routes before a claim is returned. A lease is released by
+  `Drop`; a dead owner with live route residue remains quarantined until the
+  route disappears.
+- Keep the lease name stable and unique to the topology module. The lease
+  handle supplies the host gateway, workload address, and prefix used by the
+  topology. Each module therefore owns a distinct CIDR even when a prior
+  interrupted run leaves a route behind; do not reuse production slot-0
+  addresses merely because the test's namespace names differ.
+- Keep host-loopback backend addresses and routes disjoint from production
+  addresses as well. Record the allocator pool and stable lease name in the
+  fixture's module documentation so a later production subnet change cannot
+  silently collide.
+- Before diagnosing a connection assertion, inspect the exact host routes and
+  namespaces (`ip route`, `ip rule`, `ip netns list`). After a panic or
+  cancellation, remove only the named fixture resources or restart the test
+  VM; do not paper over a collision with connection retries.
+
+This is distinct from slot partitioning: it protects manually chosen address
+and route state, while the registry protects slot-derived kernel names.
+
 ---
 
 ## Leaked workload cgroups across runs (Lima / Linux integration tests)
 
-Integration tests that exercise `ExecDriver` against real
+Integration tests that exercise the VM workload lifecycle against real
 `/sys/fs/cgroup` (anything under `tests/integration/job_lifecycle/`
 running on Linux through `cargo xtask lima run --`) create
 per-allocation scope directories under
@@ -692,7 +762,7 @@ behind in the Lima VM until something explicitly removes them.
 
 ### Why this matters
 
-`ExecDriver::start` `mkdir`s a fresh scope directory per allocation.
+The VM driver creates a fresh scope directory per allocation.
 When a stale `alloc-<job>-0.scope` already exists from a prior run,
 the next test in that file (Phase 1 `submit_to_running`,
 `crash_recovery`, `stop_to_terminated`) hits `EEXIST` on the mkdir
@@ -756,7 +826,7 @@ SIGINT from the user. After any such event, expect leftover state.
 If a previously-passing integration test starts failing or timing
 out, **run the detection one-liner before assuming the recent
 changes broke the test**. The fix is to clean the VM, not to add
-defensive `mkdir -p`-style retries to `ExecDriver` (production must
+defensive `mkdir -p`-style retries to the VM driver (production must
 NOT silently reuse a pre-existing scope — that would cross
 allocation boundaries).
 
@@ -1350,7 +1420,7 @@ bpf-next model. Advancing the pin is a deliberate, tested image change.
 ### Running tests — Lima VM
 
 All test execution goes through the Lima VM for reproducibility.
-ProcessDriver, control-plane cgroup management, eBPF programs, and every
+VmDriver, control-plane cgroup management, eBPF programs, and every
 `#[cfg(target_os = "linux")]` test surface require a real Linux kernel
 plus cgroup v2. Running tests directly on the host — even on Linux —
 gives a degraded signal: the toolchain may differ, kernel version may
@@ -1395,7 +1465,7 @@ integration-tests` is mandatory; without it, the Linux-gated tests are
 skipped and the run signal is meaningless.
 
 **Cgroup writes need root or delegation.** Tests that exercise the
-workload-cgroup path (`overdrive-worker::ProcessDriver`, the
+workload-cgroup path (`overdrive-worker::VmDriver`, the
 JobLifecycle convergence loop) `mkdir`
 `/sys/fs/cgroup/overdrive.slice/...`. The Lima default user is
 unprivileged and lacks delegation for that subtree, so the production

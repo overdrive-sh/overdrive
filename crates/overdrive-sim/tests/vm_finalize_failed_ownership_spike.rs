@@ -26,7 +26,7 @@ use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, W
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, IntentKey, ResourcesInput, ServiceV2, VmInput, WorkloadIntent,
+    DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::cgroup::CgroupPath;
@@ -37,6 +37,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::traits::vm_host_state::{
     VmHostObservation, VmHostState, VmHostStateProbeError,
 };
@@ -53,7 +54,7 @@ use overdrive_sim::adapters::{
     dataplane::SimDataplane,
     entropy::SimEntropy,
     observation_store::SimObservationStore,
-    probers::{SimExecProber, SimHttpProber, SimTcpProber},
+    probers::{SimHttpProber, SimTcpProber},
     vm_host_state::SimVmHostState,
 };
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
@@ -71,11 +72,7 @@ struct Network {
 }
 
 impl WorkloadNetworkProvisioner for Network {
-    fn provision(
-        &self,
-        _: &WorkloadNetnsPlan,
-        _: Option<&VmTapPlan>,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _: &WorkloadNetnsPlan, _: &VmTapPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
     fn teardown(&self, _: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
@@ -219,10 +216,19 @@ async fn drive(seed: u64, finalize: bool) {
         scopes: Mutex::new(vec![]),
         host: SimVmHostState::new(),
     });
+    let http_prober = Arc::new(SimHttpProber::new());
+    // Queue enough failures for every background startup-probe tick in the
+    // bounded `with_clock` drive. A single queued failure is insufficient:
+    // under full-workspace scheduling the supervisor can consume it before
+    // the manually authored `HTTP 302` row, then the adapter's default
+    // `Pass` overwrites the terminal decision. The drive advances at most
+    // ~66 one-second intervals; 128 failures leaves deterministic headroom.
+    for _ in 0..128 {
+        http_prober.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
+    }
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
-        Arc::new(SimHttpProber::new()),
-        Arc::new(SimExecProber::new()),
+        http_prober,
         clock.clone(),
         obs.clone(),
     ));
@@ -263,7 +269,7 @@ async fn drive(seed: u64, finalize: bool) {
         state.lifecycle_events.clone(),
         clock.clone(),
     );
-    let svc = ServiceV2::from_submit(ServiceSpecInput {
+    let svc = Service::from_submit(ServiceSpecInput {
         id: "vm-finalize-ownership".to_owned(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

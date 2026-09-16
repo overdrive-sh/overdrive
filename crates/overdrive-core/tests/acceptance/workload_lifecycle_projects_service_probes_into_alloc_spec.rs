@@ -32,8 +32,8 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, ServiceV2};
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadIntent, WorkloadKind};
+use overdrive_core::aggregate::{DriverInput, ResourcesInput, Service};
+use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
@@ -78,7 +78,12 @@ fn make_job(id: &str) -> Job {
         id: jid(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     }
 }
 
@@ -365,7 +370,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
     let nodes = one_node_map("local");
 
     // Build a Service intent end-to-end via the parser-side
-    // `ServiceSpecInput` → `ServiceV2::from_submit` path so the
+    // `ServiceSpecInput` → `Service::from_submit` path so the
     // projection helper is exercised against the same shape the
     // runtime hydrate path uses. Each role bucket carries a single
     // descriptor with a port that uniquely identifies the role —
@@ -378,13 +383,18 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         id: "svc".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/serve".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/serve".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: startup.clone(),
         readiness_probes: readiness.clone(),
         liveness_probes: liveness.clone(),
     };
-    let svc = ServiceV2::from_submit(input).expect("canonical ServiceSpecInput is valid");
+    let svc = Service::from_submit(input).expect("canonical ServiceSpecInput is valid");
     let intent = WorkloadIntent::Service(svc);
 
     // 1. Helper-level invariant: the projection produces the canonical

@@ -381,7 +381,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
 
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
-use overdrive_core::aggregate::{IntentKey, ServiceV2, WorkloadIntent};
+use overdrive_core::aggregate::{IntentKey, Service, WorkloadIntent};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeResultRow, ProbeRole};
@@ -740,12 +740,12 @@ impl Reconciler for ServiceLifecycleReconciler {
 /// Liveness probe `failure_threshold` default per ADR-0057 §2 / DDD-14.
 const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
 
-/// Read `WorkloadIntent::Service(ServiceV2)` for `workload_id`; `Ok(None)` when
+/// Read `WorkloadIntent::Service(Service)` for `workload_id`; `Ok(None)` when
 /// absent or a `Job` / `Schedule` variant.
 async fn service_spec_from_intent(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
-) -> Result<Option<ServiceV2>, HydrateError> {
+) -> Result<Option<Service>, HydrateError> {
     let key = IntentKey::for_workload(workload_id);
     let Some(bytes) = ctx
         .intent_store
@@ -771,14 +771,11 @@ fn format_mechanic_summary(mechanic: &ProbeMechanic) -> String {
         ProbeMechanic::Http { path, port, host } => host
             .as_ref()
             .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
-        ProbeMechanic::Exec { command } => {
-            command.first().map_or_else(|| "exec".to_string(), |c| format!("exec {c}"))
-        }
     }
 }
 
 /// Project the spec-derived startup facts uniform across every alloc.
-fn spec_facts_for_service(svc: &ServiceV2) -> (u32, Duration, String, bool, bool) {
+fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) {
     let startup_probes_empty = svc.startup_probes.is_empty();
     if startup_probes_empty {
         return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
@@ -793,7 +790,7 @@ fn spec_facts_for_service(svc: &ServiceV2) -> (u32, Duration, String, bool, bool
 }
 
 /// Project the readiness facts uniform across every alloc.
-fn readiness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+fn readiness_facts_for_service(svc: &Service) -> (bool, u32) {
     let has_readiness_probe = !svc.readiness_probes.is_empty();
     let success_threshold =
         svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
@@ -801,7 +798,7 @@ fn readiness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
 }
 
 /// Project the liveness facts uniform across every alloc.
-fn liveness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
+fn liveness_facts_for_service(svc: &Service) -> (bool, u32) {
     let has_liveness_probe = !svc.liveness_probes.is_empty();
     let failure_threshold = svc
         .liveness_probes
@@ -817,7 +814,7 @@ fn liveness_facts_for_service(svc: &ServiceV2) -> (bool, u32) {
 async fn service_dataplane_identities(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
-    svc: &ServiceV2,
+    svc: &Service,
 ) -> Result<BTreeMap<ServiceId, ServiceDataplaneIdentity>, HydrateError> {
     if svc.listeners.is_empty() {
         return Ok(BTreeMap::new());
@@ -1429,11 +1426,15 @@ mod tests {
                         let mut expected = actual.clone();
                         let passes = matches!(status, Some(ProbeStatus::Pass));
                         let next = u32::try_from((u64::from(count) + 1).min(u64::from(u32::MAX))).unwrap();
-                        if enabled && !veto {
+                        let startup_gate_blocks = !fact.startup_probes_empty
+                            && !expected.terminal_announced.is_empty()
+                            && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
+                        if enabled && !veto && !startup_gate_blocks {
                             if passes { expected.readiness_consecutive_successes.insert(key.clone(), next); }
                             else { expected.readiness_consecutive_successes.remove(&key); }
                         }
-                        let expected_healthy = !veto && (!enabled || (passes && next >= threshold));
+                        let expected_healthy =
+                            !startup_gate_blocks && !veto && (!enabled || (passes && next >= threshold));
                         let healthy = compute_backend_healthy(&alloc, &fact, &mut actual, veto);
                         prop_assert_eq!(healthy, expected_healthy);
                         prop_assert_eq!(actual, expected);

@@ -326,6 +326,19 @@ pub(super) fn stage_rootfs_with_extra_binary(
     host_bin: &Path,
     guest_name: &str,
 ) -> PathBuf {
+    stage_rootfs_with_extra_binaries(tmp, fixture, &[(host_bin, guest_name)])
+}
+
+/// Stage a per-test rootfs copy with multiple static guest binaries injected
+/// at `/sbin/<guest_name>`. A VM-to-VM scenario may need both a long-lived
+/// Service peer and a Job caller in the same image; keeping this composition
+/// in one mount/copy/unmount operation prevents the second binary from being
+/// accidentally omitted or from mutating the shared fixture image.
+pub(super) fn stage_rootfs_with_extra_binaries(
+    tmp: &Path,
+    fixture: &VmFixture,
+    binaries: &[(&Path, &str)],
+) -> PathBuf {
     let rootfs_copy = tmp.join("rootfs.ext4");
     std::fs::copy(&fixture.rootfs_path, &rootfs_copy)
         .expect("copy the shared fixture rootfs into a per-test working copy");
@@ -350,11 +363,14 @@ pub(super) fn stage_rootfs_with_extra_binary(
         Command::new("mount").arg(&loop_dev).arg(&mnt).status().expect("spawn mount");
     assert!(mount_status.success(), "mount {loop_dev} {} failed", mnt.display());
 
-    let dest = mnt.join("sbin").join(guest_name);
-    std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
-    let mut perms = std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+    for (host_bin, guest_name) in binaries {
+        let dest = mnt.join("sbin").join(guest_name);
+        std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
+        let mut perms =
+            std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+    }
 
     let umount_status = Command::new("umount").arg(&mnt).status().expect("spawn umount");
     assert!(umount_status.success(), "umount {} failed", mnt.display());
@@ -452,7 +468,7 @@ pub(super) fn config_path(tmp: &Path) -> PathBuf {
 
 /// A `[job]`+`[vm]`+`[resources]` TOML — the shape `WorkloadSpecInput::
 /// from_toml_str`'s job-family branch parses (confirmed GREEN by
-/// S-VM-06/S-VM-07 in `vm_spec_driver_table_dispatch.rs`).
+/// S-VM-06/S-VM-07 in the VM parser acceptance suite).
 pub(super) fn vm_job_toml(
     id: &str,
     command: &str,
@@ -746,7 +762,7 @@ async fn vm_guest_that_never_starts_is_never_reported_running() {
 // ---------------------------------------------------------------------
 
 /// S-VM-04 — A `[vm]` spec deploys through the exact same
-/// `overdrive_cli::commands::deploy::deploy` handler as an `[exec]`
+/// `overdrive_cli::commands::deploy::deploy` handler as any other workload
 /// spec — no new verb, no new flag. Proven at deploy-acceptance time
 /// (no full boot-to-completion needed; that is S-VM-01/02's claim).
 #[tokio::test]
@@ -769,18 +785,16 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
         "vm-same-verb.toml",
         &vm_job_toml("vm-same-verb", "/sbin/exit0", &[], &fixture.kernel_path, &rootfs),
     );
-    // The SAME `deploy()` fn every [exec] spec in this crate's other
-    // integration tests calls (`exec_spec_walking_skeleton.rs`,
-    // `workload_restart.rs`) — no `[vm]`-specific handler, no new CLI
-    // subcommand.
+    // The SAME `deploy()` fn used by the other workload integration tests —
+    // no VM-specific handler and no new CLI subcommand.
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg })
         .await
-        .expect("deploy the [vm] spec through the exact same verb an [exec] spec uses");
+        .expect("deploy the [vm] spec through the existing workload verb");
     assert_eq!(submit.workload_id, "vm-same-verb");
     assert_eq!(
         submit.outcome,
         overdrive_control_plane::api::IdempotencyOutcome::Inserted,
-        "a fresh [vm] deploy must report Inserted, exactly like a fresh [exec] deploy"
+        "a fresh [vm] deploy must report Inserted through the existing workload verb"
     );
 
     handle.shutdown().await.expect("clean shutdown");

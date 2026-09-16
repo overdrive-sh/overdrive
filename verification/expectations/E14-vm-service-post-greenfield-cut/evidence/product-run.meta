@@ -1,0 +1,13 @@
+# E14 invocation — checked-in healthy VM Service journey
+expectation_id: E14
+command: OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run -- examples/service-kind-vm-workloads/run-example.sh run healthy
+configured_target: ubuntu@151.115.99.251 (from .env OVERDRIVE_METAL_TARGET)
+guest_kernel: /srv/vm/overdrive-testing/kernel
+guest_rootfs: /srv/vm/overdrive-testing/rootfs.ext4
+attempt_1_evidence: attempt-1-product-run.out
+attempt_1_exit: 1
+attempt_1_observation: stakeholder-visible Service and peer-Job success plus zero cleanup deltas; runner teardown also observed a signal-9 failed allocation
+attempt_2_started_utc: 2026-09-15T01:56:56Z
+attempt_2_evidence: product-run.out
+attempt_2_exit: 0
+finished_utc: 2026-09-15T01:57:09Z

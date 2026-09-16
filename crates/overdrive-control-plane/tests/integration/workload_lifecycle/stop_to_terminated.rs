@@ -9,20 +9,39 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
 };
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
+use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
+
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 // `too_many_lines`: the 01-06 required-field AppState change (adds `ca` +
 // `identity`) tipped this walking-skeleton fn from 100 → 102 lines via two
@@ -41,17 +60,14 @@ async fn job_stop_drives_running_to_terminated() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     // Share the SimClock between the driver and the test so the test
-    // can `tick(...)` to advance logical time past `ExecDriver`'s
+    // can `tick(...)` to advance logical time through the simulated driver's
     // SIGTERM→SIGKILL grace window. Under the deterministic-park
     // `SimClock::sleep` contract (`.claude/rules/development.md`
     // § "Production code is not shaped by simulation"), the harness —
     // never the SUT — drives logical time.
     let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        sim_clock.clone(),
-        Arc::new(overdrive_host::RealCgroupFs::new()),
-    ));
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
 
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
@@ -86,16 +102,17 @@ async fn job_stop_drives_running_to_terminated() {
         }
     });
 
-    // Use a distinct workload_id so the derived cgroup scope
-    // (`alloc-stopper-0.scope`) does not collide with submit_to_running
-    // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
+    // Use a distinct workload ID so this test's allocation does not collide
+    // with the other lifecycle fixtures when they run in parallel.
     let job = Job::from_submit(JobSpecInput {
         id: "stopper".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -115,13 +132,14 @@ async fn job_stop_drives_running_to_terminated() {
     // Drive until Running.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");
@@ -139,13 +157,14 @@ async fn job_stop_drives_running_to_terminated() {
 
     let mut converged_terminated = false;
     for tick_n in 30..60_u64 {
-        run_convergence_tick(
+        run_convergence_tick_with_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
+            &NoopNetworkProvisioner,
         )
         .await
         .expect("tick");

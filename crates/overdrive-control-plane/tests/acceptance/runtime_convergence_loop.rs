@@ -29,11 +29,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::reconciler_runtime::{
+    ReconcilerRuntime, run_convergence_tick, run_convergence_tick_with_network_provisioner_for_test,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
+    DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -50,6 +54,26 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+/// The convergence-loop fixture uses only Sim adapters. Keep the production
+/// reconciliation/action path intact while substituting the privileged host
+/// netns/veth mutation port, so this acceptance test cannot collide with
+/// concurrently running native-kernel scenarios on the metal host.
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
+
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` and `workload-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can
@@ -63,7 +87,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -126,7 +150,12 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
@@ -292,7 +321,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -319,7 +348,12 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
@@ -505,6 +539,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 async fn stop_after_failed_alloc_drains_broker() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());
+    let network = NoopNetworkProvisioner;
 
     // --- Build AppState. Reject starts so the action shim writes
     //     `AllocState::Failed` and the reconciler enters the
@@ -517,9 +552,8 @@ async fn stop_after_failed_alloc_drains_broker() {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(
-        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::new(DriverType::Vm).fail_on_start_with("binary not found".to_string()));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -549,9 +583,11 @@ async fn stop_after_failed_alloc_drains_broker() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/does/not/exist".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -610,13 +646,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick(
+            run_convergence_tick_with_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks,
                 deadline,
+                &network,
             )
             .await
             .expect("convergence tick succeeds");
@@ -686,13 +723,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick(
+            run_convergence_tick_with_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks + tick_n,
                 deadline,
+                &network,
             )
             .await
             .expect("convergence tick succeeds");
@@ -829,9 +867,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(
-        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(SimDriver::new(DriverType::Vm).fail_on_start_with("binary not found".to_string()));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -860,9 +897,11 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             command: "/does/not/exist".to_string(),
             args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
         }),
     })
     .expect("valid job spec");
@@ -1141,7 +1180,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // SimDriver doesn't matter — no Start/Restart action will be
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -1168,7 +1207,12 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     })
     .expect("valid job spec");
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())

@@ -1,9 +1,9 @@
-//! [`Driver`] — a workload backend (exec, microVM, VM, unikernel, WASM).
+//! [`Driver`] — a workload backend (microVM, VM, unikernel, WASM).
 //!
 //! Each driver is a thin trait object owned by the node agent. Production
-//! wires concrete drivers (`CloudHypervisorDriver`, `ExecDriver`,
-//! `WasmDriver`); simulation wires `SimDriver` with configurable failure
-//! modes for scheduler and reconciler tests.
+//! wires concrete drivers (`CloudHypervisorDriver`, `WasmDriver`);
+//! simulation wires `SimDriver` with configurable failure modes for
+//! scheduler and reconciler tests.
 //!
 //! See `docs/whitepaper.md` §6 for the driver catalogue.
 
@@ -27,10 +27,8 @@ use crate::{AllocationId, SpiffeId};
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
-/// `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
-/// with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
-/// amendment 2026-04-28).
+/// wire form. [`Display`] and [`FromStr`] emit `vm`, `unikernel`, `wasm` —
+/// matching `docs/whitepaper.md` §6.
 ///
 /// `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
 /// migration (step 01-10, GH #42 — `docs/feature/
@@ -64,8 +62,6 @@ use crate::{AllocationId, SpiffeId};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
-    /// Native binary under cgroups v2 (`tokio::process`).
-    Exec,
     /// Cloud Hypervisor microVM (hotplug, virtiofs, any OS).
     Vm,
     /// Cloud Hypervisor + Unikraft unikernel.
@@ -79,7 +75,6 @@ impl DriverType {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Exec => "exec",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
             Self::Wasm => "wasm",
@@ -98,7 +93,6 @@ impl FromStr for DriverType {
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
-            "exec" => Ok(Self::Exec),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),
             "wasm" => Ok(Self::Wasm),
@@ -138,12 +132,11 @@ impl Display for DriverStartFailure {
 
 /// The driver-family discriminator for a [`DriverStartFailure`]
 /// (ADR-0083 §D5). There is deliberately no sibling `driver` field: the
-/// family rides the variant, so a `driver: Exec` / VM-cause mismatch is
+/// family rides the variant, so a mismatched driver/cause pair is
 /// unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DriverStartClass {
-    Exec(ExecStartFailure),
     Vm(VmStartFailure),
     /// A failure with no named class for this driver family. Converts to
     /// the pre-existing `DriverInternalError`; the ONLY unknown fallback.
@@ -157,28 +150,10 @@ impl DriverStartClass {
     #[must_use]
     pub const fn driver_type(&self) -> DriverType {
         match self {
-            Self::Exec(_) => DriverType::Exec,
             Self::Vm(_) => DriverType::Vm,
             Self::Unclassified { driver } => *driver,
         }
     }
-}
-
-/// `ExecDriver`'s named start causes (ADR-0083 §D5). Selected from
-/// structured OS error identity — never from `Display` text. Every payload
-/// string is the pre-existing live operator surface and does not change.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ExecStartFailure {
-    /// `spawn(2)` returned ENOENT.
-    BinaryNotFound { path: String },
-    /// `spawn(2)` returned EACCES.
-    PermissionDenied { path: String },
-    /// `spawn(2)` returned ENOEXEC / ELIBBAD. `kind` is the canonical
-    /// `"exec_format_error"` for the ENOEXEC case.
-    BinaryInvalid { path: String, kind: String },
-    /// Cgroup setup failed. `kind` is `"create_scope"` or `"place_pid"`.
-    CgroupSetupFailed { kind: String, source: String },
 }
 
 /// `VmDriver`'s named start causes (ADR-0083 §D5 rows 1-12 and 15). Not
@@ -278,17 +253,6 @@ pub enum DriverError {
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]
     Io(#[from] std::io::Error),
-    /// The driver was configured with a target network namespace
-    /// path (opt-in, mirroring the CNI spec's `CNI_NETNS`) but the
-    /// `pre_exec` hook could not enter it before `execve` — either
-    /// the path could not be opened (`netns_path` does not exist,
-    /// caller lacks permission) or `setns(CLONE_NEWNET)` failed.
-    /// Distinct from `StartRejected` because the failure mode is a
-    /// pre-fork netns-targeting setup error, not a workload-spec
-    /// rejection — callers can `matches!` on this variant when
-    /// diagnosing test-fixture netns plumbing.
-    #[error("driver {driver} could not enter netns {netns_path}: {source}")]
-    NetnsEntry { driver: DriverType, netns_path: String, source: std::io::Error },
     /// `Driver::resize` is not implemented by this driver in this feature.
     /// The `--api-socket` hotplug substrate is kept in `VmConfig` for GH #92
     /// (right-sizing / CPU hotplug) but is not exercised by any path here;
@@ -339,7 +303,7 @@ pub struct AllocationSpec {
     /// Validated health-check probe declarations per ADR-0054 §3.
     ///
     /// Carried from the reconciler-emitted `Action::StartAllocation`
-    /// down to the worker-side `ExecDriver` so the driver's
+    /// down to the worker-side `VmDriver` so the driver's
     /// `on_alloc_running` lifecycle hook can hand them to
     /// `ProbeRunner::start_alloc`.
     ///
@@ -351,14 +315,12 @@ pub struct AllocationSpec {
     /// reconciler-emitted `AllocationSpec`.
     pub probe_descriptors: Vec<ProbeDescriptor>,
 
-    /// Target network namespace NAME this allocation's workload is spawned
-    /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
-    /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). Every VM receives `Some(plan.netns)` even when the
-    /// optional mTLS worker is not composed, because guest networking is a
-    /// VM admission requirement rather than an interception side effect.
-    /// `None` remains the host-netns shape only for an Exec workload on a
-    /// non-mTLS boot. The driver opens `/var/run/netns/<name>` (via
+    /// Target network namespace NAME this allocation's VM is spawned INTO;
+    /// the action-shim C3 site provisions it before `Driver::start`. Every VM
+    /// receives `Some(plan.netns)` even when the optional mTLS worker is not
+    /// composed, because guest networking is a VM admission requirement rather
+    /// than an interception side effect. The driver opens
+    /// `/var/run/netns/<name>` (via
     /// [`NetnsName::as_str`]) when `Some`.
     ///
     /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
@@ -388,10 +350,9 @@ pub struct AllocationSpec {
     /// matches to redirect the workload's egress to leg-F
     /// (`MtlsInterceptWorker::start_alloc` →
     /// `install_outbound_tproxy(host_veth, leg_f_port)`). `Some(plan.host_veth)`
-    /// ONLY when the action-shim C3 site provisioned a per-workload netns/veth
-    /// (the production mTLS-composed boot); `None` for every non-netns workload
-    /// (every current test fixture, and any boot where the mTLS composition gate
-    /// is off) — the pre-join host-netns behaviour, exactly like `netns`.
+    /// when the action-shim C3 site admitted and provisioned the current
+    /// VM network plan; `None` only for a spec that did not pass through that
+    /// provision seam (for example, a direct unit-test fixture).
     ///
     /// `Option<String>`, NOT a newtype — on its OWN rationale (JOIN-6; this
     /// field is not this step's subject): the value is already a validated,
@@ -412,10 +373,9 @@ pub struct AllocationSpec {
 
     /// Canonical per-workload IPv4 address this allocation was provisioned
     /// into for the canonical-workload-address inbound-TPROXY path (D-A1, GH
-    /// #241). For Exec this is the in-netns transit-veth address
-    /// (`WorkloadNetnsPlan::workload_addr`); for VM it is the guest NIC address
-    /// (`VmTapPlan::guest_addr`), never the transit forwarding hop. `None` for
-    /// every non-netns workload or boot outside the mTLS composition gate.
+    /// #241). For VM this is the guest NIC address (`VmTapPlan::guest_addr`),
+    /// never the transit forwarding hop. `None` only when the current VM
+    /// network plan was not injected at the C3 provision seam.
     ///
     /// The third member of the slot-derived channel beside `netns` /
     /// `host_veth`, injected at the SAME C3 provision seam off the SAME
@@ -433,12 +393,11 @@ pub struct AllocationSpec {
     /// compose with [`Self::workload_addr`] (the guest address for VM allocs)
     /// to form the guest's fail-closed network configuration.
     ///
-    /// All five fields are `Some` together only for a VM allocation behind
-    /// the mTLS composition gate. They remain `None` for Exec allocations and
-    /// for every non-netns boot. This is deliberately a minimal field family,
-    /// not a new public value type: `AllocationSpec` is a transient in-memory
-    /// handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no persisted or
-    /// wire schema changes.
+    /// All five fields are `Some` together for a VM allocation whose current
+    /// network plan was provisioned. This is deliberately a minimal field
+    /// family, not a new public value type: `AllocationSpec` is a transient
+    /// in-memory handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no
+    /// persisted or wire schema changes.
     pub guest_tap: Option<String>,
     /// Slot-derived, locally administered unicast MAC for the guest NIC.
     pub guest_mac: Option<[u8; 6]>,
@@ -470,18 +429,10 @@ pub struct AllocationSpec {
 
 /// Tagged per-driver invocation payload (ADR-0083 §D3). The routing key
 /// [`DriverPayload::driver_type`] is what [`DriverRegistry::get`] indexes
-/// on; `command()` / `args()` are the two fields every variant carries.
+/// on; `command()` / `args()` borrow the fields carried by the VM payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriverPayload {
-    Exec(ExecPayload),
     Vm(VmPayload),
-}
-
-/// `[exec]` invocation fields — the native-binary-under-cgroups-v2 driver.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecPayload {
-    pub command: String,
-    pub args: Vec<String>,
 }
 
 /// `[vm]` invocation fields — the Cloud Hypervisor microVM driver
@@ -503,25 +454,22 @@ impl DriverPayload {
     #[must_use]
     pub const fn driver_type(&self) -> DriverType {
         match self {
-            Self::Exec(_) => DriverType::Exec,
             Self::Vm(_) => DriverType::Vm,
         }
     }
 
-    /// Both variants carry a command; borrow it regardless of kind.
+    /// Borrow the command carried by the VM payload.
     #[must_use]
     pub fn command(&self) -> &str {
         match self {
-            Self::Exec(e) => &e.command,
             Self::Vm(v) => &v.command,
         }
     }
 
-    /// Both variants carry argv; borrow it regardless of kind.
+    /// Borrow the argv carried by the VM payload.
     #[must_use]
     pub fn args(&self) -> &[String] {
         match self {
-            Self::Exec(e) => &e.args,
             Self::Vm(v) => &v.args,
         }
     }
@@ -648,10 +596,10 @@ pub struct ExitEvent {
     /// error mid-stream). Per ADR-0033 Amendment 2026-05-10.
     ///
     /// Producers:
-    /// - `ExecDriver` (production): consumes `child.stderr` line-by-
+    /// - `VmDriver` (production): consumes the VMM stderr stream line-by-
     ///   line into a bounded ring buffer of capacity
-    ///   `STDERR_TAIL_LINES`; on `child.wait()` resolution emits the
-    ///   ring contents joined by `\n` (no trailing newline).
+    ///   `STDERR_TAIL_LINES`; on exit emits the ring contents joined by
+    ///   `\n` (no trailing newline).
     /// - `SimDriver` (tests): emits `None` by default; tests that
     ///   want to exercise the tail-rendering path inject explicit
     ///   stderr via the sim driver's tail-injection API.
@@ -659,8 +607,7 @@ pub struct ExitEvent {
     /// Set only when the driver observed, immediately after exit and
     /// before any teardown, that the allocation's cgroup scope had a
     /// nonzero `oom_kill` counter (ADR-0082 §D8, the D-3 fold-in).
-    /// `ExecDriver` never sets this (its own OOM diagnosis is the
-    /// unreduced half of D-3, still deferred). `None` means "not
+    /// `VmDriver` sets this only on its VMM-died branch. `None` means "not
     /// observed to be OOM" -- it does NOT mean "confirmed not OOM": a
     /// read error also yields `None`, per this fold-in's best-effort
     /// scope.
@@ -683,7 +630,7 @@ pub struct OomFacts {
     pub oom_kill_count: u64,
 }
 
-/// Number of trailing stderr lines `ExecDriver` retains for inclusion
+/// Number of trailing stderr lines `VmDriver` retains for inclusion
 /// on the [`ExitEvent`]. The constant is the project-wide SSOT so the
 /// driver-side ring buffer (which fills it) and the renderer (which
 /// displays it as "stderr (last N lines):") read from one source.
@@ -829,7 +776,7 @@ pub trait Driver: Send + Sync + 'static {
     /// The `exit_observer` subsystem (in
     /// `overdrive-control-plane::worker::exit_observer`) consumes this
     /// receiver at startup. Drivers that emit exit events
-    /// (`ExecDriver`, `SimDriver`) override this to return their
+    /// (`VmDriver`, `SimDriver`) override this to return their
     /// internal receiver exactly once.
     ///
     /// Default: `None` — drivers that have no watcher (e.g.
@@ -860,7 +807,7 @@ pub trait Driver: Send + Sync + 'static {
     ///
     /// Production [`crate::traits::driver::Driver`] implementations
     /// that hold a reference to the worker's `ProbeRunner` (today:
-    /// `overdrive_worker::ExecDriver`) override this to call
+    /// `overdrive_worker::VmDriver`) override this to call
     /// `probe_runner.start_alloc(spec)`, handing the allocation facts and
     /// validated probe descriptors to the per-alloc supervisor per ADR-0054
     /// § 3.
@@ -928,7 +875,7 @@ pub trait Driver: Send + Sync + 'static {
     /// async").
     ///
     /// Default: `None`, for drivers that do not report supervision
-    /// (`overdrive_worker::ExecDriver` keeps the default — correct
+    /// (`overdrive_worker::VmDriver` keeps the default — correct
     /// rather than an omission, since a reclamation-shaped consumer
     /// only ever acts on VM allocations).
     fn live_allocations(&self) -> Option<Vec<AllocationId>> {

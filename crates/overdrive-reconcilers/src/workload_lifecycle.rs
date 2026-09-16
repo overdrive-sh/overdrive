@@ -8,12 +8,12 @@ use std::num::NonZeroU16;
 
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    Exec, IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
+    IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
     WorkloadKind,
 };
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, VmPayload};
 use overdrive_core::traits::intent_store::TxnOp;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use overdrive_core::transition_reason::{
@@ -86,8 +86,8 @@ fn restart_retry_deadline(seen_at: UnixInstant, attempts: u32) -> UnixInstant {
 pub enum AllocationAttemptEvent {
     /// A late guest readiness report.
     Ready,
-    /// A late start/restart execution request.
-    Exec,
+    /// A late start/restart dispatch request.
+    Dispatch,
     /// A duplicate or competing finalization request.
     Finalize,
 }
@@ -104,7 +104,7 @@ pub enum AllocationAttemptTransition {
 /// Decide whether an event may mutate an existing allocation attempt.
 ///
 /// A typed terminal claim is immutable for a Job allocation. Late READY,
-/// EXEC, and finalization events therefore all become exact no-ops. A
+/// dispatch, and finalization events therefore all become exact no-ops. A
 /// platform-reclaimed row intentionally has no terminal claim, so it remains
 /// eligible for the ordinary policy-driven replacement path.
 #[must_use]
@@ -699,7 +699,7 @@ impl WorkloadLifecycle {
                 let restart_pending = view.observed_generation < desired.generation;
 
                 // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
-                // attempt identity even if a late READY/EXEC-shaped row tries
+                // attempt identity even if a late READY/DISPATCH-shaped row tries
                 // to project that same allocation as Pending or Running. The
                 // fence is scoped to the current allocation, exactly like the
                 // existing operator-stop veto: historical terminal rows cannot
@@ -1105,12 +1105,6 @@ impl WorkloadLifecycle {
                         // `Job`, preserving the driver kind. No more
                         // literal `/bin/sleep` / `["60"]`.
                         let driver = match &job.driver {
-                            WorkloadDriver::Exec(Exec { command, args }) => {
-                                DriverPayload::Exec(ExecPayload {
-                                    command: command.clone(),
-                                    args: args.clone(),
-                                })
-                            }
                             WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
                                 DriverPayload::Vm(VmPayload {
                                     command: command.clone(),
@@ -1414,9 +1408,6 @@ fn restart_allocation_action(
 ) -> Action {
     let identity = SpiffeId::for_allocation(&job.id, &successor_alloc_id);
     let driver = match &job.driver {
-        WorkloadDriver::Exec(Exec { command, args }) => {
-            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
-        }
         WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
             command: command.clone(),
             args: args.clone(),
@@ -1603,7 +1594,7 @@ mod guest_pre_ready_exit_tests {
             pre_state.terminal = Some(terminal);
             let event = match reopening_event {
                 0 => AllocationAttemptEvent::Ready,
-                1 => AllocationAttemptEvent::Exec,
+                1 => AllocationAttemptEvent::Dispatch,
                 _ => AllocationAttemptEvent::Finalize,
             };
 
@@ -1628,7 +1619,7 @@ mod guest_pre_ready_exit_tests {
                 },
             );
             prop_assert_eq!(
-                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Exec),
+                allocation_attempt_transition(&reclaimed, AllocationAttemptEvent::Dispatch),
                 AllocationAttemptTransition::Apply,
             );
         }
@@ -1730,7 +1721,7 @@ pub struct WorkloadLifecycleState {
 /// Closes GAP-8 from the Phase 01 structural audit. Pre-patch the
 /// reconciler hardcoded an empty `Vec` at both action arms with a
 /// comment justifying it for Job-kind; Service-kind silently inherited
-/// the empty vec even though `ServiceV2` carries three probe vectors
+/// the empty vec even though `Service` carries three probe vectors
 /// (GAP-6 admission close-out). The runtime now calls this helper at
 /// hydrate-desired time and stamps the result onto
 /// [`WorkloadLifecycleState::probe_descriptors`]; the reconciler
@@ -1792,7 +1783,7 @@ pub fn project_probe_descriptors(
 /// - [`overdrive_core::aggregate::WorkloadIntent::Service(svc)`] →
 ///   `svc.listen_ports()` — the operator's declared listener ports in
 ///   declaration order, read through the single
-///   [`overdrive_core::aggregate::ServiceV2::listen_ports`] source (D-BLOCKER1).
+///   [`overdrive_core::aggregate::Service::listen_ports`] source (D-BLOCKER1).
 /// - [`overdrive_core::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
 ///   Service-kind concern, same boundary as probes per ADR-0054 §3).
@@ -1828,9 +1819,6 @@ pub fn allocation_spec_for_live_intent(
         WorkloadIntent::Schedule(_) => return None,
     };
     let driver = match driver {
-        WorkloadDriver::Exec(Exec { command, args }) => {
-            DriverPayload::Exec(ExecPayload { command: command.clone(), args: args.clone() })
-        }
         WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
             command: command.clone(),
             args: args.clone(),
@@ -1908,7 +1896,7 @@ mod project_service_listen_ports_tests {
     //! listener ports; Job and Schedule each project the empty vec.
     //!
     //! Fixtures build the `Service` arm end-to-end via
-    //! `ServiceV2::from_submit` (the parser-side path), so the projection
+    //! `Service::from_submit` (the parser-side path), so the projection
     //! is exercised against the same `svc.listeners` shape the runtime
     //! hydrate path uses and the bridge reads in 02-01 — keeping the
     //! S-PORTSET equality property structurally honest (D-BLOCKER1: one
@@ -1919,8 +1907,8 @@ mod project_service_listen_ports_tests {
     use proptest::prelude::*;
 
     use overdrive_core::aggregate::{
-        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV2, ServiceV2,
-        WorkloadDriver, WorkloadIntent,
+        CronExpr, DriverInput, Job, ResourcesInput, Schedule, Service, Vm, WorkloadDriver,
+        WorkloadIntent,
     };
     use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
     use overdrive_core::id::WorkloadId;
@@ -1937,7 +1925,12 @@ mod project_service_listen_ports_tests {
             id: wid(id),
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/bin/serve".to_string(),
+                args: vec![],
+                kernel: "/kernel".to_string(),
+                rootfs: "/rootfs".to_string(),
+            }),
         }
     }
 
@@ -1950,16 +1943,18 @@ mod project_service_listen_ports_tests {
             id: "svc".to_string(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver: DriverInput::Exec(ExecInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 command: "/bin/serve".to_string(),
                 args: vec![],
+                kernel: "/kernel".to_string(),
+                rootfs: "/rootfs".to_string(),
             }),
             listeners,
             startup_probes: vec![],
             readiness_probes: vec![],
             liveness_probes: vec![],
         };
-        let svc = ServiceV2::from_submit(input).expect("canonical ServiceSpecInput is valid");
+        let svc = Service::from_submit(input).expect("canonical ServiceSpecInput is valid");
         WorkloadIntent::Service(svc)
     }
 
@@ -2000,7 +1995,7 @@ mod project_service_listen_ports_tests {
 
     #[test]
     fn schedule_kind_projects_the_empty_port_set() {
-        let intent = WorkloadIntent::Schedule(ScheduleV2 {
+        let intent = WorkloadIntent::Schedule(Schedule {
             id: wid("a-schedule"),
             job: make_job("a-schedule"),
             cron_expr: CronExpr::new("0 * * * *").expect("valid cron"),
@@ -2070,7 +2065,7 @@ mod service_vip_release_emission_tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU32;
 
-    use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+    use overdrive_core::aggregate::{Job, Vm, WorkloadDriver, WorkloadKind};
     use overdrive_core::id::{ContentHash, WorkloadId};
     use overdrive_core::reconcilers::Action;
     use overdrive_core::traits::driver::Resources;
@@ -2086,7 +2081,12 @@ mod service_vip_release_emission_tests {
             id: wid(id),
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
-            driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/bin/serve".to_string(),
+                args: vec![],
+                kernel: "/kernel".to_string(),
+                rootfs: "/rootfs".to_string(),
+            }),
         }
     }
 
@@ -2522,7 +2522,7 @@ mod eligibility_tests {
     use std::time::{Duration, Instant};
 
     use super::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
-    use overdrive_core::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+    use overdrive_core::aggregate::{Job, Vm, WorkloadDriver, WorkloadKind};
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::{Reconciler, TickContext};
     use overdrive_core::traits::driver::Resources;
@@ -2559,7 +2559,12 @@ mod eligibility_tests {
             id: workload_id.clone(),
             replicas: NonZeroU32::new(1).expect("one replica"),
             resources: Resources { cpu_milli: 100, memory_bytes: 1024 },
-            driver: WorkloadDriver::Exec(Exec { command: "/bin/true".into(), args: vec![] }),
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/bin/true".into(),
+                args: vec![],
+                kernel: "/kernel".into(),
+                rootfs: "/rootfs".into(),
+            }),
         };
         let desired = WorkloadLifecycleState {
             workload_id: workload_id.clone(),

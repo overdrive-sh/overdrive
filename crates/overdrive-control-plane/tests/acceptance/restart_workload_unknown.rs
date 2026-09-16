@@ -12,9 +12,8 @@
 //! # Port-to-port
 //!
 //! The driving port is the `restart_workload` axum handler, invoked
-//! directly with a real `LocalIntentStore`-backed `AppState` (the
-//! `submit_job_handler_rejects_empty_exec_command_with_400.rs` pattern —
-//! no reqwest, no TLS, no port binding). The driven-port assertions are
+//! directly with a real `LocalIntentStore`-backed `AppState` (no reqwest,
+//! no TLS, no port binding). The driven-port assertions are
 //! taken at the `IntentStore` back-door read boundary (the generation key
 //! is absent ⇒ no bump landed) and at the runtime broker's counter
 //! snapshot (zero queued ⇒ no eval enqueued). No internal helper is
@@ -52,7 +51,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     AppState::new(

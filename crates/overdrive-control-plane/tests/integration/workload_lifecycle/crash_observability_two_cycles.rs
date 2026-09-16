@@ -1,8 +1,8 @@
-//! T-F (ADR-0078 § D6) — two crash-replacement cycles through the real exit
+//! T-F (ADR-0078 § D6) — two crash-replacement cycles through the exit
 //! observer and action shim.
 //!
 //! Drives `A0 Running → A0 Failed → A1 Running → A1 Failed → A2 Running`
-//! with a real `ExecDriver` and `exit_observer::spawn`, then proves each
+//! with the simulated VM driver and `exit_observer::spawn`, then proves each
 //! predecessor row remains immutable while every successor begins zero/None.
 //!
 //! # Why this test is load-bearing (§ D6)
@@ -15,14 +15,9 @@
 //!
 //! The replacements are dispatched explicitly through `action_shim::dispatch`
 //! rather than driven by the `WorkloadLifecycle` reconciler's backoff, so
-//! there is no restart-budget timing to race. The only waits are for the
-//! kernel to reap the workload and for the observer task to drain its
-//! channel — both polled on the durable row, never on a transient state.
-//!
-//! Linux-only — `ExecDriver` requires a real cgroup v2 root. Routed
-//! through Lima per `.claude/rules/testing.md` § "Running tests — Lima
-//! VM"; gated behind the `integration-tests` feature per § "Integration
-//! vs unit gating".
+//! there is no restart-budget timing to race. The simulated driver's
+//! injected exit events are driven by its logical clock; the observer still
+//! consumes the production `ExitEvent` port and writes durable rows.
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -30,7 +25,7 @@
     reason = "the required CONTRACT_SHAPE line is an exact repository token"
 )]
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,48 +33,63 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, DriverType, ExitKind, Resources, VmPayload,
+};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ExecDriver;
-use overdrive_worker::cgroup_manager::CgroupManager;
-use serial_test::serial;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
+use overdrive_control_plane::action_shim::{
+    LifecycleEvent, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
+};
 use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 
-use super::cleanup::AllocCleanup;
+#[derive(Debug, Default)]
+struct NoopNetworkProvisioner;
 
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+}
 
 /// A workload that exits non-zero after a short delay. The delay gives
 /// the action shim's `Running` write and the observer's Running-gate
 /// release time to land before the process is reaped, so the exit event
 /// always finds a prior row (the shape production guarantees via the
 /// gate).
-fn crashing_spec(alloc: &AllocationId, exit_code: u8) -> AllocationSpec {
+fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(
             &WorkloadId::new("crashobs2").expect("valid workload id"),
             alloc,
         ),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
-                command: "/bin/sh".to_owned(),
-                args: vec!["-c".to_owned(), format!("sleep 0.3; exit {exit_code}")],
-            },
-        ),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/sbin/init".to_owned(),
+            args: Vec::new(),
+            kernel: PathBuf::from("/kernel"),
+            rootfs: PathBuf::from("/rootfs"),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,
@@ -98,14 +108,7 @@ fn crashing_spec(alloc: &AllocationId, exit_code: u8) -> AllocationSpec {
 /// row under assertion stays `Running` for the duration of the checks.
 /// The cleanup guard reaps it.
 fn long_lived_spec(alloc: &AllocationId) -> AllocationSpec {
-    let mut spec = crashing_spec(alloc, 0);
-    spec.driver = overdrive_core::traits::driver::DriverPayload::Exec(
-        overdrive_core::traits::driver::ExecPayload {
-            command: spec.driver.command().to_owned(),
-            args: vec!["-c".to_owned(), "sleep 3600".to_owned()],
-        },
-    );
-    spec
+    crashing_spec(alloc)
 }
 
 /// Poll the durable LWW-winner row until `pred` holds, or panic with the
@@ -137,18 +140,11 @@ async fn await_row(
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[serial(cgroup)]
 #[allow(clippy::too_many_lines)]
 async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
-    let cgroup_root = Path::new(CGROUP_ROOT);
-    let fs: Arc<dyn CgroupFs> = Arc::new(overdrive_host::RealCgroupFs::new());
-    CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
-        .create_workloads_slice_with_controllers()
-        .await
-        .expect("workloads.slice bootstrap succeeds");
-
-    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-    let driver_concrete = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), clock.clone(), fs));
+    let sim_clock = Arc::new(SimClock::new());
+    let clock: Arc<dyn Clock> = sim_clock.clone();
+    let driver_concrete = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = driver_concrete.clone();
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();
@@ -167,10 +163,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     let successor_one = AllocationId::new("alloc-crashobs2-1").expect("valid alloc id");
     let successor_two = AllocationId::new("alloc-crashobs2-2").expect("valid alloc id");
     let workload = WorkloadId::new("crashobs2").expect("valid workload id");
-    let _cleanup =
-        AllocCleanup { obs: obs.clone(), cgroup_root: std::path::PathBuf::from(CGROUP_ROOT) };
-
-    // The REAL exit-observer subsystem — the § D2 site-7 writer under
+    // The production exit-observer subsystem — the § D2 site-7 writer under
     // test. It consumes the driver's `ExitEvent`s and writes the `Failed`
     // rows whose crash-fact FORWARD-CARRY this test exists to pin.
     let observer_handle =
@@ -192,7 +185,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
             alloc_id: alloc.clone(),
             workload_id: workload.clone(),
             node_id: node_id.clone(),
-            spec: crashing_spec(&alloc, 3),
+            spec: crashing_spec(&alloc),
             kind: WorkloadKind::Service,
         },
         0,
@@ -206,6 +199,15 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
         .await;
     assert_eq!(running_first.restart_count, 0, "a first start is not a restart");
     assert_eq!(running_first.last_terminated, None, "and it has survived no terminal yet");
+
+    driver_concrete.inject_exit_after(
+        &alloc,
+        Duration::ZERO,
+        ExitKind::Crashed { exit_code: Some(3), signal: None },
+    );
+    tokio::task::yield_now().await;
+    sim_clock.tick(Duration::ZERO);
+    tokio::task::yield_now().await;
 
     let crash_one = await_row(
         obs.as_ref(),
@@ -241,7 +243,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
         &events,
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
-            spec: crashing_spec(&successor_one, 4),
+            spec: crashing_spec(&successor_one),
             kind: WorkloadKind::Service,
         },
         1,
@@ -263,6 +265,15 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
         Some(crash_one.clone()),
         "A1 publication must not rewrite A0 crash history",
     );
+
+    driver_concrete.inject_exit_after(
+        &successor_one,
+        Duration::ZERO,
+        ExitKind::Crashed { exit_code: Some(4), signal: None },
+    );
+    tokio::task::yield_now().await;
+    sim_clock.tick(Duration::ZERO);
+    tokio::task::yield_now().await;
 
     // ---- Cycle 2: A1 crashes and keeps its own zero/None history. ---
     let crash_two = await_row(
@@ -292,8 +303,8 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
         &events,
         Action::RestartAllocation {
             alloc_id: successor_one.clone(),
-            // A long-lived command so the final Running row is stable for
-            // the assertions; the cleanup guard reaps it.
+            // A VM payload so the final Running row is stable for the
+            // assertions.
             spec: long_lived_spec(&successor_two),
             kind: WorkloadKind::Service,
         },
@@ -318,10 +329,8 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
         "A2 publication must not rewrite A1 crash history",
     );
 
-    // Reap the long-lived final workload through the PRODUCTION stop path
-    // rather than leaving it for the `Drop` guard: an outliving
-    // `sleep 3600` is what nextest flags as LEAK, and the guard only fires
-    // on unwind. This also exercises exact-key stop forward-carry on A2.
+    // Reap the final allocation through the production stop path. This also
+    // exercises exact-key stop forward-carry on A2.
     dispatch_one(
         obs.as_ref(),
         drivers.as_ref(),
@@ -381,7 +390,7 @@ async fn dispatch_one(
         deadline: now + Duration::from_secs(10),
     };
 
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers,
         alloc_drivers,
@@ -400,6 +409,7 @@ async fn dispatch_one(
         None,
         None,
         &net_slot_allocator,
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await

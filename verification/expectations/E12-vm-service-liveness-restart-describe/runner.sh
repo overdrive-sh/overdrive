@@ -92,7 +92,7 @@ awk -F '\t' -v expected_threshold="$expected_threshold" '
   }
   END {
     if (rows != 3 || seen["before"] != 1 || seen["terminal"] != 1 || seen["after"] != 1) exit 1
-    if (ids["before"] != ids["terminal"] || ids["terminal"] != ids["after"]) exit 1
+    if (ids["before"] != ids["terminal"] || ids["terminal"] == ids["after"]) exit 1
     if (startup_observed_at["before"] == startup_observed_at["after"] || started_at["before"] == started_at["after"]) exit 1
     if (threshold_failures["after"] != threshold_failures["terminal"]) exit 1
   }
@@ -106,6 +106,6 @@ grep -Fq 'last terminated:' "$EVIDENCE_DIR/product-run.out" \
 grep -Fq 'E12 teardown deltas: vm=0 probe=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 preparation=0' \
   "$EVIDENCE_DIR/product-run.out" \
   || { echo 'E12 runner: teardown did not leave a zero cleanup delta' >&2; exit 1; }
-grep -Fq 'E12 PASS: liveness stop, ordinary same-ID replacement, no readiness restart, no dead revival' \
+grep -Fq 'E12 PASS: liveness stop, fresh-successor replacement, no readiness restart, no dead revival' \
   "$EVIDENCE_DIR/product-run.out"
 cat "$EVIDENCE_DIR/product-run.out"

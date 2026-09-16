@@ -47,11 +47,11 @@ redact_transport <"$RAW_OUTPUT" >"$EVIDENCE_DIR/product-run.out"
   cat "$EVIDENCE_DIR/product-run.out" >&2
   exit "$run_rc"
 }
-grep -Fq 'E07 PASS: one VM Job called one Exec Service and received the exact reply' \
+grep -Fq 'E07 PASS: one VM Job called one VM Service and received the exact reply' \
   "$EVIDENCE_DIR/product-run.out" || {
   echo 'E07 runner: product example exited zero without its public success result' >&2
   exit 1
 }
 
 cat "$EVIDENCE_DIR/product-run.out"
-echo 'E07 expectation PASS: checked-in VM Job received the Exec Service reply'
+echo 'E07 expectation PASS: checked-in VM Job received the VM Service reply'

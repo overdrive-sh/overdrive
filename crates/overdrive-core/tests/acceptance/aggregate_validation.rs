@@ -32,8 +32,8 @@
 #![allow(clippy::expect_fun_call)]
 
 use overdrive_core::aggregate::{
-    AggregateError, Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput,
-    Node, NodeSpecInput, ResourcesInput, ServiceV2,
+    AggregateError, Allocation, AllocationSpecInput, DriverInput, Job, JobSpecInput, Node,
+    NodeSpecInput, ResourcesInput, Service,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::IdParseError;
@@ -50,7 +50,12 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
         id: "payments".to_string(),
         replicas: 0,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     // When Ana calls the validating constructor.
@@ -85,7 +90,12 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
         id: "PAY MENTS".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     // When Ana calls the validating constructor.
@@ -132,7 +142,12 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     // When Ana calls the validating constructor.
@@ -295,7 +310,12 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
         id: "PAY MENTS".to_string(),
         replicas: 0, // triply-invalid, picks up whichever fails first
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
     };
 
     // When Ana calls from_spec.
@@ -329,96 +349,100 @@ mod property {
     use proptest::prelude::*;
 
     proptest! {
-        /// For any otherwise-valid Job spec where `replicas == 0`,
-        /// `from_spec` must always return `Validation { field: "replicas", .. }`.
-        /// This closes the mutation gap on the `replicas == 0` guard per
-        /// testing.md mutation target "Newtype FromStr and validators".
-        #[test]
-        fn zero_replicas_always_yields_replicas_validation(
-            cpu in 0u32..10_000,
-            mem in 1u64..=u64::MAX,
-        ) {
-            let spec = JobSpecInput {
-                id: "payments".to_string(),
-                replicas: 0,
-                resources: ResourcesInput { cpu_milli: cpu, memory_bytes: mem },
-                driver: DriverInput::Exec(ExecInput {
-                    command: "/bin/true".to_string(),
-                    args: vec![],
-                }),
-            };
-            match Job::from_submit(spec) {
-                Err(AggregateError::Validation { field, .. }) => {
-                    prop_assert_eq!(field, "replicas");
+            /// For any otherwise-valid Job spec where `replicas == 0`,
+            /// `from_spec` must always return `Validation { field: "replicas", .. }`.
+            /// This closes the mutation gap on the `replicas == 0` guard per
+            /// testing.md mutation target "Newtype FromStr and validators".
+            #[test]
+            fn zero_replicas_always_yields_replicas_validation(
+                cpu in 0u32..10_000,
+                mem in 1u64..=u64::MAX,
+            ) {
+                let spec = JobSpecInput {
+                    id: "payments".to_string(),
+                    replicas: 0,
+                    resources: ResourcesInput { cpu_milli: cpu, memory_bytes: mem },
+                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                        command: "/bin/true".to_string(),
+                        args: vec![],
+                        kernel: "/kernel".to_owned(),
+                        rootfs: "/rootfs".to_owned(),
+    }),
+                };
+                match Job::from_submit(spec) {
+                    Err(AggregateError::Validation { field, .. }) => {
+                        prop_assert_eq!(field, "replicas");
+                    }
+                    other => prop_assert!(
+                        false,
+                        "expected Validation{{field: \"replicas\"}}, got {:?}",
+                        other
+                    ),
                 }
-                other => prop_assert!(
-                    false,
-                    "expected Validation{{field: \"replicas\"}}, got {:?}",
-                    other
-                ),
             }
-        }
 
-        /// For any otherwise-valid Job spec where `memory_bytes == 0`
-        /// and `replicas >= 1`, `from_spec` must return
-        /// `Validation { field: "memory_bytes", .. }`.
-        #[test]
-        fn zero_memory_always_yields_memory_bytes_validation(
-            cpu in 0u32..10_000,
-            replicas in 1u32..=1_000_000,
-        ) {
-            let spec = JobSpecInput {
-                id: "payments".to_string(),
-                replicas,
-                resources: ResourcesInput { cpu_milli: cpu, memory_bytes: 0 },
-                driver: DriverInput::Exec(ExecInput {
-                    command: "/bin/true".to_string(),
-                    args: vec![],
-                }),
-            };
-            match Job::from_submit(spec) {
-                Err(AggregateError::Validation { field, .. }) => {
-                    prop_assert_eq!(field, "memory_bytes");
+            /// For any otherwise-valid Job spec where `memory_bytes == 0`
+            /// and `replicas >= 1`, `from_spec` must return
+            /// `Validation { field: "memory_bytes", .. }`.
+            #[test]
+            fn zero_memory_always_yields_memory_bytes_validation(
+                cpu in 0u32..10_000,
+                replicas in 1u32..=1_000_000,
+            ) {
+                let spec = JobSpecInput {
+                    id: "payments".to_string(),
+                    replicas,
+                    resources: ResourcesInput { cpu_milli: cpu, memory_bytes: 0 },
+                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                        command: "/bin/true".to_string(),
+                        args: vec![],
+                        kernel: "/kernel".to_owned(),
+                        rootfs: "/rootfs".to_owned(),
+    }),
+                };
+                match Job::from_submit(spec) {
+                    Err(AggregateError::Validation { field, .. }) => {
+                        prop_assert_eq!(field, "memory_bytes");
+                    }
+                    other => prop_assert!(
+                        false,
+                        "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
+                        other
+                    ),
                 }
-                other => prop_assert!(
-                    false,
-                    "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
-                    other
-                ),
             }
-        }
 
-        /// For any otherwise-valid Node spec where `memory_bytes == 0`,
-        /// `new` must return `Validation { field: "memory_bytes", .. }`.
-        #[test]
-        fn node_zero_memory_always_yields_memory_bytes_validation(
-            cpu in 0u32..10_000,
-        ) {
-            let spec = NodeSpecInput {
-                id: "worker-01".to_string(),
-                region: "eu-west-1".to_string(),
-                cpu_milli: cpu,
-                memory_bytes: 0,
-            };
-            match Node::new(spec) {
-                Err(AggregateError::Validation { field, .. }) => {
-                    prop_assert_eq!(field, "memory_bytes");
+            /// For any otherwise-valid Node spec where `memory_bytes == 0`,
+            /// `new` must return `Validation { field: "memory_bytes", .. }`.
+            #[test]
+            fn node_zero_memory_always_yields_memory_bytes_validation(
+                cpu in 0u32..10_000,
+            ) {
+                let spec = NodeSpecInput {
+                    id: "worker-01".to_string(),
+                    region: "eu-west-1".to_string(),
+                    cpu_milli: cpu,
+                    memory_bytes: 0,
+                };
+                match Node::new(spec) {
+                    Err(AggregateError::Validation { field, .. }) => {
+                        prop_assert_eq!(field, "memory_bytes");
+                    }
+                    other => prop_assert!(
+                        false,
+                        "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
+                        other
+                    ),
                 }
-                other => prop_assert!(
-                    false,
-                    "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
-                    other
-                ),
             }
         }
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Service: zero memory → Validation { field: "memory_bytes", .. }
 // Closes the mutation gap on the `resources.memory_bytes == 0` guard in
-// `ServiceV2::from_submit` (Phase 5 aggregate gate, May 2026). Symmetric
-// to the equivalent JobV2 / Node tests above.
+// `Service::from_submit` (Phase 5 aggregate gate, May 2026). Symmetric
+// to the equivalent Job / Node tests above.
 // ---------------------------------------------------------------------------
 
 fn canonical_service_spec() -> ServiceSpecInput {
@@ -426,7 +450,12 @@ fn canonical_service_spec() -> ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+        driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
         listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_string() }],
         startup_probes: vec![],
         readiness_probes: vec![],
@@ -441,7 +470,7 @@ fn service_from_submit_rejects_zero_memory_with_validation_variant_naming_memory
     spec.resources.memory_bytes = 0;
 
     // When Ana calls the validating constructor.
-    let err = ServiceV2::from_submit(spec).expect_err("zero memory must be rejected");
+    let err = Service::from_submit(spec).expect_err("zero memory must be rejected");
 
     // Then the error names the memory_bytes field — same shape as Job /
     // Node so the HTTP layer per ADR-0015 maps it uniformly to 400.
@@ -456,7 +485,7 @@ fn service_from_submit_rejects_zero_memory_with_validation_variant_naming_memory
 // ---------------------------------------------------------------------------
 // Service: duplicate (port, protocol) → Validation { field: "listeners", .. }
 // Closes the mutation gap on the `!seen.insert(key)` duplicate-detection
-// guard in `ServiceV2::from_submit`. Two listeners sharing (8080, tcp)
+// guard in `Service::from_submit`. Two listeners sharing (8080, tcp)
 // MUST be rejected; the existing positive path is covered by
 // `service_vip_submit_acceptance.rs` but the negative path on the
 // duplicate-detection branch had no kill before this commit.
@@ -474,8 +503,7 @@ fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_
     ];
 
     // When Ana calls the validating constructor.
-    let err =
-        ServiceV2::from_submit(spec).expect_err("duplicate (port, protocol) must be rejected");
+    let err = Service::from_submit(spec).expect_err("duplicate (port, protocol) must be rejected");
 
     // Then the error names the listeners field and the Display form
     // includes both port and protocol so the operator-facing error
@@ -527,7 +555,7 @@ fn service_from_submit_rejects_http_probe_path_without_leading_slash() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![make_http_probe("health")];
 
-    let err = ServiceV2::from_submit(spec)
+    let err = Service::from_submit(spec)
         .expect_err("http probe path without leading `/` must be rejected");
 
     match err {
@@ -544,7 +572,7 @@ fn service_from_submit_rejects_empty_http_probe_path() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![make_http_probe("")];
 
-    let err = ServiceV2::from_submit(spec).expect_err("empty http probe path must be rejected");
+    let err = Service::from_submit(spec).expect_err("empty http probe path must be rejected");
 
     match err {
         AggregateError::Validation { field, .. } => {
@@ -559,7 +587,7 @@ fn service_from_submit_rejects_https_in_probe_path() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![make_http_probe("https://example.com/healthz")];
 
-    let err = ServiceV2::from_submit(spec).expect_err("https:// in probe path must be rejected");
+    let err = Service::from_submit(spec).expect_err("https:// in probe path must be rejected");
 
     match err {
         AggregateError::Validation { field, ref message } => {
@@ -585,7 +613,7 @@ fn service_from_submit_rejects_http_probe_with_zero_port() {
         inferred: false,
     }];
 
-    let err = ServiceV2::from_submit(spec).expect_err("http probe with port 0 must be rejected");
+    let err = Service::from_submit(spec).expect_err("http probe with port 0 must be rejected");
 
     match err {
         AggregateError::Validation { field, .. } => {
@@ -610,33 +638,7 @@ fn service_from_submit_rejects_tcp_probe_with_zero_port() {
         inferred: false,
     }];
 
-    let err = ServiceV2::from_submit(spec).expect_err("tcp probe with port 0 must be rejected");
-
-    match err {
-        AggregateError::Validation { field, .. } => {
-            assert_eq!(field, "startup_probes");
-        }
-        other => panic!("expected AggregateError::Validation, got {other:?}"),
-    }
-}
-
-#[test]
-fn service_from_submit_rejects_exec_probe_with_empty_command() {
-    let mut spec = canonical_service_spec();
-    spec.startup_probes = vec![ProbeDescriptor {
-        idx: ProbeIdx::new(0),
-        role: ProbeRole::Startup,
-        mechanic: ProbeMechanic::Exec { command: vec![] },
-        timeout_seconds: 5,
-        interval_seconds: 2,
-        max_attempts: 30,
-        failure_threshold: None,
-        success_threshold: None,
-        inferred: false,
-    }];
-
-    let err =
-        ServiceV2::from_submit(spec).expect_err("exec probe with empty command must be rejected");
+    let err = Service::from_submit(spec).expect_err("tcp probe with port 0 must be rejected");
 
     match err {
         AggregateError::Validation { field, .. } => {
@@ -651,7 +653,7 @@ fn service_from_submit_validates_readiness_probes_too() {
     let mut spec = canonical_service_spec();
     spec.readiness_probes = vec![make_http_probe("health")];
 
-    let err = ServiceV2::from_submit(spec)
+    let err = Service::from_submit(spec)
         .expect_err("readiness probe without leading `/` must be rejected");
 
     match err {
@@ -667,7 +669,7 @@ fn service_from_submit_validates_liveness_probes_too() {
     let mut spec = canonical_service_spec();
     spec.liveness_probes = vec![make_http_probe("health")];
 
-    let err = ServiceV2::from_submit(spec)
+    let err = Service::from_submit(spec)
         .expect_err("liveness probe without leading `/` must be rejected");
 
     match err {
@@ -684,7 +686,7 @@ fn service_from_submit_accepts_valid_http_probe() {
     spec.startup_probes = vec![make_http_probe("/healthz")];
 
     let service =
-        ServiceV2::from_submit(spec).expect("valid http probe with absolute path must be accepted");
+        Service::from_submit(spec).expect("valid http probe with absolute path must be accepted");
     assert_eq!(service.startup_probes.len(), 1);
 }
 
@@ -701,7 +703,7 @@ fn service_from_submit_accepts_same_port_with_different_protocols() {
         ListenerInput { port: 8080, protocol: "udp".to_string() },
     ];
 
-    let service = ServiceV2::from_submit(spec)
+    let service = Service::from_submit(spec)
         .expect("(8080, tcp) and (8080, udp) are distinct listener pairs");
     assert_eq!(service.listeners.len(), 2, "both listeners must round-trip into the aggregate");
 }
