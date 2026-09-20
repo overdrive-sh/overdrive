@@ -15,6 +15,11 @@
 //!
 //! Synchronous by design (blocking `std::net::TcpListener` accept) — leg
 //! acquisition is a one-shot per intercepted connection, not an async pump.
+
+#![allow(
+    clippy::result_large_err,
+    reason = "GH #295 exact source-honest rollback variants retain complete prior/requested/observed identities"
+)]
 //!
 //! # Production-half vs GAP-3 (test-only) boundary
 //!
@@ -50,6 +55,60 @@ use overdrive_netlink::{Client, block_on_host_netlink, errno_is_idempotent};
 // sources, without those crates taking a direct dependency on the
 // `adapter-host` `overdrive-netlink` crate.
 pub use overdrive_netlink::NetlinkError;
+
+/// One of the two node-shared transparent-interception listener legs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterceptLeg {
+    F,
+    C,
+}
+
+/// Closed shared-set identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterceptSet {
+    ManagedGuestIps,
+    OutboundSources,
+    InboundDestinations,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterceptElementOperation {
+    Insert,
+    Delete,
+    ReadBack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterceptSharedRollbackOperation {
+    RestorePrior,
+    ReadBackPrior,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterceptElementKey {
+    Address(Ipv4Addr),
+    Destination(SocketAddrV4),
+}
+
+/// Complete normalized read-back identity for one shared intercept fact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterceptPostcondition {
+    ListenerPort {
+        leg: InterceptLeg,
+        port: u16,
+    },
+    Element {
+        set: InterceptSet,
+        key: InterceptElementKey,
+        present: bool,
+    },
+    ConstantRules {
+        table_and_chains: Vec<Vec<u8>>,
+        sets: Vec<Vec<u8>>,
+        prerouting: Vec<Vec<u8>>,
+        output: Vec<Vec<u8>>,
+    },
+}
 
 /// `IP_TRANSPARENT` sockopt level value — libc 0.2 does not name it (same as
 /// the proven `roles.rs::make_transparent_listener` reference).
@@ -118,6 +177,50 @@ const AGENT_LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 /// diagnostics.
 #[derive(Debug, thiserror::Error)]
 pub enum InterceptError {
+    #[error("shared mTLS listener {leg:?} port mismatch: expected {expected}, observed {actual}")]
+    SharedListenerPortMismatch { leg: InterceptLeg, expected: u16, actual: u16 },
+    #[error("atomic replacement of the shared mTLS rule/set program failed")]
+    NftSharedReplaceFailed {
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+        #[source]
+        source: NetlinkError,
+    },
+    #[error("rollback of the shared mTLS rule/set program failed during {operation:?}")]
+    NftSharedRollbackFailed {
+        operation: InterceptSharedRollbackOperation,
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+        replacement_observed: Option<InterceptPostcondition>,
+        #[source]
+        source: NetlinkError,
+    },
+    #[error("shared mTLS rollback read-back did not restore the prior identity")]
+    NftSharedRollbackPostconditionMismatch {
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+        replacement_observed: Option<InterceptPostcondition>,
+        rollback_observed: Option<InterceptPostcondition>,
+    },
+    #[error("shared mTLS replacement mismatched and the exact prior identity was restored")]
+    NftSharedReplacementMismatchRolledBack {
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+        replacement_observed: Option<InterceptPostcondition>,
+    },
+    #[error("shared mTLS set element update failed")]
+    NftElementUpdateFailed {
+        set: InterceptSet,
+        operation: InterceptElementOperation,
+        key: InterceptElementKey,
+        #[source]
+        source: NetlinkError,
+    },
+    #[error("shared mTLS intercept postcondition mismatch")]
+    PostconditionMismatch {
+        expected: InterceptPostcondition,
+        observed: Option<InterceptPostcondition>,
+    },
     /// `make_transparent_listener` could not stand up the agent's
     /// `IP_TRANSPARENT` inbound leg-C listener (socket / setsockopt / bind /
     /// listen failed). Needs `CAP_NET_ADMIN` for the `IP_TRANSPARENT` setopt.

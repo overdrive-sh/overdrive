@@ -26,6 +26,9 @@ pub mod mtls_mark;
 /// RED scaffold — bodies `todo!()` until DELIVER lands US-01.
 pub mod service_frontend;
 
+/// Fixed node-local guest bridge MAC (locally administered, unicast).
+pub const GUEST_BRIDGE_MAC: [u8; 6] = [0x02, 0x01, 0x00, 0x00, 0x00, 0x01];
+
 pub use backend_key::{BackendKey, Proto};
 pub use drop_class::{DropClass, aggregate_per_cpu};
 pub use fingerprint::{BackendSetFingerprint, fingerprint};

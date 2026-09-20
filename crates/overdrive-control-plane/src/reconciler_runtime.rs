@@ -1390,6 +1390,31 @@ pub async fn run_convergence_tick_with_network_provisioner_for_test(
     .await
 }
 
+/// Post-#295 production-owner convergence path with only the accepted
+/// guest-network driven port substituted.
+///
+/// # Errors
+///
+/// Returns the same errors as [`run_convergence_tick`].
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+#[expect(
+    clippy::panic,
+    clippy::unused_async,
+    reason = "RED scaffold; DELIVER performs the accepted single-cut guest-network convergence composition"
+)]
+pub async fn run_convergence_tick_with_guest_network_provisioner_for_test(
+    _state: &AppState,
+    _reconciler_name: &ReconcilerName,
+    _target: &TargetResource,
+    _now: Instant,
+    _tick_n: u64,
+    _deadline: Instant,
+    _provisioner: &dyn crate::guest_network::GuestNetworkProvisioner,
+) -> Result<(), ConvergenceError> {
+    panic!("Not yet implemented -- RED scaffold (GH #295 guest-network convergence owner)")
+}
+
 #[expect(
     clippy::significant_drop_tightening,
     reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \

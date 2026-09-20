@@ -28,6 +28,11 @@
 //!   releases exactly what its install acquired — for the production
 //!   `HostMtlsIntercept` that is its per-veth / per-virt nft rule, removed by
 //!   handle; the node-global shared routing infra is left intact).
+
+#![allow(
+    clippy::result_large_err,
+    reason = "GH #295 exact shared-owner/install errors retain nested source-honest intercept outcomes"
+)]
 //!   Idempotent.
 //!
 //! ## Supervision shape — (C)+(B), no central loop (ADR-0070 / D-MTLS-16)
@@ -73,20 +78,21 @@
 //! (the outbound egress rule + the per-port inbound rules + leg-F + leg-C
 //! listeners + both accept loops + `enforce` + the wire) is production.
 
-use std::collections::BTreeMap;
-use std::net::SocketAddrV4;
+use std::collections::{BTreeMap, BTreeSet};
+use std::net::{Ipv4Addr, SocketAddrV4};
+use std::num::{NonZeroU16, NonZeroU64};
 #[cfg(any(test, feature = "integration-tests"))]
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
-use overdrive_core::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, InterceptedConnection, MtlsEnforcement, Routed,
 };
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+use overdrive_core::{AllocationId, SpiffeId};
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -126,6 +132,21 @@ use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MtlsInterceptInstallError {
+    /// The process-local registration generation cannot advance.
+    #[error("mTLS registration generation exhausted at {next}")]
+    GenerationExhausted { next: u64 },
+    /// Another Pending, Active, or Retiring capability owns this address.
+    #[error("mTLS registration address is already reserved: {address}")]
+    RegistrationConflict { address: Ipv4Addr },
+    /// Retirement won after effects were acquired but before activation.
+    #[error("mTLS registration for allocation {alloc_id} retired before activation")]
+    RegistrationRetired { alloc_id: AllocationId },
+    /// Allocation registration requires the healthy node-shared listener owner.
+    #[error("shared mTLS owner unavailable")]
+    SharedOwner {
+        #[source]
+        source: MtlsSharedOwnerError,
+    },
     /// The process owner has entered its terminal shutdown fence. A late
     /// allocation install is rejected before binding listeners or installing
     /// rules, so replacement startup cannot create work behind the old
@@ -231,6 +252,224 @@ pub struct MtlsInterceptOwnerShutdownError {
     pub failures: Vec<MtlsInterceptStopError>,
 }
 
+/// Typed lifecycle failure for the one node-shared F/C listener owner.
+#[derive(Debug, thiserror::Error)]
+pub enum MtlsSharedOwnerError {
+    #[error("shared mTLS owner has not started")]
+    NotStarted,
+    #[error("shared mTLS owner is shutting down")]
+    OwnerShutdown,
+    #[error("shared mTLS listener {leg:?} bind failed at {requested}")]
+    ListenerBind {
+        leg: crate::mtls_intercept::InterceptLeg,
+        requested: SocketAddrV4,
+        #[source]
+        source: InterceptError,
+    },
+    #[error("shared mTLS listener {leg:?} address observation failed")]
+    ListenerLocalAddr {
+        leg: crate::mtls_intercept::InterceptLeg,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(
+        "shared mTLS listener {leg:?} postcondition mismatch: expected {expected}, observed {observed:?}"
+    )]
+    ListenerPostcondition {
+        leg: crate::mtls_intercept::InterceptLeg,
+        expected: SocketAddrV4,
+        observed: Option<SocketAddrV4>,
+    },
+    #[error("shared mTLS rule/set convergence failed")]
+    Intercept {
+        #[source]
+        source: InterceptError,
+    },
+    #[error("shared mTLS listener task {leg:?} returned")]
+    TaskReturned { leg: crate::mtls_intercept::InterceptLeg },
+    #[error("shared mTLS listener task {leg:?} failed")]
+    TaskFailed {
+        leg: crate::mtls_intercept::InterceptLeg,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("shared mTLS listener task {leg:?} panicked")]
+    TaskPanicked { leg: crate::mtls_intercept::InterceptLeg },
+    #[error("shared mTLS listener task {leg:?} was cancelled")]
+    TaskCancelled { leg: crate::mtls_intercept::InterceptLeg },
+    #[error("shared mTLS listener task observation channel closed")]
+    TaskObserverClosed,
+}
+
+type SharedListenerTaskResult = std::io::Result<()>;
+
+#[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
+struct SharedListenerTaskEvent {
+    leg: crate::mtls_intercept::InterceptLeg,
+    joined: std::result::Result<SharedListenerTaskResult, tokio::task::JoinError>,
+}
+
+#[allow(dead_code, reason = "D11 RED scaffold precedes abort-on-drop implementation")]
+struct AbortOnDropListenerTask {
+    task: Option<tokio::task::JoinHandle<SharedListenerTaskResult>>,
+}
+
+impl Drop for AbortOnDropListenerTask {
+    fn drop(&mut self) {}
+}
+
+#[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
+struct SharedListenerTaskSlot {
+    task_abort: tokio::task::AbortHandle,
+    observer: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Default)]
+#[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
+struct SharedListenerTaskSlots {
+    leg_f: Option<SharedListenerTaskSlot>,
+    leg_c: Option<SharedListenerTaskSlot>,
+}
+
+#[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
+struct SharedListenerTaskOwner {
+    slots: Mutex<SharedListenerTaskSlots>,
+    event_tx: tokio::sync::mpsc::WeakSender<SharedListenerTaskEvent>,
+    event_rx: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<SharedListenerTaskEvent>>,
+}
+
+#[allow(dead_code, clippy::unused_self, reason = "D11 exact private RED scaffold")]
+impl SharedListenerTaskOwner {
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains and observes listener tasks")]
+    fn new(
+        _leg_f: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        _leg_c: tokio::task::JoinHandle<SharedListenerTaskResult>,
+    ) -> Self {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared listener task owner)")
+    }
+
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER receives the actual listener-task event"
+    )]
+    async fn wait_failure(&self) -> MtlsSharedOwnerError {
+        panic!("Not yet implemented -- RED scaffold (GH #295 listener task failure wait)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER replaces one terminal task")]
+    fn replace_terminal(
+        &self,
+        _leg: crate::mtls_intercept::InterceptLeg,
+        _task: tokio::task::JoinHandle<SharedListenerTaskResult>,
+    ) -> std::result::Result<(), MtlsSharedOwnerError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 terminal listener replacement)")
+    }
+
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER aborts and joins both task slots"
+    )]
+    async fn shutdown(self) {
+        panic!("Not yet implemented -- RED scaffold (GH #295 listener task shutdown)")
+    }
+}
+
+#[allow(dead_code, reason = "D11 RED classifier is driven only by pending source-local tests")]
+#[expect(clippy::panic, reason = "RED scaffold; DELIVER classifies actual Tokio join outcomes")]
+fn classify_shared_listener_task_exit(
+    _leg: crate::mtls_intercept::InterceptLeg,
+    _joined: std::result::Result<SharedListenerTaskResult, tokio::task::JoinError>,
+) -> MtlsSharedOwnerError {
+    panic!("Not yet implemented -- RED scaffold (GH #295 listener task exit classifier)")
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "D11 source-local acceptance uses actual Tokio task outcomes and exact diagnostics"
+)]
+mod shared_listener_task_owner_acceptance {
+    use super::*;
+    use crate::mtls_intercept::InterceptLeg;
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step for GH #295 actual shared-listener task classification"]
+    async fn actual_tokio_return_error_panic_and_cancel_map_to_the_exact_public_error() {
+        let returned = tokio::spawn(async { Ok(()) }).await;
+        assert!(matches!(
+            classify_shared_listener_task_exit(InterceptLeg::F, returned),
+            MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
+        ));
+
+        let failed =
+            tokio::spawn(async { Err(std::io::Error::from_raw_os_error(libc::ECONNABORTED)) })
+                .await;
+        assert!(matches!(
+            classify_shared_listener_task_exit(InterceptLeg::C, failed),
+            MtlsSharedOwnerError::TaskFailed {
+                leg: InterceptLeg::C,
+                source,
+            } if source.raw_os_error() == Some(libc::ECONNABORTED)
+        ));
+
+        let panicked = tokio::spawn(async {
+            panic!("actual shared-listener panic");
+            #[allow(unreachable_code)]
+            Ok(())
+        })
+        .await;
+        assert!(matches!(
+            classify_shared_listener_task_exit(InterceptLeg::F, panicked),
+            MtlsSharedOwnerError::TaskPanicked { leg: InterceptLeg::F }
+        ));
+
+        let cancelled = tokio::spawn(std::future::pending::<SharedListenerTaskResult>());
+        cancelled.abort();
+        assert!(matches!(
+            classify_shared_listener_task_exit(InterceptLeg::C, cancelled.await),
+            MtlsSharedOwnerError::TaskCancelled { leg: InterceptLeg::C }
+        ));
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step for GH #295 shared-listener task ownership"]
+    async fn observer_close_replacement_and_intentional_shutdown_use_real_owned_tasks() {
+        let owner = SharedListenerTaskOwner::new(
+            tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
+            tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
+        );
+        {
+            let slots = owner.slots.lock();
+            slots.leg_f.as_ref().expect("leg F slot").observer.abort();
+            slots.leg_c.as_ref().expect("leg C slot").observer.abort();
+        }
+        assert!(matches!(owner.wait_failure().await, MtlsSharedOwnerError::TaskObserverClosed));
+
+        let owner = SharedListenerTaskOwner::new(
+            tokio::spawn(async { Ok(()) }),
+            tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
+        );
+        assert!(matches!(
+            owner.wait_failure().await,
+            MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
+        ));
+        owner
+            .replace_terminal(InterceptLeg::F, tokio::spawn(async { Ok(()) }))
+            .expect("only the removed terminal leg can be replaced");
+        assert!(matches!(
+            owner.wait_failure().await,
+            MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
+        ));
+        owner.shutdown().await;
+    }
+}
+
 impl MtlsInterceptInstallError {
     /// Associated constructor for the site-2 leg-F transparent-listener bind
     /// failure, per the project's "associated constructor per variant"
@@ -286,6 +525,10 @@ impl MtlsInterceptInstallError {
     #[must_use]
     pub const fn stage(&self) -> &'static str {
         match self {
+            Self::GenerationExhausted { .. } => "generation_exhausted",
+            Self::RegistrationConflict { .. } => "registration_conflict",
+            Self::RegistrationRetired { .. } => "registration_retired",
+            Self::SharedOwner { .. } => "shared_owner",
             Self::OwnerShutdown => "owner_shutdown",
             Self::PriorTeardown { .. } => "prior_teardown",
             Self::OutboundTproxyInstall(_) => "outbound_tproxy_install",
@@ -301,6 +544,556 @@ impl MtlsInterceptInstallError {
             // on the per-connection accept loop, never on `start_alloc`'s
             // install path, so they cannot reach here.
             Self::Inbound(_) => "inbound_tproxy",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct RegistrationGeneration(NonZeroU64);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct CapabilityKey {
+    alloc: AllocationId,
+    generation: RegistrationGeneration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Capability {
+    key: CapabilityKey,
+    spiffe_id: SpiffeId,
+    source_addr: Ipv4Addr,
+    allowed_ports: BTreeSet<NonZeroU16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+enum CapabilityLifecycle {
+    Pending,
+    Active,
+    Retiring,
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+struct CapabilityElements {
+    outbound: Option<Box<dyn InterceptGuard>>,
+    inbound: Vec<Box<dyn InterceptGuard>>,
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+struct CapabilityRegistry {
+    _private: (),
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+#[derive(Debug)]
+struct PendingCapability {
+    _private: (),
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+struct CapabilityClaim {
+    capability: Capability,
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+struct CapabilityRetirement {
+    _private: (),
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+struct CapabilityDrain {
+    handles: Vec<EnforcedConnection>,
+    elements: CapabilityElements,
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+enum PublishDisposition {
+    Published,
+    Retired(EnforcedConnection),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+enum ActivationDisposition {
+    Activated,
+    Retired,
+}
+
+#[allow(
+    dead_code,
+    clippy::unused_self,
+    reason = "D-295-DISTILL-7 exact private API scaffold retains its approved receiver signatures before implementation"
+)]
+impl CapabilityRegistry {
+    const fn new() -> Self {
+        Self { _private: () }
+    }
+
+    #[cfg(test)]
+    const fn with_next_generation(_next_generation: u64) -> Self {
+        Self { _private: () }
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements registration")]
+    fn begin_registration(
+        &self,
+        _alloc: AllocationId,
+        _source_addr: Ipv4Addr,
+        _spiffe_id: SpiffeId,
+        _allowed_ports: BTreeSet<NonZeroU16>,
+    ) -> Result<PendingCapability, MtlsInterceptInstallError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 capability registration)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements source claim")]
+    fn claim_source(&self, _source_addr: Ipv4Addr) -> Option<CapabilityClaim> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 source capability claim)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements destination claim")]
+    fn claim_destination(
+        &self,
+        _destination_addr: Ipv4Addr,
+        _destination_port: NonZeroU16,
+    ) -> Option<CapabilityClaim> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 destination capability claim)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements retirement")]
+    fn begin_retire(&self, _alloc: &AllocationId) -> Option<CapabilityRetirement> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 capability retirement)")
+    }
+}
+
+#[allow(
+    dead_code,
+    clippy::needless_pass_by_ref_mut,
+    clippy::unused_self,
+    reason = "D-295-DISTILL-7 exact private API scaffold retains approved mutable ownership methods before implementation"
+)]
+impl PendingCapability {
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains outbound guard")]
+    fn retain_outbound(&mut self, _guard: Box<dyn InterceptGuard>) {
+        panic!("Not yet implemented -- RED scaffold (GH #295 retain outbound element)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains inbound guard")]
+    fn retain_inbound(&mut self, _guard: Box<dyn InterceptGuard>) {
+        panic!("Not yet implemented -- RED scaffold (GH #295 retain inbound element)")
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements activation")]
+    fn activate(self) -> ActivationDisposition {
+        panic!("Not yet implemented -- RED scaffold (GH #295 capability activation)")
+    }
+}
+
+#[allow(
+    dead_code,
+    clippy::unused_self,
+    reason = "D-295-DISTILL-7 exact private API scaffold retains its approved receiver signatures before implementation"
+)]
+impl CapabilityClaim {
+    const fn capability(&self) -> &Capability {
+        &self.capability
+    }
+
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements publication fence")]
+    fn publish(self, _handle: EnforcedConnection) -> PublishDisposition {
+        panic!("Not yet implemented -- RED scaffold (GH #295 capability publication)")
+    }
+}
+
+impl Drop for PendingCapability {
+    fn drop(&mut self) {}
+}
+
+impl Drop for CapabilityClaim {
+    fn drop(&mut self) {}
+}
+
+#[allow(
+    dead_code,
+    clippy::unused_async,
+    clippy::unused_self,
+    reason = "D-295-DISTILL-7 exact private async waiter scaffold precedes implementation"
+)]
+impl CapabilityRetirement {
+    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements claim wait")]
+    async fn wait_for_claims(self) -> CapabilityDrain {
+        panic!("Not yet implemented -- RED scaffold (GH #295 retirement wait)")
+    }
+}
+
+#[allow(
+    dead_code,
+    clippy::unused_self,
+    reason = "D-295-DISTILL-7 exact private drain scaffold precedes implementation"
+)]
+impl CapabilityDrain {
+    fn take_handles(&mut self) -> Vec<EnforcedConnection> {
+        std::mem::take(&mut self.handles)
+    }
+
+    fn take_elements(&mut self) -> CapabilityElements {
+        std::mem::replace(
+            &mut self.elements,
+            CapabilityElements { outbound: None, inbound: Vec::new() },
+        )
+    }
+
+    fn complete(self) {}
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::too_many_lines,
+    reason = "D-295-DISTILL-7 acceptance tables use exact Contract Shape markers and diagnostics"
+)]
+mod capability_registry_acceptance {
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    use super::*;
+    use overdrive_core::traits::mtls_enforcement::EnforcedConnectionId;
+
+    struct DropGuard(Arc<AtomicUsize>);
+
+    impl InterceptGuard for DropGuard {}
+
+    impl Drop for DropGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, AtomicOrdering::SeqCst);
+        }
+    }
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("allocation id")
+    }
+
+    fn identity(name: &str) -> SpiffeId {
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
+            .expect("SPIFFE ID")
+    }
+
+    fn ports() -> BTreeSet<NonZeroU16> {
+        [8080_u16, 8443]
+            .into_iter()
+            .map(|port| NonZeroU16::new(port).expect("non-zero port"))
+            .collect()
+    }
+
+    fn handle(alloc: &AllocationId, sequence: u64) -> EnforcedConnection {
+        EnforcedConnection::new(EnforcedConnectionId::new(alloc.clone(), sequence))
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER step for GH #295 capability registration generation"]
+    fn generation_boundaries_and_every_lifecycle_conflict_precede_effects() {
+        let exhausted = CapabilityRegistry::with_next_generation(u64::MAX);
+        let error = exhausted
+            .begin_registration(
+                alloc("generation-max"),
+                Ipv4Addr::new(100, 95, 0, 2),
+                identity("generation-max"),
+                ports(),
+            )
+            .expect_err("u64::MAX is never minted");
+        assert!(matches!(error, MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX }));
+
+        for lifecycle in [
+            CapabilityLifecycle::Pending,
+            CapabilityLifecycle::Active,
+            CapabilityLifecycle::Retiring,
+        ] {
+            let registry = CapabilityRegistry::new();
+            let first_alloc = alloc(&format!("owner-{lifecycle:?}"));
+            let address = Ipv4Addr::new(100, 95, 0, 3);
+            let pending = registry
+                .begin_registration(
+                    first_alloc.clone(),
+                    address,
+                    identity(first_alloc.as_str()),
+                    ports(),
+                )
+                .expect("first reservation");
+            let mut retirement = None;
+            match lifecycle {
+                CapabilityLifecycle::Pending => {}
+                CapabilityLifecycle::Active => {
+                    assert_eq!(pending.activate(), ActivationDisposition::Activated);
+                }
+                CapabilityLifecycle::Retiring => {
+                    assert_eq!(pending.activate(), ActivationDisposition::Activated);
+                    retirement = registry.begin_retire(&first_alloc);
+                }
+            }
+            assert_eq!(
+                retirement.is_some(),
+                lifecycle == CapabilityLifecycle::Retiring,
+                "only the Retiring partition owns a retirement token"
+            );
+            let error = registry
+                .begin_registration(
+                    alloc(&format!("contender-{lifecycle:?}")),
+                    address,
+                    identity(&format!("contender-{lifecycle:?}")),
+                    ports(),
+                )
+                .expect_err("every live lifecycle reserves its address");
+            assert!(matches!(
+                error,
+                MtlsInterceptInstallError::RegistrationConflict { address: actual }
+                    if actual == address
+            ));
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER step for GH #295 checked generation max-minus-one boundary"]
+    fn max_minus_one_is_minted_once_then_max_is_refused_without_advancing_or_reserving() {
+        let registry = CapabilityRegistry::with_next_generation(u64::MAX - 1);
+        let first_alloc = alloc("generation-max-minus-one");
+        let first_addr = Ipv4Addr::new(100, 95, 0, 11);
+        let pending = registry
+            .begin_registration(
+                first_alloc.clone(),
+                first_addr,
+                identity(first_alloc.as_str()),
+                ports(),
+            )
+            .expect("max-minus-one is the last mintable generation");
+        assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        let claim = registry.claim_source(first_addr).expect("last minted capability is active");
+        assert_eq!(claim.capability().key.generation.0.get(), u64::MAX - 1);
+        drop(claim);
+
+        let second_addr = Ipv4Addr::new(100, 95, 0, 12);
+        let error = registry
+            .begin_registration(
+                alloc("generation-max-refused"),
+                second_addr,
+                identity("generation-max-refused"),
+                ports(),
+            )
+            .expect_err("u64::MAX is never minted");
+        assert!(matches!(error, MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX }));
+        assert!(registry.claim_source(second_addr).is_none());
+        assert_eq!(
+            registry
+                .claim_source(first_addr)
+                .expect("first capability remains unchanged")
+                .capability()
+                .key
+                .generation
+                .0
+                .get(),
+            u64::MAX - 1
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step for GH #295 Pending-retirement ownership"]
+    async fn pending_retirement_waits_for_activation_and_drains_transferred_elements_once() {
+        let registry = CapabilityRegistry::new();
+        let allocation = alloc("pending-retirement");
+        let address = Ipv4Addr::new(100, 95, 0, 4);
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut pending = registry
+            .begin_registration(allocation.clone(), address, identity(allocation.as_str()), ports())
+            .expect("reserve Pending");
+        pending.retain_outbound(Box::new(DropGuard(Arc::clone(&drops))));
+        pending.retain_inbound(Box::new(DropGuard(Arc::clone(&drops))));
+        let retirement = registry.begin_retire(&allocation).expect("retire Pending");
+        let waiting = tokio::spawn(async move { retirement.wait_for_claims().await });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "drain cannot precede Pending-owner handoff");
+        assert_eq!(pending.activate(), ActivationDisposition::Retired);
+        let mut drain = waiting.await.expect("retirement waiter joins");
+        assert!(registry.claim_source(address).is_none());
+        assert!(drain.take_handles().is_empty());
+        let elements = drain.take_elements();
+        assert_eq!(drops.load(AtomicOrdering::SeqCst), 0);
+        drop(elements);
+        assert_eq!(drops.load(AtomicOrdering::SeqCst), 2);
+        drain.complete();
+        assert!(
+            registry
+                .begin_registration(
+                    alloc("pending-successor"),
+                    address,
+                    identity("pending-successor"),
+                    ports(),
+                )
+                .is_ok(),
+            "reuse is permitted only after retirement completion"
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step for GH #295 capability claim/publication fence"]
+    async fn claim_drop_and_late_publication_wake_retirement_without_reattribution() {
+        let registry = CapabilityRegistry::new();
+        let allocation = alloc("claim-retirement");
+        let address = Ipv4Addr::new(100, 95, 0, 5);
+        let pending = registry
+            .begin_registration(allocation.clone(), address, identity(allocation.as_str()), ports())
+            .expect("reserve capability");
+        assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        let claim_a = registry.claim_source(address).expect("source claim");
+        let claim_b = registry
+            .claim_destination(address, NonZeroU16::new(8080).expect("port"))
+            .expect("destination claim");
+        assert_eq!(claim_a.capability().key.alloc, allocation);
+
+        let retirement = registry.begin_retire(&allocation).expect("retire Active");
+        let waiting = tokio::spawn(async move { retirement.wait_for_claims().await });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        drop(claim_a);
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "one remaining claim keeps retirement parked");
+        let late = handle(&allocation, 1);
+        let disposition = claim_b.publish(late);
+        assert!(matches!(disposition, PublishDisposition::Retired(_)));
+        let PublishDisposition::Retired(late) = disposition else {
+            unreachable!();
+        };
+        assert_eq!(late.id().alloc(), &allocation);
+        let mut drain = waiting.await.expect("last claim wakes retirement");
+        assert!(drain.take_handles().is_empty(), "late handle is never published");
+        drain.complete();
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step for GH #295 published-handle scoped drain"]
+    async fn publication_before_retirement_is_owned_by_only_that_generation_and_allocation() {
+        let registry = CapabilityRegistry::new();
+        let first = alloc("published-first");
+        let second = alloc("published-second");
+        let first_addr = Ipv4Addr::new(100, 95, 0, 8);
+        let second_addr = Ipv4Addr::new(100, 95, 0, 9);
+        for (allocation, address) in [(&first, first_addr), (&second, second_addr)] {
+            let pending = registry
+                .begin_registration(
+                    allocation.clone(),
+                    address,
+                    identity(allocation.as_str()),
+                    ports(),
+                )
+                .expect("reserve independent capability");
+            assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        }
+
+        let first_claim = registry.claim_source(first_addr).expect("first source is claimable");
+        let first_handle = handle(&first, 11);
+        assert!(matches!(first_claim.publish(first_handle), PublishDisposition::Published));
+        let second_claim = registry
+            .claim_destination(second_addr, NonZeroU16::new(8443).expect("non-zero port"))
+            .expect("second destination remains claimable");
+
+        let mut first_drain =
+            registry.begin_retire(&first).expect("retire first only").wait_for_claims().await;
+        let handles = first_drain.take_handles();
+        assert_eq!(handles.len(), 1);
+        assert_eq!(handles[0].id().alloc(), &first);
+        assert!(registry.claim_source(first_addr).is_none());
+        assert_eq!(second_claim.capability().key.alloc, second);
+        drop(second_claim);
+        assert!(registry.claim_source(second_addr).is_some());
+        first_drain.complete();
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step for GH #295 predecessor/successor generation fencing"]
+    async fn released_address_selects_only_the_successor_and_never_reattributes_a_stale_claim() {
+        let registry = CapabilityRegistry::new();
+        let address = Ipv4Addr::new(100, 95, 0, 10);
+        let predecessor = alloc("generation-a");
+        let pending = registry
+            .begin_registration(
+                predecessor.clone(),
+                address,
+                identity(predecessor.as_str()),
+                ports(),
+            )
+            .expect("reserve predecessor");
+        assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        let stale = registry.claim_source(address).expect("claim generation A before removal");
+        let retirement = registry.begin_retire(&predecessor).expect("retire generation A");
+        let waiter = tokio::spawn(async move { retirement.wait_for_claims().await });
+        let late = handle(&predecessor, 21);
+        assert!(matches!(stale.publish(late), PublishDisposition::Retired(_)));
+        let mut predecessor_drain = waiter.await.expect("generation A drain wakes");
+        assert!(predecessor_drain.take_handles().is_empty());
+        predecessor_drain.complete();
+
+        let successor = alloc("generation-b");
+        let pending = registry
+            .begin_registration(successor.clone(), address, identity(successor.as_str()), ports())
+            .expect("address becomes reusable only after generation A completion");
+        assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        let current = registry.claim_source(address).expect("successor source is claimable");
+        assert_eq!(current.capability().key.alloc, successor);
+        assert_eq!(current.capability().spiffe_id, identity("generation-b"));
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step for GH #295 Pending cancellation"]
+    async fn pending_cancellation_relinquishes_partial_effects_without_releasing_a_retiring_key() {
+        for retire_first in [false, true] {
+            let registry = CapabilityRegistry::new();
+            let allocation = alloc(if retire_first { "cancel-retiring" } else { "cancel-pending" });
+            let address = Ipv4Addr::new(100, 95, 0, u8::from(retire_first) + 6);
+            let drops = Arc::new(AtomicUsize::new(0));
+            let mut pending = registry
+                .begin_registration(
+                    allocation.clone(),
+                    address,
+                    identity(allocation.as_str()),
+                    ports(),
+                )
+                .expect("reserve Pending");
+            pending.retain_outbound(Box::new(DropGuard(Arc::clone(&drops))));
+            let retirement =
+                retire_first.then(|| registry.begin_retire(&allocation).expect("retire Pending"));
+            drop(pending);
+            assert_eq!(drops.load(AtomicOrdering::SeqCst), 1);
+
+            if let Some(retirement) = retirement {
+                let mut drain = retirement.wait_for_claims().await;
+                assert!(matches!(
+                    registry.begin_registration(
+                        alloc("too-early-successor"),
+                        address,
+                        identity("too-early-successor"),
+                        ports(),
+                    ),
+                    Err(MtlsInterceptInstallError::RegistrationConflict { .. })
+                ));
+                let elements = drain.take_elements();
+                drop(elements);
+                drain.complete();
+            }
+            assert!(
+                registry
+                    .begin_registration(
+                        alloc("post-cancel-successor"),
+                        address,
+                        identity("post-cancel-successor"),
+                        ports(),
+                    )
+                    .is_ok()
+            );
         }
     }
 }
@@ -629,6 +1422,9 @@ pub struct MtlsInterceptWorker {
     /// param, no builder (`.claude/rules/development.md` § "Port-trait
     /// dependencies").
     intercept: Arc<dyn MtlsIntercept>,
+    /// One process-local registration/capability state machine.
+    #[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold activated by the single cut")]
+    capabilities: CapabilityRegistry,
     /// Per-alloc teardown bookkeeping (D-MTLS-16). `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice" — the
     /// set is drained deterministically on stop.
@@ -698,6 +1494,7 @@ impl MtlsInterceptWorker {
             resolve,
             _clock: clock,
             intercept,
+            capabilities: CapabilityRegistry::new(),
             intercepts: Mutex::new(BTreeMap::new()),
             stopping: Mutex::new(BTreeMap::new()),
             lifecycle: RwLock::new(WorkerLifecycle::Open),
@@ -707,6 +1504,47 @@ impl MtlsInterceptWorker {
             #[cfg(any(test, feature = "integration-tests"))]
             owner_shutdown_failures: AtomicU64::new(0),
         }
+    }
+
+    /// Start and publish the one node-shared listener owner only after its
+    /// sockets, node guard, tasks, and full audit are complete.
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER implements GH #295 shared owner start"
+    )]
+    pub async fn start_shared_owner(self: &Arc<Self>) -> Result<(), MtlsSharedOwnerError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS owner start)")
+    }
+
+    /// Resolve when the retained F/C task observer reports an abnormal exit.
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER implements GH #295 task observation"
+    )]
+    pub async fn wait_shared_owner_failure(&self) -> MtlsSharedOwnerError {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS task observer)")
+    }
+
+    /// Repair only the failed shared listener/task at its recorded address.
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER implements GH #295 exact-port recovery"
+    )]
+    pub async fn converge_shared_owner(self: &Arc<Self>) -> Result<(), MtlsSharedOwnerError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS convergence)")
+    }
+
+    /// Non-repairing read-back of sockets, tasks, and the shared rule program.
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "RED scaffold; DELIVER implements GH #295 shared mTLS audit"
+    )]
+    pub async fn audit_shared_owner(&self) -> Result<(), MtlsSharedOwnerError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS audit)")
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
@@ -1775,6 +2613,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Read as _, Write as _};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+    use std::num::NonZeroU16;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Weak};
@@ -1795,8 +2634,8 @@ mod tests {
     use parking_lot::Mutex;
 
     use super::{
-        AcceptLeg, ConnectionReady, EnforcedSet, MtlsInterceptWorker, OutboundAction,
-        await_pending_connection, decide_outbound,
+        AcceptLeg, ActivationDisposition, ConnectionReady, EnforcedSet, MtlsInterceptWorker,
+        OutboundAction, PublishDisposition, await_pending_connection, decide_outbound,
     };
     use crate::mtls_intercept_port::InterceptGuard;
 
@@ -2499,6 +3338,74 @@ mod tests {
             self.torn_down.lock().push(handle.id().clone());
             Ok(())
         }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step for GH #295 enforcement-held capability retirement"]
+    async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
+     {
+        let enforcement = GatedEnforcement::new();
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+        ));
+        let allocation = alloc("capability-enforcement-retirement");
+        let source_addr = Ipv4Addr::new(100, 95, 0, 13);
+        let pending = worker
+            .capabilities
+            .begin_registration(
+                allocation.clone(),
+                source_addr,
+                SpiffeId::new(
+                    "spiffe://overdrive.local/workload/capability/alloc/enforcement-retirement",
+                )
+                .expect("SPIFFE ID"),
+                std::iter::once(NonZeroU16::new(8443).expect("non-zero")).collect(),
+            )
+            .expect("reserve capability");
+        assert_eq!(pending.activate(), ActivationDisposition::Activated);
+        let claim = worker.capabilities.claim_source(source_addr).expect("active source claim");
+        let (leg, _, _client) = accepted_leg_f();
+        let enforce = tokio::spawn({
+            let enforcement = Arc::clone(&enforcement);
+            let allocation = allocation.clone();
+            async move {
+                let handle = enforcement
+                    .enforce(InterceptedConnection {
+                        leg,
+                        routed: Routed::Outbound {
+                            peer: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9),
+                        },
+                        alloc: allocation,
+                        expected_peer: None,
+                    })
+                    .await
+                    .expect("production enforcement returns a handle");
+                match claim.publish(handle) {
+                    PublishDisposition::Published => panic!("retirement must fence publication"),
+                    PublishDisposition::Retired(handle) => {
+                        enforcement.teardown(handle).await.expect("late handle teardown");
+                    }
+                }
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(2), enforcement.entered())
+            .await
+            .expect("enforcement holds the claim");
+        let retirement = worker.capabilities.begin_retire(&allocation).expect("retire Active");
+        let waiter = tokio::spawn(async move { retirement.wait_for_claims().await });
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished(), "retirement cannot pass the in-flight enforcement claim");
+        enforcement.release();
+        enforce.await.expect("enforcement publication task joins");
+        let mut drain = waiter.await.expect("last claim wakes retirement");
+        assert!(drain.take_handles().is_empty(), "late handle was torn down, never published");
+        drain.complete();
+        assert_eq!(enforcement.torn_down().len(), 1);
+        assert_eq!(enforcement.torn_down()[0].alloc(), &allocation);
     }
 
     struct GatedTeardown {

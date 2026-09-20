@@ -2,12 +2,15 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
+**Accepted — the current #295 contract is user-approved and independently
+approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17.**
 The approved compound decision is D-295-2: TCX/SCHED_CLS is the primary
 microVM TAP endpoint classifier; nftables remains the IP TPROXY/output socket
 delivery mechanism and supplies only the minimum bridge fail-closed guard for
 an absent TCX link. ADR-0124 owns runtime recovery and ADR-0125 owns constant
-IP nft rules/shared elements.
+IP nft rules/shared elements. The internal shared-switch owner is exposed only
+through the doc-hidden control-plane application port needed by the sibling sim
+adapter; no low-level netlink/nft/BPF port is added.
 
 ## Context
 
@@ -33,6 +36,50 @@ Use one aya-rs SCHED_CLS endpoint program and one shared endpoint map. Attach
 the program with TCX ingress and first ordering to every managed guest TAP. Key
 the endpoint map by ingress ifindex; each value holds expected source IPv4,
 expected source MAC, and the node bridge MAC.
+
+`overdrive-dataplane::guest_tcx` owns the aya boundary. It maps aya's ingress,
+egress, and custom-parent attachment values one-for-one into the semantic
+`TcxAttachPoint` fact and retains raw map/program/pin failures behind one
+source-bearing `GuestTcxError`. `overdrive-control-plane::guest_network`
+re-exports those exact types for its facts/errors and sibling sim consumer; no
+raw aya type enters control-plane facts or `overdrive-core`, and no duplicate
+TCX error taxonomy exists. Exact type signatures live only in the #295 feature
+delta.
+
+The same dataplane boundary owns semantic attachment queries, exact pinned-link
+detach, endpoint presence/removal, and counter reads. It keeps endpoint/counter
+ABI and raw aya types private, returns sorted program identities, and preserves
+map/program/pin/link/I/O sources through the canonical TCX error. Production
+audit/teardown and the external double-loss fixture use these same high-level
+operations; no subprocess or test-only host-owner fault hook exists.
+
+The independent bridge safeguard is owned through the semantic
+`overdrive-netlink::nft::bridge` adapter. Its read-only, generation-bracketed
+observation preserves actual family/table identity, actual kernel rule order,
+duplicate owned rule occurrences, expected members, and every owned or foreign
+child inside the candidate table. Every chain occurrence appears exactly once
+as base with only observed base attributes, regular without fabricated hook/
+priority/policy/type, or unsupported. Every other child belongs to exactly one
+typed or unsupported-child collection. Rule occurrences carry the canonical
+adapter-owned semantic expression program, retaining wrong value/order,
+duplicates and ordered unknown expressions without exposing raw nft ABI; the
+same facts form guest-network expected and observed postconditions. The adapter
+classifies the complete inventory as absent, exact or conflict without
+mutation; non-repairing owner audit consumes that same result. Granular setup
+and reverse cleanup remain staged and idempotent. The aggregate deletion used
+by production cleanup and the external double-loss fixture may delete only an
+exact table containing exclusively the owned chain, set, ordered rules and
+expected members; every wrong identity, duplicate, partial or foreign child
+refuses while outside objects remain unchanged. Specification and member
+inputs are validated before I/O. Existing IP-family TPROXY rules and their
+adapter API are unaffected.
+
+The control-plane host owner's module-private scratch I/O invokes this same
+dataplane adapter for TCX load/verifier, map/link pin/adopt/query, endpoint
+mutation, detach, cleanup, and inventory effects. It receives the canonical
+typed source and never reimplements aya operations. The host owner—not the I/O
+adapter—orders the classifier/original-destination/detached-link stages and
+constructs the cleanup aggregate.
 
 The program validates endpoint registration and source identity. Valid ARP and
 validated non-TCP traffic addressed to the bridge receive an **accepted mark**.
@@ -76,9 +123,9 @@ intentionally or accidentally absent, an unmarked guest packet reaches rule 3
 and cannot fall through into ordinary bridge forwarding.
 
 nftables IP prerouting/output remains responsible for mark-to-leg-F TPROXY,
-host-originated leg-B-to-leg-C delivery, and leg-S exemptions. ADR-0125 amends
-that delivery storage from per-allocation/per-port rules to three shared element
-sets and eight constant IP rules while retaining the existing install-method
+host-originated leg-B-to-leg-C delivery, and leg-S exemptions. ADR-0125 defines
+that delivery storage as three shared element sets and eight constant IP rules
+while retaining the existing install-method
 surface. `HostMtlsEnforcement` remains unchanged for TLS 1.3, kTLS TX/RX, and
 kernel splice pumps; connection scaling belongs to
 [GH #300](https://github.com/overdrive-sh/overdrive/issues/300), not #295.
@@ -87,6 +134,15 @@ kernel splice pumps; connection scaling belongs to
 
 - The node shared-switch owner owns the program, endpoint/counter maps, bpffs
   hierarchy, managed-TAP nft set, and the three-rule bridge guard.
+- Its private host implementation and sibling sim implementation satisfy the
+  same application-owner contract for startup probe, stale sweep, shared
+  converge/audit, TAP quiescence, and inherited allocation provision/teardown.
+  This is one owner boundary, not a second classifier or a low-level kernel
+  fault abstraction.
+- The application owner and its source-bearing orchestration error live in
+  control-plane. Dataplane alone converts aya attachment/error types; netlink
+  retains its existing canonical error. Core contains none of those adapter
+  types.
 - Per-allocation network provisioning first adds a down TAP to the managed set,
   then writes its endpoint-map value, attaches/pins TCX, queries the exact
   ifindex/program identity, and only then permits VMM attachment. Every partial

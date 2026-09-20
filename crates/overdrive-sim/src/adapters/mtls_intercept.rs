@@ -1,6 +1,7 @@
 //! `SimMtlsIntercept` — in-memory
 //! [`MtlsIntercept`](overdrive_worker::mtls_intercept_port::MtlsIntercept)
-//! double with per-method fault scripting (GH #250, ADR-0076 § 4.6).
+//! double with standing per-method fault scripting (GH #250/GH #295,
+//! ADR-0076 § 4.6).
 //!
 //! The sim counterpart to `overdrive_worker::mtls_intercept_port::HostMtlsIntercept`.
 //! It exists for ONE reason: nothing in the tree can make
@@ -20,7 +21,7 @@
 //!   [`std::net::TcpListener`] without a syscall. **Any test that drives this
 //!   `Ok` arm binds a socket and is therefore INTEGRATION-lane** per
 //!   `.claude/rules/testing.md` § "Integration vs unit gating".
-//! - **The `Ok` arm of the two installs returns an INERT guard** that records
+//! - **The `Ok` arm of the three installs returns an INERT guard** that records
 //!   nothing and whose `Drop` is a no-op. The double installs no nft rule, so
 //!   there is none to remove.
 //!
@@ -28,11 +29,15 @@
 //!
 //! Holds no clock, no entropy, no store, and no collection whose iteration
 //! order is observed. Each method's outcome is a pure function of its armed
-//! fault, and the three slots carry no cross-slot invariant.
+//! fault. Shared convergence additionally records one substrate-neutral
+//! identity so caller-side audit and recovery ordering are observable without
+//! pretending to implement or prove the host nft algorithm.
 
-use std::net::SocketAddrV4;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
-use overdrive_worker::mtls_intercept::{InterceptError, NetlinkError, Result};
+use overdrive_worker::mtls_intercept::{
+    InterceptError, InterceptPostcondition, NetlinkError, Result,
+};
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 use parking_lot::Mutex;
 
@@ -112,7 +117,7 @@ pub enum SimInterceptFault {
 /// legitimately carries the transparent-listener bind AND the nft/ip install
 /// failures, per `MtlsInterceptInstallError::stage`). Arming any other pairing
 /// is a test defect, not a supported scenario.
-#[expect(
+#[allow(
     clippy::struct_field_names,
     reason = "the shared `_fault` postfix is load-bearing: each field is the STANDING fault slot \
               backing one trait method, and the prefix names that method. Dropping it would leave \
@@ -120,6 +125,12 @@ pub enum SimInterceptFault {
               as the faults armed against them. Names pinned verbatim by ADR-0076 § 4.6."
 )]
 pub struct SimMtlsIntercept {
+    /// Standing fault for [`converge_shared`](MtlsIntercept::converge_shared).
+    converge_shared_fault: Mutex<Option<SimInterceptFault>>,
+    /// Standing fault for [`observe_shared`](MtlsIntercept::observe_shared).
+    observe_shared_fault: Mutex<Option<SimInterceptFault>>,
+    /// The complete shared identity last installed through the sim port.
+    shared_observation: Mutex<Option<InterceptPostcondition>>,
     /// Standing fault for [`bind_transparent`](MtlsIntercept::bind_transparent).
     bind_fault: Mutex<Option<SimInterceptFault>>,
     /// Standing fault for [`install_outbound`](MtlsIntercept::install_outbound).
@@ -142,6 +153,9 @@ impl SimMtlsIntercept {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            converge_shared_fault: Mutex::new(None),
+            observe_shared_fault: Mutex::new(None),
+            shared_observation: Mutex::new(None),
             bind_fault: Mutex::new(None),
             outbound_fault: Mutex::new(None),
             inbound_fault: Mutex::new(None),
@@ -152,6 +166,23 @@ impl SimMtlsIntercept {
     /// call until re-armed or [`clear_faults`](Self::clear_faults).
     pub fn script_bind_fault(&self, fault: SimInterceptFault) {
         *self.bind_fault.lock() = Some(fault);
+    }
+
+    /// Arm a STANDING fault on `converge_shared`.
+    ///
+    /// This is a deterministic caller-reaction seam. It does not claim to
+    /// prove the host adapter's replacement/read-back/rollback algorithm,
+    /// which is exercised above the private host I/O seam.
+    pub fn script_converge_shared_fault(&self, fault: SimInterceptFault) {
+        *self.converge_shared_fault.lock() = Some(fault);
+    }
+
+    /// Arm a STANDING fault on `observe_shared`.
+    ///
+    /// This scripts only the public port result used by composition tests;
+    /// host read-back correctness remains source-local to the host adapter.
+    pub fn script_observe_shared_fault(&self, fault: SimInterceptFault) {
+        *self.observe_shared_fault.lock() = Some(fault);
     }
 
     /// Arm a STANDING fault on `install_outbound`.
@@ -166,6 +197,8 @@ impl SimMtlsIntercept {
 
     /// Disarm every standing fault.
     pub fn clear_faults(&self) {
+        *self.converge_shared_fault.lock() = None;
+        *self.observe_shared_fault.lock() = None;
         *self.bind_fault.lock() = None;
         *self.outbound_fault.lock() = None;
         *self.inbound_fault.lock() = None;
@@ -233,6 +266,41 @@ impl MtlsIntercept for SimMtlsIntercept {
             .map_err(|source| InterceptError::TransparentListener { addr, source })
     }
 
+    fn converge_shared(
+        &self,
+        _prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+    ) -> Result<Box<dyn InterceptGuard>> {
+        if let Some(fault) = armed(&self.converge_shared_fault) {
+            return Err(materialise(fault, leg_f));
+        }
+
+        // The sim records a stable, complete identity that is deliberately
+        // substrate-neutral: it proves the owner passes both exact listener
+        // targets and later observes the same fact, not the host nft encoding.
+        let encode = |addr: SocketAddrV4| {
+            let mut bytes = Vec::with_capacity(6);
+            bytes.extend_from_slice(&addr.ip().octets());
+            bytes.extend_from_slice(&addr.port().to_be_bytes());
+            bytes
+        };
+        *self.shared_observation.lock() = Some(InterceptPostcondition::ConstantRules {
+            table_and_chains: vec![b"sim-shared-table-and-chains".to_vec()],
+            sets: vec![b"sim-shared-sets".to_vec()],
+            prerouting: vec![encode(leg_f)],
+            output: vec![encode(leg_c)],
+        });
+        Ok(Box::new(InertGuard))
+    }
+
+    fn observe_shared(&self) -> Result<Option<InterceptPostcondition>> {
+        if let Some(fault) = armed(&self.observe_shared_fault) {
+            return Err(materialise(fault, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)));
+        }
+        Ok(self.shared_observation.lock().clone())
+    }
+
     fn install_outbound(
         &self,
         _host_veth: &str,
@@ -266,7 +334,7 @@ impl MtlsIntercept for SimMtlsIntercept {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::doc_markdown, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use std::net::Ipv4Addr;
 
@@ -278,6 +346,60 @@ mod tests {
     /// A declared Service listener address — the `virt` shape `install_inbound`
     /// is called with.
     const VIRT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 8080);
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn shared_convergence_records_both_exact_targets_for_non_repairing_observation() {
+        let sut = SimMtlsIntercept::new();
+        let leg_f = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_001);
+        let leg_c = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_002);
+
+        let guard = sut
+            .converge_shared(None, leg_f, leg_c)
+            .expect("healthy sim convergence publishes one shared identity");
+        let observation = sut.observe_shared().expect("non-repairing observation succeeds");
+
+        let Some(InterceptPostcondition::ConstantRules { prerouting, output, .. }) = observation
+        else {
+            panic!("shared convergence must publish the complete ConstantRules identity");
+        };
+        let encode = |addr: SocketAddrV4| {
+            let mut bytes = Vec::from(addr.ip().octets());
+            bytes.extend_from_slice(&addr.port().to_be_bytes());
+            bytes
+        };
+        assert_eq!(prerouting, [encode(leg_f)]);
+        assert_eq!(output, [encode(leg_c)]);
+        drop(guard);
+        assert!(sut.observe_shared().expect("guard release is not a repair operation").is_some());
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn shared_converge_and_observe_faults_are_independent_standing_slots() {
+        let sut = SimMtlsIntercept::new();
+        let converge_fault =
+            SimInterceptFault::NftRuleInstall { op: "replace-shared", errno: libc::EBUSY };
+        let observe_fault =
+            SimInterceptFault::NftRuleInstall { op: "observe-shared", errno: libc::EIO };
+        sut.script_converge_shared_fault(converge_fault);
+        sut.script_observe_shared_fault(observe_fault);
+
+        for _ in 0..2 {
+            assert!(matches!(
+                sut.converge_shared(None, LEG_ADDR, LEG_ADDR),
+                Err(InterceptError::NftRuleInstallFailed { op: "replace-shared", .. })
+            ));
+            assert!(matches!(
+                sut.observe_shared(),
+                Err(InterceptError::NftRuleInstallFailed { op: "observe-shared", .. })
+            ));
+        }
+        sut.clear_faults();
+        sut.converge_shared(None, LEG_ADDR, VIRT)
+            .expect("clear_faults disarms shared convergence only");
+        assert!(sut.observe_shared().expect("shared observation is healthy").is_some());
+    }
 
     /// Which trait method a S-MIF-06 case drives.
     #[derive(Debug, Clone, Copy)]

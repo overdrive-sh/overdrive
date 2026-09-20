@@ -88,6 +88,24 @@ const NLA_F_NESTED: u16 = 0x8000;
 // families / versions.
 /// `NFPROTO_IPV4` — the `ip` family the shared `overdrive-mtls` table lives in.
 const NFPROTO_IPV4: u8 = 2;
+#[allow(dead_code, reason = "D-295-DISTILL-9 RED scaffold precedes codec cut-over")]
+const NFPROTO_BRIDGE: u8 = 7;
+
+/// Closed private nft family discriminator shared by the one codec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "D-295-DISTILL-9 RED scaffold precedes codec cut-over")]
+enum NftFamily {
+    Ipv4,
+    Bridge,
+}
+
+#[allow(dead_code, reason = "D-295-DISTILL-9 RED scaffold precedes codec cut-over")]
+impl NftFamily {
+    const fn nfproto(self) -> u8 {
+        let _ = self;
+        panic!("Not yet implemented -- RED scaffold (GH #295 nft family projection)")
+    }
+}
 const AF_UNSPEC: u8 = 0;
 const IPPROTO_TCP: u8 = 6;
 
@@ -1757,6 +1775,698 @@ pub fn chain_exists(table: &str, chain: &str) -> Result<bool, NetlinkError> {
 /// [`NetlinkError::Nft`] (`op = "delete-rule"`) on failure.
 pub fn delete_rule(table: &str, chain: &str, handle: u64) -> Result<(), NetlinkError> {
     send_batched(NFT_MSG_DELRULE, 0, &delrule_payload(table, chain, handle), "delete-rule")
+}
+
+/// Semantic bridge-family proof-mark guard adapter (GH #295).
+///
+/// Raw nft family numbers, attributes, userdata and expression encodings stay
+/// private to this parent module. This public boundary carries only the exact
+/// semantic identities approved by D-295-DISTILL-9.
+pub mod bridge {
+    #![allow(
+        dead_code,
+        clippy::panic,
+        reason = "D-295-DISTILL-9 semantic behavior remains RED until DELIVER"
+    )]
+    use std::collections::BTreeSet;
+
+    use super::{NetlinkError, RuleCounterSnapshot};
+
+    const MAX_IDENTIFIER_BYTES: usize = 255;
+    const MAX_MEMBER_BYTES: usize = 15;
+    const REQUIRED_PRIORITY: i32 = -300;
+    const REQUIRED_INTERCEPT_MARK: u32 = 0x295a;
+    const REQUIRED_ACCEPTED_MARK: u32 = 0x295b;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardSpec {
+        table: String,
+        chain: String,
+        managed_taps_set: String,
+        priority: i32,
+        intercept_mark: u32,
+        accepted_mark: u32,
+    }
+
+    impl BridgeGuardSpec {
+        /// Validate the fixed guard identity without performing I/O.
+        pub fn new(
+            _table: String,
+            _chain: String,
+            _managed_taps_set: String,
+            _priority: i32,
+            _intercept_mark: u32,
+            _accepted_mark: u32,
+        ) -> Result<Self, BridgeGuardValidationError> {
+            panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard validation)")
+        }
+
+        /// Sole public construction of the expected ordered semantic rule program.
+        #[must_use]
+        pub fn expected_rule_facts(&self) -> Vec<BridgeGuardRuleFact> {
+            let _ = self;
+            panic!("Not yet implemented -- RED scaffold (GH #295 expected bridge rules)")
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum BridgeGuardRuleKind {
+        InterceptAccept,
+        AcceptedClear,
+        DefaultDrop,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardObservedFamily {
+        Bridge,
+        Inet,
+        Ipv4,
+        Ipv6,
+        Arp,
+        Netdev,
+        Other,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardTableFact {
+        pub family: BridgeGuardObservedFamily,
+        pub name: String,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardChainType {
+        Filter,
+        Route,
+        Nat,
+        Other,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardChainHook {
+        Prerouting,
+        Input,
+        Forward,
+        Output,
+        Postrouting,
+        Ingress,
+        Egress,
+        Other,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardChainPolicy {
+        Accept,
+        Drop,
+        Other,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardChainDefinition {
+        Base {
+            chain_type: BridgeGuardChainType,
+            hook: BridgeGuardChainHook,
+            priority: i32,
+            policy: Option<BridgeGuardChainPolicy>,
+        },
+        Regular,
+        Unsupported,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardChainOccurrence {
+        pub table: BridgeGuardTableFact,
+        pub name: String,
+        pub handle: Option<u64>,
+        pub definition: BridgeGuardChainDefinition,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardSetFact {
+        pub table: BridgeGuardTableFact,
+        pub name: String,
+        pub key_len: u32,
+        pub ifname_key: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardRuleIdentity {
+        Owned(BridgeGuardRuleKind),
+        Foreign,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardRuleExpression {
+        IngressInterfaceInSet { set: String },
+        MarkEquals { value: u32 },
+        SetMark { value: u32 },
+        Counter,
+        Accept,
+        Drop,
+        Unknown { name: String },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardRuleProgram {
+        pub expressions: Vec<BridgeGuardRuleExpression>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardRuleFact {
+        pub identity: BridgeGuardRuleIdentity,
+        pub program: BridgeGuardRuleProgram,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardRuleOccurrence {
+        pub table: BridgeGuardTableFact,
+        pub chain: String,
+        pub handle: u64,
+        pub fact: BridgeGuardRuleFact,
+        pub counter: Option<RuleCounterSnapshot>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardMemberIdentity {
+        Ifname(String),
+        ForeignEncoding { encoded_len: usize },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardMemberOccurrence {
+        pub table: BridgeGuardTableFact,
+        pub set: String,
+        pub identity: BridgeGuardMemberIdentity,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardOtherChildKind {
+        Flowtable,
+        StatefulObject,
+        Other,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardOtherChildOccurrence {
+        pub table: BridgeGuardTableFact,
+        pub kind: BridgeGuardOtherChildKind,
+        pub name: Option<String>,
+        pub handle: Option<u64>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeGuardInventory {
+        pub generation: u32,
+        pub tables: Vec<BridgeGuardTableFact>,
+        pub chains: Vec<BridgeGuardChainOccurrence>,
+        pub sets: Vec<BridgeGuardSetFact>,
+        pub rules: Vec<BridgeGuardRuleOccurrence>,
+        pub members: Vec<BridgeGuardMemberOccurrence>,
+        pub other_children: Vec<BridgeGuardOtherChildOccurrence>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardObservation {
+        Absent { inventory: BridgeGuardInventory },
+        Exact { inventory: BridgeGuardInventory },
+        Conflict { inventory: BridgeGuardInventory },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardMutationOutcome {
+        Converged { observed: BridgeGuardInventory },
+        Conflict { observed: BridgeGuardInventory },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BridgeGuardDeleteOutcome {
+        Absent { observed: BridgeGuardInventory },
+        Deleted { observed: BridgeGuardInventory },
+        Conflict { observed: BridgeGuardInventory },
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BridgeGuardIdentifier {
+        Table,
+        Chain,
+        ManagedTapsSet,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+    pub enum BridgeGuardValidationError {
+        #[error("bridge guard {identifier:?} identifier is empty")]
+        EmptyIdentifier { identifier: BridgeGuardIdentifier },
+        #[error("bridge guard {identifier:?} identifier contains NUL at byte {index}")]
+        IdentifierContainsNul { identifier: BridgeGuardIdentifier, index: usize },
+        #[error("bridge guard {identifier:?} identifier is {length} bytes; maximum is {maximum}")]
+        IdentifierTooLong { identifier: BridgeGuardIdentifier, length: usize, maximum: usize },
+        #[error("bridge guard priority must be {expected}, got {actual}")]
+        PriorityMismatch { expected: i32, actual: i32 },
+        #[error("bridge guard intercept mark must be {expected:#x}, got {actual:#x}")]
+        InterceptMarkMismatch { expected: u32, actual: u32 },
+        #[error("bridge guard accepted mark must be {expected:#x}, got {actual:#x}")]
+        AcceptedMarkMismatch { expected: u32, actual: u32 },
+        #[error("bridge guard managed TAP name is empty")]
+        EmptyMember,
+        #[error("bridge guard managed TAP name contains NUL at byte {index}")]
+        MemberContainsNul { index: usize },
+        #[error("bridge guard managed TAP name is {length} bytes; maximum is {maximum}")]
+        MemberTooLong { length: usize, maximum: usize },
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BridgeGuardError {
+        #[error(transparent)]
+        Validation(#[from] BridgeGuardValidationError),
+        #[error(transparent)]
+        Netlink(#[from] NetlinkError),
+    }
+
+    fn validate_identifier(
+        _identifier: BridgeGuardIdentifier,
+        _value: &str,
+    ) -> Result<(), BridgeGuardValidationError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge identifier validation)")
+    }
+
+    fn validate_member(_value: &str) -> Result<(), BridgeGuardValidationError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member validation)")
+    }
+
+    fn encode_member(_value: &str) -> Result<[u8; 16], BridgeGuardValidationError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member encoding)")
+    }
+
+    #[allow(dead_code, reason = "activated by D9 generation-bracketed observe implementation")]
+    fn classify_inventory(
+        _spec: &BridgeGuardSpec,
+        _expected_members: &BTreeSet<String>,
+        _inventory: BridgeGuardInventory,
+    ) -> BridgeGuardObservation {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge inventory classification)")
+    }
+
+    macro_rules! red_operation {
+        ($name:ident, $output:ty) => {
+            #[allow(
+                clippy::panic,
+                reason = "RED scaffold; DELIVER implements the D-295-DISTILL-9 semantic bridge-family adapter"
+            )]
+            pub fn $name(_spec: &BridgeGuardSpec) -> Result<$output, BridgeGuardError> {
+                panic!(concat!(
+                    "Not yet implemented -- RED scaffold (GH #295 bridge guard ",
+                    stringify!($name),
+                    ")"
+                ))
+            }
+        };
+    }
+
+    #[expect(
+        clippy::panic,
+        reason = "RED scaffold; DELIVER implements generation-bracketed semantic observation"
+    )]
+    pub fn observe(
+        _spec: &BridgeGuardSpec,
+        _expected_members: &BTreeSet<String>,
+    ) -> Result<BridgeGuardObservation, BridgeGuardError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard observe)")
+    }
+
+    red_operation!(converge_table, BridgeGuardMutationOutcome);
+    red_operation!(converge_chain, BridgeGuardMutationOutcome);
+    red_operation!(converge_set, BridgeGuardMutationOutcome);
+    red_operation!(converge_rules, BridgeGuardMutationOutcome);
+
+    pub fn insert_member(
+        _spec: &BridgeGuardSpec,
+        _tap: &str,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member insert)")
+    }
+
+    pub fn delete_member(
+        _spec: &BridgeGuardSpec,
+        _tap: &str,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member delete)")
+    }
+
+    red_operation!(delete_rules, BridgeGuardDeleteOutcome);
+    red_operation!(delete_set, BridgeGuardDeleteOutcome);
+    red_operation!(delete_chain, BridgeGuardDeleteOutcome);
+    red_operation!(delete_table, BridgeGuardDeleteOutcome);
+
+    #[expect(
+        clippy::panic,
+        reason = "RED scaffold; DELIVER implements exact-exclusive aggregate guard deletion"
+    )]
+    pub fn delete_owned_guard(
+        _spec: &BridgeGuardSpec,
+        _expected_members: &BTreeSet<String>,
+    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard delete_owned_guard)")
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::doc_markdown, clippy::expect_used)]
+    mod acceptance {
+        use super::*;
+        use crate::nft::NftFamily;
+
+        fn spec() -> BridgeGuardSpec {
+            BridgeGuardSpec::new(
+                "overdrive-mtls".to_owned(),
+                "prerouting".to_owned(),
+                "managed_taps".to_owned(),
+                REQUIRED_PRIORITY,
+                REQUIRED_INTERCEPT_MARK,
+                REQUIRED_ACCEPTED_MARK,
+            )
+            .expect("canonical bridge guard spec")
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 private family projection"]
+        fn private_family_projection_is_closed_and_exact() {
+            assert_eq!(NftFamily::Ipv4.nfproto(), 2);
+            assert_eq!(NftFamily::Bridge.nfproto(), 7);
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 error projection"]
+        fn error_algebra_keeps_validation_distinct_from_source_bearing_netlink_failure() {
+            let validation = BridgeGuardError::from(BridgeGuardValidationError::EmptyMember);
+            assert!(matches!(validation, BridgeGuardError::Validation(_)));
+            let netlink = BridgeGuardError::from(NetlinkError::nft(
+                "bridge-observe",
+                std::io::Error::from_raw_os_error(libc::EIO),
+            ));
+            assert!(matches!(
+                netlink,
+                BridgeGuardError::Netlink(NetlinkError::Nft { op: "bridge-observe", .. })
+            ));
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 canonical rule facts"]
+        fn expected_rule_facts_are_the_single_ordered_semantic_program() {
+            let facts = spec().expected_rule_facts();
+            assert_eq!(facts.len(), 3);
+            assert!(matches!(
+                facts[0].identity,
+                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::InterceptAccept)
+            ));
+            assert!(matches!(
+                facts[1].identity,
+                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::AcceptedClear)
+            ));
+            assert!(matches!(
+                facts[2].identity,
+                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop)
+            ));
+            assert_eq!(
+                facts[2].program.expressions,
+                [
+                    BridgeGuardRuleExpression::IngressInterfaceInSet {
+                        set: "managed_taps".to_owned()
+                    },
+                    BridgeGuardRuleExpression::Counter,
+                    BridgeGuardRuleExpression::Drop,
+                ]
+            );
+        }
+
+        fn exact_inventory(sut: &BridgeGuardSpec) -> BridgeGuardInventory {
+            let table = BridgeGuardTableFact {
+                family: BridgeGuardObservedFamily::Bridge,
+                name: sut.table.clone(),
+            };
+            BridgeGuardInventory {
+                generation: 7,
+                tables: vec![table.clone()],
+                chains: vec![BridgeGuardChainOccurrence {
+                    table: table.clone(),
+                    name: sut.chain.clone(),
+                    handle: Some(11),
+                    definition: BridgeGuardChainDefinition::Base {
+                        chain_type: BridgeGuardChainType::Filter,
+                        hook: BridgeGuardChainHook::Prerouting,
+                        priority: sut.priority,
+                        policy: Some(BridgeGuardChainPolicy::Accept),
+                    },
+                }],
+                sets: vec![BridgeGuardSetFact {
+                    table: table.clone(),
+                    name: sut.managed_taps_set.clone(),
+                    key_len: 16,
+                    ifname_key: true,
+                }],
+                rules: sut
+                    .expected_rule_facts()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, fact)| BridgeGuardRuleOccurrence {
+                        table: table.clone(),
+                        chain: sut.chain.clone(),
+                        handle: u64::try_from(index + 20).expect("small handle"),
+                        fact,
+                        counter: None,
+                    })
+                    .collect(),
+                members: vec![BridgeGuardMemberOccurrence {
+                    table,
+                    set: sut.managed_taps_set.clone(),
+                    identity: BridgeGuardMemberIdentity::Ifname("ovd-tp-0002".to_owned()),
+                }],
+                other_children: Vec::new(),
+            }
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 semantic inventory classification"]
+        fn semantic_classification_preserves_absent_exact_and_every_conflict_partition() {
+            let sut = spec();
+            let expected_members = BTreeSet::from(["ovd-tp-0002".to_owned()]);
+            let empty = BridgeGuardInventory {
+                generation: 1,
+                tables: Vec::new(),
+                chains: Vec::new(),
+                sets: Vec::new(),
+                rules: Vec::new(),
+                members: Vec::new(),
+                other_children: Vec::new(),
+            };
+            assert!(matches!(
+                classify_inventory(&sut, &expected_members, empty),
+                BridgeGuardObservation::Absent { .. }
+            ));
+            assert!(matches!(
+                classify_inventory(&sut, &expected_members, exact_inventory(&sut)),
+                BridgeGuardObservation::Exact { .. }
+            ));
+
+            let mut conflicts = Vec::new();
+            let mut wrong_family = exact_inventory(&sut);
+            wrong_family.tables[0].family = BridgeGuardObservedFamily::Ipv4;
+            conflicts.push(wrong_family);
+            let mut regular_chain = exact_inventory(&sut);
+            regular_chain.chains.push(BridgeGuardChainOccurrence {
+                table: regular_chain.tables[0].clone(),
+                name: "foreign".to_owned(),
+                handle: Some(91),
+                definition: BridgeGuardChainDefinition::Regular,
+            });
+            conflicts.push(regular_chain);
+            let mut reordered = exact_inventory(&sut);
+            reordered.rules.swap(0, 1);
+            conflicts.push(reordered);
+            let mut duplicate = exact_inventory(&sut);
+            duplicate.rules.push(duplicate.rules[0].clone());
+            conflicts.push(duplicate);
+            let mut unknown = exact_inventory(&sut);
+            unknown.rules[0]
+                .fact
+                .program
+                .expressions
+                .push(BridgeGuardRuleExpression::Unknown { name: "quota".to_owned() });
+            conflicts.push(unknown);
+            let mut foreign_member = exact_inventory(&sut);
+            foreign_member.members[0].identity =
+                BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: 16 };
+            conflicts.push(foreign_member);
+            let mut foreign_child = exact_inventory(&sut);
+            foreign_child.other_children.push(BridgeGuardOtherChildOccurrence {
+                table: foreign_child.tables[0].clone(),
+                kind: BridgeGuardOtherChildKind::Flowtable,
+                name: Some("foreign".to_owned()),
+                handle: Some(99),
+            });
+            conflicts.push(foreign_child);
+
+            for inventory in conflicts {
+                let expected = inventory.clone();
+                assert_eq!(
+                    classify_inventory(&sut, &expected_members, inventory),
+                    BridgeGuardObservation::Conflict { inventory: expected }
+                );
+            }
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 specification validation"]
+        fn specification_validation_covers_identifier_and_fixed_policy_boundaries() {
+            let identifier_cases = [
+                (
+                    "",
+                    BridgeGuardValidationError::EmptyIdentifier {
+                        identifier: BridgeGuardIdentifier::Table,
+                    },
+                ),
+                (
+                    "bad\0table",
+                    BridgeGuardValidationError::IdentifierContainsNul {
+                        identifier: BridgeGuardIdentifier::Table,
+                        index: 3,
+                    },
+                ),
+            ];
+            for (table, expected) in identifier_cases {
+                let error = BridgeGuardSpec::new(
+                    table.to_owned(),
+                    "prerouting".to_owned(),
+                    "managed_taps".to_owned(),
+                    REQUIRED_PRIORITY,
+                    REQUIRED_INTERCEPT_MARK,
+                    REQUIRED_ACCEPTED_MARK,
+                )
+                .expect_err("invalid table identifier");
+                assert_eq!(error, expected);
+            }
+            for length in [255, 256] {
+                let table = "é".repeat(length / 2) + if length % 2 == 1 { "a" } else { "" };
+                let result = BridgeGuardSpec::new(
+                    table,
+                    "prerouting".to_owned(),
+                    "managed_taps".to_owned(),
+                    REQUIRED_PRIORITY,
+                    REQUIRED_INTERCEPT_MARK,
+                    REQUIRED_ACCEPTED_MARK,
+                );
+                assert_eq!(result.is_ok(), length == 255, "UTF-8 byte length {length}");
+            }
+            assert!(matches!(
+                BridgeGuardSpec::new(
+                    "overdrive-mtls".to_owned(),
+                    "prerouting".to_owned(),
+                    "managed_taps".to_owned(),
+                    -299,
+                    REQUIRED_INTERCEPT_MARK,
+                    REQUIRED_ACCEPTED_MARK,
+                ),
+                Err(BridgeGuardValidationError::PriorityMismatch { .. })
+            ));
+            assert!(matches!(
+                BridgeGuardSpec::new(
+                    "overdrive-mtls".to_owned(),
+                    "prerouting".to_owned(),
+                    "managed_taps".to_owned(),
+                    REQUIRED_PRIORITY,
+                    0,
+                    REQUIRED_ACCEPTED_MARK,
+                ),
+                Err(BridgeGuardValidationError::InterceptMarkMismatch { .. })
+            ));
+            assert!(matches!(
+                BridgeGuardSpec::new(
+                    "overdrive-mtls".to_owned(),
+                    "prerouting".to_owned(),
+                    "managed_taps".to_owned(),
+                    REQUIRED_PRIORITY,
+                    REQUIRED_INTERCEPT_MARK,
+                    0,
+                ),
+                Err(BridgeGuardValidationError::AcceptedMarkMismatch { .. })
+            ));
+        }
+
+        /// CONTRACT_SHAPE: bounded-change.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 member validation"]
+        fn member_validation_rejects_without_entering_the_netlink_scaffold() {
+            let sut = spec();
+            for (tap, expected) in [
+                ("", BridgeGuardValidationError::EmptyMember),
+                ("bad\0tap", BridgeGuardValidationError::MemberContainsNul { index: 3 }),
+                (
+                    "0123456789abcdef",
+                    BridgeGuardValidationError::MemberTooLong {
+                        length: 16,
+                        maximum: MAX_MEMBER_BYTES,
+                    },
+                ),
+                (
+                    "éééééééé",
+                    BridgeGuardValidationError::MemberTooLong {
+                        length: 16,
+                        maximum: MAX_MEMBER_BYTES,
+                    },
+                ),
+            ] {
+                assert!(matches!(
+                    insert_member(&sut, tap),
+                    Err(BridgeGuardError::Validation(actual)) if actual == expected
+                ));
+                assert!(matches!(
+                    delete_member(&sut, tap),
+                    Err(BridgeGuardError::Validation(actual)) if actual == expected
+                ));
+            }
+        }
+
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 member encoding"]
+        fn member_encoding_accepts_one_through_fifteen_utf8_bytes_and_never_truncates() {
+            for tap in ["a", "ovd-tp-0002", "123456789012345", "ééééééé"] {
+                let encoded = encode_member(tap).expect("valid member");
+                assert_eq!(&encoded[..tap.len()], tap.as_bytes());
+                assert!(encoded[tap.len()..].iter().all(|byte| *byte == 0));
+            }
+        }
+
+        /// CONTRACT_SHAPE: bounded-change.
+        #[test]
+        #[ignore = "pending DELIVER step for D-295-DISTILL-9 semantic observation and exact-exclusive deletion"]
+        fn observe_and_delete_preserve_order_duplicates_foreign_children_and_full_conflicts() {
+            let sut = spec();
+            let expected_members =
+                BTreeSet::from(["ovd-tp-0002".to_owned(), "ovd-tp-0003".to_owned()]);
+            let observation = observe(&sut, &expected_members).expect("read-only observation");
+            let BridgeGuardObservation::Exact { inventory } = observation else {
+                panic!("healthy production guard is exact");
+            };
+            let expected_rules = sut.expected_rule_facts();
+            assert_eq!(
+                inventory.rules.iter().map(|rule| &rule.fact).collect::<Vec<_>>(),
+                expected_rules.iter().collect::<Vec<_>>()
+            );
+            assert_eq!(inventory.members.len(), expected_members.len());
+            assert!(inventory.other_children.is_empty());
+            assert!(matches!(
+                delete_owned_guard(&sut, &expected_members).expect("typed aggregate deletion"),
+                BridgeGuardDeleteOutcome::Deleted { .. }
+            ));
+            assert!(matches!(
+                observe(&sut, &BTreeSet::new()).expect("post-delete observation"),
+                BridgeGuardObservation::Absent { .. }
+            ));
+        }
+    }
 }
 
 /// True iff a recv chunk carries an `NLMSG_DONE` terminator.

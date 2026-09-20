@@ -142,6 +142,10 @@
 // Skip-on-no-privilege and executed-marker messages are the legitimate way
 // these Tier-3 tests communicate their lane to the test log.
 #![allow(clippy::print_stderr)]
+#![allow(
+    clippy::large_futures,
+    reason = "GH #295 exact source-honest shared-network errors increase the existing composed dispatch future until the single cut lands"
+)]
 // A-1'/A-6'/A-8'/A-9' etc. read as prose labels in the scenario docs, not code.
 #![allow(clippy::doc_markdown)]
 

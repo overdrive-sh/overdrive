@@ -2,8 +2,9 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
-GH #295 DESIGN stage 1. Runtime ownership is completed by ADR-0124.
+**Accepted — the current #295 contract is user-approved and independently
+approved, including D-295-DISTILL-5 at review iteration 6 on 2026-09-16.**
+Runtime ownership is defined by ADR-0124.
 
 ## Context
 
@@ -29,6 +30,26 @@ cleanup consumers read.
 Exact implementation-facing alternatives are in
 `docs/feature/netns-density-295/feature-delta.md`.
 
+The shared guest-switch owner is singular across node and allocation effects.
+The same injected object owns the startup probe, post-VMM stale sweep,
+production convergence, non-repairing audit, TAP quiescence, and the inherited
+per-allocation provision/teardown boundary. Its plan, ports, facts, and
+source-bearing orchestration error live in
+`overdrive-control-plane::guest_network`; the private host implementation
+continues to compose the existing netlink and dataplane adapters. Core carries
+only grouped driver/VMM handoffs, the fixed bridge MAC, and dependency-neutral
+EXEC capabilities/request values. This placement creates neither a second
+network owner nor a low-level netlink/BPF port. Exact signatures live only in
+the #295 feature delta.
+
+The private host owner also owns the startup scratch algorithm. A module-private
+typed I/O boundary supplies only raw netlink/TCX/socket effects and per-family
+counts; it cannot construct the public complement or cleanup aggregate. The
+host owner retains setup and semantic-probe ordering, unconditional reverse
+cleanup, continuation after the first cleanup failure, all-fifteen inventory,
+and the final source-honest disposition. This is effect isolation inside the
+same owner, not another shared-switch owner or a public fault interface.
+
 ## Alternatives considered
 
 ### Keep per-workload netns and raise the slot ceiling
@@ -41,6 +62,14 @@ does not change that structural cost.
 
 Rejected. It removes netns but preserves an O(N) switching object and does not
 provide the one shared-switch density model the spike proved.
+
+### Use the public shared-owner port to inject completed startup results
+
+Rejected as proof of the host algorithm. Public sim-port scripting remains
+valid for deterministic composition behavior, but a completed owner result
+cannot prove that the private host implementation actually attempted cleanup
+or observed kernel scratch inventory. The private typed I/O boundary exercises
+that algorithm without widening the public port.
 
 ## Consequences
 

@@ -2636,6 +2636,8 @@ fn assert_exact_pre_ready_failure(
 }
 
 struct MeshResult {
+    service_replicas: (u32, u32),
+    caller_verdict: overdrive_cli::render::JobVerdict,
     service_running: AllocStatusRowBody,
     vm_running: AllocStatusRowBody,
     vm_terminal: AllocStatusRowBody,
@@ -2689,6 +2691,8 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
         SERVICE_PORT,
     );
+    let service_replicas =
+        (service_state.snapshot.replicas_desired, service_state.snapshot.replicas_running);
     let service_running =
         service_state.snapshot.rows.into_iter().next().expect("one Running service allocation");
     let service_identity = poll_until_issued_identity(
@@ -2899,7 +2903,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     );
     // Natural Job completion is represented by Terminated + exit code zero;
     // the lifecycle assertion below distinguishes it from a public stop.
+    let caller_verdict =
+        overdrive_cli::render::derive_job_verdict(std::slice::from_ref(&vm_terminal));
     MeshResult {
+        service_replicas,
+        caller_verdict,
         service_running,
         vm_running,
         vm_terminal,
@@ -2921,6 +2929,16 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
 #[serial(cgroup)]
 async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
     let result = run_mesh_guest_scenario("gti-mesh-roundtrip").await;
+    assert_eq!(
+        result.service_replicas,
+        (1, 1),
+        "the callee Service is operator-visible as Running replicas 1/1"
+    );
+    assert_eq!(
+        result.caller_verdict,
+        overdrive_cli::render::JobVerdict::Succeeded,
+        "the reply-dependent caller reaches the operator-visible Succeeded verdict"
+    );
     // Observable universe: every field of AllocStatusRowBody. The helper
     // asserts the exact lifecycle delta and compares the complete complement.
     assert_exact_lifecycle_delta(&result.vm_running, &result.vm_terminal);

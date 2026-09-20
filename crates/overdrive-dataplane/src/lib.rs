@@ -32,6 +32,9 @@ pub mod allocators;
 // 5-step swap orchestration).
 pub mod gc;
 
+/// Shared guest-network TCX semantic projection and canonical aya error.
+pub mod guest_tcx;
+
 // Direct `bpf(2)` syscall surface used where aya 0.13.x ships no
 // typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
 pub mod sys;

@@ -22,6 +22,8 @@
 )]
 
 mod acceptance {
+    // netns-density-295 — control-plane-owned scratch complement contract.
+    mod netns_density_guest_network;
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
     // `lo`-named `DataplaneConfig` helper for SimDataplane-override
     // fixtures (the `job_stop_*` acceptance tests boot `run_server`).

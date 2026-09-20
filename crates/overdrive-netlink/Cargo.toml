@@ -29,9 +29,8 @@ crate_class = "adapter-host"
 # Workspace-wide convention (`.claude/rules/testing.md` § "Workspace
 # convention"): every member declares this feature so
 # `cargo {check,test,mutants} --features integration-tests` resolves
-# uniformly under per-package scoping. This crate has no integration tests of
-# its own (its impure netlink/genl I/O is exercised by the consuming crates'
-# Tier-3 suites), so the declaration is a deliberate no-op.
+# uniformly under per-package scoping. D-295-DISTILL-9 adds the owning
+# bridge-family nft integration binary behind this gate.
 integration-tests = []
 
 [dependencies]

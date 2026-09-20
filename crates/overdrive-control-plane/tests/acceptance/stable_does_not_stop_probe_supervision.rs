@@ -195,7 +195,7 @@ async fn harness() -> Harness {
 
     let driver: Arc<dyn Driver> = Arc::new(VmDriver::new(
         Arc::new(overdrive_sim::SimVmm::new()),
-        sim_clock,
+        sim_clock.clone(),
         Arc::new(overdrive_sim::SimCgroupFs::new()),
         Arc::new(overdrive_sim::SimCgroupAccounting::new()),
         Arc::clone(&runner),

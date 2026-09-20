@@ -2,8 +2,10 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
-GH #295 DESIGN stage 1. This records GEN-295-A.
+**Accepted — user-approved and approved by system design review iteration 5 on
+2026-09-16; D-295-DISTILL-7's complete private registry contract was
+independently approved at review iteration 9 on 2026-09-17.** This records
+GEN-295-A.
 
 ## Context
 
@@ -29,6 +31,29 @@ Registration checks that the next value can advance before publishing any
 effect. Exhaustion refuses registration with a typed intercept-install error and
 leaves indexes and nft elements unchanged. The value is internal and is not
 added to `GuestNetworkAssignment` or `AllocationSpec`.
+
+Pending registration reserves allocation/source/destination keys under the
+same lock but is not claimable. A conflict with Pending, Active, or Retiring
+state refuses before element acquisition. Failed Pending work removes only its
+reservations and never reuses its consumed generation. Retirement removes
+claimable indexes immediately but retains reservations until exact handles and
+elements have drained and their absence is confirmed, so an address-reuse
+successor cannot overlap the predecessor.
+
+If stop or owner shutdown races a Pending registration, retirement atomically
+takes that exact generation without releasing its reservations. The retirement
+wait completes only after the Pending owner activates into Retiring or rolls
+back/relinquishes every partial effect and signals its waiter. A cancelled
+Pending owner removes reservations only when the same generation is still
+Pending and retirement has not taken ownership; it can never remove a
+successor's reservation.
+
+Activation after retirement is a typed install failure, never success. It names
+the existing allocation identity rather than exposing the private generation.
+The Pending owner transfers its guards to Retiring, wakes the waiter, and
+returns the failure; retirement retains reservations until all effects drain.
+Consequently the production action owner cannot release guest EXEC or reuse the
+address on this branch.
 
 Accept captures one immutable capability and increments its exact in-flight
 claim before enforcement. Publish either records the handle while that

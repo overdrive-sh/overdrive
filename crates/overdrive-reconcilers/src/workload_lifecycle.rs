@@ -2009,6 +2009,41 @@ mod project_service_listen_ports_tests {
         );
     }
 
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER step for GH #295 TCP-only duplicate-normalized membership projection"]
+    fn service_projection_keeps_first_tcp_order_deduplicates_tcp_and_excludes_udp() {
+        use overdrive_core::aggregate::Listener;
+        use overdrive_core::dataplane::Proto;
+
+        let intent = WorkloadIntent::Service(Service {
+            id: wid("mixed-listeners"),
+            replicas: NonZeroU32::new(1).expect("one replica"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/bin/serve".to_owned(),
+                args: Vec::new(),
+                kernel: "/kernel".to_owned(),
+                rootfs: "/rootfs".to_owned(),
+            }),
+            listeners: vec![
+                Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp },
+                Listener { port: NonZeroU16::new(53).expect("non-zero"), protocol: Proto::Udp },
+                Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp },
+                Listener { port: NonZeroU16::new(8443).expect("non-zero"), protocol: Proto::Tcp },
+                Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Udp },
+            ],
+            startup_probes: Vec::new(),
+            readiness_probes: Vec::new(),
+            liveness_probes: Vec::new(),
+        });
+
+        assert_eq!(
+            project_service_listen_ports(&intent),
+            [NonZeroU16::new(8080).expect("non-zero"), NonZeroU16::new(8443).expect("non-zero")]
+        );
+    }
+
     proptest! {
         /// Producer side of S-PORTSET (finalized 02-01): over an
         /// arbitrary non-empty set of distinct listener ports, the

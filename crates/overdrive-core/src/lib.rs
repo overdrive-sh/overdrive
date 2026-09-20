@@ -77,6 +77,8 @@ pub mod eval_broker;
 // wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them.
 pub mod dataplane;
 pub mod error;
+/// Paired shared guest-network EXEC admission capabilities (GH #295).
+pub mod guest_network;
 pub mod id;
 // `maglev::{permutation, table}` — pure userspace consistent-hashing
 // primitives over `BackendId` + `MaglevTableSize`. Lives here (rather

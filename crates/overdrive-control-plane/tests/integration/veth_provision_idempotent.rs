@@ -38,7 +38,8 @@ use std::process::Command;
 )]
 #[tokio::test]
 async fn c3_restart_replaces_and_converges_vm_network_plan() {
-    super::alloc_netns_lifecycle::run_c3_restart_replaces_and_converges_vm_network_plan().await;
+    Box::pin(super::alloc_netns_lifecycle::run_c3_restart_replaces_and_converges_vm_network_plan())
+        .await;
 }
 
 /// Per-test iface names — suffixed with the PID (so two parallel test

@@ -22,6 +22,7 @@
 // the shared prefix; renaming to `_payments_body` / `_frontend_body`
 // would couple the variable name to a fixture detail, which is worse.
 #![allow(clippy::similar_names)]
+#![allow(clippy::print_stderr)]
 
 // The inline `mod integration { ... }` mirrors the `tests/acceptance.rs`
 // pattern: an integration-test crate root resolves `mod foo;` against
@@ -159,6 +160,9 @@ mod integration {
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
     /// S-2.2-28. Body panics until DELIVER fills it.
     mod service_map_hydrator_dispatch;
+    /// GH #295 S-ND295-00 — composed production-startup ordering and
+    /// scratch-probe refusal through the accepted shared-owner port.
+    mod shared_guest_network_startup;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of
     /// `reconciler-memory-redb`. Action shim threads `Action.terminal`

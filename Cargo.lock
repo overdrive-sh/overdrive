@@ -2129,6 +2129,7 @@ dependencies = [
  "libc",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-dataplane",
  "overdrive-host",
  "overdrive-netlink",
  "overdrive-reconcilers",
@@ -2393,6 +2394,25 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trybuild",
+]
+
+[[package]]
+name = "overdrive-system-conformance"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "nix 0.30.1",
+ "overdrive-control-plane",
+ "overdrive-core",
+ "overdrive-netlink",
+ "overdrive-sim",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

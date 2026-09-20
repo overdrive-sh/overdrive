@@ -209,7 +209,9 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! Every live scenario is GREEN and carries no `#[ignore]`. Every blocker this
+//! Every pre-#295 live scenario is GREEN and carries no `#[ignore]`. The one
+//! reasoned GH #295 DISTILL body at the end is deliberately pending until its
+//! accepted one-cut production path exists. Every blocker this
 //! file's history above documents (vsock EAFNOSUPPORT, the terminal-row
 //! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
 //! contamination) is CLOSED.
@@ -233,11 +235,14 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::BTreeSet;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::os::fd::RawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
@@ -247,7 +252,15 @@ use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::vm::config::{MemoryPlan, RootfsPlan, VmRunDir};
+use overdrive_dataplane::guest_tcx::{
+    GuestTcxCounter, TcxAttachPoint, detach_pinned_link, endpoint_present, query_attachment,
+    read_counter,
+};
 use overdrive_host::CloudHypervisorVmm;
+use overdrive_netlink::nft::bridge::{
+    BridgeGuardDeleteOutcome, BridgeGuardObservation, BridgeGuardRuleIdentity, BridgeGuardRuleKind,
+    BridgeGuardSpec, delete_owned_guard, observe as observe_bridge_guard,
+};
 use overdrive_sim::{SimVmm, SimVmmProbeFault};
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
@@ -575,12 +588,20 @@ async fn poll_until_state(
 fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
     let needle = run_dir.path().to_string_lossy().into_owned();
-    for entry in std::fs::read_dir("/proc").expect("read /proc") {
-        let Ok(entry) = entry else { continue };
+    for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc entry while locating allocation {alloc}: {error}"),
+        };
         if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
             continue;
         }
-        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else { continue };
+        let cmdline = match std::fs::read(entry.path().join("cmdline")) {
+            Ok(cmdline) => cmdline,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc cmdline while locating allocation {alloc}: {error}"),
+        };
         let argv0 = cmdline.split(|&byte| byte == 0).next().unwrap_or(&[]);
         let argv0 = String::from_utf8_lossy(argv0);
         if Path::new(argv0.as_ref()).file_name() != Some(std::ffi::OsStr::new("cloud-hypervisor")) {
@@ -820,11 +841,19 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
 /// match can never succeed against this binary name, which is why this
 /// helper previously panicked even when a real VMM was running.
 fn find_cloud_hypervisor_pid() -> u32 {
-    for entry in std::fs::read_dir("/proc").expect("read /proc") {
-        let Ok(entry) = entry else { continue };
+    for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc entry while locating Cloud Hypervisor: {error}"),
+        };
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
         let cmdline_path = entry.path().join("cmdline");
-        let Ok(cmdline) = std::fs::read(&cmdline_path) else { continue };
+        let cmdline = match std::fs::read(&cmdline_path) {
+            Ok(cmdline) => cmdline,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read {}: {error}", cmdline_path.display()),
+        };
         let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
         let argv0 = String::from_utf8_lossy(argv0);
         if Path::new(argv0.as_ref()).file_name() == Some(std::ffi::OsStr::new("cloud-hypervisor")) {
@@ -1151,6 +1180,246 @@ pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
     out
 }
 
+fn build_identifiable_datagram_emitter(tmp: &Path, target: std::net::Ipv4Addr) -> PathBuf {
+    let src = tmp.join("shared-guest-network-emitter.rs");
+    let target = target.octets();
+    std::fs::write(
+        &src,
+        format!(
+            r#"use std::ffi::CString;
+use std::mem::size_of;
+use std::thread;
+use std::time::Duration;
+
+#[repr(C)]
+struct SockaddrLl {{
+    family: u16,
+    protocol: u16,
+    ifindex: i32,
+    hatype: u16,
+    pkttype: u8,
+    halen: u8,
+    addr: [u8; 8],
+}}
+
+extern "C" {{
+    fn if_nametoindex(name: *const i8) -> u32;
+    fn socket(domain: i32, kind: i32, protocol: i32) -> i32;
+    fn sendto(
+        fd: i32,
+        bytes: *const u8,
+        length: usize,
+        flags: i32,
+        address: *const SockaddrLl,
+        address_length: u32,
+    ) -> isize;
+}}
+
+fn ipv4_udp(source_mac: [u8; 6], source_ip: [u8; 4], target_ip: [u8; 4]) -> Vec<u8> {{
+    let marker = b"ND295-S37-IDENTIFIABLE";
+    let total = 20 + 8 + marker.len();
+    let mut frame = Vec::with_capacity(14 + total);
+    frame.extend_from_slice(&[0x02, 0x00, {t0}, {t1}, {t2}, {t3}]);
+    frame.extend_from_slice(&source_mac);
+    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
+    frame.extend_from_slice(&[0x45, 0]);
+    frame.extend_from_slice(&(total as u16).to_be_bytes());
+    frame.extend_from_slice(&[0, 0, 0, 0, 64, 17, 0, 0]);
+    frame.extend_from_slice(&source_ip);
+    frame.extend_from_slice(&target_ip);
+    frame.extend_from_slice(&40_037_u16.to_be_bytes());
+    frame.extend_from_slice(&19_037_u16.to_be_bytes());
+    frame.extend_from_slice(&((8 + marker.len()) as u16).to_be_bytes());
+    frame.extend_from_slice(&[0, 0]);
+    frame.extend_from_slice(marker);
+    frame
+}}
+
+fn arp_spoof(source_mac: [u8; 6], source_ip: [u8; 4], target_ip: [u8; 4]) -> Vec<u8> {{
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&[0xff; 6]);
+    frame.extend_from_slice(&source_mac);
+    frame.extend_from_slice(&0x0806_u16.to_be_bytes());
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
+    frame.extend_from_slice(&[6, 4]);
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&source_mac);
+    frame.extend_from_slice(&source_ip);
+    frame.extend_from_slice(&[0_u8; 6]);
+    frame.extend_from_slice(&target_ip);
+    frame.extend_from_slice(b"ND295-S37-IDENTIFIABLE");
+    frame
+}}
+
+fn main() {{
+    const AF_PACKET: i32 = 17;
+    const SOCK_RAW: i32 = 3;
+    const ETH_P_ALL: u16 = 0x0003;
+    let interface = CString::new("eth0").unwrap();
+    let ifindex = unsafe {{ if_nametoindex(interface.as_ptr()) }};
+    assert_ne!(ifindex, 0);
+    let fd = unsafe {{ socket(AF_PACKET, SOCK_RAW, i32::from(ETH_P_ALL.to_be())) }};
+    assert!(fd >= 0);
+    let destination = [0x02, 0x00, {t0}, {t1}, {t2}, {t3}];
+    let good_mac = [0x02, 0x00, 100, 95, 0, 3];
+    let good_ip = [100, 95, 0, 3];
+    let mut mac_spoof = ipv4_udp([0x02, 0, 1, 2, 3, 4], good_ip, [{t0}, {t1}, {t2}, {t3}]);
+    let ip_spoof = ipv4_udp(good_mac, [100, 95, 0, 99], [{t0}, {t1}, {t2}, {t3}]);
+    let udp_bypass = ipv4_udp(good_mac, good_ip, [{t0}, {t1}, {t2}, {t3}]);
+    let arp_source_spoof = arp_spoof(good_mac, [100, 95, 0, 99], [{t0}, {t1}, {t2}, {t3}]);
+    let mut non_ipv4 = udp_bypass.clone();
+    non_ipv4[12..14].copy_from_slice(&0x86dd_u16.to_be_bytes());
+    let malformed = udp_bypass[..18].to_vec();
+    // Make the MAC-spoof case carry a byte-distinct marker copy while retaining
+    // a well-formed IPv4/UDP envelope.
+    mac_spoof.extend_from_slice(b"-MAC");
+    let frames = [mac_spoof, ip_spoof, udp_bypass, arp_source_spoof, non_ipv4, malformed];
+    let address = SockaddrLl {{
+        family: AF_PACKET as u16,
+        protocol: ETH_P_ALL.to_be(),
+        ifindex: ifindex as i32,
+        hatype: 0,
+        pkttype: 0,
+        halen: 6,
+        addr: [destination[0], destination[1], destination[2], destination[3], destination[4], destination[5], 0, 0],
+    }};
+    thread::sleep(Duration::from_secs(5));
+    loop {{
+        for frame in &frames {{
+            let sent = unsafe {{
+                sendto(
+                    fd,
+                    frame.as_ptr(),
+                    frame.len(),
+                    0,
+                    &address,
+                    size_of::<SockaddrLl>() as u32,
+                )
+            }};
+            assert_eq!(sent, frame.len() as isize);
+        }}
+        thread::sleep(Duration::from_millis(10));
+    }}
+}}"#,
+            t0 = target[0],
+            t1 = target[1],
+            t2 = target[2],
+            t3 = target[3],
+        ),
+    )
+    .expect("write identifiable guest emitter source");
+    let out = tmp.join("shared-guest-network-emitter");
+    let status = Command::new("rustc")
+        .arg("--edition")
+        .arg("2021")
+        .arg("-C")
+        .arg("opt-level=0")
+        .arg("-C")
+        .arg("target-feature=+crt-static")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-musl")
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for identifiable guest emitter");
+    assert!(status.success(), "rustc builds the identifiable guest emitter");
+    out
+}
+
+struct PacketCapture(RawFd);
+
+impl PacketCapture {
+    fn open(interface: &str) -> Self {
+        const ETH_P_ALL: u16 = 0x0003;
+        let name = std::ffi::CString::new(interface).expect("interface has no NUL");
+        // SAFETY: `name` is a live NUL-terminated string for this call.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "capture interface {interface} exists");
+        // SAFETY: AF_PACKET raw socket; the returned fd is owned by PacketCapture.
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_PACKET,
+                libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                i32::from(ETH_P_ALL.to_be()),
+            )
+        };
+        assert!(fd >= 0, "open AF_PACKET capture: {}", std::io::Error::last_os_error());
+        // SAFETY: zero is a valid initialization for sockaddr_ll before fields are populated.
+        let mut address: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+        address.sll_family = u16::try_from(libc::AF_PACKET).expect("AF_PACKET fits u16");
+        address.sll_protocol = ETH_P_ALL.to_be();
+        address.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits i32");
+        // SAFETY: address points to a fully initialized sockaddr_ll of the supplied length.
+        let bound = unsafe {
+            libc::bind(
+                fd,
+                std::ptr::from_ref(&address).cast(),
+                libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>())
+                    .expect("sockaddr_ll length fits socklen_t"),
+            )
+        };
+        if bound != 0 {
+            // SAFETY: fd was returned by socket and is closed exactly here on bind failure.
+            unsafe { libc::close(fd) };
+            panic!("bind AF_PACKET capture: {}", std::io::Error::last_os_error());
+        }
+        Self(fd)
+    }
+
+    fn drain_identifiable(&self) -> usize {
+        const NEEDLE: &[u8] = b"ND295-S37-IDENTIFIABLE";
+        let mut matched = 0;
+        loop {
+            let mut frame = [0_u8; 2048];
+            // SAFETY: frame is a live writable buffer and self.0 is an owned socket fd.
+            let read = unsafe {
+                libc::recv(self.0, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
+            };
+            if read > 0 {
+                let length = usize::try_from(read).expect("positive recv length");
+                matched += usize::from(frame[..length].windows(NEEDLE.len()).any(|w| w == NEEDLE));
+                continue;
+            }
+            if read == 0 {
+                return matched;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() == ErrorKind::WouldBlock {
+                return matched;
+            }
+            panic!("capture recv failed: {error}");
+        }
+    }
+}
+
+impl Drop for PacketCapture {
+    fn drop(&mut self) {
+        // SAFETY: PacketCapture exclusively owns this socket fd.
+        unsafe { libc::close(self.0) };
+    }
+}
+
+fn guard_default_drop_packets(observation: &BridgeGuardObservation) -> u64 {
+    let inventory = match observation {
+        BridgeGuardObservation::Absent { inventory }
+        | BridgeGuardObservation::Exact { inventory }
+        | BridgeGuardObservation::Conflict { inventory } => inventory,
+    };
+    inventory
+        .rules
+        .iter()
+        .find_map(|rule| {
+            matches!(
+                rule.fact.identity,
+                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop)
+            )
+            .then_some(rule.counter.map_or(0, |counter| counter.packets))
+        })
+        .expect("one semantic default-drop rule occurrence")
+}
+
 // ---------------------------------------------------------------------
 // S-VM-14 — the deadline arm of the three-way boot race leaks nothing.
 // ---------------------------------------------------------------------
@@ -1171,12 +1440,20 @@ pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
 /// masking the deadline-arm cleanup leak this file's own module doc
 /// documents (01-08 review remediation).
 fn no_cloud_hypervisor_process_running() -> bool {
-    let Ok(entries) = std::fs::read_dir("/proc") else { return true };
-    for entry in entries {
-        let Ok(entry) = entry else { continue };
+    let entries = std::fs::read_dir("/proc").expect("read /proc");
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc entry while checking Cloud Hypervisor: {error}"),
+        };
         let Ok(_pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
         let cmdline_path = entry.path().join("cmdline");
-        let Ok(cmdline) = std::fs::read(&cmdline_path) else { continue };
+        let cmdline = match std::fs::read(&cmdline_path) {
+            Ok(cmdline) => cmdline,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read {}: {error}", cmdline_path.display()),
+        };
         let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
         let argv0 = String::from_utf8_lossy(argv0);
         if Path::new(argv0.as_ref()).file_name() == Some(std::ffi::OsStr::new("cloud-hypervisor")) {
@@ -2160,4 +2437,470 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
     }
 
     handle.shutdown().await.expect("clean shutdown");
+}
+
+/// S-ND295-35 — two VM allocations launch directly on host TAPs attached to
+/// one shared bridge, with no per-workload network namespace wrapper.
+/// CONTRACT_SHAPE: bounded-change.
+#[expect(
+    clippy::doc_markdown,
+    reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
+)]
+#[tokio::test]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER step for GH #295 direct host-TAP production composition"]
+async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("nd295-shared-bridge-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the native-metal staging filesystem");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
+    let cfg = config_path(server_tmp.path());
+    let mut deployed = Vec::new();
+    let command_output = |program: &str, args: &[&str]| {
+        let output = std::process::Command::new(program)
+            .args(args)
+            .output()
+            .unwrap_or_else(|error| panic!("run {program} {args:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "{program} {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("host inventory output is UTF-8")
+    };
+    let veth_before = command_output("ip", &["-j", "link", "show", "type", "veth"]);
+    let netns_before = command_output("ip", &["netns", "list"]);
+    let routes_before = command_output("ip", &["-4", "route", "show"]);
+
+    for id in ["nd295-a", "nd295-b"] {
+        let spec = write_toml(
+            server_tmp.path(),
+            &format!("{id}.toml"),
+            &vm_job_toml(id, "/sbin/spin", &[], &fixture.kernel_path, &rootfs),
+        );
+        let output = deploy(DeployArgs { spec, config_path: cfg.clone() })
+            .await
+            .expect("deploy VM through the production handler");
+        let running = poll_until_running(&cfg, &output.workload_id, Duration::from_secs(90)).await;
+        let row = running.snapshot.rows.first().expect("one Running allocation row");
+        let alloc = AllocationId::new(&row.alloc_id).expect("allocation id parses");
+        let addr = row.workload_addr.expect("Running VM publishes its guest address");
+        deployed.push((output.workload_id, alloc, addr));
+    }
+
+    let host_netns = std::fs::read_link("/proc/self/ns/net").expect("read host network namespace");
+    let mut masters = std::collections::BTreeSet::new();
+    let mut taps = std::collections::BTreeSet::new();
+    for (_, alloc, addr) in &deployed {
+        let offset = u16::from_be_bytes([addr.octets()[2], addr.octets()[3]]);
+        let tap = format!("ovd-tp-{offset:04x}");
+        let tap_dir = PathBuf::from("/sys/class/net").join(&tap);
+        assert!(tap_dir.exists(), "the production owner creates the IP-derived host TAP {tap}");
+        let master = std::fs::read_link(tap_dir.join("master"))
+            .expect("the production TAP is attached to a bridge");
+        masters.insert(master);
+        taps.insert(tap.clone());
+
+        let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
+        let needle = run_dir.path().to_string_lossy();
+        let mut found = None;
+        for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("read /proc entry while locating allocation {alloc}: {error}"),
+            };
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            let bytes = match std::fs::read(entry.path().join("cmdline")) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("read /proc/{pid}/cmdline for allocation {alloc}: {error}"),
+            };
+            let argv = String::from_utf8_lossy(&bytes).replace('\0', " ");
+            if argv.contains(needle.as_ref()) {
+                found = Some((pid, argv));
+                break;
+            }
+        }
+        let (pid, argv) = found.expect("find this allocation's Cloud Hypervisor process");
+        let octets = addr.octets();
+        let mac = format!(
+            "02:00:{:02x}:{:02x}:{:02x}:{:02x}",
+            octets[0], octets[1], octets[2], octets[3]
+        );
+        assert!(
+            argv.contains(&format!("--net tap={tap},mac={mac}")),
+            "Cloud Hypervisor receives only the assigned host TAP and IPv4-derived MAC: {argv}"
+        );
+        assert!(!argv.contains("ip netns exec"), "direct-TAP launch has no namespace wrapper");
+        assert!(
+            !argv.contains("host_veth") && !argv.contains("ovd-hv-"),
+            "the VMM launch carries no deleted host-veth identity"
+        );
+        let guest_owner_netns =
+            std::fs::read_link(format!("/proc/{pid}/ns/net")).expect("read VMM network namespace");
+        assert_eq!(guest_owner_netns, host_netns, "the VMM stays in the host network namespace");
+        let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .expect("read VMM cgroup membership");
+        assert!(
+            cgroup.contains(alloc.as_str()),
+            "the existing per-allocation cgroup remains the VMM owner: {cgroup}"
+        );
+        assert!(run_dir.path().exists(), "the existing allocation run directory remains live");
+        assert!(
+            argv.contains(".overdrive-vm-rootfs-") && argv.contains(alloc.as_str()),
+            "the existing allocation-owned rootfs clone remains in the Cloud Hypervisor argv"
+        );
+    }
+
+    assert_eq!(taps.len(), 2, "one distinct TAP is owned per allocation");
+    assert_eq!(masters.len(), 1, "both TAPs share one node-local bridge");
+    let bridge = masters.into_iter().next().expect("one bridge symlink");
+    let bridge_name = bridge.file_name().expect("bridge symlink has a name");
+    let bridge_mac =
+        std::fs::read_to_string(PathBuf::from("/sys/class/net").join(bridge_name).join("address"))
+            .expect("read converged bridge MAC");
+    assert_eq!(bridge_mac.trim(), "02:01:00:00:00:01");
+    assert_eq!(
+        command_output("ip", &["-j", "link", "show", "type", "veth"]),
+        veth_before,
+        "allocations add no workload veth pair"
+    );
+    assert_eq!(
+        command_output("ip", &["netns", "list"]),
+        netns_before,
+        "allocations add no workload network namespace"
+    );
+    let routes_during = command_output("ip", &["-4", "route", "show"]);
+    for route in routes_during.lines().filter(|line| !routes_before.lines().any(|old| old == *line))
+    {
+        assert!(!route.contains("/30"), "the shared-prefix cut creates no allocation /30: {route}");
+    }
+
+    for (workload_id, _, _) in &deployed {
+        stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("stop the exact VM workload");
+        let terminal = poll_until_terminal(&cfg, workload_id, Duration::from_secs(30)).await;
+        assert_eq!(
+            terminal.snapshot.rows.first().expect("terminal allocation row").state,
+            AllocStateWire::Terminated,
+        );
+    }
+    for tap in taps {
+        assert!(
+            !PathBuf::from("/sys/class/net").join(&tap).exists(),
+            "public stop removes the exact owned TAP {tap}"
+        );
+    }
+    for (_, alloc, _) in &deployed {
+        assert!(
+            !VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc).path().exists(),
+            "stop removes the allocation-owned run directory"
+        );
+        assert!(
+            !CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).exists(),
+            "stop removes the allocation-owned cgroup"
+        );
+    }
+    assert!(rootfs.exists(), "cleanup preserves the operator-owned rootfs master");
+    assert_eq!(
+        command_output("ip", &["-j", "link", "show", "type", "veth"]),
+        veth_before,
+        "stop preserves the pre-existing veth inventory exactly"
+    );
+    assert_eq!(
+        command_output("ip", &["netns", "list"]),
+        netns_before,
+        "stop preserves the pre-existing namespace inventory exactly"
+    );
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+/// S-ND295-37 — simultaneous external TCX-link and bridge-guard loss has the
+/// accepted bounded exposure and quiescence envelope.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    clippy::print_stderr,
+    clippy::too_many_lines,
+    reason = "one native-metal body retains the full typed mutation, frame, counter, audit, quiescence, recovery, and cleanup narrative"
+)]
+#[tokio::test]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER step for GH #295 real shared-owner audit and D6/D9 host bindings"]
+async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision native-metal VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("shared-guest-network-double-loss-")
+        .tempdir_in(shared_staging_root())
+        .expect("native-metal test tempdir");
+    let sink = build_spin_binary(tmp.path());
+    let emitter = build_identifiable_datagram_emitter(tmp.path(), "100.95.0.2".parse().unwrap());
+    let rootfs = stage_rootfs_with_extra_binaries(
+        tmp.path(),
+        &fixture,
+        &[(&sink, "nd295-sink"), (&emitter, "nd295-emitter")],
+    );
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
+    let cfg = config_path(server_tmp.path());
+
+    let sink_spec = write_toml(
+        server_tmp.path(),
+        "shared-guest-network-sink.toml",
+        &vm_job_toml(
+            "shared-guest-network-sink",
+            "/sbin/nd295-sink",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let sink_submit = deploy(DeployArgs { spec: sink_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy sink VM through production handler");
+    let sink_running =
+        poll_until_running(&cfg, &sink_submit.workload_id, Duration::from_secs(90)).await;
+    let sink_row = sink_running.snapshot.rows.first().expect("one sink allocation");
+    assert_eq!(sink_row.workload_addr, Some("100.95.0.2".parse().unwrap()));
+
+    let emitter_spec = write_toml(
+        server_tmp.path(),
+        "shared-guest-network-emitter.toml",
+        &vm_job_toml(
+            "shared-guest-network-emitter",
+            "/sbin/nd295-emitter",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let emitter_submit = deploy(DeployArgs { spec: emitter_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy identifiable-frame emitter through production handler");
+    let emitter_running =
+        poll_until_running(&cfg, &emitter_submit.workload_id, Duration::from_secs(90)).await;
+    let emitter_row = emitter_running.snapshot.rows.first().expect("one emitter allocation");
+    let emitter_addr = emitter_row.workload_addr.expect("emitter guest address");
+    let tap_for = |address: std::net::Ipv4Addr| {
+        let octets = address.octets();
+        format!("ovd-tp-{:04x}", u16::from_be_bytes([octets[2], octets[3]]))
+    };
+    let sink_tap = tap_for(sink_row.workload_addr.expect("sink guest address"));
+    let emitter_tap = tap_for(emitter_addr);
+    let emitter_ifindex = {
+        let name = std::ffi::CString::new(emitter_tap.as_str()).expect("TAP name has no NUL");
+        // SAFETY: name is a live C string for the duration of the lookup.
+        let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(index, 0, "managed emitter TAP exists");
+        index
+    };
+    let pin_root = Path::new("/sys/fs/bpf/overdrive/mtls-endpoints");
+    let endpoint_pin = pin_root.join("maps/endpoints");
+    let counter_pin = pin_root.join("maps/counters");
+    let link_pin = pin_root.join(format!("links/{emitter_tap}-ingress"));
+    let attach_point = TcxAttachPoint::Ingress;
+    let before = query_attachment(&emitter_tap, attach_point).expect("query owned TCX attachment");
+    assert!(!before.program_ids.is_empty());
+    assert!(endpoint_present(&endpoint_pin, emitter_ifindex).expect("query endpoint entry"));
+
+    let negative_counters = [
+        GuestTcxCounter::SourceMacSpoof,
+        GuestTcxCounter::SourceIpArpSpoof,
+        GuestTcxCounter::DirectBypassDrop,
+        GuestTcxCounter::MalformedDrop,
+    ];
+    let classifier_before = negative_counters.map(|counter| {
+        read_counter(&counter_pin, counter).expect("read classifier negative-partition baseline")
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if negative_counters.into_iter().enumerate().all(|(index, counter)| {
+                read_counter(&counter_pin, counter).expect("read classifier counter")
+                    > classifier_before[index]
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect(
+        "real malformed, source-MAC-spoofed, source-IP/ARP-spoofed, and direct-bypass frames each reach TCX and increment only their negative partition",
+    );
+
+    let guard = BridgeGuardSpec::new(
+        "overdrive-mtls".to_owned(),
+        "prerouting".to_owned(),
+        "managed_taps".to_owned(),
+        -300,
+        0x295a,
+        0x295b,
+    )
+    .expect("canonical production bridge guard specification");
+    let expected_members = BTreeSet::from([sink_tap.clone(), emitter_tap.clone()]);
+    assert!(matches!(
+        observe_bridge_guard(&guard, &expected_members).expect("healthy guard observation"),
+        BridgeGuardObservation::Exact { .. }
+    ));
+    let bridge = std::fs::read_link(Path::new("/sys/class/net").join(&sink_tap).join("master"))
+        .expect("sink TAP retains the production shared-bridge master");
+    let bridge_name = bridge
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .expect("shared-bridge master has a UTF-8 interface name")
+        .to_owned();
+    let peer_capture = PacketCapture::open(&sink_tap);
+    let host_capture = PacketCapture::open(&bridge_name);
+    assert_eq!(
+        peer_capture.drain_identifiable(),
+        0,
+        "healthy TCX blocks direct guest UDP bypass at the peer TAP"
+    );
+    assert_eq!(
+        host_capture.drain_identifiable(),
+        0,
+        "healthy TCX blocks direct guest UDP bypass at the shared host bridge"
+    );
+
+    detach_pinned_link(&link_pin).expect("external actor detaches the exact owned TCX link");
+    let detached = query_attachment(&emitter_tap, attach_point).expect("query after detach");
+    assert!(detached.program_ids.is_empty(), "the injected first loss is exact link absence");
+    assert!(
+        endpoint_present(&endpoint_pin, emitter_ifindex).expect("endpoint remains queryable"),
+        "endpoint map remains present, so no third loss is injected"
+    );
+    let classifier_at_detach =
+        read_counter(&counter_pin, GuestTcxCounter::DirectBypassDrop).expect("counter at detach");
+    let guard_before = guard_default_drop_packets(
+        &observe_bridge_guard(&guard, &expected_members).expect("guard counter baseline"),
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let current = observe_bridge_guard(&guard, &expected_members)
+                .expect("guard-only observation after link loss");
+            if guard_default_drop_packets(&current) > guard_before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the independent bridge guard passively counts and drops identifiable frames");
+    assert_eq!(
+        peer_capture.drain_identifiable(),
+        0,
+        "single TCX loss remains fail-closed at the peer TAP"
+    );
+    assert_eq!(
+        host_capture.drain_identifiable(),
+        0,
+        "single TCX loss remains fail-closed at the host bridge"
+    );
+    assert_eq!(
+        read_counter(&counter_pin, GuestTcxCounter::DirectBypassDrop)
+            .expect("classifier counter after detached interval"),
+        classifier_at_detach,
+        "a detached classifier cannot author the guard-only evidence"
+    );
+
+    // Establish the complete, non-vacuous host-observation cut immediately
+    // before the typed guard deletion. The retained supervisor body separately
+    // pins this cut to its one-second audit cadence; this native body owns the
+    // real kernel state and deletion-to-quiescence duration.
+    let attachment_at_second_loss =
+        query_attachment(&emitter_tap, attach_point).expect("query at second-loss cut");
+    assert!(
+        attachment_at_second_loss.program_ids.is_empty(),
+        "the first injected loss remains exact TCX absence"
+    );
+    let guard_at_second_loss =
+        observe_bridge_guard(&guard, &expected_members).expect("guard at second-loss cut");
+    assert!(matches!(guard_at_second_loss, BridgeGuardObservation::Exact { .. }));
+    assert!(
+        guard_default_drop_packets(&guard_at_second_loss) > guard_before,
+        "the live guard counter fixes a non-vacuous audit position before its deletion"
+    );
+    assert!(
+        endpoint_present(&endpoint_pin, emitter_ifindex).expect("endpoint at second-loss cut"),
+        "the endpoint remains present; the fixture injects exactly two losses"
+    );
+    let client = overdrive_netlink::Client::new().expect("open typed host-netlink client");
+    assert_eq!(
+        client.observe_link(&emitter_tap).await.expect("observe TAP at second-loss cut"),
+        Some(true),
+        "the managed TAP is administratively up immediately before the second loss"
+    );
+    assert_eq!(
+        peer_capture.drain_identifiable(),
+        0,
+        "the still-present guard prevents escape to the peer at the second-loss cut"
+    );
+    assert_eq!(
+        host_capture.drain_identifiable(),
+        0,
+        "the still-present guard prevents escape to the host bridge at the second-loss cut"
+    );
+
+    let deletion_started = Instant::now();
+    assert!(matches!(
+        delete_owned_guard(&guard, &expected_members).expect("typed exact-owned guard deletion"),
+        BridgeGuardDeleteOutcome::Deleted { .. }
+    ));
+    let mut exposure_frames = 0;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            exposure_frames += peer_capture.drain_identifiable();
+            exposure_frames += host_capture.drain_identifiable();
+            if client.observe_link(&emitter_tap).await.expect("observe managed TAP") == Some(false)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the next one-second audit closes the exposure by quiescing the TAP");
+    assert!(deletion_started.elapsed() <= Duration::from_secs(1));
+    eprintln!(
+        "S-ND295-37 accepted exposure observed {exposure_frames} identifiable frame(s) before TAP quiescence; no fail-closed claim is made for that interval"
+    );
+    let _ = peer_capture.drain_identifiable();
+    let _ = host_capture.drain_identifiable();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        peer_capture.drain_identifiable(),
+        0,
+        "after quiescence no identifiable guest frame reaches the peer TAP"
+    );
+    assert_eq!(
+        host_capture.drain_identifiable(),
+        0,
+        "after quiescence no identifiable guest frame reaches ordinary host-bridge forwarding"
+    );
+
+    for workload_id in [&emitter_submit.workload_id, &sink_submit.workload_id] {
+        stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("stop the exact native-metal workload");
+        let terminal = poll_until_terminal(&cfg, workload_id, Duration::from_secs(30)).await;
+        assert_eq!(
+            terminal.snapshot.rows.first().expect("one terminal row").state,
+            AllocStateWire::Terminated
+        );
+    }
+    assert!(!endpoint_present(&endpoint_pin, emitter_ifindex).expect("post-stop endpoint query"));
+    assert!(!link_pin.exists(), "post-stop teardown removes the exact TCX pin");
+    assert!(!Path::new("/sys/class/net").join(&emitter_tap).exists());
+    assert!(!Path::new("/sys/class/net").join(&sink_tap).exists());
+    handle.shutdown().await.expect("clean shutdown after complete owned cleanup");
 }

@@ -92,7 +92,7 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver(
 
     let vm_driver = VmDriver::new(
         Arc::new(SimVmm::new()),
-        clock,
+        clock.clone(),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         Arc::clone(&runner),

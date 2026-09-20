@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
 | Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base. Extended 2026-09-16 for GH #295: the accepted shared-bridge topology creates no new bounded context, aggregate, repository, event model, or lifecycle meaning; transient guest-network values and exact-generation mTLS capabilities remain subordinate to existing Workload Orchestration, Transparent mTLS Enforcement, Workload Identity, Guest Runtime, and host-substrate boundaries. GH #295 DDD accepted — approved by DDD review iteration 2 on 2026-09-16.** |
-| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); shared-bridge microVM application composition (2026-09-16, GH #295, stage 3 APPROVED by independent solution review iteration 4 after iterations 1–3 remediation) maps accepted ADR-0114…0118/0120…0126 onto existing control-plane/worker/host/BPF adapters and pins only the user-authorized F-01/F-02/F-03 cross-crate contract closures; no new crate, dependency, service, behavior scope, or persistence owner** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); shared-bridge microVM application composition (2026-09-16, GH #295, stage 3 APPROVED by independent solution review iteration 4 after iterations 1–3 remediation) maps accepted ADR-0114…0118/0120…0126 onto existing control-plane/worker/host/BPF adapters and pins the user-authorized F-01/F-02/F-03 closures; post-DISTILL D-295-DISTILL-1/2 (user-approved and independently approved 2026-09-16) add only the doc-hidden shared-owner boundary and optional-prior/private rollback I/O seam; D-295-DISTILL-4 (user-approved and independently approved at review iteration 4 on 2026-09-16) keeps core infrastructure-free, puts the guest-network application contract in control-plane, and retains exact aya sources in dataplane; D-295-DISTILL-5 (user-approved and independently approved at review iteration 6 on 2026-09-16) adds only the private typed host scratch-I/O boundary and honest host-algorithm evidence split while retaining public sim APIs; no new crate, dependency, service, behavior scope, or persistence owner** |
 
 ---
 
@@ -11291,6 +11291,50 @@ ADR-0120 through ADR-0126 are accepted and user-ratified; the stage-2 DDD
 conclusion is accepted. The remediation closes four application-contract gaps
 without changing behavior or scope, and it does not authorize DELIVER.
 
+**Post-DISTILL bounded decisions:** D-295-DISTILL-1 and D-295-DISTILL-2 were
+user-approved and independently approved on 2026-09-16. They expose only the
+doc-hidden shared-network owner contract needed by the existing sibling sim
+adapter, make clean-first-boot nft rollback represent absence honestly behind
+a private host I/O seam, and make startup cleanup retain the primary failure,
+direct cleanup source, and complete per-resource scratch observation without
+an implicit zero. D-295-DISTILL-4 was user-approved and independently approved
+on 2026-09-16: core retains only dependency-neutral handoff, EXEC
+synchronization/request, and bridge-MAC values; control-plane owns the complete
+guest-network application contract; and dataplane owns the semantic TCX attach
+projection plus exact aya error sources. D-295-DISTILL-5 was user-approved and
+independently approved at review iteration 6 on 2026-09-16. It gives the
+private host owner one module-private typed scratch-I/O boundary while keeping setup/probe/cleanup/
+inventory/error aggregation in that owner; public sim scripting remains the
+reusable composition boundary. These decisions add no behavior, owner,
+service, persistence, deployment unit, crate, or dependency cycle.
+D-295-DISTILL-6/7/8 and the `RegistrationRetired` correction were user-approved
+and independently approved at review iteration 9 on 2026-09-17. They pin the dataplane typed TCX mutation/query adapter, the worker-
+private capability registry, and the control-plane-private retained
+supervisor/DNS task owners. D-295-DISTILL-9 was user-approved and independently
+approved at review iteration 12 on 2026-09-17 under the user's autonomous
+DESIGN/DISTILL authorization. It adds a semantic bridge-family guard adapter over one private family-
+aware nft codec while every public IPv4 API remains unchanged. Its read-only
+classification preserves actual identity, kernel rule order, duplicates and
+all target-table children. Chain occurrences never fabricate base-chain fields,
+and one adapter-owned semantic rule program supplies structured netlink and
+guest-error facts without raw bytes; typed validation remains separate from
+sourced netlink failure. DISTILL executable reconciliation is in progress; no
+behavior or ownership decision is reopened.
+
+D-295-DISTILL-10 records the reusable public `SimSharedGuestNetworkOwner`
+standing and one-shot fault scripting, ordered call observation, and shared-owner/
+EXEC test wiring. It is deterministic test infrastructure and adds no product
+behavior or compatibility surface.
+
+D-295-DISTILL-11 closes three acceptance reachability gaps without adding a
+product outcome. The worker privately owns and classifies actual Tokio listener
+task return/error/panic/cancel/channel-close causes. Shared-owner audit carries
+the failed closed component plus its exact existing source, and the public sim
+adapter scripts all twelve components plus one exact next result. S37 observes
+the existing structured `TcxLink` unhealthy event and joins it to supervisor
+begin-before-event and core Recovering-claim evidence; no public kill method,
+gate accessor, PID oracle, or fabricated consequence is added.
+
 The architecture stays a Rust modular monolith with ports-and-adapters. The
 current production chain—`overdrive serve` composition root → `AppState` →
 reconciliation runtime → action shim → `DriverRegistry`/`VmDriver`—remains.
@@ -11305,24 +11349,28 @@ gate change.
 
 | Component boundary | Owning crate/home | Responsibility after #295 |
 |---|---|---|
-| Serve composition and task ownership | `overdrive-control-plane::run_server*`, `AppState`, `ServerHandle` | Wire/probe/reclaim/sweep/converge before use; retain exactly one runtime supervisor, request receiver, and EXEC gate; preserve existing runtime, store, observer, and driver ownership. |
-| Allocation network orchestration | Existing action-shim C3 seam in `overdrive-control-plane` | Apply fixed-cap admission before assignment; sequence lease, TAP/bridge/guard/map/TCX effects, VMM start, Running, registration, EXEC, and reverse-order cleanup. The async provisioner and opaque plan are doc-hidden public solely for a sibling `overdrive-sim` adapter; two test-gated high-level seams drive the real action/runtime owner. |
-| Shared guest-switch owner | Internal `overdrive-control-plane` component over existing adapter crates | Own one fixed-MAC bridge/gateway, endpoint/counter maps, pinned per-TAP TCX links, managed-TAP proof-mark guard, startup probe, boot sweep, runtime audit, TAP quiescence, and repair. It is not a Service dataplane or lifecycle owner. |
+| Serve composition and task ownership | `overdrive-control-plane::run_server*`, `AppState`, `ServerHandle` | Ordinary `run_server` privately constructs one host shared-network owner; injected-driver compositions require that one owner immediately before EXEC wiring. Wire/probe/reclaim/sweep/converge before use. `ServerHandle` retains exactly one private supervisor owner with the sole join/request receiver/EXEC supervisor/shutdown token; that supervisor owns the one DNS task owner. |
+| Allocation network orchestration | `overdrive-control-plane::guest_network`, used by the existing action-shim C3 seam | Own the opaque plan, both doc-hidden ports, probe/scratch/operation/fact/error/result family, private address pool, and private host owner. Apply fixed-cap admission before assignment; sequence lease, TAP/bridge/guard/map/TCX effects, VMM start, Running, registration, EXEC, and reverse-order cleanup. The sibling sim implements the same application port through its existing control-plane dependency. |
+| Shared guest-switch owner | Private `overdrive-control-plane` host implementation behind one doc-hidden application port | The same object inherits allocation provision/teardown and owns one fixed-MAC bridge/gateway, endpoint/counter maps, pinned per-TAP TCX links, managed-TAP proof-mark guard, startup probe, boot sweep, runtime converge/audit, TAP quiescence, and repair. Its module-private typed scratch I/O supplies only raw leaf effects/counts; the owner retains setup, three-stage exercise, full reverse cleanup, all-fifteen inventory, and aggregation. Audit failure carries the exact closed component plus existing source. The sibling sim scripts all twelve components and exact next results for deterministic composition without pretending to prove kernel cleanup. |
 | Guest-address pool | Internal `overdrive-control-plane` value/owner | Own one process-session allocation-to-plan binding with atomic smallest-free assignment, release-last, and ordered snapshot. No repository or durable lease table. |
-| Host network effects | `overdrive-netlink` | Extend typed rtnetlink/nft operations and exact read-back for bridge/TAP/MAC/master/up/down/address/guard state. No new port trait or subprocess path. |
-| Endpoint classifier | `overdrive-bpf` + `overdrive-dataplane` | Add SCHED_CLS program/maps and high-level TCX lifecycle adapter. Keep the existing XDP/cgroup-BPF Service dataplane separate and authoritative for backend selection. |
-| Transparent intercept owner | `overdrive-worker::MtlsInterceptWorker` + `MtlsIntercept` | Keep the existing four injected ports; boot-start exactly two node-shared listeners; expose one task-failure future plus exact-port converge/audit; keep allocation start/stop for generations, indexes, set elements, claims, publish fence, and capability-scoped handles; shutdown drains userspace/allocation ownership while retaining constant empty rules for fail-closed next-boot revalidation. |
+| Host network effects | `overdrive-netlink` | Extend typed rtnetlink and the shipped nft codec. Existing public IPv4 operations remain unchanged; one private family-aware codec also backs semantic bridge-guard facts/outcomes and exact table/chain/set/rule/member observe/converge/delete. Read-only observation retains actual family/table identity, every chain exactly once as base/regular/unsupported without invented fields, ordered duplicate-preserving semantic rule programs including unknown expressions, and a disjoint exhaustive target-table child inventory. The adapter's canonical rule facts also populate structured guest-network expected/observed postconditions. Validation is pre-I/O; only real netlink failures retain their source. Aggregate guard deletion requires one exact exclusive owned identity; conflicts refuse without mutation and outside objects remain equal. |
+| Endpoint classifier | `overdrive-bpf` + `overdrive-dataplane::guest_tcx` | Add SCHED_CLS program/maps and the high-level TCX lifecycle plus typed semantic query/pinned-link detach/endpoint/counter adapter. Dataplane owns private map ABI, sorted attachment identity, and exact aya map/program/pin/link/I/O sources. Keep the existing XDP/cgroup-BPF Service dataplane separate and authoritative for backend selection. |
+| Transparent intercept owner | `overdrive-worker::MtlsInterceptWorker` + `MtlsIntercept` | Keep the existing four injected ports and public methods. Its module-private capability registry owns checked generation, Pending reservations/effects, retirement ownership handoff, cancellation/shutdown wake, RAII claims, publish fence, Retiring drain/complete, and address-reuse exclusion. A private two-slot Tokio task owner classifies real listener return/error/panic/cancel/channel-close and prevents detach. Activation after retirement returns typed refusal and can never make intercept-live or release EXEC. |
 | Guest runtime/VMM | `overdrive-worker::VmDriver`, `overdrive-host::CloudHypervisorVmm`, `overdrive-init` | Consume one grouped guest assignment, attach the host TAP directly, retain READY/Running/EXEC meanings, and keep all VMM/cgroup/confinement responsibilities. `VmDriver` receives only the claim half of one `overdrive-core` EXEC-gate wiring. |
 | EXEC admission capability | `overdrive_core::guest_network`, consumed by worker and control plane | One constructor produces paired opaque gate/supervisor capabilities over one lock/Notify/recovery snapshot. Worker can claim/wait/refuse; only the control-plane supervisor capability can recover, reopen, or fail-stop. `Driver` is unchanged. |
-| Name layer | Existing `DnsResponder`, `NameIndex`, `FrontendAddrAllocator` | Serve one shared-gateway socket while preserving userspace wire/index/negative-answer/source-pin semantics. |
+| Name layer | Existing `DnsResponder`, `NameIndex`, `FrontendAddrAllocator` | Serve one shared-gateway socket while preserving userspace wire/index/negative-answer/source-pin semantics. One private DNS task owner, owned by the common supervisor, classifies task loss and performs exact replacement as cooperative old stop/join → bounded abort backstop if necessary → replacement read-back → spawn/publish. No live handle is overwritten. |
 | Resource/recovery owners | Existing `CgroupManager`, `VmReclamation`, `VmHostState` | Retain per-VM CPU/memory/PID/OOM/termination and boot-reclamation authority. Shared-switch sweep follows reclamation and never adopts a VMM. |
 
-Dependency direction remains inward: `overdrive-core` carries only the
-already-approved transient values, constant, and cross-crate error/request
-vocabularies; it does not import aya, rtnetlink, nft, Tokio networking, or host
-syscalls. Control-plane and worker application owners depend on core ports.
-Host/kernel crates implement effects. There is no new adapter-to-domain
-back-edge, crate, service, database, message queue, or deployment boundary.
+Dependency direction remains acyclic. `overdrive-core` carries only the grouped
+driver assignment, VMM attachment, fixed bridge MAC, and dependency-neutral
+EXEC synchronization/request values; it does not own the guest-network plan,
+ports, facts, or error family and does not import aya, rtnetlink, nft, Tokio
+networking, or host syscalls. `overdrive-control-plane::guest_network` owns the
+application contract and depends on existing core, dataplane, and netlink
+crates. `overdrive-dataplane::guest_tcx` owns TCX/aya translation and exact aya
+sources. Worker, host, and kernel adapters retain their existing directions.
+There is no adapter-to-domain back-edge, crate, service, database, message
+queue, or deployment boundary.
 
 Iteration-1 dispositions are deliberately narrow:
 
@@ -11338,6 +11386,16 @@ Iteration-1 dispositions are deliberately narrow:
 | S2-F04 | Mark ADR-0090's netns/veth and Exec material historical; live target evidence is default-feature production shared bridge/direct host TAP through `serve` + `deploy`. |
 | I3-F01 | Split rollback transport/read failure from semantic rollback mismatch: only the former carries an operation-tagged real `NetlinkError`; exact restored-prior and wrong-identity read-back are separate source-less dispositions retaining structured identities. |
 | I3-F02 | Remove Exec/process from ADR-0090's operative decision, consequence, and evidence sets; retain it only as explicitly historical rationale after GH #293. |
+| D-295-DISTILL-1 | Keep one private host shared-switch implementation but expose a doc-hidden owner super-port over the allocation provisioner; inject one owner before paired EXEC wiring; preserve the optional primary failure, direct cleanup source, and complete per-resource scratch observation, with unavailable distinct from zero and no default complement. |
+| D-295-DISTILL-2 | Represent rollback prior as optional, where `None` means absence; test the host algorithm through one private observe/atomic-replace effect seam without changing public `MtlsIntercept`. |
+| D-295-DISTILL-4 | Keep cross-crate handoff, EXEC synchronization/request, and bridge-MAC values in core; put the complete guest-network application contract and private owner/pool in control-plane; put the semantic TCX attach projection and exact aya-backed TCX error in dataplane; re-export and wrap that canonical error without duplicating its taxonomy. |
+| D-295-DISTILL-5 | Keep startup setup/probe/reverse-cleanup/all-family observation and error aggregation in `HostSharedGuestNetworkOwner`; inject only module-private typed raw effects/counts into source-local tests; retain public sim scripting/call observation/test wiring as composition evidence rather than host-algorithm proof. |
+| D-295-DISTILL-6 | Keep raw aya and map ABI in dataplane; expose only semantic attachment/counter values and doc-hidden typed query/detach/endpoint/counter operations shared by production ownership and the S-ND295-37 external actor. |
+| D-295-DISTILL-7 | Keep registration generation, reservations, partial effects, capability lifecycle, claims, publication, Pending-retirement handoff, waiter/wake, drain and reuse exclusion inside one module-private worker registry. Project activation-after-retire as one typed allocation-identified install failure and stable action-shim stage; never success or EXEC release. |
+| D-295-DISTILL-8 | Keep exactly one private retained supervisor owner in `ServerHandle` and one stateful private DNS task owner beneath it; classify actual Tokio join/channel outcomes, fail-stop before return, separate intentional shutdown, and replace DNS only after old-task termination plus replacement read-back, never by overwriting a live handle. |
+| D-295-DISTILL-9 | Keep one private family-aware nft codec and every existing public IPv4 API unchanged; expose only semantic bridge-guard specification/facts/outcomes and staged table/chain/set/rule/member operations needed by production ownership and S-ND295-37. Preserve actual observed identity; exactly-once base/regular/unsupported chain occurrences without fabricated fields; canonical ordered rule programs with duplicates and unknown expressions shared by netlink and guest-network postconditions; and every candidate-table child. Separate validation from sourced netlink failure and permit aggregate deletion only for the exact exclusive owned guard. |
+| D-295-DISTILL-10 | Keep the public shared-network sim reusable and pin exact standing/one-shot fault scripting, ordered call observation, and shared-owner/EXEC test wiring. Simulation proves application-port composition and does not replace host-owner evidence. |
+| D-295-DISTILL-11 | Classify shared-listener return/error/panic/cancel/channel-close through one module-private actual Tokio task owner; tag shared-network audit failure with its exact closed component and retained guest-network source; extend the reusable sim with twelve independent component slots and one exact next audit result; prove S37 EXEC closure by joining the structured `TcxLink` unhealthy event to supervisor begin-before-event and core Recovering-claim evidence. No public task control, gate accessor, PID/process evidence, fabricated consequence, or new product outcome. |
 
 Exact signatures exist only in the feature delta.
 
@@ -11351,13 +11409,19 @@ Service selector; the selected `BackendId` receipt remains the exact-peer
 identity source before traffic reaches the selected node's leg C.
 
 The new action-shim host-effect boundary is the accepted async
-`GuestNetworkProvisioner`; its normative methods and typed error family live
-only in the #295 feature delta. The host implementation composes
-`overdrive-netlink` with the TCX adapter and returns only after effect and
-postcondition read-back complete. Its cross-crate visibility is limited to the
-opaque/read-only plan and doc-hidden trait required by `overdrive-sim`; the
-test-gated dispatch/tick functions reuse production preflight, hydration, View,
-validation, shim, and re-enqueue ownership. The accepted `MtlsIntercept` method
+`GuestNetworkProvisioner`, inherited by the doc-hidden
+`SharedGuestNetworkOwner`. The opaque/read-only plan, both ports, and their
+probe/scratch/operation/fact/error/result family live in
+`overdrive-control-plane::guest_network`; exact normative shapes live only in
+the #295 feature delta. The private host implementation composes
+`overdrive-netlink` with `overdrive-dataplane::guest_tcx`, whose semantic attach
+projection and canonical error retain the exact aya source. Control-plane
+re-exports those TCX boundary types and wraps the canonical TCX error inside
+its single guest-network error taxonomy. Effects return only after their
+postcondition read-back completes. Cross-crate visibility is limited to the
+opaque/read-only plan and the two doc-hidden traits required by the one sibling
+`overdrive-sim` owner; the test-gated compositions reuse production preflight,
+hydration, View, validation, shim, and re-enqueue ownership. The accepted `MtlsIntercept` method
 surface owns shared nft elements, while `MtlsInterceptWorker` owns the concrete
 boot listener lifecycle and its task observation/recovery. Existing
 `MtlsEnforcement`, `MtlsResolve`, `IdentityRead`, `Vmm`, `CgroupFs`,
@@ -11365,6 +11429,14 @@ boot listener lifecycle and its task observation/recovery. Existing
 existing contracts and adapters. Linux and Cloud Hypervisor are local substrate integrations, so
 startup probes, adapter-equivalence tests, and native behavior checks—not
 Pact-style remote API contracts—are the appropriate contract evidence.
+
+The host startup algorithm is tested one layer lower without widening that
+cross-crate surface. A private typed scratch-I/O contract exposes raw
+netlink/TCX/socket results and individual inventory counts only to source-local
+tests. The owner constructs the complement and cleanup aggregate. Public
+`overdrive-sim` scripts the accepted owner-port result for composed ordering and
+reaction tests; it does not substitute for the source-local host algorithm or
+native-metal kernel inventory.
 
 ### Lifecycle and data-flow contract
 
@@ -11393,6 +11465,13 @@ replace owned rule targets. Foreign/conflicting rule identity, a nonzero
 managed-TAP complement, a non-BootClosed gate, replacement/read-back failure,
 or rollback uncertainty refuses startup without READY/admission. Runtime
 recovery rebinds only the recorded ports and never rewrites target values.
+
+Startup-probe refusal never invents cleanup success. When cleanup succeeds,
+every bridge/TAP/map/entry/program/link/pin/bridge-guard family is observed as
+zero and the original primary failure returns. When cleanup or its observation
+fails, the refusal retains the optional primary failure, direct cleanup source,
+and one complete per-family observation in which unavailable is distinct from
+zero; no production shared owner or task is published.
 
 The allocation vertical slice remains production-driven:
 
@@ -11450,6 +11529,15 @@ partial result or a result arriving after FailStop is ignored for admission.
 At the deadline the typed request crosses to the CLI-owned `ServerHandle`,
 which applies the accepted ten-second hard outer shutdown bound and status 1.
 Normal SIGINT remains status 0.
+
+Recurring S-ND295-33 conformance drives the exported server handler through
+the public HTTPS API, drains it after the typed fail-stop request, and has the
+test harness construct a fresh handler over retained roots. The runtime does
+not replace itself. That direct-handler lane makes no subprocess, CLI, PID, or
+new-process claim. The accepted external deployment-supervisor replacement and
+production-readiness contract remain separate operational context; no S-ND295
+process/PID/exit test is assigned. No restart daemon or HA owner is added to
+Overdrive.
 
 The security model has four explicit trust crossings:
 
@@ -11556,6 +11644,12 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-09-17 | **netns-density-295 D-295-DISTILL-10 deterministic simulation contract.** The public shared-network sim retains reusable standing/one-shot port-output scripting, ordered call observation, and shared-owner/EXEC test wiring. D11 extends component-audit scripting separately. This is test infrastructure, not product behavior or compatibility surface. — Morgan. |
+| 2026-09-17 | **netns-density-295 D-295-DISTILL-11 final acceptance reachability (authorized under autonomous DESIGN/DISTILL authority).** One module-private two-slot task owner classifies actual Tokio return, I/O error, panic, cancellation and observer-channel close into the accepted mTLS shared-owner errors; private abort-on-drop ownership prevents detached tasks, and source-local tests drive causes rather than constructing consequences. Shared-network audit now retains the exact closed component plus existing guest-network source. The public sim provides independent standing slots for all twelve components and one exact next component/source result while preserving ordered calls and reusable DST semantics. S37 proves EXEC closure through the existing structured `TcxLink` unhealthy event joined to supervisor begin-before-event ordering and the core Recovering claim block; native metal retains timing/frame/counter/TAP evidence. No public kill method, gate accessor, PID/process oracle, duplicate error family or new product outcome is added. — Morgan. |
+| 2026-09-17 | **netns-density-295 D-295-DISTILL-9 semantic bridge-family nft adapter (user-approved under autonomous DESIGN/DISTILL authorization; independently approved at iteration 12 after F-10-01/F-10-02 and F-11-01/F-11-02 remediation).** The shipped nft implementation gains one private IPv4/bridge family discriminator shared by payloads, atomic transactions, observers, dumps, normalization and decoding. Every existing public IPv4 API and PORT-295-C behavior remains unchanged. `overdrive-netlink::nft::bridge` owns validated guard specification, semantic observations/outcomes, complete set/lookup ABI, generation checks and staged idempotent convergence/cleanup. Read-only classification preserves actual family/table identity; every base, regular or unsupported chain occurrence exactly once without invented fields; kernel rule order, duplicates and ordered unknown expressions through one adapter-owned semantic program; and every owned or foreign target-table child through a disjoint exhaustive inventory. The same semantic rule facts form `GuestNetworkFact::BridgeGuard` expected/observed evidence, so control-plane copies neither raw ABI nor expected byte programs. Aggregate `delete_owned_guard` deletes only one exact exclusive owned identity with exactly the expected members. Identifier/priority/mark and member byte/NUL/IFNAMSIZ failures occur before I/O through typed validation; only transport/malformed-decode/ACK/kernel failures retain `NetlinkError`. `HostSharedGuestNetworkOwner` maps real transport sources to existing netlink errors and source-less validation/conflict to the existing postcondition mismatch; S-ND295-37 uses the same production adapter. No new ADR, guest-network error variant, raw builder, subprocess, public owner fault hook, daemon, HA, persistence, or PID/process acceptance test is added. — Morgan. |
+| 2026-09-17 | **netns-density-295 D-295-DISTILL-6/7/8 exact acceptance-driving contracts and `RegistrationRetired` correction (user-approved; independently approved at iteration 9).** Dataplane owns semantic TCX attachment/counter projections, typed query/pinned-link detach/endpoint/counter operations, private map ABI, sorted IDs, and exact Link/I/O sources. `MtlsInterceptWorker` owns one module-private capability registry with checked generation-before-effects, Pending reservations, atomic activation, RAII claims, publication fence, Retiring wait/drain/complete, and predecessor/successor exclusion. `ServerHandle` owns exactly one private retained supervisor handle; that supervisor owns one private DNS serve-task owner and classifies actual Tokio return/error/panic/cancel/channel-close outcomes before fail-stop return, while intentional shutdown and recovered-task replacement stay in the same owners. No public kill/generation/fault hooks, parallel observer, process/PID acceptance test, daemon, HA mechanism, or persistence is added. — Morgan. |
+| 2026-09-16 | **netns-density-295 D-295-DISTILL-5 private host scratch-effect boundary (user-approved; independently approved at review iteration 6).** `HostSharedGuestNetworkOwner` retains scratch setup, classifier/original-destination/detached-link exercise, unconditional reverse cleanup, continuation after the first cleanup failure, all-fifteen inventory, complement construction, and source-honest aggregation. One module-private typed I/O contract supplies raw netlink/TCX/socket results and per-family counts to source-local tests; its private real implementation remains the native-metal binding. Public `SimSharedGuestNetworkOwner` scripting, call observation, and test wiring remain intentional cross-crate deterministic composition API and do not claim host cleanup proof. S-ND295-33's already-approved evidence mapping is recorded as exported-handler/public-HTTPS conformance with harness-owned fresh-handler construction; it makes no subprocess/PID/CLI claim. The external deployment-supervisor/new-process and CLI-exit contracts remain unchanged operational context, with no S-ND295 process/PID/exit test assigned. No new ADR, crate, dependency, owner, daemon, HA mechanism, or persistence is added. — Morgan. |
+| 2026-09-16 | **netns-density-295 bounded post-DISTILL DESIGN decisions D-295-DISTILL-1/2 (user-approved and independently approved), complete F-02 source-honest cleanup contract, and D-295-DISTILL-4 crate-ownership correction (user-approved and independently approved at iteration 4).** One private control-plane host owner sits behind a doc-hidden `SharedGuestNetworkOwner` super-port over the accepted allocation provisioner, with the same owner injected before paired EXEC wiring in the two existing injected-driver compositions. Startup cleanup retains the optional primary failure, direct cleanup source, and complete bridge/TAP/map/entry/program/link/pin/guard observation; unavailable is distinct from zero and the complement has no default. Clean-first-boot nft rollback carries an optional prior and can restore absence; a module-private observe/atomic-replace effect seam makes the host algorithm testable without changing public `MtlsIntercept`. Core retains only grouped driver/VMM handoffs, fixed bridge MAC, and dependency-neutral EXEC synchronization/request values; control-plane owns the guest-network plan, both ports, facts/errors/result, private pool, and private host owner; dataplane owns semantic TCX attach projection and the canonical TCX error with exact aya sources. No new crate or dependency cycle is introduced. No production code, tests, DISTILL scenario, expectation artifact, roadmap, review, or DELIVER authority changed in this documentation pass. — Morgan. |
 | 2026-09-16 | **netns-density-295 stage-3 application/solution architecture, review iterations 1–4 (GH #295; APPROVED 2026-09-16).** Iteration 1 pins dependency-neutral EXEC capabilities, sim provisioner seams, worker-owned listener lifecycle, and the kernel packet edge. Iteration 2 distinguishes cold-boot atomic target recovery from runtime exact-port repair, removes competing VmDriver signatures, closes Contract Shape universes, and updates ADR-0090's live substrate. Iteration 3 splits sourced rollback I/O/read failures from source-less semantic rollback mismatches and removes Exec/process from ADR-0090's operative contract. Independent solution-architecture review iteration 4 approved the completed stage with zero critical/high/medium findings. Feature-delta remains the exact API SSOT. No new crate, dependency, service, persistence owner, fixed/persisted port, roadmap, behavior expansion, or DELIVER authority. — Morgan. |
 | 2026-09-14 | **remove-legacy-exec-workload-driver bounded DESIGN correction after iteration-2 approval (GH #293).** The completed independent iteration-2 review remains recorded as `APPROVED` for the prior bundle. A later user correction identified that bundle's unsanctioned `ParseError::RetiredExecDriver` compatibility API. The revised exact contract deletes that proposed variant/message and every special legacy-driver parser branch: `[vm]` is the sole live grammar; unsupported, unknown, invalid, or missing driver input uses only existing ordinary generic parser/serde behavior. Dedicated rejection matrices and tests of deleted symbols are not DESIGN obligations. P-293-1 through P-293-6, exactly four incompatible V1 resets, host Exec-probe deletion, P-105, and the #295 constraint-only boundary are unchanged. This bounded correction awaits fresh independent DESIGN re-review; existing DISTILL artifacts are not edited by this pass and do not authorize DELIVER. — Morgan. |
 | 2026-09-14 | **remove-legacy-exec-workload-driver DESIGN user-approval and iteration-1 remediation (GH #293; ADR-0110/0111/0112/0113).** P-293-1 through P-293-6 are user-approved. Live execution is VM/microVM-only while the existing registry/index/observer routing remains; the full host Exec health-probe surface is deleted; exactly four Exec-coupled envelopes reset forward-only to incompatible V1 with no legacy reader/migration/fixture; P-105 allocation identity and replacement remain unchanged; and every #295 shared-switch/per-tap/shared-DNS/transparent-mTLS handoff bullet remains a constraint only, not #293 implementation. Iteration-1 F-01–F-04 are remediated without changing those decisions: Reuse Analysis now declares bounded composition/observer/probe universes, `Running` is factually separated from post-Running intercept installation, `WorkloadSpecInput::exec_command` is deleted without replacement, and ADR-0113 explicitly supersedes only ADR-0054's Exec clauses plus ADR-0059. Outcome SSOT registers four #293 outcomes, supersedes the old combined Service-admission promise, and narrows the surviving VM target projection. Independent DESIGN re-review is still required; no implementation, roadmap, DISTILL, or DELIVER authority is granted. — Morgan. |

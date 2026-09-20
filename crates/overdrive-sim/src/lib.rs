@@ -32,6 +32,9 @@ pub mod adapters;
 pub mod harness;
 pub mod invariants;
 
+pub use adapters::guest_network::{
+    SimSharedGuestNetworkOwner, test_wiring as shared_guest_network_test_wiring,
+};
 pub use adapters::{
     SimCgroupAccounting, SimCgroupFs, SimEntry, SimOp, SimVmHostState, SimVmm, SimVmmProbeFault,
 };

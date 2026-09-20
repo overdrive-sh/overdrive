@@ -132,7 +132,7 @@ async fn production_owner_replacement_survives_rejected_publication_and_reopen_f
          --no-capture"
     );
 
-    production_owner_replacement_case(DriverType::Vm).await;
+    Box::pin(production_owner_replacement_case(DriverType::Vm)).await;
 }
 
 async fn production_owner_replacement_case(driver_type: DriverType) {

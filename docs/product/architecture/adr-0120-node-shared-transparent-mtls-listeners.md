@@ -2,9 +2,12 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
-GH #295 DESIGN stage 1. ADR-0123 owns registration generations; ADR-0124 owns
-runtime recovery; ADR-0125 owns destination allowed-port membership.
+**Accepted — the current #295 contract is user-approved and independently
+approved through D-295-DISTILL-7 at review iteration 9 on 2026-09-17;
+D-295-DISTILL-11 task-owner evidence is autonomously authorized and pending the
+trusted-checkpoint review.** ADR-0123 owns registration generations;
+ADR-0124 owns runtime recovery; ADR-0125 owns destination allowed-port
+membership.
 
 ## Context
 
@@ -36,25 +39,52 @@ The node listener owner binds exactly one transparent leg-F listener and one
 transparent leg-C listener. Their lifetime is node-scoped; stopping an
 allocation never closes or replaces either listener.
 
-**Application-boundary amendment, 2026-09-16 (user-authorized solution-review
-F-03 remediation).** The existing `MtlsInterceptWorker` is that owner. Its
-mandatory four-port constructor remains side-effect free; a boot lifecycle
-starts the two listeners and constant rule targets once, one failure-observation
-future feeds the control-plane supervisor, exact-port converge/audit performs
-runtime recovery, and owner shutdown closes/drains the complete listener tree.
+One module-private registry inside `MtlsInterceptWorker` owns the complete
+Pending/Active/Retiring capability lifecycle. It checks generation overflow and
+key conflicts before effects, publishes indexes only with full element
+ownership, issues RAII exact-generation claims, fences returned-handle
+publication against retirement, waits claims without holding the lock, and
+retains predecessor reservations through handle/element drain completion.
+Listener sockets/tasks, node guard, and unrelated capabilities remain outside
+that registry's mutation universe.
+
+Retirement may take ownership while registration is Pending. It retains every
+reservation and cannot expose a drain until the Pending owner either activates
+atomically or relinquishes all partial element effects. Activation after that
+handoff never publishes Active; it transfers its effects to the Retiring record
+and wakes the same waiter. Pending cancellation drops partial guards before it
+signals completion. No registry lock crosses guard teardown or an await, and
+owner shutdown uses the same handshake for every Pending registration.
+
+If activation observes that retirement already owns the generation, it never
+reports successful installation. `start_alloc` returns the typed allocation-
+identified registration-retired failure while the retirement owner keeps every
+guard and reservation through drain completion. The action shim therefore
+keeps EXEC closed, stops the driver, joins that same retirement cleanup, tears
+down the guest network, and releases the address last; no second cleanup owner
+is created.
+
+The existing `MtlsInterceptWorker` is that owner. Its mandatory four-port
+constructor remains side-effect free. A boot lifecycle starts the two listeners
+and constant rule targets once; one failure-observation future feeds the
+control-plane supervisor; exact-port converge/audit performs runtime recovery;
+and owner shutdown closes and drains the complete listener tree.
 After allocation elements are removed, shutdown retains the constant empty
 rules for the accepted listenerless mark/local-route fail-closed state and
 next-boot revalidation.
+
 On a fresh process only, boot first proves the EXEC gate is closed and stale
 managed-TAP ownership is empty, then identifies the retained owned rules, binds
 fresh ephemeral F/C ports, atomically retargets only those owned rules, and
 requires complete socket/rule/set read-back before admission. No listener is
 adopted or persisted. Runtime recovery remains exact-port rebind with target
 rewrite forbidden.
+
 Per-allocation start/stop owns only registration capabilities, shared set
 elements, claims, and enforcement handles. Exact signatures and typed error
-projection live only in the #295 feature delta; ADR-0076 is amended to remove
-its stale per-allocation listener interpretation.
+projection live only in the #295 feature delta. ADR-0076 retains privileged
+intercept-port ownership but does not assign listener cardinality or lifetime
+per allocation.
 
 The owner maintains two allocation-registration indexes. Leg F resolves the
 accepted socket's validated source guest address and recovered original
@@ -84,6 +114,19 @@ follow the normal allocation lifecycle.
 ADR-0124 supervises both listeners at runtime: task/socket failure immediately
 closes new command release, receives a five-second bounded reconvergence window,
 and fail-stops the serve process if recovery does not complete.
+
+The worker retains both listener tasks through one module-private two-slot
+Tokio owner. Each listener join is awaited by an owned observer whose drop
+aborts rather than detaches the child; the owner keeps only a weak event sender
+plus the real receiver. Normal return, I/O error, panic and cancellation are
+classified from actual `JoinHandle` results, while unexpected loss of both
+observer senders is the channel-closed error. Recovery replaces only a slot
+already removed by terminal observation, and intentional owner shutdown
+consumes and joins the owner without reclassifying its cancellation. Source-
+local tests spawn real Tokio tasks and drive their actual return/error/panic/
+abort/channel-close causes through this owner. No public task-control hook or
+constructed consequence is part of the contract; exact private signatures
+remain single-sourced in the #295 feature delta.
 
 ## Alternatives considered
 

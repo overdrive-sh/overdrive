@@ -40,6 +40,7 @@ pub mod kek;
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+pub mod guest_network;
 pub mod identity_read;
 pub mod llm;
 // transparent-mtls-host-socket step 02-02 — `SimMtlsEnforcement`, the in-memory

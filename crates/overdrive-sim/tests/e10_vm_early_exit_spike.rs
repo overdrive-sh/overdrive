@@ -299,6 +299,10 @@ async fn guest_ready(path: &Path) -> BufReader<UnixStream> {
     peer
 }
 
+#[allow(
+    clippy::large_stack_frames,
+    reason = "GH #295 widens the typed ShimError future while this seeded spike intentionally retains its complete schedule state"
+)]
 async fn drive(seed: u64, restart: bool) {
     eprintln!("e10-vm-early-exit seed={seed} restart={restart}");
     let temp = tempfile::tempdir().unwrap();

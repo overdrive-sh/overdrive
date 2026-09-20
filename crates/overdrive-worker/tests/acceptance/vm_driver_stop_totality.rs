@@ -18,7 +18,12 @@
 //! evidence for the SAME production code those Tier-3 scenarios prove
 //! against a real substrate.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "acceptance tests require exact CONTRACT_SHAPE markers and diagnostic assertions"
+)]
 
 use std::future::Future as _;
 use std::os::fd::AsRawFd as _;
@@ -1060,7 +1065,6 @@ async fn backpressured_exec_release_cannot_delay_stop_deadline() {
         "the async release hook must remain owned and pending while its actual socket write is \
          backpressured"
     );
-
     let driver_for_stop = driver.clone();
     let handle_for_stop = handle.clone();
     let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_for_stop).await });
@@ -1307,6 +1311,7 @@ impl Vmm for HoldsFirstTermination {
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
+    clippy::too_many_lines,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
@@ -1356,7 +1361,6 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     });
     yield_for_task_poll().await;
     assert!(!release_task.is_finished(), "forced-backpressure precondition must hold");
-
     release_task.abort();
     assert!(release_task.await.expect_err("release task is cancelled").is_cancelled());
 

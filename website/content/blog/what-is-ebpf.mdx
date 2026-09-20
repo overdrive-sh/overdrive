@@ -1,0 +1,214 @@
+---
+title: What is eBPF, and why does Overdrive use it?
+description: eBPF lets Linux run small, verified programs at specific kernel events. Overdrive uses it for IPv4 service steering and same-host address rewrites, not as a replacement for the whole network stack.
+date: 2026-09-16
+author: The Overdrive team
+summary: eBPF gives Overdrive a narrow place to make frequent network decisions inside Linux, while user-space software keeps ownership of service discovery, lifecycle, and failure handling.
+---
+
+eBPF is a way to give Linux a small, tightly controlled instruction at a
+specific moment. A packet arrives. A process opens a network connection. Linux
+reaches that event, runs the instruction, and continues with the result.
+
+Overdrive uses eBPF for a narrow job: steering supported IPv4 service traffic
+to the right backend before a user-space proxy needs to handle each request. It
+also uses eBPF to rewrite service addresses for traffic that stays on one host.
+
+That scope matters. eBPF does not turn Overdrive into a kernel program. Most of
+Overdrive still runs in ordinary user space, where it discovers services,
+builds routing tables, manages workload lifecycle, and handles failures. eBPF
+makes a few frequent, bounded decisions at the Linux network edge.
+
+## A small rule at a guarded junction
+
+Think of Linux networking as a road network with guarded junctions. At a few
+named junctions, Linux permits a small rule card. When traffic reaches that
+junction, the guard reads the card and chooses from a short list of allowed
+actions.
+
+That picture maps to the real terms:
+
+- A **hook** is the junction: a named kernel event such as a packet arriving
+  or a process connecting a socket.
+- An **eBPF program** is the rule card. It runs only when its hook fires.
+- A **BPF map** is a shared table. Ordinary software writes the table; eBPF
+  code reads it while handling an event.
+- The **verifier** is Linux's safety inspector. It checks that a program has
+  safe memory access and a bounded path through its work before Linux accepts
+  it.
+
+The verifier does not accept arbitrary software. An eBPF program gets only the
+data and operations allowed at its hook. It cannot allocate memory freely,
+recurse, or take an unbounded walk through packet data. This restriction is the
+reason eBPF can run at sensitive kernel events without becoming a general way
+to run an application in the kernel.
+
+The verifier checks safety, not intent. It can accept a program that safely
+picks the wrong backend or safely writes a bad packet checksum. Overdrive still
+tests real packets on real Linux kernels.
+
+## Why place a routing decision inside Linux?
+
+A service request needs a destination. A conventional design can pass the
+request from Linux to a user-space proxy, ask the proxy to choose a backend,
+then send the traffic back through Linux. That model gives the proxy a lot of
+control, but it also puts the proxy in the path of every request.
+
+Overdrive takes a different split for its supported service path. User-space
+software does the slow, complex work before traffic arrives: it learns which
+backends exist and builds a routing table. An eBPF program reads that prepared
+table when the packet or socket appears and makes the small routing choice.
+
+The division is deliberate. eBPF does not search for services or run a broad
+policy engine for each packet. User space owns those jobs. eBPF handles the
+small decision that happens often.
+
+## How Overdrive steers IPv4 service traffic
+
+Overdrive gives a service a virtual IP address, or **VIP**. A VIP names the
+service rather than one particular server. An application can connect to that
+stable address even while the set of backends changes.
+
+For supported IPv4 TCP and UDP requests arriving at a network link, Overdrive's
+XDP program runs early in Linux's packet path. XDP means **eXpress Data Path**.
+It performs five small steps:
+
+1. It checks the packet shape and drops a bounded set of malformed forms while
+   recording a counter.
+2. It looks up the target address, port, and transport protocol in a service
+   table.
+3. It uses a Maglev table to select one backend. Maglev is a precomputed table
+   designed to spread connections across backends while keeping most choices
+   stable when the backend set changes.
+4. It rewrites the packet's destination address and port, then fixes the
+   checksums that protect those fields.
+5. It gives the packet back to Linux to route toward the selected backend.
+
+Replies need the same stable public shape. A second XDP program performs the
+reverse translation so a response from the backend appears to come from the
+service VIP and port.
+
+This path has sharp boundaries. It serves IPv4 TCP and UDP traffic in the
+supported forms. IPv6, IPv4 options, service-table misses, and other traffic
+continue through the normal Linux networking path. eBPF works with Linux's
+network stack; it does not replace it.
+
+## Same-host traffic uses a different hook
+
+Not every connection arrives at a network link. An application and its chosen
+backend can live on the same host. In that case, Overdrive attaches eBPF hooks
+to a Linux **cgroup**: a kernel-managed group of host processes.
+
+When a process in that cgroup connects to a service VIP, the hook can replace
+the VIP with the selected local backend address. Similar hooks handle UDP send
+and reply-address handling. The application still uses a normal socket and the
+stable service address. It does not need to know which local backend was
+selected.
+
+These hooks change addresses. They are not a general firewall, an access
+control system, or a private network. A lookup miss leaves unrelated traffic on
+the normal path.
+
+## User space writes the plan; eBPF reads it
+
+The routing table does not build itself in the kernel. Overdrive's user-space
+control plane creates it.
+
+For a backend update, user space fills a complete new inner map with a Maglev
+table. It then changes the corresponding entry in an outer map. A packet sees
+the old complete table or the new complete table, never a partly filled one.
+
+That handoff is atomic for a reader of that map entry. It does not make every
+related update one giant transaction. Reverse-routing state, backend records,
+and cleanup still need their own ordered handling. The point is narrower and
+more useful: traffic does not use a half-built backend table.
+
+This is the pattern behind Overdrive's eBPF use. User space does the work that
+needs rich data structures, retry logic, and lifecycle awareness. The kernel
+code reads a small prepared answer on the fast path.
+
+## What Overdrive gains
+
+The first gain is fewer user-space crossings on these selected paths. XDP can
+choose a backend before much of the ordinary network stack runs. A cgroup hook
+can change a same-host service address at the socket boundary. Neither path
+requires a user-space proxy to make that individual choice.
+
+The second gain is a clean route update. User space builds a new table away
+from active packet processing, then directs readers to it only after it is
+complete.
+
+The third gain is a stable service address. Applications use the service VIP;
+Overdrive can select the backend behind it. Applications do not need a special
+network library for this IPv4 service path.
+
+There is a limited safety benefit as well. The XDP program rejects and counts
+specific malformed packet forms close to the network edge. That is not DDoS
+protection, identity policy, or access control. It is one bounded check at one
+point in the packet path.
+
+These are qualitative gains, not a performance promise. Results depend on the
+network driver, Linux version, hook, map shape, packet mix, and control-plane
+state. eBPF removes work from particular paths; it does not make the whole
+system automatically fast or secure.
+
+## eBPF does not terminate Overdrive's TLS
+
+Overdrive uses mutual TLS, or mTLS, to authenticate peers and encrypt traffic.
+That work uses kernel support, but eBPF is not the TLS endpoint.
+
+The host-side path uses nftables TPROXY to direct traffic to a listener, Rustls
+for the mTLS handshake, kTLS for TLS record processing in the kernel, and
+`splice` to move the steady data flow between sockets without copying every
+byte through user space. eBPF steers service addresses and packets; it does not
+perform Overdrive's TLS handshake or terminate its TLS sessions.
+
+Choosing the right Linux primitive for each job matters more than forcing every
+network problem through eBPF.
+
+## The restrictions are part of the design
+
+eBPF earns its place by being constrained. Those constraints create real work.
+
+**The verifier shapes the code.** Every packet read needs a bounds check. Loops
+need fixed limits. A small change can make the verifier reject a program or do
+far more work to check it.
+
+**Kernel and driver support matter.** Native XDP depends on driver support.
+Overdrive can use generic XDP where native XDP is unavailable, but the two
+modes have different performance characteristics. Linux versions also differ
+in available hooks, helpers, and verifier behavior.
+
+**Byte-level correctness matters.** User-space code and kernel code must agree
+about each map's layout, capacity, and byte order. A packet rewrite must repair
+checksums correctly. The verifier cannot tell whether a checksum is safe to
+write but wrong on the wire.
+
+**Kernel state needs ownership.** Loading programs, attaching hooks, and
+pinning maps require host privileges. A normal shutdown releases the links
+Overdrive owns. A hard process stop can leave kernel state behind, so tests and
+operators need reliable inspection and cleanup procedures.
+
+**No single test is enough.** Overdrive needs tests for table construction,
+program behavior, real hook attachment, and the result on the wire. It also
+tracks verifier complexity, because a correct program that becomes too complex
+for the verifier is not deployable.
+
+## Keep the kernel decision small
+
+eBPF works best when the event happens frequently, the answer is small, and
+user space can prepare the data first. That describes service steering. It does
+not describe every networking problem.
+
+Overdrive keeps service discovery, lifecycle management, table construction,
+and failure handling in user space. It uses eBPF for the bounded decisions that
+benefit from running at a Linux network hook. The value comes from that narrow
+boundary, not from putting more of the platform in the kernel.
+
+## Further reading
+
+- [eBPF Foundation: What is eBPF?](https://ebpf.io/what-is-ebpf/)
+- [Linux kernel documentation: eBPF verifier](https://docs.kernel.org/bpf/verifier.html)
+- [Linux kernel documentation: BPF maps](https://docs.kernel.org/bpf/maps.html)
+- [Linux kernel documentation: map-of-maps](https://docs.kernel.org/bpf/map_of_maps.html)
+- [Aya: XDP programs](https://aya-rs.dev/book/programs/xdp)

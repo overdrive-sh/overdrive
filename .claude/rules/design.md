@@ -86,6 +86,29 @@ tests to their owning artifacts. Reviewers block an ADR that joins independent
 decisions, embeds interface or test specifications, uses an architecture layer
 as its decision statement, or becomes large by acting as a feature bucket.
 
+## Do not manufacture amendment history before implementation
+
+An accepted ADR whose decision has not yet been implemented has no operative
+historical contract to amend or supersede. When DESIGN review, DISTILL, or
+another pre-implementation activity corrects or completes that decision,
+incorporate the approved correction directly into the ADR's current Context,
+Decision, Alternatives, and Consequences in present tense. Do not add
+"amended," revision-history, remediation-history, or supersession prose that
+makes an unimplemented proposal read like a sequence of shipped behaviours.
+
+Material corrections still require explicit user approval and independent
+design review. Preserve the ADR's acceptance and review provenance, but record
+the resulting contract as the one current decision rather than narrating every
+pre-implementation draft that led to it. Git history already retains those
+drafts.
+
+Amendment or supersession history becomes appropriate only after the prior
+decision is operative: its implementation has landed, an external consumer can
+depend on it, persisted or wire state exists under it, or production behaviour
+otherwise makes the old contract historically relevant. At that point, retain
+the old contract and state the amendment or supersession explicitly so readers
+can understand compatibility, migration, and operational consequences.
+
 ## Preserve the meaning and ownership of existing states
 
 A locally useful readiness check does not automatically own an upstream

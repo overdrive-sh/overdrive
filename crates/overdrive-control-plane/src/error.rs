@@ -505,6 +505,11 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     MtlsBoot(#[from] MtlsBootError),
 
+    /// Shared guest-network startup proof or boot convergence failed before
+    /// production admission was published (GH #295).
+    #[error(transparent)]
+    GuestNetworkBoot(#[from] crate::guest_network::GuestNetworkError),
+
     /// Post-reclamation netns adopt/GC failed: a slot-correlation conflict, an
     /// `ip netns` / procfs observe failure, or an obs-store read failure.
     /// Boot-epoch VM reclamation has already made unsupervised non-terminal
@@ -968,6 +973,13 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::MtlsBoot(_))`) to emit
             // `health.startup.refused` and refuse to boot fail-closed;
             // this arm exists only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::GuestNetworkBoot(e) => (
+            // Shared guest-network probing, stale-owner sweep, convergence,
+            // and audit all complete before the HTTP listener is published.
+            // This arm therefore exists for exhaustive typed mapping only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

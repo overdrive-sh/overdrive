@@ -1553,6 +1553,27 @@ iteration 5 on 2026-09-16. D-295-7 and
 D-295-9 remain unchanged accepted-contract constraints.** This view is
 single-node, claims attachment capacity only, and is not DELIVER authority.
 
+**Post-DISTILL bounded decisions:** D-295-DISTILL-1 and D-295-DISTILL-2 were
+user-approved and independently approved on 2026-09-16. D-295-DISTILL-4 was
+user-approved and independently approved on 2026-09-16. D-295-DISTILL-5 was
+user-approved and independently approved at review iteration 6 on 2026-09-16. The diagrams show
+D-295-DISTILL-1's one owner boundary and D-295-DISTILL-4's crate ownership:
+core retains dependency-neutral handoff/EXEC values, control-plane owns the
+guest-network application contract, and dataplane owns the semantic TCX attach
+projection and exact aya-backed error. D-295-DISTILL-5 stays inside the existing
+private host-owner component: its module-private typed scratch I/O is not a new
+owner/container. Optional nft rollback prior remains a contract detail that
+does not add a C4 element. D-295-DISTILL-6/7/8 and the
+`RegistrationRetired` correction were user-approved and independently
+approved at review iteration 9 on 2026-09-17: they extend the existing dataplane
+adapter, worker owner, and retained control-plane task owner without adding a
+container. D-295-DISTILL-9 now pins the semantic bridge-family adapter needed
+by S-ND295-37, including exactly-once base/regular/unsupported chain
+occurrences, canonical semantic rule programs shared with guest-network
+postconditions, complete ordered/all-child observation, exact-exclusive
+deletion and typed pre-I/O validation, and is independently approved at review
+iteration 12 before DISTILL executable reconciliation.
+
 ### C4 Level 1 — System Context
 
 ```mermaid
@@ -1580,17 +1601,17 @@ C4Container
   title Accepted node-local shared bridge and transparent-mTLS path
 
   Container_Boundary(node, "Overdrive node") {
-    Container(cp, "GuestNetworkProvisioner + action shim", "Rust/Tokio", "Applies private 16,384 admission cap; owns one internal allocation-keyed address pool with assign/release/snapshot; carries one GuestNetworkPlan through ordered provision/teardown")
-    Container(sw, "Shared guest switch owner", "Linux bridge + aya-rs TCX + minimal bridge nft guard", "Owns fixed bridge MAC/gateway identity, endpoint bridge-MAC equality, maps, pinned links, proof-mark guard, runtime repair, and boot sweep")
-    Container(dns, "DnsResponder", "Rust/hickory-proto", "Answers on the shared bridge gateway from existing NameIndex")
-    Container(mtls, "Node-shared MtlsInterceptWorker", "Rust/Tokio", "Owns F/C listeners, node-session generation, IP/allowed-port capability indexes, per-capability handles, and shared nft element guards")
+    Container(cp, "Guest-network application contract + action shim", "overdrive-control-plane / Rust/Tokio", "Owns plan, provisioner/owner ports, probe/scratch/fact/error/result family, private 16,384-cap pool, and ordered provision/teardown")
+    Container(sw, "Shared guest switch owner", "Private control-plane host implementation behind the application port", "Implements the one application contract and owns allocation provision/teardown, fixed bridge identity, maps, pinned links, proof-mark guard, startup probe, sweep, audit, quiescence, and repair")
+    Container(dns, "DnsResponder", "Rust/hickory-proto", "Answers on the shared bridge gateway; one supervisor-owned task state machine cooperatively stops/joins old work before publishing a read-back replacement")
+    Container(mtls, "Node-shared MtlsInterceptWorker", "Rust/Tokio", "Owns F/C listeners and one private capability registry; activation after retirement transfers effects to drain and returns typed refusal, never intercept-live/EXEC release")
     Container(enforce, "HostMtlsEnforcement", "rustls + kTLS + splice", "Unchanged in #295; current per-handle cost motivates GH #300, outside attachment capacity")
     Container(resolve, "ServiceBackendsResolve", "Rust", "Resolves recovered original destination through authoritative backend rows")
     Container(identity, "IdentityMgr + RcgenCa", "Rust", "Holds platform SVID material; guests hold none")
     Container(vmdriver, "VmDriver + CloudHypervisorVmm", "Rust + Cloud Hypervisor", "Attaches the host TAP directly and owns guest READY/EXEC ordering")
     Container(cgroup, "CgroupManager + VmReclamation", "cgroup v2", "Owns CPU/memory/VMM PID/OOM/teardown/boot reclamation")
-    Container(supervisor, "Shared-owner health gate", "Rust/Tokio + kernel audit", "Lock-linearizes EXEC claims and latest recovery snapshot; exact-port listener rebind; 250 ms retries for 5 s; typed request to CLI; 10 s hard shutdown bound")
-    Container(serveowner, "ServerHandle + CLI serve owner", "Rust/Tokio", "Retains/observes supervisor JoinHandle + request receiver; every exit class closes EXEC and exits status 1 within outer bound")
+    Container(supervisor, "Shared-owner health gate", "Rust/Tokio + kernel audit", "Owns one retained supervisor handle and one DNS task owner; classifies actual join/channel exits, exact-port recovery, 250 ms retries for 5 s, and fail-stop-before-return")
+    Container(serveowner, "ServerHandle + CLI serve owner", "Rust/Tokio", "Owns exactly one private supervisor handle; public wait delegates; CLI applies the separate hard shutdown/status bound")
     ContainerDb(obs, "ObservationStore", "Existing adapter", "Persists workload_addr and backend/lifecycle facts")
     Container(bridge, "ovd guest bridge", "Linux bridge", "One node-local L2; one TAP port per running guest")
   }
@@ -1670,17 +1691,17 @@ C4Component
     Component(compose, "Serve composition root", "overdrive-control-plane", "Wires probes and owners; orders scratch probe, reclamation, sweep, production convergence, task retention, and admission")
     Component(pool, "Guest address pool", "overdrive-control-plane / internal", "Owns atomic allocation-to-plan leases; derives address, TAP and guest MAC; release-last")
     Component(shim, "Action shim", "overdrive-control-plane", "Sequences existing lifecycle Actions through guest-network, VMM, observation, intercept, EXEC and cleanup owners")
-    Component(sw, "Shared guest-switch owner", "overdrive-control-plane / internal", "Owns fixed bridge identity, managed TAP inventory, endpoint maps, TCX pins, bridge guard, probe, audit, repair and sweep")
-    Component(netlink, "Host network adapter", "overdrive-netlink", "Executes typed rtnetlink and nft bridge/TAP/rule/set operations with exact read-back")
-    Component(tcx, "TCX endpoint adapter", "overdrive-dataplane + overdrive-bpf", "Loads SCHED_CLS, owns endpoint/counter maps, and attaches/pins/adopts/queries/detaches per-TAP TCX links")
-    Component(mtls, "Node-shared intercept owner", "overdrive-worker", "Boot-starts F/C listeners; exposes one failure future plus exact-port converge/audit; owns capability generations/indexes/claims, shared IP elements, fence and handles")
+    Component(sw, "Guest-network contract + shared switch owner", "overdrive-control-plane::guest_network / private host implementation behind doc-hidden port", "Owns plan, both ports, probe/scratch/operation/fact/error/result family, private pool and host owner; private typed scratch I/O supplies leaf effects/counts while this owner retains setup, probe, reverse cleanup, all-family observation, sweep, audit, quiescence and repair")
+    Component(netlink, "Host network adapter", "overdrive-netlink", "Executes typed rtnetlink; unchanged public IPv4 nft and semantic bridge-guard APIs share one private codec; exactly-once chain/child inventory, canonical ordered rule facts for guest postconditions, typed validation, exact-exclusive deletion")
+    Component(tcx, "TCX endpoint adapter", "overdrive-dataplane::guest_tcx + overdrive-bpf", "Loads SCHED_CLS; owns private map ABI; projects semantic attachment/counter facts; provides typed query, pinned-link detach and endpoint/counter operations with exact aya sources")
+    Component(mtls, "Node-shared intercept owner", "overdrive-worker", "Boot-starts F/C listeners; owns Pending effects/retirement handshake, typed activation-retired refusal, RAII claims, publish fence, drain completion and reuse exclusion")
     Component(enforce, "Existing mTLS core", "overdrive-dataplane", "Performs TLS 1.3, kTLS TX/RX, splice and handle teardown")
     Component(resolve, "Existing resolve + identity readers", "overdrive-control-plane + worker", "Maps original destination through backend facts and supplies platform-held SVID material")
-    Component(dns, "Shared-gateway DNS owner", "overdrive-control-plane", "Probes and serves existing NameIndex/wire/negative-answer/source-pin semantics")
+    Component(dns, "Shared-gateway DNS owner", "overdrive-control-plane", "Preserves NameIndex/wire/source-pin semantics; task owner states prevent replacement until old stop/join and replacement probe/read-back complete")
     Component(vm, "VmDriver + VMM adapter", "overdrive-worker + overdrive-host", "Consumes grouped assignment, starts direct host-TAP VM, owns READY and deferred EXEC")
     Component(execgate, "Paired EXEC-gate capabilities", "overdrive-core / guest_network", "One lock/Notify/recovery snapshot; worker claims release while control-plane supervisor recovers, reopens or fail-stops")
-    Component(supervisor, "Shared-owner supervisor", "overdrive-control-plane / internal", "Consumes listener/DNS task failure, audits and reconverges exact shared owners, and emits one typed fail-stop request")
-    Component(handle, "ServerHandle + CLI serve owner", "overdrive-control-plane + overdrive-cli", "Retains supervisor join/request/gate and applies graceful or hard fail-stop shutdown")
+    Component(supervisor, "Shared-owner supervisor", "overdrive-control-plane / internal", "Retains one join/request/gate/shutdown owner plus one DNS task owner; classifies actual Tokio outcomes, audits/reconverges, replaces recovered DNS task, and fail-stops before return")
+    Component(handle, "ServerHandle + CLI serve owner", "overdrive-control-plane + overdrive-cli", "Owns exactly one private supervisor handle; public shutdown-request wait delegates; CLI remains the outer process owner")
     Component(reclaim, "Existing VM/cgroup reclamation", "overdrive-reconcilers + worker + host", "Kills unsupervised VMMs and removes driver artifacts before network sweep")
   }
 
@@ -1692,16 +1713,16 @@ C4Component
 
   Rel(operator, compose, "Starts and configures")
   Rel(operator, shim, "Drives deploy/stop/restart through existing handlers and reconciliation")
-  Rel(compose, sw, "Probes, sweeps and converges before use")
+  Rel(compose, sw, "Injects one owner; probes, sweeps and converges before use")
   Rel(compose, reclaim, "Runs before shared-switch sweep")
   Rel(compose, mtls, "Binds exactly one F and one C listener")
   Rel(compose, dns, "Probes and starts one gateway responder")
   Rel(compose, execgate, "Constructs one paired wiring from the injected clock")
   Rel(compose, supervisor, "Starts and retains one supervisor with EXEC closed until full audit")
   Rel(shim, pool, "Assigns before provision and releases after teardown")
-  Rel(shim, sw, "Provisions and tears down one attachment through")
+  Rel(shim, sw, "Uses the same owner's inherited port to provision and tear down one attachment through")
   Rel(sw, netlink, "Mutates and reads bridge/TAP/guard state through")
-  Rel(sw, tcx, "Mutates and reads classifier/map/link/pin state through")
+  Rel(sw, tcx, "Uses semantic attach facts and wraps the canonical sourced TCX error while mutating and reading classifier/map/link/pin state")
   Rel(shim, vm, "Passes grouped assignment, starts/stops exact allocation, and invokes existing EXEC release hook")
   Rel(shim, obs, "Writes accepted Running/terminal lifecycle and workload_addr")
   Rel(shim, mtls, "Registers or retires exact allocation capability and IP elements")
@@ -1773,6 +1794,16 @@ sequenceDiagram
 ```
 
 The scratch probe must not adopt or mutate the production allocation inventory.
+Its successful cleanup receipt observes every owned bridge/TAP/map/entry/
+program/link/pin/bridge-guard family at zero. A cleanup or observation failure
+refuses startup with the optional primary failure, direct cleanup source, and
+one complete per-family observation; unavailable is distinct from zero and no
+owner/task is published.
+Source-local tests drive that algorithm through the private typed scratch-I/O
+boundary; the public sim owner scripts final port outcomes only for composed
+ordering/refusal behavior. Native-metal tests retain actual kernel inventory
+authority. The private I/O is an effect boundary inside the same owner, not a
+new C4 component.
 The production bridge is converged only after reclamation and stale-state sweep;
 admission begins only after every owner has returned its complete read-back.
 Port zero and target replacement occur only in this fresh-process sequence. A
@@ -1873,3 +1904,11 @@ Once `ServerHandle` writes FailStop, no late retry may restore Open. A pure
 listener/DNS loss does not down TAPs or pause already-written commands; it
 still closes new EXEC and new socket/query admission. External restart is an
 operational precondition, never an in-process recovery service.
+
+S-ND295-33 observes only the in-process portion of this sequence. It drives the
+exported server handler through HTTPS, drains that handler, and has the test
+harness construct a fresh handler over retained roots. The runtime does not
+create its successor. The `CLI -> external supervisor -> new PID` edge remains
+an accepted deployment/production-readiness contract but is not asserted by
+that direct-handler scenario. DISTILL assigns no S-ND295 process/PID/exit test
+to the edge.

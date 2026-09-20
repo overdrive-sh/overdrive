@@ -50,6 +50,37 @@ scenarios into Rust integration tests in
 introduce cucumber-rs, pytest-bdd, conftest.py, or any `.feature` file
 consumer.
 
+## Root-level system conformance — `tests/conformance`
+
+`tests/conformance` owns recurring contracts for the assembled system when no
+single production crate is the natural test owner. Placement is determined by
+ownership and observable boundary, not by perceived importance or test size.
+
+Put a test in `tests/conformance` only when all of the following hold:
+
+- the contract crosses two or more production owners or crates;
+- the behavior is observed through a public system boundary, normally the
+  exported server handler plus its public API;
+- assigning the test to one crate's integration suite would make that crate
+  pretend to own another component's lifecycle or outcome; and
+- the test is a recurring regression/conformance contract, not point-in-time
+  verification evidence.
+
+Do not put these in `tests/conformance`:
+
+- single-crate behavior or adapter equivalence — keep it in that crate's unit,
+  acceptance, or integration suite;
+- pure functions, state machines, and input-space properties — keep them in
+  unit/proptest or seeded simulation lanes;
+- kernel-program-level and hook-attachment proofs — keep them in Tier 2/Tier 3;
+- CLI parsing/rendering unless the CLI protocol itself is the contract;
+- EDD expectations — retain those under `verification/expectations/`; or
+- stress/capacity measurements and benchmarks — retain those in their declared
+  benchmark lane.
+
+The subtree's `CLAUDE.md` defines how conformance tests are composed and
+driven. This project-level rule owns only placement and classification.
+
 ---
 
 ## DISTILL — prove composed system behavior under deliberate failure
@@ -490,6 +521,7 @@ design gap instead.
 Pre-commit and pre-push hooks run after the step reaches GREEN. `git commit
 --no-verify` remains blocked; diagnose and fix hook failures, or request explicit
 user approval only for a genuinely external hook defect.
+
 
 ---
 

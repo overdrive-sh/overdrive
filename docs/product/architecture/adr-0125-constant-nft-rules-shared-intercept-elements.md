@@ -2,11 +2,11 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
-GH #295 DESIGN stage 1. This records PORT-295-C and amends C1's storage
-mechanism. The user-authorized solution-review F-03 remediation adds only the
-node-owner converge/audit operations needed to create and read back this ADR's
-shared rules/sets at boot/runtime; allocation install methods remain unchanged.
+**Accepted — the current #295 contract is user-approved and independently
+approved.** This records PORT-295-C's current storage and
+ownership decision. Node-owner converge/audit creates and reads back shared
+rules/sets; allocation install methods remain unchanged. Exact signatures live
+only in the #295 feature delta.
 
 ## Context
 
@@ -42,8 +42,7 @@ shared converge operation, owns the constant rules and set objects after exact
 target read-back; the worker never places it on an allocation. The sibling
 audit operation is read-only. Exact signatures stay in the feature delta.
 
-**Fresh-process target recovery amendment, 2026-09-16 (user-authorized
-S2-F01).** Retained constant rules are adopted only for typed identity after
+For fresh-process target recovery, retained constant rules are adopted only for typed identity after
 the EXEC gate is BootClosed and stale attachment recovery proves zero managed
 TAPs. Fresh F/C listeners may bind ephemeral ports only then. One nft atomic
 transaction replaces every owned occurrence of the two TPROXY target ports
@@ -59,8 +58,24 @@ At runtime the recorded F/C ports are immutable. Missing owned rules may be
 recreated with those same targets; a present wrong-target rule is never
 rewritten and reaches ADR-0124's bounded fail-stop path.
 
-**Rollback error amendment, 2026-09-16 (user-authorized I3-F01).** A failed
-rollback write or rollback read carries the real typed netlink source and an
+The captured prior is `None` when no owned shared program exists and `Some`
+only for a complete owned identity. If a first-boot create commits but full
+read-back mismatches, rollback targets absence and success requires the next
+observation to be `None`. Every successful-rollback, rollback-I/O-failure, and
+rollback-postcondition-mismatch outcome therefore carries the optional prior;
+an empty fabricated program is not a representation of absence.
+
+`HostMtlsIntercept` retains the replacement/read-back/rollback algorithm above
+one module-private effect seam with exactly two responsibilities: observe the
+optional normalized shared program and atomically replace an expected optional
+current program with an optional desired program. Production construction
+privately supplies real netlink I/O. Only an in-module `cfg(test)` constructor
+may supply a scripted implementation; the seam is not public, not available to
+integration consumers, and not a compatibility adapter. This keeps public
+five-method `MtlsIntercept`, worker ownership, and allocation element methods
+unchanged while making source-honest rollback branches deterministic.
+
+A failed rollback write or rollback read carries the real typed netlink source and an
 operation discriminator. A rollback write/read that succeeds but observes the
 wrong prior identity is a distinct source-less semantic postcondition failure.
 Exact successful rollback is a third source-less restored-prior disposition.
@@ -99,4 +114,6 @@ dynamic state scales as N managed-IP + N source + M destination-port elements,
 while unmatched intercepted or managed-destination TCP drops fail closed.
 Negative: the shared sets and constant-rule targets become node-global runtime
 dependencies governed by ADR-0124, and element memory/churn still requires
-measurement at the observed port distribution.
+measurement at the observed port distribution. The host adapter adds one
+private effect interface for staged rollback evidence, but no public port or
+second ownership path.

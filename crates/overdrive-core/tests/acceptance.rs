@@ -346,4 +346,10 @@ mod acceptance {
     // names this module directly (S-VM-01's guest-side prerequisite);
     // authored fresh per DWD-06a.
     mod vm_beacon_roundtrip;
+
+    // netns-density-295 — paired BootClosed/Open/Recovering/FailStop EXEC
+    // capability contract. DISTILL activates only the first RED-ready body;
+    // DELIVER removes one reasoned pending marker per implementation step.
+    mod netns_density_exec_gate;
+    mod netns_density_placement_cap;
 }

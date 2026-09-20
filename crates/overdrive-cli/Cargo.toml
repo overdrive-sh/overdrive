@@ -141,6 +141,9 @@ overdrive-store-local.path   = "../overdrive-store-local"
 # decoder production uses. This is an independent readiness oracle over
 # kernel state, not an implementation-authored lifecycle event.
 overdrive-netlink.path       = "../overdrive-netlink"
+# GH #295 native-metal shared-guest-network conformance uses only the
+# dataplane-owned semantic TCX query/detach/endpoint/counter boundary.
+overdrive-dataplane.path     = "../overdrive-dataplane"
 # The S-GTI-05 prerequisite preflights the exact production outbound TPROXY
 # expression against the delta-scoped INPUT-hook incompatibility fixture and
 # inspects its complete typed worker error chain without claiming the later

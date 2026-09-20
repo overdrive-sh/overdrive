@@ -270,7 +270,7 @@ fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
 ///   inner ARRAY max_entries = MaglevTableSize::DEFAULT (16_381),
 ///     value = u32 (BackendId)
 ///   outer key = ServiceKey (8 bytes); outer value = u32 (inner FD)
-fn pre_pin_service_map(pin_dir: &std::path::Path) {
+pub(super) fn pre_pin_service_map(pin_dir: &std::path::Path) {
     use std::ffi::CString;
     use std::mem;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};

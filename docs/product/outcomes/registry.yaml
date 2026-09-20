@@ -769,3 +769,75 @@ outcomes:
   artifact: crates/overdrive-reconcilers/src/workload_lifecycle.rs
   related: []
   superseded_by: null
+- id: OUT-ND295-SHARED-SWITCH
+  kind: operation
+  summary: Provision or tear down one allocation-scoped guest network attachment on
+    the node-local shared bridge with awaited typed effect completion.
+  feature: netns-density-295
+  inputs:
+  - shape: GuestNetworkProvisioner::{provision,teardown}(&GuestNetworkPlan)
+  output:
+    shape: Result<(), GuestNetworkError>; exact allocation effects changed, unrelated
+      attachments preserved
+  keywords:
+  - guest-network
+  - shared-bridge
+  - attachment
+  - provision
+  - teardown
+  - release-last
+  artifact: docs/feature/netns-density-295/feature-delta.md#c-295-b--network-provisioner-boundary
+  related:
+  - OUT-SVM-SERVICE-TARGET-PROJECTION
+  - OUT-MTLS-COMPOSED-PROXY-SKELETON
+  superseded_by: null
+- id: OUT-ND295-BORN-CAPTURED
+  kind: invariant
+  summary: In healthy state and under any single owned-component loss, after Running
+    and before guest EXEC every managed guest TCP flow is intercepted or dropped;
+    exact allocation generation is frozen before enforcement and never re-attributed.
+    Near-simultaneous external TCX plus bridge-guard deletion is an accepted bounded
+    exception detected within one second before managed-TAP quiescence.
+  feature: netns-density-295
+  inputs:
+  - shape: production StartAllocation/RestartAllocation owner path plus shared-owner
+      health, managed TAP, capability, and EXEC-gate state
+  output:
+    shape: EXEC released only with live TCX/guard/shared-listener/elements and exact
+      Active capability; healthy and single-owned-component-loss paths catch or drop;
+      late handles are torn down; simultaneous external TCX+guard deletion is detected
+      and TAPs quiesced within <=1s without claiming the exposure window is fail-closed
+  keywords:
+  - transparent-mtls
+  - exec-gate
+  - tcx
+  - proof-mark
+  - generation
+  - fail-closed
+  artifact: docs/feature/netns-density-295/feature-delta.md#gate-g-295-2--existing-guest-command-release-narrowed-to-the-new-switch
+  related:
+  - OUT-MTLS-COMPOSED-PROXY-SKELETON
+  - OUT-MTLS-WIRE-TLS13
+  - OUT-SVM-SERVICE-TARGET-PROJECTION
+  superseded_by: null
+- id: OUT-ND295-DENSITY
+  kind: invariant
+  summary: The guest-network attachment owner supports T1-BASE and T1-PORT4 with exact
+    constant-rule, dynamic-element, attachment, counter, and cleanup inventories.
+  feature: netns-density-295
+  inputs:
+  - shape: T1-BASE N=16384 M=0 or T1-PORT4 N=16384 M=65536 production attachment cohort;
+      no VMM or EnforcedConnection population
+  output:
+    shape: exact 11 rules, 3N+M dynamic elements, N attachment facts, exact lookup
+      counters, measured resource receipts, and empty full-sweep complement
+  keywords:
+  - capacity
+  - attachment
+  - benchmark
+  - tcx
+  - nftables
+  - cleanup
+  artifact: docs/feature/netns-density-295/feature-delta.md#attachment-capacity-contract-and-non-contractual-connection-limitation
+  related: []
+  superseded_by: null

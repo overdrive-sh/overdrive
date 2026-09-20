@@ -32,6 +32,22 @@ mod acceptance {
     // projection and VmDriver hook delegation. Test-only RED scaffolds;
     // production API remains exactly the accepted ADR-0090 shape.
     mod service_kind_vm_workloads;
+    // GH #295 — node-shared F/C listener owner lifecycle through the accepted
+    // worker surface and standing SimMtlsIntercept outcomes.
+    mod netns_density_shared_owner;
+    // GH #295 (S-ND295-28) — deterministic real-`VmDriver` EXEC-release
+    // schedules through the gate-coupled seven-arg constructor: recovery
+    // waits without taking the pending EXEC, claim-before-detection
+    // cancellation leaves no second writer, and FailStop wakes the waiter
+    // without writing EXEC. Authored in its live home at
+    // `tests/acceptance/netns_density_exec_release.rs`; NOT yet wired —
+    // the body targets the post-F-01 seven-argument
+    // `VmDriver::new(…, wiring.gate(), layout)` (feature-delta.md §
+    // RUN-295-B), which the pre-cut tree does not provide, so wiring
+    // it today would be a compile break rather than a reasoned-`#[ignore]`
+    // RED. DELIVER's F-01 step both lands the seven-arg ctor and
+    // un-comments this line in the same cut.
+    // mod netns_density_exec_release;
     // microvm-driver-cloud-hypervisor (GH #42), step 01-07 — S-VM-76 +
     // crafter-authored race-arm examples against SimVmm (ADR-0082
     // §§D3-D4).

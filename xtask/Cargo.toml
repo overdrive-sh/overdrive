@@ -47,6 +47,7 @@ color-eyre.workspace = true
 clap.workspace       = true
 serde.workspace      = true
 serde_json.workspace = true
+tempfile.workspace    = true
 dotenvy.workspace    = true
 syn.workspace        = true
 rand.workspace       = true
@@ -57,5 +58,4 @@ cargo_metadata       = "0.18"
 
 [dev-dependencies]
 proptest.workspace = true
-tempfile.workspace = true
 serial_test.workspace = true

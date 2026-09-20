@@ -689,6 +689,18 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-dataplane) & binary(integration)'
 test-group = 'host-kernel-shared'
 
+[[profile.default.overrides]]
+filter = 'package(overdrive-netlink) & binary(integration)'
+test-group = 'host-kernel-shared'
+
+# Root system-conformance owns exported-handler composition plus typed host
+# observations and may provision the same global guest-network kernel names as
+# crate integration binaries. Keep its whole integration binary in the same
+# single-writer group.
+[[profile.default.overrides]]
+filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
+test-group = 'host-kernel-shared'
+
 # The xtask metal-qualification binary drives the production
 # `infra/metal/bootstrap.sh` lease protocol through several nested shell
 # processes and a real `flock`. Although its fixtures use temporary paths,

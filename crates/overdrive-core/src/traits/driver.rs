@@ -281,6 +281,17 @@ pub struct Resources {
     pub memory_bytes: u64,
 }
 
+/// Complete transient guest-network handoff for one allocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestNetworkAssignment {
+    pub address: Ipv4Addr,
+    pub tap: String,
+    pub mac: [u8; 6],
+    pub gateway: Ipv4Addr,
+    pub prefix: u8,
+    pub dns: Ipv4Addr,
+}
+
 /// What the scheduler handed to the node agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllocationSpec {

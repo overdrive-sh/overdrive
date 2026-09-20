@@ -41,6 +41,7 @@ use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServic
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
 // transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
@@ -1152,6 +1153,29 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
     .await;
 
     preflight_err.map_or(dispatch_result, Err)
+}
+
+/// Post-#295 integration-test composition that preserves the complete
+/// production action owner while replacing only its accepted guest-network
+/// driven port.
+///
+/// # Errors
+///
+/// Returns the same typed [`ShimError`] values as production dispatch.
+#[doc(hidden)]
+#[cfg(any(test, feature = "integration-tests"))]
+#[expect(
+    clippy::panic,
+    clippy::unused_async,
+    reason = "RED scaffold; DELIVER performs the accepted single-cut guest-network action composition"
+)]
+pub async fn dispatch_with_guest_network_provisioner_for_test(
+    _actions: Vec<Action>,
+    _state: &crate::AppState,
+    _tick: &TickContext,
+    _provisioner: &dyn GuestNetworkProvisioner,
+) -> Result<(), ShimError> {
+    panic!("Not yet implemented -- RED scaffold (GH #295 guest-network action owner)")
 }
 
 /// C3 PROVISION SEAM (transparent-mtls-enrollment D-TME-12 G1/G2/G3 + JOIN-2,
@@ -3006,6 +3030,10 @@ async fn find_prior_alloc_row(
 /// observation row. Per ADR-0023 §3.
 #[derive(Debug, thiserror::Error)]
 pub enum ShimError {
+    /// Awaited shared guest-network provision/teardown failed with its exact
+    /// operation and lower source intact.
+    #[error(transparent)]
+    GuestNetwork(#[from] crate::guest_network::GuestNetworkError),
     /// A driver failure that did not fit the `SpawnFailed` shape (i.e.
     /// the shim cannot record it as `state: Failed`).
     #[error("driver failure")]
@@ -3634,9 +3662,9 @@ mod fail_closed_mtls_tests {
         }
     }
 
-    /// The SIX constructible `MtlsInterceptInstallError` shapes paired with
-    /// the `stage()` string each must map onto, against the CLOSED four-value
-    /// vocabulary. Cases 5 and 6 pin the two ALIAS arms — `LegFLocalAddr` and
+    /// The constructible `MtlsInterceptInstallError` shapes paired with
+    /// the `stage()` string each must map onto. The final alias cases pin
+    /// `LegFLocalAddr` and
     /// `LegCLocalAddr` fold onto their bind siblings' stage strings, and
     /// without them a future edit splitting the alias arms goes unnoticed.
     ///
@@ -3645,6 +3673,25 @@ mod fail_closed_mtls_tests {
     /// CONSTRUCTION. No new constructor, no `#[doc(hidden)]`, no new variant.
     fn install_error_cases() -> Vec<(&'static str, MtlsInterceptInstallError, &'static str)> {
         vec![
+            (
+                "generation exhaustion",
+                MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX },
+                "generation_exhausted",
+            ),
+            (
+                "registration conflict",
+                MtlsInterceptInstallError::RegistrationConflict {
+                    address: Ipv4Addr::new(100, 95, 0, 2),
+                },
+                "registration_conflict",
+            ),
+            (
+                "registration retired before activation",
+                MtlsInterceptInstallError::RegistrationRetired {
+                    alloc_id: AllocationId::new("mif-alloc-0").expect("valid alloc id"),
+                },
+                "registration_retired",
+            ),
             (
                 "outbound nft-TPROXY install",
                 MtlsInterceptInstallError::OutboundTproxyInstall(nft_install_failed(
@@ -3923,10 +3970,11 @@ mod fail_closed_mtls_tests {
     /// S-MIF-01 — an intercept-install failure drives the allocation `Failed`,
     /// stops the driver, and never releases the exit gate.
     ///
-    /// Table-driven over the six constructible cause shapes (the module
-    /// idiom; the argument space is a closed six-element set, so a generator
+    /// Table-driven over the constructible cause shapes (the module
+    /// idiom; the argument space is finite, so a generator
     /// would be parametrisation theatre). Assertions A-1 … A-10 are
     /// case-invariant except A-3's `stage`, pinned per case.
+    /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn install_failure_supersedes_running_with_failed_and_never_releases_the_gate() {
         for (label, cause, expected_stage) in install_error_cases() {

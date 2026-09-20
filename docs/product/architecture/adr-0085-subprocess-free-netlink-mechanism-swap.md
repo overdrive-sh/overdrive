@@ -6,6 +6,19 @@ Accepted. 2026-08-24. Decision-makers: Morgan (solution-architect,
 proposing, Propose mode). Tags: phase-2, dataplane, transparent-mtls,
 adapter-host, netlink, mechanism-swap, GH-233.
 
+**Amended 2026-09-17 (D-295-DISTILL-9, user-approved and independently
+approved at review iteration 12):** the shipped private
+nft framing/transaction/observer/decoder implementation is family-aware for
+IPv4 and bridge families. Every existing public IPv4 operation and encoded
+PORT-295-C behavior remains unchanged. A semantic bridge-guard module now owns
+typed bridge table/chain/ifname-set/rule/member observation, convergence and
+deletion over that shared codec. Its public observation is semantic and keeps
+raw nft family/attribute encoding private: chains are exactly-once semantic
+occurrences and rules use one canonical program fact shared with the guest-
+network postcondition. Its validation failures are distinct from source-bearing
+netlink failures. This is a genuine post-implementation adapter extension, not
+pre-implementation revision history.
+
 **Scope:** a **mechanism swap only** — replace every `ip` / `nft` /
 `ethtool` / `sysctl` subprocess shell-out in
 `crates/overdrive-control-plane/src/veth_provisioner.rs` and
@@ -139,6 +152,50 @@ shared `NetlinkError` errno mapping, the rtnetlink connect/run helper,
 and the `setns` helper would drift across two copies; concentrating all
 hand-rolled netlink wire encoding in one place is a load-bearing
 auditability property.
+
+### 2026-09-17 amendment — share family-aware nft internals, expose semantic bridge guard
+
+The existing nft module continues to own one hand-rolled nfnetlink codec. Its
+private payload, transaction, observer, multipart dump, normalization and
+decoder paths select a closed IPv4 or bridge family internally. Existing public
+IPv4 functions remain exact wrappers and do not gain a family parameter.
+
+The bridge-family extension is semantic rather than a raw nft builder. It owns
+the accepted proof-mark guard's table, prerouting filter chain, ifname-key set,
+three ordered normalized rules, counters and members. Read-only observation is
+complete and generation-bracketed: it preserves actual family/table identity,
+actual kernel rule order, every duplicate owned occurrence, and every owned or
+foreign child in the candidate table. Every chain dump occurrence is projected
+exactly once as base with only its observed semantic attributes, regular with
+no invented base-chain attributes, or unsupported; unsupported child kinds are
+retained separately rather than dropped or double-counted.
+
+Rule observation uses one adapter-owned semantic expression program. It keeps
+actual expression order, duplicate rule occurrences, wrong semantic values,
+and one ordered unknown marker per well-formed unrecognized expression while
+raw registers, userdata and attribute bytes remain private. The same semantic
+rule facts supply the control-plane's expected and observed guest-network
+postconditions, so no caller reconstructs nft ABI or copies normalized byte
+programs. A well-formed wrong family/table/schema, unknown rule, duplicate or
+foreign child is structured `Absent`/`Exact`/`Conflict` state, never a
+fabricated transport failure. Non-repairing audit uses that same
+classification. Aggregate deletion is permitted only for one exact, exclusive
+owned identity with exactly the expected members; otherwise it refuses without
+mutation, and objects outside the target table remain equal.
+
+Guard identifiers, fixed priority and proof marks are validated when the
+semantic specification is constructed. A member is validated only at its
+insert/delete boundary: its UTF-8 byte length is 1 through 15, it contains no
+interior NUL, and it is encoded as one exact 16-byte NUL-padded `IFNAMSIZ` key
+without truncation. These failures are bridge-specific validation errors and
+perform no I/O. Only transport, malformed decode, ACK, or kernel failures wrap
+the original `NetlinkError::Nft` source.
+
+This keeps all set/set-element and bridge lookup ABI in the same auditable
+adapter, avoids duplicating framing, and prevents bridge-family TPROXY or other
+invalid combinations that a public generic family parameter would permit.
+Exact implementation-facing types and signatures live only in the #295 feature
+delta.
 
 ### D3. Error model — a shared errno-carrying `NetlinkError`, embedded (not substituted) into the per-site enums
 

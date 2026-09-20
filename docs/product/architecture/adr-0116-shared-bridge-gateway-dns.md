@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
+**Accepted — user-approved and approved by system design review iteration 5 on
+2026-09-16; D-295-DISTILL-8's retained DNS task ownership was independently
+approved at review iteration 9 on 2026-09-17.**
 The approved D-295-6 decision keeps one shared-gateway in-agent userspace DNS
 responder and rejects DNS synthesis in eBPF. ADR-0124 owns runtime DNS-loop
 recovery/fail-stop.
@@ -27,6 +29,21 @@ At startup, bind `0.0.0.0:53` first. On `EADDRINUSE`, fall back to exactly one
 socket at the shared gateway, not one socket per allocation. Delete the
 `NetSlotAllocator` dependency and all per-gateway rebinding logic. A bind or
 List-seed failure continues to refuse startup.
+
+The common shared-network supervisor owns one private DNS serve-task owner.
+Unexpected return, panic, or cancellation enters the same bounded recovery
+contract as other shared-owner loss. Intentional shutdown stops and joins the
+task without reclassifying it; successful recovery replaces only the exact task
+inside that same owner after probe/read-back. `ServerHandle` does not retain a
+parallel DNS observer.
+
+Replacement never overwrites a live task. From a running owner, recovery first
+cooperatively stops the old responder and joins its task; abort is only a
+bounded, recorded backstop and the aborted handle is still awaited. From an
+already-exited owner, the consumed handle is absent. Only after old termination
+and exact replacement bind/probe/read-back may the one owner spawn and publish
+the replacement. ShuttingDown/Stopped owners refuse replacement, and
+intentional shutdown cannot race a later publication.
 
 DNS stays in userspace because it is a variable-length protocol and a stateful
 semantic boundary, not steady-state application payload forwarding. The owner
