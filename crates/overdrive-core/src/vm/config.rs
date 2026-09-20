@@ -81,7 +81,6 @@ use std::path::{Path, PathBuf};
 
 use crate::AllocationId;
 use crate::cgroup::CgroupPath;
-use crate::id::NetnsName;
 
 // -----------------------------------------------------------------------
 // D2.4 — KernelImage: validates before Cloud Hypervisor ever sees the file
@@ -883,14 +882,10 @@ impl VmRunDir {
 // overdrive-core-resident type (ADR-0082 §D2, 2026-08-12 amendment).
 // -----------------------------------------------------------------------
 
-/// The complete host-side attachment for a VM NIC. Keeping the namespace,
-/// persistent TAP, and MAC in one value makes "enter a netns but attach no
-/// NIC" unrepresentable at the VMM boundary.
+/// The complete host-side attachment for a VM NIC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmNetworkAttachment {
-    /// Network namespace that owns the persistent TAP.
-    pub netns: NetnsName,
-    /// Persistent TAP interface already provisioned inside `netns`.
+    /// Persistent TAP interface already provisioned on the host bridge.
     pub tap: String,
     /// Slot-derived locally administered unicast MAC for the virtio NIC.
     pub mac: [u8; 6],
@@ -1249,7 +1244,6 @@ mod tests {
             let mut config = sample_vm_config(0, 0);
             let tap = format!("ovd-tp-{tap_suffix}");
             config.network = network_present.then(|| VmNetworkAttachment {
-                netns: NetnsName::from_hex4(&tap_suffix).unwrap(),
                 tap: tap.clone(),
                 mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x01],
             });

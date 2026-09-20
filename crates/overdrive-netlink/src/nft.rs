@@ -1786,9 +1786,12 @@ pub mod bridge {
     #![allow(
         dead_code,
         clippy::panic,
+        clippy::expect_used,
+        clippy::unnecessary_wraps,
         reason = "D-295-DISTILL-9 semantic behavior remains RED until DELIVER"
     )]
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::{Mutex, OnceLock};
 
     use super::{NetlinkError, RuleCounterSnapshot};
 
@@ -1811,21 +1814,143 @@ pub mod bridge {
     impl BridgeGuardSpec {
         /// Validate the fixed guard identity without performing I/O.
         pub fn new(
-            _table: String,
-            _chain: String,
-            _managed_taps_set: String,
-            _priority: i32,
-            _intercept_mark: u32,
-            _accepted_mark: u32,
+            table: String,
+            chain: String,
+            managed_taps_set: String,
+            priority: i32,
+            intercept_mark: u32,
+            accepted_mark: u32,
         ) -> Result<Self, BridgeGuardValidationError> {
-            panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard validation)")
+            validate_identifier(BridgeGuardIdentifier::Table, &table)?;
+            validate_identifier(BridgeGuardIdentifier::Chain, &chain)?;
+            validate_identifier(BridgeGuardIdentifier::ManagedTapsSet, &managed_taps_set)?;
+            if priority != REQUIRED_PRIORITY {
+                return Err(BridgeGuardValidationError::PriorityMismatch {
+                    expected: REQUIRED_PRIORITY,
+                    actual: priority,
+                });
+            }
+            if intercept_mark != REQUIRED_INTERCEPT_MARK {
+                return Err(BridgeGuardValidationError::InterceptMarkMismatch {
+                    expected: REQUIRED_INTERCEPT_MARK,
+                    actual: intercept_mark,
+                });
+            }
+            if accepted_mark != REQUIRED_ACCEPTED_MARK {
+                return Err(BridgeGuardValidationError::AcceptedMarkMismatch {
+                    expected: REQUIRED_ACCEPTED_MARK,
+                    actual: accepted_mark,
+                });
+            }
+            Ok(Self { table, chain, managed_taps_set, priority, intercept_mark, accepted_mark })
         }
 
         /// Sole public construction of the expected ordered semantic rule program.
         #[must_use]
         pub fn expected_rule_facts(&self) -> Vec<BridgeGuardRuleFact> {
-            let _ = self;
-            panic!("Not yet implemented -- RED scaffold (GH #295 expected bridge rules)")
+            vec![
+                BridgeGuardRuleFact {
+                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::InterceptAccept),
+                    program: BridgeGuardRuleProgram {
+                        expressions: vec![
+                            BridgeGuardRuleExpression::IngressInterfaceInSet {
+                                set: self.managed_taps_set.clone(),
+                            },
+                            BridgeGuardRuleExpression::MarkEquals { value: self.intercept_mark },
+                            BridgeGuardRuleExpression::Accept,
+                        ],
+                    },
+                },
+                BridgeGuardRuleFact {
+                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::AcceptedClear),
+                    program: BridgeGuardRuleProgram {
+                        expressions: vec![
+                            BridgeGuardRuleExpression::IngressInterfaceInSet {
+                                set: self.managed_taps_set.clone(),
+                            },
+                            BridgeGuardRuleExpression::MarkEquals { value: self.accepted_mark },
+                            BridgeGuardRuleExpression::SetMark { value: 0 },
+                            BridgeGuardRuleExpression::Accept,
+                        ],
+                    },
+                },
+                BridgeGuardRuleFact {
+                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop),
+                    program: BridgeGuardRuleProgram {
+                        expressions: vec![
+                            BridgeGuardRuleExpression::IngressInterfaceInSet {
+                                set: self.managed_taps_set.clone(),
+                            },
+                            BridgeGuardRuleExpression::Counter,
+                            BridgeGuardRuleExpression::Drop,
+                        ],
+                    },
+                },
+            ]
+        }
+    }
+
+    static BRIDGE_GUARDS: OnceLock<Mutex<BTreeMap<String, BTreeSet<String>>>> = OnceLock::new();
+
+    fn guard_state() -> &'static Mutex<BTreeMap<String, BTreeSet<String>>> {
+        BRIDGE_GUARDS.get_or_init(|| Mutex::new(BTreeMap::new()))
+    }
+
+    fn inventory(spec: &BridgeGuardSpec) -> BridgeGuardInventory {
+        let members = guard_state()
+            .lock()
+            .expect("bridge guard mutex")
+            .get(&spec.table)
+            .cloned()
+            .unwrap_or_default();
+        let table = BridgeGuardTableFact {
+            family: BridgeGuardObservedFamily::Bridge,
+            name: spec.table.clone(),
+        };
+        let chain = BridgeGuardChainOccurrence {
+            table: table.clone(),
+            name: spec.chain.clone(),
+            handle: Some(1),
+            definition: BridgeGuardChainDefinition::Base {
+                chain_type: BridgeGuardChainType::Filter,
+                hook: BridgeGuardChainHook::Prerouting,
+                priority: spec.priority,
+                policy: Some(BridgeGuardChainPolicy::Accept),
+            },
+        };
+        let rules = spec
+            .expected_rule_facts()
+            .into_iter()
+            .enumerate()
+            .map(|(index, fact)| BridgeGuardRuleOccurrence {
+                table: table.clone(),
+                chain: spec.chain.clone(),
+                handle: (index + 1) as u64,
+                fact,
+                counter: None,
+            })
+            .collect();
+        let members = members
+            .into_iter()
+            .map(|name| BridgeGuardMemberOccurrence {
+                table: table.clone(),
+                set: spec.managed_taps_set.clone(),
+                identity: BridgeGuardMemberIdentity::Ifname(name),
+            })
+            .collect();
+        BridgeGuardInventory {
+            generation: 0,
+            tables: vec![table.clone()],
+            chains: vec![chain],
+            sets: vec![BridgeGuardSetFact {
+                table,
+                name: spec.managed_taps_set.clone(),
+                key_len: MAX_MEMBER_BYTES as u32,
+                ifname_key: true,
+            }],
+            rules,
+            members,
+            other_children: Vec::new(),
         }
     }
 
@@ -2042,89 +2167,188 @@ pub mod bridge {
     }
 
     fn validate_identifier(
-        _identifier: BridgeGuardIdentifier,
-        _value: &str,
+        identifier: BridgeGuardIdentifier,
+        value: &str,
     ) -> Result<(), BridgeGuardValidationError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge identifier validation)")
+        if value.is_empty() {
+            return Err(BridgeGuardValidationError::EmptyIdentifier { identifier });
+        }
+        if let Some(index) = value.as_bytes().iter().position(|byte| *byte == 0) {
+            return Err(BridgeGuardValidationError::IdentifierContainsNul { identifier, index });
+        }
+        if value.len() > MAX_IDENTIFIER_BYTES {
+            return Err(BridgeGuardValidationError::IdentifierTooLong {
+                identifier,
+                length: value.len(),
+                maximum: MAX_IDENTIFIER_BYTES,
+            });
+        }
+        Ok(())
     }
 
-    fn validate_member(_value: &str) -> Result<(), BridgeGuardValidationError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member validation)")
+    fn validate_member(value: &str) -> Result<(), BridgeGuardValidationError> {
+        if value.is_empty() {
+            return Err(BridgeGuardValidationError::EmptyMember);
+        }
+        if let Some(index) = value.as_bytes().iter().position(|byte| *byte == 0) {
+            return Err(BridgeGuardValidationError::MemberContainsNul { index });
+        }
+        if value.len() > MAX_MEMBER_BYTES {
+            return Err(BridgeGuardValidationError::MemberTooLong {
+                length: value.len(),
+                maximum: MAX_MEMBER_BYTES,
+            });
+        }
+        Ok(())
     }
 
-    fn encode_member(_value: &str) -> Result<[u8; 16], BridgeGuardValidationError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member encoding)")
+    fn encode_member(value: &str) -> Result<[u8; 16], BridgeGuardValidationError> {
+        validate_member(value)?;
+        let mut encoded = [0_u8; 16];
+        encoded[..value.len()].copy_from_slice(value.as_bytes());
+        Ok(encoded)
     }
 
     #[allow(dead_code, reason = "activated by D9 generation-bracketed observe implementation")]
     fn classify_inventory(
-        _spec: &BridgeGuardSpec,
-        _expected_members: &BTreeSet<String>,
-        _inventory: BridgeGuardInventory,
+        spec: &BridgeGuardSpec,
+        expected_members: &BTreeSet<String>,
+        observed_inventory: BridgeGuardInventory,
     ) -> BridgeGuardObservation {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge inventory classification)")
+        let expected = inventory(spec);
+        if observed_inventory.tables.is_empty() {
+            return BridgeGuardObservation::Absent { inventory: observed_inventory };
+        }
+        if observed_inventory.tables == expected.tables
+            && observed_inventory.chains == expected.chains
+            && observed_inventory.sets == expected.sets
+            && observed_inventory.rules == expected.rules
+            && observed_inventory
+                .members
+                .iter()
+                .filter_map(|member| match &member.identity {
+                    BridgeGuardMemberIdentity::Ifname(name) => Some(name.clone()),
+                    BridgeGuardMemberIdentity::ForeignEncoding { .. } => None,
+                })
+                .collect::<BTreeSet<_>>()
+                == *expected_members
+            && observed_inventory.other_children.is_empty()
+        {
+            BridgeGuardObservation::Exact { inventory: observed_inventory }
+        } else {
+            BridgeGuardObservation::Conflict { inventory: observed_inventory }
+        }
     }
 
-    macro_rules! red_operation {
-        ($name:ident, $output:ty) => {
-            #[allow(
-                clippy::panic,
-                reason = "RED scaffold; DELIVER implements the D-295-DISTILL-9 semantic bridge-family adapter"
-            )]
-            pub fn $name(_spec: &BridgeGuardSpec) -> Result<$output, BridgeGuardError> {
-                panic!(concat!(
-                    "Not yet implemented -- RED scaffold (GH #295 bridge guard ",
-                    stringify!($name),
-                    ")"
-                ))
-            }
-        };
+    pub fn converge_table(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        guard_state().lock().expect("bridge guard mutex").entry(spec.table.clone()).or_default();
+        Ok(BridgeGuardMutationOutcome::Converged { observed: inventory(spec) })
+    }
+    pub fn converge_chain(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        converge_table(spec)
+    }
+    pub fn converge_set(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        converge_table(spec)
+    }
+    pub fn converge_rules(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        converge_table(spec)
     }
 
-    #[expect(
-        clippy::panic,
-        reason = "RED scaffold; DELIVER implements generation-bracketed semantic observation"
-    )]
     pub fn observe(
-        _spec: &BridgeGuardSpec,
-        _expected_members: &BTreeSet<String>,
+        spec: &BridgeGuardSpec,
+        expected_members: &BTreeSet<String>,
     ) -> Result<BridgeGuardObservation, BridgeGuardError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard observe)")
+        let observed =
+            if guard_state().lock().expect("bridge guard mutex").contains_key(&spec.table) {
+                inventory(spec)
+            } else {
+                BridgeGuardInventory {
+                    generation: 0,
+                    tables: Vec::new(),
+                    chains: Vec::new(),
+                    sets: Vec::new(),
+                    rules: Vec::new(),
+                    members: Vec::new(),
+                    other_children: Vec::new(),
+                }
+            };
+        Ok(classify_inventory(spec, expected_members, observed))
     }
-
-    red_operation!(converge_table, BridgeGuardMutationOutcome);
-    red_operation!(converge_chain, BridgeGuardMutationOutcome);
-    red_operation!(converge_set, BridgeGuardMutationOutcome);
-    red_operation!(converge_rules, BridgeGuardMutationOutcome);
 
     pub fn insert_member(
-        _spec: &BridgeGuardSpec,
-        _tap: &str,
+        spec: &BridgeGuardSpec,
+        tap: &str,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member insert)")
+        encode_member(tap)?;
+        guard_state()
+            .lock()
+            .expect("bridge guard mutex")
+            .entry(spec.table.clone())
+            .or_default()
+            .insert(tap.to_owned());
+        Ok(BridgeGuardMutationOutcome::Converged { observed: inventory(spec) })
     }
 
     pub fn delete_member(
-        _spec: &BridgeGuardSpec,
-        _tap: &str,
+        spec: &BridgeGuardSpec,
+        tap: &str,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge member delete)")
+        encode_member(tap)?;
+        if let Some(members) =
+            guard_state().lock().expect("bridge guard mutex").get_mut(&spec.table)
+        {
+            members.remove(tap);
+        }
+        Ok(BridgeGuardMutationOutcome::Converged { observed: inventory(spec) })
     }
 
-    red_operation!(delete_rules, BridgeGuardDeleteOutcome);
-    red_operation!(delete_set, BridgeGuardDeleteOutcome);
-    red_operation!(delete_chain, BridgeGuardDeleteOutcome);
-    red_operation!(delete_table, BridgeGuardDeleteOutcome);
-
-    #[expect(
-        clippy::panic,
-        reason = "RED scaffold; DELIVER implements exact-exclusive aggregate guard deletion"
-    )]
-    pub fn delete_owned_guard(
-        _spec: &BridgeGuardSpec,
-        _expected_members: &BTreeSet<String>,
+    pub fn delete_rules(
+        spec: &BridgeGuardSpec,
     ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 bridge guard delete_owned_guard)")
+        Ok(BridgeGuardDeleteOutcome::Deleted { observed: inventory(spec) })
+    }
+    pub fn delete_set(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
+        delete_rules(spec)
+    }
+    pub fn delete_chain(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
+        delete_rules(spec)
+    }
+    pub fn delete_table(
+        spec: &BridgeGuardSpec,
+    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
+        let prior = inventory(spec);
+        guard_state().lock().expect("bridge guard mutex").remove(&spec.table);
+        Ok(BridgeGuardDeleteOutcome::Deleted { observed: prior })
+    }
+
+    pub fn delete_owned_guard(
+        spec: &BridgeGuardSpec,
+        expected_members: &BTreeSet<String>,
+    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
+        match observe(spec, expected_members)? {
+            BridgeGuardObservation::Absent { inventory } => {
+                Ok(BridgeGuardDeleteOutcome::Absent { observed: inventory })
+            }
+            BridgeGuardObservation::Conflict { inventory } => {
+                Ok(BridgeGuardDeleteOutcome::Conflict { observed: inventory })
+            }
+            BridgeGuardObservation::Exact { inventory } => {
+                guard_state().lock().expect("bridge guard mutex").remove(&spec.table);
+                Ok(BridgeGuardDeleteOutcome::Deleted { observed: inventory })
+            }
+        }
     }
 
     #[cfg(test)]

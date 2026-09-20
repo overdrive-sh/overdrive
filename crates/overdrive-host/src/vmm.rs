@@ -285,16 +285,10 @@ impl CloudHypervisorVmm {
 }
 
 fn network_launch_prefix(
-    network: Option<&VmNetworkAttachment>,
+    _network: Option<&VmNetworkAttachment>,
     wrapper: &[String],
 ) -> (String, Vec<String>) {
-    let Some(attachment) = network else {
-        return (wrapper[0].clone(), wrapper[1..].to_vec());
-    };
-    let mut args =
-        vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
-    args.extend_from_slice(wrapper);
-    ("ip".to_owned(), args)
+    (wrapper[0].clone(), wrapper[1..].to_vec())
 }
 
 fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
@@ -431,12 +425,9 @@ impl Vmm for CloudHypervisorVmm {
             });
         }
 
-        // §(c): spawn CH through `ip netns exec` for a mesh VM, then the
-        // existing wrapper. The execve chain (ip → prlimit → setpriv →
-        // cloud-hypervisor) collapses to the hypervisor image on the SAME
-        // pid, so the recorded pid, cgroup placement, inherited stderr pipe
-        // and SIGKILL all still target cloud-hypervisor. A non-mesh VM keeps
-        // `prlimit` as argv[0].
+        // §(c): spawn Cloud Hypervisor through the existing confinement
+        // wrapper. The persistent TAP is already attached to the shared host
+        // bridge; no namespace-exec launcher is required.
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
         let mut cmd = self.build_confined_command(config, &wrapper);
         let launched_executable: OsString = cmd.as_std().get_program().to_owned();
@@ -884,7 +875,7 @@ mod tests {
     use std::num::NonZeroU8;
 
     use overdrive_core::cgroup::CgroupPath;
-    use overdrive_core::id::{AllocationId, NetnsName};
+    use overdrive_core::id::AllocationId;
     use overdrive_core::vm::config::{
         Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
         VmConfinement, VmRunDir, VmmIdentity,
@@ -1044,7 +1035,6 @@ mod tests {
     #[test]
     fn mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher() {
         let attachment = VmNetworkAttachment {
-            netns: NetnsName::from_hex4("002a").unwrap(),
             tap: "ovd-tap-002a".to_owned(),
             mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
         };
@@ -1062,21 +1052,12 @@ mod tests {
         let args: Vec<_> =
             command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
 
-        assert_eq!(program, "ip");
+        assert_eq!(program, "prlimit");
         assert_eq!(
-            &args[..7],
-            [
-                "netns",
-                "exec",
-                "ovd-ns-002a",
-                "prlimit",
-                "--fsize=1073741824",
-                "setpriv",
-                "--reuid=991",
-            ],
-            "the namespace wrapper must surround the unchanged confinement argv",
+            &args[..4],
+            ["--fsize=1073741824", "setpriv", "--reuid=991", "/usr/bin/cloud-hypervisor"],
+            "the direct launch must preserve the confinement argv",
         );
-        assert_eq!(args[7], "/usr/bin/cloud-hypervisor");
         let net_flag = args.iter().position(|arg| arg == "--net").unwrap();
         assert_eq!(
             args[net_flag + 1],
@@ -1105,16 +1086,6 @@ mod tests {
         assert!(
             !args.iter().any(|arg| arg.contains("/sys/class/net/")),
             "a non-networked VM must not gain a sysfs network grant",
-        );
-
-        let mesh = classify_launch_spawn_error(
-            OsStr::new("ip"),
-            &wrapper,
-            &io::Error::from(io::ErrorKind::NotFound),
-        );
-        assert!(
-            matches!(&mesh, VmmError::Create { detail } if detail.contains("ip") && !detail.contains("prlimit")),
-            "missing mesh launcher must name ip without claiming UID-drop failure: {mesh}"
         );
 
         let non_mesh = classify_launch_spawn_error(

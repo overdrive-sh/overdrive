@@ -1685,10 +1685,11 @@ impl MtlsInterceptWorker {
         // (no interface to match) but still stands up the leg-F listener +
         // accept loop — a fixture that drives leg-F directly exercises the
         // accept path without the kernel redirect.
-        let outbound_tproxy_guard = match spec.host_veth.as_deref() {
-            Some(host_veth) => Some(
+        let outbound_tproxy_guard = match spec.network.as_ref().map(|network| network.tap.as_str())
+        {
+            Some(tap) => Some(
                 self.intercept
-                    .install_outbound(host_veth, leg_f_addr.port())
+                    .install_outbound(tap, leg_f_addr.port())
                     .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?,
             ),
             None => None,
@@ -1754,7 +1755,7 @@ impl MtlsInterceptWorker {
         // the `MtlsResolve` consumer wired in the accept loop below — see
         // [`Self::handle_outbound`].)
         let mut inbound_tproxy_guards = Vec::new();
-        if let Some(workload_addr) = spec.workload_addr {
+        if let Some(workload_addr) = spec.network.as_ref().map(|network| network.address) {
             for port in &spec.service_ports {
                 let virt = SocketAddrV4::new(workload_addr, port.get());
                 inbound_tproxy_guards
@@ -2831,15 +2832,8 @@ mod tests {
             }),
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
+            network: None,
             service_ports: Vec::new(),
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
         }
     }
 
@@ -3705,15 +3699,8 @@ mod tests {
             }),
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
+            network: None,
             service_ports: Vec::new(),
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
         };
         let tasks = AllocationTaskOwner::new();
         worker.record_intercept_full(

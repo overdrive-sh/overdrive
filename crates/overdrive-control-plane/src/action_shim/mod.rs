@@ -44,6 +44,7 @@ use crate::api::{AllocStateWire, TransitionSource};
 use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
+use overdrive_core::traits::driver::GuestNetworkAssignment;
 // transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
 // lifecycle wiring: per-host slot allocator, slot→plan derivation, the
 // gateway-as-responder helper, and the netns provision/teardown executors.
@@ -916,6 +917,52 @@ pub async fn dispatch_with_network_provisioner(
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
+    dispatch_with_network_provisioner_and_guest(
+        actions,
+        drivers,
+        alloc_drivers,
+        obs,
+        dataplane,
+        ca,
+        clock,
+        identity,
+        bus,
+        tick,
+        writer_node,
+        allocator,
+        broker,
+        workflow_engine,
+        mtls_lifecycle,
+        net_slot_allocator,
+        network_provisioner,
+        None,
+        host,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_with_network_provisioner_and_guest(
+    actions: Vec<Action>,
+    drivers: &DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
+    obs: &dyn ObservationStore,
+    dataplane: &dyn Dataplane,
+    ca: &dyn Ca,
+    clock: &dyn Clock,
+    identity: &IdentityMgr,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    writer_node: &NodeId,
+    allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
+    broker: &parking_lot::Mutex<EvaluationBroker>,
+    workflow_engine: Option<&WorkflowEngine>,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+    host: &dyn VmHostState,
+) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
@@ -937,6 +984,7 @@ pub async fn dispatch_with_network_provisioner(
             mtls_lifecycle,
             net_slot_allocator,
             network_provisioner,
+            guest_provisioner,
             host,
         )
         .await;
@@ -1164,18 +1212,39 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
 /// Returns the same typed [`ShimError`] values as production dispatch.
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
-#[expect(
-    clippy::panic,
-    clippy::unused_async,
-    reason = "RED scaffold; DELIVER performs the accepted single-cut guest-network action composition"
-)]
 pub async fn dispatch_with_guest_network_provisioner_for_test(
-    _actions: Vec<Action>,
-    _state: &crate::AppState,
-    _tick: &TickContext,
-    _provisioner: &dyn GuestNetworkProvisioner,
+    actions: Vec<Action>,
+    state: &crate::AppState,
+    tick: &TickContext,
+    provisioner: &dyn GuestNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 guest-network action owner)")
+    let (dispatchable, preflight_err) =
+        persist_workflow_intents(state.store.as_ref(), actions).await;
+    let mtls_lifecycle =
+        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let dispatch_result = dispatch_with_network_provisioner_and_guest(
+        dispatchable,
+        state.drivers.as_ref(),
+        &state.alloc_drivers,
+        state.obs.as_ref(),
+        state.dataplane.as_ref(),
+        state.ca.as_ref(),
+        state.clock.as_ref(),
+        state.identity.as_ref(),
+        state.lifecycle_events.as_ref(),
+        tick,
+        &state.node_id,
+        Arc::clone(&state.allocator),
+        state.runtime.broker_mutex(),
+        Some(state.workflow_engine.as_ref()),
+        mtls_lifecycle,
+        &state.net_slot_allocator,
+        &HostNetworkProvisioner,
+        Some(provisioner),
+        state.vm_host_state.as_ref(),
+    )
+    .await;
+    preflight_err.map_or(dispatch_result, Err)
 }
 
 /// C3 PROVISION SEAM (transparent-mtls-enrollment D-TME-12 G1/G2/G3 + JOIN-2,
@@ -1195,11 +1264,18 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
 ///   rather than dropped onto a shared veth/subnet).
 /// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth/tap provision failed
 ///   (fail-closed: the workload must not spawn without its netns).
-fn provision_and_inject_netns(
+async fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
 ) -> Result<(), ShimError> {
+    if let Some(guest_provisioner) = guest_provisioner {
+        let plan = crate::guest_network::assign_action_plan(spec.alloc.clone())?;
+        guest_provisioner.provision(&plan).await?;
+        spec.network = Some(plan.assignment().clone());
+        return Ok(());
+    }
     // G3: assign the smallest-free slot (idempotent re-entry for an already-
     // held alloc — a Restart reuses the same slot). Exhaustion REFUSES.
     let slot = net_slot_allocator.assign(spec.alloc.clone())?;
@@ -1227,17 +1303,17 @@ fn provision_and_inject_netns(
 /// as the canonical workload address and fills the complete guest-net channel.
 fn inject_workload_network(
     spec: &mut AllocationSpec,
-    workload: &WorkloadNetnsPlan,
+    _workload: &WorkloadNetnsPlan,
     vm_tap: &VmTapPlan,
 ) {
-    spec.netns = Some(workload.netns.clone());
-    spec.host_veth = Some(workload.host_veth.clone());
-    spec.workload_addr = Some(vm_tap.guest_addr);
-    spec.guest_tap = Some(vm_tap.tap.clone());
-    spec.guest_mac = Some(vm_tap.mac);
-    spec.guest_gateway = Some(vm_tap.tap_gateway);
-    spec.guest_prefix_len = Some(vm_tap.guest_network.prefix_len());
-    spec.guest_dns = Some(vm_tap.responder_addr);
+    spec.network = Some(GuestNetworkAssignment {
+        address: vm_tap.guest_addr,
+        tap: vm_tap.tap.clone(),
+        mac: vm_tap.mac,
+        gateway: vm_tap.tap_gateway,
+        prefix: vm_tap.guest_network.prefix_len(),
+        dns: vm_tap.responder_addr,
+    });
 }
 
 #[cfg(test)]
@@ -1262,14 +1338,7 @@ mod vm_tap_spec_injection_tests {
             driver,
             resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
+            network: None,
             service_ports: Vec::new(),
         }
     }
@@ -1295,24 +1364,16 @@ mod vm_tap_spec_injection_tests {
 
         inject_workload_network(&mut spec, &workload, &tap);
 
-        assert_eq!(spec.netns.as_ref(), Some(&workload.netns));
-        assert_eq!(spec.host_veth.as_deref(), Some(workload.host_veth.as_str()));
-        assert_eq!(spec.workload_addr, Some(tap.guest_addr));
-        assert_eq!(spec.guest_tap.as_deref(), Some(tap.tap.as_str()));
-        assert_eq!(spec.guest_mac, Some(tap.mac));
-        assert_eq!(spec.guest_gateway, Some(tap.tap_gateway));
-        assert_eq!(spec.guest_prefix_len, Some(tap.guest_network.prefix_len()));
-        assert_eq!(spec.guest_dns, Some(tap.responder_addr));
+        let network = spec.network.as_ref().expect("complete network assignment");
+        assert_eq!(network.address, tap.guest_addr);
+        assert_eq!(network.tap, tap.tap);
+        assert_eq!(network.mac, tap.mac);
+        assert_eq!(network.gateway, tap.tap_gateway);
+        assert_eq!(network.prefix, tap.guest_network.prefix_len());
+        assert_eq!(network.dns, tap.responder_addr);
 
         let mut expected = before;
-        expected.netns = Some(workload.netns.clone());
-        expected.host_veth = Some(workload.host_veth.clone());
-        expected.workload_addr = Some(tap.guest_addr);
-        expected.guest_tap = Some(tap.tap.clone());
-        expected.guest_mac = Some(tap.mac);
-        expected.guest_gateway = Some(tap.tap_gateway);
-        expected.guest_prefix_len = Some(tap.guest_network.prefix_len());
-        expected.guest_dns = Some(tap.responder_addr);
+        expected.network = spec.network.clone();
         assert_eq!(
             spec, expected,
             "VM injection may change only its declared network handoff fields",
@@ -1381,6 +1442,37 @@ fn teardown_and_release_netns(
         network_provisioner,
     )
     .map_err(ShimError::from)
+}
+
+async fn teardown_guest_network(
+    alloc_id: &AllocationId,
+    guest_provisioner: &dyn GuestNetworkProvisioner,
+) -> Result<(), ShimError> {
+    let Some(plan) = crate::guest_network::action_plan(alloc_id) else {
+        return Ok(());
+    };
+    guest_provisioner.teardown(&plan).await?;
+    crate::guest_network::release_action_plan(alloc_id);
+    Ok(())
+}
+
+async fn teardown_for_dispatch(
+    alloc_id: &AllocationId,
+    prior_workload_addr: Option<std::net::Ipv4Addr>,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
+) -> Result<(), ShimError> {
+    if let Some(guest_provisioner) = guest_provisioner {
+        teardown_guest_network(alloc_id, guest_provisioner).await
+    } else {
+        teardown_and_release_netns(
+            alloc_id,
+            prior_workload_addr,
+            net_slot_allocator,
+            network_provisioner,
+        )
+    }
 }
 
 /// Abort cleanup for a successor that did not reach an accepted Running row.
@@ -1514,6 +1606,7 @@ async fn dispatch_single(
     mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     match action {
@@ -1794,12 +1887,14 @@ async fn dispatch_single(
             if let Some(mtls_lifecycle) = mtls_lifecycle {
                 mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
             }
-            teardown_and_release_netns(
+            teardown_for_dispatch(
                 &row.alloc_id,
                 prior_workload_addr,
                 net_slot_allocator,
                 network_provisioner,
-            )?;
+                guest_provisioner,
+            )
+            .await?;
             let terminal_driver =
                 alloc_drivers.lock().get(&row.alloc_id).copied().and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {
@@ -1875,8 +1970,13 @@ async fn dispatch_single(
             // alloc is Pending → Failed, never Running). A non-provision
             // `ShimError` (unreachable here, but kept exhaustive) propagates
             // unchanged.
-            if let Err(err) =
-                provision_and_inject_netns(&mut spec, net_slot_allocator, network_provisioner)
+            if let Err(err) = provision_and_inject_netns(
+                &mut spec,
+                net_slot_allocator,
+                network_provisioner,
+                guest_provisioner,
+            )
+            .await
             {
                 let Some(cause) = netns_provision_cause(&err) else {
                     return Err(err);
@@ -1948,12 +2048,14 @@ async fn dispatch_single(
                 )
                 .await
             {
-                teardown_and_release_netns(
+                teardown_for_dispatch(
                     &alloc_id,
                     None,
                     net_slot_allocator,
                     network_provisioner,
-                )?;
+                    guest_provisioner,
+                )
+                .await?;
                 return Err(issue_error);
             }
             let start_outcome: Result<AllocationHandle, DriverError> =
@@ -2067,8 +2169,11 @@ async fn dispatch_single(
             // A failed start (`state == Failed`) never reached the provisioned
             // netns, so it carries `None`. Successor / terminal writers (exit
             // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
-            let workload_addr =
-                if state == AllocState::Running { spec.workload_addr } else { None };
+            let workload_addr = if state == AllocState::Running {
+                spec.network.as_ref().map(|network| network.address)
+            } else {
+                None
+            };
             let updated_at =
                 LogicalTimestamp::dominating(tick.tick, node_id.clone(), prior_updated_at.as_ref());
             let row = build_alloc_status_row(
@@ -2183,12 +2288,14 @@ async fn dispatch_single(
                         // interception are gone. `teardown` precedes slot
                         // release inside this helper, preserving the existing
                         // retryable ownership boundary on teardown failure.
-                        teardown_and_release_netns(
+                        teardown_for_dispatch(
                             &row.alloc_id,
                             None,
                             net_slot_allocator,
                             network_provisioner,
-                        )?;
+                            guest_provisioner,
+                        )
+                        .await?;
                     }
                     return Err(write_err.into());
                 }
@@ -2300,8 +2407,13 @@ async fn dispatch_single(
             // The successor path is complete before the predecessor cleanup
             // attempt. A failed provision is represented at the successor key
             // and its structural ownership is unwound before old cleanup.
-            let successor_outcome = if let Err(error) =
-                provision_and_inject_netns(&mut spec, net_slot_allocator, network_provisioner)
+            let successor_outcome = if let Err(error) = provision_and_inject_netns(
+                &mut spec,
+                net_slot_allocator,
+                network_provisioner,
+                guest_provisioner,
+            )
+            .await
             {
                 let Some(cause) = netns_provision_cause(&error) else {
                     return finish_restart(
@@ -2512,8 +2624,9 @@ async fn dispatch_single(
                 // A fresh successor starts with zero/None per-allocation
                 // history. A failed launch never reached Running.
                 let started_at = (state == AllocState::Running).then_some(tick.now_unix);
-                let workload_addr =
-                    (state == AllocState::Running).then_some(spec.workload_addr).flatten();
+                let workload_addr = (state == AllocState::Running)
+                    .then_some(spec.network.as_ref().map(|network| network.address))
+                    .flatten();
                 let row = build_alloc_status_row(
                     successor_alloc_id.clone(),
                     prior_row.workload_id.clone(),
@@ -2748,12 +2861,14 @@ async fn dispatch_single(
             if let Some(mtls_lifecycle) = mtls_lifecycle {
                 mtls_lifecycle.stop_alloc(&alloc_id).await?;
             }
-            teardown_and_release_netns(
+            teardown_for_dispatch(
                 &alloc_id,
                 prior_row.workload_addr,
                 net_slot_allocator,
                 network_provisioner,
-            )?;
+                guest_provisioner,
+            )
+            .await?;
             let terminal_driver =
                 alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
             if let Some(driver) = terminal_driver {

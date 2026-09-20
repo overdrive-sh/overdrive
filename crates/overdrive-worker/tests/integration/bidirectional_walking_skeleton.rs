@@ -549,7 +549,7 @@ fn held_identities(pki: &TestPki) -> HeldIdentities {
 /// the leg-B handshake) with `host_veth = Some(VETH_H)` (the channel the
 /// action-shim C3 provision seam sets in production, JOIN-6 — drives the egress
 /// nft-TPROXY install matching `iifname VETH_H`).
-fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec {
+fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpec {
     AllocationSpec {
         alloc: pki.client_alloc.clone(),
         identity: pki.client_leaf.spiffe.clone(),
@@ -563,15 +563,8 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth,
+        network: None,
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 

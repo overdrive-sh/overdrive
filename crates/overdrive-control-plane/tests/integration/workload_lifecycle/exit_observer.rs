@@ -24,6 +24,8 @@
 //! kernel — so this file gates only on `#[cfg(feature =
 //! "integration-tests")]` (no `target_os = "linux"`).
 
+#![allow(clippy::large_futures)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

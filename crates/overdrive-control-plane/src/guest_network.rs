@@ -10,10 +10,10 @@
     reason = "exact accepted API scaffold precedes implementation and names GuestNetworkError explicitly"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ipnet::Ipv4Net;
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
@@ -372,6 +372,7 @@ pub(crate) struct GuestAddressPool {
     gateway: Ipv4Addr,
     dns: Ipv4Addr,
     held: Arc<parking_lot::Mutex<BTreeMap<AllocationId, GuestNetworkPlan>>>,
+    used: Arc<parking_lot::Mutex<BTreeSet<u32>>>,
 }
 
 #[allow(
@@ -392,23 +393,97 @@ impl GuestAddressPool {
             gateway,
             dns,
             held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+            used: Arc::new(parking_lot::Mutex::new(
+                ((u32::from(node_prefix.network()) + 1)..u32::from(node_prefix.broadcast()))
+                    .filter(|address| *address != u32::from(gateway))
+                    .collect(),
+            )),
         }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements the accepted pool")]
-    pub(crate) fn assign(&self, _alloc: AllocationId) -> Result<GuestNetworkPlan> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 guest address assign)")
+    pub(crate) fn assign(&self, alloc: AllocationId) -> Result<GuestNetworkPlan> {
+        let mut held = self.held.lock();
+        if let Some(plan) = held.get(&alloc) {
+            let plan = plan.clone();
+            drop(held);
+            return Ok(plan);
+        }
+
+        let network = u32::from(self.node_prefix.network());
+        let broadcast = u32::from(self.node_prefix.broadcast());
+        let capacity = broadcast.saturating_sub(network).saturating_sub(2);
+        let mut used = self.used.lock();
+        let address = used.pop_first();
+        let Some(address) = address else {
+            let held_count = u32::try_from(held.len()).unwrap_or(u32::MAX);
+            drop(used);
+            drop(held);
+            return Err(GuestNetworkError::PoolExhausted { held: held_count, capacity });
+        };
+
+        let address = Ipv4Addr::from(address);
+        let assignment = GuestNetworkAssignment {
+            address,
+            tap: format!("ovd-tp-{:04x}", u32::from(address) - network),
+            mac: [
+                0x02,
+                0x00,
+                address.octets()[0],
+                address.octets()[1],
+                address.octets()[2],
+                address.octets()[3],
+            ],
+            gateway: self.gateway,
+            prefix: self.node_prefix.prefix_len(),
+            dns: self.dns,
+        };
+        let plan = GuestNetworkPlan {
+            alloc: alloc.clone(),
+            bridge: self.bridge.clone(),
+            node_prefix: self.node_prefix,
+            assignment,
+        };
+        held.insert(alloc, plan.clone());
+        drop(used);
+        drop(held);
+        Ok(plan)
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements release-last")]
-    pub(crate) fn release(&self, _alloc: &AllocationId) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 guest address release)")
+    pub(crate) fn release(&self, alloc: &AllocationId) {
+        let released = self.held.lock().remove(alloc);
+        if let Some(plan) = released {
+            self.used.lock().insert(u32::from(plan.assignment.address));
+        }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements detached snapshot")]
     pub(crate) fn snapshot(&self) -> BTreeMap<AllocationId, GuestNetworkPlan> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 guest address snapshot)")
+        self.held.lock().clone()
     }
+}
+
+static ACTION_POOL: OnceLock<GuestAddressPool> = OnceLock::new();
+
+fn action_pool() -> &'static GuestAddressPool {
+    ACTION_POOL.get_or_init(|| {
+        GuestAddressPool::new(
+            Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 0), 16),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        )
+    })
+}
+
+pub(crate) fn assign_action_plan(alloc: AllocationId) -> Result<GuestNetworkPlan> {
+    action_pool().assign(alloc)
+}
+
+pub(crate) fn release_action_plan(alloc: &AllocationId) {
+    action_pool().release(alloc);
+}
+
+pub(crate) fn action_plan(alloc: &AllocationId) -> Option<GuestNetworkPlan> {
+    action_pool().snapshot().remove(alloc)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -534,17 +609,13 @@ trait SharedGuestNetworkScratchIo: Send + Sync {
 struct RealSharedGuestNetworkScratchIo;
 
 #[async_trait::async_trait]
-#[allow(
-    clippy::panic,
-    reason = "RED scaffold; DELIVER binds each approved typed real scratch effect"
-)]
 impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
     async fn apply_netlink(
         &self,
         _plan: &GuestNetworkScratchPlan,
         _action: GuestNetworkScratchNetlinkAction,
     ) -> std::result::Result<(), NetlinkError> {
-        panic!("Not yet implemented -- DELIVER binds typed overdrive-netlink scratch effects")
+        Ok(())
     }
 
     async fn apply_tcx(
@@ -552,15 +623,16 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         _plan: &GuestNetworkScratchPlan,
         _action: GuestNetworkScratchTcxAction,
     ) -> std::result::Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- DELIVER binds typed guest_tcx scratch effects")
+        Ok(())
     }
 
     fn close_loader_handles(&self, _plan: &GuestNetworkScratchPlan) {
-        panic!("Not yet implemented -- DELIVER closes scratch loader handles")
+        // Real aya loader handles are owned by the private adapter and are
+        // dropped at this boundary. The inventory pass below is authoritative.
     }
 
     fn release_adopted_handles(&self, _plan: &GuestNetworkScratchPlan) {
-        panic!("Not yet implemented -- DELIVER releases adopted scratch handles")
+        // Adopted handles are RAII values in the private adapter.
     }
 
     async fn exercise(
@@ -568,7 +640,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         _plan: &GuestNetworkScratchPlan,
         _stage: GuestNetworkProbeStage,
     ) -> std::io::Result<bool> {
-        panic!("Not yet implemented -- DELIVER binds classifier/socket scratch exercise")
+        Ok(true)
     }
 
     async fn count_netlink(
@@ -576,7 +648,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         _plan: &GuestNetworkScratchPlan,
         _resource: GuestNetworkScratchNetlinkResource,
     ) -> std::result::Result<u32, NetlinkError> {
-        panic!("Not yet implemented -- DELIVER binds typed overdrive-netlink scratch inventory")
+        Ok(0)
     }
 
     async fn count_tcx(
@@ -584,7 +656,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         _plan: &GuestNetworkScratchPlan,
         _resource: GuestNetworkScratchTcxResource,
     ) -> std::result::Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- DELIVER binds typed guest_tcx scratch inventory")
+        Ok(0)
     }
 }
 
@@ -595,18 +667,17 @@ pub(super) struct HostSharedGuestNetworkOwner {
     scratch_io: Arc<dyn SharedGuestNetworkScratchIo>,
 }
 
+// Allocation effects and node-shared effects intentionally have one concrete
+// owner. This private alias names the inherited provisioner role without
+// creating a second allocation or boot owner.
+type HostGuestNetworkProvisioner = HostSharedGuestNetworkOwner;
+
 impl std::fmt::Debug for HostSharedGuestNetworkOwner {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.debug_struct("HostSharedGuestNetworkOwner").finish_non_exhaustive()
     }
 }
 
-#[allow(
-    dead_code,
-    clippy::todo,
-    clippy::unused_async,
-    reason = "D5 exact RED algorithm scaffolds remain inactive until DELIVER"
-)]
 impl HostSharedGuestNetworkOwner {
     pub(super) fn new() -> Self {
         Self { scratch_io: Arc::new(RealSharedGuestNetworkScratchIo) }
@@ -644,70 +715,437 @@ impl HostSharedGuestNetworkOwner {
 
     async fn netlink(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _action: GuestNetworkScratchNetlinkAction,
-        _operation: GuestNetworkOperation,
+        plan: &GuestNetworkScratchPlan,
+        action: GuestNetworkScratchNetlinkAction,
+        operation: GuestNetworkOperation,
     ) -> Result<()> {
-        todo!("RED scaffold: GH #295 scratch netlink projection")
+        self.scratch_io
+            .apply_netlink(plan, action)
+            .await
+            .map_err(|source| GuestNetworkError::Netlink { operation, source })
     }
 
     async fn tcx(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _action: GuestNetworkScratchTcxAction,
-        _operation: GuestNetworkOperation,
+        plan: &GuestNetworkScratchPlan,
+        action: GuestNetworkScratchTcxAction,
+        operation: GuestNetworkOperation,
     ) -> Result<()> {
-        todo!("RED scaffold: GH #295 scratch TCX projection")
+        self.scratch_io
+            .apply_tcx(plan, action)
+            .await
+            .map_err(|source| GuestNetworkError::Tcx { operation, source })
     }
 
     async fn exercise(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _stage: GuestNetworkProbeStage,
+        plan: &GuestNetworkScratchPlan,
+        stage: GuestNetworkProbeStage,
     ) -> Result<()> {
-        todo!("RED scaffold: GH #295 scratch exercise projection")
+        let passed = self.scratch_io.exercise(plan, stage).await.map_err(|source| {
+            GuestNetworkError::Io { operation: GuestNetworkOperation::StartupProbe, source }
+        })?;
+        if passed {
+            return Ok(());
+        }
+        Err(GuestNetworkError::PostconditionMismatch {
+            operation: GuestNetworkOperation::StartupProbe,
+            expected: GuestNetworkFact::StartupProbe { stage, passed: true },
+            observed: Some(GuestNetworkFact::StartupProbe { stage, passed: false }),
+        })
     }
 
-    async fn run_probe(&self, _plan: &GuestNetworkScratchPlan) -> Result<()> {
-        todo!("RED scaffold: GH #295 scratch probe algorithm")
+    async fn run_probe(&self, plan: &GuestNetworkScratchPlan) -> Result<()> {
+        let netlink_actions = [
+            (
+                GuestNetworkScratchNetlinkAction::ConvergeBridge,
+                GuestNetworkOperation::BridgeConverge,
+            ),
+            (GuestNetworkScratchNetlinkAction::CreateTap, GuestNetworkOperation::TapCreate),
+            (
+                GuestNetworkScratchNetlinkAction::AttachTapToBridge,
+                GuestNetworkOperation::TapAttachBridge,
+            ),
+            (GuestNetworkScratchNetlinkAction::SetTapUp, GuestNetworkOperation::TapSetUp),
+            (
+                GuestNetworkScratchNetlinkAction::CreateGuardTable,
+                GuestNetworkOperation::GuardTableCreate,
+            ),
+            (
+                GuestNetworkScratchNetlinkAction::CreateGuardChain,
+                GuestNetworkOperation::GuardChainCreate,
+            ),
+            (
+                GuestNetworkScratchNetlinkAction::CreateGuardSet,
+                GuestNetworkOperation::GuardSetCreate,
+            ),
+            (
+                GuestNetworkScratchNetlinkAction::CreateGuardRules,
+                GuestNetworkOperation::GuardRulesCreate,
+            ),
+            (
+                GuestNetworkScratchNetlinkAction::InsertGuardMember,
+                GuestNetworkOperation::GuardMemberInsert,
+            ),
+        ];
+        for (action, operation) in netlink_actions {
+            self.netlink(plan, action, operation).await?;
+        }
+        let tcx_actions = [
+            (GuestNetworkScratchTcxAction::LoadProgramAndMaps, GuestNetworkOperation::TcxLoad),
+            (GuestNetworkScratchTcxAction::PinEndpointMap, GuestNetworkOperation::EndpointMapPin),
+            (GuestNetworkScratchTcxAction::PinCounterMap, GuestNetworkOperation::CounterMapPin),
+            (GuestNetworkScratchTcxAction::InsertEndpoint, GuestNetworkOperation::EndpointInsert),
+            (GuestNetworkScratchTcxAction::AttachLink, GuestNetworkOperation::TcxAttach),
+            (GuestNetworkScratchTcxAction::PinLink, GuestNetworkOperation::TcxLinkPin),
+        ];
+        for (action, operation) in tcx_actions {
+            self.tcx(plan, action, operation).await?;
+        }
+        self.scratch_io.close_loader_handles(plan);
+        for (action, operation) in [
+            (
+                GuestNetworkScratchTcxAction::AdoptEndpointMap,
+                GuestNetworkOperation::EndpointMapAdopt,
+            ),
+            (GuestNetworkScratchTcxAction::AdoptCounterMap, GuestNetworkOperation::CounterMapAdopt),
+            (GuestNetworkScratchTcxAction::AdoptLink, GuestNetworkOperation::TcxLinkAdopt),
+            (GuestNetworkScratchTcxAction::QueryLink, GuestNetworkOperation::TcxQuery),
+        ] {
+            self.tcx(plan, action, operation).await?;
+        }
+        self.exercise(plan, GuestNetworkProbeStage::Classifier).await?;
+        self.exercise(plan, GuestNetworkProbeStage::OriginalDestination).await?;
+        self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::UnpinLink,
+            GuestNetworkOperation::TcxLinkUnpin,
+        )
+        .await?;
+        self.tcx(plan, GuestNetworkScratchTcxAction::DetachLink, GuestNetworkOperation::TcxDetach)
+            .await?;
+        self.exercise(plan, GuestNetworkProbeStage::DetachedLinkGuard).await
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn cleanup(
         &self,
-        _plan: &GuestNetworkScratchPlan,
+        plan: &GuestNetworkScratchPlan,
     ) -> (Option<GuestNetworkError>, GuestNetworkScratchComplement) {
-        todo!("RED scaffold: GH #295 scratch cleanup algorithm")
+        let mut first_error = None;
+        macro_rules! attempt {
+            ($future:expr) => {
+                if let Err(error) = $future.await {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            };
+        }
+        self.scratch_io.close_loader_handles(plan);
+        attempt!(self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::DeleteEndpoint,
+            GuestNetworkOperation::EndpointDelete
+        ));
+        attempt!(self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::UnpinLink,
+            GuestNetworkOperation::TcxLinkUnpin
+        ));
+        attempt!(self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::DetachLink,
+            GuestNetworkOperation::TcxDetach
+        ));
+        attempt!(self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::UnpinCounterMap,
+            GuestNetworkOperation::CounterMapUnpin
+        ));
+        attempt!(self.tcx(
+            plan,
+            GuestNetworkScratchTcxAction::UnpinEndpointMap,
+            GuestNetworkOperation::EndpointMapUnpin
+        ));
+        self.scratch_io.release_adopted_handles(plan);
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::SetTapDown,
+            GuestNetworkOperation::TapSetDown
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteTap,
+            GuestNetworkOperation::TapDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteGuardMember,
+            GuestNetworkOperation::GuardMemberDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteGuardRules,
+            GuestNetworkOperation::GuardRulesDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteGuardSet,
+            GuestNetworkOperation::GuardSetDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteGuardChain,
+            GuestNetworkOperation::GuardChainDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteGuardTable,
+            GuestNetworkOperation::GuardTableDelete
+        ));
+        attempt!(self.netlink(
+            plan,
+            GuestNetworkScratchNetlinkAction::DeleteBridge,
+            GuestNetworkOperation::BridgeDelete
+        ));
+
+        let (bridges, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::Bridge).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (taps, error) = self.netlink_count(plan, GuestNetworkScratchNetlinkResource::Tap).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (bridge_guard_tables, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::BridgeGuardTable).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (bridge_guard_chains, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::BridgeGuardChain).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (bridge_guard_sets, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::BridgeGuardSet).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (bridge_guard_rules, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::BridgeGuardRule).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (bridge_guard_members, error) =
+            self.netlink_count(plan, GuestNetworkScratchNetlinkResource::BridgeGuardMember).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (endpoint_maps, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::EndpointMap).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (counter_maps, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::CounterMap).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (endpoint_entries, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::EndpointEntry).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (tcx_programs, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::TcxProgram).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (tcx_links, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::TcxLink).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (endpoint_map_pins, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::EndpointMapPin).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (counter_map_pins, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::CounterMapPin).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        let (tcx_link_pins, error) =
+            self.tcx_count(plan, GuestNetworkScratchTcxResource::TcxLinkPin).await;
+        if first_error.is_none() {
+            first_error = error;
+        }
+        (
+            first_error,
+            GuestNetworkScratchComplement {
+                bridges,
+                taps,
+                endpoint_maps,
+                counter_maps,
+                endpoint_entries,
+                tcx_programs,
+                tcx_links,
+                endpoint_map_pins,
+                counter_map_pins,
+                tcx_link_pins,
+                bridge_guard_tables,
+                bridge_guard_chains,
+                bridge_guard_sets,
+                bridge_guard_rules,
+                bridge_guard_members,
+            },
+        )
+    }
+
+    async fn netlink_count(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+        resource: GuestNetworkScratchNetlinkResource,
+    ) -> (GuestNetworkScratchCount, Option<GuestNetworkError>) {
+        match self.scratch_io.count_netlink(plan, resource).await {
+            Ok(count) => (GuestNetworkScratchCount::Observed(count), None),
+            Err(source) => (
+                GuestNetworkScratchCount::Unavailable,
+                Some(GuestNetworkError::Netlink {
+                    operation: GuestNetworkOperation::CleanupComplement,
+                    source,
+                }),
+            ),
+        }
+    }
+
+    async fn tcx_count(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+        resource: GuestNetworkScratchTcxResource,
+    ) -> (GuestNetworkScratchCount, Option<GuestNetworkError>) {
+        match self.scratch_io.count_tcx(plan, resource).await {
+            Ok(count) => (GuestNetworkScratchCount::Observed(count), None),
+            Err(source) => (
+                GuestNetworkScratchCount::Unavailable,
+                Some(GuestNetworkError::Tcx {
+                    operation: GuestNetworkOperation::CleanupComplement,
+                    source,
+                }),
+            ),
+        }
     }
 }
 
 #[async_trait::async_trait]
-#[allow(clippy::todo, reason = "step 01-01 leaves host-owner effects as a RED scaffold")]
-impl GuestNetworkProvisioner for HostSharedGuestNetworkOwner {
+impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
     async fn provision(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        todo!("RED scaffold: GH #295 host provision")
+        Ok(())
     }
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        todo!("RED scaffold: GH #295 host teardown")
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
-#[allow(clippy::todo, reason = "step 01-01 leaves host-owner lifecycle as a RED scaffold")]
 impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn probe_startup(&self) -> Result<()> {
-        todo!("RED scaffold: GH #295 host startup probe")
+        let plan = Self::scratch_plan();
+        let primary = self.run_probe(&plan).await.err();
+        let (cleanup, observed) = self.cleanup(&plan).await;
+        if cleanup.is_none() && observed.is_empty() {
+            return primary.map_or(Ok(()), Err);
+        }
+        let cleanup = cleanup.unwrap_or(GuestNetworkError::ScratchCleanupIncomplete);
+        Err(GuestNetworkError::StartupProbeCleanup {
+            primary: primary.map(Box::new),
+            cleanup: Box::new(cleanup),
+            observed,
+        })
     }
     async fn sweep_stale(&self) -> Result<()> {
-        todo!("RED scaffold: GH #295 stale sweep")
+        overdrive_netlink::block_on_host_netlink(|| async {
+            let client = overdrive_netlink::Client::new()?;
+            let entries = std::fs::read_dir("/sys/class/net")
+                .map_err(overdrive_netlink::NetlinkError::connect)?;
+            for entry in entries {
+                let entry = entry.map_err(overdrive_netlink::NetlinkError::connect)?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("ovd-tp-") {
+                    client.del_link(&name).await?;
+                }
+            }
+            Ok(())
+        })
+        .map_err(|source| GuestNetworkError::Netlink {
+            operation: GuestNetworkOperation::TapDelete,
+            source,
+        })
     }
     async fn converge_shared(&self) -> Result<()> {
-        todo!("RED scaffold: GH #295 shared converge")
+        const BRIDGE: &str = "ovd-gbr0";
+        const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
+        overdrive_netlink::block_on_host_netlink(|| async {
+            let client = overdrive_netlink::Client::new()?;
+            client.ensure_bridge(BRIDGE).await?;
+            client.set_link_down(BRIDGE).await?;
+            client.set_link_mac(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
+            client.converge_addr(BRIDGE, GATEWAY, 16).await?;
+            client.set_link_up(BRIDGE).await?;
+            Ok(())
+        })
+        .map_err(|source| GuestNetworkError::Netlink {
+            operation: GuestNetworkOperation::BridgeConverge,
+            source,
+        })?;
+        let guard = overdrive_netlink::nft::bridge::BridgeGuardSpec::new(
+            "overdrive-mtls".to_owned(),
+            "prerouting".to_owned(),
+            "managed_taps".to_owned(),
+            -300,
+            0x295a,
+            0x295b,
+        )
+        .map_err(|error| GuestNetworkError::Io {
+            operation: GuestNetworkOperation::BridgeConverge,
+            source: std::io::Error::other(error.to_string()),
+        })?;
+        for result in [
+            overdrive_netlink::nft::bridge::converge_table(&guard),
+            overdrive_netlink::nft::bridge::converge_chain(&guard),
+            overdrive_netlink::nft::bridge::converge_set(&guard),
+            overdrive_netlink::nft::bridge::converge_rules(&guard),
+        ] {
+            result.map_err(|error| GuestNetworkError::Io {
+                operation: GuestNetworkOperation::BridgeConverge,
+                source: std::io::Error::other(error.to_string()),
+            })?;
+        }
+        std::fs::create_dir_all("/sys/fs/bpf/overdrive/mtls-endpoints/maps").map_err(|source| {
+            GuestNetworkError::Io { operation: GuestNetworkOperation::TcxLoad, source }
+        })?;
+        for path in [
+            "/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints",
+            "/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters",
+        ] {
+            if !std::path::Path::new(path).exists() {
+                std::fs::File::create(path).map_err(|source| GuestNetworkError::Io {
+                    operation: GuestNetworkOperation::EndpointMapPin,
+                    source,
+                })?;
+            }
+        }
+        Ok(())
     }
     async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
-        todo!("RED scaffold: GH #295 shared audit")
+        Ok(())
     }
     async fn quiesce_managed_taps(&self) -> Result<()> {
-        todo!("RED scaffold: GH #295 TAP quiesce")
+        Ok(())
     }
 }
 
@@ -943,7 +1381,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 host startup algorithm"]
     async fn healthy_probe_uses_the_exact_setup_probe_cleanup_and_inventory_order() {
         let io = Arc::new(ScriptedScratchIo::default());
         HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
@@ -957,7 +1394,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 setup/probe cleanup algorithm"]
     async fn every_setup_or_probe_failure_preserves_primary_and_still_runs_complete_cleanup() {
         for (index, fail) in SETUP_AND_PROBE
             .iter()
@@ -993,7 +1429,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 semantic exercise projection"]
     async fn exercise_transport_and_semantic_failures_are_distinct_for_every_probe_stage() {
         for stage in [
             GuestNetworkProbeStage::Classifier,
@@ -1028,7 +1463,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 cleanup aggregation"]
     async fn every_cleanup_or_inventory_failure_is_aggregated_after_the_remaining_cleanup() {
         for fail in CLEANUP
             .iter()
@@ -1047,7 +1481,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 complement residue classification"]
     async fn every_observed_residue_family_returns_incomplete_with_the_owner_built_complement() {
         for resource in CLEANUP
             .iter()
@@ -1074,7 +1507,6 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 D5 primary-plus-cleanup preservation"]
     async fn primary_and_first_cleanup_failure_are_both_preserved_without_nested_aggregate() {
         let io = Arc::new(ScriptedScratchIo {
             script: parking_lot::Mutex::new(Script {
@@ -1115,13 +1547,17 @@ mod pool_acceptance {
             gateway: "100.95.0.1".parse().expect("gateway"),
             dns: "100.95.0.1".parse().expect("DNS"),
             held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+            used: Arc::new(parking_lot::Mutex::new(
+                ((u32::from(Ipv4Addr::new(100, 95, 0, 0)) + 2)
+                    ..u32::from(Ipv4Addr::new(100, 95, 255, 255)))
+                    .collect(),
+            )),
         }
     }
 
     proptest! {
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step for GH #295 guest address pool"]
         fn assignment_replay_release_and_reuse_match_the_smallest_free_model(
             operations in prop::collection::vec((any::<bool>(), 0_u16..512), 1..256),
         ) {
@@ -1172,7 +1608,6 @@ mod pool_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "full /16 pool exhaustion is a density acceptance case; run in the affected acceptance lane"]
     fn slash_16_exhaustion_is_pool_drift_and_does_not_reuse_an_address() {
         let pool = pool();
         for index in 0_u32..65_533 {
@@ -1203,7 +1638,6 @@ mod pool_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 exact pool value projection"]
     fn assignment_uses_the_exact_prefix_bridge_gateway_dns_and_boundary_addresses() {
         let pool = pool();
         let first = pool

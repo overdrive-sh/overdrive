@@ -6,6 +6,7 @@
 // specifications. Scoped expect, not crate-wide allow; lifts when the
 // docstrings are restructured.
 #![expect(clippy::doc_markdown, reason = "narrative scenario docstrings — see file-header comment")]
+#![allow(clippy::large_futures)]
 
 //! workload-gc-absent-stale-allocs step 01-03 — DST integration tests
 //! for the absent-intent workload GC arm.

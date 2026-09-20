@@ -119,15 +119,8 @@ fn start_action() -> Action {
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
+            network: None,
             service_ports: Vec::new(),
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
         },
         kind: WorkloadKind::Service,
     }
@@ -362,7 +355,7 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
         .expect("a Running row must exist after a successful start");
     assert_eq!(row.state, AllocState::Running, "the committed row is Running");
 
-    let (workload, tap) = {
+    let (_workload, tap) = {
         let provisions = network.provisions.lock();
         assert_eq!(
             provisions.len(),
@@ -375,12 +368,11 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
     let started = sim_driver.started_specs();
     assert_eq!(started.len(), 1, "the VM-shaped driver is exercised exactly once");
     let started = &started[0];
-    assert_eq!(started.netns.as_ref(), Some(&workload.netns));
-    assert_eq!(started.host_veth.as_deref(), Some(workload.host_veth.as_str()));
-    assert_eq!(started.workload_addr, Some(tap.guest_addr));
-    assert_eq!(started.guest_tap.as_deref(), Some(tap.tap.as_str()));
-    assert_eq!(started.guest_mac, Some(tap.mac));
-    assert_eq!(started.guest_gateway, Some(tap.tap_gateway));
-    assert_eq!(started.guest_prefix_len, Some(tap.guest_network.prefix_len()));
-    assert_eq!(started.guest_dns, Some(tap.responder_addr));
+    let network = started.network.as_ref().expect("grouped assignment");
+    assert_eq!(network.address, tap.guest_addr);
+    assert_eq!(network.tap, tap.tap);
+    assert_eq!(network.mac, tap.mac);
+    assert_eq!(network.gateway, tap.tap_gateway);
+    assert_eq!(network.prefix, tap.guest_network.prefix_len());
+    assert_eq!(network.dns, tap.responder_addr);
 }

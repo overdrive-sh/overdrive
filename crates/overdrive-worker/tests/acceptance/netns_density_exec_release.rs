@@ -18,7 +18,7 @@ use overdrive_core::guest_network::{
     GuestNetworkExecSupervisor, GuestNetworkExecWiring, SharedGuestNetworkComponent,
     SharedGuestNetworkFailStopCause,
 };
-use overdrive_core::id::{AllocationId, NetnsName, NodeId};
+use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverPayload, Resources, VmPayload,
 };
@@ -82,14 +82,14 @@ fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> Allocatio
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: Some(NetnsName::from_hex4("0002").expect("netns")),
-        host_veth: Some("ovd-hv-0002".to_owned()),
-        workload_addr: Some("100.95.0.2".parse().expect("guest address")),
-        guest_tap: Some("ovd-tp-0002".to_owned()),
-        guest_mac: Some([0x02, 0, 100, 95, 0, 2]),
-        guest_gateway: Some("100.95.0.1".parse().expect("gateway")),
-        guest_prefix_len: Some(16),
-        guest_dns: Some("100.95.0.1".parse().expect("DNS")),
+        network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
+            address: "100.95.0.2".parse().expect("guest address"),
+            tap: "ovd-tp-0002".to_owned(),
+            mac: [0x02, 0, 100, 95, 0, 2],
+            gateway: "100.95.0.1".parse().expect("gateway"),
+            prefix: 16,
+            dns: "100.95.0.1".parse().expect("DNS"),
+        }),
         service_ports: Vec::new(),
     }
 }

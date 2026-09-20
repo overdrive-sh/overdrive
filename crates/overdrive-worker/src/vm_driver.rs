@@ -20,22 +20,21 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::io::SeekFrom;
-use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::guest_network::GuestNetworkExecGate;
-use overdrive_core::id::{AllocationId, NetnsName};
+use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    STDERR_TAIL_LINES, VmStartFailure,
+    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, GuestNetworkAssignment,
+    OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -123,26 +122,12 @@ impl GuestConsoleTailReader for FsGuestConsoleTailReader {
 
 #[derive(Clone, Copy)]
 struct VmNetworkInputs<'a> {
-    netns: Option<&'a NetnsName>,
-    tap: Option<&'a str>,
-    mac: Option<[u8; 6]>,
-    guest_addr: Option<Ipv4Addr>,
-    gateway: Option<Ipv4Addr>,
-    prefix_len: Option<u8>,
-    dns: Option<Ipv4Addr>,
+    assignment: Option<&'a GuestNetworkAssignment>,
 }
 
 impl<'a> From<&'a AllocationSpec> for VmNetworkInputs<'a> {
     fn from(spec: &'a AllocationSpec) -> Self {
-        Self {
-            netns: spec.netns.as_ref(),
-            tap: spec.guest_tap.as_deref(),
-            mac: spec.guest_mac,
-            guest_addr: spec.workload_addr,
-            gateway: spec.guest_gateway,
-            prefix_len: spec.guest_prefix_len,
-            dns: spec.guest_dns,
-        }
+        Self { assignment: spec.network.as_ref() }
     }
 }
 
@@ -155,26 +140,19 @@ fn compose_vm_network(
     arch: HostArch,
     inputs: VmNetworkInputs<'_>,
 ) -> Result<ComposedVmNetwork, DriverError> {
-    let VmNetworkInputs { netns, tap, mac, guest_addr, gateway, prefix_len, dns } = inputs;
-    match (netns, tap, mac, guest_addr, gateway, prefix_len, dns) {
-        (None, None, None, None, None, None, None) => {
-            Err(start_rejected_unclassified("VM guest network assignment is required"))
-        }
-        (
-            Some(netns),
-            Some(tap),
-            Some(mac),
-            Some(guest_addr),
-            Some(gateway),
-            Some(prefix_len),
-            Some(dns),
-        ) => {
-            if prefix_len > 32 {
+    match inputs.assignment {
+        None => Err(start_rejected_unclassified("VM guest network assignment is required")),
+        Some(assignment) => {
+            if assignment.prefix > 32 {
                 return Err(start_rejected_unclassified(format!(
-                    "VM guest network prefix length {prefix_len} exceeds 32"
+                    "VM guest network prefix length {} exceeds 32",
+                    assignment.prefix
                 )));
             }
-            let token = format!("overdrive.net={guest_addr}/{prefix_len},gw={gateway},dns={dns}");
+            let token = format!(
+                "overdrive.net={}/{},gw={},dns={}",
+                assignment.address, assignment.prefix, assignment.gateway, assignment.dns
+            );
             let mut cmdline = KernelCmdline::platform_default(arch);
             if !cmdline.append_platform_token(&token) {
                 return Err(start_rejected_unclassified(
@@ -184,15 +162,11 @@ fn compose_vm_network(
             Ok(ComposedVmNetwork {
                 cmdline,
                 attachment: Some(VmNetworkAttachment {
-                    netns: netns.clone(),
-                    tap: tap.to_owned(),
-                    mac,
+                    tap: assignment.tap.clone(),
+                    mac: assignment.mac,
                 }),
             })
         }
-        _ => Err(start_rejected_unclassified(
-            "VM guest network channel is incomplete; netns, TAP, MAC, guest address, prefix, gateway, and DNS must be present together",
-        )),
     }
 }
 
@@ -2529,15 +2503,15 @@ mod tests {
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             probe_descriptors: vec![],
-            netns: Some(NetnsName::from_hex4("0001").expect("valid netns")),
-            host_veth: Some("ovd-hv-0001".to_owned()),
+            network: Some(overdrive_core::traits::driver::GuestNetworkAssignment {
+                address: "100.96.0.6".parse().expect("valid guest address"),
+                tap: "ovd-tap-0001".to_owned(),
+                mac: [0x02, 0, 0, 0, 0, 1],
+                gateway: "100.96.0.5".parse().expect("valid gateway"),
+                prefix: 30,
+                dns: "100.96.0.5".parse().expect("valid DNS"),
+            }),
             service_ports: vec![],
-            workload_addr: Some("100.96.0.6".parse().expect("valid guest address")),
-            guest_tap: Some("ovd-tap-0001".to_owned()),
-            guest_mac: Some([0x02, 0, 0, 0, 0, 1]),
-            guest_gateway: Some("100.96.0.5".parse().expect("valid gateway")),
-            guest_prefix_len: Some(30),
-            guest_dns: Some("100.96.0.5".parse().expect("valid DNS")),
         };
         let terminate_calls = Arc::new(AtomicUsize::new(0));
         let vmm: Arc<dyn Vmm> =
@@ -2733,25 +2707,21 @@ mod tests {
     )]
     #[test]
     fn complete_mesh_network_inputs_become_one_attachment_and_one_guest_addressing_token() {
-        let netns = NetnsName::from_hex4("002a").unwrap();
-        let composed = compose_vm_network(
-            HostArch::X86_64,
-            VmNetworkInputs {
-                netns: Some(&netns),
-                tap: Some("ovd-tap-002a"),
-                mac: Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x2a]),
-                guest_addr: Some("100.96.0.166".parse().unwrap()),
-                gateway: Some("100.96.0.165".parse().unwrap()),
-                prefix_len: Some(30),
-                dns: Some("100.96.0.165".parse().unwrap()),
-            },
-        )
-        .expect("a complete mesh network channel composes");
+        let assignment = GuestNetworkAssignment {
+            address: "100.96.0.166".parse().unwrap(),
+            tap: "ovd-tap-002a".to_owned(),
+            mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
+            gateway: "100.96.0.165".parse().unwrap(),
+            prefix: 30,
+            dns: "100.96.0.165".parse().unwrap(),
+        };
+        let composed =
+            compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: Some(&assignment) })
+                .expect("a complete mesh network channel composes");
 
         assert_eq!(
             composed.attachment,
             Some(VmNetworkAttachment {
-                netns,
                 tap: "ovd-tap-002a".to_owned(),
                 mac: [0x02, 0x00, 0x00, 0x00, 0x00, 0x2a],
             }),
@@ -2776,19 +2746,7 @@ mod tests {
     )]
     #[test]
     fn incomplete_mesh_network_inputs_are_rejected_before_vm_provisioning() {
-        let netns = NetnsName::from_hex4("002a").unwrap();
-        let result = compose_vm_network(
-            HostArch::X86_64,
-            VmNetworkInputs {
-                netns: Some(&netns),
-                tap: None,
-                mac: None,
-                guest_addr: None,
-                gateway: None,
-                prefix_len: None,
-                dns: None,
-            },
-        );
+        let result = compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: None });
 
         assert!(result.is_err(), "a VM netns without its NIC/addressing tuple must fail closed");
     }
@@ -2800,18 +2758,7 @@ mod tests {
     )]
     #[test]
     fn absent_vm_network_assignment_is_rejected_before_vm_provisioning() {
-        let result = compose_vm_network(
-            HostArch::X86_64,
-            VmNetworkInputs {
-                netns: None,
-                tap: None,
-                mac: None,
-                guest_addr: None,
-                gateway: None,
-                prefix_len: None,
-                dns: None,
-            },
-        );
+        let result = compose_vm_network(HostArch::X86_64, VmNetworkInputs { assignment: None });
 
         let Err(DriverError::StartRejected { failure }) = result else {
             panic!("an unassigned VM network must fail closed with a typed rejection");

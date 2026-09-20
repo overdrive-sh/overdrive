@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use overdrive_core::AllocationId;
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{AllocationSpec, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, GuestNetworkAssignment, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_sim::adapters::clock::SimClock;
@@ -195,15 +195,22 @@ pub fn build_inbound_spec(
         ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        network: workload_addr.map(|address| GuestNetworkAssignment {
+            address,
+            tap: "ovd-tp-test".to_owned(),
+            mac: [
+                0x02,
+                0x00,
+                address.octets()[0],
+                address.octets()[1],
+                address.octets()[2],
+                address.octets()[3],
+            ],
+            gateway: address,
+            prefix: 16,
+            dns: address,
+        }),
         service_ports,
-        workload_addr,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 

@@ -1357,7 +1357,8 @@ pub async fn run_convergence_tick(
     tick_n: u64,
     deadline: Instant,
 ) -> Result<(), ConvergenceError> {
-    run_convergence_tick_inner(state, reconciler_name, target, now, tick_n, deadline, None).await
+    run_convergence_tick_inner(state, reconciler_name, target, now, tick_n, deadline, None, None)
+        .await
 }
 
 /// Integration-test form of [`run_convergence_tick`] that drives the same
@@ -1386,6 +1387,7 @@ pub async fn run_convergence_tick_with_network_provisioner_for_test(
         tick_n,
         deadline,
         Some(network_provisioner),
+        None,
     )
     .await
 }
@@ -1398,21 +1400,26 @@ pub async fn run_convergence_tick_with_network_provisioner_for_test(
 /// Returns the same errors as [`run_convergence_tick`].
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
-#[expect(
-    clippy::panic,
-    clippy::unused_async,
-    reason = "RED scaffold; DELIVER performs the accepted single-cut guest-network convergence composition"
-)]
 pub async fn run_convergence_tick_with_guest_network_provisioner_for_test(
-    _state: &AppState,
-    _reconciler_name: &ReconcilerName,
-    _target: &TargetResource,
-    _now: Instant,
-    _tick_n: u64,
-    _deadline: Instant,
-    _provisioner: &dyn crate::guest_network::GuestNetworkProvisioner,
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    now: Instant,
+    tick_n: u64,
+    deadline: Instant,
+    provisioner: &dyn crate::guest_network::GuestNetworkProvisioner,
 ) -> Result<(), ConvergenceError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 guest-network convergence owner)")
+    run_convergence_tick_inner(
+        state,
+        reconciler_name,
+        target,
+        now,
+        tick_n,
+        deadline,
+        None,
+        Some(provisioner),
+    )
+    .await
 }
 
 #[expect(
@@ -1421,6 +1428,7 @@ pub async fn run_convergence_tick_with_guest_network_provisioner_for_test(
               borrow-bundle and must outlive both hydrate_* .await calls; the scoped block \
               already releases them at the minimal hydration window"
 )]
+#[allow(clippy::too_many_arguments)]
 async fn run_convergence_tick_inner(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1429,6 +1437,7 @@ async fn run_convergence_tick_inner(
     tick_n: u64,
     deadline: Instant,
     network_provisioner: Option<&dyn action_shim::WorkloadNetworkProvisioner>,
+    guest_provisioner: Option<&dyn crate::guest_network::GuestNetworkProvisioner>,
 ) -> Result<(), ConvergenceError> {
     // Look up the named reconciler from the registered set. The
     // Evaluation's `reconciler` field is the broker's key half and
@@ -1548,52 +1557,64 @@ async fn run_convergence_tick_inner(
     // unchanged) so `lib.rs` logs it; the self-heal is the re-enqueue. The
     // invariant-conflict branch directly below already self-heals by NOT
     // early-returning — this matches that posture for the dispatch path.
-    let dispatch_outcome: Result<(), ConvergenceError> =
-        if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
-            surface_reconcile_conflict(state, reconciler_name, target, &tick, &violation).await;
-            // The validate-violation path is itself a self-heal: skip dispatch,
-            // keep the persisted View, retry next tick. It contributes no dispatch
-            // error to propagate.
-            Ok(())
-        } else {
-            // Dispatch through the action shim — this is where `.await`
-            // is permitted. Per-action error isolation lives in the shim.
-            // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
-            // after every successful `obs.write` per architecture.md §10.
-            //
-            // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
-            // (step 01-08), so the shim receives the REAL engine, replacing
-            // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
-            // is the AppState-aware path that ALSO persists workflow-instance
-            // desired-intent for every `Action::StartWorkflow` BEFORE handing
-            // the actions to the engine off the shim — so the workflow-lifecycle
-            // reconciler's `hydrate_desired` can read the instance back on the
-            // next tick (and re-emit on restart).
-            // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
-            // and returned at the END of the function, AFTER the self-re-enqueue
-            // below. A recoverable shim error must still re-enqueue (self-heal) so
-            // the persisted retry memory actually re-drives on a later tick.
-            match network_provisioner {
-                #[cfg(any(test, feature = "integration-tests"))]
-                Some(network_provisioner) => {
-                    action_shim::dispatch_with_workflow_intent_and_network_provisioner_for_test(
-                        actions,
-                        state,
-                        &tick,
-                        network_provisioner,
-                    )
-                    .await
-                    .map_err(ConvergenceError::Shim)
-                }
-                #[cfg(not(any(test, feature = "integration-tests")))]
-                Some(_) => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-                    .await
-                    .map_err(ConvergenceError::Shim),
-                None => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-                    .await
-                    .map_err(ConvergenceError::Shim),
+    let dispatch_outcome: Result<(), ConvergenceError> = if let Err(violation) =
+        action_shim::validate::validate_reconcile_output(&actions)
+    {
+        surface_reconcile_conflict(state, reconciler_name, target, &tick, &violation).await;
+        // The validate-violation path is itself a self-heal: skip dispatch,
+        // keep the persisted View, retry next tick. It contributes no dispatch
+        // error to propagate.
+        Ok(())
+    } else {
+        // Dispatch through the action shim — this is where `.await`
+        // is permitted. Per-action error isolation lives in the shim.
+        // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
+        // after every successful `obs.write` per architecture.md §10.
+        //
+        // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
+        // (step 01-08), so the shim receives the REAL engine, replacing
+        // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
+        // is the AppState-aware path that ALSO persists workflow-instance
+        // desired-intent for every `Action::StartWorkflow` BEFORE handing
+        // the actions to the engine off the shim — so the workflow-lifecycle
+        // reconciler's `hydrate_desired` can read the instance back on the
+        // next tick (and re-emit on restart).
+        // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
+        // and returned at the END of the function, AFTER the self-re-enqueue
+        // below. A recoverable shim error must still re-enqueue (self-heal) so
+        // the persisted retry memory actually re-drives on a later tick.
+        match (network_provisioner, guest_provisioner) {
+            #[cfg(any(test, feature = "integration-tests"))]
+            (_, Some(guest_provisioner)) => {
+                action_shim::dispatch_with_guest_network_provisioner_for_test(
+                    actions,
+                    state,
+                    &tick,
+                    guest_provisioner,
+                )
+                .await
+                .map_err(ConvergenceError::Shim)
             }
-        };
+            #[cfg(any(test, feature = "integration-tests"))]
+            (Some(network_provisioner), None) => {
+                action_shim::dispatch_with_workflow_intent_and_network_provisioner_for_test(
+                    actions,
+                    state,
+                    &tick,
+                    network_provisioner,
+                )
+                .await
+                .map_err(ConvergenceError::Shim)
+            }
+            #[cfg(not(any(test, feature = "integration-tests")))]
+            (Some(_), None) => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                .await
+                .map_err(ConvergenceError::Shim),
+            (None, None) => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                .await
+                .map_err(ConvergenceError::Shim),
+        }
+    };
 
     // Cooperative yield — every action_shim::dispatch path on the
     // single-node SimObservationStore returns Ready synchronously

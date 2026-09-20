@@ -16,7 +16,9 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
+use overdrive_core::traits::driver::{
+    AllocationSpec, Driver, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
+};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{ProbeFailure, ProbeOutcome, TcpProber};
 use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
@@ -55,15 +57,15 @@ fn allocation_spec(
         driver,
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: probes,
-        netns: None,
-        host_veth: None,
+        network: Some(GuestNetworkAssignment {
+            address: Ipv4Addr::new(192, 0, 2, 22),
+            tap: "ovd-tp-test".to_owned(),
+            mac: [0x02, 0x00, 192, 0, 2, 22],
+            gateway: Ipv4Addr::new(192, 0, 2, 1),
+            prefix: 24,
+            dns: Ipv4Addr::new(192, 0, 2, 1),
+        }),
         service_ports: Vec::new(),
-        workload_addr: Some(Ipv4Addr::new(192, 0, 2, 22)),
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 

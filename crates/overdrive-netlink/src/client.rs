@@ -29,7 +29,8 @@ use rtnetlink::packet_route::route::{
 };
 use rtnetlink::packet_route::rule::{RuleAction, RuleAttribute, RuleMessage};
 use rtnetlink::{
-    Handle, IpVersion, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
+    Handle, IpVersion, LinkBridge, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder,
+    new_connection,
 };
 
 use crate::error::{NEG_ENODEV, NetlinkError};
@@ -271,6 +272,41 @@ impl Client {
             Ok(None) => Ok(None),
             Err(err) => absent_or_err("get", err),
         }
+    }
+
+    /// Create or adopt a host bridge with the requested name.
+    pub async fn ensure_bridge(&self, name: &str) -> Result<(), NetlinkError> {
+        if self.observe_link(name).await?.is_none() {
+            self.handle
+                .link()
+                .add(LinkBridge::new(name).build())
+                .execute()
+                .await
+                .map_err(|err| NetlinkError::link("add-bridge", err))?;
+        }
+        Ok(())
+    }
+
+    /// Set a link administratively down.
+    pub async fn set_link_down(&self, iface: &str) -> Result<(), NetlinkError> {
+        let index = self.require_index(iface).await?;
+        self.handle
+            .link()
+            .set(LinkUnspec::new_with_index(index).down().build())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::link("set-down", err))
+    }
+
+    /// Set a link's locally administered MAC address.
+    pub async fn set_link_mac(&self, iface: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
+        let index = self.require_index(iface).await?;
+        self.handle
+            .link()
+            .set(LinkUnspec::new_with_index(index).address(mac.to_vec()).build())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::link("set-mac", err))
     }
 
     /// Observe whether `name` is the exact persistent TAP resource.

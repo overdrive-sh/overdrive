@@ -56,6 +56,8 @@
 //! + `ObservationStore::alloc_status_rows` driven-port boundaries. No
 //! reconciler / executor internals are exercised directly.
 
+#![allow(clippy::large_futures)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

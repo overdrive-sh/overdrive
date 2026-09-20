@@ -64,7 +64,12 @@
 //! reconciler-runtime wiring against `Sim*` adapters is structurally
 //! supported here. No additional dep introduced.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::large_futures
+)]
 // Module-level narrative docstrings reference scenario sub-invariant
 // names (gc.converges, gc.terminal_claim, gc.no_fresh_alloc,
 // resubmit.places_fresh, resubmit.preserves_prior_gc_terminal),

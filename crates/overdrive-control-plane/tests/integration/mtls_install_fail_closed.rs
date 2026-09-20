@@ -273,15 +273,8 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         probe_descriptors: Vec::new(),
         // The C3 provision seam SETS these — supplied `None` so the seam's own
         // assign/provision/inject runs for real.
-        netns: None,
-        host_veth: None,
+        network: None,
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 
@@ -1337,8 +1330,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     let successor = AllocationId::new(&format!("{stem}-1")).expect("valid successor alloc id");
     let workload = WorkloadId::new("svc-restart-abort").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
-    let mut prior_spec = build_spec(&predecessor);
-    prior_spec.host_veth = Some("ovd-hv-prior".to_owned());
+    let prior_spec = build_spec(&predecessor);
     worker.start_alloc(&prior_spec).await.expect("prior interception installs");
     assert!(worker.leg_c_addr(&predecessor).is_some(), "fixture owns a prior interception");
     seed_restart_predecessor(obs.as_ref(), &predecessor, &workload, &node).await;

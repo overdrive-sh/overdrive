@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
+use overdrive_core::traits::driver::{
+    AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
+};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_sim::adapters::SimIdentityRead;
@@ -414,18 +416,18 @@ fn allocation_spec(name: &str) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 1, memory_bytes: 1 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        network: Some(GuestNetworkAssignment {
+            address: Ipv4Addr::new(100, 95, 0, 2),
+            tap: "ovd-tp-0002".to_owned(),
+            mac: [0x02, 0x00, 100, 95, 0, 2],
+            gateway: Ipv4Addr::new(100, 95, 0, 1),
+            prefix: 16,
+            dns: Ipv4Addr::new(100, 95, 0, 1),
+        }),
         service_ports: [8080_u16, 8443]
             .into_iter()
             .map(|port| std::num::NonZeroU16::new(port).expect("non-zero port"))
             .collect(),
-        workload_addr: Some(Ipv4Addr::new(100, 95, 0, 2)),
-        guest_tap: Some("ovd-tp-0002".to_owned()),
-        guest_mac: Some([0x02, 0x00, 100, 95, 0, 2]),
-        guest_gateway: Some(Ipv4Addr::new(100, 95, 0, 1)),
-        guest_prefix_len: Some(16),
-        guest_dns: Some(Ipv4Addr::new(100, 95, 0, 1)),
     }
 }
 

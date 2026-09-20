@@ -2542,7 +2542,36 @@ pub async fn run_server_with_obs_and_drivers(
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
-    let _ = &shared_guest_network;
+    if let Err(cause) = shared_guest_network.probe_startup().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.probe",
+            cause = %cause,
+            "shared guest-network startup probe refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
+    if let Err(cause) = shared_guest_network.sweep_stale().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.sweep",
+            cause = %cause,
+            "shared guest-network stale sweep refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
+    if let Err(cause) = shared_guest_network.converge_shared().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.converge",
+            cause = %cause,
+            "shared guest-network convergence refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
     let (_request_tx, request_rx) = tokio::sync::mpsc::channel(1);
     let shared_network_supervisor = SharedNetworkSupervisorHandle {
         request_rx,

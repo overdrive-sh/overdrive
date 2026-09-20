@@ -62,7 +62,6 @@ fn scratch_complement(counts: &[Option<u32>]) -> GuestNetworkScratchComplement {
 proptest! {
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 scratch complement semantics"]
     fn scratch_complement_never_fabricates_zero(
         counts in prop::collection::vec(prop::option::of(0_u32..4), 15..=15),
     ) {
@@ -120,18 +119,11 @@ fn spec(name: &str) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        network: None,
         service_ports: [8080_u16, 8080, 53]
             .into_iter()
             .map(|port| NonZeroU16::new(port).expect("non-zero listener port"))
             .collect(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 
@@ -146,14 +138,7 @@ fn start_action(name: &str) -> Action {
 }
 
 fn assignment(spec: &AllocationSpec) -> GuestNetworkAssignment {
-    GuestNetworkAssignment {
-        address: spec.workload_addr.expect("canonical address"),
-        tap: spec.guest_tap.clone().expect("guest TAP"),
-        mac: spec.guest_mac.expect("guest MAC"),
-        gateway: spec.guest_gateway.expect("guest gateway"),
-        prefix: spec.guest_prefix_len.expect("guest prefix"),
-        dns: spec.guest_dns.expect("guest DNS"),
-    }
+    spec.network.clone().expect("canonical grouped assignment")
 }
 
 fn tick(counter: u64) -> TickContext {
@@ -168,7 +153,6 @@ fn tick(counter: u64) -> TickContext {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 guest-network action-owner single cut"]
 async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
     let tmp = TempDir::new().expect("tempdir");
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
@@ -201,7 +185,6 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 release-last action-owner single cut"]
 async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse() {
     let tmp = TempDir::new().expect("tempdir");
     let driver = Arc::new(SimDriver::new(DriverType::Vm));

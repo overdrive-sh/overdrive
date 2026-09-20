@@ -180,15 +180,8 @@ fn build_vm_spec(alloc: &AllocationId) -> AllocationSpec {
         }),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        netns: None,
-        host_veth: None,
+        network: None,
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 

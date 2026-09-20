@@ -29,7 +29,7 @@
 //! `Harness::run` here is synchronous so the xtask binary can call it
 //! without imposing an async boundary on CI.
 
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, clippy::large_futures)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

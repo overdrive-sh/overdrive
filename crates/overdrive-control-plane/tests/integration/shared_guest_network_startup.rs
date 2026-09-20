@@ -193,7 +193,6 @@ fn assert_startup_refusal_event(events: &[EventRow]) {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 composed shared-network startup gate"]
 async fn ordinary_probe_faults_refuse_before_convergence_or_publication() {
     let faults = [
         GuestNetworkError::Io {
@@ -216,7 +215,6 @@ async fn ordinary_probe_faults_refuse_before_convergence_or_publication() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 composed shared-network startup gate"]
 async fn cleanup_failure_refuses_and_preserves_primary_cleanup_and_observed_residue() {
     let observed = residue_complement();
     let fault = GuestNetworkError::StartupProbeCleanup {
@@ -260,7 +258,6 @@ async fn cleanup_failure_refuses_and_preserves_primary_cleanup_and_observed_resi
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 real host-owner startup and D9 bridge binding"]
 async fn production_host_owner_boots_only_after_real_shared_identity_is_exact() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     if unsafe { libc::geteuid() } != 0 {
@@ -324,7 +321,6 @@ async fn production_host_owner_boots_only_after_real_shared_identity_is_exact() 
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 typed stale-attachment boot sweep"]
 async fn boot_reclamation_removes_a_prior_epoch_tap_before_shared_convergence_and_admission() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     if unsafe { libc::geteuid() } != 0 {

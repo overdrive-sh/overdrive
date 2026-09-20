@@ -327,15 +327,8 @@ fn sample_spec() -> AllocationSpec {
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
-        netns: None,
-        host_veth: None,
+        network: None,
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 

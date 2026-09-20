@@ -21,7 +21,6 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
-use crate::id::NetnsName;
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
@@ -326,98 +325,8 @@ pub struct AllocationSpec {
     /// reconciler-emitted `AllocationSpec`.
     pub probe_descriptors: Vec<ProbeDescriptor>,
 
-    /// Target network namespace NAME this allocation's VM is spawned INTO;
-    /// the action-shim C3 site provisions it before `Driver::start`. Every VM
-    /// receives `Some(plan.netns)` even when the optional mTLS worker is not
-    /// composed, because guest networking is a VM admission requirement rather
-    /// than an interception side effect. The driver opens
-    /// `/var/run/netns/<name>` (via
-    /// [`NetnsName::as_str`]) when `Some`.
-    ///
-    /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
-    /// serde, no rkyv, no `FromStr`) minted ONLY by
-    /// `derive_workload_netns_plan` (`overdrive-control-plane`) from a
-    /// validated `NetSlot`. **This field's type SUPERSEDES D-TME-12 /
-    /// JOIN-1's prior `Option<String>` choice** — per ADR-0082 §D2
-    /// (Amendment 2026-08-12, GH #42), the value gained a newtype while
-    /// keeping JOIN-1's underlying reasoning intact: it has no parse
-    /// surface, no operator-typed entry point, and no `FromStr`
-    /// round-trip to defend (the JOIN-1 canonical home,
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
-    /// no longer exists on disk — the archived feature's surviving
-    /// references are `docs/architecture/transparent-mtls-enrollment/
-    /// feature-delta.md` and `docs/evolution/
-    /// 2026-06-22-transparent-mtls-enrollment.md`; ADR-0082 §D2 is the
-    /// authoritative record of the supersession). Per
-    /// `.claude/rules/development.md` § "Persist inputs, not derived
-    /// state": `AllocationSpec` derives only `Debug, Clone, PartialEq,
-    /// Eq` — NO serde, NO rkyv — and is recomputed each reconcile tick
-    /// (never persisted), so this field is a pure in-memory channel with
-    /// no schema-evolution discipline attached.
-    pub netns: Option<NetnsName>,
-
-    /// Host-side veth interface NAME for this allocation's per-workload veth
-    /// pair (`ovd-hv-<4hex-slot>`), the `iifname` the outbound nft-TPROXY rule
-    /// matches to redirect the workload's egress to leg-F
-    /// (`MtlsInterceptWorker::start_alloc` →
-    /// `install_outbound_tproxy(host_veth, leg_f_port)`). `Some(plan.host_veth)`
-    /// when the action-shim C3 site admitted and provisioned the current
-    /// VM network plan; `None` only for a spec that did not pass through that
-    /// provision seam (for example, a direct unit-test fixture).
-    ///
-    /// `Option<String>`, NOT a newtype — on its OWN rationale (JOIN-6; this
-    /// field is not this step's subject): the value is already a validated,
-    /// bounded, slot-derived name minted ONLY by `derive_workload_netns_plan`
-    /// (a pure projection of the already-newtyped `NetSlot`); it has no parse
-    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
-    /// defend.
-    ///
-    /// `netns` above carried the SAME JOIN-1 no-newtype rationale until
-    /// ADR-0082 §D2 (Amendment 2026-08-12, GH #42) reversed it FOR `netns`
-    /// ONLY — `host_veth` was not part of that reversal and stays
-    /// `Option<String>`. JOIN-1 / JOIN-6's canonical archived home,
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
-    /// no longer exists on disk; see `docs/architecture/
-    /// transparent-mtls-enrollment/feature-delta.md` and `docs/evolution/
-    /// 2026-06-22-transparent-mtls-enrollment.md` for the surviving record.
-    pub host_veth: Option<String>,
-
-    /// Canonical per-workload IPv4 address this allocation was provisioned
-    /// into for the canonical-workload-address inbound-TPROXY path (D-A1, GH
-    /// #241). For VM this is the guest NIC address (`VmTapPlan::guest_addr`),
-    /// never the transit forwarding hop. `None` only when the current VM
-    /// network plan was not injected at the C3 provision seam.
-    ///
-    /// The third member of the slot-derived channel beside `netns` /
-    /// `host_veth`, injected at the SAME C3 provision seam off the SAME
-    /// slot-derived plan family. Per `.claude/rules/development.md` § "Persist
-    /// inputs, not derived state": `AllocationSpec` derives only
-    /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
-    /// each reconcile tick (never persisted), so this is a pure in-memory
-    /// channel with no schema-evolution discipline attached.
-    pub workload_addr: Option<Ipv4Addr>,
-
-    /// VM-only guest network attachment inputs, carried in memory from the C3
-    /// provision seam to the VM driver. `guest_tap` names the persistent TAP
-    /// already created inside [`Self::netns`]; `guest_mac` is the virtio-net
-    /// NIC address; and `guest_gateway` / `guest_prefix_len` / `guest_dns`
-    /// compose with [`Self::workload_addr`] (the guest address for VM allocs)
-    /// to form the guest's fail-closed network configuration.
-    ///
-    /// All five fields are `Some` together for a VM allocation whose current
-    /// network plan was provisioned. This is deliberately a minimal field
-    /// family, not a new public value type: `AllocationSpec` is a transient
-    /// in-memory handoff (`Debug + Clone + Eq`, no serde and no rkyv), so no
-    /// persisted or wire schema changes.
-    pub guest_tap: Option<String>,
-    /// Slot-derived, locally administered unicast MAC for the guest NIC.
-    pub guest_mac: Option<[u8; 6]>,
-    /// Guest default-route gateway (the TAP's first usable address).
-    pub guest_gateway: Option<Ipv4Addr>,
-    /// Prefix length applied to the guest's [`Self::workload_addr`].
-    pub guest_prefix_len: Option<u8>,
-    /// Node-local DNS responder installed in the guest resolver config.
-    pub guest_dns: Option<Ipv4Addr>,
+    /// Complete all-or-none guest network handoff for this allocation.
+    pub network: Option<GuestNetworkAssignment>,
 
     /// Declared Service listener ports projected from the live intent at
     /// hydrate-desired time via

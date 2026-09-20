@@ -592,15 +592,8 @@ mod release_for_exit_emission_tests {
             }),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
-            netns: None,
-            host_veth: None,
+            network: None,
             service_ports: Vec::new(),
-            workload_addr: None,
-            guest_tap: None,
-            guest_mac: None,
-            guest_gateway: None,
-            guest_prefix_len: None,
-            guest_dns: None,
         }
     }
 

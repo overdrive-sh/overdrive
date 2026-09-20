@@ -273,7 +273,7 @@ fn cgroup_connect4_sections() -> Vec<String> {
         .collect()
 }
 
-fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec {
+fn build_spec(alloc: &AllocationId, _host_veth: Option<String>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
@@ -290,15 +290,8 @@ fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec
         probe_descriptors: Vec::new(),
         // The C3 provision seam sets this in production (JOIN-6); the AT supplies
         // it directly to exercise the OUTBOUND egress-rule install.
-        netns: None,
-        host_veth,
+        network: None,
         service_ports: Vec::new(),
-        workload_addr: None,
-        guest_tap: None,
-        guest_mac: None,
-        guest_gateway: None,
-        guest_prefix_len: None,
-        guest_dns: None,
     }
 }
 
