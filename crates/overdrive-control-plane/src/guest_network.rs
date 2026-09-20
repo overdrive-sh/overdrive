@@ -10,9 +10,10 @@
     reason = "exact accepted API scaffold precedes implementation and names GuestNetworkError explicitly"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use ipnet::Ipv4Net;
@@ -372,7 +373,7 @@ pub(crate) struct GuestAddressPool {
     gateway: Ipv4Addr,
     dns: Ipv4Addr,
     held: Arc<parking_lot::Mutex<BTreeMap<AllocationId, GuestNetworkPlan>>>,
-    used: Arc<parking_lot::Mutex<BTreeSet<u32>>>,
+    next_free: Arc<AtomicU32>,
 }
 
 #[allow(
@@ -393,10 +394,12 @@ impl GuestAddressPool {
             gateway,
             dns,
             held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
-            used: Arc::new(parking_lot::Mutex::new(
-                ((u32::from(node_prefix.network()) + 1)..u32::from(node_prefix.broadcast()))
-                    .filter(|address| *address != u32::from(gateway))
-                    .collect(),
+            next_free: Arc::new(AtomicU32::new(
+                if u32::from(node_prefix.network()).saturating_add(1) == u32::from(gateway) {
+                    u32::from(gateway).saturating_add(1)
+                } else {
+                    u32::from(node_prefix.network()).saturating_add(1)
+                },
             )),
         }
     }
@@ -412,14 +415,19 @@ impl GuestAddressPool {
         let network = u32::from(self.node_prefix.network());
         let broadcast = u32::from(self.node_prefix.broadcast());
         let capacity = broadcast.saturating_sub(network).saturating_sub(2);
-        let mut used = self.used.lock();
-        let address = used.pop_first();
-        let Some(address) = address else {
+        let mut address = self.next_free.load(Ordering::Relaxed);
+        if held.values().any(|plan| u32::from(plan.assignment.address) == address) {
+            address = (address.saturating_add(1)..broadcast)
+                .find(|candidate| {
+                    !held.values().any(|plan| u32::from(plan.assignment.address) == *candidate)
+                })
+                .unwrap_or(broadcast);
+        }
+        if address >= broadcast {
             let held_count = u32::try_from(held.len()).unwrap_or(u32::MAX);
-            drop(used);
             drop(held);
             return Err(GuestNetworkError::PoolExhausted { held: held_count, capacity });
-        };
+        }
 
         let address = Ipv4Addr::from(address);
         let assignment = GuestNetworkAssignment {
@@ -444,7 +452,7 @@ impl GuestAddressPool {
             assignment,
         };
         held.insert(alloc, plan.clone());
-        drop(used);
+        self.next_free.store(u32::from(address).saturating_add(1), Ordering::Relaxed);
         drop(held);
         Ok(plan)
     }
@@ -452,7 +460,7 @@ impl GuestAddressPool {
     pub(crate) fn release(&self, alloc: &AllocationId) {
         let released = self.held.lock().remove(alloc);
         if let Some(plan) = released {
-            self.used.lock().insert(u32::from(plan.assignment.address));
+            self.next_free.fetch_min(u32::from(plan.assignment.address), Ordering::Relaxed);
         }
     }
 
@@ -1547,11 +1555,7 @@ mod pool_acceptance {
             gateway: "100.95.0.1".parse().expect("gateway"),
             dns: "100.95.0.1".parse().expect("DNS"),
             held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
-            used: Arc::new(parking_lot::Mutex::new(
-                ((u32::from(Ipv4Addr::new(100, 95, 0, 0)) + 2)
-                    ..u32::from(Ipv4Addr::new(100, 95, 255, 255)))
-                    .collect(),
-            )),
+            next_free: Arc::new(AtomicU32::new(u32::from(Ipv4Addr::new(100, 95, 0, 2)))),
         }
     }
 
