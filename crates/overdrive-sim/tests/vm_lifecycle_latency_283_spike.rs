@@ -467,6 +467,7 @@ async fn drive(effect: Effect) {
         config,
         obs.clone(),
         driver.clone(),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
     )
@@ -581,6 +582,7 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
         config,
         obs.clone(),
         driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
     )
@@ -700,6 +702,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         config,
         obs.clone(),
         driver.clone(),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
     )
@@ -1246,6 +1249,7 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         config,
         obs.clone(),
         driver.clone(),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
     )
@@ -1468,6 +1472,7 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
         config,
         obs.clone(),
         driver.clone(),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
     )

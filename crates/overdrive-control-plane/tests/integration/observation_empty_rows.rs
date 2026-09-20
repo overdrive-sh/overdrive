@@ -122,6 +122,7 @@ async fn spawn_server_with_obs_handle()
         config,
         Arc::clone(&obs),
         driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )

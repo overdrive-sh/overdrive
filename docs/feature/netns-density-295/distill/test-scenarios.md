@@ -38,10 +38,14 @@ owners; fixtures may inject faults only through accepted driven ports.
 
 | ID | Contract shape | Kind / evidence | Rust or receipt home | Status at DISTILL |
 |---|---|---|---|---|
-| S-ND295-00 | bounded-change | private host-algorithm partition tables plus composed refusal | `guest_network::scratch_probe_acceptance::*` and `shared_guest_network_startup::{ordinary_probe_faults_refuse_before_convergence_or_publication,cleanup_failure_refuses_and_preserves_primary_cleanup_and_observed_residue}` | private algorithm bodies are active; composed reactions are reasoned-pending |
+| S-ND295-00 | bounded-change | D12 private projection/capture tables, D5 continuation, and Lima inventory | dataplane `guest_tcx::tests::{every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics,wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less,capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source,a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count,every_receipted_family_returns_one_and_clean_families_return_exact_zero}`; control-plane `guest_network::scratch_probe_acceptance::*`; integration `guest_tcx_inventory::{clean_and_receipted_inventory_observes_all_eight_exact_families,retained_unpinned_maps_programs_and_links_survive_handle_release_and_remain_observable,wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero}` | five non-waived D12 bodies are reasoned-pending, compile, and include distinguishable program-before-link first-source precedence; three Linux real-kernel placeholders retain Lima authority and are user-waived from this remediation gate |
 | S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, TLS 1.3/kTLS/splice/no-cleartext wire, direct-host-TAP topology, and total cleanup; historical E07 is not current proof |
 | S-ND295-02..05 | pure-function / bounded-change | grouped values plus address-pool properties and cap table | control-plane `guest_network::pool_acceptance`, `netns_density_guest_network::scratch_complement_never_fabricates_zero`, and the direct-TAP VMM projection body | complete reasoned-pending bodies |
-| S-ND295-06..13 | bounded-change | action-owner/provisioner and TCX/guard contracts | `netns_density_guest_network::{provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause,teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse}`, private host-owner bodies, and `guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | accepted B1 action-owner helpers drive the reusable Sim owner; BPF_PROG_TEST_RUN, D5 startup algorithm, D6 semantic projection/counter/error bodies, and production owner ports compile |
+| S-ND295-06..09 | bounded-change | action-owner refusal/lease plus classifier partitions | `netns_density_guest_network::{provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause,teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse}` and `guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | pre-existing accepted bodies remain mapped to revised `02-01` |
+| S-ND295-10 | bounded-change | Lima deliberate D6 detach + D9 guard/counter/capture/audit | `shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | reasoned-pending compiled RED scaffold; fixture owns only external typed detach and observations |
+| S-ND295-11 | bounded-change | D12A source-local netlink projection and real-owner order/identity tables plus Lima production read-back | `overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`; `guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`; and `shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start` | reasoned-pending; three non-waived source-local bodies fail at the exact parser/projection or owner behavior gap, while the user-waived Lima placeholder remains a separate production-composition layer |
+| S-ND295-12 | bounded-change | D12A source-local failure/continuation plus Lima two-attachment complement | `guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` and `shared_guest_network_startup::two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal` | reasoned-pending; source-local RED is current no-op teardown and its finite table compiles every exact cleanup-leaf operation/source/continuation row; the Lima body remains a waived production-composition scaffold |
+| S-ND295-13 | bounded-change | seeded production-helper ordering, separate GREEN telemetry, native VMM/kernel complement | `overdrive_sim::invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm`; `shared_guest_network_startup::{production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts,native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance}` | the non-waived seeded invariant fails reproducibly on the actual sweep snapshot with shrunk seed `0`; the telemetry and native reasoned-pending placeholders are user-waived from this remediation gate, and native execution still requires `OVERDRIVE_METAL_TARGET` |
 | S-ND295-14..19 | bounded-change | shared nft replacement/rollback | `mtls_intercept_port::shared_program_rollback_acceptance::{replacement_and_every_rollback_disposition_preserve_exact_identity_and_source,runtime_present_wrong_target_is_reported_without_mutation}` plus Tier-3 normalized read-back | exact private seam; absent/exact prior, rejection, successful rollback, rollback write/read source, source-less wrong identity, and runtime no-rewrite are executable |
 | S-ND295-20..26 | bounded-change | node-shared listener/capability lifecycle | `netns_density_shared_owner::*`, `capability_registry_acceptance::*`, plus existing real-enforcement retirement/zero-copy suites | complete reasoned-pending owner start, leg-F/leg-C/rule partial cleanup, exact-port recovery/occupied refusal, D7 generation/conflict/Pending/claim/publication/scoped-drain/reuse, isolated handle and shutdown bodies |
 | S-ND295-27 | bounded-change | Rust acceptance | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` | one active RED + five reasoned-pending recovery/fail-stop/model/table bodies authored |
@@ -75,11 +79,10 @@ outcome → scenario reverse-trace is total:
   OUT-SVM-SERVICE-TARGET-PROJECTION / OUT-MTLS-WIRE-TLS13 outcomes; it
   introduces no new #295 outcome.
 
-Marker discipline: the reasoned-`#[ignore]` markers currently name the GH-#295
-area, not a concrete DELIVER step, because `roadmap.json` does not exist yet.
-When DELIVER produces the roadmap, each marker is updated to name its activating
-step (`pending DELIVER step NN-NN`) so discovery via reasoned markers + roadmap
-resolves to an exact step.
+Marker discipline: every body added or transitioned by the phase-02 remediation
+names exact step `02-01` in its reasoned `#[ignore]` marker. Revised `02-01`
+owns S-ND295-00, 02..04, and 06..13; S-ND295-05 remains exclusively `03-01`;
+S-ND295-14..19 remain `02-02`; S-ND295-20..26 remain `02-03`.
 
 ## Acceptance specification
 
@@ -161,6 +164,18 @@ body must prove scratch probe precedes production convergence/admission,
 task is published. Only the private host-owner algorithm table proves the
 complete scratch bridge/TAP/link/pin/map/guard/rule complement; the public
 simulation owner scripts the final result solely to prove caller reaction.
+The D12 remediation adds a separate dataplane-private evidence layer:
+`project_map_kind`/`project_map_schema` cover the locked aya map-kind table and
+opaque property equality; `capture_with_source` deterministically fails maps,
+programs, and links independently plus simultaneous program/link failure using
+outer `Program` errors with distinguishable nested aya I/O sources while returning an observation-capable
+identity; D5 maps all eight TCX resource families after explicit cleanup and
+both handle-release boundaries. The earlier program-enumeration source moves
+once into `TcxLoad`, while the failed link family is exact source-less
+`CaptureUnavailable`; independent domains and exact pin paths continue;
+no-receipt candidates are always `InventoryAmbiguous`.
+Lima `guest_tcx_inventory` owns real enumeration, by-ID and exact-path proof,
+including deliberately retained unpinned map/program/link objects.
 
 ### S-ND295-01 — Two VM workloads communicate by name through the production shared guest network
 
@@ -291,6 +306,12 @@ AND it reaches neither another guest TAP nor the host IP stack
 AND the owner audit reports the exact missing link identity
 ```
 
+Executable body:
+`shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause`.
+It enters through ordinary production composition, uses only D6 query/detach
+for the external mutation, and leaves creation of the TAP, endpoint, link, pin,
+and D9 guard entirely to production.
+
 ### S-ND295-11 — A workload is admitted only after its complete network attachment is verified
 
 `@tier3 @real-io @adapter-integration @contract-shape:bounded-change`
@@ -302,6 +323,21 @@ THEN guard membership precedes endpoint insertion and TCX attach/pin/query while
 AND success returns only after bridge master, link state, endpoint value, program, attach type, ifindex, pin, and fixed bridge MAC read back exactly
 AND no production effect is installed by the test fixture
 ```
+
+Paired executable bodies:
+`overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`,
+`guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`
+and
+`shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start`.
+The private netlink projection table covers absent, persistent TAP with exact
+or missing owner UID, non-persistent TAP, TUN, dummy, veth, other, and correct
+or same-name wrong-kind bridge messages with exact ifindex, up/master, MAC,
+persistence, and bridge identity. The D12A scripted
+leaf returns those actual TAP/bridge observations only; it never returns a
+completed workflow or boolean verdict. The owner must refresh bridge identity
+before both master comparisons, reject every first/final checkpoint partition
+without publication, and publish the exact allocation record only after the
+final checkpoint succeeds.
 
 ### S-ND295-12 — A stopped workload leaves none of its network attachment behind
 
@@ -315,6 +351,21 @@ AND the named complement becomes empty without changing the unrelated attachment
 AND a normal-path deletion failure remains typed and is never hidden by best-effort Drop
 ```
 
+Paired executable bodies:
+`guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement`
+and
+`shared_guest_network_startup::two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal`.
+The source-local body combines a primary endpoint-deletion failure with a later
+TAP-deletion failure, requires later cleanup calls, returns the exact first
+source, retains the same owner/allocation and lease, then disarms and retries to
+the named empty complement. It then repeats the named teardown and calls a
+never-published teardown twice with no leaf calls; the unrelated attachment's
+exposed facts remain byte-for-byte equal. A separate finite table in the same
+body fails every endpoint/link/pin/TAP/guard cleanup mutation and observation
+leaf—including both TAP-observation occurrences—and asserts its exact
+operation/source plus continuation through final guard observation. Lima owns
+actual two-attachment isolation and release-last read-back.
+
 ### S-ND295-13 — Boot reclaims old owners before accepting new leases
 
 `@tier3 @error @real-io @contract-shape:bounded-change`
@@ -326,6 +377,18 @@ THEN VMM reclamation completes before shared-switch sweep
 AND the zero-managed-TAP and zero-dynamic-element complements are read back before the empty address pool accepts assignment
 AND no old VMM, allocation capability, listener, or address lease is adopted
 ```
+
+Three independent executable layers are named. The first is the seeded
+production-helper invariant
+`reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm`:
+the same `SimVmHostState` is injected into production reclamation and
+`SimSharedGuestNetworkOwner::with_sweep_host_state`, so the actual sweep port
+snapshot proves ordering and prints the replay seed. The second is
+`production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts`, a
+separate GREEN obligation over the exact structured phase events. The third is
+`native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`,
+which retains independent real-VMM/kernel authority and is gated by the native
+metal target.
 
 ### S-ND295-14 — A restarted node preserves protection while refreshing listener destinations
 
@@ -705,11 +768,22 @@ and VMM capacity are excluded.
 
 - Layer 1/2 unbounded domains use proptest; finite error/component/cause sets
   use one table-driven Rust test. Slow real-kernel paths are named examples.
+- D12's locked aya map-kind space is a finite closed table, not PBT. D12A's
+  TAP/bridge identities and teardown leaves are likewise finite owner tables.
+  S13 alone is an unbounded seeded property; its failure always prints and
+  shrinks the seed.
 - Seeded control-plane cases use the accepted test-gated action-shim and
   convergence-runtime seams so production owners author observations and
   cleanup. They do not seed terminal consequences or add a production seam.
 - Kernel effects run under Lima except real microVM/KVM and final shared-bridge
   composition, which run only through `cargo xtask metal run --`.
+- S-ND295-13 is three separately selected lanes: the seeded sweep-call
+  invariant is in-process Sim wrapped by the explicit Lima Linux runner only
+  for repository/toolchain execution (not real-kernel evidence); structured
+  boot-phase telemetry is the non-KVM Lima integration name; and only
+  `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`
+  is selected by the metal runner. The native Rust body does not spawn or
+  require the built product binary.
 - Rust acceptance and system-conformance tests do not spawn the built product
   or capture EDD evidence. The **required rerunnable coverage** for the
   serve+deploy contract is the conformance + walking-skeleton tests — S-ND295-33
@@ -766,13 +840,37 @@ raise it.
 
 ## Executable completeness status
 
-The prose audit remains COMPLETE at 15/15. The exact D10 overlay now compiles
-the final-shape A2, mTLS source-address, shared-DNS, direct-TAP, VmDriver-gate,
-and server-owner bodies while the pre-cut suite remains GREEN. The three pinned
-ignored-only commands reach accepted semantic MISSING_FUNCTIONALITY boundaries,
-and the executable self-audit therefore covers all 15 categories. Its final
-disposition is **PENDING INDEPENDENT REVIEW**, not self-approved COMPLETE:
-the acceptance-design reviewer still owns body/oracle completeness and the
-solution-architecture reviewer owns API/mechanical exactness. Reasoned-pending
-live bodies are counted only where the hashed overlay and normalized evidence
-identify their compiled source and accepted RED boundary.
+The bounded remediation's executable population is ten non-waived
+reasoned-pending bodies: five S00 dataplane bodies, one S11 netlink projection
+body, two S11 owner bodies, one S12 owner body, and the S13 seeded invariant.
+The eight unconditional real-I/O panic placeholders are explicitly
+user-waived: they were not rerun, do not contribute points, and are not
+approval conditions for this gate.
+
+| Check | Executable disposition for the ten non-waived bodies |
+|---|---|
+| C1a empty/minimum | PASS — all eight clean inventory families return exact zero; absent TAP/link projections are explicit. |
+| C1b boundaries | PASS — endpoint capacity covers max-1/max/max+1 and S11 separates the first and final read-back checkpoints. |
+| C2a state machine documented | PASS — the retained owner model is `Unpublished -> Provisioning -> Published -> TeardownPending -> Absent`. |
+| C2b illegal event per state | PASS — every first/final observation refusal keeps publication absent; failed teardown retains state; retry and absent teardown are distinct. |
+| C3 zero/one/many | PASS — zero and one receipts, unique and multiple unreceipted candidates, and two attachments are explicit. |
+| C4a apply twice | PASS — S12 retries the same retained owner/allocation, then repeats teardown in `Absent`. |
+| C4b inverse without prerequisite | PASS — teardown of a never-published allocation is an asserted no-op. |
+| C5a mode combinations | N/A — D12/D12A/D13 define no independent product-mode dimension for these source-local and Sim contracts. |
+| C5b orthogonality | N/A — C5a has no independent mode flag; independent-domain continuation and unrelated byte equality remain bounded-change complement assertions under C2/C7. |
+| C6a malformed input | PASS — both accepted schemas are paired with wrong kind/key/value/capacity; raw projection covers absent, TAP with exact/missing owner, TUN, dummy, veth, other, and correct/wrong-kind bridge identities. |
+| C6b each declared error | PASS — simultaneous program/link failure retains outer `Program` with the exact earlier nested `IOError(EIO)` rather than the later link-enumeration `IOError(ENOENT)`, while link observation is source-less `CaptureUnavailable`; every cleanup leaf row asserts its exact operation/lower source and continuation. |
+| C6c closed error set | PASS — all eight inventory families and the exact Tap/BridgeLinkIdentity/LinkMaster fact variants are finite tables. |
+| C7a degraded resource | PASS — independent and simultaneous maps/programs/links capture failures plus every cleanup-leaf failure and the dual-failure precedence row are executable. |
+| C7b interruption | PASS — the seeded S13 production-helper schedule reproducibly observes sweep before reclamation and prints/shrinks its seed. |
+| C7c concurrent actors | N/A — these accepted bodies specify one owner and no independent concurrent-actor interleaving. |
+
+The executable audit is **COMPLETE — 12 PASS + 3 justified N/A = 15/15
+dispositions, roadmap validation pending**. Every non-waived body was invoked
+independently with `--ignored`: nine fail on their exact missing D12/D12A
+behavior, while S13 reaches the actual sweep call and shrinks to replay seed
+`0`. Linux Docker compilation succeeded for the affected dataplane, netlink,
+control-plane, and Sim targets. Native metal remains an honest environment
+gate because `OVERDRIVE_METAL_TARGET` is unset. Lima execution was unavailable:
+the `overdrive` VM failed to restore SSH after restart, so Docker evidence makes
+no Lima or native-kernel execution claim.

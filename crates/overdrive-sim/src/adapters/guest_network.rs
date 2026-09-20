@@ -14,7 +14,23 @@ use overdrive_control_plane::guest_network::{
 };
 use overdrive_core::guest_network::{GuestNetworkExecWiring, SharedGuestNetworkComponent};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::vm_host_state::{VmHostObservation, VmHostState};
 use parking_lot::Mutex;
+
+use super::vm_host_state::SimVmHostState;
+
+/// Host-state snapshot observed at one real Sim shared-owner sweep call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimSharedGuestNetworkSweepCall {
+    pub call_index: usize,
+    pub host: VmHostObservation,
+}
+
+#[derive(Debug, Default)]
+struct Trace {
+    calls: Vec<GuestNetworkOperation>,
+    sweep_calls: Vec<SimSharedGuestNetworkSweepCall>,
+}
 
 /// Sim owner with one standing failure slot per accepted owner operation.
 #[derive(Debug, Default)]
@@ -28,10 +44,17 @@ pub struct SimSharedGuestNetworkOwner {
     quiesce: AtomicBool,
     probe_error: Mutex<Option<GuestNetworkError>>,
     audit_error: Mutex<Option<(SharedGuestNetworkComponent, GuestNetworkError)>>,
-    calls: Mutex<Vec<GuestNetworkOperation>>,
+    sweep_host_state: Option<SimVmHostState>,
+    trace: Mutex<Trace>,
 }
 
 impl SimSharedGuestNetworkOwner {
+    /// Bind the existing Arc-backed simulated host state to real sweep-call observation.
+    #[must_use]
+    pub fn with_sweep_host_state(host: SimVmHostState) -> Self {
+        Self { sweep_host_state: Some(host), ..Self::default() }
+    }
+
     pub fn script_provision_failure(&self, armed: bool) {
         self.provision.store(armed, Ordering::SeqCst);
     }
@@ -76,11 +99,17 @@ impl SimSharedGuestNetworkOwner {
     /// Ordered production-port calls observed by this simulation adapter.
     #[must_use]
     pub fn calls(&self) -> Vec<GuestNetworkOperation> {
-        self.calls.lock().clone()
+        self.trace.lock().calls.clone()
+    }
+
+    /// Ordered host snapshots taken by the actual `sweep_stale` port call.
+    #[must_use]
+    pub fn sweep_calls(&self) -> Vec<SimSharedGuestNetworkSweepCall> {
+        self.trace.lock().sweep_calls.clone()
     }
 
     fn record(&self, operation: GuestNetworkOperation) {
-        self.calls.lock().push(operation);
+        self.trace.lock().calls.push(operation);
     }
 
     fn result(armed: &AtomicBool, operation: GuestNetworkOperation) -> Result<()> {
@@ -177,7 +206,18 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
     }
 
     async fn sweep_stale(&self) -> Result<()> {
-        self.record(GuestNetworkOperation::CleanupComplement);
+        if let Some(host) = &self.sweep_host_state {
+            let snapshot = host.observe().await.map_err(|source| GuestNetworkError::Io {
+                operation: GuestNetworkOperation::CleanupComplement,
+                source,
+            })?;
+            let mut trace = self.trace.lock();
+            let call_index = trace.calls.len();
+            trace.calls.push(GuestNetworkOperation::CleanupComplement);
+            trace.sweep_calls.push(SimSharedGuestNetworkSweepCall { call_index, host: snapshot });
+        } else {
+            self.record(GuestNetworkOperation::CleanupComplement);
+        }
         Self::result(&self.sweep, GuestNetworkOperation::CleanupComplement)
     }
 

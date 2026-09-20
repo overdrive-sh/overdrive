@@ -2194,7 +2194,7 @@ pub async fn run_server(
         #[cfg(not(feature = "integration-tests"))]
         let vmm_override = None;
         match compose_vm_driver(
-            cgroup_root_path,
+            cgroup_root_path.clone(),
             overdrive_core::vm::config::clone_index_dir(&config.data_dir),
             overdrive_core::vm::config::clone_staging_dir(&config.data_dir),
             Arc::clone(&clock),
@@ -2227,10 +2227,18 @@ pub async fn run_server(
         }
     }
 
+    let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
+        Arc::new(overdrive_host::RealVmHostState::new(
+            cgroup_root_path,
+            std::path::PathBuf::from("/run/overdrive/vm"),
+            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
+        ));
+
     run_server_with_obs_and_drivers(
         config,
         obs,
         Arc::new(registry),
+        vm_host_state,
         Arc::new(guest_network::HostSharedGuestNetworkOwner::new()),
         guest_network_exec,
     )
@@ -2505,6 +2513,7 @@ pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
+    vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
@@ -2514,6 +2523,7 @@ pub async fn run_server_with_obs_and_driver(
         config,
         obs,
         Arc::new(registry),
+        vm_host_state,
         shared_guest_network,
         guest_network_exec,
     )
@@ -2539,6 +2549,7 @@ pub async fn run_server_with_obs_and_drivers(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     drivers: Arc<DriverRegistry>,
+    vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
@@ -3218,13 +3229,6 @@ pub async fn run_server_with_obs_and_drivers(
     // lives — and because the index is under `data_dir` (never `/run`) it
     // survives a restart that loses the in-memory `RootfsPlan` (S-VM-84
     // ending 3).
-    let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
-        Arc::new(overdrive_host::RealVmHostState::new(
-            std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT),
-            std::path::PathBuf::from("/run/overdrive/vm"),
-            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
-        ));
-
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,

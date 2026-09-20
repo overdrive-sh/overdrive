@@ -192,6 +192,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         config,
         Arc::clone(&obs),
         Arc::clone(&driver),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )

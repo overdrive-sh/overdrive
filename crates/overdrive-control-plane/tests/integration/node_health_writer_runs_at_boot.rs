@@ -76,6 +76,7 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         config,
         Arc::clone(&obs),
         driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )
@@ -158,6 +159,7 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         config,
         Arc::clone(&obs),
         driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )

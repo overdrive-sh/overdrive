@@ -25,6 +25,9 @@ mod integration {
     /// a retry after a partial failure (forward removed, reverse survived)
     /// purges the stale reverse entry. Caller-supplied backend.
     mod deregister_retry_safety;
+    /// netns-density-295 S-ND295-00 — Lima real-kernel D12 inventory,
+    /// retained unpinned objects, and exact-path ownership/schema evidence.
+    mod guest_tcx_inventory;
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;

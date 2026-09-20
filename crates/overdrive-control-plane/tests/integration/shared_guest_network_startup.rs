@@ -170,7 +170,10 @@ async fn run_refusing_boot(
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let result = run_server_with_obs_and_driver(config, obs, driver, owner_port, wiring).await;
+    let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
+    let result =
+        run_server_with_obs_and_driver(config, obs, driver, vm_host_state, owner_port, wiring)
+            .await;
     let error = match result {
         Err(error) => error,
         Ok(handle) => {
@@ -365,4 +368,87 @@ async fn boot_reclamation_removes_a_prior_epoch_tap_before_shared_convergence_an
         overdrive_netlink::nft::bridge::BridgeGuardObservation::Exact { .. }
     ));
     handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains cleanly");
+}
+
+/// S-ND295-10 — a deliberate external TCX-link loss remains blocked by the
+/// independent bridge guard and is reported by production audit.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-10 deliberate TCX-link loss guard"]
+fn deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause() {
+    // Activation contract (Lima root): ordinary run_server composition must
+    // provision the attachment. The fixture only queries the exact ingress
+    // identity then calls D6 detach_pinned_link. D9 observes the unchanged
+    // exact guard and DefaultDrop counter; peer-TAP plus host-stack captures
+    // observe no escaped valid frame; HostSharedGuestNetworkOwner::audit_shared
+    // reports component TcxLink with the exact typed source. The fixture must
+    // not create a TAP, endpoint, link, pin, or guard production effect.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-10 deliberate link-loss barrier)");
+}
+
+/// S-ND295-11 — ordinary production composition admits the VMM only after
+/// complete shared-network attachment read-back.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-11 production provision read-back"]
+fn ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start() {
+    // Activation contract (Lima root): drive serve/deploy -> reconciler ->
+    // action shim -> inherited GuestNetworkProvisioner::provision on the one
+    // run_server-composed owner, with an injected recording VMM. Assert the
+    // recording VMM has not observed start until the real kernel reports:
+    // persistent exact-owner TAP, Bridge-kind current master, requested link
+    // state, endpoint source IPv4/MAC/fixed bridge MAC, classifier program ID,
+    // TCX ingress/ifindex, exact link pin, and the D9 managed member. The test
+    // fixture installs none of those effects and the unrelated inventory is
+    // byte-equal.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-11 production provision/read-back)");
+}
+
+/// S-ND295-12 — normal production teardown is effect-first, retryable, and
+/// preserves an unrelated live attachment exactly.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-12 production teardown complement"]
+fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal() {
+    // Activation contract (Lima root): provision two ordinary attachments,
+    // stop the named allocation through the same production handler, and
+    // externally make one inverse already absent to exercise idempotent retry.
+    // Observe endpoint absence -> TCX pin/link absence -> TAP-down -> guarded
+    // TAP deletion -> guard-member deletion -> exact named empty complement;
+    // only then may the address return to the pool. The second attachment's
+    // TAP/master/up/owner, endpoint, attachment, pins, guard membership and
+    // lease remain byte-equal before/after. A normal-path typed failure is
+    // returned rather than hidden by Drop.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-12 effect-first teardown complement)");
+}
+
+/// S-ND295-13 GREEN telemetry layer — operational events corroborate the
+/// already-independent sweep-call ordering invariant.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-13 production boot-phase telemetry"]
+fn production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts() {
+    // Activation contract: capture only the non-persisted structured event
+    // guest_network.shared_owner_boot_phase and require the exact four phase/
+    // transition boundaries. vm_reclamation/completed precedes
+    // stale_sweep/started and neither failed awaited effect emits completed.
+    // This is GREEN operational evidence; the seeded Sim RED never depends on
+    // event presence.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-13 boot-phase telemetry)");
+}
+
+/// S-ND295-13 native-metal layer — a real prior VMM is reclaimed before the
+/// real attachment sweep and first fresh lease acceptance.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-13 native VMM and kernel complement"]
+fn native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance() {
+    // Activation contract (`cargo xtask metal run --`): leave one genuine
+    // Cloud Hypervisor process/cgroup/run-dir/clone plus its TAP, endpoint,
+    // TCX link and pins, guard membership, and shared dynamic elements. A
+    // fresh ordinary run_server must complete VMM reclamation first, then
+    // read back zero TAP/entry/link/pin/guard/dynamic-element complements,
+    // adopt no predecessor VMM/capability/listener/lease, and only afterward
+    // accept the smallest-free first address for a new allocation.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-13 native reclamation and sweep)");
 }

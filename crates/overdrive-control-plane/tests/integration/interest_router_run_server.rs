@@ -79,6 +79,7 @@ async fn production_boot_spawns_the_interest_router() {
         config,
         Arc::clone(&obs),
         Arc::clone(&driver),
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )

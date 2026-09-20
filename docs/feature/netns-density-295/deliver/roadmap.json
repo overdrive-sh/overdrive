@@ -3,23 +3,27 @@
     "project_id": "netns-density-295",
     "feature_id": "netns-density-295",
     "created_at": "2026-09-20T12:28:19Z",
-    "goal": "Deliver GH #295: cut VmDriver::new to its accepted seven-argument gate-coupled shape (F-01), stand up the node-shared guest-network owner (shared bridge, TCX classifier plus proof-mark guard, constant nft rules, two node-owned transparent listeners), and activate the DISTILL-authored reasoned-#[ignore] acceptance scaffolds (S-ND295-00..37, B-ND295-T1-BASE/T1-PORT4) across overdrive-core/control-plane/worker/dataplane/netlink/sim/cli in roadmap order, closing with the production-composed walking skeleton, the recurring conformance suite, and the two attachment-capacity benchmark receipts.",
+    "goal": "Deliver GH #295: cut VmDriver::new to its accepted seven-argument gate-coupled shape (F-01), stand up the node-shared guest-network owner (shared bridge, TCX classifier plus proof-mark guard, constant nft rules, two node-owned transparent listeners), and activate independently approved DISTILL evidence (S-ND295-00..37, B-ND295-T1-BASE/T1-PORT4) across overdrive-core/control-plane/worker/dataplane/netlink/sim/cli in roadmap order. Revised 02-01 remains blocked while the newly authored S-ND295-00/10/11/12/13 bodies await independent DISTILL and roadmap review. Delivery closes with the production-composed walking skeleton, recurring conformance, and two attachment-capacity receipts.",
     "total_steps": 11,
     "total_estimate_hours": 214,
-    "estimate_basis": "Phase 01 lands the single dependency-neutral API cut that every gate-coupled scaffold needs (8h). Phase 02 builds the three node-shared production owners in dependency order -- provisioner/pool/startup-algorithm (28h), TCX classifier plus nft replacement/rollback (30h), listener/capability lifecycle (30h) -- the largest phase because it creates every new kernel-facing effect owner. Phase 03 activates the already-authored gate/release/recovery acceptance bodies against those owners (18h + 16h + 26h). Phase 04 proves the whole cut end-to-end on native metal: the walking skeleton (24h), the recurring conformance suite (10h), non-regression plus the Tier-3 timed double-loss scenario (16h), and the two T1 benchmark receipts (8h).",
+    "estimate_basis": "Phase 01 lands the single dependency-neutral API cut that every gate-coupled scaffold needs (8h). Phase 02 builds three acyclic production slices in dependency order -- the complete shared-switch attachment owner with its classifier, typed TCX lifecycle, and semantic bridge guard (48h); IP-family constant-rule replacement/rollback (10h); and listener/capability lifecycle (30h). The phase-02 total remains 88h; the 2026-09-20 remediation redistributes the prior 28h/30h split so no owner step consumes later-step effects. Phase 03 activates the gate/release/recovery acceptance bodies against those owners (18h + 16h + 26h). Phase 04 proves the whole cut end-to-end on native metal: the walking skeleton (24h), the recurring conformance suite (10h), non-regression plus the Tier-3 timed double-loss scenario (16h), and the two T1 benchmark receipts (8h).",
     "design_refs": [
       "docs/feature/netns-density-295/feature-delta.md",
       "docs/feature/netns-density-295/distill/test-scenarios.md",
       "docs/feature/netns-density-295/distill/red-classification.md",
-      "docs/product/architecture/adr-0085-transparent-mtls-node-shared-guest-network.md",
-      "docs/product/architecture/adr-0114-shared-bridge-guest-network-topology.md",
-      "docs/product/architecture/adr-0115-tcx-endpoint-classifier-and-bridge-guard.md",
-      "docs/product/architecture/adr-0116-constant-nft-rules-and-shared-element-sets.md",
-      "docs/product/architecture/adr-0120-node-owned-leg-f-leg-c-listeners.md",
-      "docs/product/architecture/adr-0122-guest-address-pool-and-fixed-admission-cap.md",
-      "docs/product/architecture/adr-0123-capability-registry-generation-ownership.md",
-      "docs/product/architecture/adr-0124-bounded-reconvergence-then-fail-stop.md",
-      "docs/product/architecture/adr-0125-dependency-neutral-exec-gate.md"
+      "docs/product/architecture/brief.md",
+      "docs/product/architecture/adr-0114-node-local-shared-bridge-guest-network.md",
+      "docs/product/architecture/adr-0115-tcx-endpoint-classification-feeds-transparent-mtls.md",
+      "docs/product/architecture/adr-0116-shared-bridge-gateway-dns.md",
+      "docs/product/architecture/adr-0117-initial-shared-bridge-density-target.md",
+      "docs/product/architecture/adr-0118-guest-address-lease-and-derived-link-identity.md",
+      "docs/product/architecture/adr-0120-node-shared-transparent-mtls-listeners.md",
+      "docs/product/architecture/adr-0121-fixed-guest-network-admission-cap.md",
+      "docs/product/architecture/adr-0122-guest-network-operation-error-family.md",
+      "docs/product/architecture/adr-0123-node-session-mtls-registration-generation.md",
+      "docs/product/architecture/adr-0124-bounded-shared-network-owner-recovery.md",
+      "docs/product/architecture/adr-0125-constant-nft-rules-shared-intercept-elements.md",
+      "docs/product/architecture/adr-0126-fixed-node-guest-bridge-mac.md"
     ],
     "delivery_protocol": [
       "Execute in the fixed dependency order 01-01 -> 02-01 -> 02-02 -> 02-03 -> 03-01 -> 03-02 -> 03-03 -> 04-01 -> 04-02 -> 04-03 -> 04-04; every phase-02/03 step needs the shared-owner surface the prior step left compiling.",
@@ -100,8 +104,8 @@
     },
     {
       "id": "02",
-      "name": "Node-shared guest-network infrastructure: provisioner, TCX classifier, listener/capability lifecycle",
-      "description": "Build the three production kernel-facing owners the shared-bridge topology needs: the guest-network provisioner plus address pool and shared-owner startup algorithm (S-ND295-00, 02-13); the TCX classifier's shared nft constant-rule replacement and rollback contract (S-ND295-14-19); and the node-shared leg-F/leg-C listener owner with its private capability registry (S-ND295-20-26). Each step's real effect owner is a prerequisite for the next.",
+      "name": "Node-shared guest-network infrastructure: complete shared-switch owner, IP intercept program, listener/capability lifecycle",
+      "description": "Build three acyclic slices: 02-01 owns the complete shared-switch attachment owner, classifier, typed TCX lifecycle, and bridge guard; 02-02 owns IP-family rule/set replacement and rollback; 02-03 owns shared listeners and capabilities. Revised 02-01 waits for independent review of the authored remediation bodies and roadmap approval.",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
       "depends_on": [
@@ -110,74 +114,126 @@
       "steps": [
         {
           "id": "02-01",
-          "name": "Guest-network provisioner, address pool, and shared-owner startup algorithm",
-          "description": "Land the accepted grouped AllocationSpec.network: Option<GuestNetworkAssignment> handoff (A2), the private GuestAddressPool (assign/release/snapshot, ERR-295-A), the async GuestNetworkProvisioner port and its private HostGuestNetworkProvisioner/production plan constructor (B1/D-295-DISTILL-4), and the SharedGuestNetworkOwner super-port's real private scratch-probe/setup/cleanup startup algorithm (C-295-G/D-295-DISTILL-5) including the fixed GUEST_BRIDGE_MAC convergence, boot VM-reclamation-then-sweep ordering, and the TCX attach/pin/query effects provision() performs as part of the same atomic operation. Activates S-ND295-00 and S-ND295-02..07, S-ND295-10..13 (S-ND295-08/09's TCX classifier bodies are step 02-02's job, once the classifier itself exists).",
+          "name": "Complete shared-switch owner with classifier, TCX, and bridge guard",
+          "description": "Complete the one production shared-switch attachment slice. Land A2/pool, the one owner, D5 scratch algorithm, D12 lifecycle/inventory plus its private projection source, D12A's production allocation leaf seam, classifier/maps, D6, D9, and D13's existing VmHostState/telemetry plus ordering-honest Sim sweep oracle. Delete the legacy path and require real complements before admission. Activates S00, S02..04, and S06..13; S05 remains 03-01. Authored DISTILL bodies remain blocked pending independent review.",
           "agent": "nw-software-crafter",
           "deps": [
             "01-01"
           ],
-          "estimate_hours": 28,
+          "estimate_hours": 48,
           "criteria": [
             "AllocationSpec deletes netns/host_veth and its six separate guest-network option fields and gains exactly `pub network: Option<GuestNetworkAssignment>` where GuestNetworkAssignment is `{ address: Ipv4Addr, tap: String, mac: [u8; 6], gateway: Ipv4Addr, prefix: u8, dns: Ipv4Addr }`; VmNetworkAttachment stays exactly `{ tap: String, mac: [u8; 6] }` and CloudHypervisorVmm renders `--net tap=...,mac=...` directly, removing the `ip netns exec` launch-tool prerequisite; both types keep their existing Debug/Clone/PartialEq/Eq derives and add no serde/rkyv schema, generation, or listener-port field.",
             "GuestAddressPool exposes exactly `assign`, `release`, `snapshot` under one parking_lot::Mutex critical section, none crossing `.await`; assign is atomic and idempotent for an already-held AllocationId (returns the byte-equal existing plan) and otherwise inserts the smallest free non-reserved address, excluding prefix-network/broadcast/gateway addresses; release of an absent allocation is an idempotent no-op; snapshot returns a detached BTreeMap clone in allocation-ID order; below-cap exhaustion returns `GuestNetworkError::PoolExhausted { held, capacity }`, never a panic or address reuse.",
             "`overdrive_control_plane::guest_network::GuestNetworkProvisioner` is exactly the two-method async trait `provision(&self, plan: &GuestNetworkPlan) -> Result<()>` / `teardown(&self, plan: &GuestNetworkPlan) -> Result<()>`; GuestNetworkPlan is `#[doc(hidden)] pub` with private fields and exactly four read-only accessors (alloc/bridge/node_prefix/assignment); production construction and the HostGuestNetworkProvisioner implementation remain private to overdrive-control-plane; overdrive-sim implements only the public port. (The trait signature itself, per C-295-G, was already declared as compile-time API surface in step 01-01; this step supplies HostGuestNetworkProvisioner's real production body.)",
-            "dispatch_with_guest_network_provisioner_for_test and run_convergence_tick_with_guest_network_provisioner_for_test execute the identical production workflow-intent preflight, reconciler hydration, View write-through, action shim, re-enqueue, and error projection as the real production path, differing only in the one injected driven-network adapter.",
+            "Ordinary handler -> reconciler -> action-shim start/restart/stop dispatch uses the same one SharedGuestNetworkOwner object that boot composed; dispatch_with_guest_network_provisioner_for_test and run_convergence_tick_with_guest_network_provisioner_for_test execute that identical workflow-intent preflight, hydration, View write-through, action shim, re-enqueue, and error projection, differing only in the one injected driven-network adapter. The production HostNetworkProvisioner/NetSlot/netns/veth branch, AppState::net_slot_allocator, boot adoption, deleted shim error variants, setns VMM launch, and optional compatibility path are absent after this cut.",
             "SharedGuestNetworkOwner is exactly `probe_startup`, `sweep_stale`, `converge_shared`, `audit_shared` (returning SharedGuestNetworkAuditError), and `quiesce_managed_taps`, all on the one concrete production owner that also implements the inherited GuestNetworkProvisioner allocation operations -- no second owner object exists for boot/runtime ownership versus allocation provision/teardown. (The trait signature was likewise declared in step 01-01; this step supplies HostSharedGuestNetworkOwner's real method bodies behind it, replacing 01-01's todo!() scaffold.)",
             "The private HostSharedGuestNetworkOwner startup algorithm, driven through the module-private SharedGuestNetworkScratchIo seam by source-local tests (not the public SimSharedGuestNetworkOwner), proves: probe_startup owns only isolated scratch resources and always attempts their cleanup; on primary-probe failure with successful cleanup the primary typed error returns and the scratch complement is exactly zero; on cleanup failure or non-empty cleanup read-back, startup still refuses with EXEC BootClosed and no production owner/task is published, while preserving both the primary and cleanup errors plus the complete GuestNetworkScratchComplement with any unread-back resource family reported Unavailable, never fabricated zero; a later retry or boot never overwrites that first-failure evidence.",
             "The node bridge MAC is set only from `overdrive_core::dataplane::GUEST_BRIDGE_MAC = [0x02, 0x01, 0x00, 0x00, 0x00, 0x01]`, never adopted from ambient kernel state; convergence creates-or-adopts a bridge-kind link, brings it down, sets the fixed MAC, reads back exact name/ifindex/type/MAC/gateway-prefix, then brings it up before writing any endpoint entry or attaching any TAP; a successful mutation followed by wrong read-back is `GuestNetworkError::PostconditionMismatch` and refuses startup.",
-            "sweep_stale runs only after existing VM reclamation and removes prior-epoch TAP/map/pin residue before the new held address set initializes; boot never adopts a surviving VMM or recreates a NetSlot-style recovery map.",
-            "provision/teardown mutate only the named allocation's TAP/master/up state, endpoint entry, TCX link/pin, and bridge-guard membership (plus the shared bridge/maps/rules only toward their one desired identity); the real-kernel S-ND295-11..13 bodies prove provision/read-back, effect-first teardown (address released last), and post-VMM-reclamation boot sweep with a full complement check against unrelated allocations.",
-            "S-ND295-02..05 grouped-value/pool/A2-boundary properties, S-ND295-06..07 production-action-owner start-failure and release-last-teardown bodies (via the two test-gated owner seams, no simulation-owned action sequence), and S-ND295-10 deliberate-link-loss bridge-guard body are activated with real production owners -- no acceptance body is weakened, replaced, or re-authored. (S-ND295-08/09's TCX classifier bodies move to step 02-02, the step that lands the classifier itself.)"
+            "The C-295-0 SCHED_CLS classifier attaches at TCX ingress with first ordering to every managed TAP against one 65,536-entry ifindex-keyed endpoint map containing exactly source IPv4, source MAC, and bridge MAC; its exact eight counter classes and every Ethernet/ARP/TCP partition produce the accepted TC_ACT_OK/TC_ACT_SHOT, proof mark, MAC rewrite, original-destination preservation, and single-counter result. Existing S-ND295-08/09 BPF_PROG_TEST_RUN plus real-kernel no-escape evidence is activated in this step.",
+            "D-295-DISTILL-6 remains exactly GuestTcxAttachment, GuestTcxCounter, TcxAttachPoint, GuestTcxError, its semantic program_ids, and five doc-hidden free functions. D12 adds only exact doc-hidden GuestTcxObject/GuestTcxEndpoint, semantic map shapes with opaque unsupported tokens, GuestTcxMapSchema/GuestTcxInventoryFamily/GuestTcxInventoryCapture/GuestTcxInventoryIdentity, and opaque non-Clone GuestTcxProgram/GuestTcxLink/GuestTcxAdoptedState fences. No lifecycle trait, generic command, raw aya/numeric ABI, new inventory ownership ID, FD/record, ELF name, or additional free operation crosses into control-plane.",
+            "GuestTcxProgram::load(&GuestTcxInventoryIdentity)/pin_endpoint_map/pin_counter_map/insert_endpoint/read_endpoint/attach_first_ingress and GuestTcxLink::program_id/pin/detach are the only live-loader methods. GuestTcxAdoptedState::for_inventory(&GuestTcxInventoryIdentity, link_pin) plus its exact adopt/read/unpin methods is the only adoption surface. HostSharedGuestNetworkOwner::new remains sole constructor and retains one Mutex<Option<private HostGuestTcxState { program, inventory }>>; Sim implements only the high-level owner. Load preserves aya::EbpfError; semantic errors remain source-less; cleanup, Drop non-mutation, read-back, and no-lock-across-await match D12.",
+            "GuestTcxMapKind is exactly Hash, Array, or Unsupported(opaque token); key/value/capacity are likewise closed semantic shapes with equality-preserving opaque unsupported properties. Tokens have no public constructor/accessor and render no raw/numeric identity. Endpoint schema is exactly Hash/U32/EndpointAbi/EndpointMaximum and counter schema Array/U32/CounterU64/CounterSlots. MapSchemaMismatch carries comparable expected/observed GuestTcxMapSchema and no source; aya kind-decode failure remains sourced Map. Raw sizes/capacity never cross into control-plane.",
+            "GuestTcxInventoryIdentity::capture always returns GuestTcxInventoryCapture. into_parts moves an observation-capable identity and one Result disposition: capture exhausts map/program/link domains in fixed order, stores failed-domain flags privately in the identity, and moves the original first Map/Program error directly. Real D5 stores identity before moving disposition into the TcxLoad primary and skips BPF load on Err. The identity never stores/clones/wraps that source; affected later families return source-less CaptureUnavailable, while independent successful domains and exact pin paths remain observable.",
+            "After explicit cleanup and handle release, D5 maps its eight count_tcx families exactly to observe_endpoint_maps/observe_counter_maps/observe_endpoint_entries/observe_tcx_programs/observe_tcx_links/observe_endpoint_map_pins/observe_counter_map_pins/observe_tcx_link_pins. Dataplane uses complete loaded-object enumeration, private by-ID entry lookup, and exact pins. Only a recorded receipt may return an owned nonzero count. With no receipt and a complete baseline, zero candidates is Ok(0), but any candidate—including a unique semantic match—is source-less InventoryAmbiguous; failed baseline is CaptureUnavailable. Every Err becomes Unavailable, first-source retention and later-family continuation remain D5-owned, and pin absence or Drop never implies object absence.",
+            "D12's raw map/program/link/pin observations, GuestTcxInventorySource trait, AyaGuestTcxInventorySource implementation, capture_with_source, and project_map_kind/project_map_schema are dataplane-private. Public capture delegates to the real source and retains it privately. Source-local tests inject only capture_with_source with raw aya/numeric observations and domain failures, proving every supported/unsupported semantic projection and source branch; opaque public tokens retain no constructor/accessor and no raw value crosses crates.",
+            "The D-295-DISTILL-9 bridge adapter is real kernel-backed, not process-local. It owns the already-approved semantic BridgeGuardSpec/fact/inventory/outcome/error types and exactly observe, converge_table, converge_chain, converge_set, converge_rules, insert_member, delete_member, delete_rules, delete_set, delete_chain, delete_table, and delete_owned_guard over the one private family-aware nft codec; existing IPv4 operations remain byte-equal. The one table bridge overdrive-mtls guard has one managed_taps ifname set, one filter/prerouting/-300/accept chain, exactly the three ordered proof-mark rules, exact-exclusive aggregate deletion, and complete foreign/conflict preservation.",
+            "The shared-switch owner pins maps and per-TAP links only under /sys/fs/bpf/overdrive/mtls-endpoints/{maps/{endpoints,counters},links/<tap>-ingress}; provision orders down TAP -> bridge/master -> guard membership -> endpoint insertion -> TCX first-ingress attach/pin/query and exact program/ifindex/pin/MAC read-back before VMM start. Closing loader handles never detaches a pinned link, and no pin outside that hierarchy is adopted.",
+            "provision/teardown mutate only the named allocation's TAP/master/up state, endpoint entry, TCX link/pin, and bridge-guard membership (plus shared bridge/maps/guard only toward their one desired identity). Teardown deletes endpoint, unpins/detaches TCX, deletes the TAP while guard membership remains, removes membership, proves the named complement empty without changing an unrelated attachment, and releases the address last; typed normal-path failures are never hidden by Drop.",
+            "D12A adds one module-private GuestNetworkAllocationIo leaf interface used by the real owner, with exact tap mutate/observe, D9 member mutate/observe, and D12/D6 endpoint/link mutate/observe methods. HostGuestNetworkAllocationIo is the sole real adapter over a shared Arc<Mutex<Option<HostGuestTcxState>>>; the owner publishes a private alloc->{ifindex,program_id} record only after final read-back; with_allocation_io is source-local cfg(test)-only. Tests invoke real provision/teardown, inject only leaf results, and record calls; no public hook, simulated action owner, completed result, or replacement workflow exists.",
+            "D12A TAP observation is exactly Absent{name}, Incompatible{name,ifindex,kind,persistent,up,owner_uid,master_ifindex}, or Persistent{name,ifindex,up,owner_uid,master_ifindex}. The real leaf maps the existing typed persistent-TAP observer plus doc-hidden semantic link identity; the owner alone constructs GuestNetworkFact::Tap/LinkMaster and requires persistent TAP, exact OVERDRIVE_VMM_UID, desired up/down, stable ifindex, and exact master. Absent/incompatible are semantic PostconditionMismatch, never fabricated Netlink errors.",
+            "GuestNetworkAllocationIo::observe_bridge returns private Absent{name} or Present{name,ifindex,kind}; the real leaf performs generic semantic link lookup and the owner compares through GuestNetworkFact::BridgeLinkIdentity. It refreshes immediately before both down-TAP and final up-TAP master checks, uses only a Bridge-kind current ifindex as expected master, and never caches ownership. Scripted tests return actual facts, not boolean success; raw LinkMessage/details and a public bridge port are forbidden.",
+            "Provision succeeds only after TAP create/down/master observations, full guard membership, exact endpoint read-back, first-ingress attach/pin/query/pin presence, and final TAP-up observation. Primary failure drives owner rollback. Teardown/rollback continue endpoint -> pinned/pending link -> endpoint/link/pin absence read-back while TAP exists -> TAP down -> guarded TAP delete -> guard delete -> final TAP/guard read-back, retaining first cleanup source; only empty complement succeeds and address release follows outside. Source-local S06/S11/S12 fail every leaf/wrong read-back and assert continuation/no-release/retry/unrelated preservation; Lima retains actual effects.",
+            "D13 retains mandatory vm_host_state before shared_guest_network in both helpers and the approved guest_network.shared_owner_boot_phase telemetry. For the first honest RED, SimSharedGuestNetworkOwner::with_sweep_host_state receives the same SimVmHostState and records SimSharedGuestNetworkSweepCall { call_index, host } at the actual sweep_stale call while preserving the existing calls() API. No ServerConfig override, boot port, alternate owner, product hook, or public state accessor is added; production events remain separate GREEN telemetry.",
+            "Before changing source order, reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm must fail through current composition because the real sweep-call snapshot still contains seeded host residue, with the replay seed printed; it must not depend on absent D13 events. Only that RED authorizes reclamation-before-sweep. GREEN separately proves approved event order, and native metal independently proves the real VMM/kernel complement and first lease acceptance.",
+            "DISTILL must extend S00 through D12's private source, author S10, drive S11/S12 through D12A, and complete S13 with the sweep-call RED plus separate telemetry/native layers. Crafters may activate approved bodies but may not author substitute assertions, expose private seams, or replace production owners.",
+            "S-ND295-00, S-ND295-02..04, and S-ND295-06..13 are this step's activation set. S-ND295-05 remains exclusively in step 03-01. No acceptance assertion is weakened, replaced, or re-authored; transitioned Contract Shape metadata names only the grouped network delta and every active acceptance body retains its outcome anchor."
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs",
-          "scenario_name": "provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause",
+          "scenario_name": "phase-02-01 shared-switch bundle; ten non-waived S-ND295-00/11/12/13 source-local and Sim RED bodies pending independent DISTILL re-review; eight real-I/O placeholders user-waived from this bounded gate",
           "scenario_ids": [
             "S-ND295-00",
             "S-ND295-02",
             "S-ND295-03",
             "S-ND295-04",
-            "S-ND295-05",
             "S-ND295-06",
             "S-ND295-07",
+            "S-ND295-08",
+            "S-ND295-09",
             "S-ND295-10",
             "S-ND295-11",
             "S-ND295-12",
             "S-ND295-13"
           ],
           "files_to_modify": [
+            "Cargo.toml",
             "crates/overdrive-core/src/traits/driver.rs",
             "crates/overdrive-core/src/vm/config.rs",
             "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/acceptance/preflight_before_workloads_bootstrap.rs",
             "crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs",
+            "crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs",
+            "crates/overdrive-control-plane/tests/integration/interest_router_run_server.rs",
+            "crates/overdrive-control-plane/tests/integration/node_health_writer_runs_at_boot.rs",
+            "crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
             "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_lifecycle/convergence_loop_spawned_in_production_boot.rs",
             "crates/overdrive-sim/src/adapters/guest_network.rs",
+            "crates/overdrive-sim/src/adapters/vm_host_state.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-sim/src/invariants/netns_density_boot_order.rs",
+            "crates/overdrive-sim/src/harness.rs",
+            "crates/overdrive-sim/src/lib.rs",
+            "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs",
+            "tests/conformance/src/lib.rs",
+            "xtask/src/dst_lint.rs",
+            "crates/overdrive-bpf/Cargo.toml",
+            "crates/overdrive-bpf/src/main.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "crates/overdrive-bpf/src/programs/guest_tcx_classifier.rs",
+            "crates/overdrive-bpf/src/maps/mod.rs",
+            "crates/overdrive-bpf/src/maps/guest_tcx_endpoints.rs",
+            "crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs",
             "crates/overdrive-dataplane/src/guest_tcx.rs",
+            "crates/overdrive-dataplane/tests/integration.rs",
+            "crates/overdrive-dataplane/tests/integration/guest_tcx_inventory.rs",
+            "crates/overdrive-netlink/src/client.rs",
+            "crates/overdrive-netlink/src/lib.rs",
+            "crates/overdrive-netlink/src/nft.rs",
+            "crates/overdrive-netlink/tests/integration/bridge_guard_lifecycle.rs",
             "crates/overdrive-host/src/vmm.rs"
           ],
           "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(guest_network)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(netns_density_guest_network)' --no-fail-fast",
             "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(pool_acceptance) or test(scratch_probe_acceptance)' --no-fail-fast",
-            "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_guest_network_startup)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-bpf --test integration --features integration-tests -E 'test(guest_tcx_classifier_test_run)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --lib -E 'test(guest_tcx)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --test integration --features integration-tests -E 'test(guest_tcx_inventory)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-netlink --lib -E 'test(persistent_tap) or test(observe_link_identity)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-netlink --test integration --features integration-tests -E 'test(bridge_guard_lifecycle)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause) or test(ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start) or test(two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal) or test(production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-sim --lib -E 'test(reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-sim --all-targets --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
-            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
+            "cargo verifier-regress"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. In this repository's Rust suite: GuestAddressPool::assign/release/snapshot is the feature delta's own 'bounded-change' example (only the allocation-keyed held map may change) -- drive it with proptest over interleaved assign/release/snapshot sequences and assert_state_delta-shaped equality on every other allocation's binding; the pure address/MAC/TAP derivation and TCP-listener projection functions are 'pure-function' Contract Shape -- return-only proptests over /16 boundaries, reserved addresses, uniqueness, and TCP filter/dedup/order. Do not invent GuestNetworkPlan/GuestNetworkProvisioner/SharedGuestNetworkOwner surface beyond the exact trait/struct fences in feature-delta.md C-295-A/B/G and D-295-DISTILL-5 -- the scratch-I/O seam is module-private by design; if its shape is ambiguous for a case DISTILL did not cover, stop and surface it."
+          "implementation_notes": "Cumulative D12, its private source, D12A, and D13 are approved through DESIGN iteration 6. DISTILL has authored the exact S00/10/11/12/13 bodies at the accepted homes; revised 02-01 remains non-executable until independent DISTILL and roadmap review approve them. The seeded S13 invariant already reproduces current sweep-before-reclamation order with shrunk seed 0; the crafter activates it before any reorder. Existing commits remain rejected history and the original crafter logs only phases executed. Public surface is closed: no product bridge port, raw netlink fact, owner/plan method, public fault hook, generic command, boot port, second owner, or compatibility path. Source-local leaves return actual typed TAP/bridge observations, never boolean verdicts; the owner alone constructs Tap/BridgeLinkIdentity/LinkMaster facts and expected UID/master comparisons. All prior cleanup, inventory, S13 RED/GREEN, lease, and release-last decisions remain fixed."
         },
         {
           "id": "02-02",
-          "name": "TCX classifier attach and shared nft constant-rule replacement/rollback",
-          "description": "Implement the aya-rs SCHED_CLS TCX endpoint classifier and its node-global counters/endpoint map per C-295-0, the D-295-DISTILL-9 bridge-family proof-mark guard adapter in overdrive-netlink over one private family-aware codec, the D-295-DISTILL-6 typed dataplane guest_tcx query/detach/endpoint/counter adapter, and PORT-295-C's fresh-process constant-rule replacement plus S2-F01's atomic rollback contract in the worker's MtlsIntercept host adapter (converge_shared/observe_shared over the private SharedInterceptProgramIo seam). Activates S-ND295-08, S-ND295-09, and S-ND295-14..19.",
+          "name": "Shared IP intercept constant-rule replacement and rollback",
+          "description": "Implement only PORT-295-C/C-295-C's fresh-process IP-family constant-rule/set replacement and S2-F01's atomic rollback contract in the worker's MtlsIntercept host adapter: converge_shared/observe_shared over the already-approved private SharedInterceptProgramIo seam. The classifier, D-295-DISTILL-6 TCX adapter, and D-295-DISTILL-9 bridge guard are complete prerequisites owned and approved in 02-01. Activates S-ND295-14..19.",
           "agent": "nw-software-crafter",
           "deps": [
             "02-01"
           ],
-          "estimate_hours": 30,
+          "estimate_hours": 10,
           "criteria": [
-            "The TCX program attaches via TCX ingress with first ordering to every managed TAP against a node-global 65,536-entry ifindex-keyed endpoint map whose value is exactly the expected source IPv4, source MAC, and bridge MAC; it owns exactly eight counter classes (gateway/host pass, intercept, endpoint-map miss, source-MAC spoof, source-IP/ARP spoof, direct-bypass drop, ARP pass, malformed drop) and every Ethernet/ARP parse, spoof, and TCP-intercept partition in C-295-0 fires the exact counter and TC_ACT_OK/TC_ACT_SHOT verdict specified, with original IPv4 destination and port byte-identical after intercept-mark rewrite.",
-            "S-ND295-08 (valid guest traffic enters the protected path exactly once) and S-ND295-09 (malformed or impersonated guest traffic cannot escape) are activated against the real TCX classifier via Tier 2 BPF_PROG_TEST_RUN (crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs) plus the Tier-3 real-kernel body -- no acceptance body is weakened, replaced, or re-authored.",
-            "guest_tcx exposes exactly GuestTcxAttachment, GuestTcxCounter, and the five doc-hidden high-level adapter operations (attach/pin/adopt/query/remove) with GuestTcxError's Link/Io source variants nesting every raw aya source; no raw aya type or layout crosses into control-plane facts.",
-            "The shared-switch owner pins maps and per-TAP links under /sys/fs/bpf/overdrive/mtls-endpoints/{maps/{endpoints,counters},links/<tap>-ingress}; provisioning orders guard membership before map insert and TCX attach and queries the exact link/program/ifindex before VMM attachment; closing the loader never detaches a pinned link; a pin outside this hierarchy is never adopted as an Overdrive endpoint link.",
-            "overdrive-netlink::nft::bridge's semantic guard adapter observes/converges/deletes the node-global `table bridge overdrive-mtls` safeguard (one managed_taps ifname set, one `type filter hook prerouting priority -300; policy accept` chain with exactly three ordered rules) over the same private family-aware codec the existing IPv4 nft operations use; existing IP-family objects stay byte-equal and delete_owned_guard is exact-exclusive.",
             "MtlsIntercept gains exactly converge_shared(prior, leg_f, leg_c) -> Result<Box<dyn InterceptGuard>> and observe_shared() -> Result<Option<InterceptPostcondition>> alongside the unchanged bind_transparent/install_outbound/install_inbound; observe_shared is a non-mutating complete dump returning None only for genuine absence (any partial/foreign/duplicate/malformed identity is a typed error, never absence); converge_shared requires the live observation to equal the caller's prior snapshot, atomically creates/adopts the three sets and eight normalized rules for the exact passed targets, reads them back, and returns one node-scoped guard owning only those shared objects; reapplying identical targets is idempotent.",
             "The fresh-process target-recovery ordering in S2-F01 is implemented exactly: BootClosed + zero-managed-TAP precondition -> observe_shared dump without mutation -> fresh port-zero F/C binds -> converge_shared with the captured prior identity replacing only the two owned TPROXY target ports while preserving every other rule/set/userdata/foreign object -> full read-back of both sockets, three sets, eight constant rules, two new target ports, and zero dynamic-element complement -> publish and open_after_boot only after every read-back passes; port zero is never used at runtime and runtime never invokes this branch.",
             "The four disjoint rollback outcomes are source-honest exactly as ERR-295-A/PORT-295-C pin them: NftSharedReplaceFailed (batch rejected, prior state intact); NftSharedReplacementMismatchRolledBack (mismatch + rollback committed and read back equal to prior, including prior = None meaning first-boot create rolled back to absence -- source-less); NftSharedRollbackFailed (a genuine lower-level rollback write/read NetlinkError, tagged RestorePrior or ReadBackPrior); NftSharedRollbackPostconditionMismatch (rollback write+read both succeeded but the read-back differs from prior -- deliberately source-less, no fabricated NetlinkError). Runtime converge_shared_owner never passes port zero, recreates only a missing owned rule at the same recorded target, and treats a present owned rule with a different target as a conflict that consumes the bounded 250ms/5s retry.",
@@ -186,8 +242,6 @@
           "test_file": "crates/overdrive-worker/src/mtls_intercept_port.rs",
           "scenario_name": "shared_program_rollback_acceptance::replacement_and_every_rollback_disposition_preserve_exact_identity_and_source",
           "scenario_ids": [
-            "S-ND295-08",
-            "S-ND295-09",
             "S-ND295-14",
             "S-ND295-15",
             "S-ND295-16",
@@ -196,24 +250,19 @@
             "S-ND295-19"
           ],
           "files_to_modify": [
-            "crates/overdrive-bpf/src/programs/guest_tcx_classifier.rs",
-            "crates/overdrive-bpf/src/maps/guest_tcx_endpoints.rs",
-            "crates/overdrive-dataplane/src/guest_tcx.rs",
             "crates/overdrive-netlink/src/nft.rs",
             "crates/overdrive-worker/src/mtls_intercept.rs",
             "crates/overdrive-worker/src/mtls_intercept_port.rs",
-            "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
-            "crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs"
+            "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs"
           ],
           "verification": [
-            "cargo xtask metal run -- cargo nextest run -p overdrive-bpf --test integration --features integration-tests -E 'test(guest_tcx_classifier_test_run)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(shared_program_rollback_acceptance)' --no-fail-fast",
             "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(mtls_intercept_install)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
             "cargo verifier-regress"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: TCX packet evaluation and guest_tcx query/detach/endpoint/counter operations are both 'bounded-change' Contract Shape with an explicit closed universe (one skb's sanctioned fields plus one counter class; one owned attachment/pin/entry/counter) per the Effect Isolation table in feature-delta.md -- BPF_PROG_TEST_RUN PKTGEN/SETUP/CHECK triptychs plus Tier-3 real-kernel captures are the assertion mechanism (per .claude/rules/testing.md Tier 2/3), not proptest alone, since the mutation universe is kernel state. Bridge-guard and nft rollback bodies are source-honest by construction (feature-delta.md is explicit that fabricating a NetlinkError for a semantic-only mismatch is forbidden) -- do not add a source to NftSharedRollbackPostconditionMismatch or NftSharedReplacementMismatchRolledBack even if a test would be easier to write that way. Do not invent MtlsIntercept surface beyond the exact five-method C-295-C fence; the SharedInterceptProgramIo seam and its cfg(test) constructor are the only sanctioned test-only surface."
+          "implementation_notes": "This step starts only after revised 02-01 is independently APPROVED. It owns the worker's IP-family eight-rule/three-set program and optional-prior replacement/read-back/rollback algorithm, not any TCX or bridge-family guard behavior. Rollback bodies are source-honest by construction: never add a source to NftSharedRollbackPostconditionMismatch or NftSharedReplacementMismatchRolledBack, and never represent prior absence with a fabricated empty program. Do not invent MtlsIntercept surface beyond the exact five-method C-295-C fence; SharedInterceptProgramIo and its cfg(test)-only constructor are the sole sanctioned private test seam. Existing IPv4 APIs may share the private family-aware codec landed in 02-01, but this step adds no public family parameter and does not modify the approved D6/D9 surface."
         },
         {
           "id": "02-03",
@@ -297,6 +346,7 @@
           "test_file": "crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs",
           "scenario_name": "exec_gate_boot_closed_recovery_fail_stop_model_and_table",
           "scenario_ids": [
+            "S-ND295-05",
             "S-ND295-27"
           ],
           "files_to_modify": [
@@ -350,14 +400,14 @@
         {
           "id": "03-03",
           "name": "Retained supervisor: owner-port recovery matrix, run_server composition, and DNS task lifecycle",
-          "description": "Wire ordinary run_server to construct the real production HostSharedGuestNetworkOwner (landed in step 02-01) in place of step 01-01's compile-time todo!() scaffold and supply it to run_server_with_obs_and_driver(s) -- whose shared_guest_network/guest_network_exec signature was already amended in step 01-01 -- and land D-295-DISTILL-8's retained SharedNetworkSupervisorHandle owning the sole join, request receiver, paired EXEC supervisor, and intentional-shutdown token; drive RUN-295-B's full bounded-reconvergence-then-fail-stop matrix (bridge, listeners, DNS, TCX/maps/pins, nft guard) and re-home DnsResponder to the shared-bridge gateway with its private DnsServeTaskOwner. Activates S-ND295-29..32 and S-ND295-34.",
+          "description": "Use ordinary run_server's already-composed real HostSharedGuestNetworkOwner and the cumulative vm_host_state/shared_guest_network/guest_network_exec helper signature completed in step 02-01; land D-295-DISTILL-8's retained SharedNetworkSupervisorHandle owning the sole join, request receiver, paired EXEC supervisor, and intentional-shutdown token; drive RUN-295-B's full bounded-reconvergence-then-fail-stop matrix (bridge, listeners, DNS, TCX/maps/pins, nft guard) and re-home DnsResponder to the shared-bridge gateway with its private DnsServeTaskOwner. Activates S-ND295-29..32 and S-ND295-34.",
           "agent": "nw-software-crafter",
           "deps": [
             "03-02"
           ],
           "estimate_hours": 26,
           "criteria": [
-            "Ordinary run_server privately constructs the real, fully-behavioral HostSharedGuestNetworkOwner landed in step 02-01 (replacing step 01-01's compile-time todo!() scaffold) and supplies that one instance to run_server_with_obs_and_driver(s), whose shared_guest_network: Arc<dyn SharedGuestNetworkOwner> / guest_network_exec: GuestNetworkExecWiring signature was already amended in step 01-01 per F-01/D-295-DISTILL-1 and needs no further signature change here.",
+            "Ordinary run_server already constructs and supplies the one real HostSharedGuestNetworkOwner from step 02-01. The injected helpers' cumulative signature is vm_host_state: Arc<dyn VmHostState>, shared_guest_network: Arc<dyn SharedGuestNetworkOwner>, guest_network_exec: GuestNetworkExecWiring exactly per D-295-DISTILL-1/13 and needs no change in this step.",
             "SharedNetworkSupervisorHandle is the sole module-private ServerHandle field holding request_rx, the retained task JoinHandle, the paired GuestNetworkExecSupervisor, and a CancellationToken; ServerHandle's already-public shutdown_requested delegates to it and adds no new public method.",
             "The one-second kernel audit and 250ms-retry/5s-fail-stop reconvergence loop is implemented exactly per RUN-295-B's table: a bridge/TAP-membership, leg-F/leg-C listener, DNS-loop, or TCX-link/map/pin mismatch each closes EXEC release, quiesces every managed TAP down before repair (or cgroup-kills and fail-stops if quiesce cannot be confirmed), and a pure listener/DNS task exit does not require TAP-down; listener recovery only ever rebinds the exact previously recorded address/port and never rewrites an nft target or replaces a port.",
             "S-ND295-29 (lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds) and S-ND295-30 (occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port) both pass against the real retained supervisor and worker, proving the exact-port recovery contract and its EADDRINUSE refusal with no alternate port ever selected.",
@@ -389,7 +439,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: the twelve-component fail-stop/recovery matrix is a finite closed table -- use table-driven tests (rstest-shaped or a hand-rolled case array) over every (SharedGuestNetworkComponent, detection signal) pair rather than one test per component, and pair with real Tokio task join/panic/cancel fixtures (tokio::task::JoinError classification) since the mutation surface is real async task outcomes, not pure data. The run_server_with_obs_and_driver(s) signature itself is no longer this step's concern -- step 01-01 already amended it and supplied a compile-time HostSharedGuestNetworkOwner scaffold; this step's job is swapping that scaffold for the step-02-01-built real owner and landing the retained supervisor + reconvergence behavior around it."
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: the twelve-component fail-stop/recovery matrix is a finite closed table -- use table-driven tests over every (SharedGuestNetworkComponent, detection signal) pair and pair with real Tokio task join/panic/cancel fixtures. The run_server_with_obs_and_driver(s) signature and real owner composition are no longer this step's concern: step 01-01 added the shared-owner/EXEC surface and revised 02-01 completed D13's VmHostState parameter plus the real owner cut. This step lands only the retained supervisor, DNS task owner, and reconvergence/fail-stop behavior around them."
         }
       ]
     },
@@ -583,8 +633,8 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "Each DELIVER step is signed off by its dispatched crafter's paired reviewer per delivery_protocol (deliver/review-<step-id>.md, APPROVED before advancement); the roadmap itself has not yet been independently reviewed by a solution-architect-reviewer pass -- no reviewer has been assigned to that roadmap-level review.",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "Phase-02 DESIGN remediation approved after independent architecture review iteration 6. Revised DISTILL evidence approved by final product-owner, solution-architecture, platform, and acceptance-design re-reviews; eight real-I/O panic placeholders are explicitly user-waived and unscored. Unrelated whole-roadmap findings retain the user's prior approval override and remain outside this phase-02 gate.",
+    "approved_at": "2026-09-20T23:37:51Z"
   }
 }

@@ -806,6 +806,7 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
         config,
         obs.clone(),
         driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
     )

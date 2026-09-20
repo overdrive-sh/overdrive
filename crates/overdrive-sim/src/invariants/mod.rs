@@ -82,6 +82,9 @@ pub mod maglev_distribution;
 // `MaglevDistributionEven`: that invariant pins the steady-state
 // distribution property, this one pins the determinism property.
 pub mod maglev_deterministic;
+// netns-density-295 S-ND295-13 — production-composed boot ordering over the
+// same injected SimVmHostState and the actual shared-owner sweep port call.
+pub mod netns_density_boot_order;
 // phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20). The
 // `ReverseNatLockstep` invariant pins the lockstep contract between
 // `SimDataplane.services` and `SimDataplane.reverse_nat`: every

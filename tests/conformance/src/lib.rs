@@ -432,9 +432,11 @@ impl DirectHandlerHarness {
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock_port);
         let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
             owner.clone();
-        let handle = run_server_with_obs_and_driver(config, obs, driver, owner_port, wiring)
-            .await
-            .expect("start production server handler");
+        let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
+        let handle =
+            run_server_with_obs_and_driver(config, obs, driver, vm_host_state, owner_port, wiring)
+                .await
+                .expect("start production server handler");
         let address = handle.local_addr().await.expect("server handler bound address");
         let trust_path = self.config_dir.join(".overdrive/config");
         let api = PublicApi::from_trust_config(&trust_path).expect("load server trust triple");
