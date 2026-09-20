@@ -1,13 +1,3 @@
-YOU MUST READ ALL THE FOLLOWING FILES:
-- CLAUDE.md
-- .claude/rules/bpf.md
-- .claude/rules/debugging.md
-- .claude/rules/design.md
-- .claude/rules/development.md
-- .claude/rules/rust.md
-- .claude/rules/testing.md
-- .claude/rules/verification.md
-
 ## Commit attribution
 
 Do not change the Git author when creating a commit. Attribute the coding
@@ -294,7 +284,7 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/khartoum-v1] recent context, 2026-09-17 10:53am GMT+2
+# [helios/wellington-v2] recent context, 2026-09-20 4:28pm GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
