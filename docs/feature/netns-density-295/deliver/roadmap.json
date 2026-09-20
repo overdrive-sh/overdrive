@@ -1,0 +1,590 @@
+{
+  "roadmap": {
+    "project_id": "netns-density-295",
+    "feature_id": "netns-density-295",
+    "created_at": "2026-09-20T12:28:19Z",
+    "goal": "Deliver GH #295: cut VmDriver::new to its accepted seven-argument gate-coupled shape (F-01), stand up the node-shared guest-network owner (shared bridge, TCX classifier plus proof-mark guard, constant nft rules, two node-owned transparent listeners), and activate the DISTILL-authored reasoned-#[ignore] acceptance scaffolds (S-ND295-00..37, B-ND295-T1-BASE/T1-PORT4) across overdrive-core/control-plane/worker/dataplane/netlink/sim/cli in roadmap order, closing with the production-composed walking skeleton, the recurring conformance suite, and the two attachment-capacity benchmark receipts.",
+    "total_steps": 11,
+    "total_estimate_hours": 214,
+    "estimate_basis": "Phase 01 lands the single dependency-neutral API cut that every gate-coupled scaffold needs (8h). Phase 02 builds the three node-shared production owners in dependency order -- provisioner/pool/startup-algorithm (28h), TCX classifier plus nft replacement/rollback (30h), listener/capability lifecycle (30h) -- the largest phase because it creates every new kernel-facing effect owner. Phase 03 activates the already-authored gate/release/recovery acceptance bodies against those owners (18h + 16h + 26h). Phase 04 proves the whole cut end-to-end on native metal: the walking skeleton (24h), the recurring conformance suite (10h), non-regression plus the Tier-3 timed double-loss scenario (16h), and the two T1 benchmark receipts (8h).",
+    "design_refs": [
+      "docs/feature/netns-density-295/feature-delta.md",
+      "docs/feature/netns-density-295/distill/test-scenarios.md",
+      "docs/feature/netns-density-295/distill/red-classification.md",
+      "docs/product/architecture/adr-0085-transparent-mtls-node-shared-guest-network.md",
+      "docs/product/architecture/adr-0114-shared-bridge-guest-network-topology.md",
+      "docs/product/architecture/adr-0115-tcx-endpoint-classifier-and-bridge-guard.md",
+      "docs/product/architecture/adr-0116-constant-nft-rules-and-shared-element-sets.md",
+      "docs/product/architecture/adr-0120-node-owned-leg-f-leg-c-listeners.md",
+      "docs/product/architecture/adr-0122-guest-address-pool-and-fixed-admission-cap.md",
+      "docs/product/architecture/adr-0123-capability-registry-generation-ownership.md",
+      "docs/product/architecture/adr-0124-bounded-reconvergence-then-fail-stop.md",
+      "docs/product/architecture/adr-0125-dependency-neutral-exec-gate.md"
+    ],
+    "delivery_protocol": [
+      "Execute in the fixed dependency order 01-01 -> 02-01 -> 02-02 -> 02-03 -> 03-01 -> 03-02 -> 03-03 -> 04-01 -> 04-02 -> 04-03 -> 04-04; every phase-02/03 step needs the shared-owner surface the prior step left compiling.",
+      "Every step activates only the reasoned-#[ignore] bodies its scenario_ids name. A crafter may not weaken, replace, re-author, or repair an acceptance body authored in DISTILL -- only remove the reasoned-pending marker and supply the implementation the body already specifies.",
+      "The feature delta (feature-delta.md) pins the exact public/private contract, including every doc-hidden port. Any new public method, type, port, error variant, or persisted field beyond what feature-delta.md names is a blocker -- surface it, do not improvise a shape (root CLAUDE.md, 'Implement to the design').",
+      "Each step's crafter runs the Lima-routed compile/clippy/nextest gates named in its verification list before requesting review; each reviewer records deliver/review-<step-id>.md with APPROVED before advancement.",
+      "Mutation testing (cargo xtask mutants) is the single final DELIVER gate after every roadmap step and review per .claude/rules/testing.md -- it is never run per step.",
+      "Tier-3/native-metal bodies in phases 02-04 run only through cargo xtask metal run -- (or cargo xtask lima run -- for non-KVM Lima-root Tier-2/Tier-3 portions); no Tier-3 evidence is accepted from a virtualized or nested host."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "F-01 API cut: dependency-neutral EXEC gate and the seven-argument VmDriver constructor",
+      "description": "Land the one cross-crate API cut every later step depends on: overdrive_core::guest_network's paired EXEC capability state machine, VmDriver::new's mandatory sixth guest_network_exec dependency, gate-coupled release_for_exit_emission, the retained-handle shutdown-request vocabulary, and the ~10 inventoried compiler-fallout callsites. Unblocks every gate-coupled scaffold and makes the worker's post-cut EXEC-release test module reachable.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Cut VmDriver::new to the seven-argument gate-coupled shape and land the dependency-neutral EXEC wiring",
+          "description": "Implement overdrive_core::guest_network's GuestNetworkExecWiring/GuestNetworkExecGate/GuestNetworkExecSupervisor/GuestNetworkExecClaim BootClosed/Open/Recovering/FailStop state machine exactly per RUN-295-B's EXEC-close linearization and F-01's normative code fence; extend VmDriver::new with guest_network_exec: Arc<GuestNetworkExecGate> as the mandatory sixth constructor argument immediately before layout; gate-couple release_for_exit_emission so a claim is acquired before pending_exec/gate_sender is taken and held through beacon-writer acknowledgement; update every inventoried VmDriver::new callsite; land the same F-01/D-295-DISTILL-1 code fence's second signature amendment -- run_server_with_obs_and_driver(s) gain the mandatory shared_guest_network: Arc<dyn SharedGuestNetworkOwner> argument immediately before guest_network_exec -- by declaring the GuestNetworkProvisioner/SharedGuestNetworkOwner port traits (C-295-G) in overdrive-control-plane::guest_network as pure #[doc(hidden)] pub API surface, backed by a minimal private HostSharedGuestNetworkOwner scaffold (todo!(\"RED scaffold: ...\") method bodies per .claude/rules/testing.md) so ordinary run_server compiles and every inventoried run_server_with_obs_and_driver(s) callsite compiles with neutral fallout; the real startup/converge/audit/quiesce behavior is step 02-01's job and this step activates none of it; add the SharedGuestNetworkComponent/SharedGuestNetworkFailStopCause/SharedGuestNetworkRecovery/SharedGuestNetworkFailStop/ServeShutdownRequest vocabulary plus the ServerHandle and CLI ServeHandle shutdown_requested delegations and the one CliError variant; and uncomment `mod netns_density_exec_release;` in overdrive-worker/tests/acceptance.rs so its authored reasoned-pending bodies become reachable (activation itself is step 03-02's job).",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "estimate_hours": 8,
+          "criteria": [
+            "GuestNetworkExecWiring::new(clock) / gate() / supervisor() construct one private mutex/Notify state that starts BootClosed with zero active claims and no recovery snapshot; GuestNetworkExecGate, GuestNetworkExecSupervisor, and GuestNetworkExecClaim are each private-field, non-`Clone` types whose only cloneable handle is their own `Arc`, and none is constructible outside GuestNetworkExecWiring.",
+            "GuestNetworkExecGate::claim_release returns Some(claim) and increments the active-claim count only from Open; from BootClosed or Recovering it registers a Notify waiter before unlocking and retries after wake without touching any VM pending-EXEC state; from FailStop it returns None immediately; GuestNetworkExecClaim's Drop decrements the count under the same lock and wakes waiters.",
+            "GuestNetworkExecSupervisor::open_after_boot performs only BootClosed -> Open, wakes waiters, and returns false from every other state; is_boot_closed is the read-only precondition check used immediately before fresh-process mutation and is never treated as a runtime health signal; begin_recovery performs only Open -> Recovering and returns true only for the winning transition; complete_attempt applies only while Recovering, updates the first-remaining component or transitions to Open and wakes waiters, and returns false after Open/FailStop so late work cannot overwrite either; recovery_progress returns a value snapshot only while Recovering and None in every other state; fail_stop atomically transitions BootClosed/Open/Recovering -> FailStop, returns the one request to send on its first call and None on every later call (first-request-wins, idempotent-send), and wakes waiters. (This enumeration of GuestNetworkExecSupervisor's surface is non-exhaustive -- see feature-delta.md for the complete method list.)",
+            "VmDriver::new's signature is exactly `pub fn new(vmm: Arc<dyn Vmm>, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>, cgroup_accounting: Arc<dyn CgroupAccounting>, probe_runner: Arc<ProbeRunner>, guest_network_exec: Arc<GuestNetworkExecGate>, layout: VmHostLayout) -> Self` with no optional builder, no default-open gate constructed inside VmDriver, and no change to the public Driver trait.",
+            "release_for_exit_emission acquires a gate claim strictly before it reads pending_exec or gate_sender; an Open claim is held through the beacon-writer acknowledgement; a Recovering caller waits without taking either value and proceeds only once recovery reopens the gate; a FailStop caller is woken with None so EXEC is never taken or written and process shutdown owns the remaining VMM/gate teardown; an already-written command is never paused or frozen.",
+            "Every file feature-delta.md's VmDriver::new compiler-fallout table names -- overdrive-control-plane/src/lib.rs; control-plane acceptance service_kind_vm_workloads.rs, stable_does_not_stop_probe_supervision.rs, vm_failed_start_artifact_disposal.rs; overdrive-worker/src/vm_driver.rs; worker acceptance service_kind_vm_workloads.rs, vm_driver_clone_index.rs, vm_driver_start_failure_contract.rs, vm_driver_stop_totality.rs; sim e10_vm_early_exit_spike.rs, vm_finalize_failed_ownership_spike.rs -- compiles against the seven-argument constructor, with every non-production caller supplying neutral wiring built from that fixture's already-injected Clock (SimClock in Sim callers).",
+            "run_server_with_obs_and_driver(s) gain the mandatory shared_guest_network: Arc<dyn SharedGuestNetworkOwner> argument immediately before the existing guest_network_exec: GuestNetworkExecWiring argument exactly per F-01/D-295-DISTILL-1's normative code fence; the GuestNetworkProvisioner (provision/teardown) and SharedGuestNetworkOwner (probe_startup/sweep_stale/converge_shared/audit_shared/quiesce_managed_taps) trait declarations land as #[doc(hidden)] pub API surface in overdrive-control-plane::guest_network per C-295-G, backed by a minimal private HostSharedGuestNetworkOwner scaffold whose method bodies are todo!(\"RED scaffold: ...\") per the RED-scaffold convention (.claude/rules/testing.md); ordinary run_server constructs and supplies that one scaffolded instance so the crate compiles, and no second owner type is created; the real startup/converge/audit/quiesce behavior is step 02-01's job and this step activates none of it.",
+            "Every file the run_server_with_obs_and_driver(s) compiler-fallout table names -- overdrive-control-plane/src/lib.rs; control-plane integration dns_responder_bind.rs, interest_router_run_server.rs, node_health_writer_runs_at_boot.rs, observation_empty_rows.rs, workload_lifecycle/convergence_loop_spawned_in_production_boot.rs; sim vm_lifecycle_latency_283_spike.rs -- compiles against the amended signature, with every non-production caller supplying the same scaffolded owner (or a sim equivalent) as neutral fallout.",
+            "ServerHandle::shutdown_requested and CLI ServeHandle::shutdown_requested (overdrive-cli/src/commands/serve.rs) compile as thin async delegations returning ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop { component, cause, attempts, elapsed }); CliError gains exactly the SharedGuestNetworkFailStop { request } variant and no other new public surface is added.",
+            "`mod netns_density_exec_release;` is uncommented in crates/overdrive-worker/tests/acceptance.rs and the crate compiles with every reasoned-#[ignore] body in netns_density_exec_release.rs visible to the test binary; the bodies themselves remain #[ignore]/pending -- this step activates none of them.",
+            "`cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` are clean; no S-ND295 scenario acceptance body is activated by this step."
+          ],
+          "test_file": "crates/overdrive-core/src/guest_network.rs",
+          "scenario_name": "guest_network_exec_wiring_gate_supervisor_claim_state_machine (compile-time prerequisite for S-ND295-27/28; this step does not activate either scenario)",
+          "scenario_ids": [
+            "S-ND295-27",
+            "S-ND295-28"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/guest_network.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-cli/src/commands/serve.rs",
+            "crates/overdrive-worker/tests/acceptance.rs",
+            "crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs",
+            "crates/overdrive-control-plane/tests/acceptance/stable_does_not_stop_probe_supervision.rs",
+            "crates/overdrive-control-plane/tests/acceptance/vm_failed_start_artifact_disposal.rs",
+            "crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_clone_index.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+            "crates/overdrive-sim/tests/e10_vm_early_exit_spike.rs",
+            "crates/overdrive-sim/tests/vm_finalize_failed_ownership_spike.rs",
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs",
+            "crates/overdrive-control-plane/tests/integration/interest_router_run_server.rs",
+            "crates/overdrive-control-plane/tests/integration/node_health_writer_runs_at_boot.rs",
+            "crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_lifecycle/convergence_loop_spawned_in_production_boot.rs",
+            "crates/overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance -E 'test(guest_network)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane -p overdrive-sim --no-fail-fast"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT (cascade): NEW code = Stage 0 (paradigm-from-day-zero, no debt accumulates). This repository's actual suite is Rust (nextest/proptest/DST per .claude/rules/testing.md), not Python/Hypothesis; translate the mandate's INTENT into Rust terms: the GuestNetworkExecGate/Supervisor state machine is exactly the 'bounded-change' Contract Shape the feature delta already assigns it (gate state is read-only; the allowed delta is active-claim count +/-1 and waiter registration/wake) -- drive it with seeded proptest schedules over BootClosed/Open/Recovering/FailStop transitions plus a whole-private-state-delta assertion that nothing outside that declared universe (recovery snapshot, request channel, pending EXEC values, other claims) changed, per the Effect Isolation and Contract Shape classification table in feature-delta.md. Do not invent this state machine's public surface beyond the exact code fence under 'EXEC-close linearization' in feature-delta.md -- if a transition case is underspecified there, stop and surface it rather than adding a method the design did not name. The GuestNetworkProvisioner/SharedGuestNetworkOwner trait declarations this step also lands are pure compile-time API surface (todo!() RED-scaffold bodies) -- do not invent real startup/converge/audit/quiesce behavior for them here; that is step 02-01's job."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Node-shared guest-network infrastructure: provisioner, TCX classifier, listener/capability lifecycle",
+      "description": "Build the three production kernel-facing owners the shared-bridge topology needs: the guest-network provisioner plus address pool and shared-owner startup algorithm (S-ND295-00, 02-13); the TCX classifier's shared nft constant-rule replacement and rollback contract (S-ND295-14-19); and the node-shared leg-F/leg-C listener owner with its private capability registry (S-ND295-20-26). Each step's real effect owner is a prerequisite for the next.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "depends_on": [
+        "01"
+      ],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Guest-network provisioner, address pool, and shared-owner startup algorithm",
+          "description": "Land the accepted grouped AllocationSpec.network: Option<GuestNetworkAssignment> handoff (A2), the private GuestAddressPool (assign/release/snapshot, ERR-295-A), the async GuestNetworkProvisioner port and its private HostGuestNetworkProvisioner/production plan constructor (B1/D-295-DISTILL-4), and the SharedGuestNetworkOwner super-port's real private scratch-probe/setup/cleanup startup algorithm (C-295-G/D-295-DISTILL-5) including the fixed GUEST_BRIDGE_MAC convergence, boot VM-reclamation-then-sweep ordering, and the TCX attach/pin/query effects provision() performs as part of the same atomic operation. Activates S-ND295-00 and S-ND295-02..07, S-ND295-10..13 (S-ND295-08/09's TCX classifier bodies are step 02-02's job, once the classifier itself exists).",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "01-01"
+          ],
+          "estimate_hours": 28,
+          "criteria": [
+            "AllocationSpec deletes netns/host_veth and its six separate guest-network option fields and gains exactly `pub network: Option<GuestNetworkAssignment>` where GuestNetworkAssignment is `{ address: Ipv4Addr, tap: String, mac: [u8; 6], gateway: Ipv4Addr, prefix: u8, dns: Ipv4Addr }`; VmNetworkAttachment stays exactly `{ tap: String, mac: [u8; 6] }` and CloudHypervisorVmm renders `--net tap=...,mac=...` directly, removing the `ip netns exec` launch-tool prerequisite; both types keep their existing Debug/Clone/PartialEq/Eq derives and add no serde/rkyv schema, generation, or listener-port field.",
+            "GuestAddressPool exposes exactly `assign`, `release`, `snapshot` under one parking_lot::Mutex critical section, none crossing `.await`; assign is atomic and idempotent for an already-held AllocationId (returns the byte-equal existing plan) and otherwise inserts the smallest free non-reserved address, excluding prefix-network/broadcast/gateway addresses; release of an absent allocation is an idempotent no-op; snapshot returns a detached BTreeMap clone in allocation-ID order; below-cap exhaustion returns `GuestNetworkError::PoolExhausted { held, capacity }`, never a panic or address reuse.",
+            "`overdrive_control_plane::guest_network::GuestNetworkProvisioner` is exactly the two-method async trait `provision(&self, plan: &GuestNetworkPlan) -> Result<()>` / `teardown(&self, plan: &GuestNetworkPlan) -> Result<()>`; GuestNetworkPlan is `#[doc(hidden)] pub` with private fields and exactly four read-only accessors (alloc/bridge/node_prefix/assignment); production construction and the HostGuestNetworkProvisioner implementation remain private to overdrive-control-plane; overdrive-sim implements only the public port. (The trait signature itself, per C-295-G, was already declared as compile-time API surface in step 01-01; this step supplies HostGuestNetworkProvisioner's real production body.)",
+            "dispatch_with_guest_network_provisioner_for_test and run_convergence_tick_with_guest_network_provisioner_for_test execute the identical production workflow-intent preflight, reconciler hydration, View write-through, action shim, re-enqueue, and error projection as the real production path, differing only in the one injected driven-network adapter.",
+            "SharedGuestNetworkOwner is exactly `probe_startup`, `sweep_stale`, `converge_shared`, `audit_shared` (returning SharedGuestNetworkAuditError), and `quiesce_managed_taps`, all on the one concrete production owner that also implements the inherited GuestNetworkProvisioner allocation operations -- no second owner object exists for boot/runtime ownership versus allocation provision/teardown. (The trait signature was likewise declared in step 01-01; this step supplies HostSharedGuestNetworkOwner's real method bodies behind it, replacing 01-01's todo!() scaffold.)",
+            "The private HostSharedGuestNetworkOwner startup algorithm, driven through the module-private SharedGuestNetworkScratchIo seam by source-local tests (not the public SimSharedGuestNetworkOwner), proves: probe_startup owns only isolated scratch resources and always attempts their cleanup; on primary-probe failure with successful cleanup the primary typed error returns and the scratch complement is exactly zero; on cleanup failure or non-empty cleanup read-back, startup still refuses with EXEC BootClosed and no production owner/task is published, while preserving both the primary and cleanup errors plus the complete GuestNetworkScratchComplement with any unread-back resource family reported Unavailable, never fabricated zero; a later retry or boot never overwrites that first-failure evidence.",
+            "The node bridge MAC is set only from `overdrive_core::dataplane::GUEST_BRIDGE_MAC = [0x02, 0x01, 0x00, 0x00, 0x00, 0x01]`, never adopted from ambient kernel state; convergence creates-or-adopts a bridge-kind link, brings it down, sets the fixed MAC, reads back exact name/ifindex/type/MAC/gateway-prefix, then brings it up before writing any endpoint entry or attaching any TAP; a successful mutation followed by wrong read-back is `GuestNetworkError::PostconditionMismatch` and refuses startup.",
+            "sweep_stale runs only after existing VM reclamation and removes prior-epoch TAP/map/pin residue before the new held address set initializes; boot never adopts a surviving VMM or recreates a NetSlot-style recovery map.",
+            "provision/teardown mutate only the named allocation's TAP/master/up state, endpoint entry, TCX link/pin, and bridge-guard membership (plus the shared bridge/maps/rules only toward their one desired identity); the real-kernel S-ND295-11..13 bodies prove provision/read-back, effect-first teardown (address released last), and post-VMM-reclamation boot sweep with a full complement check against unrelated allocations.",
+            "S-ND295-02..05 grouped-value/pool/A2-boundary properties, S-ND295-06..07 production-action-owner start-failure and release-last-teardown bodies (via the two test-gated owner seams, no simulation-owned action sequence), and S-ND295-10 deliberate-link-loss bridge-guard body are activated with real production owners -- no acceptance body is weakened, replaced, or re-authored. (S-ND295-08/09's TCX classifier bodies move to step 02-02, the step that lands the classifier itself.)"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs",
+          "scenario_name": "provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause",
+          "scenario_ids": [
+            "S-ND295-00",
+            "S-ND295-02",
+            "S-ND295-03",
+            "S-ND295-04",
+            "S-ND295-05",
+            "S-ND295-06",
+            "S-ND295-07",
+            "S-ND295-10",
+            "S-ND295-11",
+            "S-ND295-12",
+            "S-ND295-13"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-core/src/vm/config.rs",
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs",
+            "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs",
+            "crates/overdrive-sim/src/adapters/guest_network.rs",
+            "crates/overdrive-dataplane/src/guest_tcx.rs",
+            "crates/overdrive-host/src/vmm.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(netns_density_guest_network)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(pool_acceptance) or test(scratch_probe_acceptance)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_guest_network_startup)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. In this repository's Rust suite: GuestAddressPool::assign/release/snapshot is the feature delta's own 'bounded-change' example (only the allocation-keyed held map may change) -- drive it with proptest over interleaved assign/release/snapshot sequences and assert_state_delta-shaped equality on every other allocation's binding; the pure address/MAC/TAP derivation and TCP-listener projection functions are 'pure-function' Contract Shape -- return-only proptests over /16 boundaries, reserved addresses, uniqueness, and TCP filter/dedup/order. Do not invent GuestNetworkPlan/GuestNetworkProvisioner/SharedGuestNetworkOwner surface beyond the exact trait/struct fences in feature-delta.md C-295-A/B/G and D-295-DISTILL-5 -- the scratch-I/O seam is module-private by design; if its shape is ambiguous for a case DISTILL did not cover, stop and surface it."
+        },
+        {
+          "id": "02-02",
+          "name": "TCX classifier attach and shared nft constant-rule replacement/rollback",
+          "description": "Implement the aya-rs SCHED_CLS TCX endpoint classifier and its node-global counters/endpoint map per C-295-0, the D-295-DISTILL-9 bridge-family proof-mark guard adapter in overdrive-netlink over one private family-aware codec, the D-295-DISTILL-6 typed dataplane guest_tcx query/detach/endpoint/counter adapter, and PORT-295-C's fresh-process constant-rule replacement plus S2-F01's atomic rollback contract in the worker's MtlsIntercept host adapter (converge_shared/observe_shared over the private SharedInterceptProgramIo seam). Activates S-ND295-08, S-ND295-09, and S-ND295-14..19.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "02-01"
+          ],
+          "estimate_hours": 30,
+          "criteria": [
+            "The TCX program attaches via TCX ingress with first ordering to every managed TAP against a node-global 65,536-entry ifindex-keyed endpoint map whose value is exactly the expected source IPv4, source MAC, and bridge MAC; it owns exactly eight counter classes (gateway/host pass, intercept, endpoint-map miss, source-MAC spoof, source-IP/ARP spoof, direct-bypass drop, ARP pass, malformed drop) and every Ethernet/ARP parse, spoof, and TCP-intercept partition in C-295-0 fires the exact counter and TC_ACT_OK/TC_ACT_SHOT verdict specified, with original IPv4 destination and port byte-identical after intercept-mark rewrite.",
+            "S-ND295-08 (valid guest traffic enters the protected path exactly once) and S-ND295-09 (malformed or impersonated guest traffic cannot escape) are activated against the real TCX classifier via Tier 2 BPF_PROG_TEST_RUN (crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs) plus the Tier-3 real-kernel body -- no acceptance body is weakened, replaced, or re-authored.",
+            "guest_tcx exposes exactly GuestTcxAttachment, GuestTcxCounter, and the five doc-hidden high-level adapter operations (attach/pin/adopt/query/remove) with GuestTcxError's Link/Io source variants nesting every raw aya source; no raw aya type or layout crosses into control-plane facts.",
+            "The shared-switch owner pins maps and per-TAP links under /sys/fs/bpf/overdrive/mtls-endpoints/{maps/{endpoints,counters},links/<tap>-ingress}; provisioning orders guard membership before map insert and TCX attach and queries the exact link/program/ifindex before VMM attachment; closing the loader never detaches a pinned link; a pin outside this hierarchy is never adopted as an Overdrive endpoint link.",
+            "overdrive-netlink::nft::bridge's semantic guard adapter observes/converges/deletes the node-global `table bridge overdrive-mtls` safeguard (one managed_taps ifname set, one `type filter hook prerouting priority -300; policy accept` chain with exactly three ordered rules) over the same private family-aware codec the existing IPv4 nft operations use; existing IP-family objects stay byte-equal and delete_owned_guard is exact-exclusive.",
+            "MtlsIntercept gains exactly converge_shared(prior, leg_f, leg_c) -> Result<Box<dyn InterceptGuard>> and observe_shared() -> Result<Option<InterceptPostcondition>> alongside the unchanged bind_transparent/install_outbound/install_inbound; observe_shared is a non-mutating complete dump returning None only for genuine absence (any partial/foreign/duplicate/malformed identity is a typed error, never absence); converge_shared requires the live observation to equal the caller's prior snapshot, atomically creates/adopts the three sets and eight normalized rules for the exact passed targets, reads them back, and returns one node-scoped guard owning only those shared objects; reapplying identical targets is idempotent.",
+            "The fresh-process target-recovery ordering in S2-F01 is implemented exactly: BootClosed + zero-managed-TAP precondition -> observe_shared dump without mutation -> fresh port-zero F/C binds -> converge_shared with the captured prior identity replacing only the two owned TPROXY target ports while preserving every other rule/set/userdata/foreign object -> full read-back of both sockets, three sets, eight constant rules, two new target ports, and zero dynamic-element complement -> publish and open_after_boot only after every read-back passes; port zero is never used at runtime and runtime never invokes this branch.",
+            "The four disjoint rollback outcomes are source-honest exactly as ERR-295-A/PORT-295-C pin them: NftSharedReplaceFailed (batch rejected, prior state intact); NftSharedReplacementMismatchRolledBack (mismatch + rollback committed and read back equal to prior, including prior = None meaning first-boot create rolled back to absence -- source-less); NftSharedRollbackFailed (a genuine lower-level rollback write/read NetlinkError, tagged RestorePrior or ReadBackPrior); NftSharedRollbackPostconditionMismatch (rollback write+read both succeeded but the read-back differs from prior -- deliberately source-less, no fabricated NetlinkError). Runtime converge_shared_owner never passes port zero, recreates only a missing owned rule at the same recorded target, and treats a present owned rule with a different target as a conflict that consumes the bounded 250ms/5s retry.",
+            "S-ND295-14..19 (constant-rule replacement, refusal, exact rollback, source-honest rollback failure, semantic mismatch, and runtime no-rewrite) plus the Tier-3 normalized read-back bodies are activated against the real host adapter -- no acceptance body is weakened, replaced, or re-authored."
+          ],
+          "test_file": "crates/overdrive-worker/src/mtls_intercept_port.rs",
+          "scenario_name": "shared_program_rollback_acceptance::replacement_and_every_rollback_disposition_preserve_exact_identity_and_source",
+          "scenario_ids": [
+            "S-ND295-08",
+            "S-ND295-09",
+            "S-ND295-14",
+            "S-ND295-15",
+            "S-ND295-16",
+            "S-ND295-17",
+            "S-ND295-18",
+            "S-ND295-19"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/programs/guest_tcx_classifier.rs",
+            "crates/overdrive-bpf/src/maps/guest_tcx_endpoints.rs",
+            "crates/overdrive-dataplane/src/guest_tcx.rs",
+            "crates/overdrive-netlink/src/nft.rs",
+            "crates/overdrive-worker/src/mtls_intercept.rs",
+            "crates/overdrive-worker/src/mtls_intercept_port.rs",
+            "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
+            "crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs"
+          ],
+          "verification": [
+            "cargo xtask metal run -- cargo nextest run -p overdrive-bpf --test integration --features integration-tests -E 'test(guest_tcx_classifier_test_run)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(shared_program_rollback_acceptance)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(mtls_intercept_install)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
+            "cargo verifier-regress"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: TCX packet evaluation and guest_tcx query/detach/endpoint/counter operations are both 'bounded-change' Contract Shape with an explicit closed universe (one skb's sanctioned fields plus one counter class; one owned attachment/pin/entry/counter) per the Effect Isolation table in feature-delta.md -- BPF_PROG_TEST_RUN PKTGEN/SETUP/CHECK triptychs plus Tier-3 real-kernel captures are the assertion mechanism (per .claude/rules/testing.md Tier 2/3), not proptest alone, since the mutation universe is kernel state. Bridge-guard and nft rollback bodies are source-honest by construction (feature-delta.md is explicit that fabricating a NetlinkError for a semantic-only mismatch is forbidden) -- do not add a source to NftSharedRollbackPostconditionMismatch or NftSharedReplacementMismatchRolledBack even if a test would be easier to write that way. Do not invent MtlsIntercept surface beyond the exact five-method C-295-C fence; the SharedInterceptProgramIo seam and its cfg(test) constructor are the only sanctioned test-only surface."
+        },
+        {
+          "id": "02-03",
+          "name": "Node-shared leg-F/leg-C listener owner and private capability registry",
+          "description": "Implement MtlsInterceptWorker's node-shared listener lifecycle (start_shared_owner/wait_shared_owner_failure/converge_shared_owner/audit_shared_owner/shutdown_owner plus per-allocation start_alloc/stop_alloc) over C-295-L, and the module-private D-295-DISTILL-7 CapabilityRegistry state machine (checked generation, Pending/Active/Retiring, RAII claims, publication fence, scoped drain, address-reuse exclusion) with GEN-295-A's checked_add(1)-then-publish generation ownership and PORT-295-C's userspace source/destination registry. Activates S-ND295-20..26.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "02-02"
+          ],
+          "estimate_hours": 30,
+          "criteria": [
+            "The node listener owner binds exactly one leg-F and one leg-C transparent TCP listener that survive every allocation stop and close only with their node owner; they are ordinary node-owned sockets recreated at boot, never pinned/adopted per-allocation state.",
+            "start_shared_owner captures observe_shared, binds F and C once at the boot owner boundary, records both concrete non-zero SocketAddrV4 values, calls converge_shared with the captured prior identity, retains its node-scoped guard, starts exactly two accept tasks, and audits both socket and rule identities before returning; a partial bind/rule/task-start failure closes every listener, rule guard, and task acquired by that invocation and refuses boot without ever publishing a half-started owner.",
+            "Leg F resolves the accepted socket's validated source guest address to an immutable (AllocationId, generation, SpiffeId) capability and separately recovers the original destination; leg C resolves the recovered destination IPv4 to one destination registration, requires the recovered TCP port in allowed_ports, then captures that capability; unknown IP or disallowed port closes fail-closed; an accepted predecessor connection is never re-looked-up or re-attributed to an address-reuse successor.",
+            "CapabilityRegistry::begin_registration performs checked_add(1) before any reservation or kernel effect (returning MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX } with no registry/nft effect on overflow, u64::MAX never minted), then atomically reserves the allocation/source/destination keys as Pending; a conflicting Pending/Active/Retiring key returns RegistrationConflict before element acquisition.",
+            "PendingCapability::activate re-enters the lock: if still Pending it moves guards into the record, transitions Pending -> Active, publishes claimable source/destination indexes atomically, wakes waiters, and returns Activated; if retirement already owns the generation it moves guards into the Retiring record, publishes no index, and returns Retired -- and MtlsInterceptWorker::start_alloc projects Retired to exactly `MtlsInterceptInstallError::RegistrationRetired { alloc_id }`, never Ok(()), with stage projection `\"registration_retired\"`.",
+            "CapabilityClaim::publish re-enters the lock: Active stores the handle then decrements in-flight and returns Published; Retiring decrements/wakes and returns Retired(handle) with the worker awaiting teardown outside the lock; no returned handle is ever re-looked-up or attributed to a successor.",
+            "begin_retire is idempotent and marks the exact record/generation Retiring, removing claimable indexes immediately for Active or transferring retirement ownership for Pending; wait_for_claims holds no mutex while waiting and yields CapabilityDrain only once in_flight == 0 and the pending-owner flag is clear; stop_alloc drains only that generation's handles/elements via CapabilityDrain::take_handles/take_elements/complete, removes the recorded 2+P nft elements with read-back, tears down TAP/TCX/guard membership, and releases the address last -- unrelated handles/capabilities and both shared listeners remain live throughout.",
+            "Address reuse is remove-before-reassign: predecessor registrations and its active generation are gone before successor registration is accepted; a successor using the same address is refused until the predecessor's drain completes.",
+            "A production-path test (or focused integration case) holds real enforcement across a retirement race after claim, returns a real handle, and observes awaited teardown with zero publication -- closing the one race Part D's spike evidence did not execute.",
+            "shutdown_owner closes both listener admissions, retires all exact capabilities, waits every in-flight claim, drains every published handle, removes their allocation elements, joins both accept tasks, closes both listener sockets, then deliberately relinquishes the node-scoped shared-rule guard without deleting the constant rules/empty sets, preserving the listenerless mark/local-route fail-closed state until next-boot revalidation.",
+            "S-ND295-20..26 (two-listener owner start, atomic capability/port membership, generation exhaustion, late-handle fence, address reuse, isolated allocation stop, and owner shutdown) are activated against the real registry and worker, including the D-295-DISTILL-7 model tables and Tier-3 real-listener/enforcement cases for S-ND295-25 -- no acceptance body is weakened, replaced, or re-authored.",
+            "The pre-existing real-enforcement zero-copy regression suite (crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::outbound_enforce_substrate_bidirectional_splice_zero_copy) remains green and unmodified against the new CapabilityRegistry-backed listener owner -- capability retirement itself is new #295 surface covered by this step's own criteria (begin_retire, wait_for_claims, the production-path retirement-race test above), not a pre-existing suite this step must merely preserve."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
+          "scenario_name": "lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds",
+          "scenario_ids": [
+            "S-ND295-20",
+            "S-ND295-21",
+            "S-ND295-22",
+            "S-ND295-23",
+            "S-ND295-24",
+            "S-ND295-25",
+            "S-ND295-26"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-worker/src/mtls_intercept_port.rs",
+            "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
+            "crates/overdrive-worker/tests/integration/mtls_intercept_equivalence.rs",
+            "crates/overdrive-sim/src/adapters/mtls_intercept_lifecycle.rs",
+            "crates/overdrive-sim/src/adapters/mtls_intercept.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_shared_owner) or test(capability_registry_acceptance) or test(shared_listener_task_owner_acceptance)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(mtls_intercept_equivalence)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(outbound_enforce_substrate_bidirectional_splice_zero_copy)' --no-fail-fast"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: CapabilityRegistry is exactly the feature delta's 'Node-shared capability register/claim/publish/retire' bounded-change row -- its closed universe is named field-by-field (generation counter, Pending/Active/Retiring reservations, pending-owner flag, source/destination indexes, in-flight count, published handles, waiter notifications, completion fence); drive it with seeded state-machine proptests over interleaved begin_registration/claim/publish/begin_retire/drop call orders and assert the declared universe via assert_always!-shaped invariants (no drain before in_flight==0 and pending-owner clear; no reservation released until Pending atomically activates or relinquishes). Do not add a public generation setter, lifecycle hook, or second test registry -- CapabilityRegistry::with_next_generation is #[cfg(test)]-only and module-private. Do not invent MtlsInterceptWorker public methods beyond the exact seven-method surface in C-295-L's F-03 fence."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Gate and acceptance activation: EXEC-gate, EXEC-release, and owner-port recovery",
+      "description": "Activate the already-authored reasoned-#[ignore] acceptance bodies against the real production owners phase 02 built: the core EXEC-gate's BootClosed/recovery/fail-stop/PBT model (S-ND295-27), the worker's gate-coupled EXEC-release schedules now unblocked by phase 01's seven-argument constructor (S-ND295-28), and the retained supervisor's owner-port recovery/fail-stop matrix plus shared-gateway DNS lifecycle (S-ND295-29..32, S-ND295-34), completing the D-295-DISTILL-1 run_server composition-root wiring and D-295-DISTILL-8 retained task owners.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "depends_on": [
+        "02"
+      ],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Core EXEC-gate acceptance: BootClosed/recovery/fail-stop model and placement cap",
+          "description": "Activate crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs's five reasoned-pending recovery/fail-stop/model/table bodies plus the one active RED body, and netns_density_placement_cap.rs's final-shape grouped-network-assignment placement-cap acceptance, over the real GuestNetworkExecGate/Supervisor state machine from step 01-01.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "02-03"
+          ],
+          "estimate_hours": 18,
+          "criteria": [
+            "Every reasoned-#[ignore] body in netns_density_exec_gate.rs is activated with no weakening, replacement, or re-authoring; the file's model proves BootClosed/Open/Recovering/FailStop transitions, claim linearization before and after detection, and the first-request-wins fail-stop send exactly as RUN-295-B's EXEC-close linearization specifies.",
+            "The exact table-driven vocabulary (SharedGuestNetworkComponent's twelve variants, SharedGuestNetworkFailStopCause's six variants) is exercised exhaustively -- every component/cause pair the closed enums permit has at least one asserting case, and no case is asserted via a string match on Display/Debug output where the typed variant is available.",
+            "netns_density_placement_cap.rs activates using only the accepted grouped GuestNetworkAssignment shape from step 02-01 -- no partial-assignment or pre-cut AllocationSpec shape appears in an active body.",
+            "CAP-295-A's fixed T1 admission boundary (16,384 live attachments) is proven as a property: cap-1/cap/cap+1 boundary cases and the below-cap PoolExhausted error path from GuestAddressPool are both covered without a magic literal duplicated outside the one admission-check call site.",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate) or test(netns_density_placement_cap)' passes with zero remaining #[ignore] markers in either file."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs",
+          "scenario_name": "exec_gate_boot_closed_recovery_fail_stop_model_and_table",
+          "scenario_ids": [
+            "S-ND295-27"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/guest_network.rs",
+            "crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs",
+            "crates/overdrive-core/tests/acceptance/netns_density_placement_cap.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_placement_cap)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: activation of already-authored Stage-0 bodies, not new-from-scratch test design -- the DISTILL acceptance-designer already framed these as generated/PBT model bodies per the scenario matrix ('generated_operation_sequences_match_the_gate_model' names a state-machine-model proptest). This step's job is implementation to make the existing bodies pass, not redesigning their assertions. C1b boundary coverage (16,383/16,384/16,385) is named explicitly in the DISTILL completeness audit -- confirm it is exercised, do not add a new boundary case with a different cap value."
+        },
+        {
+          "id": "03-02",
+          "name": "Worker EXEC-release acceptance: gate-coupled beacon-writer schedules",
+          "description": "Activate crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs (uncommented in step 01-01) against the real seven-argument VmDriver and gate-coupled release_for_exit_emission: generated_operation_sequences_match_the_gate_model, writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed, backpressured_exec_release_cannot_delay_stop_deadline, cancelling_backpressured_release_cannot_leave_an_exec_sender_running, and start_allocation_awaits_release_and_cancellation_owns_the_future.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "03-01"
+          ],
+          "estimate_hours": 16,
+          "criteria": [
+            "generated_operation_sequences_match_the_gate_model drives seeded schedules of claim/wait/wake/fail-stop operations against the real VmDriver and asserts the observed writer/gate trajectory matches the core gate's own model from step 03-01 -- no seeded-sim writer or injected supervisor consequence stands in for the real beacon-writer path, per red-classification.md's explicit exclusion.",
+            "writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed proves the claim's held duration overlaps the existing single-VMM stop grace window and that every dispatched beacon writer is consumed (no leaked writer task, no double-write) under the real gate.",
+            "backpressured_exec_release_cannot_delay_stop_deadline proves a Recovering-waiting release() call never extends the allocation's existing stop-deadline contract -- the stop path's timing invariant is unaffected by EXEC gate backpressure.",
+            "cancelling_backpressured_release_cannot_leave_an_exec_sender_running proves that cancelling a task awaiting claim_release while Recovering/BootClosed leaves no dangling EXEC-sender future and no leaked Notify registration.",
+            "start_allocation_awaits_release_and_cancellation_owns_the_future proves the action-shim's start path genuinely awaits release_for_exit_emission's claim-then-release sequence end to end, and that cancelling the awaiting future is the only path that can abandon it (no silent detach).",
+            "Every reasoned-#[ignore] body in netns_density_exec_release.rs is activated with no weakening, replacement, or re-authoring; the file compiles and passes with zero remaining ignore markers."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs",
+          "scenario_name": "generated_operation_sequences_match_the_gate_model",
+          "scenario_ids": [
+            "S-ND295-28"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_exec_release)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-worker --test acceptance -E 'test(generated_operation_sequences_match_the_gate_model)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: activation, not new design -- generated_operation_sequences_match_the_gate_model IS the PBT/state-machine test this mandate asks for; do not add a second parallel property suite beside it. This is the step red-classification.md flags as the sole RED-at-activation surface once the mod line is uncommented -- expect the crafter's first compile to surface any residual seven-argument-constructor fallout inside this specific file that step 01-01's inventory did not need to touch (the file was authored against the post-cut shape already)."
+        },
+        {
+          "id": "03-03",
+          "name": "Retained supervisor: owner-port recovery matrix, run_server composition, and DNS task lifecycle",
+          "description": "Wire ordinary run_server to construct the real production HostSharedGuestNetworkOwner (landed in step 02-01) in place of step 01-01's compile-time todo!() scaffold and supply it to run_server_with_obs_and_driver(s) -- whose shared_guest_network/guest_network_exec signature was already amended in step 01-01 -- and land D-295-DISTILL-8's retained SharedNetworkSupervisorHandle owning the sole join, request receiver, paired EXEC supervisor, and intentional-shutdown token; drive RUN-295-B's full bounded-reconvergence-then-fail-stop matrix (bridge, listeners, DNS, TCX/maps/pins, nft guard) and re-home DnsResponder to the shared-bridge gateway with its private DnsServeTaskOwner. Activates S-ND295-29..32 and S-ND295-34.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "03-02"
+          ],
+          "estimate_hours": 26,
+          "criteria": [
+            "Ordinary run_server privately constructs the real, fully-behavioral HostSharedGuestNetworkOwner landed in step 02-01 (replacing step 01-01's compile-time todo!() scaffold) and supplies that one instance to run_server_with_obs_and_driver(s), whose shared_guest_network: Arc<dyn SharedGuestNetworkOwner> / guest_network_exec: GuestNetworkExecWiring signature was already amended in step 01-01 per F-01/D-295-DISTILL-1 and needs no further signature change here.",
+            "SharedNetworkSupervisorHandle is the sole module-private ServerHandle field holding request_rx, the retained task JoinHandle, the paired GuestNetworkExecSupervisor, and a CancellationToken; ServerHandle's already-public shutdown_requested delegates to it and adds no new public method.",
+            "The one-second kernel audit and 250ms-retry/5s-fail-stop reconvergence loop is implemented exactly per RUN-295-B's table: a bridge/TAP-membership, leg-F/leg-C listener, DNS-loop, or TCX-link/map/pin mismatch each closes EXEC release, quiesces every managed TAP down before repair (or cgroup-kills and fail-stops if quiesce cannot be confirmed), and a pure listener/DNS task exit does not require TAP-down; listener recovery only ever rebinds the exact previously recorded address/port and never rewrites an nft target or replaces a port.",
+            "S-ND295-29 (lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds) and S-ND295-30 (occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port) both pass against the real retained supervisor and worker, proving the exact-port recovery contract and its EADDRINUSE refusal with no alternate port ever selected.",
+            "D8's actual-Tokio-primitive matrix is exercised across every one of the twelve SharedGuestNetworkComponent snapshot components: task return, I/O error, panic, cancellation, and channel-close each classify to the correct typed cause with no fabricated consequence.",
+            "DnsResponder::new's third dependency changes from NetSlotAllocator to the shared-bridge gateway Ipv4Addr; probe() binds 0.0.0.0:53 first and falls back to exactly <shared-gateway>:53 on EADDRINUSE; all other constructor dependencies and the probe/serve surface remain unchanged; DnsServeTaskOwner classifies live/exited task replacement, intentional shutdown, and invalid-state transitions and replaces only the exact recovered task.",
+            "S-ND295-31A and S-ND295-31B (the two distinct actual-socket-state bodies) and S-ND295-32 (typed handler fail-stop) are activated; S-ND295-34's Tier-3 real shared-gateway UDP bind/wire evidence is produced under cargo xtask metal run --.",
+            "No acceptance body across S-ND295-29..32 or S-ND295-34 is weakened, replaced, or re-authored; every reasoned-#[ignore] marker these scenarios named is removed only by supplying the real implementation."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
+          "scenario_name": "occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port",
+          "scenario_ids": [
+            "S-ND295-29",
+            "S-ND295-30",
+            "S-ND295-31A",
+            "S-ND295-31B",
+            "S-ND295-32",
+            "S-ND295-34"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs",
+            "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs"
+          ],
+          "verification": [
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_network_task_owner_acceptance)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_shared_owner)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(dns_responder_bind)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(interest_router_run_server) or test(node_health_writer_runs_at_boot) or test(observation_empty_rows) or test(convergence_loop_spawned_in_production_boot)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: the twelve-component fail-stop/recovery matrix is a finite closed table -- use table-driven tests (rstest-shaped or a hand-rolled case array) over every (SharedGuestNetworkComponent, detection signal) pair rather than one test per component, and pair with real Tokio task join/panic/cancel fixtures (tokio::task::JoinError classification) since the mutation surface is real async task outcomes, not pure data. The run_server_with_obs_and_driver(s) signature itself is no longer this step's concern -- step 01-01 already amended it and supplied a compile-time HostSharedGuestNetworkOwner scaffold; this step's job is swapping that scaffold for the step-02-01-built real owner and landing the retained supervisor + reconvergence behavior around it."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "End-to-end proof: walking skeleton, conformance, non-regression, and capacity receipts",
+      "description": "Prove the complete cut through the real overdrive serve + overdrive deploy production path on native x86_64 metal, add the recurring direct-handler conformance suite for fail-stop/recovery, close the non-regression and Tier-3 double-loss scenarios, and produce the two T1 attachment-capacity benchmark receipts.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "depends_on": [
+        "03"
+      ],
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Production-composed walking skeleton: two VM workloads dial by name over the shared bridge",
+          "description": "Activate the native-metal walking-skeleton body proving two checked-in VM workloads communicate by name through real overdrive serve + overdrive deploy <SPEC>, encrypted on the peer wire (TLS 1.3, kTLS TX/RX, splice, zero cleartext), on the direct-host-TAP shared-bridge topology with no per-workload netns/veth/slot, and owned total cleanup. Activates S-ND295-01.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "03-03"
+          ],
+          "estimate_hours": 24,
+          "criteria": [
+            "The callee VM Service reports Running with replicas 1/1 and the caller VM Job reports success dependent on receiving the callee's reply, driven entirely through the real overdrive serve + overdrive deploy <SPEC> production entry points -- no test-only wiring installs a rule, binds a socket, programs a map, or supplies an address that production does not install/bind/program/supply itself.",
+            "Wire evidence proves the guest's mesh traffic travels the peer wire as TLS 1.3 application_data records (0x17) with zero cleartext, kTLS TX/RX armed, and steady-state bytes moved via kernel splice(2); the guest itself remains a credential-free plaintext endpoint end to end.",
+            "The topology capture shows both VMs attached directly to the node-local shared bridge via TAP with no per-workload network namespace, veth pair, transit/guest /30, NetSlot, or host_veth anywhere on the production path.",
+            "Teardown is total: TAP, endpoint map entry, TCX link/pin, bridge-guard membership, and the leased address are all released, and a post-test kernel inventory shows no leftover Overdrive-owned object for either allocation.",
+            "The Rust walking skeleton is the persistent native-metal regression proof -- it does not spawn the overdrive binary as a subprocess and does not emit verification/expectations/ EDD evidence; the checked-in examples/guest-stack-transparent-mtls-intercept/ example and any fresh E07 capture remain a separate, historical, point-in-time layer that this test does not depend on or supersede.",
+            "The test runs only through cargo xtask metal run -- against a canonical native x86_64 metal lease with usable KVM and no virtualization/nesting, per the Prerequisites and Environment Matrix."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+          "scenario_name": "microvm_dials_a_mesh_peer_by_name_and_receives_the_reply",
+          "scenario_ids": [
+            "S-ND295-01"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs"
+          ],
+          "verification": [
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(guest_stack_mtls_egress)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(vm_walking_skeleton::two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: E2E tests remain single-example by the mandate's own carve-out -- this walking skeleton is exactly that carve-out (it verifies real production wiring end to end, not an invariant over an input space), so a single deterministic native-metal run is the correct shape; do not attempt to parametrize or fuzz the walking skeleton itself. Per CLAUDE.md 'Build vertical slices through production entry points', confirm no fixture in this file installs anything run_server/start_alloc does not install itself before marking this step complete."
+        },
+        {
+          "id": "04-02",
+          "name": "Recurring conformance suite: exported-handler fail-stop/drain and admission reopen",
+          "description": "Activate tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs over the reusable direct-handler/public-API harness in tests/conformance/src/lib.rs: exported server handler plus HTTPS API, typed ServeShutdownRequest obtained only by delegating the real retained ServerHandle::shutdown_requested, same-root harness-constructed fresh handler replacement, nix/overdrive-netlink host observation, and cleanup -- with no fixture panic, fabricated request, private-supervisor reach-around, CLI, subprocess SUT, PID oracle, assert_cmd, or trycmd. Activates S-ND295-33.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "04-01"
+          ],
+          "estimate_hours": 10,
+          "criteria": [
+            "The harness constructs the exported server handler and drives it only through the same public HTTPS API and ServerHandle::shutdown_requested a real caller would use -- it never reaches into SharedNetworkSupervisorHandle or any other private field.",
+            "A shared-owner fault injected through an accepted driven-port seam drives a real ServeShutdownRequest::SharedGuestNetwork(...) out of shutdown_requested; the test asserts on that typed value, never on a string match of a log line or Display output.",
+            "The harness constructs a fresh exported handler over the same retained roots after fail-stop and observes that public HTTPS API admission reopens only after recovery succeeds -- the runtime itself never replaces its own process or handle; that remains an external deployment-supervisor concern this test does not assert on.",
+            "Host observation for kernel/network state goes through nix and overdrive-netlink's existing read surfaces only, matching the required-adapter-coverage table; no raw ioctl or new low-level port is introduced for this test.",
+            "The suite spawns no product CLI process, no subprocess SUT, asserts no PID or process-exit code, and uses neither assert_cmd nor trycmd; cleanup after every case leaves no leftover kernel or registry state for a subsequent case in the same binary.",
+            "S-ND295-33 is fully activated with zero remaining reasoned-#[ignore] markers in shared_guest_network_fail_stop_recovery.rs."
+          ],
+          "test_file": "tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs",
+          "scenario_name": "shared_guest_network_fail_stop_recovery",
+          "scenario_ids": [
+            "S-ND295-33"
+          ],
+          "files_to_modify": [
+            "tests/conformance/src/lib.rs",
+            "tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs"
+          ],
+          "verification": [
+            "cargo xtask metal run -- cargo nextest run --manifest-path tests/conformance/Cargo.toml --test shared_guest_network_fail_stop_recovery --no-fail-fast",
+            "cargo xtask lima run -- cargo check --manifest-path tests/conformance/Cargo.toml --all-targets",
+            "cargo xtask lima run -- cargo clippy --manifest-path tests/conformance/Cargo.toml --all-targets -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: this is a recurring conformance suite (E2E-shaped, single-example is correct per the mandate's own carve-out) whose value is repeatable black-box proof, not input-space coverage -- do not fuzz the HTTPS API surface here; that belongs, if ever wanted, to a separate fuzz target outside this roadmap's scope. This is the step where the outcomes/verification-separation discipline in feature-delta.md is most load-bearing: this suite is explicitly kept separate from verification/expectations/ and must not be reclassified as an EDD expectation."
+        },
+        {
+          "id": "04-03",
+          "name": "Non-regression composition and the Tier-3 simultaneous double-loss quiescence",
+          "description": "Close S-ND295-35 (production probe-runner sharing between server boot and VmDriver), S-ND295-36 (mapped existing non-regression bodies: guest_stack_mtls_egress, service_kind_vm_workloads, VM cgroup/accounting equivalence, mtls_resolve_rekey, Service dataplane selection), and S-ND295-37 (the accepted simultaneous external TCX-and-guard-loss envelope: real peer-TAP frame capture, the structured TcxLink unhealthy event, passive guard counter, one-second managed-TAP quiescence, post-quiescence no-forwarding, and total cleanup).",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "04-02"
+          ],
+          "estimate_hours": 16,
+          "criteria": [
+            "one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver and vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner pass, proving the server boot's ProbeRunner is the same trusted instance VmDriver's seven-argument constructor receives -- no second probe-runner instance is created for the guest-network path.",
+            "two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces (S-ND295-35's topology body) passes on native metal with the same complete-cleanup and no-netns/veth/slot assertions as 04-01's walking skeleton, run as an independent regression rather than folded into 04-01's body.",
+            "Every S-ND295-36 mapped existing body (guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply, the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear}, service_kind_vm_workloads, the VM cgroup/accounting equivalence suite, mtls_resolve_rekey, and the Service dataplane selection suite) remains green and unmodified in its assertions -- no #295 duplicate body is created for behavior these suites already cover, and the shared switch is proven to never select a Service backend.",
+            "simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second deliberately detaches both the TCX link and the bridge guard on a live managed TAP, captures at least one identifiable guest frame reaching the peer TAP before quiescence (the accepted fail-open window), observes the structured TcxLink unhealthy event and the passive guard-drop counter increment, asserts every managed TAP is administratively down within one second of detection, asserts zero forwarding after that point, and asserts total cleanup with no leftover kernel state.",
+            "The core gate body and the supervisor call-order body join on the same structured unhealthy event/component from S-ND295-37 to prove EXEC closure across that fault, with no raw aya access, subprocess control, or gate accessor crossing into the test.",
+            "Every S-ND295-35/37 reasoned-#[ignore] body is activated with no weakening, replacement, or re-authoring.",
+            "The VM cgroup/accounting equivalence suite (crates/overdrive-host/tests/integration/cgroup_accounting_equivalence.rs) and the Service dataplane selection suite (crates/overdrive-dataplane/tests/integration/service_map_forward.rs::ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth) both remain green under this step's verification, closing the gap left by the S-ND295-36 criterion above naming them without a matching nextest filter."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+          "scenario_name": "simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second",
+          "scenario_ids": [
+            "S-ND295-35",
+            "S-ND295-36",
+            "S-ND295-37"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+            "crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs",
+            "crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs"
+          ],
+          "verification": [
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(vm_walking_skeleton)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane -p overdrive-worker --test acceptance -E 'test(one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver) or test(vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(guest_stack_mtls_egress) or test(service_kind_vm_workloads) or test(mtls_resolve_rekey)' --no-fail-fast",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-host --test integration --features integration-tests -E 'test(cgroup_accounting_equivalence)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --test integration --features integration-tests -E 'test(ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth)' --no-fail-fast"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: S-ND295-36 is by definition Stage-1-completed legacy surface (pre-existing suites) -- do not add new PBT amplification to guest_stack_mtls_egress/service_kind_vm_workloads/mtls_resolve_rekey in this step; the mandate's own guidance is low yield by design there because the surface is debt-paid. S-ND295-37's timing assertion (within one second) is a real wall-clock bound on a real kernel; do not weaken it to a looser bound to make the test less flaky -- if it flakes, the fix is the quiescence implementation's speed, not the assertion. one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver lives in crates/overdrive-control-plane/tests/acceptance/service_kind_vm_workloads.rs (around line 76) and vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner lives in crates/overdrive-worker/tests/acceptance/service_kind_vm_workloads.rs (around line 442) -- both already touched by step 01-01's constructor-cut fallout; this step adds assertions to those existing files, it does not re-author them."
+        },
+        {
+          "id": "04-04",
+          "name": "Attachment-capacity benchmark receipts: T1-BASE and T1-PORT4",
+          "description": "Produce the two required, non-EDD measurement receipts under target/benchmarks/netns-density-295/{T1-BASE,T1-PORT4}/ via a new DELIVER benchmark target that drives 16,384 real production-owner network attachments (T1-BASE: N=16,384/M=0, Job-shaped, no VMM population, no Service TCP listeners; T1-PORT4: N=16,384/M=65,536, Service-shaped with TCP ports 8080/8081/8443/9000, no VMM population) and reports the exact CAP-295-A/PORT-295-C element inventory, memory, update, and sweep measurements.",
+          "agent": "nw-software-crafter",
+          "deps": [
+            "04-03"
+          ],
+          "estimate_hours": 8,
+          "criteria": [
+            "T1-BASE attaches exactly 16,384 Job-shaped allocation network attachments through the real production GuestNetworkProvisioner/SharedGuestNetworkOwner (no VMM population, no Service TCP listeners) and reports: successful attach/read-back for all 16,384; kernel memory delta for every map/set/link/FDB; full-population insert/delete elements/s; one outbound-hit packet per source plus 256 deterministic missing-source probes with exact lookup packets/s and counters; and a full 3N+M=49,152-element sweep wall time with an empty complement afterward -- IP-set inventory 2N+M=32,768, bridge managed_taps inventory N=16,384.",
+            "T1-PORT4 attaches exactly 16,384 Service-shaped allocation network attachments each with TCP ports 8080, 8081, 8443, and 9000 (no VMM population) and reports the same memory/update/sweep measurement classes plus one hit for all four ports and one 9001-miss for every destination (81,920 lookup packets total), exact counters and packets/s, and a full sweep/read-back complement -- IP-set inventory 2N+M=98,304, bridge managed_taps inventory N=16,384, total 114,688 elements.",
+            "Both receipts report the actual measured N, M, port distribution, kernel version (uname -r), and any substrate limit encountered -- no receipt asserts or implies a simultaneous-connection, EnforcedConnection, throughput, RLIMIT_NOFILE, pids.max, threads-max, or connection-pump capacity claim; CAP-295-A's attachment-only boundary is stated explicitly in the receipt output.",
+            "The benchmark target is clearly marked non-EDD (not under verification/expectations/, not asserted against in a pass/fail nextest body) and is driven only through the real production owner -- no fixture manufactures kernel state the production path would not itself create.",
+            "Both receipts are produced on the same native x86_64 metal lease class used by phase 04's other Tier-3 evidence, via cargo xtask metal run --, and are committed under target/benchmarks/netns-density-295/{T1-BASE,T1-PORT4}/ (or, if target/ is gitignored, the raw captured output is preserved as evidence alongside the roadmap per the verification.md discipline for executed, non-narrated measurement)."
+          ],
+          "test_file": "target/benchmarks/netns-density-295/T1-BASE/",
+          "scenario_name": "B-ND295-T1-BASE and B-ND295-T1-PORT4 attachment-capacity receipts",
+          "scenario_ids": [
+            "B-ND295-T1-BASE",
+            "B-ND295-T1-PORT4"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/Cargo.toml",
+            "crates/overdrive-control-plane/bin/netns_density_benchmark.rs",
+            "target/benchmarks/netns-density-295/T1-BASE/",
+            "target/benchmarks/netns-density-295/T1-PORT4/"
+          ],
+          "verification": [
+            "cargo xtask metal run -- cargo run -p overdrive-control-plane --bin netns_density_benchmark --features integration-tests -- --profile t1-base --out target/benchmarks/netns-density-295/T1-BASE/",
+            "cargo xtask metal run -- cargo run -p overdrive-control-plane --bin netns_density_benchmark --features integration-tests -- --profile t1-port4 --out target/benchmarks/netns-density-295/T1-PORT4/",
+            "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
+          ],
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: this step produces measurement receipts, not correctness tests -- the mandate's PBT framing does not apply to the benchmark binary itself (it is a capacity harness, explicitly 'never EDD' per feature-delta.md); apply the mandate instead to any pure helper the benchmark binary factors out (e.g. element-count/inventory-size arithmetic), which should be proptested against the closed-form 8N+6M / 11N formulas feature-delta.md derives. JUDGMENT CALL: feature-delta.md names the receipt directory and required measurements exactly but does not name a concrete benchmark binary path, CLI shape, or crate placement beyond 'a future DELIVER benchmark target' -- the crate/bin path above is this roadmap's proposed location (overdrive-control-plane owns the provisioner/pool it must drive), not a design-pinned name; confirm the exact shape with the architect/user before landing new public CLI surface, since a new operator-facing subcommand would itself need design sign-off under 'Implement to the design.'"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-netlink/src/",
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-host/src/",
+      "crates/overdrive-cli/src/",
+      "tests/conformance/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-worker/tests/",
+      "crates/overdrive-dataplane/tests/",
+      "crates/overdrive-netlink/tests/",
+      "crates/overdrive-bpf/tests/",
+      "crates/overdrive-sim/tests/",
+      "crates/overdrive-cli/tests/",
+      "tests/conformance/tests/",
+      "target/benchmarks/netns-density-295/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "spike-scratch/**",
+      "**/*.orig",
+      "**/*.rej"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "Each DELIVER step is signed off by its dispatched crafter's paired reviewer per delivery_protocol (deliver/review-<step-id>.md, APPROVED before advancement); the roadmap itself has not yet been independently reviewed by a solution-architect-reviewer pass -- no reviewer has been assigned to that roadmap-level review.",
+    "approved_at": null
+  }
+}
