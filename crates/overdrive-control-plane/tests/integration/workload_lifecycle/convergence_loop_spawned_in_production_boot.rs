@@ -186,9 +186,17 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         vmm_override: None,
     };
 
-    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))
-        .await
-        .expect("server boot");
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let handle = run_server_with_obs_and_driver(
+        config,
+        Arc::clone(&obs),
+        Arc::clone(&driver),
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .expect("server boot");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     let client = client_trusting(&ca_pem);

@@ -193,12 +193,15 @@ async fn harness() -> Harness {
     .await
     .expect("Earned-Trust gate passes with default Sim probers");
 
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(sim_clock.clone());
+    assert!(wiring.supervisor().open_after_boot());
     let driver: Arc<dyn Driver> = Arc::new(VmDriver::new(
         Arc::new(overdrive_sim::SimVmm::new()),
         sim_clock.clone(),
         Arc::new(overdrive_sim::SimCgroupFs::new()),
         Arc::new(overdrive_sim::SimCgroupAccounting::new()),
         Arc::clone(&runner),
+        wiring.gate(),
         VmHostLayout {
             cgroup_root: PathBuf::from("/tmp/stable-probe-cgroup"),
             run_dir_root: PathBuf::from("/tmp/stable-probe-run"),

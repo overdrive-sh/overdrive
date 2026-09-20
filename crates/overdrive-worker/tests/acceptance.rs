@@ -40,14 +40,10 @@ mod acceptance {
     // waits without taking the pending EXEC, claim-before-detection
     // cancellation leaves no second writer, and FailStop wakes the waiter
     // without writing EXEC. Authored in its live home at
-    // `tests/acceptance/netns_density_exec_release.rs`; NOT yet wired —
-    // the body targets the post-F-01 seven-argument
-    // `VmDriver::new(…, wiring.gate(), layout)` (feature-delta.md §
-    // RUN-295-B), which the pre-cut tree does not provide, so wiring
-    // it today would be a compile break rather than a reasoned-`#[ignore]`
-    // RED. DELIVER's F-01 step both lands the seven-arg ctor and
-    // un-comments this line in the same cut.
-    // mod netns_density_exec_release;
+    // `tests/acceptance/netns_density_exec_release.rs`; visible after the
+    // F-01 seven-argument constructor cut, while every body remains a
+    // reasoned `#[ignore]` pending the later worker-release activation step.
+    mod netns_density_exec_release;
     // microvm-driver-cloud-hypervisor (GH #42), step 01-07 — S-VM-76 +
     // crafter-authored race-arm examples against SimVmm (ADR-0082
     // §§D3-D4).

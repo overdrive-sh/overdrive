@@ -164,11 +164,13 @@ async fn run_refusing_boot(
         0,
     ));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
+    let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
+        owner.clone();
     let collector = EventCollector::default();
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let result = run_server_with_obs_and_driver(config, obs, driver).await;
+    let result = run_server_with_obs_and_driver(config, obs, driver, owner_port, wiring).await;
     let error = match result {
         Err(error) => error,
         Ok(handle) => {

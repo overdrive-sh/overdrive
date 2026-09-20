@@ -73,9 +73,17 @@ async fn production_boot_spawns_the_interest_router() {
         vmm_override: None,
     };
 
-    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), Arc::clone(&driver))
-        .await
-        .expect("server boot");
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let handle = run_server_with_obs_and_driver(
+        config,
+        Arc::clone(&obs),
+        Arc::clone(&driver),
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .expect("server boot");
 
     // The vertical-slice assertion: the PRODUCTION entry spawned the router.
     // No spawn fn was hand-called, no router hand-assembled — the boot did it.

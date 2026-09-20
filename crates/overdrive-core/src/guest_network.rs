@@ -8,16 +8,12 @@
 
 // SCAFFOLD: true — netns-density-295 DISTILL.
 
-#![expect(
-    clippy::unused_async,
-    clippy::unused_self,
-    reason = "the accepted instance-method API is scaffolded before its private state machine"
-)]
-
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::Clock;
+use parking_lot::Mutex;
+use tokio::sync::Notify;
 
 /// Paired construction authority for the release and recovery capabilities.
 pub struct GuestNetworkExecWiring {
@@ -27,18 +23,42 @@ pub struct GuestNetworkExecWiring {
 
 /// Read/claim capability retained by the VM driver.
 pub struct GuestNetworkExecGate {
-    _private: (),
+    shared: Arc<GuestNetworkExecShared>,
 }
 
 /// Recovery/reopen/fail-stop capability retained by the control plane.
 pub struct GuestNetworkExecSupervisor {
-    _private: (),
+    shared: Arc<GuestNetworkExecShared>,
 }
 
 /// RAII claim held across one deferred-EXEC writer acknowledgement.
 #[must_use]
 pub struct GuestNetworkExecClaim {
-    _private: (),
+    shared: Arc<GuestNetworkExecShared>,
+}
+
+struct GuestNetworkExecShared {
+    state: Mutex<GuestNetworkExecState>,
+    notify: Notify,
+    clock: Arc<dyn Clock>,
+}
+
+struct GuestNetworkExecState {
+    state: GuestNetworkExecGateState,
+    active_claims: usize,
+}
+
+struct RecoverySnapshot {
+    component: SharedGuestNetworkComponent,
+    started_at: Instant,
+    completed_attempts: u32,
+}
+
+enum GuestNetworkExecGateState {
+    BootClosed,
+    Open,
+    Recovering(RecoverySnapshot),
+    FailStop,
 }
 
 /// Closed vocabulary for the first unhealthy shared-network component.
@@ -122,10 +142,18 @@ impl GuestNetworkExecWiring {
     /// Construct one BootClosed state and its paired opaque capabilities.
     /// CONTRACT_SHAPE: pure-function.
     #[must_use]
-    pub fn new(_clock: Arc<dyn Clock>) -> Self {
+    pub fn new(clock: Arc<dyn Clock>) -> Self {
+        let shared = Arc::new(GuestNetworkExecShared {
+            state: Mutex::new(GuestNetworkExecState {
+                state: GuestNetworkExecGateState::BootClosed,
+                active_claims: 0,
+            }),
+            notify: Notify::new(),
+            clock,
+        });
         Self {
-            gate: Arc::new(GuestNetworkExecGate { _private: () }),
-            supervisor: Arc::new(GuestNetworkExecSupervisor { _private: () }),
+            gate: Arc::new(GuestNetworkExecGate { shared: Arc::clone(&shared) }),
+            supervisor: Arc::new(GuestNetworkExecSupervisor { shared }),
         }
     }
 
@@ -145,59 +173,155 @@ impl GuestNetworkExecWiring {
 impl GuestNetworkExecGate {
     /// Wait while closed/recovering, claim when open, or return `None` at fail-stop.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements claim linearization")]
     pub async fn claim_release(&self) -> Option<GuestNetworkExecClaim> {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 EXEC claim)")
+        loop {
+            let mut notified = Box::pin(self.shared.notify.notified());
+            let claim = {
+                let mut shared = self.shared.state.lock();
+                match &shared.state {
+                    GuestNetworkExecGateState::Open => {
+                        shared.active_claims = shared.active_claims.saturating_add(1);
+                        drop(shared);
+                        Some(GuestNetworkExecClaim { shared: Arc::clone(&self.shared) })
+                    }
+                    GuestNetworkExecGateState::FailStop => return None,
+                    GuestNetworkExecGateState::BootClosed
+                    | GuestNetworkExecGateState::Recovering(_) => {
+                        notified.as_mut().enable();
+                        None
+                    }
+                }
+            };
+            if claim.is_some() {
+                return claim;
+            }
+            notified.await;
+        }
     }
 }
 
 impl GuestNetworkExecSupervisor {
     /// Report whether fresh-process target recovery may mutate owned targets.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements BootClosed observation")]
     pub fn is_boot_closed(&self) -> bool {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 BootClosed)")
+        matches!(self.shared.state.lock().state, GuestNetworkExecGateState::BootClosed)
     }
 
     /// Perform the sole BootClosed-to-Open transition.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements boot opening")]
     pub fn open_after_boot(&self) -> bool {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 boot open)")
+        let opened = {
+            let mut shared = self.shared.state.lock();
+            if matches!(shared.state, GuestNetworkExecGateState::BootClosed) {
+                shared.state = GuestNetworkExecGateState::Open;
+                true
+            } else {
+                false
+            }
+        };
+        if opened {
+            self.shared.notify.notify_waiters();
+        }
+        opened
     }
 
     /// Perform the sole Open-to-Recovering transition.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements recovery detection")]
-    pub fn begin_recovery(&self, _component: SharedGuestNetworkComponent) -> bool {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 recovery begin)")
+    pub fn begin_recovery(&self, component: SharedGuestNetworkComponent) -> bool {
+        let began = {
+            let mut shared = self.shared.state.lock();
+            if matches!(shared.state, GuestNetworkExecGateState::Open) {
+                shared.state = GuestNetworkExecGateState::Recovering(RecoverySnapshot {
+                    component,
+                    started_at: self.shared.clock.now(),
+                    completed_attempts: 0,
+                });
+                true
+            } else {
+                false
+            }
+        };
+        if began {
+            self.shared.notify.notify_waiters();
+        }
+        began
     }
 
     /// Record one completed attempt and either remain recovering or reopen.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements recovery completion")]
-    pub fn complete_attempt(&self, _first_remaining: Option<SharedGuestNetworkComponent>) -> bool {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 recovery attempt)")
+    pub fn complete_attempt(&self, first_remaining: Option<SharedGuestNetworkComponent>) -> bool {
+        let completed = {
+            let mut shared = self.shared.state.lock();
+            let GuestNetworkExecGateState::Recovering(snapshot) = &mut shared.state else {
+                return false;
+            };
+            let attempts = snapshot.completed_attempts.saturating_add(1);
+            match first_remaining {
+                Some(component) => {
+                    snapshot.component = component;
+                    snapshot.completed_attempts = attempts;
+                }
+                None => shared.state = GuestNetworkExecGateState::Open,
+            }
+            true
+        };
+        if completed {
+            self.shared.notify.notify_waiters();
+        }
+        completed
     }
 
     /// Project the latest immutable recovery snapshot.
     #[must_use]
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements recovery projection")]
     pub fn recovery_progress(&self) -> Option<SharedGuestNetworkRecovery> {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 recovery progress)")
+        let shared = self.shared.state.lock();
+        let GuestNetworkExecGateState::Recovering(snapshot) = &shared.state else {
+            return None;
+        };
+        let progress = SharedGuestNetworkRecovery {
+            component: snapshot.component,
+            attempts: snapshot.completed_attempts,
+            elapsed: self.shared.clock.now().saturating_duration_since(snapshot.started_at),
+        };
+        drop(shared);
+        Some(progress)
     }
 
     /// Enter FailStop once and return the first public request receipt.
     /// CONTRACT_SHAPE: bounded-change.
     #[must_use]
-    #[expect(
-        clippy::panic,
-        reason = "RED scaffold; DELIVER implements first-request-wins fail-stop"
-    )]
     pub fn fail_stop(
         &self,
-        _cause: SharedGuestNetworkFailStopCause,
+        cause: SharedGuestNetworkFailStopCause,
     ) -> Option<SharedGuestNetworkFailStop> {
-        panic!("Not yet implemented -- RED scaffold (netns-density-295 fail-stop)")
+        let request = {
+            let mut shared = self.shared.state.lock();
+            let (component, attempts, elapsed) = match &shared.state {
+                GuestNetworkExecGateState::FailStop => return None,
+                GuestNetworkExecGateState::Recovering(snapshot) => (
+                    snapshot.component,
+                    snapshot.completed_attempts,
+                    self.shared.clock.now().saturating_duration_since(snapshot.started_at),
+                ),
+                GuestNetworkExecGateState::BootClosed | GuestNetworkExecGateState::Open => {
+                    (SharedGuestNetworkComponent::Supervisor, 0, Duration::ZERO)
+                }
+            };
+            shared.state = GuestNetworkExecGateState::FailStop;
+            let request = SharedGuestNetworkFailStop { component, cause, attempts, elapsed };
+            drop(shared);
+            request
+        };
+        self.shared.notify.notify_waiters();
+        Some(request)
+    }
+}
+
+impl Drop for GuestNetworkExecClaim {
+    fn drop(&mut self) {
+        let mut shared = self.shared.state.lock();
+        shared.active_claims = shared.active_claims.saturating_sub(1);
+        drop(shared);
+        self.shared.notify.notify_waiters();
     }
 }

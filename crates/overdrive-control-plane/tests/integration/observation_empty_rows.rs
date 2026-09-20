@@ -116,9 +116,17 @@ async fn spawn_server_with_obs_handle()
         ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
-        .await
-        .expect("run_server_with_obs_and_driver");
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let handle = run_server_with_obs_and_driver(
+        config,
+        Arc::clone(&obs),
+        driver,
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .expect("run_server_with_obs_and_driver");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem, obs)

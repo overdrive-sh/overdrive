@@ -168,6 +168,7 @@ use crate::identity_mgr::IdentityMgr;
 use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
+use overdrive_core::guest_network::GuestNetworkExecWiring;
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
@@ -1225,6 +1226,10 @@ pub struct ServerHandle {
     /// outside the `MtlsResolve` domain port so both graceful and abrupt server
     /// boundaries can cancel and await the exact `JoinHandle`.
     mtls_resolve_owner: Option<Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>>,
+    /// Sole retained shared-network supervisor owner. The step-01 scaffold
+    /// keeps its task alive until graceful shutdown; later delivery supplies
+    /// the production audit/recovery loop behind this same field.
+    shared_network_supervisor: Option<SharedNetworkSupervisorHandle>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1259,14 +1264,45 @@ impl SharedNetworkSupervisorHandle {
         Self { request_rx, task: Some(task), exec, shutdown }
     }
 
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER owns biased task/request classification"
-    )]
     async fn shutdown_requested(&mut self) -> overdrive_core::guest_network::ServeShutdownRequest {
-        let _ = (&mut self.request_rx, &self.task, &self.exec);
-        panic!("Not yet implemented -- RED scaffold (GH #295 retained supervisor outcome)")
+        let Some(task) = self.task.as_mut() else {
+            return self.fail_stop_or_pending(
+                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorReturned,
+            )
+            .await;
+        };
+        tokio::select! {
+            biased;
+            request = self.request_rx.recv() => {
+                match request {
+                    Some(request) => request,
+                    None => self.fail_stop_or_pending(
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RequestChannelClosed,
+                    ).await,
+                }
+            }
+            result = task => {
+                let cause = match result {
+                    Ok(Ok(())) => overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorReturned,
+                    Ok(Err(_)) => overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorFailed,
+                    Err(error) if error.is_panic() => overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorPanicked,
+                    Err(_) => overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorCancelled,
+                };
+                self.fail_stop_or_pending(cause).await
+            }
+        }
+    }
+
+    async fn fail_stop_or_pending(
+        &self,
+        cause: overdrive_core::guest_network::SharedGuestNetworkFailStopCause,
+    ) -> overdrive_core::guest_network::ServeShutdownRequest {
+        match self.exec.fail_stop(cause) {
+            Some(request) => {
+                overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(request)
+            }
+            None => std::future::pending().await,
+        }
     }
 
     async fn shutdown(mut self) {
@@ -1778,6 +1814,16 @@ impl ServerHandle {
         self.inner.listening().await
     }
 
+    /// Wait for the retained shared-network owner to request process shutdown.
+    pub async fn shutdown_requested(
+        &mut self,
+    ) -> overdrive_core::guest_network::ServeShutdownRequest {
+        let Some(supervisor) = self.shared_network_supervisor.as_mut() else {
+            return std::future::pending().await;
+        };
+        supervisor.shutdown_requested().await
+    }
+
     /// Abruptly revoke every in-process task owned by this server without
     /// running the graceful drain or any workload stop/cleanup path.
     ///
@@ -1805,6 +1851,7 @@ impl ServerHandle {
             interest_router_shutdown: _,
             mtls_worker_owner,
             mtls_resolve_owner,
+            shared_network_supervisor,
         } = self;
 
         server_task.abort();
@@ -1839,6 +1886,9 @@ impl ServerHandle {
         };
         if let Some(resolve) = mtls_resolve_owner {
             resolve.shutdown().await;
+        }
+        if let Some(supervisor) = shared_network_supervisor {
+            supervisor.shutdown().await;
         }
         worker_failure.map_or(Ok(AbruptServerResidue), Err)
     }
@@ -1946,6 +1996,9 @@ impl ServerHandle {
         };
         if let Some(resolve) = self.mtls_resolve_owner {
             resolve.shutdown().await;
+        }
+        if let Some(supervisor) = self.shared_network_supervisor {
+            supervisor.shutdown().await;
         }
         worker_failure.map_or(Ok(()), Err)
     }
@@ -2148,6 +2201,7 @@ pub async fn run_server(
         Arc::clone(&obs),
     )
     .await?;
+    let guest_network_exec = GuestNetworkExecWiring::new(Arc::clone(&clock));
 
     let mut registry = DriverRegistry::new();
 
@@ -2186,6 +2240,7 @@ pub async fn run_server(
             fs,
             cgroup_accounting,
             Arc::clone(&probe_runner),
+            guest_network_exec.gate(),
             vmm_override,
         )
         .await
@@ -2211,7 +2266,14 @@ pub async fn run_server(
         }
     }
 
-    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+    run_server_with_obs_and_drivers(
+        config,
+        obs,
+        Arc::new(registry),
+        Arc::new(guest_network::HostSharedGuestNetworkOwner::new()),
+        guest_network_exec,
+    )
+    .await
 }
 
 /// Outcome of a failed [`compose_vm_driver`] attempt — distinguishes
@@ -2309,6 +2371,7 @@ async fn compose_vm_driver(
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
     probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
+    guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 ) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
@@ -2443,6 +2506,7 @@ async fn compose_vm_driver(
         fs,
         cgroup_accounting,
         probe_runner,
+        guest_network_exec,
         layout,
     ))
 }
@@ -2480,10 +2544,19 @@ pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
+    shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+    guest_network_exec: GuestNetworkExecWiring,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     let mut registry = DriverRegistry::new();
     registry.insert(driver);
-    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+    run_server_with_obs_and_drivers(
+        config,
+        obs,
+        Arc::new(registry),
+        shared_guest_network,
+        guest_network_exec,
+    )
+    .await
 }
 
 /// Start the control-plane server with caller-supplied observation
@@ -2505,7 +2578,24 @@ pub async fn run_server_with_obs_and_drivers(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     drivers: Arc<DriverRegistry>,
+    shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+    guest_network_exec: GuestNetworkExecWiring,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
+    let _ = &shared_guest_network;
+    let shared_network_shutdown = CancellationToken::new();
+    let task_shutdown = shared_network_shutdown.clone();
+    let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+    let shared_network_task = tokio::spawn(async move {
+        let _request_owner = request_tx;
+        task_shutdown.cancelled().await;
+        Ok(())
+    });
+    let shared_network_supervisor = SharedNetworkSupervisorHandle::new(
+        request_rx,
+        shared_network_task,
+        guest_network_exec.supervisor(),
+        shared_network_shutdown,
+    );
     // ADR-0028 preflight, parent-slice delegation, and workloads-slice
     // bootstrap all run in `run_server` (the outer composition
     // boundary). Tests that compose `run_server_with_obs_and_driver`
@@ -3567,6 +3657,7 @@ pub async fn run_server_with_obs_and_drivers(
         interest_router_shutdown,
         mtls_worker_owner,
         mtls_resolve_owner,
+        shared_network_supervisor: Some(shared_network_supervisor),
     })
 }
 
@@ -4499,6 +4590,10 @@ mod tests {
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
                 test_probe_runner(),
+                overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+                    SimClock::new(),
+                ))
+                .gate(),
                 Some(Arc::new(sim_vmm)),
             )
             .await
@@ -4571,6 +4666,10 @@ mod tests {
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),
                 test_probe_runner(),
+                overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+                    SimClock::new(),
+                ))
+                .gate(),
                 Some(Arc::new(sim_vmm)),
             )
             .await

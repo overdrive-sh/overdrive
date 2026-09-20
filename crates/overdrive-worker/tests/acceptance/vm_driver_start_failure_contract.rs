@@ -140,8 +140,18 @@ fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock,
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(cgroup_fs.clone());
     let accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
         Arc::new(SimCgroupAccounting::new());
-    let driver =
-        VmDriver::new(vmm, Arc::new(clock.clone()), fs, accounting, probe_runner(), layout);
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
+    assert!(wiring.supervisor().open_after_boot());
+    let driver = VmDriver::new(
+        vmm,
+        Arc::new(clock.clone()),
+        fs,
+        accounting,
+        probe_runner(),
+        wiring.gate(),
+        layout,
+    );
     (driver, clock, cgroup_fs)
 }
 

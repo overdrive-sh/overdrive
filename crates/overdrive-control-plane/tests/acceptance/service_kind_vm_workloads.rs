@@ -90,12 +90,15 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver(
     .expect("one trusted ProbeRunner is composed at boot");
     assert_eq!(tcp.calls.load(Ordering::SeqCst), 1, "the trust probe runs once per boot");
 
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+    assert!(wiring.supervisor().open_after_boot());
     let vm_driver = VmDriver::new(
         Arc::new(SimVmm::new()),
         clock.clone(),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         Arc::clone(&runner),
+        wiring.gate(),
         VmHostLayout {
             cgroup_root: PathBuf::from("/tmp/svm-22-vm-cgroup"),
             run_dir_root: PathBuf::from("/tmp/svm-22-vm-run"),

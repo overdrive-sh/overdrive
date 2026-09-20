@@ -25,6 +25,7 @@ use overdrive_control_plane::api::{
     StopWorkloadResponse, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
+use overdrive_core::guest_network::ServeShutdownRequest;
 use reqwest::StatusCode;
 use thiserror::Error;
 use url::Url;
@@ -38,6 +39,9 @@ use url::Url;
 /// failure mode (retry, rewrite, abort) match on the variant.
 #[derive(Debug, Error)]
 pub enum CliError {
+    /// The retained shared guest-network owner entered its terminal fail-stop.
+    #[error("shared guest-network fail-stop: {request:?}")]
+    SharedGuestNetworkFailStop { request: ServeShutdownRequest },
     /// The server listener drained, but the one-shot authoritative userspace
     /// mTLS teardown failed. The nested error retains exact diagnostics.
     #[error("server shutdown failed: {source}")]

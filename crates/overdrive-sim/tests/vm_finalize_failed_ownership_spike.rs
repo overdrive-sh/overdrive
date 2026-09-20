@@ -232,12 +232,15 @@ async fn drive(seed: u64, finalize: bool) {
         clock.clone(),
         obs.clone(),
     ));
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+    assert!(wiring.supervisor().open_after_boot());
     let driver = Arc::new(VmDriver::new(
         vmm.clone(),
         clock.clone(),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         probes,
+        wiring.gate(),
         layout.clone(),
     ));
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(temp.path()).unwrap();

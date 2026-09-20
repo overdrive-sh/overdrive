@@ -30,7 +30,7 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::{
     SimKek, clock::SimClock, dataplane::SimDataplane, driver::SimDriver,
-    observation_store::SimObservationStore,
+    guest_network::SimSharedGuestNetworkOwner, observation_store::SimObservationStore,
 };
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -461,7 +461,17 @@ async fn drive(effect: Effect) {
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         ..ServerConfig::new(Arc::new(SimKek::for_boot()))
     };
-    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let server = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver.clone(),
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .unwrap();
     let bound = server.local_addr().await.unwrap();
     let client = client(&config_dir);
     let base = format!("https://localhost:{}", bound.port());
@@ -565,7 +575,17 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         ..ServerConfig::new(Arc::new(SimKek::for_boot()))
     };
-    let server = run_server_with_obs_and_driver(config, obs.clone(), driver).await.unwrap();
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let server = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver,
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let http = client(&config_dir);
     submit(&http, &base, "payments").await;
@@ -674,7 +694,17 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         ..ServerConfig::new(Arc::new(SimKek::for_boot()))
     };
-    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let server = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver.clone(),
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let client = client(&config_dir);
     let trace_before_effect = (effect == Effect::Start).then(trace_cursor);
@@ -1210,7 +1240,17 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         ..ServerConfig::new(Arc::new(SimKek::for_boot()))
     };
-    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let server = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver.clone(),
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let client = client(&config_dir);
     let cursor = trace_cursor();
@@ -1422,7 +1462,17 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         ..ServerConfig::new(Arc::new(SimKek::for_boot()))
     };
-    let server = run_server_with_obs_and_driver(config, obs.clone(), driver.clone()).await.unwrap();
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let server = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver.clone(),
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let client = client(&config_dir);
     let cursor = trace_cursor();

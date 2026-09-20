@@ -133,7 +133,7 @@ fn vm_payload() -> DriverPayload {
 }
 
 fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
-    let clock = Arc::new(SimClock::default());
+    let clock: Arc<dyn Clock> = Arc::new(SimClock::default());
     let observation_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
         NodeId::new("svm-hook-driver").expect("valid node ID"),
         0,
@@ -159,12 +159,15 @@ fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
             1024,
         ),
     };
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+    assert!(wiring.supervisor().open_after_boot());
     let driver = VmDriver::new(
         Arc::new(SimVmm::new()),
-        clock,
+        Arc::clone(&clock),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         Arc::clone(&probe_runner),
+        wiring.gate(),
         layout,
     );
     (driver, probe_runner)

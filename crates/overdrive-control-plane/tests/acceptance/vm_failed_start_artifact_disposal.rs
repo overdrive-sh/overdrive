@@ -277,12 +277,16 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         creates: AtomicUsize::new(0),
         terminates: AtomicUsize::new(0),
     });
+    let clock: Arc<dyn overdrive_core::traits::clock::Clock> = Arc::new(SimClock::new());
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+    assert!(wiring.supervisor().open_after_boot());
     let driver = Arc::new(VmDriver::new(
         Arc::clone(&vmm) as Arc<dyn Vmm>,
-        Arc::new(SimClock::new()),
+        Arc::clone(&clock),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
         probe_runner(),
+        wiring.gate(),
         layout.clone(),
     ));
     let mut drivers = DriverRegistry::new();

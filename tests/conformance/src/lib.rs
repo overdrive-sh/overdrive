@@ -429,7 +429,10 @@ impl DirectHandlerHarness {
             sequence,
         ));
         let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-        let handle = run_server_with_obs_and_driver(config, obs, driver)
+        let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock_port);
+        let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
+            owner.clone();
+        let handle = run_server_with_obs_and_driver(config, obs, driver, owner_port, wiring)
             .await
             .expect("start production server handler");
         let address = handle.local_addr().await.expect("server handler bound address");

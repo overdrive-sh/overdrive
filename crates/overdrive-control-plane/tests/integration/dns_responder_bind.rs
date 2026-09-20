@@ -800,7 +800,16 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
         ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
 
-    let result = run_server_with_obs_and_driver(config, obs.clone(), driver).await;
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let result = run_server_with_obs_and_driver(
+        config,
+        obs.clone(),
+        driver,
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await;
 
     // (1) the boot REFUSED with the typed DnsResponderBoot variant — kills the
     // "delete the return Err(DnsResponderBoot)" mutant (boot would otherwise

@@ -70,9 +70,17 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
-        .await
-        .expect("run_server_with_obs_and_driver");
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let handle = run_server_with_obs_and_driver(
+        config,
+        Arc::clone(&obs),
+        driver,
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .expect("run_server_with_obs_and_driver");
 
     // Read directly from the obs handle the server holds. The
     // expected post-boot state (ADR-0025 § 3 step 5): exactly one
@@ -144,9 +152,17 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
-        .await
-        .expect("run_server_with_obs_and_driver");
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let handle = run_server_with_obs_and_driver(
+        config,
+        Arc::clone(&obs),
+        driver,
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        wiring,
+    )
+    .await
+    .expect("run_server_with_obs_and_driver");
 
     // Read the trust triple to build a CA-pinned reqwest client —
     // same shape as `tests/integration/observation_empty_rows.rs`.

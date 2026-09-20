@@ -26,6 +26,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use overdrive_core::guest_network::GuestNetworkExecGate;
 use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
@@ -997,6 +998,7 @@ pub struct VmDriver {
     cgroup_manager: CgroupManager,
     cgroup_accounting: Arc<dyn CgroupAccounting>,
     probe_runner: Arc<ProbeRunner>,
+    guest_network_exec: Arc<GuestNetworkExecGate>,
     layout: VmHostLayout,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -1017,6 +1019,7 @@ impl VmDriver {
         fs: Arc<dyn CgroupFs>,
         cgroup_accounting: Arc<dyn CgroupAccounting>,
         probe_runner: Arc<ProbeRunner>,
+        guest_network_exec: Arc<GuestNetworkExecGate>,
         layout: VmHostLayout,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
@@ -1027,6 +1030,7 @@ impl VmDriver {
             cgroup_manager,
             cgroup_accounting,
             probe_runner,
+            guest_network_exec,
             layout,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
@@ -1856,6 +1860,10 @@ impl Driver for VmDriver {
     /// new public Driver method. Idempotency remains `Option::take` on both
     /// pending values.
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        let Some(_exec_claim) = self.guest_network_exec.claim_release().await else {
+            return;
+        };
+
         // Hold the supervision lock only long enough to clone/take the
         // release state. The socket itself is exclusively owned by the
         // production writer task; no mutex guard crosses socket I/O.
@@ -2536,13 +2544,17 @@ mod tests {
             Arc::new(ExitsBeforeReady { terminate_calls: Arc::clone(&terminate_calls) });
         let cgroup_fs: Arc<dyn CgroupFs> = Arc::new(SimCgroupFs::new());
         let accounting: Arc<dyn CgroupAccounting> = Arc::new(SimCgroupAccounting::new());
+        let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+        let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+        assert!(wiring.supervisor().open_after_boot());
         let reader = Arc::new(ScriptedConsoleReader { outcome, calls: AtomicUsize::new(0) });
         let driver = VmDriver::new(
             vmm,
-            Arc::new(SimClock::new()),
+            Arc::clone(&clock),
             cgroup_fs,
             accounting,
             test_probe_runner(),
+            wiring.gate(),
             layout,
         )
         .with_guest_console_reader(reader.clone());
@@ -2618,12 +2630,16 @@ mod tests {
             ),
         };
         let fs = SimCgroupFs::new();
+        let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+        let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
+        assert!(wiring.supervisor().open_after_boot());
         let driver = VmDriver::new(
             Arc::new(CleanupTerminateFails { attempts: AtomicUsize::new(0) }),
-            Arc::new(SimClock::new()),
+            Arc::clone(&clock),
             Arc::new(fs.clone()),
             Arc::new(SimCgroupAccounting::new()),
             test_probe_runner(),
+            wiring.gate(),
             layout.clone(),
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");

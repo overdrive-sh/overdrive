@@ -591,7 +591,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
 /// Private host owner; its startup algorithm is independently executable from
 /// the still-pending native adapter bindings.
 #[allow(dead_code, reason = "D5 exact RED owner field is activated in DELIVER")]
-pub(crate) struct HostSharedGuestNetworkOwner {
+pub(super) struct HostSharedGuestNetworkOwner {
     scratch_io: Arc<dyn SharedGuestNetworkScratchIo>,
 }
 
@@ -603,12 +603,12 @@ impl std::fmt::Debug for HostSharedGuestNetworkOwner {
 
 #[allow(
     dead_code,
-    clippy::panic,
+    clippy::todo,
     clippy::unused_async,
     reason = "D5 exact RED algorithm scaffolds remain inactive until DELIVER"
 )]
 impl HostSharedGuestNetworkOwner {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { scratch_io: Arc::new(RealSharedGuestNetworkScratchIo) }
     }
 
@@ -648,7 +648,7 @@ impl HostSharedGuestNetworkOwner {
         _action: GuestNetworkScratchNetlinkAction,
         _operation: GuestNetworkOperation,
     ) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 scratch netlink projection)")
+        todo!("RED scaffold: GH #295 scratch netlink projection")
     }
 
     async fn tcx(
@@ -657,7 +657,7 @@ impl HostSharedGuestNetworkOwner {
         _action: GuestNetworkScratchTcxAction,
         _operation: GuestNetworkOperation,
     ) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 scratch TCX projection)")
+        todo!("RED scaffold: GH #295 scratch TCX projection")
     }
 
     async fn exercise(
@@ -665,49 +665,49 @@ impl HostSharedGuestNetworkOwner {
         _plan: &GuestNetworkScratchPlan,
         _stage: GuestNetworkProbeStage,
     ) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 scratch exercise projection)")
+        todo!("RED scaffold: GH #295 scratch exercise projection")
     }
 
     async fn run_probe(&self, _plan: &GuestNetworkScratchPlan) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 scratch probe algorithm)")
+        todo!("RED scaffold: GH #295 scratch probe algorithm")
     }
 
     async fn cleanup(
         &self,
         _plan: &GuestNetworkScratchPlan,
     ) -> (Option<GuestNetworkError>, GuestNetworkScratchComplement) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 scratch cleanup algorithm)")
+        todo!("RED scaffold: GH #295 scratch cleanup algorithm")
     }
 }
 
 #[async_trait::async_trait]
-#[allow(clippy::panic, reason = "exact host-owner effects remain RED until DELIVER")]
+#[allow(clippy::todo, reason = "step 01-01 leaves host-owner effects as a RED scaffold")]
 impl GuestNetworkProvisioner for HostSharedGuestNetworkOwner {
     async fn provision(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 host provision)")
+        todo!("RED scaffold: GH #295 host provision")
     }
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 host teardown)")
+        todo!("RED scaffold: GH #295 host teardown")
     }
 }
 
 #[async_trait::async_trait]
-#[allow(clippy::panic, reason = "exact host-owner lifecycle remains RED until DELIVER")]
+#[allow(clippy::todo, reason = "step 01-01 leaves host-owner lifecycle as a RED scaffold")]
 impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn probe_startup(&self) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 host startup probe)")
+        todo!("RED scaffold: GH #295 host startup probe")
     }
     async fn sweep_stale(&self) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 stale sweep)")
+        todo!("RED scaffold: GH #295 stale sweep")
     }
     async fn converge_shared(&self) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared converge)")
+        todo!("RED scaffold: GH #295 shared converge")
     }
     async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared audit)")
+        todo!("RED scaffold: GH #295 shared audit")
     }
     async fn quiesce_managed_taps(&self) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 TAP quiesce)")
+        todo!("RED scaffold: GH #295 TAP quiesce")
     }
 }
 

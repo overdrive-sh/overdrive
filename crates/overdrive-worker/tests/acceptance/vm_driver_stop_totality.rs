@@ -171,12 +171,17 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
     let cgroup_accounting: std::sync::Arc<
         dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
     > = std::sync::Arc::new(SimCgroupAccounting::new());
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(std::sync::Arc::new(
+        clock.clone(),
+    ));
+    assert!(wiring.supervisor().open_after_boot());
     let driver = VmDriver::new(
         vmm,
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
         probe_runner(),
+        wiring.gate(),
         layout,
     );
     (driver, clock)
@@ -200,12 +205,17 @@ fn build_driver_with_cgroup_fs(
     let cgroup_accounting: std::sync::Arc<
         dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
     > = std::sync::Arc::new(SimCgroupAccounting::new());
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(std::sync::Arc::new(
+        clock.clone(),
+    ));
+    assert!(wiring.supervisor().open_after_boot());
     let driver = VmDriver::new(
         vmm,
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
         probe_runner(),
+        wiring.gate(),
         layout,
     );
     (driver, clock, cgroup_fs)
@@ -1785,12 +1795,17 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     let cgroup_fs = SimCgroupFs::new();
     let held_cleanup = HoldsWorkloadScopeRemoval::new(cgroup_fs.clone(), scope.clone());
     let clock = SimClock::new();
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(std::sync::Arc::new(
+        clock.clone(),
+    ));
+    assert!(wiring.supervisor().open_after_boot());
     let driver = VmDriver::new(
         std::sync::Arc::new(sim.clone()),
-        std::sync::Arc::new(clock),
+        std::sync::Arc::new(clock.clone()),
         std::sync::Arc::new(held_cleanup.clone()),
         std::sync::Arc::new(SimCgroupAccounting::new()),
         probe_runner(),
+        wiring.gate(),
         layout,
     );
 

@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_host::RealCgroupFs;
@@ -82,6 +83,11 @@ impl ServeHandle {
     #[must_use]
     pub const fn endpoint(&self) -> &Url {
         &self.endpoint
+    }
+
+    /// Wait for the retained shared guest-network owner to request shutdown.
+    pub async fn shutdown_requested(&mut self) -> ServeShutdownRequest {
+        self.inner.shutdown_requested().await
     }
 
     /// Trigger graceful shutdown. In-flight requests complete within a
