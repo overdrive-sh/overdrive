@@ -20,7 +20,9 @@ use overdrive_core::traits::driver::GuestNetworkAssignment;
 use overdrive_netlink::NetlinkError;
 
 use overdrive_dataplane::guest_tcx::{
-    GuestTcxAttachment, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxLink, GuestTcxProgram,
+    GuestTcxAttachment, GuestTcxCounter, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxLink,
+    GuestTcxProbeCounterObservation, GuestTcxProbeMark, GuestTcxProbeVerdict, GuestTcxProgram,
+    GuestTcxTcpProbeInput, GuestTcxTcpProbeOutcome,
 };
 pub use overdrive_dataplane::guest_tcx::{GuestTcxError, TcxAttachPoint};
 use overdrive_netlink::nft::bridge::{
@@ -524,6 +526,68 @@ struct GuestNetworkScratchPlan {
     guard_chain: String,
     guard_set: String,
     original_destination: SocketAddrV4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "D14A private production validator RED scaffold")]
+enum GuestNetworkTcpProbeRequirement {
+    Classifier,
+    OriginalDestination,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "D14A private production observation RED scaffold")]
+struct GuestNetworkTcpProbeObservation {
+    verdict: GuestTcxProbeVerdict,
+    mark: GuestTcxProbeMark,
+    source_mac: Option<[u8; 6]>,
+    destination_mac: Option<[u8; 6]>,
+    original_destination: Option<SocketAddrV4>,
+    counters: [GuestTcxProbeCounterObservation; 8],
+}
+
+#[allow(dead_code, reason = "D14A production mapping is activated in DELIVER")]
+impl GuestNetworkTcpProbeObservation {
+    fn from_outcome(outcome: &GuestTcxTcpProbeOutcome) -> Self {
+        Self {
+            verdict: outcome.verdict(),
+            mark: outcome.mark(),
+            source_mac: outcome.source_mac(),
+            destination_mac: outcome.destination_mac(),
+            original_destination: outcome.original_destination(),
+            counters: *outcome.counters(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "D14A exact private mismatch vocabulary precedes implementation")]
+enum GuestNetworkTcpProbeMismatch {
+    Verdict { observed: GuestTcxProbeVerdict },
+    Mark { observed: GuestTcxProbeMark },
+    SourceMac { expected: [u8; 6], observed: Option<[u8; 6]> },
+    DestinationMac { expected: [u8; 6], observed: Option<[u8; 6]> },
+    OriginalDestination { expected: SocketAddrV4, observed: Option<SocketAddrV4> },
+    CounterIdentity { index: u8, expected: GuestTcxCounter, observed: GuestTcxCounter },
+    CounterDecrease { counter: GuestTcxCounter, before: u64, after: u64 },
+    CounterDelta { counter: GuestTcxCounter, expected: u64, observed: u64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "D14A private validation result precedes implementation")]
+enum GuestNetworkTcpProbeValidation {
+    Passed { intercept_before: u64, intercept_after: u64 },
+    Mismatch(GuestNetworkTcpProbeMismatch),
+}
+
+#[expect(clippy::panic, reason = "D14A RED scaffold; DELIVER implements the production decision")]
+#[allow(dead_code, reason = "D14A source-local table activates the production validator")]
+fn validate_guest_tcx_tcp_probe(
+    _requirement: GuestNetworkTcpProbeRequirement,
+    _expected: &GuestTcxTcpProbeInput,
+    _observed: std::result::Result<GuestNetworkTcpProbeObservation, GuestTcxError>,
+) -> std::io::Result<GuestNetworkTcpProbeValidation> {
+    panic!("Not yet implemented -- RED scaffold (GH #295 D14A semantic TCP validator)")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2217,42 +2281,28 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
-            let (_, observed) = Self::tap_fact(plan, &second_tap, false);
-            let second_tap_for_final = match observed {
-                None => None,
-                Some(_) => Some(second_tap.clone()),
-            };
-            if let Some(second_tap) = &second_tap_for_final {
-                let (_, second_observed) = Self::tap_fact(plan, second_tap, false);
-                let valid_identity = matches!(
-                    second_observed,
-                    Some(GuestNetworkFact::Tap {
-                        name,
-                        ifindex: Some(observed_ifindex),
-                        link_kind: GuestLinkKind::Tap,
-                        persistent: true,
-                        owner_uid: Some(observed_owner),
-                        ..
-                    }) if name == plan.assignment().tap
-                        && observed_ifindex == tap_ifindex
-                        && observed_owner == overdrive_core::vm::config::OVERDRIVE_VMM_UID
-                );
-                if valid_identity {
-                    let second_master = match second_tap {
-                        GuestNetworkAllocationTapObservation::Persistent {
-                            master_ifindex, ..
-                        }
-                        | GuestNetworkAllocationTapObservation::Incompatible {
-                            master_ifindex,
-                            ..
-                        } => *master_ifindex,
-                        GuestNetworkAllocationTapObservation::Absent { .. } => None,
-                    };
-                    Self::ensure_master(tap_ifindex, bridge_ifindex, second_master.or(tap_master))?;
-                }
-            } else {
-                Self::ensure_master(tap_ifindex, bridge_ifindex, tap_master)?;
+            let (expected_second, observed_second) = Self::tap_fact(plan, &second_tap, false);
+            if observed_second.is_none()
+                || expected_second
+                    != observed_second.clone().unwrap_or_else(|| expected_second.clone())
+            {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected: expected_second,
+                    observed: observed_second,
+                });
             }
+            let second_tap_for_final = Some(second_tap.clone());
+            let second_master = match second_tap {
+                GuestNetworkAllocationTapObservation::Persistent { master_ifindex, .. } => {
+                    master_ifindex
+                }
+                GuestNetworkAllocationTapObservation::Incompatible { .. }
+                | GuestNetworkAllocationTapObservation::Absent { .. } => unreachable!(
+                    "tap_fact accepted only persistent TAP state at the down-TAP checkpoint"
+                ),
+            };
+            Self::ensure_master(tap_ifindex, bridge_ifindex, second_master.or(tap_master))?;
 
             self.allocation_io.insert_guard_member(plan).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
@@ -2826,6 +2876,39 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 source: std::io::Error::other(error.to_string()),
             })?;
         }
+        let guard_observation = overdrive_netlink::nft::bridge::observe(&guard, &BTreeSet::new())
+            .map_err(|error| GuestNetworkError::Io {
+            operation: GuestNetworkOperation::BridgeObserve,
+            source: std::io::Error::other(error.to_string()),
+        })?;
+        let (guard_exact, guard_rules, guard_member) = match guard_observation {
+            BridgeGuardObservation::Exact { inventory } => (
+                true,
+                inventory.rules.into_iter().map(|rule| rule.fact).collect(),
+                !inventory.members.is_empty(),
+            ),
+            BridgeGuardObservation::Absent { inventory }
+            | BridgeGuardObservation::Conflict { inventory } => (
+                false,
+                inventory.rules.into_iter().map(|rule| rule.fact).collect(),
+                !inventory.members.is_empty(),
+            ),
+        };
+        if !guard_exact {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::BridgeObserve,
+                expected: GuestNetworkFact::BridgeGuard {
+                    tap: String::new(),
+                    member: false,
+                    rules: guard.expected_rule_facts(),
+                },
+                observed: Some(GuestNetworkFact::BridgeGuard {
+                    tap: String::new(),
+                    member: guard_member,
+                    rules: guard_rules,
+                }),
+            });
+        }
         let endpoint_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints");
         let counter_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters");
         let capture = GuestTcxInventoryIdentity::capture(endpoint_pin.clone(), counter_pin.clone());
@@ -3156,13 +3239,13 @@ mod scratch_probe_acceptance {
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::InsertEndpoint),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::AttachLink),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::PinLink),
+        ScratchCall::Exercise(GuestNetworkProbeStage::Classifier),
+        ScratchCall::Exercise(GuestNetworkProbeStage::OriginalDestination),
         ScratchCall::CloseLoader,
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptEndpointMap),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptCounterMap),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptLink),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::QueryLink),
-        ScratchCall::Exercise(GuestNetworkProbeStage::Classifier),
-        ScratchCall::Exercise(GuestNetworkProbeStage::OriginalDestination),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::UnpinLink),
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::DetachLink),
         ScratchCall::Exercise(GuestNetworkProbeStage::DetachedLinkGuard),
@@ -3203,6 +3286,7 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A superseded D5 setup order"]
     async fn healthy_probe_uses_the_exact_setup_probe_cleanup_and_inventory_order() {
         let io = Arc::new(ScriptedScratchIo::default());
         HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
@@ -3216,6 +3300,7 @@ mod scratch_probe_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A superseded D5 failure order"]
     async fn every_setup_or_probe_failure_preserves_primary_and_still_runs_complete_cleanup() {
         for (index, fail) in SETUP_AND_PROBE
             .iter()
@@ -3241,6 +3326,15 @@ mod scratch_probe_acceptance {
             );
             let calls = io.calls();
             let failure_index = calls.iter().position(|call| *call == fail).expect("failed call");
+            let expected_failure_index = SETUP_AND_PROBE
+                .iter()
+                .position(|call| *call == fail)
+                .expect("failed call belongs to the exact D14A setup table");
+            assert_eq!(
+                &calls[..=failure_index],
+                &SETUP_AND_PROBE[..=expected_failure_index],
+                "case {index} follows the exercise-before-close order up to its failure"
+            );
             assert_eq!(calls.get(failure_index + 1), Some(&ScratchCall::CloseLoader));
             assert!(
                 calls.ends_with(&CLEANUP[1..]),
@@ -3352,6 +3446,734 @@ mod scratch_probe_acceptance {
             } if !matches!(*primary, GuestNetworkError::StartupProbeCleanup { .. })
                 && !matches!(*cleanup, GuestNetworkError::StartupProbeCleanup { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code, clippy::doc_markdown, clippy::expect_used, clippy::too_many_lines)]
+mod scratch_probe_packet_acceptance {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProbeTarget {
+        Peer,
+        Gateway,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum PacketProbeCall {
+        Netlink(GuestNetworkScratchNetlinkAction),
+        Tcx(GuestNetworkScratchTcxAction),
+        Probe(GuestNetworkProbeStage, ProbeTarget),
+        DetachedGuard,
+        CloseLoader,
+        LazyAdoptForCleanup,
+        ReleaseAdopted,
+        CountNetlink(GuestNetworkScratchNetlinkResource),
+        CountTcx(GuestNetworkScratchTcxResource),
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProbeFailure {
+        TypedSource,
+        Semantic,
+    }
+
+    #[derive(Debug, Default)]
+    struct PacketProbeScript {
+        calls: Vec<PacketProbeCall>,
+        failure: Option<(GuestNetworkProbeStage, ProbeFailure)>,
+        adopted: bool,
+        lazy_adopted: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct PacketProbeIo {
+        script: parking_lot::Mutex<PacketProbeScript>,
+    }
+
+    impl PacketProbeIo {
+        fn with_failure(stage: GuestNetworkProbeStage, failure: ProbeFailure) -> Arc<Self> {
+            Arc::new(Self {
+                script: parking_lot::Mutex::new(PacketProbeScript {
+                    failure: Some((stage, failure)),
+                    ..PacketProbeScript::default()
+                }),
+            })
+        }
+
+        fn calls(&self) -> Vec<PacketProbeCall> {
+            self.script.lock().calls.clone()
+        }
+
+        fn record(&self, call: PacketProbeCall) {
+            self.script.lock().calls.push(call);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SharedGuestNetworkScratchIo for PacketProbeIo {
+        async fn apply_netlink(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+            action: GuestNetworkScratchNetlinkAction,
+        ) -> std::result::Result<(), NetlinkError> {
+            self.record(PacketProbeCall::Netlink(action));
+            Ok(())
+        }
+
+        async fn apply_tcx(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+            action: GuestNetworkScratchTcxAction,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let mut script = self.script.lock();
+            if matches!(
+                action,
+                GuestNetworkScratchTcxAction::UnpinLink
+                    | GuestNetworkScratchTcxAction::UnpinCounterMap
+                    | GuestNetworkScratchTcxAction::UnpinEndpointMap
+            ) && !script.adopted
+                && !script.lazy_adopted
+            {
+                script.calls.push(PacketProbeCall::LazyAdoptForCleanup);
+                script.adopted = true;
+                script.lazy_adopted = true;
+            }
+            script.calls.push(PacketProbeCall::Tcx(action));
+            if matches!(
+                action,
+                GuestNetworkScratchTcxAction::AdoptEndpointMap
+                    | GuestNetworkScratchTcxAction::AdoptCounterMap
+                    | GuestNetworkScratchTcxAction::AdoptLink
+            ) {
+                script.adopted = true;
+            }
+            Ok(())
+        }
+
+        fn close_loader_handles(&self, _plan: &GuestNetworkScratchPlan) {
+            self.record(PacketProbeCall::CloseLoader);
+        }
+
+        fn release_adopted_handles(&self, _plan: &GuestNetworkScratchPlan) {
+            self.record(PacketProbeCall::ReleaseAdopted);
+        }
+
+        async fn exercise(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+            stage: GuestNetworkProbeStage,
+        ) -> std::io::Result<bool> {
+            if stage == GuestNetworkProbeStage::DetachedLinkGuard {
+                self.record(PacketProbeCall::DetachedGuard);
+                return Ok(true);
+            }
+            self.record(PacketProbeCall::Probe(stage, ProbeTarget::Peer));
+            self.record(PacketProbeCall::Probe(stage, ProbeTarget::Gateway));
+            match self.script.lock().failure {
+                Some((failed_stage, ProbeFailure::TypedSource)) if failed_stage == stage => {
+                    Err(std::io::Error::other(GuestTcxError::Io {
+                        source: std::io::Error::from_raw_os_error(libc::EREMOTEIO),
+                    }))
+                }
+                Some((failed_stage, ProbeFailure::Semantic)) if failed_stage == stage => Ok(false),
+                _ => Ok(true),
+            }
+        }
+
+        async fn count_netlink(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+            resource: GuestNetworkScratchNetlinkResource,
+        ) -> std::result::Result<u32, NetlinkError> {
+            self.record(PacketProbeCall::CountNetlink(resource));
+            Ok(0)
+        }
+
+        async fn count_tcx(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+            resource: GuestNetworkScratchTcxResource,
+        ) -> std::result::Result<u32, GuestTcxError> {
+            self.record(PacketProbeCall::CountTcx(resource));
+            Ok(0)
+        }
+    }
+
+    const SETUP: &[PacketProbeCall] = &[
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::ConvergeBridge),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::AttachTapToBridge),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::SetTapUp),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardTable),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardChain),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardSet),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardRules),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::InsertGuardMember),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::LoadProgramAndMaps),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::PinEndpointMap),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::PinCounterMap),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::InsertEndpoint),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::AttachLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::PinLink),
+    ];
+
+    const POST_PROBE: &[PacketProbeCall] = &[
+        PacketProbeCall::CloseLoader,
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::AdoptEndpointMap),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::AdoptCounterMap),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::AdoptLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::QueryLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::UnpinLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::DetachLink),
+        PacketProbeCall::DetachedGuard,
+    ];
+
+    const CLEANUP: &[PacketProbeCall] = &[
+        PacketProbeCall::CloseLoader,
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::DeleteEndpoint),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::UnpinLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::DetachLink),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::UnpinCounterMap),
+        PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::UnpinEndpointMap),
+        PacketProbeCall::ReleaseAdopted,
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::SetTapDown),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteTap),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteGuardMember),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteGuardRules),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteGuardSet),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteGuardChain),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteGuardTable),
+        PacketProbeCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteBridge),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::Bridge),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::Tap),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::BridgeGuardTable),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::BridgeGuardChain),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::BridgeGuardSet),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::BridgeGuardRule),
+        PacketProbeCall::CountNetlink(GuestNetworkScratchNetlinkResource::BridgeGuardMember),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::EndpointMap),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::CounterMap),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::EndpointEntry),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::TcxProgram),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::TcxLink),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::EndpointMapPin),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::CounterMapPin),
+        PacketProbeCall::CountTcx(GuestNetworkScratchTcxResource::TcxLinkPin),
+    ];
+
+    fn exact_probe_calls(stage: GuestNetworkProbeStage) -> [PacketProbeCall; 2] {
+        [
+            PacketProbeCall::Probe(stage, ProbeTarget::Peer),
+            PacketProbeCall::Probe(stage, ProbeTarget::Gateway),
+        ]
+    }
+
+    fn cleanup_after_preclose_failure() -> Vec<PacketProbeCall> {
+        let mut cleanup = CLEANUP.to_vec();
+        cleanup.insert(2, PacketProbeCall::LazyAdoptForCleanup);
+        cleanup
+    }
+
+    fn d14_expected_input() -> GuestTcxTcpProbeInput {
+        GuestTcxTcpProbeInput {
+            ingress_ifindex: 295,
+            source_ipv4: Ipv4Addr::new(100, 95, 255, 254),
+            source_mac: [0x02, 0x00, 100, 95, 255, 254],
+            bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+            destination_mac: [0x02, 0x00, 100, 95, 255, 253],
+            original_destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 253), 8443),
+        }
+    }
+
+    fn d14_counter_order() -> [GuestTcxCounter; 8] {
+        [
+            GuestTcxCounter::GatewayHostPass,
+            GuestTcxCounter::Intercept,
+            GuestTcxCounter::EndpointMapMiss,
+            GuestTcxCounter::SourceMacSpoof,
+            GuestTcxCounter::SourceIpArpSpoof,
+            GuestTcxCounter::DirectBypassDrop,
+            GuestTcxCounter::ArpPass,
+            GuestTcxCounter::MalformedDrop,
+        ]
+    }
+
+    fn d14_valid_observation() -> GuestNetworkTcpProbeObservation {
+        let counters = d14_counter_order();
+        GuestNetworkTcpProbeObservation {
+            verdict: GuestTcxProbeVerdict::Accept,
+            mark: GuestTcxProbeMark::Intercept,
+            source_mac: Some([0x02, 0x00, 100, 95, 255, 254]),
+            destination_mac: Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC),
+            original_destination: Some(SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 253), 8443)),
+            counters: std::array::from_fn(|index| GuestTcxProbeCounterObservation {
+                counter: counters[index],
+                before: u64::try_from(100 + index).expect("small finite table index"),
+                after: u64::try_from(100 + index).expect("small finite table index")
+                    + u64::from(counters[index] == GuestTcxCounter::Intercept),
+            }),
+        }
+    }
+
+    fn assert_d14_mismatch(
+        observed: GuestNetworkTcpProbeObservation,
+        requirement: GuestNetworkTcpProbeRequirement,
+        expected_mismatch: GuestNetworkTcpProbeMismatch,
+    ) {
+        assert_eq!(
+            validate_guest_tcx_tcp_probe(requirement, &d14_expected_input(), Ok(observed))
+                .expect("semantic mismatch is not fabricated as I/O"),
+            GuestNetworkTcpProbeValidation::Mismatch(expected_mismatch)
+        );
+    }
+
+    /// S-ND295-00 — D14A's production validator exposes every mismatch and lower source.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::too_many_lines, reason = "one finite D14A mismatch table is audited intact")]
+    #[test]
+    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A production validator"]
+    fn every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator() {
+        let expected = d14_expected_input();
+        let valid = d14_valid_observation();
+        assert_eq!(
+            validate_guest_tcx_tcp_probe(
+                GuestNetworkTcpProbeRequirement::OriginalDestination,
+                &expected,
+                Ok(valid.clone()),
+            )
+            .expect("valid semantic observation"),
+            GuestNetworkTcpProbeValidation::Passed { intercept_before: 101, intercept_after: 102 }
+        );
+
+        let mut classifier_ignores_original_destination = valid.clone();
+        classifier_ignores_original_destination.original_destination = None;
+        assert!(matches!(
+            validate_guest_tcx_tcp_probe(
+                GuestNetworkTcpProbeRequirement::Classifier,
+                &expected,
+                Ok(classifier_ignores_original_destination),
+            ),
+            Ok(GuestNetworkTcpProbeValidation::Passed { .. })
+        ));
+
+        let mut all_wrong = valid.clone();
+        all_wrong.verdict = GuestTcxProbeVerdict::Drop;
+        all_wrong.mark = GuestTcxProbeMark::Accepted;
+        all_wrong.source_mac = None;
+        assert_d14_mismatch(
+            all_wrong,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::Verdict { observed: GuestTcxProbeVerdict::Drop },
+        );
+
+        for observed in [GuestTcxProbeVerdict::Drop, GuestTcxProbeVerdict::Unexpected] {
+            let mut wrong = valid.clone();
+            wrong.verdict = observed;
+            assert_d14_mismatch(
+                wrong,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::Verdict { observed },
+            );
+        }
+
+        for observed in
+            [GuestTcxProbeMark::None, GuestTcxProbeMark::Accepted, GuestTcxProbeMark::Unexpected]
+        {
+            let mut wrong = valid.clone();
+            wrong.mark = observed;
+            assert_d14_mismatch(
+                wrong,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::Mark { observed },
+            );
+        }
+
+        for observed in [None, Some([0x02, 0, 1, 2, 3, 4])] {
+            let mut wrong = valid.clone();
+            wrong.source_mac = observed;
+            assert_d14_mismatch(
+                wrong,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::SourceMac { expected: expected.source_mac, observed },
+            );
+        }
+        for observed in [None, Some([0x02, 0, 4, 3, 2, 1])] {
+            let mut wrong = valid.clone();
+            wrong.destination_mac = observed;
+            assert_d14_mismatch(
+                wrong,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::DestinationMac {
+                    expected: expected.bridge_mac,
+                    observed,
+                },
+            );
+        }
+        for observed in [
+            None,
+            Some(SocketAddrV4::new(
+                Ipv4Addr::new(100, 95, 255, 252),
+                expected.original_destination.port(),
+            )),
+            Some(SocketAddrV4::new(
+                *expected.original_destination.ip(),
+                expected.original_destination.port() + 1,
+            )),
+            Some(SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 252), 9443)),
+        ] {
+            let mut wrong = valid.clone();
+            wrong.original_destination = observed;
+            assert_d14_mismatch(
+                wrong,
+                GuestNetworkTcpProbeRequirement::OriginalDestination,
+                GuestNetworkTcpProbeMismatch::OriginalDestination {
+                    expected: expected.original_destination,
+                    observed,
+                },
+            );
+        }
+
+        let counter_order = d14_counter_order();
+        let mut permuted_identity = valid.clone();
+        let mut permutation = counter_order;
+        permutation.rotate_left(1);
+        for (observation, counter) in permuted_identity.counters.iter_mut().zip(permutation) {
+            observation.counter = counter;
+        }
+        assert_d14_mismatch(
+            permuted_identity,
+            GuestNetworkTcpProbeRequirement::Classifier,
+            GuestNetworkTcpProbeMismatch::CounterIdentity {
+                index: 0,
+                expected: counter_order[0],
+                observed: counter_order[1],
+            },
+        );
+
+        for index in 0..8 {
+            let mut wrong_identity = valid.clone();
+            let observed = counter_order[(index + 1) % counter_order.len()];
+            wrong_identity.counters[index].counter = observed;
+            assert_d14_mismatch(
+                wrong_identity,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::CounterIdentity {
+                    index: u8::try_from(index).expect("finite counter index"),
+                    expected: counter_order[index],
+                    observed,
+                },
+            );
+
+            let mut wrong_delta = valid.clone();
+            let expected_delta = u64::from(counter_order[index] == GuestTcxCounter::Intercept);
+            let observed_delta = expected_delta + 1;
+            wrong_delta.counters[index].after = wrong_delta.counters[index].before + observed_delta;
+            assert_d14_mismatch(
+                wrong_delta,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::CounterDelta {
+                    counter: counter_order[index],
+                    expected: expected_delta,
+                    observed: observed_delta,
+                },
+            );
+
+            for (before, after) in [(9, 8), (u64::MAX, 0)] {
+                let mut decrease = valid.clone();
+                decrease.counters[index].before = before;
+                decrease.counters[index].after = after;
+                assert_d14_mismatch(
+                    decrease,
+                    GuestNetworkTcpProbeRequirement::Classifier,
+                    GuestNetworkTcpProbeMismatch::CounterDecrease {
+                        counter: counter_order[index],
+                        before,
+                        after,
+                    },
+                );
+            }
+        }
+
+        let mut unchanged_intercept = valid.clone();
+        unchanged_intercept.counters[1].after = unchanged_intercept.counters[1].before;
+        assert_d14_mismatch(
+            unchanged_intercept,
+            GuestNetworkTcpProbeRequirement::Classifier,
+            GuestNetworkTcpProbeMismatch::CounterDelta {
+                counter: GuestTcxCounter::Intercept,
+                expected: 1,
+                observed: 0,
+            },
+        );
+
+        let mut verdict_before_mark = valid.clone();
+        verdict_before_mark.verdict = GuestTcxProbeVerdict::Unexpected;
+        verdict_before_mark.mark = GuestTcxProbeMark::None;
+        assert_d14_mismatch(
+            verdict_before_mark,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::Verdict { observed: GuestTcxProbeVerdict::Unexpected },
+        );
+
+        let mut mark_before_source = valid.clone();
+        mark_before_source.mark = GuestTcxProbeMark::Accepted;
+        mark_before_source.source_mac = None;
+        assert_d14_mismatch(
+            mark_before_source,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::Mark { observed: GuestTcxProbeMark::Accepted },
+        );
+
+        let mut source_before_destination = valid.clone();
+        source_before_destination.source_mac = None;
+        source_before_destination.destination_mac = None;
+        assert_d14_mismatch(
+            source_before_destination,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::SourceMac {
+                expected: expected.source_mac,
+                observed: None,
+            },
+        );
+
+        let wrong_ip_same_port = SocketAddrV4::new(
+            Ipv4Addr::new(100, 95, 255, 252),
+            expected.original_destination.port(),
+        );
+        let mut destination_before_original = valid.clone();
+        destination_before_original.destination_mac = None;
+        destination_before_original.original_destination = Some(wrong_ip_same_port);
+        assert_d14_mismatch(
+            destination_before_original,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::DestinationMac {
+                expected: expected.bridge_mac,
+                observed: None,
+            },
+        );
+
+        let mut classifier_destination_before_counter = valid.clone();
+        classifier_destination_before_counter.destination_mac = None;
+        classifier_destination_before_counter.counters[0].counter = counter_order[1];
+        assert_d14_mismatch(
+            classifier_destination_before_counter,
+            GuestNetworkTcpProbeRequirement::Classifier,
+            GuestNetworkTcpProbeMismatch::DestinationMac {
+                expected: expected.bridge_mac,
+                observed: None,
+            },
+        );
+
+        let mut original_before_counters = valid.clone();
+        original_before_counters.original_destination = Some(wrong_ip_same_port);
+        original_before_counters.counters[0].counter = counter_order[1];
+        assert_d14_mismatch(
+            original_before_counters,
+            GuestNetworkTcpProbeRequirement::OriginalDestination,
+            GuestNetworkTcpProbeMismatch::OriginalDestination {
+                expected: expected.original_destination,
+                observed: Some(wrong_ip_same_port),
+            },
+        );
+
+        for index in 0..7 {
+            let lower_counter = counter_order[index];
+            let expected_delta = u64::from(lower_counter == GuestTcxCounter::Intercept);
+            let observed_delta = expected_delta + 1;
+            let mut lower_record_before_next_identity = valid.clone();
+            lower_record_before_next_identity.counters[index].after =
+                lower_record_before_next_identity.counters[index].before + observed_delta;
+            lower_record_before_next_identity.counters[index + 1].counter =
+                counter_order[(index + 2) % counter_order.len()];
+            assert_d14_mismatch(
+                lower_record_before_next_identity,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::CounterDelta {
+                    counter: lower_counter,
+                    expected: expected_delta,
+                    observed: observed_delta,
+                },
+            );
+        }
+
+        for index in 0..8 {
+            let counter = counter_order[index];
+            let observed_identity = counter_order[(index + 1) % counter_order.len()];
+            let mut identity_before_decrease = valid.clone();
+            identity_before_decrease.counters[index].counter = observed_identity;
+            identity_before_decrease.counters[index].before = 9;
+            identity_before_decrease.counters[index].after = 8;
+            assert_d14_mismatch(
+                identity_before_decrease,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::CounterIdentity {
+                    index: u8::try_from(index).expect("finite counter index"),
+                    expected: counter,
+                    observed: observed_identity,
+                },
+            );
+
+            let mut decrease_before_delta = valid.clone();
+            decrease_before_delta.counters[index].before = u64::MAX;
+            decrease_before_delta.counters[index].after = 0;
+            assert_d14_mismatch(
+                decrease_before_delta,
+                GuestNetworkTcpProbeRequirement::Classifier,
+                GuestNetworkTcpProbeMismatch::CounterDecrease {
+                    counter,
+                    before: u64::MAX,
+                    after: 0,
+                },
+            );
+        }
+
+        let mut intercept_decrease_before_wrapping_delta = valid;
+        intercept_decrease_before_wrapping_delta.counters[1].before = u64::MAX;
+        intercept_decrease_before_wrapping_delta.counters[1].after = 1;
+        assert_eq!(1_u64.wrapping_sub(u64::MAX), 2);
+        assert_d14_mismatch(
+            intercept_decrease_before_wrapping_delta,
+            GuestNetworkTcpProbeRequirement::Classifier,
+            GuestNetworkTcpProbeMismatch::CounterDecrease {
+                counter: GuestTcxCounter::Intercept,
+                before: u64::MAX,
+                after: 1,
+            },
+        );
+
+        let error = validate_guest_tcx_tcp_probe(
+            GuestNetworkTcpProbeRequirement::Classifier,
+            &expected,
+            Err(GuestTcxError::Io { source: std::io::Error::from_raw_os_error(libc::EREMOTEIO) }),
+        )
+        .expect_err("lower dataplane source remains an I/O error");
+        let typed = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<GuestTcxError>())
+            .expect("GuestTcxError remains downcastable");
+        assert!(matches!(
+            typed,
+            GuestTcxError::Io { source }
+                if source.raw_os_error() == Some(libc::EREMOTEIO)
+        ));
+    }
+
+    /// S-ND295-00 — D14A probes twice per stage before close and cleanup remains complete.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A probe order and lazy cleanup"]
+    async fn classifier_runs_precede_close_and_each_stage_is_fresh() {
+        let io = Arc::new(PacketProbeIo::default());
+        HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
+            .probe_startup()
+            .await
+            .expect("four fresh classifier observations and distinct detached guard succeed");
+        let calls = io.calls();
+        let classifier = exact_probe_calls(GuestNetworkProbeStage::Classifier);
+        let original = exact_probe_calls(GuestNetworkProbeStage::OriginalDestination);
+        let classifier_index = calls
+            .iter()
+            .position(|call| *call == classifier[0])
+            .expect("classifier peer probe is mandatory");
+        let close_index = calls
+            .iter()
+            .position(|call| *call == PacketProbeCall::CloseLoader)
+            .expect("normal loader close is mandatory");
+        assert!(
+            classifier_index < close_index,
+            "D14 classifier exercise must precede normal loader closure"
+        );
+
+        let mut expected = SETUP.to_vec();
+        expected.extend(classifier);
+        expected.extend(original);
+        expected.extend_from_slice(POST_PROBE);
+        expected.extend_from_slice(CLEANUP);
+        assert_eq!(calls, expected);
+        let detach_index = calls
+            .iter()
+            .position(|call| {
+                *call == PacketProbeCall::Tcx(GuestNetworkScratchTcxAction::DetachLink)
+            })
+            .expect("exact TCX detach");
+        let guard_index = calls
+            .iter()
+            .position(|call| *call == PacketProbeCall::DetachedGuard)
+            .expect("detached D9 guard stage");
+        assert!(detach_index < guard_index, "D9 guard evidence stays after exact TCX detach");
+
+        for stage in
+            [GuestNetworkProbeStage::Classifier, GuestNetworkProbeStage::OriginalDestination]
+        {
+            for failure in [ProbeFailure::TypedSource, ProbeFailure::Semantic] {
+                let io = PacketProbeIo::with_failure(stage, failure);
+                let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
+                    .probe_startup()
+                    .await
+                    .expect_err("a wrong or missing D14 result never fabricates startup success");
+                match failure {
+                    ProbeFailure::TypedSource => {
+                        let GuestNetworkError::Io {
+                            operation: GuestNetworkOperation::StartupProbe,
+                            source,
+                        } = error
+                        else {
+                            panic!("typed probe source must remain the StartupProbe I/O primary");
+                        };
+                        let typed = source
+                            .get_ref()
+                            .and_then(|source| source.downcast_ref::<GuestTcxError>())
+                            .expect("typed GuestTcxError source remains downcastable");
+                        assert!(matches!(
+                            typed,
+                            GuestTcxError::Io { source }
+                                if source.raw_os_error() == Some(libc::EREMOTEIO)
+                        ));
+                    }
+                    ProbeFailure::Semantic => assert!(matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::StartupProbe,
+                            expected: GuestNetworkFact::StartupProbe {
+                                stage: expected_stage,
+                                passed: true,
+                            },
+                            observed: Some(GuestNetworkFact::StartupProbe {
+                                stage: observed_stage,
+                                passed: false,
+                            }),
+                        } if expected_stage == stage && observed_stage == stage
+                    )),
+                }
+
+                let failure_marker = PacketProbeCall::Probe(stage, ProbeTarget::Gateway);
+                let calls = io.calls();
+                let failure_index = calls
+                    .iter()
+                    .position(|call| *call == failure_marker)
+                    .expect("both peer and gateway observations run fresh before failure");
+                let cleanup_start = calls
+                    .iter()
+                    .enumerate()
+                    .skip(failure_index + 1)
+                    .find_map(|(index, call)| {
+                        (*call == PacketProbeCall::CloseLoader).then_some(index)
+                    })
+                    .expect("cleanup closes the live loader first");
+                assert_eq!(&calls[cleanup_start..], cleanup_after_preclose_failure());
+                assert_eq!(
+                    calls
+                        .iter()
+                        .filter(|call| **call == PacketProbeCall::LazyAdoptForCleanup)
+                        .count(),
+                    1,
+                    "the first unpin lazily creates exactly one handle-free adopted state"
+                );
+                assert!(!calls.contains(&PacketProbeCall::DetachedGuard));
+            }
+        }
     }
 }
 

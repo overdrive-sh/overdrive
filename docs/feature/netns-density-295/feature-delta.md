@@ -48,11 +48,17 @@ TCX mutation/query boundary, the worker-private registration-capability state
 machine, and the control-plane-private retained supervisor/DNS task owners.
 They add no public product command, persistence, daemon, HA owner, process/PID
 acceptance test, or expectation.
-**DISTILL status:** cumulative D12, its private inventory source, D12A, and
-D13's ordering-honest Sim oracle passed bounded DESIGN review iteration 6;
-P02-07/08 are closed. The non-waived S00/S11/S12/S13 source-local/Sim bodies
-are authored, have completed the bounded iteration-2 corrections, and completed
-independent iteration-3 re-review. The eight
+**DISTILL status:** cumulative D12, its private inventory source, D12A,
+and D13's ordering-honest Sim oracle passed bounded DESIGN review iteration 6;
+P02-07/08 are closed. The pre-D14 non-waived S00/S11/S12/S13 source-local/Sim
+bodies are authored, have completed the bounded iteration-2 corrections, and
+completed independent iteration-3 re-review. D14 is independently APPROVED by
+phase-02 DESIGN review iteration 7; its pre-D14A three S00 projection,
+owner-order, and real-kernel boot bodies were authored reasoned-pending, but
+iteration-8 translation review found the bounded validator/deterministic-
+observation/serialization gaps closed by independently approved D14A at
+phase-02 DESIGN review iteration 9. The four exact transitioned S00 bodies are
+authored reasoned-pending and await independent DISTILL review. The eight
 real-I/O panic placeholders are user-waived and not scored by this bounded
 gate. D-295-DISTILL-1
 through D-295-DISTILL-9 are independently approved; D9 was approved at review
@@ -82,9 +88,29 @@ kill method, or gate accessor.
 API/order/telemetry plus Sim RED oracle are APPROVED through phase-02 DESIGN
 review iteration 6.** Ownership remains one real control-plane owner; no public
 product hook or second adapter owner is added. The required S-ND295-00/10/11/
-12/13 RED bodies are authored, have completed bounded iteration-2 review
-corrections, and completed independent DISTILL iteration-3 re-review. DELIVER
-remains unauthorized while later wave validation is pending.
+12/13 RED bodies for that pre-D14 scope are authored, have completed bounded
+iteration-2 review corrections, and completed independent DISTILL iteration-3
+re-review. DELIVER remains unauthorized while later wave validation is
+pending.
+**D-295-DISTILL-14 is APPROVED by phase-02 DESIGN review iteration 7 on
+2026-09-21.** It adds one doc-hidden semantic TCP
+classifier probe method on the existing opaque `GuestTcxProgram`, keeps its raw
+packet/SKB/BPF syscall/FD/numeric ABI private to dataplane, and assigns the
+unlike detached-link guard proof to the existing private real D5 host adapter
+over D9 observation plus the scratch TAP. D12/D12A/D13 ownership, existing
+methods, source taxonomy, and dependency direction remain unchanged. The
+matching DELIVER roadmap remains `validation.status = pending`; step `02-01`
+may not resume until the revised DISTILL evidence and roadmap are independently
+approved.
+**D-295-DISTILL-14A is APPROVED by phase-02 DESIGN review iteration 9 on
+2026-09-21.** It keeps
+D14's approved cross-crate API byte-for-byte, adds one production-used
+control-plane-private semantic validator, replaces the racy scratch-resource
+monitor with non-persisted structured completion events captured across
+ordinary `run_server`, and requires the existing cross-process
+`host-kernel-shared` nextest group. It adds no public constructor, port, hook,
+state accessor, timing seam, persistence, or second owner. Roadmap validation
+remains pending.
 **Documentation density:** `lean` (`expansion_prompt=ask-intelligent`,
 `provenance=explicit_override`). Only Tier-1 `[REF]` sections are emitted in
 this feature delta. The Level-3 SSOT diagram is the solution-architect role's
@@ -667,7 +693,7 @@ graph; purity alone does not move an application-owner contract into core.
 | `overdrive-core::vm::config` | `VmNetworkAttachment`, because it is the core `Vmm` configuration handoff consumed by the host adapter. |
 | `overdrive-core::dataplane` | `GUEST_BRIDGE_MAC`, a pure cross-crate constant used by classifier facts and bridge convergence. |
 | `overdrive-control-plane::guest_network` | `GuestNetworkPlan`, `GuestNetworkProvisioner`, `SharedGuestNetworkOwner`, `SharedGuestNetworkAuditError`, `GuestNetworkProbeStage`, `GuestNetworkScratchCount`, `GuestNetworkScratchComplement`, `GuestNetworkOperation`, `GuestNetworkFact`, `GuestLinkKind`, `GuestBpfMapKind`, `GuestEndpointFact`, `GuestNetworkError`, and the guest-network `Result` alias. The private address pool, private host owner/constructor, module-private scratch plan/action/resource/I/O boundary, and D12A's module-private allocation observation/I/O boundary stay in this crate. |
-| `overdrive-dataplane::guest_tcx` | `TcxAttachPoint`, `GuestTcxAttachment`, `GuestTcxCounter`, `GuestTcxObject`, `GuestTcxEndpoint`, semantic map kind/key/value/capacity shapes with opaque unsupported tokens, `GuestTcxMapSchema`, `GuestTcxInventoryFamily`, `GuestTcxInventoryCapture`, `GuestTcxInventoryIdentity`, `GuestTcxError`, the opaque doc-hidden `GuestTcxProgram`/`GuestTcxLink`/`GuestTcxAdoptedState` lifecycle types, the exhaustive aya-to-semantic attach-point conversion, and D6's exact five doc-hidden query/detach/endpoint/counter functions. Raw aya types, numeric map ABI, inventory map/link ownership IDs and FDs, enumeration records, and the private endpoint/counter layout terminate here; D6's already-approved semantic `program_ids` projection is unchanged. The later D-295-DISTILL-12 fence below is the exact lifecycle and inventory surface; it adds no trait or generic command method. |
+| `overdrive-dataplane::guest_tcx` | `TcxAttachPoint`, `GuestTcxAttachment`, `GuestTcxCounter`, `GuestTcxObject`, `GuestTcxEndpoint`, semantic map kind/key/value/capacity shapes with opaque unsupported tokens, `GuestTcxMapSchema`, `GuestTcxInventoryFamily`, `GuestTcxInventoryCapture`, `GuestTcxInventoryIdentity`, `GuestTcxError`, the opaque doc-hidden `GuestTcxProgram`/`GuestTcxLink`/`GuestTcxAdoptedState` lifecycle types, D14's doc-hidden semantic TCP-probe input/outcome values and one `GuestTcxProgram::probe_tcp_intercept` method, the exhaustive aya-to-semantic attach-point conversion, and D6's exact five doc-hidden query/detach/endpoint/counter functions. Raw packets, SKB context, BPF syscall command/attribute layout, program/map FDs, TC action and counter-slot numbers, raw aya types, inventory map/link ownership IDs, enumeration records, and the private endpoint/counter layout terminate here; D6's already-approved semantic `program_ids` projection is unchanged. D12/D14 add no trait, generic command method, raw-FD accessor, or free packet operation. |
 | `overdrive-netlink::nft::bridge` | `BridgeGuardSpec`, semantic table/chain/set/rule/member/other-child observation facts, mutation/delete outcomes, and typed observe/converge/member/delete operations. The shared private nft codec owns `NftFamily`; every existing public IP operation remains unchanged. |
 | `overdrive-worker::mtls_intercept_worker` | The module-private `RegistrationGeneration`, capability key/value/lifecycle/elements, registry, Pending/claim/retirement/drain RAII values, and publish disposition. Public worker methods remain unchanged. |
 | `overdrive-control-plane` server composition | The module-private `SharedNetworkSupervisorHandle`, `DnsServeTaskOwner`, DNS exit vocabulary, and existing private supervisor error. `ServerHandle::shutdown_requested` remains the sole public wait surface. |
@@ -2149,25 +2175,35 @@ only to source-local tests in the same module; integration tests,
 `overdrive-sim`, and downstream crates cannot name the effect trait or replace
 the host algorithm.
 
-The owner algorithm is fixed:
+The owner algorithm is fixed. D14 explicitly supersedes the pre-D14 sequence
+“close loader → adopt/query → exercise classifier/original destination.” The
+only normative sequence is the numbered exercise-before-close order below;
+DISTILL must transition existing D5 call-order tables rather than retain both
+orders as alternatives:
 
 1. Construct one isolated scratch plan.
 2. Apply bridge, TAP, guard table/chain/set/rules/member, TCX program/maps,
    map pins, endpoint, link, and link-pin setup in that order.
-3. Close the loader handles, adopt both map pins and the link pin, and query the
-   exact link/program/ifindex attachment.
-4. Exercise `Classifier` and `OriginalDestination`.
-5. Unpin and detach the TCX link, then exercise `DetachedLinkGuard` while the
-   endpoint and guard still exist.
+3. Exercise `Classifier` and `OriginalDestination` through D14 while the
+   existing opaque `GuestTcxProgram` still owns the loaded classifier and both
+   typed maps. Both stages cover peer-MAC and gateway-MAC TCP; the exact link
+   has already been attached and pinned, so the program-id receipt binds these
+   semantic runs to the link adopted in the next step.
+4. Close the loader handles, adopt both map pins and the link pin, and query the
+   exact link/program/ifindex attachment. The query must equal the program id
+   retained before the D14 exercise; classifier success never substitutes for
+   pin survival/adoption/query.
+5. Unpin and detach the TCX link, then exercise `DetachedLinkGuard` through the
+   private real host adapter while the endpoint and exact D9 guard still exist.
 6. On success or the first primary failure, attempt the complete safe reverse
    cleanup in this exact order: unconditionally call `close_loader_handles`;
    delete the endpoint; unpin then detach the TCX link; unpin the counter and
    endpoint maps; release adopted handles; set the TAP down; delete the TAP
    while guard membership still exists; delete guard membership, rules, set,
    chain, and table; then delete the bridge. This cleanup-phase loader close
-   runs even when setup failed before the normal step-3 close, including every
+   runs even when setup failed before the normal step-4 close, including every
    failure after `LoadProgramAndMaps` but before normal loader closure. On paths
-   that reached step 3 it repeats idempotently. The link unpin/detach calls also
+   that reached step 4 it repeats idempotently. The link unpin/detach calls also
    repeat absence-idempotently after the deliberate-loss stage. Every cleanup
    action is absence-idempotent. Cleanup continues after failure while
    retaining the first direct cleanup source. Because loader close is
@@ -2188,8 +2224,12 @@ The owner algorithm is fixed:
 The direct source mapping is structural: `apply_netlink`/`count_netlink` map to
 `GuestNetworkError::Netlink`, `apply_tcx`/`count_tcx` map to
 `GuestNetworkError::Tcx`, and `exercise` transport failure maps to
-`GuestNetworkError::Io`. `exercise == Ok(false)` maps only to the existing
-stage-specific `PostconditionMismatch`.
+`GuestNetworkError::Io`. Under D14, the real exercise adapter wraps a
+`GuestTcxError` or `BridgeGuardError` only with `std::io::Error::other(error)`,
+never `error.to_string()`, so its complete typed source chain remains
+inspectable beneath the accepted `Io { operation: StartupProbe }` leaf.
+`exercise == Ok(false)` maps only to the existing stage-specific
+`PostconditionMismatch`.
 
 The test split is equally binding:
 
@@ -2198,7 +2238,7 @@ The test split is equally binding:
   setup/probe leaf failure, every cleanup leaf failure, every observation
   failure, semantic residue, success, call order, continuation, and optional-
   primary case. The call-order matrix includes a primary failure after every
-  fallible setup action. For failures before normal step-3 handle closure it
+  fallible setup action. For failures before normal step-4 handle closure it
   proves the cleanup-phase `close_loader_handles` occurs before the first
   fallible cleanup action and before all fifteen inventory calls. For paths
   that reached normal handle closure it proves the second cleanup-phase close
@@ -3979,7 +4019,7 @@ the same roots exactly as already accepted.
 | Technology | Proposed use | Version/evidence | License posture |
 |---|---|---|---|
 | Linux bridge + TAP | Node-local shared L2 and one workload port per VM | Parts A-D proved the bounded same-node mechanism on 7.0.0-29 native metal, not the pinned 6.18 baseline. | Existing pinned Linux substrate, GPL-2.0-only; no new dependency. |
-| aya-rs SCHED_CLS + TCX | Primary per-TAP endpoint classification, source validation, counters, proof marks; raw attach/error types terminate in `overdrive-dataplane::guest_tcx` | **User-approved mechanism; cumulative D12/private projection/D12A approved through phase-02 DESIGN review iteration 6.** aya 0.13.1 / aya-ebpf 0.1.1; Part C measured 296 verified instructions and proved high-level attach/pin/adopt/query/remove. D6 retains its exact five functions; D12 owns semantic projections and opaque lifecycle/inventory; the private raw source and D12A expose no raw value across crates. | MIT OR Apache-2.0; already locked. |
+| aya-rs SCHED_CLS + TCX | Primary per-TAP endpoint classification, source validation, counters, proof marks; raw attach/error types terminate in `overdrive-dataplane::guest_tcx` | **User-approved mechanism; cumulative D12/private projection/D12A approved through phase-02 DESIGN review iteration 6; D14 semantic boot-probe amendment approved at iteration 7.** aya 0.13.1 / aya-ebpf 0.1.1; Part C measured 296 verified instructions and proved high-level attach/pin/adopt/query/remove. D6 retains its exact five functions; D12 owns semantic projections and opaque lifecycle/inventory; D14 adds one closed method on that opaque program while raw packet/SKB/test-run/FD/numeric ABI stays private. | MIT OR Apache-2.0; already locked. |
 | nftables bridge family | Minimum managed-TAP/proof-mark fail-closed guard only | Three ordered rules + one ifname set; no duplicated endpoint classification. This guard is approved but not Part-C-executed. | Existing Linux netfilter substrate; no new userspace dependency. |
 | nftables IP family | Eight constant rules over managed-IP, source-IP, and destination-IP/TCP-port sets | PORT-295-C approved. TPROXY/output plus unmatched-intercept/managed-destination drops; per-allocation/per-port rules are deleted. Part C did not exercise this final population. | Existing Linux netfilter substrate; no new userspace dependency. |
 | `rtnetlink` / `overdrive-netlink` | Subprocess-free bridge/TAP/address/link convergence | Workspace `rtnetlink 0.23.0`; extend existing adapter. | MIT; already locked. |
@@ -4023,9 +4063,9 @@ and one leg C for Overdrive's current TCP mTLS path.
 |---|---|
 | TCX support/load/verifier | **New shared-switch probe is required on pinned 6.18.** Load the production SCHED_CLS object, record verified instructions against a same-kernel baseline, and refuse boot on unsupported TCX or verifier/load failure. Part C's 296 count on 7.0 is evidence, not the cross-kernel baseline. |
 | TCX attach/pin/adopt/query/detach | The startup probe attaches to a scratch TAP with first ordering, pins, closes the loader, reopens the pin, queries exact program/ifindex, unpins/detaches, and proves zero residual attachment. Part C executed this sequence successfully; production repeats it through the production owner. |
-| Endpoint-map verdicts | Inject passing and failing scratch frames through the production classifier: accepted gateway traffic, intercept/local delivery/orig-dst, map miss, MAC spoof, IP spoof, malformed, and direct-bypass drop. For ARP, prove one valid request and reply plus Ethernet-source/ARP-SHA mismatch, sender-IP mismatch, wrong htype/ptype/hlen/plen/opcode, and every executable post-Ethernet truncation length 14..41. Exercise IPv4/L4 truncation only after the full Ethernet+IPv4 header at lengths 34..37. The SKB runner makes no claim for kernel-rejected 0..13-byte Ethernet frames. Assert the exact single counter and `TC_ACT_SHOT`/accepted mark for each, paired with external peer-TAP/host no-escape capture. Part C did not exercise this complete runnable partition. |
+| Endpoint-map verdicts | D14 makes the production boot boundary explicit: the existing opaque program runs fresh peer-MAC and gateway-MAC TCP cases through its private context-aware test-run path, returning only semantic verdict/mark/MAC/original-destination/eight-counter observations; raw bytes/FD/ABI do not cross crates. S08/09 independently inject the complete passing/failing population through the production classifier: accepted gateway traffic, intercept/local delivery/orig-dst, map miss, MAC spoof, IP spoof, malformed, direct-bypass, valid ARP request/reply, Ethernet-source/ARP-SHA mismatch, sender-IP mismatch, wrong htype/ptype/hlen/plen/opcode, every executable post-Ethernet truncation 14..41, and IPv4/L4 truncation 34..37. The SKB runner makes no claim for kernel-rejected 0..13-byte frames. Exact counters/verdicts/marks pair with external no-escape evidence. |
 | Bridge MAC ownership | Boot with absent, correct, and wrong-MAC bridge states. Prove only bridge-kind adoption, exact fixed-MAC convergence before up/TAP attach, gateway-prefix read-back, and every endpoint value's bridge MAC equality. Runtime mutate bridge MAC and one endpoint value independently; RUN must close EXEC/down TAPs, repair both to the constant, verify the full registered set, then reopen. Assert constant local-admin/unicast bits and disjointness from every derived guest MAC. |
-| Deliberate/missing TCX link | With the scratch TAP still in `managed_taps`, detach TCX and inject a valid frame. The bridge proof-mark guard must drop it and its counter must advance; no packet may reach peer TAP or host IP. This is the new evidence Part C deliberately did not provide. |
+| Deliberate/missing TCX link | D14 pins the startup layer: with the isolated scratch TAP still in `managed_taps`, detach TCX, write one uniquely identifiable valid frame through the TAP queue, require exact D9 default-drop packet delta one/positive byte delta, unchanged classifier counters, and no host UDP delivery. S10 separately proves peer-TAP plus host no-escape and exact audit cause on the ordinary production attachment. BPF test-run cannot substitute for either real guard traversal. |
 | Bridge guard ownership/cleanup | The same probe proves only `0x295a` and `0x295b` pass, accepted mark clears, unknown/unmarked managed traffic drops, and add/use/delete leaves an empty complement. It must not duplicate source/IP/protocol classification. |
 | Pinned-link self-application | Boot and teardown query actual TCX attachments rather than trusting pins alone. A defunct/missing/wrong-target pin refuses adoption or is removed while the bridge guard stays active. Cilium's pin/update/query lifecycle is corroborating precedent, not evidence for Overdrive's guard. |
 | TLS 1.3 + kTLS TX/RX + splice | Existing `HostMtlsEnforcement::probe()` already proves the production core. Do not add a second crypto/zero-copy probe. |
@@ -4276,9 +4316,9 @@ to infer its mutation universe.
 | Guest address-pool assign/release/snapshot | **bounded-change** | Only the allocation-keyed held map; assign adds one binding or returns byte-equal existing, release removes only the named binding, snapshot mutates nothing | One mutex makes check-and-act atomic; complete before/after map delta and complement equality for all other allocations. |
 | Grouped `AllocationSpec` / `VmNetworkAttachment` projection | **pure-function** | Returned transient values only; every non-network field remains equal | Rust types make partial guest assignment and netns-bearing VMM attachment unrepresentable; compile and property checks cover exact projection. D10's detached transition overlay applies the destructive shape plus acceptance patch, proves every final-shape body compiles/REDs, and persists reviewed hashes while the committed pre-cut tree keeps only the old sole shape and stays GREEN. |
 | `GuestNetworkProvisioner::provision/teardown` | **bounded-change** | Named allocation's TAP/master/up state, endpoint entry, TCX link/pin, bridge-guard membership, and lease-correlated facts; shared bridge/maps/rules may change only toward their one desired identity | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary; typed operation/error family, full postcondition read-back, allocation-scoped state-delta universe, and real-kernel complement. |
-| `SharedGuestNetworkOwner` startup/sweep/converge/audit/quiesce | **bounded-change** | Platform bpffs hierarchy, one bridge/gateway, managed TAP set, endpoint/counter maps, three guard rules, scratch-probe resources, and registered allocation inventory; unrelated host objects preserved | One mandatory injected owner is also the allocation provisioner. Source-local tests drive startup through D5's private scratch leaf I/O and allocation provision/rollback/teardown through D12A's separate private production-used leaf I/O; neither returns a completed owner result. Tests cover every leaf, read-back, reverse cleanup, continuation, complement, and first-source branch. Public Sim proves only high-level composition. Lima/native uses the real private adapters and actual kernel inventory. |
+| `SharedGuestNetworkOwner` startup/sweep/converge/audit/quiesce | **bounded-change** | Platform bpffs hierarchy, one bridge/gateway, managed TAP set, endpoint/counter maps, three guard rules, scratch-probe resources, and registered allocation inventory; unrelated host objects preserved | One mandatory owner is also the provisioner. D14A's production-used private validator covers every semantic mismatch/lower source; D5/D12A source-local tables cover owner algorithms. Non-persisted stage/attachment/guard/complement events expose only completed real-boot effects to the tracing subscriber. Public Sim remains composition-only; Lima/native retains kernel authority. |
 | Public `SimSharedGuestNetworkOwner` | **bounded-change** | Adapter-sim universe only: six independent non-audit refusal bits, twelve component audit bits, replaceable/consumable next-probe and next-audit errors, one append-only ordered `GuestNetworkOperation` call log, and optional D13 sweep-call observations over the same injected `SimVmHostState`. No kernel/listener/cleanup implementation exists | Existing method/call-log table remains unchanged. D13's exact constructor stores one clone of the existing Sim host; each real owner-port sweep atomically records call index plus `VmHostObservation`. Default/test_wiring has no host observation. Composition tests prove application ordering only; D5/D12A source-local and Lima/native tests exclusively prove host effects/cleanup. |
-| TCX classifier packet evaluation | **bounded-change** | One input skb's sanctioned MAC/type/mark fields plus exactly one counter class; no userspace state or payload copy | BPF verifier/Tier-2 parsing properties plus Tier-3 marks, exact counters, peer/host no-escape captures, and deliberate-link-loss guard proof. |
+| TCX classifier packet evaluation | **bounded-change** | One input skb's sanctioned MAC/type/mark fields plus exactly one counter class; D14 permits only one scratch counter increment per semantic run and no retained userspace packet/FD/payload | BPF/Tier-2 plus Tier-3 partitions remain. D14 raw projection and D14A private validation tables are separate; the real boot calls the opaque program and emits completion only after validation. D9/TAP owns detached guard proof; tracing observes but never coordinates or persists effects. |
 | `guest_tcx` query/detach/endpoint/counter operations | **bounded-change** | Exact owned TCX attachment, one link pin, one ifindex endpoint entry, or one of eight counters; bridge guard, TAP state, other endpoints/counters, and unrelated pins remain complement-equal | Dataplane-source-local typed adapter tests plus S-ND295-37 real-kernel external mutation: query baseline, detach exact pin, typed guard deletion, query absence, frame/counter/capture oracle, structured `TcxLink` unhealthy event, one-second TAP quiescence, and post-quiescence no-forwarding. Supervisor call-order plus core gate tests join on that event/component to prove EXEC closure; no raw aya, subprocess control, or gate accessor crosses into the test. |
 | `overdrive-netlink::nft::bridge` guard operations | **bounded-change** | Exact bridge-family table, one base/regular/unsupported occurrence for every candidate-table chain, ifname set, ordered semantic rule facts/programs with duplicates and unknown expressions, semantic member occurrences, a disjoint exhaustive partition of every owned/foreign target-table child, ruleset generation and outside-table complement; raw nfnetlink ABI remains private and existing IP-family objects remain byte-equal | Family-aware codec and validation properties cover identifier/member byte/NUL/IFNAMSIZ boundaries with no I/O on rejection; malformed decode; base/regular/unsupported chains without fabricated fields or dropped/duplicated children; wrong observed family/table; wrong semantic rule value/order, duplicate owned occurrence and ordered unknown expressions; adapter-derived expected rule facts mapped unchanged into `GuestNetworkFact`; foreign-child conflict; expected-member classification; generation-bracketed observation; absent/exact/conflict no-mutation; staged granular convergence; reverse cleanup; and S-ND295-37 exact exclusive `delete_owned_guard`. Only transport/decode/ACK/kernel failures wrap `NetlinkError`. |
 | `MtlsIntercept` shared rule/set converge/audit and guards | **bounded-change** | Adapter universe only: exactly eight IP rules, three IP sets, their normalized ownership identities/targets, one node guard, and each capability's `2 + P` element guards. No listener socket/task, capability registry, handle, TAP, bridge, or TCX state | Fresh boot covers prior `None` and exact owned prior, then asserts four disjoint outcomes: replace rejection with real source/prior unchanged; replacement mismatch + exact rollback to prior or absence; rollback write/read failure with operation-tagged real source; successful rollback read with wrong identity and no fabricated source. Every case checks optional-prior/requested/replacement/rollback observations, zero dynamic elements, foreign complement, and BootClosed. Runtime: identical-target idempotence, missing-rule same-target recreation, present wrong-target no-mutation. |
@@ -5081,6 +5121,543 @@ direction. It makes the already-approved control-plane → dataplane adapter edg
 executable and therefore belongs only in the feature-delta API SSOT; no
 `brief.md` or ADR amendment is warranted.
 
+#### D-295-DISTILL-14 — source-honest startup packet-probe boundary
+
+**Status: APPROVED by phase-02 DESIGN review iteration 7 on 2026-09-21;
+independent revised DISTILL evidence and roadmap review are required before
+DELIVER resumes.** The implementation review proved a reachable production
+gap: ordinary `run_server` awaits
+`HostSharedGuestNetworkOwner::probe_startup`, D5 delegates its three semantic
+stages to `RealSharedGuestNetworkScratchIo::exercise`, and that real adapter
+currently checks only attachment/endpoint/counter presence. Startup can
+therefore succeed without observing the classifier verdict, the one exact
+counter transition, proof mark, MAC rewrite, original destination, or D9's
+detached-link drop.
+
+The current ownership capabilities were revalidated:
+
+- `overdrive-dataplane::guest_tcx::GuestTcxProgram` is the only production
+  value that simultaneously owns the loaded classifier and its typed endpoint
+  and counter maps. It deliberately exposes no program/map FD.
+- `overdrive-dataplane::sys::prog_test_run` accepts packet bytes but no
+  `__sk_buff` context, so it cannot set ingress ifindex or observe skb mark.
+  The complete context-aware runner exists only in the
+  `overdrive-bpf` integration test and is not a production boot boundary.
+- Writing or sending a frame through a TAP/AF_PACKET socket can exercise the
+  attached path, but it cannot directly and honestly return the classifier's
+  TC verdict, skb mark, rewritten bytes, and preserved L3/L4 destination.
+- D9's generation-bracketed `bridge::observe` already supplies the exact
+  `DefaultDrop` rule counter. A guest-side write through the persistent TAP and
+  a host UDP receive socket can independently prove that an unmarked frame
+  reached that rule and did not reach the host IP stack after TCX detach.
+
+The structurally distinct boundaries are:
+
+| Shape | Benefit | Rejection or selection reason |
+|---|---|---|
+| Expose a program FD or generic packet/test-run method from dataplane | Lets control-plane reuse the test helper directly. | **Rejected:** leaks aya/kernel ABI and raw packets, creates a generic production test hook, and makes control-plane a second classifier adapter. |
+| Add a doc-hidden free function that reopens a classifier by program id or pin | Can run after loader closure. | **Rejected:** adds a second loader/lookup path, a sixth D6-style free operation, and ownership ambiguity between the opaque program receipt and the reopened object. |
+| Add an owner-private trait/adapter in dataplane beside `GuestTcxProgram` | Easy to fake and can hide the syscall. | **Rejected:** D5 already has the one private injectable effect seam; another injectable lifecycle/probe owner duplicates test and production authority. A private raw runner function may support source-local projection tests, but it is not a trait or cross-crate surface. |
+| Move all of D5 `exercise` into dataplane | One aggregate probe result. | **Rejected:** dataplane would need to own D9 nft observation, `/dev/net/tun`, bridge addressing, and host delivery capture, reversing the accepted dependency boundary and conflating unlike mechanisms. |
+| Use only TAP/AF_PACKET/UDP for all stages | Exercises the attached production path. | **Rejected:** cannot honestly observe the classifier TC return code or skb mark, and packet absence cannot distinguish classifier, guard, route, or socket behavior. |
+| Add one closed semantic TCP-intercept method to the existing opaque program; keep detached-link proof in the existing real D5 host adapter | Each owner observes only its mechanism, with no raw value crossing crates. | **Selected:** smallest source-honest boundary. The classifier run is bound to the same program-id receipt later adopted/queried; the guard run crosses the real TAP and D9 rule. |
+
+The exact additive D14 dataplane surface is:
+
+```rust
+// overdrive-dataplane::guest_tcx
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestTcxProbeVerdict {
+    Accept,
+    Drop,
+    Unexpected,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestTcxProbeMark {
+    None,
+    Intercept,
+    Accepted,
+    Unexpected,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestTcxProbeCounterObservation {
+    pub counter: GuestTcxCounter,
+    pub before: u64,
+    pub after: u64,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestTcxTcpProbeInput {
+    pub ingress_ifindex: u32,
+    pub source_ipv4: Ipv4Addr,
+    pub source_mac: [u8; 6],
+    pub bridge_mac: [u8; 6],
+    pub destination_mac: [u8; 6],
+    pub original_destination: SocketAddrV4,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestTcxTcpProbeOutcome {
+    verdict: GuestTcxProbeVerdict,
+    mark: GuestTcxProbeMark,
+    source_mac: Option<[u8; 6]>,
+    destination_mac: Option<[u8; 6]>,
+    original_destination: Option<SocketAddrV4>,
+    counters: [GuestTcxProbeCounterObservation; 8],
+}
+
+impl GuestTcxTcpProbeOutcome {
+    pub const fn verdict(&self) -> GuestTcxProbeVerdict;
+    pub const fn mark(&self) -> GuestTcxProbeMark;
+    pub const fn source_mac(&self) -> Option<[u8; 6]>;
+    pub const fn destination_mac(&self) -> Option<[u8; 6]>;
+    pub const fn original_destination(&self) -> Option<SocketAddrV4>;
+    pub const fn counters(&self) -> &[GuestTcxProbeCounterObservation; 8];
+}
+
+impl GuestTcxProgram {
+    pub fn probe_tcp_intercept(
+        &self,
+        input: GuestTcxTcpProbeInput,
+    ) -> Result<GuestTcxTcpProbeOutcome, GuestTcxError>;
+}
+```
+
+Every item is `#[doc(hidden)] pub` only because the existing real D5 adapter is
+in the sibling control-plane crate. The input/outcome values are data, not
+state owners: they carry no handle or raw packet. Input and counter-observation
+fields are the exact semantic construction shape and have no inherent
+constructor. Outcome fields are private and the six read-only accessors above
+are its complete surface; no downstream crate can construct a successful
+outcome or replace the production projection. No free probe operation, trait,
+raw handle accessor, packet enum, protocol selector, arbitrary payload, repeat
+count, or link/pin lookup is added. The enums/records expose no TC action
+number, skb field, mark number, counter slot, program FD, or BPF
+command/attribute.
+
+`probe_tcp_intercept` has one fixed behavior. It constructs exactly one valid
+Ethernet/IPv4/TCP SYN with a private fixed source port and the caller's exact
+semantic source, destination MAC, and original destination. It obtains the FD
+only from the classifier already owned by `self`, supplies a private full
+`__sk_buff` context whose ingress ifindex is `input.ingress_ifindex`, invokes
+`BPF_PROG_TEST_RUN` exactly once, and projects the returned TC action, skb mark,
+packet bytes, IPv4 destination, and TCP destination port into the semantic
+outcome. Raw frame bytes, context layout, `bpf_attr`, command number, FD, TC
+action numbers, mark numbers, and counter indexes never leave
+`guest_tcx.rs`. `Unexpected` means a well-formed raw result that is neither an
+accepted semantic value; it deliberately reveals no numeric ABI. A short or
+malformed returned packet yields `None` for the affected MAC/destination field
+and remains a semantic failed observation rather than a fabricated transport
+source.
+
+Before the syscall, the method reads all eight counters in the enum order
+`GatewayHostPass`, `Intercept`, `EndpointMapMiss`, `SourceMacSpoof`,
+`SourceIpArpSpoof`, `DirectBypassDrop`, `ArpPass`, `MalformedDrop`; afterward
+it reads all eight again and returns the actual `before`/`after` pair for every
+semantic counter. It never resets, subtracts, saturates, or normalizes a
+counter. The D5 adapter uses `checked_sub`: pass requires `Intercept == 1`, all
+seven other deltas `== 0`, and no decrease/wrap. Map reads retain
+`GuestTcxError::Map`; missing classifier/counter-map objects retain
+`ObjectMissing`; the raw syscall and private context/output transport retain
+the exact `std::io::Error` in `GuestTcxError::Io`. No new
+`GuestTcxError` variant is added.
+
+The real D5 adapter constructs two inputs on every semantic stage:
+
+1. **peer-MAC TCP:** the source fields and bridge MAC are the scratch endpoint;
+   the existing scratch plan's `original_destination` is exactly
+   `100.95.255.253:8443`, distinct from source `100.95.255.254` and gateway
+   `100.95.0.1`, and its MAC is exactly
+   `[0x02, 0x00, 100, 95, 255, 253]` under the accepted derivation;
+2. **gateway-MAC TCP:** the destination MAC is the fixed bridge MAC and the
+   destination tuple is exactly `100.95.0.1:8443`.
+
+D14 changes only the value assigned to the existing private
+`GuestNetworkScratchPlan::original_destination`; it adds no plan field,
+accessor, or caller-selected address.
+
+For `GuestNetworkProbeStage::Classifier`, both observations must be
+`Accept`/`Intercept`, preserve the source MAC, return the bridge destination
+MAC, and satisfy the exact counter transitions above. For
+`OriginalDestination`, the adapter performs two fresh runs and requires all
+the same classifier facts plus byte-equal peer and gateway destination
+IPv4/port values. A fresh run prevents one cached/self-authored receipt from
+satisfying both D5 stages. The complete S-ND295-08/09 positive, ARP, malformed,
+spoof, map-miss, truncation, and direct-bypass partitions remain independent
+Tier-2/Tier-3 obligations; this bounded D5 amendment neither weakens nor
+duplicates them.
+
+Because the method requires the live opaque program, D5's order is amended as
+shown above: attach and pin first; exercise `Classifier` and
+`OriginalDestination`; close loader handles; adopt both maps and the link;
+then query and compare the exact retained program id/ifindex. The D12 receipt
+links the probed classifier to the post-close pinned attachment. Adoption and
+query still refuse startup independently, and no loader handle survives that
+transition.
+
+This pre-close exercise does not create a cleanup hole. The real D5 I/O has
+already retained `GuestTcxInventoryIdentity` and the exact planned link pin.
+If either semantic stage fails before normal adoption, the existing cleanup
+still begins by closing the loader. On the first `UnpinLink`,
+`UnpinCounterMap`, or `UnpinEndpointMap` action whose adopted state is absent,
+the real I/O constructs exactly one
+`GuestTcxAdoptedState::for_inventory(&identity, link_pin)` and immediately
+executes the already-approved unpin method. `for_inventory` performs no I/O or
+kernel mutation; it is internal state preparation, not a new D5 action or
+adoption success claim. Unpin/detach and all eight TCX observations therefore
+remain reachable after a `Classifier` or `OriginalDestination` failure.
+
+The detached-link stage uses a different, exact production boundary. After
+D5 unpins and detaches the link, the existing private
+`RealSharedGuestNetworkScratchIo`:
+
+1. queries D6 attachment absence and samples all eight D6 classifier counters;
+2. calls D9 `bridge::observe` with exactly the scratch TAP member, requires an
+   `Exact` inventory and exactly one owned `DefaultDrop` occurrence with a
+   present `RuleCounterSnapshot`;
+3. binds a nonblocking host UDP socket with `SO_BINDTODEVICE` to the exact
+   scratch bridge and `gateway:0`, reads back that same gateway plus the
+   kernel-selected non-zero port, reopens the existing persistent TAP through
+   `/dev/net/tun` with `TUNSETIFF(IFF_TAP | IFF_NO_PI)`, and writes one valid
+   Ethernet/IPv4/UDP datagram containing a unique private marker from the exact
+   scratch source MAC/IP to the bridge MAC and that exact gateway/port;
+4. after the TAP write returns, runs a synchronous monotonic-deadline loop for
+   at most 250 ms, repeatedly sampling the complete D9 observation, all D6
+   counters, and the nonblocking UDP socket without spawning or awaiting; and
+5. passes only when the guard remains `Exact`, the default-drop packet count has
+   checked delta exactly one, its byte count has a checked positive delta, all
+   classifier counters are unchanged, and the bound UDP socket returns
+   `WouldBlock` with no marker delivery. Counter decrease/wrap, packet delta
+   other than one, missing/duplicate counter, host delivery, guard conflict, or
+   non-empty attachment, or no exact transition before the deadline is
+   `Ok(false)` and therefore the existing `DetachedLinkGuard` postcondition
+   mismatch.
+
+The scratch TAP is isolated and has no VMM, so an extra default-drop packet is
+not ignored as ambient traffic; it refuses startup. D9's counter transition is
+the non-vacuous arrival oracle, while the UDP socket is the independent host-IP
+no-delivery oracle. S-ND295-10 remains the separate ordinary-production
+two-attachment proof for peer-TAP plus host no-escape and exact audit cause;
+the startup probe does not claim to replace it.
+
+The production classifier method and detached helper are synchronous once
+entered; the real `async exercise` implementation contains no await, spawned
+task, thread, callback, or retained future. Cancellation can therefore occur
+only before or after a complete one-packet observation. Program/map/TAP/socket
+FDs are borrowed or locally RAII-owned and never escape. The only successful
+probe mutations are increments in the isolated classifier/guard counters;
+there is no reset. The bounded guard poll adds at most 250 ms once at process
+startup and no steady-state packet or runtime-audit cost. On every returned
+error or false outcome,
+`probe_startup` enters D5's already-approved complete reverse cleanup and all
+fifteen-family observation. `close_loader_handles` remains the first cleanup
+action and is absence-idempotent even though the normal close moved after the
+two classifier stages; lazy construction of the handle-free adopted state
+keeps every unpin/detach branch executable.
+
+`SharedGuestNetworkScratchIo::exercise` keeps its existing
+`std::io::Result<bool>` signature. The real adapter wraps a typed
+`GuestTcxError` or `BridgeGuardError` with
+`std::io::Error::other(error)`, preserving rather than stringifying the full
+source. Direct TAP/socket failures remain their original `std::io::Error`.
+D5 maps `Err` to the existing `GuestNetworkError::Io { operation:
+StartupProbe, source }`; semantic disagreement maps to the stage-specific
+`PostconditionMismatch`. The source-local scripted D5 seam continues to return
+only stage booleans/errors and cannot fabricate a
+`GuestTcxTcpProbeOutcome` as production evidence.
+
+DISTILL and DELIVER evidence is exact and layered:
+
+- dataplane source-local pure tables drive the private raw-result projection
+  through accepted/drop/unexpected verdicts and marks, short output, peer and
+  gateway MAC/destination parsing, every counter before/after combination, and
+  decrease/wrap; the body is named
+  `guest_tcx::tests::startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi`,
+  carries the exact rustdoc line `/// CONTRACT_SHAPE: pure-function.`, and does
+  not call a fake public probe;
+- the existing `overdrive-bpf` test-run body continues to prove the complete
+  S-ND295-08/09 partition against the production BPF object;
+- control-plane source-local D5 tables assert the amended real owner call
+  order, both stage failures, source-chain preservation, unconditional cleanup,
+  and no cached outcome in
+  `guest_network::scratch_probe_packet_acceptance::classifier_runs_precede_close_and_each_stage_is_fresh`,
+  but do not count scripted success as kernel proof;
+- one Lima-root ordinary boot body calls the production
+  `HostSharedGuestNetworkOwner::probe_startup` with the real D5 adapter and
+  proves peer/gateway semantic outcomes, post-close adoption/query, the real
+  detached D9 counter/no-host-delivery oracle, empty cleanup, BootClosed
+  refusal on each semantic mismatch or lower failure, and no publication;
+  its exact name is
+  `shared_guest_network_startup::production_startup_exercises_classifier_and_detached_guard_before_admission`;
+- S-ND295-10 remains the independent ordinary-provision deliberate-link-loss
+  body. No ignored placeholder, public Sim result, test-only BPF helper, inline
+  replacement classifier, fabricated outcome, or direct test call to a private
+  runner may satisfy the boot-probe gate.
+
+This amendment adds no component, owner, technology, crate edge, persistence,
+recovery behavior, later supervisor behavior, or product-facing API. It makes
+the already-approved D5-to-D12/D9 edges source-honest, so feature-delta
+exactness is sufficient. `brief.md`, C4 diagrams, and ADR-0114/0115/0122/0124
+remain correct and are not amended.
+
+##### D-295-DISTILL-14A — private semantic validation and deterministic boot observation
+
+**Status: APPROVED by phase-02 DESIGN review iteration 9 on 2026-09-21;
+D14's approved cross-crate API is unchanged.** Translation review
+proved two bounded gaps. First, projecting raw dataplane fields into an opaque
+outcome does not force the real control-plane adapter to compare every field.
+Second, a 1 ms monitor that polls short-lived pins and nft counters can miss a
+correct probe and is not a deterministic production-composition oracle.
+
+The semantic decision remains inside `overdrive-control-plane::guest_network`,
+where D5 already owns stage meaning. The exact module-private values and
+production-used validation function are:
+
+```rust
+// overdrive-control-plane::guest_network — every item module-private
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestNetworkTcpProbeRequirement {
+    Classifier,
+    OriginalDestination,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuestNetworkTcpProbeObservation {
+    verdict: GuestTcxProbeVerdict,
+    mark: GuestTcxProbeMark,
+    source_mac: Option<[u8; 6]>,
+    destination_mac: Option<[u8; 6]>,
+    original_destination: Option<SocketAddrV4>,
+    counters: [GuestTcxProbeCounterObservation; 8],
+}
+
+impl GuestNetworkTcpProbeObservation {
+    fn from_outcome(outcome: &GuestTcxTcpProbeOutcome) -> Self;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GuestNetworkTcpProbeMismatch {
+    Verdict { observed: GuestTcxProbeVerdict },
+    Mark { observed: GuestTcxProbeMark },
+    SourceMac {
+        expected: [u8; 6],
+        observed: Option<[u8; 6]>,
+    },
+    DestinationMac {
+        expected: [u8; 6],
+        observed: Option<[u8; 6]>,
+    },
+    OriginalDestination {
+        expected: SocketAddrV4,
+        observed: Option<SocketAddrV4>,
+    },
+    CounterIdentity {
+        index: u8,
+        expected: GuestTcxCounter,
+        observed: GuestTcxCounter,
+    },
+    CounterDecrease {
+        counter: GuestTcxCounter,
+        before: u64,
+        after: u64,
+    },
+    CounterDelta {
+        counter: GuestTcxCounter,
+        expected: u64,
+        observed: u64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GuestNetworkTcpProbeValidation {
+    Passed {
+        intercept_before: u64,
+        intercept_after: u64,
+    },
+    Mismatch(GuestNetworkTcpProbeMismatch),
+}
+
+fn validate_guest_tcx_tcp_probe(
+    requirement: GuestNetworkTcpProbeRequirement,
+    expected: &GuestTcxTcpProbeInput,
+    observed: std::result::Result<
+        GuestNetworkTcpProbeObservation,
+        GuestTcxError,
+    >,
+) -> std::io::Result<GuestNetworkTcpProbeValidation>;
+```
+
+`GuestNetworkTcpProbeObservation::from_outcome` is the sole production mapping
+from the approved opaque outcome accessors. It copies semantic values only and
+cannot access or reconstruct raw packet/SKB/BPF state. Source-local tests in the
+same module construct the private observation directly; this makes every
+finite mismatch reachable without a public outcome constructor or a second
+dataplane adapter.
+
+Validation is deterministic and returns the first mismatch in this exact
+order: verdict must be `Accept`; mark must be `Intercept`; source MAC must be
+`Some(expected.source_mac)`; destination MAC must be
+`Some(expected.bridge_mac)`; `OriginalDestination` additionally requires
+`Some(expected.original_destination)` while `Classifier` does not compare that
+field; then all eight counter records are checked in the canonical enum order.
+Each counter record must name the counter at its array index, `after` must
+permit `checked_sub(before)`, `Intercept` must have delta one, and every other
+counter must have delta zero. Wrong identity, decrease/wrap, and wrong delta
+are distinct mismatch variants. `Passed` returns the actual Intercept bracket
+used by deterministic telemetry; it does not manufacture a count.
+
+An input `Err(GuestTcxError)` returns
+`Err(std::io::Error::other(error))`, preserving the typed error and lower source
+for D5's existing `Io { operation: StartupProbe }` mapping. A mismatch is not a
+lower failure: the real adapter maps `Mismatch(_)` to `Ok(false)`, so the owner
+constructs the existing stage-specific `PostconditionMismatch`. The real
+`RealSharedGuestNetworkScratchIo::exercise` must call this function for both
+peer and gateway outcomes in both TCP stages. It emits stage completion only
+after both calls return `Passed`; a semantic mismatch emits no completion and
+cannot be hidden by a pre-decided scripted boolean.
+
+The source-local body is exactly
+`guest_network::scratch_probe_packet_acceptance::every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator`.
+Its finite table drives wrong verdict, mark, source MAC, destination MAC,
+original destination, wrong counter identity, wrong delta for each of the eight
+counters, decrease/wrap for each counter, and one source-bearing
+`GuestTcxError::Io`. It asserts the exact private mismatch variant or preserved
+error source. The dataplane projection body separately adds complete-length
+malformed rows for wrong EtherType, IPv4 version/IHL, non-TCP protocol, and a
+declared TCP destination-port boundary outside the returned bytes; those rows
+must yield `None` for affected semantic fields. This closes translation-review
+P02-10 without changing D14's API or evidence ownership.
+
+The ordinary-boot witness uses production-owned structured tracing rather than
+transient-resource polling. The alternatives are:
+
+| Observation shape | Decision |
+|---|---|
+| Background monitor polling pins/counters every 1 ms | **Rejected:** scheduler-dependent, can miss correct create/use/delete transitions, and races cleanup. |
+| Poll pins or guard state after `run_server` returns | **Rejected:** correct D5 cleanup has already removed them, so absence cannot prove the stages that preceded it. |
+| Add a test channel, callback, barrier, sleep, or public snapshot accessor | **Rejected:** creates a test-shaped timing hook or second observation owner. |
+| Persist a probe receipt in View/redb/health state | **Rejected:** creates a new system of record and recovery contract for ephemeral boot evidence. |
+| Emit non-persisted structured completion events from the real adapter/owner and capture them with the existing tracing-subscriber pattern | **Selected:** deterministic production control-flow evidence with no state authority or timing seam. |
+
+The event vocabulary is closed and exact:
+
+```text
+event name: guest_network.shared_owner_startup_probe_tcp_stage_completed
+level: INFO
+fields:
+  stage = "classifier" | "original_destination"
+  program_id = <retained GuestTcxLink::program_id>
+  peer_intercept_before = <actual u64>
+  peer_intercept_after = <actual u64>
+  gateway_intercept_before = <actual u64>
+  gateway_intercept_after = <actual u64>
+
+event name: guest_network.shared_owner_startup_probe_attachment_reopened
+level: INFO
+fields:
+  program_id = <the same retained program id>
+  revision = <D6 query revision>
+  program_count = 1
+  ifindex = <scratch TAP ifindex>
+
+event name: guest_network.shared_owner_startup_probe_detached_guard_completed
+level: INFO
+fields:
+  program_id = <the same retained program id>
+  classifier_intercept_before = <actual u64>
+  classifier_intercept_after = <actual u64>
+  guard_packets_before = <actual u64>
+  guard_packets_after = <actual u64>
+  guard_bytes_before = <actual u64>
+  guard_bytes_after = <actual u64>
+  host_datagrams = 0
+
+event name: guest_network.shared_owner_startup_probe_cleanup_observed
+level: INFO
+fields:
+  primary_failed = <bool>
+  cleanup_failed = <bool>
+  fully_observed = <GuestNetworkScratchComplement::is_fully_observed()>
+  empty = <GuestNetworkScratchComplement::is_empty()>
+  bridges = ?<GuestNetworkScratchCount>
+  taps = ?<GuestNetworkScratchCount>
+  endpoint_maps = ?<GuestNetworkScratchCount>
+  counter_maps = ?<GuestNetworkScratchCount>
+  endpoint_entries = ?<GuestNetworkScratchCount>
+  tcx_programs = ?<GuestNetworkScratchCount>
+  tcx_links = ?<GuestNetworkScratchCount>
+  endpoint_map_pins = ?<GuestNetworkScratchCount>
+  counter_map_pins = ?<GuestNetworkScratchCount>
+  tcx_link_pins = ?<GuestNetworkScratchCount>
+  bridge_guard_tables = ?<GuestNetworkScratchCount>
+  bridge_guard_chains = ?<GuestNetworkScratchCount>
+  bridge_guard_sets = ?<GuestNetworkScratchCount>
+  bridge_guard_rules = ?<GuestNetworkScratchCount>
+  bridge_guard_members = ?<GuestNetworkScratchCount>
+```
+
+The real scratch adapter retains the semantic program id before `PinLink`
+consumes the opaque link. The TCP-stage event is emitted synchronously only
+after both peer and gateway outcomes pass the private validator. The
+attachment event is emitted only after normal loader close, fresh pin
+adoption, and a D6 query whose complete `program_ids` vector equals exactly
+that one retained id. The detached event is emitted only after attachment
+absence, exact D9 guard identity, checked packet delta one, checked positive
+byte delta, all classifier counters unchanged, and no UDP delivery. The
+cleanup event is emitted once by `HostSharedGuestNetworkOwner::probe_startup`
+after `cleanup` returns the constructed fifteen-family complement and before
+the existing success/error selection.
+
+On semantic mismatch or lower error there is no false stage-completed event;
+already-completed earlier stages remain in the trace, cleanup still runs, and
+the cleanup event records its actual result. Post-close query mismatch emits no
+attachment event. Detached-guard mismatch emits no detached event. An
+unavailable family renders `Unavailable`, never `Observed(0)`, in the cleanup
+event. Tracing emission has no return value and never changes startup outcome.
+Cancellation before an emission produces no completion claim; cancellation
+after emission cannot retract an already completed synchronous effect.
+
+These events extend the already-approved
+`guest_network.shared_owner_*` operational telemetry family. They are not
+persisted, indexed, replayed, consulted by admission/recovery, or represented
+by a public enum, port, row, accessor, or health repository. The integration
+test installs the same minimal tracing-subscriber layer already used by
+control-plane startup-refusal tests before awaiting ordinary `run_server`; the
+events occur synchronously inside that awaited boot path, not in a detached
+monitor task.
+
+The revised Lima body removes its monitor thread and every poll of transient
+bpffs/nft state. It filters the captured trace to the four names above and
+requires exactly five events in this order: `classifier`, `original_destination`, attachment
+reopened, detached guard, cleanup. All first four events must carry the same
+program id. The four TCP calls must form one continuous Intercept sequence
+with delta one per call; the detached classifier bracket must equal the final
+TCP value and remain unchanged. The detached guard packet delta must be one,
+its byte delta positive, and host datagrams zero. Cleanup must be fully
+observed and every one of the fifteen fields `Observed(0)`. Stable post-return
+absence read-back may corroborate cleanup, but no transient pin/counter sample
+is an oracle.
+
+Cross-process serialization is mandatory independently of source-level
+`serial_test`. The existing `.config/nextest.toml` whole-binary override
+`package(overdrive-control-plane) & binary(integration)` must continue to
+resolve every `shared_guest_network_startup` body, including D14 S00 and
+S10/S11/S12/S13, into the one-thread `host-kernel-shared` group. DISTILL and
+DELIVER must verify that resolution with `cargo nextest show-config
+test-groups`; they must not replace it with an in-process annotation.
+
+D14A changes no approved D14/D12/D12A/D13 public or doc-hidden API, component,
+owner, dependency, recovery policy, persistence, or evidence partition.
+Feature-delta exactness is sufficient; no brief, C4, or ADR amendment is
+warranted.
+
 #### D-295-DISTILL-12A — private production allocation-effect boundary
 
 **Status: APPROVED by phase-02 DESIGN review iteration 6.** D5 remains
@@ -5572,7 +6149,8 @@ no `brief.md` or ADR amendment is warranted.
 #### DISTILL handoff required before revised `02-01` may resume
 
 The table below preserves the gaps observed when iteration 6 approved the
-DESIGN handoff. The bounded DISTILL remediation has now authored the five
+prior DESIGN handoff and adds the D14 packet-probe evidence now required by the
+reachable step-02-01 blocker. The bounded DISTILL remediation has authored the five
 non-waived S00 source-local bodies, S11's private netlink projection body and
 two real-owner bodies, S12's retained-owner failure/retry body, and S13's
 seeded production-helper invariant. Those ten bodies remain reasoned-pending
@@ -5583,9 +6161,20 @@ named in `distill/red-classification.md` are explicitly user-waived and are not
 scored by this remediation gate; the waiver does not turn them into executed
 Lima or native evidence.
 
+After D14's iteration-7 approval and D14A's bounded translation remediation,
+revised DISTILL adds exactly
+`startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi`,
+`every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator`,
+`classifier_runs_precede_close_and_each_stage_is_fresh`, and
+`production_startup_exercises_classifier_and_detached_guard_before_admission`.
+All four are reasoned-pending; the first three are source-local RED layers, and
+the fourth is an executable ordinary-boot Lima body whose tracing subscriber
+captures production-owned stage, attachment, detached-guard, and complement
+events without installing effects or polling transient resources.
+
 | Scenario | Missing or insufficient body | Production entry point and required oracle | Evidence layer and disposition |
 |---|---|---|---|
-| S-ND295-00 | Existing D5 owner-algorithm tables do not yet prove the corrected D12 real inventory binding. | Dataplane source-local tables drive private `capture_with_source` through every accepted/unsupported map kind/property and maps/programs/links capture failure. Control-plane source-local tables then drive `HostSharedGuestNetworkOwner::probe_startup` through the private real D5 binding: clean capture/cleanup yields eight zeros; receipted retained objects yield exact positives; capture failure moves its first source only into `TcxLoad`, marks dependent fields unavailable, and continues; every unreceipted candidate—including a unique match—is `InventoryAmbiguous`, never owned. | Pair private dataplane projection/failure tables, control-plane D5 source-movement/continuation tables, and Lima-root real-kernel inventory. Include wrong path ownership/schema and retained unpinned map/program/link cases. Public Sim remains composition-only. |
+| S-ND295-00 | Existing D5 owner-algorithm/inventory bodies do not prove D14's production packet decisions. | Retain D12 capture/inventory. Add the private production validator table for every mismatch/lower error and transition D5 tables exclusively to exercise-before-close. Ordinary Lima boot must capture the five ordered D14A production events across `run_server`: both TCP stages, exact post-close same-id attachment, real detached D9/TAP result, and all-fifteen complement. It asserts counter continuity without polling pins/nft state. | Projection/validator/owner tables are necessary but never kernel proof. The serialized Lima body is mandatory and may not substitute the test-only BPF runner, public Sim, an ignored placeholder, fabricated outcome, private-runner call, monitor thread, or timing poll. Existing D12 evidence and independent S08/09/S10 remain required. |
 | S-ND295-10 | No authored active deliberate-link-loss body. | Drive the ordinary `run_server`-composed `HostSharedGuestNetworkOwner` through the real provision path; use D6 `query_attachment` then `detach_pinned_link` as the external mutation; observe the still-exact D9 guard, its `DefaultDrop` counter, peer/host no-escape capture, and the production audit's exact `TcxLink` failure. The fixture creates no production attachment effect. | Author as a Lima-root real-kernel integration body. Native metal is unnecessary unless DISTILL deliberately composes a real microVM. |
 | S-ND295-11 | No authored active production provision/read-back body. | Drive `HostSharedGuestNetworkOwner::provision` through D12A. Assert exact TAP-down/create/attach/guard/endpoint/TCX/TAP-up order. Table every TAP observation state (absent, TUN/dummy/veth/non-persistent, wrong UID, persistent exact), both bridge lookups (absent, wrong kind, replaced ifindex), and both exact-master comparisons. The scripted leaf returns typed actual observations; the owner alone builds `Tap`, `BridgeLinkIdentity`, and `LinkMaster` facts/mismatches. Pair with ordinary production-composition Lima read-back before injected VMM start. | Source-local tests inject only leaf results through `with_allocation_io`; no boolean verdict or completed action sequence. Netlink source-local tests prove raw-to-semantic TAP/link projection; Lima retains real netlink/D9/D12 effect authority. |
 | S-ND295-12 | No authored active effect-first teardown/complement body. | Drive the same real owner's teardown through D12A with two attachments. Fail every cleanup leaf once; assert later cleanup calls continue, the first typed cleanup error returns, the address remains held, and retry reaches an empty named complement in exact endpoint → link → TAP-down → guarded TAP-delete → member-delete order while the unrelated attachment remains byte-equal. | Pair source-local algorithm/fault/continuation tables with Lima real-kernel production-composition evidence. No public fault hook, second owner, simulated action owner, or replacement workflow is permitted. |
@@ -5611,6 +6200,10 @@ missing.
 | `DESIGN-P02-06` | **Resolved by corrected D12:** only an exact recorded receipt may produce an owned nonzero count; without a receipt, an empty complete-baseline delta is zero and every nonempty candidate set is `InventoryAmbiguous`, regardless of cardinality. |
 | `DESIGN-P02-07` | **Resolved by corrected D12A:** the private TAP enum preserves absence, incompatibility/non-persistence, actual kind/ifindex/up/owner/master, and persistent exact state; only the owner maps it to existing Tap/LinkMaster facts and exact VMM UID expectations. |
 | `DESIGN-P02-08` | **Resolved by corrected D12A:** a private bridge observation supplies semantic kind/current ifindex from the leaf adapter immediately before both master comparisons; the owner maps BridgeLinkIdentity and never accepts a test-authored boolean or performs host I/O. |
+| `DELIVER-02-01-F16` | **Resolved at DESIGN by approved D-295-DISTILL-14:** the existing opaque program gains one closed semantic TCP probe and D5 separately owns the real D9/TAP detached-link oracle. Implementation and executable proof remain pending; no crafter may invent an FD accessor, free packet function, second adapter, or test-only substitute. |
+| `DESIGN-P02-09` | **Resolved by approved D14A:** the real adapter maps opaque accessors into one constructible private observation and calls the exact production validator; every mismatch and lower error is source-locally drivable without a public outcome constructor. |
+| `DESIGN-P02-10` | **No DESIGN/API change required:** D14A makes the already-required complete-length malformed projection rows explicit for DISTILL. |
+| `DESIGN-P02-11` | **Resolved by approved D14A:** production-owned non-persisted completion events replace transient monitoring, and the existing whole control-plane integration-binary `host-kernel-shared` assignment is mandatory evidence. |
 
 - The earlier assertion that all acceptance bodies were authored is false for
   S-ND295-10/11/12 and incomplete for S-ND295-13.
@@ -5645,7 +6238,7 @@ SSOT, so editing a brief or ADR would duplicate unchanged architecture.
 | `NetSlotAllocator`, `WorkloadNetnsPlan`, `VmTapPlan` | Address/name/topology allocation | **DELETE** | Their identity is the forbidden slot + two-`/30` + netns/veth mechanism. Preserving them would preserve the constraint #295 removes. |
 | `AllocationSpec` guest fields | C3 → VM transient handoff | **DELETE fields + CREATE approved grouped value** | A2 is user-approved: reuse the current `AllocationSpec` channel with exactly `network: Option<GuestNetworkAssignment>` containing `address`, `tap`, `mac`, `gateway`, `prefix`, and `dns`; do not add a second driver/network API or extra fields. |
 | `VmNetworkAttachment` | VMM NIC attach | **EXTEND** | Same Cloud Hypervisor `--net tap=…,mac=…` contract; only the netns wrapper is obsolete. |
-| `overdrive-bpf` + `overdrive-dataplane::guest_tcx` | Existing kernel-program and userspace-loader homes | **EXTEND — D-295-2/D-295-DISTILL-4/D-295-DISTILL-12** | Add the SCHED_CLS endpoint program/maps; expose D12's exact opaque, non-`Clone` loader/link/adopted-state lifecycle types and semantic endpoint/map facts for the production D5 binding; retain D6's exact five free functions `query_attachment`, `detach_pinned_link`, `endpoint_present`, `remove_endpoint`, and `read_counter`. Raw aya, private endpoint/counter ABI, ELF names, FDs, and map-type numbers terminate in dataplane. Part C proves aya 0.13.1 supports the lifecycle; no new crate or dependency edge is added. |
+| `overdrive-bpf` + `overdrive-dataplane::guest_tcx` | Existing kernel-program and userspace-loader homes | **EXTEND — D-295-2/D-295-DISTILL-4/D-295-DISTILL-12/D-295-DISTILL-14** | Add the SCHED_CLS endpoint program/maps; expose D12's exact opaque, non-`Clone` loader/link/adopted-state lifecycle types and semantic endpoint/map facts for the production D5 binding; add D14's one closed semantic TCP-intercept method on that existing program; retain D6's exact five free functions `query_attachment`, `detach_pinned_link`, `endpoint_present`, `remove_endpoint`, and `read_counter`. Raw aya, packets, SKB/test-run ABI, private endpoint/counter ABI, ELF names, FDs, TC action/counter-slot numbers, and map-type numbers terminate in dataplane. Part C proves aya 0.13.1 supports the lifecycle; no new crate, trait, owner, free operation, or dependency edge is added. |
 | Existing nft TPROXY/output owner | Transparent socket delivery and recursion exemptions | **EXTEND — PORT-295-C approved** | Replace linear rules with three shared typed sets and exactly eight constant IP rules; retain install methods/per-element guards. Bridge proof-mark guard remains separate. |
 | `MtlsIntercept` / guards | Privileged bind and TPROXY ownership | **EXTEND — C1/PORT-295-C approved** | Existing methods now acquire shared set elements; outbound replaces `host_veth` with source IPv4. Per-rule guards/delete paths are retired. |
 | `MtlsInterceptWorker` | Transparent listeners and connection ownership | **EXTEND — GEN-295-A/RUN-295-B/F-03 approved** | Same mandatory port constructor; exact boot start/failure observation/converge/audit/shutdown interface owns two shared listeners; per-allocation methods own counter, registry, claims, elements, fence, and handles. |
@@ -5797,6 +6390,8 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-DISTILL-11 final reachability contracts | **AUTHORIZED 2026-09-17 under autonomous DESIGN/DISTILL authority:** module-private two-slot worker task owner and actual Tokio join/channel classifier for the full `MtlsSharedOwnerError` task family; source-bearing component-tagged owner audit result; public sim twelve-component standing and exact next-audit scripting; S37 structured `TcxLink` unhealthy event joined to supervisor begin-before-event and core Recovering-claim evidence; no public kill/gate accessor or fabricated consequence | This feature delta § *D-295-DISTILL-11*, F-03/RUN-295-B Contract Shape and test handoff; focused current ADR-0120/0122/0124 and brief prose only; same trusted-validator review/checkpoint, no new ADR/C4/product outcome |
 | D-295-DISTILL-12/12A lifecycle and allocation-effect boundaries | **APPROVED through phase-02 DESIGN review iteration 6:** D12 retains opaque lifecycle/inventory/schema contracts and private production-used projection. D12A adds one module-private allocation leaf I/O with exact owner ordering/injection; its TAP observation preserves persistent/owner/master identity and its refreshed bridge fact supplies exact master ifindex without moving comparison from the owner. No public hook, second owner, or alternate workflow | This feature delta § *D-295-DISTILL-12* and § *D-295-DISTILL-12A*; ownership/dependencies unchanged; no brief/ADR/C4 change |
 | D-295-DISTILL-13 production-composed S13 boundary | **API/order/telemetry contract APPROVED by phase-02 DESIGN review iteration 2; RED-oracle refinement APPROVED at iteration 5:** mandatory existing `VmHostState` argument remains; the same Sim host is observed at the real Sim owner `sweep_stale` call so current order fails before telemetry exists; approved structured phase events remain separate GREEN evidence; native metal remains independent | This feature delta § *D-295-DISTILL-13* and cumulative EXEC-close helper signatures; no new boot owner/product hook/brief/ADR/C4 change |
+| D-295-DISTILL-14 startup packet-probe boundary | **APPROVED by phase-02 DESIGN review iteration 7 on 2026-09-21; revised DISTILL review pending:** one doc-hidden semantic `GuestTcxProgram::probe_tcp_intercept` with closed inputs/outcomes keeps raw test-run ABI/FDs/packets inside dataplane; D5 exercises peer/gateway stages before close and separately proves detached-link D9 drop through the existing private host adapter, TAP write, exact counter delta, and no host delivery | This feature delta § *D-295-DISTILL-14*; D12/D12A/D13 ownership/dependencies unchanged; no brief/ADR/C4 change |
+| D-295-DISTILL-14A translation testability | **APPROVED by phase-02 DESIGN review iteration 9 on 2026-09-21; revised DISTILL review pending:** one production-used control-plane-private semantic validator makes every D14 mismatch and lower error source-locally reachable; four non-persisted structured event names deterministically expose five ordered real-boot completions; the existing whole control-plane integration binary remains in `host-kernel-shared` | This feature delta § *D-295-DISTILL-14A*; approved D14 API and D12/D12A/D13 remain unchanged; no brief/ADR/C4 change |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
@@ -5820,17 +6415,20 @@ the user's autonomous DESIGN/DISTILL authorization for the remainder of this
 run. That same authorization resolves D-295-DISTILL-10's exact simulator API
 plus D-295-DISTILL-11's bounded reachability surfaces without changing product
 scope.
-Cumulative D12, its private projection source, D12A, and D13 are approved
-through phase-02 DESIGN review iteration 6. P02-07/08 are closed; no DESIGN
-decision remains pending in this bounded remediation. This approval does not
-authorize DELIVER while DISTILL and roadmap validation remain pending.
+Cumulative D12, its private projection source, D12A, and D13 remain approved
+through phase-02 DESIGN review iteration 6. P02-07/08 remain closed. D14's exact
+additive semantic packet-probe method, D5 ordering, and distinct D9/TAP guard
+oracle are approved by phase-02 DESIGN review iteration 7. D14A's private
+validation and deterministic observation boundary is approved by phase-02
+DESIGN review iteration 9. No bounded DESIGN decision remains pending; DELIVER
+remains blocked while revised DISTILL review and roadmap validation are pending.
 D-295-DISTILL-1 and D-295-DISTILL-2 are independently approved;
 D-295-DISTILL-4 was independently approved by review iteration 4, and
 D-295-DISTILL-5 was independently approved by review iteration 6. D9 resolves
 the remaining typed bridge-family mutation signature, D10 resolves the trusted
-transition evidence, and D11 closes only acceptance reachability; no product
-choice remains open. Independent post-DISTILL re-review and roadmap validation
-are still required.
+transition evidence, and D11 closes only acceptance reachability. Those prior
+choices plus D14/D14A remain closed. Independent revised DISTILL review and
+roadmap validation are still required.
 All twelve original #295 ADRs were
 Accepted by system design review iteration 5 on 2026-09-16. D-295-7 and D-295-9 remain pre-existing
 non-regression constraints. GH #298, GH #299, and GH #300 own cross-host,
@@ -5841,8 +6439,8 @@ authorization and need no further user gate or new ADR; existing ADRs are
 amended only where intent/evidence or older exact contracts became stale.
 Independent solution-architecture review iteration 4 approved the preceding
 stage-3 baseline on 2026-09-16 with zero critical/high/medium findings. There
-is no DELIVER authority until the approved post-DISTILL amendments receive
-independent review and DISTILL reruns its completeness gate.
+is no DELIVER authority until the transitioned D14A evidence passes independent
+DISTILL review and the roadmap is reapproved.
 
 ## Wave: DESIGN / [REF] Author Validation
 
@@ -6019,6 +6617,27 @@ independent review and DISTILL reruns its completeness gate.
   call, so current ordering fails before telemetry exists; approved structured
   phase events remain a separate GREEN/operational trace. This adds no
   alternate boot owner, product hook, or generalized seam.
+- D-295-DISTILL-14 revalidated the currently reachable production boot path,
+  D12 opaque program lifetime, the context-free production
+  `sys::prog_test_run` helper, the context-aware test-only BPF runner, D6
+  counter reads, D9 counter-bearing observations, persistent-TAP `/dev/net/tun`
+  injection, and ordinary UDP delivery. The classifier's verdict/mark/output
+  bytes cannot be inferred honestly from TAP traffic, while BPF test-run cannot
+  traverse the detached nft guard. The selected split therefore adds only one
+  closed semantic method to the already-owning program and keeps the unlike
+  guard oracle inside the existing real D5 host adapter. No raw FD/packet/ABI,
+  second loader, trait, owner, persistence, or dependency edge is introduced.
+- D-295-DISTILL-14A revalidated the authored translation against the actual
+  `RealSharedGuestNetworkScratchIo` call path, the private opaque outcome
+  accessors, D5 complement construction, existing tracing-subscriber capture
+  patterns, and `.config/nextest.toml`. A constructible control-plane-private
+  observation is the smallest way to drive every semantic mismatch while the
+  successful outcome remains unforgeable across crates. The existing whole
+  control-plane integration-binary override already resolves the D14 body into
+  `host-kernel-shared`; no config or in-source serial mechanism is added.
+  Non-persisted completion events are selected over a monitor, hook, accessor,
+  or stored receipt because they observe completed production effects without
+  owning state or coordinating timing.
 - `cargo metadata --format-version 1 --locked` confirmed the technology table's
   locked versions and license expressions for aya/aya-ebpf, rtnetlink, Tokio,
   rustls, hickory-proto, ipnet, parking_lot, nix, and the netlink family. The
@@ -6097,7 +6716,7 @@ under *Rust Scaffolds and Test Placement* are compiled bodies at this commit.
 
 | IDs | Outcome | Principal tags |
 |---|---|---|
-| S-ND295-00 | The real host-owner algorithm handles every scratch-probe/setup/cleanup/observation partition and produces the honest complement; composed startup separately proves BootClosed/refusal/no publication for an owner-port failure | `@driving_port @error @real-io @contract-shape:bounded-change` |
+| S-ND295-00 | The real host-owner algorithm handles every scratch-probe/setup/cleanup/observation partition, including D14's real peer/gateway classifier observations and detached D9/TAP guard drop, and produces the honest complement; composed startup separately proves BootClosed/refusal/no publication | `@driving_port @error @real-io @contract-shape:bounded-change` |
 | S-ND295-01 | Two checked-in VM workloads communicate by name through production `serve` + `deploy`, encrypted on the peer wire, with owned cleanup | `@walking_skeleton @driving_port @real-io @adapter-integration @contract-shape:bounded-change` |
 | S-ND295-02..05 | Grouped handoff, `/16` lease derivation, replay/release complement, and fixed admission boundary | `@property @boundary @contract-shape:pure-function|bounded-change` |
 | S-ND295-06..07 | Production action-owner start failure and release-last teardown converge without fixture-authored consequences | `@property @tier1 @in-memory @error @contract-shape:bounded-change` |
@@ -6145,13 +6764,13 @@ independent.
 |---|---|---|
 | Built CLI `serve` + `deploy` | S-ND295-01 / existing E07 checked-in example | E07 runner exists but retained evidence is historical; the stabilized post-cut Rust traffic body uses the approved shared-owner/intercept seams |
 | Action shim + convergence runtime | S-ND295-06, S-ND295-07, S-ND295-28 | Accepted high-level test seams only; no simulation-owned action sequence |
-| `HostSharedGuestNetworkOwner` startup algorithm | S-ND295-00 | Source-local private scratch-I/O table drives real owner setup, three semantic stages, reverse cleanup, continued cleanup after first failure, all-fifteen inventory, and exact aggregate; native metal proves the real I/O binding |
+| `HostSharedGuestNetworkOwner` startup algorithm | S-ND295-00 | Source-local private validator drives every D14 semantic mismatch/lower source; the owner table uses only exercise-before-close and proves cleanup/continuation/all-fifteen inventory; serialized Lima ordinary boot captures production stage/attachment/guard/complement events across `run_server` with no monitor or transient poll |
 | Public `SimSharedGuestNetworkOwner` | S-ND295-00, S-ND295-06..07, S-ND295-13, S-ND295-29..33 | D10/D11 exact non-audit slots, twelve typed component audit slots, one-shot exact probe/audit errors, ordered non-draining calls and typed `test_wiring` prove deterministic port/composition reaction; D13 additionally snapshots the same injected Sim host only at the actual sweep port call; none substitutes for private host cleanup or real worker task-exit classification |
 | `GuestNetworkProvisioner` host adapter | S-ND295-11..13 | D12A source-local tests drive the real owner through typed allocation leaves; Lima/native bodies retain real bridge/TAP/guard/TCX effects and complete complements |
 | `GuestNetworkProvisioner` sim adapter | S-ND295-06..07 | Production-owner-path fault injection and state-delta oracles |
 | `overdrive-netlink` bridge/TAP/nft adapter | S-ND295-10..19, S-ND295-37 | Real kernel mutation plus normalized family-correct read-back; D9 bridge guard observation/convergence/member/reverse deletion and exact `delete_owned_guard`; no runtime packet edge, raw builder, or new low-level port |
-| TCX/BPF loader, endpoint/counter maps, bpffs links | S-ND295-00, S-ND295-08..13, S-ND295-37 | D12 private projection/capture and eight-family inventory tables; D6 typed semantic query, exact pinned-link detach, endpoint presence/removal, and counter read; Tier-2 parser/verdict plus Tier-3 frame/capture/quiesce and retained-unpinned-object oracles |
-| Bridge proof-mark guard | S-ND295-10..13, S-ND295-37 | Deliberate missing-TCX oracle and double-loss envelope |
+| TCX/BPF loader, endpoint/counter maps, bpffs links | S-ND295-00, S-ND295-08..13, S-ND295-37 | D12 private projection/capture and eight-family inventory tables; D14 private raw-result projection plus the production-used opaque-program TCP probe; D6 typed semantic query, exact pinned-link detach, endpoint presence/removal, and counter read; Tier-2 full parser/verdict partitions plus real boot/Tier-3 frame/capture/quiesce and retained-unpinned-object oracles |
+| Bridge proof-mark guard | S-ND295-00, S-ND295-10..13, S-ND295-37 | D14 boot uses D9 exact counter observation, real scratch-TAP injection, and host UDP no-delivery after deliberate detach; S10/S37 retain ordinary-production no-escape/audit and double-loss authority |
 | `MtlsIntercept` host adapter | S-ND295-14..19, S-ND295-31A/B | Constant rules/shared elements, target recovery, exact-port runtime behavior |
 | `MtlsIntercept` sim adapter | S-ND295-20..24, S-ND295-29 | Same typed outcomes without pretending to create kernel state |
 | `MtlsInterceptWorker` | S-ND295-20..26, S-ND295-31A/B | D7 private registry model drives checked generation, Pending/Active/Retiring, RAII claims, publish fence, scoped drain/complete and address reuse; real listener/enforcement cases remain Tier-3 |
@@ -6177,6 +6796,12 @@ independently approved. The D6 guest-TCX operations do not, however, supply
 the distinct bridge-family guard mutation that S-ND295-37 also requires;
 D-295-DISTILL-9 pins that final typed adapter contract and is independently
 approved; executable reconciliation now uses it directly.
+D-295-DISTILL-14 adds only the missing production-used semantic packet
+observation on D12 and the unlike real D9/TAP startup oracle; it does not alter
+D6/D9 ownership or let a source-local/scripted result stand in for Linux.
+D-295-DISTILL-14A adds no cross-crate API: it makes the control-plane decision
+source-locally drivable and the Linux evidence deterministic through existing
+operational telemetry and nextest serialization.
 
 ## Wave: DISTILL / [REF] Rust Scaffolds and Test Placement
 
@@ -6198,10 +6823,10 @@ RED-ready files authored in DISTILL:
 |---|---|---|
 | `crates/overdrive-core/src/guest_network.rs` | Exact accepted dependency-neutral wiring/gate/supervisor/claim, component, cause, recovery, fail-stop, and shutdown-request API scaffold | `SCAFFOLD: true`; exact method bodies panic only for the designated gate RED. No VmDriver/server/live-regression caller receives this scaffold before the gate step is GREEN. |
 | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` + `netns_density_placement_cap.rs` | Complete BootClosed/recovery/fail-stop/PBT bodies plus final-shape placement-cap acceptance | every gate body is reasoned-pending for its DELIVER step; placement-cap uses only the accepted grouped network assignment |
-| `crates/overdrive-control-plane/src/guest_network.rs` + acceptance/integration bodies | Exact plan/ports/probe/scratch/fact/error/result/private pool/host-owner home; D5 private scratch I/O; D12A private allocation leaf and source-local S11/S12 tables; D9 semantic bridge-guard adapter mapping; separate composed startup refusal and Lima S10/S11/S12 plus telemetry/native S13 bodies | D12A tables invoke the real owner through `with_allocation_io`, inject actual typed TAP/bridge/guard/endpoint/TCX leaf results, fail every cleanup leaf occurrence with exact operation/source and continuation, and fail RED on the current no-op provision/teardown bodies; the five control-plane real-I/O placeholders are reasoned-pending and user-waived from the bounded remediation score |
+| `crates/overdrive-control-plane/src/guest_network.rs` + acceptance/integration bodies | Exact plan/ports/probe/scratch/fact/error/result/private pool/host-owner home; D5 scratch I/O; D14 opaque outcome mapping; D14A private validator and non-persisted stage/attachment/guard/complement events; D12A allocation leaf; Lima S00/S10/S11/S12 plus S13 telemetry/native bodies | Four S00 bodies are authored reasoned-pending: expanded dataplane projection; every closed validator value/mismatch/lower source plus all adjacent first-mismatch precedence rows; superseding exercise-before-close owner order/cleanup; and serialized ordinary boot with tracing subscriber. The Lima body contains no monitor or transient poll; the earlier waiver does not cover it. D12A and later evidence retain prior roles. |
 | `crates/overdrive-sim/src/adapters/guest_network.rs` + `src/invariants/netns_density_boot_order.rs` | Exact reusable `SimSharedGuestNetworkOwner`, same-host sweep-call observation, and seeded S13 production-helper invariant | `with_sweep_host_state` records one `SimSharedGuestNetworkSweepCall` inside the actual sweep port invocation while preserving `calls()`; the invariant passes the same `SimVmHostState` into the production helper, fails on current residue-at-sweep order, prints every seed, and shrinks to seed `0` without depending on telemetry |
 | `crates/overdrive-netlink/src/nft.rs` + bridge-family source-local/integration bodies | Unchanged public IPv4 operations over one private family-aware codec; D9 bridge set/lookup ABI, semantic facts/outcomes and complete observe/converge/member/delete surface | active validation/family/expected-program/classification/member bodies plus reasoned-pending semantic observation/exact-exclusive deletion and real-kernel S37 bodies |
-| `crates/overdrive-dataplane/src/guest_tcx.rs` + `tests/integration/guest_tcx_inventory.rs` | D12 exact semantic endpoint/map/inventory/lifecycle types, private production-used inventory source/projections, and D6's unchanged five operations | five source-local reasoned-pending bodies cover every locked aya map kind, both accepted and opaque wrong schemas, once-moved capture failure/eight-family continuation including simultaneous outer-`Program` failures with distinguishable nested program/link enumeration sources, unique/multiple unreceipted ambiguity, and exact zero/positive receipts; the three Lima placeholders remain user-waived from this gate |
+| `crates/overdrive-dataplane/src/guest_tcx.rs` + `tests/integration/guest_tcx_inventory.rs` | D12 exact semantic endpoint/map/inventory/lifecycle types, approved D14 semantic TCP input/outcome and one opaque-program method, private inventory/probe projections, and D6's unchanged operations | Retain D12 bodies. The D14 pure projection table covers verdict/mark/MAC/destination/eight counter pairs, short output, complete malformed EtherType/version/IHL/protocol/destination-port boundaries, wrong source, and decrease/wrap. Lima alone exercises the opaque method through real D5; no runner or fabricated outcome satisfies boot. |
 | `crates/overdrive-netlink/src/client.rs` | D12A doc-hidden `ObservedLinkIdentity`/`ObservedLinkKind`/`PersistentTapIdentity`, exact observation methods, and source-local raw-message projection table | method/projection bodies are explicit RED panics; the table covers absent/TAP/TUN/dummy/veth/other/correct-or-wrong bridge plus persistence, exact/missing UID, up/master/MAC identity, while Lima retains real RTM_GETLINK/persistent-TAP effect authority |
 | `crates/overdrive-worker/src/mtls_intercept{,_port,_worker}.rs` + worker acceptance | Accepted intercept vocabularies/errors, private observe/atomic-replace seam, node-shared worker lifecycle/task owner, D7 private capability registry/RAII model, and final VmDriver gate schedules | Source-local actual Tokio tasks cover returned/error/panicked/cancelled/channel-closed classifications through D11's private owner. `netns_density_shared_owner` and dedicated `netns_density_exec_release` are acceptance-designer-owned final-shape bodies. |
 | `crates/overdrive-control-plane/src/lib.rs` + DNS responder source-local acceptance | D8 private retained supervisor/DNS task owners and unchanged public `ServerHandle::shutdown_requested` delegation | actual Tokio join/channel, DNS live/exited replacement, cooperative/abort shutdown, and invalid-state bodies compile without public kill methods |
@@ -6237,7 +6862,7 @@ oracles; black-box expectations do not absorb them.
 | Environment | Required precondition | Scenario evidence |
 |---|---|---|
 | Default in-process / explicit Linux runner | Rust production composition with injected Sim ports; the roadmap may wrap the exact-name S13 command in Lima only as its Linux toolchain runner; no host or kernel I/O is evidence | S-ND295-02..07, S-ND295-13 seeded sweep-call invariant, S-ND295-20..24, S-ND295-27..33 |
-| Lima root | Linux/cgroup v2/BPF/nft/netlink, `integration-tests`, `host-kernel-shared` serialization, named test CIDR leases | Tier 2 and non-KVM Tier 3 portions of S-ND295-08..12, S-ND295-13 structured boot-phase telemetry only, S-ND295-14..19, S-ND295-34, S-ND295-37 |
+| Lima root | Linux/cgroup v2/BPF/nft/netlink, `integration-tests`, existing whole-`overdrive-control-plane` integration-binary `host-kernel-shared` serialization verified through nextest `show-config`, named test CIDR leases | S-ND295-00 D14 ordinary boot through tracing-captured production stage/attachment/guard/complement events; Tier 2 and non-KVM Tier 3 portions of S-ND295-08..12; S-ND295-13 structured boot-phase telemetry only; S-ND295-14..19, S-ND295-34, S-ND295-37 |
 | Native x86_64 metal — in-process S13 | canonical lease, no virtualization/nesting, usable KVM, real Cloud Hypervisor and guest artifacts; no built product binary | S-ND295-13 `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance` only |
 | Native x86_64 metal — remaining feature lanes | canonical lease, no virtualization/nesting, usable KVM, built default-feature binary, real Cloud Hypervisor and guest artifacts | S-ND295-01, S-ND295-23, S-ND295-25..26, S-ND295-35..37 and both T1 receipts |
 | Fresh-process retained owned rules | BootClosed, zero managed TAPs after VMM/attachment sweep, complete owned identity or empty state | S-ND295-13..18 |
@@ -6273,15 +6898,20 @@ extension is opted in.
 | C7b interruption | PASS | retirement during enforcement, task panic/cancel/return, channel close, late retry after FailStop |
 | C7c concurrent actors | PASS | detection-versus-release, duplicate registration, predecessor/successor reuse, two allocations and in-flight shutdown |
 
-**Current prose verdict: COMPLETE — 15/15.** D-295-DISTILL-5 is reconciled:
-reasoned-pending source-local private-I/O tables drive the host-owner algorithm through
-setup, all probe stages, unconditional reverse cleanup, all count failures,
-all residue families, exact order, and optional-primary aggregation. Composed
-startup tests now prove only caller reaction and construct no empty complement.
+**Pre-D14A prose verdict: COMPLETE — 15/15. Current D14A verdict: COMPLETE,
+pending independent DISTILL review.** D-295-DISTILL-5 remains reconciled for
+setup, unconditional reverse cleanup, count failures, residue families,
+ordering, and optional-primary aggregation. D14 now requires the amended
+pre-close classifier/post-close-adoption order and real detached-guard oracle;
+the prior scripted stage booleans and transient monitor do not complete those
+obligations. D14A pins the missing production validator and deterministic
+event oracle.
 
-**Current non-waived executable-body audit: COMPLETE — 12 PASS + 3 justified
-N/A = 15/15 dispositions, roadmap validation pending.** The scored population
-is exactly ten reasoned-pending bodies: five D12 private
+**Pre-D14 non-waived executable-body audit: COMPLETE — 12 PASS + 3 justified
+N/A = 15/15 dispositions. Current D14A audit: COMPLETE — the four exact S00
+bodies are transitioned reasoned-pending and await independent review; roadmap
+validation remains pending.** The
+pre-D14 scored population is exactly ten reasoned-pending bodies: five D12 private
 map/schema/capture/receipt bodies, one D12A private netlink projection body,
 two S11 real-owner order/identity bodies, one S12 retained-owner
 failure/retry/complement body, and the S13 seeded invariant. The detailed
@@ -6291,9 +6921,13 @@ helper and fails on residue in the real sweep-call snapshot, shrinking to
 printed replay seed `0`. The eight unconditional real-I/O panic placeholders
 are user-waived, not rerun in this gate, and unscored—not completed fixture
 evidence.
-Linux Docker compile gates passed for the affected dataplane, control-plane,
-netlink, and Sim targets. No public kill/fault/generation hook, subprocess
-control, second owner, or test-authored production effect was introduced.
+The D14A source-local RED bodies compile and fail on the missing projection,
+production validator, and owner ordering. The Lima body compiles and captures
+only the five deterministic production events across awaited ordinary boot;
+the rejected monitor/polls are absent. Kernel execution remains
+environment-gated and is never replaced by source-local or Sim evidence. D14A
+introduces no public kill/fault/generation hook, subprocess control, second
+owner, or test-authored production effect.
 
 Native metal remains environment-gated because `OVERDRIVE_METAL_TARGET` is
 unset. The Lima VM was unavailable after a failed SSH restore, so the recorded

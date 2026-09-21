@@ -1226,3 +1226,878 @@ All previously approved D12/D12A/D13 boundaries remain intact. DISTILL may
 proceed with S-ND295-00/10/11/12/13; the roadmap must remain pending and no
 DELIVER step may resume until DISTILL approval and the separate roadmap-level
 findings are resolved.
+
+## Iteration 7 — D-295-DISTILL-14 startup packet-probe review
+
+### Scope and prior-finding disposition
+
+Iteration 7 preserves iterations 1–6 and reviews only the proposed
+D-295-DISTILL-14 amendment: one closed semantic TCP probe on the existing D12
+opaque program, the amended D5 pre-close exercise order, and the distinct
+D9/TAP detached-link oracle. D12's lifecycle/inventory contract, D12A's
+allocation leaf, and D13's production-composed ordering evidence remain
+unchanged.
+
+F-16 is production-reachable and bounded exactly as D14 states. Ordinary
+`run_server_with_obs_and_drivers` awaits the one composed owner's
+`probe_startup` before publishing the supervisor or admitting work
+(`overdrive-control-plane/src/lib.rs:2558-2582`). The real D5 binding currently
+checks only attachment/endpoint/counter presence for `Classifier` and
+`OriginalDestination`, and only attachment absence for `DetachedLinkGuard`
+(`overdrive-control-plane/src/guest_network.rs:1020-1066`). It can therefore
+return startup success without any packet-level classifier or D9 guard
+observation, exactly matching implementation-review F-16. D14 changes only
+that proven path; it does not absorb F-22/F-23/F-24 or any later supervisor
+work.
+
+### Exact API necessity and sufficiency
+
+The proposed additive surface is necessary because the existing values divide
+the needed authority deliberately:
+
+- `GuestTcxProgram` alone simultaneously owns the loaded classifier and typed
+  endpoint/counter maps (`guest_tcx.rs:689-697,718-860`). D6 exposes only
+  semantic attachment/counter operations and no live program handle.
+- the existing production `sys::prog_test_run` helper has a context-free raw
+  packet/FD boundary, while the context-aware `__sk_buff` runner is confined to
+  the BPF integration test (`overdrive-dataplane/src/sys/prog_test_run.rs:43-132`;
+  `overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs:51-146`);
+- TAP traffic cannot return the TC action, output mark, and rewritten packet,
+  while BPF test-run cannot traverse the bridge-family nft hook after link
+  detach.
+
+The selected method is also sufficient. Its six outcome accessors cover every
+D5 semantic comparison without exporting a raw representation:
+
+| Required observation | D14 semantic result |
+| --- | --- |
+| TC verdict | `verdict()` → `Accept`/`Drop`/`Unexpected` |
+| proof mark | `mark()` → `None`/`Intercept`/`Accepted`/`Unexpected` |
+| source-MAC preservation | `source_mac()` |
+| bridge destination rewrite | `destination_mac()` |
+| preserved destination IPv4 and TCP port | `original_destination()` |
+| exact one-of-eight transition and wrap/decrease detection | `counters()` over eight semantic before/after records |
+
+`GuestTcxTcpProbeInput` and the counter records are intentionally semantic data
+that the sibling control-plane adapter can construct or inspect. The successful
+`GuestTcxTcpProbeOutcome` itself has private fields and no constructor; the
+control-plane cannot synthesize or replace a projected outcome. `Clone` permits
+no fabrication because cloning still requires an existing dataplane-produced
+value. The surface exposes no packet bytes, context field, action/mark/counter
+number, FD, `bpf_attr`, command, repeat count, program lookup, protocol selector,
+or arbitrary payload.
+
+No smaller existing method can provide these observations, and none of the
+rejected alternatives is needed. Adding the method to the already-owning
+opaque program avoids a second loader, free packet operation, injectable
+dataplane trait, or control-plane raw-BPF adapter. D6's five free operations,
+`GuestTcxError`, `GuestTcxLink`, and `GuestTcxAdoptedState` remain exact.
+
+### Aya and kernel implementability
+
+The boundary is implementable with the locked substrate and no dependency
+change:
+
+- Aya 0.13.1 exposes immutable program-FD borrowing from a loaded `Program` and
+  immutable typed array reads. `GuestTcxProgram` retains both the loaded
+  `aya::Ebpf` and the typed counter array, so `&self` is the correct receiver;
+  no mutable public handle or FD accessor is required.
+- the repository already carries the complete `BPF_PROG_TEST_RUN` attribute
+  layout and syscall error handling in production, and the existing TC
+  integration runner proves the `ctx_in`/`ctx_out` layout needed to set
+  `ingress_ifindex` and recover `mark`. D14 can keep the new context-aware raw
+  helper and packet parser private to `guest_tcx`; it need not widen the
+  pre-existing context-free `sys` helper.
+- the production classifier reads `ingress_ifindex`, validates the endpoint's
+  source IPv4/MAC, preserves the destination tuple, rewrites the destination
+  MAC, writes the intercept mark, and advances only `Intercept`
+  (`overdrive-bpf/src/programs/guest_tcx.rs:41-127`). One fixed valid TCP SYN is
+  therefore a complete narrow positive boot probe; S08/09 retain the full
+  positive and negative classifier partitions.
+- the workspace already enables nix's `ioctl` and socket features, and
+  control-plane already depends on nix. Reopening the named persistent TAP with
+  `TUNSETIFF(IFF_TAP | IFF_NO_PI)` and binding the local UDP socket with
+  `SO_BINDTODEVICE` requires no new crate, public netlink operation, or owner.
+
+The production use of `BPF_PROG_TEST_RUN` is acceptable at this boot boundary.
+The caller already has the privilege required to load and attach the same BPF
+program; the synthetic run injects no host-network packet, retains no buffer or
+FD, and the current classifier's only persistent mutation is one isolated
+counter increment. The method executes once per semantic input, never resets a
+counter, and returns the actual eight before/after pairs. `checked_sub` in D5
+makes decrease/wrap fail closed. This adds bounded startup work only and no
+steady-state or audit cost.
+
+### Same-program identity, source, and cleanup
+
+The amended order preserves one identity chain rather than substituting test
+execution for attachment proof:
+
+1. D12 loads one classifier/maps object, inserts the scratch endpoint, attaches
+   first-ingress, retains `GuestTcxLink::program_id`, and pins that link.
+2. Both peer-MAC and gateway-MAC inputs run through the still-live
+   `GuestTcxProgram`; the method obtains the FD only from that same object and
+   reads that object's counter map.
+3. D5 closes the loader, adopts the exact recorded pins, queries the scratch
+   interface/ingress attachment, and requires the complete returned program-id
+   vector to equal the retained id. Probe success cannot satisfy adoption or
+   query, and query cannot fabricate classifier semantics.
+
+Fresh peer/gateway calls in both `Classifier` and `OriginalDestination` stages
+also prevent one cached receipt from satisfying both stages. Each call has an
+independent exact counter bracket and distinct destination facts.
+
+The error chain remains source-honest. Counter reads remain `GuestTcxError::Map`;
+missing owned objects remain `ObjectMissing`; raw syscall/context/output
+transport remains `GuestTcxError::Io`. The real D5 adapter wraps a typed
+`GuestTcxError` or `BridgeGuardError` with `std::io::Error::other(error)`, so
+`GuestNetworkError::Io { operation: StartupProbe }` retains the typed error and
+its lower source rather than a string. Semantic disagreement remains the
+existing stage-specific `PostconditionMismatch`; no error variant is added.
+
+Moving the two classifier stages before normal loader close does not create an
+unreachable cleanup branch. D12 already specifies that
+`GuestTcxAdoptedState::unpin_link` unpins the exact planned link and is
+absence-idempotent even when the state began with `for_inventory`
+(`feature-delta.md:4909-4928`). D14 requires the real I/O to create that one
+handle-free state lazily at the first unpin when normal adoption was not
+reached. The existing public method can privately open/validate/unpin the
+receipted planned path and return the opaque unpinned link for the existing
+detach action; no `adopt_link` success claim or new action is needed.
+
+The current partial implementation's `unpin_link` returns `Ok(None)` when its
+optional opened handle is empty (`guest_tcx.rs:1000-1014`), so GREEN must bring
+that body into compliance with its already-approved D12 semantics for this new
+reachable branch. This is implementation work within the exact existing
+method, not an API or DESIGN gap. Normal and cleanup-phase
+`close_loader_handles` remain infallible and absence-idempotent; complete
+reverse cleanup and all fifteen observations still run after every returned
+error or false result.
+
+Both new packet operations are synchronous once their async `exercise` future
+is polled. They contain no `.await`, spawn, callback, retained future, or lock
+across an await, so cancellation cannot bisect one BPF test run or the bounded
+TAP/counter/socket observation. Cancellation before the first poll or after a
+ready return does not invent a partial packet-operation receipt. The broader
+already-approved D5 setup/cleanup ownership is unchanged.
+
+### Detached-link oracle and evidence-layer separation
+
+The detached-link mechanism is non-vacuous and distinct from the classifier
+probe:
+
+- D6 first proves the scratch ingress attachment vector is empty and snapshots
+  all eight classifier counters.
+- D9's synchronous generation-bracketed `observe` returns the actual exact
+  bridge-family inventory and its anonymous `DefaultDrop` packet/byte counter
+  (`overdrive-netlink/src/nft.rs:2963-3015,3510-3609`). Requiring one exact
+  owned occurrence prevents a different rule/counter from supplying evidence.
+- writing one valid marker-bearing Ethernet/IPv4/UDP datagram through the
+  reopened persistent TAP enters the host as traffic from the exact managed
+  member. The bridge-bound UDP socket uses the kernel-selected port, eliminating
+  a stale fixed-port dependency.
+- exact packet delta one and positive byte delta prove arrival at the guard;
+  unchanged classifier counters prove the detached classifier did not run; and
+  continuous nonblocking `WouldBlock` with no received datagram proves no host
+  delivery. Any extra scratch traffic, duplicate/missing counter, wrap/decrease,
+  guard conflict, reappeared link, or delivery fails closed.
+
+The scratch bridge/TAP has no VMM or other producer, and the loop uses a
+monotonic deadline capped at 250 ms. It waits for the asynchronous kernel
+counter transition instead of relying on an immediate post-write sample, while
+the exact-one requirement prevents ambient traffic from being ignored. The
+poll is boot-only and owns local RAII socket/TAP FDs; it adds no detached task or
+runtime flake-prone timer assertion.
+
+There is no evidence collapse:
+
+- D14 boot probes only the two narrow positive TCP semantics needed for source-
+  honest production admission. S08/09 still own the complete TCP/gateway/ARP,
+  malformed, spoof, miss, truncation, direct-bypass, exact-counter, and external
+  no-escape partitions.
+- D14's scratch detached stage proves one real D9 counter transition plus host
+  no-delivery before admission. S10 still owns an ordinary provisioned
+  attachment, external link loss, peer-TAP and host no-escape, and the exact
+  production audit cause.
+- source-local raw-result/projection tables and D5 call-order/error tables are
+  necessary but cannot stand in for the named Lima ordinary-boot body. Public
+  Sim, the test-only BPF runner, an ignored placeholder, a fabricated outcome,
+  or a direct private-runner call is explicitly excluded.
+
+The D14 handoff is sufficiently exact for revised DISTILL: it names the pure
+projection body and required `/// CONTRACT_SHAPE: pure-function.` marker; the
+real-owner order/source/cleanup body; the active Lima ordinary-boot body through
+`HostSharedGuestNetworkOwner::probe_startup`; the semantic mismatch and lower-
+source refusal matrix; post-close exact adoption/query; real detached D9/TAP/
+UDP observation; empty complement; BootClosed/no-publication; and the retained
+independent S08/09/S10 evidence. DISTILL may author those bodies without
+choosing a new API or owner.
+
+### Architecture, roadmap, and mechanical checks
+
+D14 adds no component, owner, port, dependency edge, technology, persistence,
+system of record, recovery policy, supervisor behavior, or product-facing API.
+It is one doc-hidden method and five semantic values on the existing D12
+dataplane boundary plus implementation inside the existing private D5 adapter.
+Raw classifier packet/context/syscall/FD/numeric ABI remains below that
+boundary. Brief, C4, and ADR-0114/0115/0122/0124 remain correct; the exact API
+belongs in the feature-delta SSOT.
+
+| Check | Iteration-7 result |
+| --- | --- |
+| Roadmap schema | PASS — `VALID: 4 phases, 11 steps`; existing length/count warnings remain non-blocking. |
+| Roadmap-only DES integrity | PASS — roadmap format OK, no errors. |
+| JSON/diff/reference hygiene | PASS — `jq empty`, `git diff --check`, balanced Markdown fences, and all local feature-delta links resolve. |
+| Locked dependency feasibility | PASS — `cargo metadata --format-version 1 --locked --no-deps`; Aya remains `^0.13`, aya-ebpf `^0.1.1`, nix `^0.30` with required existing features. |
+| Dependency graph | PASS — 11 known steps, no missing dependency and no cycle. The existing S27/S28 prerequisite duplication remains the separately recorded whole-roadmap issue; D14 introduces no scenario duplicate. |
+| External validity | PASS — ordinary boot invokes the real owner and the revised verification list names the active real-adapter Lima body. |
+| API/implementation coupling | PASS for this bounded amendment — the exact doc-hidden signature is the accepted feature-delta contract required by repository policy; behavioral kernel evidence remains independently specified. |
+| Unit/integration boundary | PASS — pure private projection, real owner algorithm, Lima kernel boot, S08/09 classifier partitions, and S10 ordinary detached-link behavior remain separate. |
+| Step history | PASS — rejected `02-01` commits and DES events remain untouched historical evidence; the original crafter must run a fresh same-step cycle only after all upstream gates approve. |
+| Roadmap execution status | Correctly BLOCKED — `validation.status = pending` until revised DISTILL and roadmap review approve the new evidence. DESIGN approval alone grants no DELIVER authority. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-7 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-08 | Remain CLOSED. |
+| D12 opaque lifecycle/private source/inventory | Remains APPROVED. |
+| D12A allocation leaf and exact TAP/bridge identity | Remains APPROVED. |
+| D13 same-host sweep RED oracle and independent evidence layers | Remains APPROVED. |
+| DELIVER-02-01-F16 startup packet exercise | CLOSED at DESIGN by D14's exact semantic program method, amended D5 order, and separate D9/TAP oracle; implementation and executable proof remain pending downstream. |
+
+No unresolved DESIGN finding remains in the bounded D14 remediation. The noted
+current `unpin_link` body is a directly reachable GREEN obligation under the
+already-approved D12 method semantics, not authorization for another method,
+variant, action, loader, or owner.
+
+## Iteration 7 final verdict
+
+# APPROVED
+
+D-295-DISTILL-14 is necessary, sufficient, Rust/kernel-implementable, and
+source-honest. It closes F-16 at the DESIGN boundary without reopening or
+changing D12/D12A/D13, and it preserves the S08/09/S10 evidence partitions.
+Revised DISTILL and independent roadmap validation remain mandatory; step
+`02-01` is not executable while `validation.status = pending`.
+
+## Iteration 8 — D14 DESIGN-to-DISTILL translation review
+
+### Scope and translation inventory
+
+Iteration 8 preserves the iteration-7 DESIGN approval and reviews only its
+translation into the three newly authored D14 bodies, their RED scaffolds, the
+revised DISTILL documents, and the matching `02-01` roadmap handoff. No
+production behavior, rejected `02-01` history, DES event, or prior D12/D12A/D13
+decision is re-reviewed.
+
+The translation correctly preserves the exact public/doc-hidden shape:
+
+- `GuestTcxProbeVerdict`, `GuestTcxProbeMark`,
+  `GuestTcxProbeCounterObservation`, `GuestTcxTcpProbeInput`, and
+  `GuestTcxTcpProbeOutcome` match the approved derives, fields, and type homes;
+- the outcome fields remain private and expose exactly the six approved
+  accessors;
+- `GuestTcxProgram::probe_tcp_intercept(&self, GuestTcxTcpProbeInput)` has the
+  exact approved return type and is an explicit RED panic, not an invented
+  implementation;
+- `RawGuestTcxTcpProbeResult` and `project_tcp_probe_result` are private to
+  `guest_tcx.rs`; no raw packet, skb, FD, action/mark number, counter index,
+  syscall attribute, trait, free operation, constructor, or error variant is
+  exported; and
+- the control-plane additions are confined to `#[cfg(test)]` private fixtures.
+  They do not add another owner, loader, production seam, or public packet
+  surface.
+
+The source-local owner body also captures the approved coarse D5 order: setup;
+`Classifier`; `OriginalDestination`; normal loader close; adoption/query;
+unpin/detach; distinct detached-guard stage; then unconditional reverse cleanup
+and all fifteen observations. Its pre-close failure suffix places the one lazy
+handle-free adopted-state preparation inside the first unpin action and retains
+the typed `GuestTcxError` beneath `StartupProbe` I/O. Those are valid RED
+obligations.
+
+Three blocking translation findings remain.
+
+### Finding DESIGN-P02-09 — Blocking: no body forces the real D5 adapter to validate the six semantic outcome fields
+
+**Evidence:**
+
+- Approved D14 requires D5 to refuse every wrong verdict, mark, source MAC,
+  destination MAC, original destination, non-Intercept counter delta, missing
+  Intercept delta, and counter decrease/wrap. The approved Lima body was also
+  required to prove BootClosed refusal for each semantic mismatch or lower
+  failure (`feature-delta.md:5242-5252,5268-5277,5360-5385`).
+- The dataplane body calls only the private pure projection
+  (`guest_tcx.rs:1576-1733`). It proves that raw fields are represented in an
+  outcome, but never drives the control-plane predicate that decides whether
+  that outcome passes a D5 stage.
+- The control-plane body's `PacketProbeIo::exercise` fabricates its own
+  peer/gateway call records and then returns one generic `Ok(false)` or typed
+  error per stage (`guest_network.rs:3488-3507`). It cannot construct a
+  `GuestTcxTcpProbeOutcome`, does not invoke
+  `RealSharedGuestNetworkScratchIo`, and therefore proves only that the owner
+  reacts to a pre-decided stage boolean.
+- The Lima body is healthy-path only (`shared_guest_network_startup.rs:479-545`).
+  It never makes any one semantic field wrong and never observes a real-adapter
+  semantic refusal. The older composed Sim body proves only caller reaction to
+  an already-assembled owner-port error.
+
+**Reachability and consequence:** A DELIVER implementation may call the real
+opaque probe but omit any one of the mark/MAC/original-destination/counter
+comparisons. The pure projection body, scripted owner-order body, healthy Lima
+body, and existing Sim refusal body can all still pass. The acceptance set
+therefore does not enforce the exact source-honest boundary it claims to hand
+to the crafter.
+
+**Required bounded disposition:** Add RED evidence that reaches the actual D5
+semantic decision for every finite mismatch class and the exact lower-source
+class already specified by D14. Do not add a public outcome constructor, raw
+runner, FD accessor, injectable dataplane trait, second adapter, or test-only
+product hook. If the approved surface cannot make those failures reachable,
+return that testability gap to DESIGN rather than inventing API in DISTILL.
+
+### Finding DESIGN-P02-10 — Blocking: the pure projection table does not cover malformed complete output
+
+**Evidence:**
+
+- D14 and the roadmap require both short **and malformed** returned-packet
+  projection, with `None` for the affected semantic destination
+  (`feature-delta.md:5236-5240,5360-5366`; roadmap `02-01` criterion 14).
+- `raw_tcp_probe_output` always builds the same IPv4/TCP-shaped 38-byte value.
+  The negative rows truncate it only to lengths 0, 6, 12, and 34
+  (`guest_tcx.rs:1537-1553,1698-1715`).
+- The wrong-source row is still a structurally valid IPv4/TCP output. There is
+  no complete-length row for a wrong EtherType, IPv4 version/IHL, non-TCP
+  protocol, or unavailable destination-port boundary.
+
+**Reachability and consequence:** A projection that reads fixed offsets from
+every buffer of length at least 38, without validating the declared packet
+shape, satisfies the authored table while violating D14's malformed-output
+contract. The revised DISTILL documents nevertheless mark C6a and malformed
+output complete.
+
+**Required bounded disposition:** Extend the existing private pure table with
+the finite malformed complete-output and destination-boundary rows required by
+the approved projection contract. This needs no API, owner, real-I/O fixture,
+or architecture change.
+
+### Finding DESIGN-P02-11 — Blocking: the Lima witness races transient scratch state and is not serialized with the selected host-kernel tests
+
+**Evidence:**
+
+- The ordinary-boot body starts an unsynchronised monitor thread, polls every
+  1 ms, calls `run_server`, and stops the monitor immediately when `run_server`
+  returns (`shared_guest_network_startup.rs:114-159,488-496`).
+- It then requires the monitor to have sampled the short-lived counter pin,
+  observed classifier maximum exactly four, and completed D9 observations both
+  before and after the one packet (`shared_guest_network_startup.rs:498-516`).
+  There is no handshake that the monitor started before setup, no receipt that
+  it observed either transition before cleanup, and no post-boot wait because
+  the scratch resources are correctly gone by then.
+- The `02-01` verification command selects this body together with S10/S11/S12/
+  S13 real-host bodies in the same nextest run. The repository's cross-process
+  `host-kernel-shared` group is the required mechanism for fixed global kernel
+  names, but `.config/nextest.toml` has no override covering
+  `shared_guest_network_startup`. In-source `serial_test` would not serialize
+  nextest processes.
+
+**Reachability and consequence:** A correct production probe can create,
+increment, and clean its isolated pins/guard before the monitor is scheduled or
+between two samples, producing a false test failure. Conversely, another
+selected real-host test can collide with the fixed scratch/production bpffs,
+bridge, TAP, or nft names. This makes the mandatory Lima gate scheduler- and
+suite-order-dependent rather than repeatable kernel evidence.
+
+**Required bounded disposition:** Make the ordinary-production-composition
+oracle deterministic using only the already-approved semantic/read-only
+surfaces, and place every selected fixed-name shared-kernel body in the existing
+cross-process serialization domain. Do not add a product event, timing hook,
+public state accessor, sleep in production, or second owner to coordinate the
+test.
+
+### Evidence-layer and documentation disposition
+
+The intended layer split remains correct and must be preserved during
+remediation:
+
+- the dataplane private table owns raw-to-semantic projection only;
+- the private D5 table owns owner order, source retention, cleanup continuation,
+  and the fifteen-family complement;
+- ordinary Lima boot owns the real opaque-program call, post-close same-program
+  adoption/query, real D9/TAP/UDP guard traversal, and cleanup;
+- S08/09 retain the complete classifier partition and external no-escape
+  evidence; and
+- S10 retains ordinary provision, external detach, peer/host no-escape, and
+  exact audit cause.
+
+No authored body improperly substitutes Sim or the test-only BPF runner for
+Linux, and no production effect is installed by the new Lima fixture. The
+findings concern missing enforcement and determinism inside that otherwise
+correct partition, not a request to merge layers or broaden scope.
+
+Until the three findings close, the revised prose overstates its evidence:
+`test-scenarios.md` cannot mark C6a/C6b and the D14 executable audit complete,
+and `red-classification.md` cannot describe the Lima witness as exact. The
+roadmap is correct to retain `validation.status = pending`; step `02-01` remains
+non-executable.
+
+### Mechanical checks
+
+| Check | Iteration-8 result |
+| --- | --- |
+| Exact D14 API/visibility | PASS — only the approved five semantic values, six outcome accessors, and one opaque-program method were added; raw scaffolds remain private. |
+| Production implementation prohibition | PASS — D14 production methods are explicit RED panics; test-only fixtures are `#[cfg(test)]` or integration-crate local. |
+| Roadmap schema | PASS — `VALID: 4 phases, 11 steps`; existing count/length warnings remain non-blocking. |
+| Roadmap-only DES integrity | PASS — roadmap format OK, no validator errors. |
+| JSON/diff hygiene | PASS — `jq empty` and `git diff --check`. |
+| Contract Shape markers | PASS — the live pure projection body carries the exact `/// CONTRACT_SHAPE: pure-function.` line; the two stateful bodies declare bounded-change. |
+| D5 cleanup order | PASS at the scripted owner layer — normal and pre-close-failure expected sequences include exact cleanup continuation and all fifteen observations. |
+| Semantic refusal coverage | FAIL — DESIGN-P02-09. |
+| Malformed projection coverage | FAIL — DESIGN-P02-10. |
+| Lima determinism/serialization | FAIL — DESIGN-P02-11. |
+| Roadmap execution status | Correctly pending; no DELIVER authority. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-8 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-08 | Remain CLOSED. |
+| D14 architecture/API decision | Remains APPROVED; no API or ownership defect was introduced by the translation. |
+| DESIGN-P02-09 — actual D5 semantic mismatch enforcement is not driven | OPEN, blocking. |
+| DESIGN-P02-10 — malformed complete-output projection is absent | OPEN, blocking. |
+| DESIGN-P02-11 — Lima witness is timing-racy and cross-process-unserialized | OPEN, blocking. |
+
+## Iteration 8 final verdict
+
+# CHANGES_REQUIRED
+
+The translation preserves D14's exact API, ownership, raw-ABI fence, cleanup
+order, and evidence-layer separation, but it does not yet enforce every
+semantic refusal and its mandatory Lima proof is not deterministic. Remediate
+the three bounded findings and re-review before independent roadmap approval or
+DELIVER step `02-01`.
+
+## Iteration 9 — D-295-DISTILL-14A validation and deterministic-observation review
+
+### Scope and prior-finding dispositions
+
+Iteration 9 preserves D14's iteration-7 public/doc-hidden API approval and
+reviews only proposed D-295-DISTILL-14A: the production-used module-private
+semantic validator, the four-name/five-event non-persisted startup trace, D5
+order supersession, malformed projection handoff, and deterministic Lima/
+nextest requirements. No code, test, DES log, prior D12/D12A/D13 decision, or
+later supervisor behavior is reviewed or authorized here.
+
+| Iteration-8 finding | Iteration-9 disposition | Evidence |
+| --- | --- | --- |
+| DESIGN-P02-09 — actual D5 semantic mismatch enforcement is not drivable | **CLOSED by D14A.** | `GuestNetworkTcpProbeObservation` is constructible only inside the control-plane module, while `from_outcome` is the sole production mapping from opaque accessors. The exact production-used validator makes every finite mismatch and one source-bearing lower error directly testable without making the successful outcome constructible downstream. |
+| DESIGN-P02-10 — malformed complete-output projection is absent | **CLOSED at DESIGN handoff.** | D14A explicitly requires complete-length wrong EtherType, IPv4 version/IHL, non-TCP protocol, and unavailable destination-port rows in the existing dataplane-private pure table. No API or owner change is introduced. |
+| DESIGN-P02-11 — transient Lima monitor and serialization | **CLOSED by D14A.** | The monitor/polls are rejected and replaced with synchronous production completion events captured across awaited ordinary boot. The whole `overdrive-control-plane` integration binary already has a committed `host-kernel-shared` override in `.config/nextest.toml`; D14A correctly requires preserving and mechanically verifying it rather than inventing source-level serialization. |
+
+The iteration-8 statement that the whole integration binary lacked a nextest
+assignment was factually incomplete: `.config/nextest.toml` already contains
+`package(overdrive-control-plane) & binary(integration)` →
+`host-kernel-shared`. The monitor race finding remains valid; D14A removes that
+race and pins verification of the existing cross-process assignment.
+
+### Private validator exactness and source semantics
+
+The proposed boundary is necessary and no broader than the translation gap:
+
+```text
+validate_guest_tcx_tcp_probe(
+    requirement,
+    expected,
+    observed Result<private semantic observation, GuestTcxError>,
+) -> io::Result<Passed(actual Intercept bracket) | Mismatch(exact private cause)>
+```
+
+All supporting values and the function remain module-private. The observation
+contains only D14's already-approved semantic outcome fields. It carries no raw
+packet, skb context, FD, program handle, action/mark number, counter slot,
+syscall attribute, owner authority, or persistence identity. Source-local tests
+may construct it, but downstream crates still cannot construct a
+`GuestTcxTcpProbeOutcome`; production obtains an observation only through the
+six approved outcome accessors.
+
+The validation order is deterministic and sufficient:
+
+1. `Accept` verdict;
+2. `Intercept` mark;
+3. exact present source MAC;
+4. exact present bridge destination MAC;
+5. exact present original destination for `OriginalDestination` only;
+6. each of the eight counter identities at its canonical array index;
+7. checked non-decreasing before/after bracket; and
+8. `Intercept +1`, every other counter `+0`.
+
+The mismatch taxonomy retains precisely the information needed to distinguish
+those failures: observed verdict/mark, expected and optional observed MAC/
+destination, counter index and semantic identities, actual decreasing bracket,
+or expected/observed delta. `CounterDecrease` honestly represents both an
+ordinary decrease and u64 wrap; `CounterDelta` is evaluated only after
+`checked_sub` succeeds. `Passed` returns the actual Intercept bracket used by
+the later trace and does not normalize, reset, or invent a count.
+
+`Classifier` intentionally does not compare original destination; D14 assigns
+that additional check to the fresh `OriginalDestination` stage. Both stages
+still validate verdict, mark, MACs, and all counters for peer and gateway
+inputs. This preserves the approved division rather than weakening a field.
+
+An observed `GuestTcxError` becomes
+`std::io::Error::other(error)`. The typed `GuestTcxError` and its lower source
+therefore remain downcastable beneath D5's existing
+`GuestNetworkError::Io { operation: StartupProbe }`. A semantic mismatch is not
+fabricated as I/O: the real adapter converts `Mismatch` to `Ok(false)`, leaving
+the owner to construct the existing stage-specific `PostconditionMismatch`.
+No public error variant or parallel source taxonomy is added.
+
+### Five-event production trace
+
+D14A defines four closed event names that produce exactly five ordered events
+on a successful startup probe:
+
+| Order | Completion claim | Required actual fields |
+| --- | --- | --- |
+| 1 | TCP stage completed — `classifier` | retained program id; peer and gateway Intercept before/after brackets |
+| 2 | TCP stage completed — `original_destination` | the same fields from two fresh validated calls |
+| 3 | attachment reopened | the same retained program id; actual D6 revision; `program_count = 1`; scratch TAP ifindex |
+| 4 | detached guard completed | the same retained program id; unchanged classifier Intercept bracket; actual D9 packet/byte brackets; `host_datagrams = 0` |
+| 5 | cleanup observed | primary/cleanup failure flags; actual fully-observed/empty predicates; every one of the fifteen semantic scratch counts |
+
+The emission fences are exact and source-honest:
+
+- the real scratch adapter retains `GuestTcxLink::program_id` before `PinLink`
+  consumes the opaque link;
+- a TCP-stage event is emitted only after both peer and gateway outcomes pass
+  the production validator, so no scripted boolean can manufacture completion;
+- the attachment event follows loader close, fresh pin adoption, and a D6 query
+  whose complete program-id vector equals exactly the retained id;
+- the detached event follows attachment absence, exact D9 identity, checked
+  packet delta one, checked positive byte delta, equality of every classifier
+  counter, and zero UDP delivery; and
+- the owner emits the cleanup event exactly once after cleanup constructs the
+  complete fifteen-family complement and before choosing its existing return
+  path.
+
+The trace is also sufficient for a deterministic successful-boot receipt. The
+four TCP calls must form one continuous Intercept sequence with delta one per
+call. The detached classifier bracket begins at the final TCP value and remains
+unchanged. Guard packets advance exactly one, bytes advance positively, and
+host datagrams remain zero. The final event requires every family to be
+`Observed(0)`, not an unavailable field or inferred absence. The first four
+events carry one identical program id; cleanup deliberately carries resource
+facts rather than pretending a released program identity is still live.
+
+Failure semantics are honest: a mismatch or lower error emits no completion
+for that stage; already completed earlier stages remain true history; attachment
+or guard disagreement emits no corresponding event; and cleanup still emits
+its actual result. Tracing has no return value, does not influence admission,
+and cannot turn emission failure into product failure. Cancellation before a
+completion emits no claim; cancellation after a synchronous completed effect
+does not invalidate the already-true event.
+
+### Determinism, ownership, and architecture audit
+
+The tracing replacement is feasible with existing production composition. The
+integration body installs the repository's existing minimal subscriber before
+awaiting ordinary `run_server`. D14A emits every event synchronously inside
+that awaited boot path; there is no detached monitor, poll interval, barrier,
+callback, sleep, or transient post-return read. Filtering the captured trace by
+the four exact names yields a stable five-event sequence after `run_server`
+returns.
+
+Cross-process isolation is independently correct. The committed whole-binary
+nextest override places every `overdrive-control-plane` integration test in the
+one-thread `host-kernel-shared` group. The added `cargo nextest show-config
+test-groups` gate uses supported package/target/ignored/group/filter options and
+proves the actual resolution; no in-process `serial_test` claim substitutes for
+it.
+
+The events extend existing `guest_network.shared_owner_*` operational
+telemetry, not product state. They are not persisted, indexed, replayed,
+queried by admission or recovery, or exposed through a public enum, row, port,
+health repository, callback, or state accessor. The private validator is a
+production decision function, not a test hook. D14A adds no component, owner,
+dependency edge, system of record, recovery protocol, supervisor behavior, or
+product-facing API. Feature-delta exactness is sufficient; brief, C4, and the
+accepted ADRs remain unchanged.
+
+### D5 supersession and DISTILL/environment handoff
+
+D14A preserves D14's single normative owner order and makes the transition
+requirement explicit: attach/pin → fresh peer/gateway `Classifier` and
+`OriginalDestination` validation → close → adopt/query the same id → detach →
+distinct D9/TAP guard proof → reverse cleanup/all-fifteen observation. Existing
+D5 tables must be rewritten to that one order; the obsolete
+close/adopt/query-before-exercise sequence is not retained as an alternative.
+Pre-close failure still lazily constructs only the approved handle-free adopted
+state inside first unpin, without a new D5 action or success claim.
+
+The malformed projection handoff now names the missing finite classes at the
+correct dataplane-private pure boundary: wrong EtherType, IPv4 version/IHL,
+non-TCP protocol, and destination-port bytes outside the returned buffer. Each
+must produce `None` only for the affected semantic field. The separate
+control-plane validator table owns semantic mismatch/source behavior, avoiding
+raw/projection and owner-decision collapse.
+
+The environment matrix remains layered and executable:
+
+- source-local projection, validator, and D5 order/cleanup bodies are
+  deterministic Rust RED evidence and never kernel proof;
+- Lima root supplies Linux BPF/TCX, nft, netlink, persistent TAP, UDP, bpffs,
+  the integration feature, tracing-captured ordinary production boot, and the
+  verified `host-kernel-shared` assignment; and
+- S08/09, S10, D12 inventory, D12A provision/teardown, D13 Sim ordering and
+  native-metal evidence remain independent. D14A neither weakens nor replaces
+  the inherited pinned-kernel/verifier and native-metal gates.
+
+No monitor, timing poll, public Sim outcome, ignored panic placeholder,
+test-only BPF runner, fabricated successful outcome, or direct private-runner
+call may satisfy the Lima gate.
+
+### Mechanical checks
+
+| Check | Iteration-9 result |
+| --- | --- |
+| Roadmap schema | PASS — `VALID: 4 phases, 11 steps`; existing length/count warnings remain non-blocking. |
+| Roadmap-only DES integrity | PASS — roadmap format OK, no validator errors. |
+| JSON/diff hygiene | PASS — `jq empty` and `git diff --check`. |
+| Locked dependency graph | PASS — `cargo metadata --format-version 1 --locked --no-deps`; D14A adds no dependency. |
+| Exact private validator shape | PASS — private requirement/observation/mismatch/validation values and one exact production-used function; no cross-crate surface. |
+| Error/source taxonomy | PASS — semantic mismatches remain source-less owner postconditions; lower typed failure stays in the existing I/O source chain. |
+| Five-event trace | PASS — exact names, fields, emission fences, identity continuity, counter/guard conditions, and cleanup complement are pinned. |
+| Deterministic Lima feasibility | PASS — synchronous tracing capture replaces transient polling. |
+| Cross-process serialization | PASS — existing whole integration-binary override plus mandatory `show-config` proof. |
+| D5 order | PASS — old order explicitly superseded; only exercise-before-close remains normative. |
+| Malformed/environment handoff | PASS — finite malformed rows and layered source-local/Lima/independent evidence are explicit. |
+| Roadmap execution status | Correctly pending until transitioned DISTILL and independent roadmap review. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-9 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-08 | Remain CLOSED. |
+| DESIGN-P02-09 — production semantic mismatch decision not drivable | CLOSED by the production-used private validator and exact mismatch table. |
+| DESIGN-P02-10 — malformed complete-output rows absent | CLOSED by the exact dataplane projection handoff; executable transition remains DISTILL work. |
+| DESIGN-P02-11 — transient/racy Lima observation | CLOSED by synchronous production events and verified existing nextest serialization. |
+| D14 public/doc-hidden API, D12/D12A/D13 | Remain APPROVED and unchanged. |
+
+No unresolved DESIGN finding remains in the bounded D14A remediation.
+
+## Iteration 9 final verdict
+
+# APPROVED
+
+D-295-DISTILL-14A is exact, implementable, source-honest, and bounded to the
+proven translation gaps. It adds only a production-used private validator and
+non-persisted completion telemetry, preserves D14's API and one-owner
+architecture, makes the Lima proof deterministic, and closes
+DESIGN-P02-09/10/11. DISTILL must now transition the four named S00 bodies and
+pass independent review; roadmap `validation.status` correctly remains pending
+and DELIVER step `02-01` is not yet executable.
+
+## Iteration 10 — final D14A DESIGN-to-DISTILL translation review
+
+### Scope and accepted translation portions
+
+Iteration 10 reviews only the final four D14A S00 bodies and their matching
+DISTILL/roadmap claims against the iteration-9 contract. D14A's architecture is
+not reopened.
+
+The translation preserves the approved boundaries:
+
+- all D14A requirement/observation/mismatch/validation types and
+  `validate_guest_tcx_tcp_probe` are module-private and exact;
+- `GuestNetworkTcpProbeObservation::from_outcome` copies only the six approved
+  semantic accessors, while the production validator remains an explicit RED
+  panic;
+- no public constructor, outcome field, raw packet/SKB/FD/syscall value, trait,
+  free runner, error variant, owner, persistence record, callback, or timing
+  hook was added;
+- the dataplane projection table now includes complete-length wrong EtherType,
+  IPv4 version/IHL, non-TCP protocol, and unavailable destination-port rows,
+  with MACs retained and original destination absent;
+- both the original D5 table and the focused D14A table now require only the
+  exercise-before-close order, including pre-close cleanup, lazy adopted-state
+  preparation, and all fifteen inventory observations; and
+- the Lima body removes the monitor/polls and asserts the exact five-event
+  trace: two ordered TCP stages, same-id attachment reopen, detached D9 guard,
+  and fifteen-field all-zero cleanup. Counter continuity, guard packet/byte
+  deltas, zero delivery, identity continuity, and cleanup predicates are all
+  asserted. The existing whole integration-binary `host-kernel-shared`
+  assignment remains intact and the roadmap requires `show-config` proof.
+
+One blocking acceptance-table gap remains.
+
+### Finding DESIGN-P02-12 — Blocking: the validator table does not enforce the full closed value partitions or exact first-mismatch order
+
+**Evidence:**
+
+Iteration 9 pins `Accept` as the sole valid verdict, `Intercept` as the sole
+valid mark, exact `SocketAddrV4` equality, exact counter identity at each array
+index, every wrong counter delta, and the first mismatch in the order verdict →
+mark → source MAC → destination MAC → original destination → ordered counters.
+
+The authored body at `guest_network.rs:3737-3873` leaves reachable incorrect
+implementations green:
+
+- verdict validation exercises `Drop` but not the other closed invalid value,
+  `Unexpected`;
+- mark validation exercises `Unexpected` but not `None` or `Accepted`;
+- the wrong `OriginalDestination` row changes IP and port together, so a
+  validator comparing only one axis passes; no row isolates same-IP/wrong-port
+  and wrong-IP/same-port;
+- wrong Intercept delta exercises `2` but not `0`, so a validator rejecting
+  only oversized deltas passes;
+- counter-identity rows replace one identity and therefore create a duplicate/
+  missing pair; they do not include an order-preserving-cardinality permutation
+  that distinguishes exact index validation from set/uniqueness validation;
+  and
+- the sole multi-error row proves only that verdict precedes mark/source. It
+  does not prove mark-before-source, source-before-destination,
+  destination-before-original-destination, semantic fields before counters, or
+  lower counter index before higher counter index.
+
+**Reachability and consequence:** The validator is the production decision
+boundary added specifically to make every D14 semantic mismatch testable. An
+implementation that accepts `GuestTcxProbeVerdict::Unexpected`, accepts
+`GuestTcxProbeMark::None`, checks only the destination IP, accepts an unchanged
+Intercept counter, treats counter identities as a set, or returns a later
+mismatch first can satisfy every current D14A body. The DISTILL documents
+therefore overstate “every exact private mismatch,” “every wrong delta,” and
+“deterministic first mismatch.”
+
+**Required bounded disposition:** Extend the existing private pure validator
+table with the missing closed enum alternatives, isolated destination IP/port
+rows, zero Intercept delta, a counter-identity permutation, and multi-error rows
+that mechanically establish each adjacent first-mismatch precedence including
+counter index order. This is test-only table completion under the already-
+approved private validator; it requires no DESIGN, API, production seam,
+telemetry, or environment change.
+
+### Evidence and mechanical disposition
+
+| Check | Iteration-10 result |
+| --- | --- |
+| Exact private D14A shape | PASS — no visibility or signature drift. |
+| Raw/API/production-behavior fence | PASS — only exact semantic projection glue is implemented; decision/effect bodies remain RED. |
+| Malformed projection | PASS — all iteration-9 complete-output classes plus short boundaries are present. |
+| Superseded D5 order | PASS — both order tables use exercise-before-close exclusively. |
+| Five-event Lima oracle | PASS — exact event order/fields, identity/counter/guard/cleanup assertions, no monitor or poll. |
+| Kernel-test serialization | PASS — committed whole-binary nextest assignment retained; roadmap includes `show-config`. |
+| Validator mismatch completeness | FAIL — DESIGN-P02-12. |
+| Roadmap schema | PASS — `VALID: 4 phases, 11 steps`; existing length/count warnings remain non-blocking. |
+| Roadmap-only DES integrity | PASS — roadmap format OK, no validator errors. |
+| JSON/diff hygiene | PASS — `jq empty` and `git diff --check`. |
+| Roadmap execution status | Correctly pending; no DELIVER authority. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+The environment split remains honest: source-local tables are not kernel proof;
+Lima is still required for the tracing-captured real adapter; S08/09/S10 and
+D12/D12A/D13 retain their independent roles. The Lima body is compile/list
+verified but remains `PENDING_ENVIRONMENT`, with no claimed real-kernel run.
+
+### Iteration-10 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-11 | Remain CLOSED at DESIGN; D14A architecture remains APPROVED. |
+| DESIGN-P02-12 — incomplete validator value/order table | OPEN, blocking in DISTILL translation. |
+
+## Iteration 10 final verdict
+
+# CHANGES_REQUIRED
+
+The final translation is exact at the API, malformed-projection, owner-order,
+telemetry, Lima, and serialization boundaries, but its core validator table
+does not yet enforce the full closed semantic contract or deterministic
+first-mismatch order. Complete the bounded rows above and re-review before
+roadmap approval or DELIVER step `02-01`.
+
+## Iteration 11 — final D14A validator-table re-review
+
+### Scope and prior-finding disposition
+
+Iteration 11 reviews only the bounded remediation for DESIGN-P02-12. D14A's
+iteration-9 architecture, the previously accepted malformed projection, D5
+order, five-event Lima oracle, serialization, and all D12/D12A/D13/D14
+decisions remain unchanged.
+
+DESIGN-P02-12 is **CLOSED**. The production-validator body now covers every
+missing closed partition and the complete adjacent precedence chain:
+
+- both invalid verdicts, `Drop` and `Unexpected`;
+- all three invalid marks, `None`, `Accepted`, and `Unexpected`;
+- absent and wrong source/destination MAC values;
+- absent original destination, wrong IP with the expected port, expected IP
+  with the wrong port, and both axes wrong;
+- a full counter-identity permutation that preserves the eight-value
+  cardinality, plus wrong identity at every individual index;
+- wrong delta at every counter, including both zero and oversized Intercept
+  deltas;
+- ordinary decrease and max-to-zero wrap at every counter; and
+- multi-error rows proving verdict before mark, mark before source, source
+  before destination, destination before original destination, original
+  destination before counters, lower counter record before the next record,
+  counter identity before decrease, and decrease before delta.
+
+The `Classifier` original-destination exemption remains separately asserted,
+while `OriginalDestination` still requires exact IP and port. The healthy row
+still returns the actual Intercept bracket, and the lower `GuestTcxError::Io`
+remains downcastable beneath `std::io::Error::other`. These additions complete
+the accepted private decision contract without adding a type, variant,
+function, parameter, constructor, hook, or production implementation.
+
+### Regression and evidence audit
+
+- The D14A validator/type shapes remain byte-for-byte aligned with iteration 9
+  and module-private.
+- `GuestNetworkTcpProbeObservation::from_outcome` remains the sole semantic
+  accessor projection; the validator is still an explicit RED scaffold.
+- The dataplane malformed table, exercise-before-close D5 tables, lazy cleanup,
+  five-event tracing receipt, and monitor-free Lima body are unchanged.
+- The existing whole `overdrive-control-plane` integration-binary
+  `host-kernel-shared` assignment and roadmap `show-config` command remain
+  intact.
+- Revised DISTILL and RED-classification prose now describe the actual closed
+  partitions and adjacent precedence evidence without claiming a kernel run;
+  the Lima body remains honestly `PENDING_ENVIRONMENT`.
+- No public/raw ABI, system of record, owner, recovery behavior, supervisor
+  behavior, product event consumer, or test coordination seam was introduced.
+
+### Mechanical checks
+
+| Check | Iteration-11 result |
+| --- | --- |
+| P02-12 invalid-value partitions | PASS — complete verdict, mark, optional value, destination-axis, identity, delta, decrease and wrap rows. |
+| P02-12 first-mismatch precedence | PASS — every adjacent semantic/counter boundary and counter index order is exercised. |
+| Exact private API/ownership | PASS — no D14A/D14 surface drift. |
+| Malformed projection / D5 order / five-event Lima oracle | PASS — unchanged from iteration 10. |
+| Roadmap-only DES integrity | PASS — roadmap format OK, no validator errors. |
+| JSON/diff hygiene | PASS — `jq empty` and `git diff --check`. |
+| Roadmap execution status | Correctly pending until independent roadmap approval; no DELIVER authority. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-11 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-11 | Remain CLOSED. |
+| DESIGN-P02-12 — incomplete validator value/order table | CLOSED by the complete closed-partition and adjacent-precedence rows. |
+| D14A architecture and prior D12/D12A/D13/D14 approvals | Remain APPROVED and unchanged. |
+
+No unresolved finding remains in the bounded final D14A translation.
+
+## Iteration 11 final verdict
+
+# APPROVED
+
+The final D14A DESIGN-to-DISTILL translation now enforces the complete private
+semantic validator contract and deterministic first-mismatch order while
+preserving every approved API, owner, evidence boundary, and real-kernel gate.
+Independent roadmap approval remains required before DELIVER step `02-01`.

@@ -49,6 +49,14 @@ impl Visit for FieldVisitor {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.fields.insert(field.name().to_owned(), value.to_owned());
     }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields.insert(field.name().to_owned(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields.insert(field.name().to_owned(), value.to_string());
+    }
 }
 
 #[derive(Clone, Default)]
@@ -368,6 +376,139 @@ async fn boot_reclamation_removes_a_prior_epoch_tap_before_shared_convergence_an
         overdrive_netlink::nft::bridge::BridgeGuardObservation::Exact { .. }
     ));
     handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains cleanly");
+}
+
+fn required_field<'a>(event: &'a EventRow, field: &str) -> &'a str {
+    event.fields.get(field).unwrap_or_else(|| panic!("{} event is missing {field}", event.name))
+}
+
+fn u64_field(event: &EventRow, field: &str) -> u64 {
+    required_field(event, field)
+        .parse()
+        .unwrap_or_else(|error| panic!("{} {field} must be u64: {error}", event.name))
+}
+
+fn bool_field(event: &EventRow, field: &str) -> bool {
+    required_field(event, field)
+        .parse()
+        .unwrap_or_else(|error| panic!("{} {field} must be bool: {error}", event.name))
+}
+
+const D14A_TCP_EVENT: &str = "guest_network.shared_owner_startup_probe_tcp_stage_completed";
+const D14A_ATTACHMENT_EVENT: &str = "guest_network.shared_owner_startup_probe_attachment_reopened";
+const D14A_DETACHED_EVENT: &str =
+    "guest_network.shared_owner_startup_probe_detached_guard_completed";
+const D14A_CLEANUP_EVENT: &str = "guest_network.shared_owner_startup_probe_cleanup_observed";
+
+fn assert_tcp_stage_event(
+    event: &EventRow,
+    stage: &str,
+    program_id: u64,
+    expected_before: &mut u64,
+) {
+    assert_eq!(required_field(event, "stage"), stage);
+    assert_eq!(u64_field(event, "program_id"), program_id);
+    let peer_before = u64_field(event, "peer_intercept_before");
+    let peer_after = u64_field(event, "peer_intercept_after");
+    let gateway_before = u64_field(event, "gateway_intercept_before");
+    let gateway_after = u64_field(event, "gateway_intercept_after");
+    assert_eq!(peer_before, *expected_before);
+    assert_eq!(peer_after.checked_sub(peer_before), Some(1));
+    assert_eq!(gateway_before, peer_after);
+    assert_eq!(gateway_after.checked_sub(gateway_before), Some(1));
+    *expected_before = gateway_after;
+}
+
+/// S-ND295-00 — ordinary boot admits only after D14A's five deterministic
+/// completion events prove the real classifier, attachment, guard and cleanup.
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one real-boot D14A trace keeps every completion field auditable"
+)]
+#[tokio::test]
+#[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A deterministic ordinary-boot trace"]
+async fn production_startup_exercises_classifier_and_detached_guard_before_admission() {
+    // SAFETY: `geteuid` has no memory-safety preconditions.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!(
+            "SKIP production_startup_exercises_classifier_and_detached_guard_before_admission: root required"
+        );
+        return;
+    }
+
+    let collector = EventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let tmp = TempDir::new().expect("tempdir");
+    let handle = run_server(config(&tmp), Arc::new(overdrive_host::RealCgroupFs::new()))
+        .await
+        .expect("D14A real classifier and detached-guard probe permit admission");
+    handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains cleanly");
+
+    let events: Vec<_> = collector
+        .snapshot()
+        .into_iter()
+        .filter(|event| {
+            [D14A_TCP_EVENT, D14A_ATTACHMENT_EVENT, D14A_DETACHED_EVENT, D14A_CLEANUP_EVENT]
+                .contains(&event.name.as_str())
+        })
+        .collect();
+    assert_eq!(
+        events.iter().map(|event| event.name.as_str()).collect::<Vec<_>>(),
+        [
+            D14A_TCP_EVENT,
+            D14A_TCP_EVENT,
+            D14A_ATTACHMENT_EVENT,
+            D14A_DETACHED_EVENT,
+            D14A_CLEANUP_EVENT,
+        ]
+    );
+
+    let program_id = u64_field(&events[0], "program_id");
+    let mut next_intercept = u64_field(&events[0], "peer_intercept_before");
+    assert_tcp_stage_event(&events[0], "classifier", program_id, &mut next_intercept);
+    assert_tcp_stage_event(&events[1], "original_destination", program_id, &mut next_intercept);
+
+    assert_eq!(u64_field(&events[2], "program_id"), program_id);
+    assert_eq!(u64_field(&events[2], "program_count"), 1);
+    let _revision = u64_field(&events[2], "revision");
+    assert!(u64_field(&events[2], "ifindex") > 0);
+
+    assert_eq!(u64_field(&events[3], "program_id"), program_id);
+    assert_eq!(u64_field(&events[3], "classifier_intercept_before"), next_intercept);
+    assert_eq!(u64_field(&events[3], "classifier_intercept_after"), next_intercept);
+    let guard_packets_before = u64_field(&events[3], "guard_packets_before");
+    let guard_packets_after = u64_field(&events[3], "guard_packets_after");
+    let guard_bytes_before = u64_field(&events[3], "guard_bytes_before");
+    let guard_bytes_after = u64_field(&events[3], "guard_bytes_after");
+    assert_eq!(guard_packets_after.checked_sub(guard_packets_before), Some(1));
+    assert!(guard_bytes_after.checked_sub(guard_bytes_before).is_some_and(|delta| delta > 0));
+    assert_eq!(u64_field(&events[3], "host_datagrams"), 0);
+
+    assert!(!bool_field(&events[4], "primary_failed"));
+    assert!(!bool_field(&events[4], "cleanup_failed"));
+    assert!(bool_field(&events[4], "fully_observed"));
+    assert!(bool_field(&events[4], "empty"));
+    for field in [
+        "bridges",
+        "taps",
+        "endpoint_maps",
+        "counter_maps",
+        "endpoint_entries",
+        "tcx_programs",
+        "tcx_links",
+        "endpoint_map_pins",
+        "counter_map_pins",
+        "tcx_link_pins",
+        "bridge_guard_tables",
+        "bridge_guard_chains",
+        "bridge_guard_sets",
+        "bridge_guard_rules",
+        "bridge_guard_members",
+    ] {
+        assert_eq!(required_field(&events[4], field), "Observed(0)", "cleanup field {field}");
+    }
 }
 
 /// S-ND295-10 — a deliberate external TCX-link loss remains blocked by the

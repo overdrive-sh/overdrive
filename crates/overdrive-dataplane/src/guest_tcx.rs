@@ -1,7 +1,7 @@
 //! Semantic boundary for the shared guest-network TCX adapter (GH #295).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +41,84 @@ pub enum GuestTcxCounter {
     DirectBypassDrop,
     ArpPass,
     MalformedDrop,
+}
+
+/// Semantic TC verdict returned by the fixed startup TCP probe.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestTcxProbeVerdict {
+    Accept,
+    Drop,
+    Unexpected,
+}
+
+/// Semantic proof-mark observation returned by the fixed startup TCP probe.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestTcxProbeMark {
+    None,
+    Intercept,
+    Accepted,
+    Unexpected,
+}
+
+/// One exact before/after observation from the eight-counter classifier map.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestTcxProbeCounterObservation {
+    pub counter: GuestTcxCounter,
+    pub before: u64,
+    pub after: u64,
+}
+
+/// Semantic inputs for the one fixed TCP-intercept startup probe.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestTcxTcpProbeInput {
+    pub ingress_ifindex: u32,
+    pub source_ipv4: Ipv4Addr,
+    pub source_mac: [u8; 6],
+    pub bridge_mac: [u8; 6],
+    pub destination_mac: [u8; 6],
+    pub original_destination: SocketAddrV4,
+}
+
+/// Semantic result projected from the private context-aware BPF test run.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuestTcxTcpProbeOutcome {
+    verdict: GuestTcxProbeVerdict,
+    mark: GuestTcxProbeMark,
+    source_mac: Option<[u8; 6]>,
+    destination_mac: Option<[u8; 6]>,
+    original_destination: Option<SocketAddrV4>,
+    counters: [GuestTcxProbeCounterObservation; 8],
+}
+
+impl GuestTcxTcpProbeOutcome {
+    pub const fn verdict(&self) -> GuestTcxProbeVerdict {
+        self.verdict
+    }
+
+    pub const fn mark(&self) -> GuestTcxProbeMark {
+        self.mark
+    }
+
+    pub const fn source_mac(&self) -> Option<[u8; 6]> {
+        self.source_mac
+    }
+
+    pub const fn destination_mac(&self) -> Option<[u8; 6]> {
+        self.destination_mac
+    }
+
+    pub const fn original_destination(&self) -> Option<SocketAddrV4> {
+        self.original_destination
+    }
+
+    pub const fn counters(&self) -> &[GuestTcxProbeCounterObservation; 8] {
+        &self.counters
+    }
 }
 
 /// Closed semantic identity for one required embedded TCX object.
@@ -294,6 +372,22 @@ enum RawGuestTcxPinObservation {
     Map(RawGuestTcxMapObservation),
     Link(RawGuestTcxLinkObservation),
     Other,
+}
+
+#[derive(Clone)]
+#[allow(dead_code, reason = "D14 private raw-result projection RED scaffold")]
+struct RawGuestTcxTcpProbeResult {
+    action: u32,
+    mark: u32,
+    output: Vec<u8>,
+    counters_before: [u64; 8],
+    counters_after: [u64; 8],
+}
+
+#[expect(clippy::panic, reason = "D14 RED scaffold; DELIVER projects private BPF test-run output")]
+#[allow(dead_code, reason = "D14 source-local table activates this projection")]
+fn project_tcp_probe_result(_raw: &RawGuestTcxTcpProbeResult) -> GuestTcxTcpProbeOutcome {
+    panic!("Not yet implemented -- RED scaffold (GH #295 D14 TCP probe projection)")
 }
 
 #[repr(C)]
@@ -675,6 +769,7 @@ struct GuestTcxInventoryReceipts {
     counter_map_id: Option<u32>,
     endpoint_ifindices: BTreeSet<u32>,
     program_id: Option<u32>,
+    program_tag: Option<u64>,
     link_id: Option<u32>,
     link_program_id: Option<u32>,
     link_target_ifindex: Option<u32>,
@@ -733,9 +828,13 @@ impl GuestTcxProgram {
         let classifier: &mut SchedClassifier =
             program.try_into().map_err(|source| GuestTcxError::Program { source })?;
         classifier.load().map_err(|source| GuestTcxError::Program { source })?;
-        let program_id =
-            classifier.info().map_err(|source| GuestTcxError::Program { source })?.id();
-        inventory.receipts.lock().program_id = Some(program_id);
+        let info = classifier.info().map_err(|source| GuestTcxError::Program { source })?;
+        let program_id = info.id();
+        let program_tag = info.tag();
+        let mut receipts = inventory.receipts.lock();
+        receipts.program_id = Some(program_id);
+        receipts.program_tag = Some(program_tag);
+        drop(receipts);
         Ok(Self {
             inventory: inventory.clone(),
             bpf,
@@ -825,6 +924,19 @@ impl GuestTcxProgram {
             source => Err(GuestTcxError::Map { source }),
         })
     }
+
+    #[expect(
+        clippy::panic,
+        clippy::unused_self,
+        reason = "D14 exact opaque-program RED scaffold precedes production implementation"
+    )]
+    pub fn probe_tcp_intercept(
+        &self,
+        _input: GuestTcxTcpProbeInput,
+    ) -> Result<GuestTcxTcpProbeOutcome, GuestTcxError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 D14 semantic TCP probe)")
+    }
+
     pub fn attach_first_ingress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
         let target_ifindex = std::fs::read_to_string(format!("/sys/class/net/{interface}/ifindex"))
             .map_err(|source| GuestTcxError::Io { source })?
@@ -1159,14 +1271,23 @@ impl GuestTcxInventoryIdentity {
             let Some(program) = programs.iter().find(|program| program.id == id) else {
                 return Ok(0);
             };
-            let (endpoint_map_id, counter_map_id) = {
+            let (endpoint_map_id, counter_map_id, program_tag) = {
                 let expected_maps = self.receipts.lock();
-                (expected_maps.endpoint_map_id, expected_maps.counter_map_id)
+                (
+                    expected_maps.endpoint_map_id,
+                    expected_maps.counter_map_id,
+                    expected_maps.program_tag,
+                )
             };
             let map_ids_match = endpoint_map_id
                 .is_none_or(|map_id| program.map_ids.contains(&map_id))
                 && counter_map_id.is_none_or(|map_id| program.map_ids.contains(&map_id));
             if !map_ids_match {
+                return Err(GuestTcxError::OwnershipMismatch {
+                    family: GuestTcxInventoryFamily::TcxProgram,
+                });
+            }
+            if program_tag != Some(program.tag) {
                 return Err(GuestTcxError::OwnershipMismatch {
                     family: GuestTcxInventoryFamily::TcxProgram,
                 });
@@ -1411,6 +1532,229 @@ mod tests {
         for (counter, expected) in cases {
             assert_eq!(counter_index(counter), expected);
         }
+    }
+
+    fn raw_tcp_probe_output(
+        source_mac: [u8; 6],
+        destination_mac: [u8; 6],
+        original_destination: SocketAddrV4,
+    ) -> Vec<u8> {
+        let mut frame = vec![0_u8; 38];
+        frame[..6].copy_from_slice(&destination_mac);
+        frame[6..12].copy_from_slice(&source_mac);
+        frame[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+        frame[14] = 0x45;
+        frame[23] = 6;
+        frame[26..30].copy_from_slice(&[100, 95, 255, 254]);
+        frame[30..34].copy_from_slice(&original_destination.ip().octets());
+        frame[34..36].copy_from_slice(&49_295_u16.to_be_bytes());
+        frame[36..38].copy_from_slice(&original_destination.port().to_be_bytes());
+        frame
+    }
+
+    fn raw_tcp_probe(
+        action: u32,
+        mark: u32,
+        output: Vec<u8>,
+        before: [u64; 8],
+        after: [u64; 8],
+    ) -> RawGuestTcxTcpProbeResult {
+        RawGuestTcxTcpProbeResult {
+            action,
+            mark,
+            output,
+            counters_before: before,
+            counters_after: after,
+        }
+    }
+
+    /// S-ND295-00 — D14A projects one opaque program's fixed TCP probe without raw ABI leakage.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::too_many_lines, reason = "one closed D14A projection table is audited intact")]
+    #[test]
+    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A semantic TCP probe projection"]
+    fn startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi() {
+        const ACCEPT: u32 = 0;
+        const DROP: u32 = 2;
+        const INTERCEPT: u32 = 0x295a;
+        const ACCEPTED: u32 = 0x295b;
+        const SOURCE_MAC: [u8; 6] = [0x02, 0x00, 100, 95, 255, 254];
+        const PEER_MAC: [u8; 6] = [0x02, 0x00, 100, 95, 255, 253];
+        const BRIDGE_MAC: [u8; 6] = [0x02, 0x01, 0, 0, 0, 1];
+
+        let peer_destination = SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 253), 8443);
+        let gateway_destination = SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 8443);
+        let peer_input = GuestTcxTcpProbeInput {
+            ingress_ifindex: 295,
+            source_ipv4: Ipv4Addr::new(100, 95, 255, 254),
+            source_mac: SOURCE_MAC,
+            bridge_mac: BRIDGE_MAC,
+            destination_mac: PEER_MAC,
+            original_destination: peer_destination,
+        };
+        let gateway_input = GuestTcxTcpProbeInput {
+            destination_mac: BRIDGE_MAC,
+            original_destination: gateway_destination,
+            ..peer_input
+        };
+        assert_ne!(peer_input.destination_mac, gateway_input.destination_mac);
+        assert_ne!(peer_input.original_destination, gateway_input.original_destination);
+
+        let before = [10, 20, 30, 40, 50, 60, 70, 80];
+        let after = [10, 21, 30, 40, 50, 60, 70, 80];
+        let peer = project_tcp_probe_result(&raw_tcp_probe(
+            ACCEPT,
+            INTERCEPT,
+            raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination),
+            before,
+            after,
+        ));
+        assert_eq!(peer.verdict(), GuestTcxProbeVerdict::Accept);
+        assert_eq!(peer.mark(), GuestTcxProbeMark::Intercept);
+        assert_eq!(peer.source_mac(), Some(SOURCE_MAC));
+        assert_eq!(peer.destination_mac(), Some(BRIDGE_MAC));
+        assert_eq!(peer.original_destination(), Some(peer_destination));
+
+        let counter_order = [
+            GuestTcxCounter::GatewayHostPass,
+            GuestTcxCounter::Intercept,
+            GuestTcxCounter::EndpointMapMiss,
+            GuestTcxCounter::SourceMacSpoof,
+            GuestTcxCounter::SourceIpArpSpoof,
+            GuestTcxCounter::DirectBypassDrop,
+            GuestTcxCounter::ArpPass,
+            GuestTcxCounter::MalformedDrop,
+        ];
+        for (index, observation) in peer.counters().iter().enumerate() {
+            assert_eq!(observation.counter, counter_order[index]);
+            assert_eq!(observation.before, before[index]);
+            assert_eq!(observation.after, after[index]);
+            assert_eq!(
+                observation.after.checked_sub(observation.before),
+                Some(u64::from(observation.counter == GuestTcxCounter::Intercept))
+            );
+        }
+
+        let gateway = project_tcp_probe_result(&raw_tcp_probe(
+            ACCEPT,
+            INTERCEPT,
+            raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, gateway_destination),
+            after,
+            [10, 22, 30, 40, 50, 60, 70, 80],
+        ));
+        assert_eq!(gateway.verdict(), GuestTcxProbeVerdict::Accept);
+        assert_eq!(gateway.mark(), GuestTcxProbeMark::Intercept);
+        assert_eq!(gateway.source_mac(), Some(SOURCE_MAC));
+        assert_eq!(gateway.destination_mac(), Some(BRIDGE_MAC));
+        assert_eq!(gateway.original_destination(), Some(gateway_destination));
+
+        for (action, verdict) in [
+            (ACCEPT, GuestTcxProbeVerdict::Accept),
+            (DROP, GuestTcxProbeVerdict::Drop),
+            (u32::MAX, GuestTcxProbeVerdict::Unexpected),
+        ] {
+            assert_eq!(
+                project_tcp_probe_result(&raw_tcp_probe(
+                    action,
+                    INTERCEPT,
+                    raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination),
+                    before,
+                    after,
+                ))
+                .verdict(),
+                verdict
+            );
+        }
+        for (mark, expected) in [
+            (0, GuestTcxProbeMark::None),
+            (INTERCEPT, GuestTcxProbeMark::Intercept),
+            (ACCEPTED, GuestTcxProbeMark::Accepted),
+            (u32::MAX, GuestTcxProbeMark::Unexpected),
+        ] {
+            assert_eq!(
+                project_tcp_probe_result(&raw_tcp_probe(
+                    ACCEPT,
+                    mark,
+                    raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination),
+                    before,
+                    after,
+                ))
+                .mark(),
+                expected
+            );
+        }
+
+        let wrong_source = [0x02, 0, 1, 2, 3, 4];
+        let wrong = project_tcp_probe_result(&raw_tcp_probe(
+            ACCEPT,
+            INTERCEPT,
+            raw_tcp_probe_output(wrong_source, BRIDGE_MAC, peer_destination),
+            before,
+            after,
+        ));
+        assert_eq!(wrong.source_mac(), Some(wrong_source));
+        assert_ne!(wrong.source_mac(), Some(SOURCE_MAC));
+
+        for (length, destination, source, original) in [
+            (0, None, None, None),
+            (6, Some(BRIDGE_MAC), None, None),
+            (12, Some(BRIDGE_MAC), Some(SOURCE_MAC), None),
+            (34, Some(BRIDGE_MAC), Some(SOURCE_MAC), None),
+        ] {
+            let output = raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination);
+            let short = project_tcp_probe_result(&raw_tcp_probe(
+                ACCEPT,
+                INTERCEPT,
+                output[..length].to_vec(),
+                before,
+                after,
+            ));
+            assert_eq!(short.destination_mac(), destination);
+            assert_eq!(short.source_mac(), source);
+            assert_eq!(short.original_destination(), original);
+        }
+
+        let mut wrong_ether_type = raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination);
+        wrong_ether_type[12..14].copy_from_slice(&0x86dd_u16.to_be_bytes());
+        let mut wrong_ipv4_version = raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination);
+        wrong_ipv4_version[14] = 0x65;
+        let mut wrong_ipv4_ihl = raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination);
+        wrong_ipv4_ihl[14] = 0x44;
+        let mut non_tcp = raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination);
+        non_tcp[23] = 17;
+        let destination_port_unavailable =
+            raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination)[..37].to_vec();
+        for output in [
+            wrong_ether_type,
+            wrong_ipv4_version,
+            wrong_ipv4_ihl,
+            non_tcp,
+            destination_port_unavailable,
+        ] {
+            let malformed =
+                project_tcp_probe_result(&raw_tcp_probe(ACCEPT, INTERCEPT, output, before, after));
+            assert_eq!(malformed.destination_mac(), Some(BRIDGE_MAC));
+            assert_eq!(malformed.source_mac(), Some(SOURCE_MAC));
+            assert_eq!(malformed.original_destination(), None);
+        }
+
+        let exact_wrap_and_decrease = project_tcp_probe_result(&raw_tcp_probe(
+            ACCEPT,
+            INTERCEPT,
+            raw_tcp_probe_output(SOURCE_MAC, BRIDGE_MAC, peer_destination),
+            [0, u64::MAX, 7, 8, 9, 10, 11, 12],
+            [0, 0, 6, 8, 9, 10, 11, 12],
+        ));
+        assert_eq!(exact_wrap_and_decrease.counters()[1].before, u64::MAX);
+        assert_eq!(exact_wrap_and_decrease.counters()[1].after, 0);
+        assert_eq!(exact_wrap_and_decrease.counters()[2].before, 7);
+        assert_eq!(exact_wrap_and_decrease.counters()[2].after, 6);
+
+        let same_program_contract: fn(
+            &GuestTcxProgram,
+            GuestTcxTcpProbeInput,
+        ) -> Result<GuestTcxTcpProbeOutcome, GuestTcxError> = GuestTcxProgram::probe_tcp_intercept;
+        let _ = same_program_contract;
     }
 
     /// S-ND295-00 — every valid raw map kind keeps an honest semantic identity.
@@ -1931,6 +2275,7 @@ mod tests {
             counter_map_id: Some(296),
             endpoint_ifindices: BTreeSet::from([295]),
             program_id: Some(297),
+            program_tag: Some(0x295),
             link_id: Some(298),
             link_program_id: Some(297),
             link_target_ifindex: Some(295),
