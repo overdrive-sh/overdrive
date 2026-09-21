@@ -1,7 +1,6 @@
 //! Node-shared guest TCX endpoint and classifier-counter maps.
 
 use aya_ebpf::{
-    Pod,
     macros::map,
     maps::{Array, HashMap},
 };
@@ -15,8 +14,6 @@ pub struct Endpoint {
     pub bridge_mac: [u8; 6],
     pub bridge_pad: [u8; 2],
 }
-
-unsafe impl Pod for Endpoint {}
 
 #[map]
 pub static ENDPOINTS: HashMap<u32, Endpoint> = HashMap::with_max_entries(65_536, 0);

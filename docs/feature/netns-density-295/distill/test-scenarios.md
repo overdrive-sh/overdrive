@@ -287,11 +287,12 @@ AND exactly one matching counter advances for each frame
 `@property @tier2 @tier3 @error @real-io @adapter-integration @contract-shape:bounded-change`
 
 ```gherkin
-GIVEN the complete finite partition of map miss, short Ethernet, every ARP truncation through byte 41, wrong ARP type/length/opcode, MAC spoof, sender-IP spoof, non-IP/non-ARP, and peer-directed non-TCP input
+GIVEN the complete executable SKB partition of map miss, every post-Ethernet ARP truncation at lengths 14 through 41, IPv4/L4 truncation at lengths 34 through 37, wrong ARP type/length/opcode, MAC spoof, sender-IP spoof, non-IP/non-ARP, and peer-directed non-TCP input
 WHEN each frame enters the production classifier
 THEN it returns `TC_ACT_SHOT`
 AND exactly the declared one of map-miss, malformed, MAC-spoof, IP/ARP-spoof, or direct-bypass counters advances
 AND peer-TAP and host captures observe no escaped packet
+AND this SKB runner makes no claim about the kernel-rejected 0 through 13-byte short-Ethernet branch
 ```
 
 ### S-ND295-10 — A second safety barrier still blocks traffic when primary protection is removed

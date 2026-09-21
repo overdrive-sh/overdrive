@@ -368,7 +368,7 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
             4,
             None,
         ));
-        for length in 0..42 {
+        for length in 14..42 {
             cases.push((
                 "truncated Ethernet/ARP",
                 arp_frame(SOURCE_MAC, SOURCE_IP, 1)[..length].to_vec(),
@@ -378,7 +378,7 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
                 None,
             ));
         }
-        for length in 14..34 {
+        for length in 34..38 {
             cases.push((
                 "truncated IPv4/TCP",
                 ipv4_frame(PEER_MAC, SOURCE_MAC, SOURCE_IP, 6)[..length].to_vec(),

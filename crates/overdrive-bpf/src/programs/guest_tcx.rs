@@ -2,7 +2,7 @@
 
 use aya_ebpf::{bindings::TC_ACT_OK, macros::classifier, programs::TcContext};
 
-use crate::maps::guest_tcx::{COUNTERS, ENDPOINTS, Endpoint};
+use crate::maps::guest_tcx::{COUNTERS, ENDPOINTS};
 
 const TC_ACT_SHOT: i32 = 2;
 const INTERCEPT_MARK: u32 = 0x295a;

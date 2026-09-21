@@ -3,7 +3,6 @@
 //! The private host owner/pool implementation and accepted executable
 //! specifications live at this application boundary.
 
-
 #![expect(
     clippy::use_self,
     reason = "exact accepted API scaffold precedes implementation and names GuestNetworkError explicitly"
@@ -21,7 +20,7 @@ use overdrive_core::traits::driver::GuestNetworkAssignment;
 use overdrive_netlink::NetlinkError;
 
 use overdrive_dataplane::guest_tcx::{
-    GuestTcxAttachment, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxProgram,
+    GuestTcxAttachment, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxLink, GuestTcxProgram,
 };
 pub use overdrive_dataplane::guest_tcx::{GuestTcxError, TcxAttachPoint};
 use overdrive_netlink::nft::bridge::{
@@ -375,13 +374,20 @@ pub type Result<T, E = GuestNetworkError> = std::result::Result<T, E>;
 
 /// Private process-local lease owner. It is intentionally not a repository.
 #[derive(Debug, Clone)]
-#[allow(dead_code, reason = "GH #295 exact RED scaffold is exercised only by pending tests")]
+#[allow(dead_code, reason = "private pool is exercised by owner and source-local tests")]
 pub(crate) struct GuestAddressPool {
     node_prefix: Ipv4Net,
     bridge: String,
     gateway: Ipv4Addr,
     dns: Ipv4Addr,
-    held: Arc<parking_lot::Mutex<BTreeMap<AllocationId, GuestNetworkPlan>>>,
+    held: Arc<parking_lot::Mutex<GuestAddressPoolState>>,
+}
+
+#[derive(Debug, Default)]
+struct GuestAddressPoolState {
+    plans: BTreeMap<AllocationId, GuestNetworkPlan>,
+    addresses: BTreeSet<u32>,
+    next_candidate: u32,
 }
 
 #[allow(
@@ -401,28 +407,34 @@ impl GuestAddressPool {
             bridge,
             gateway,
             dns,
-            held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+            held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState {
+                plans: BTreeMap::new(),
+                addresses: BTreeSet::new(),
+                next_candidate: u32::from(node_prefix.network()).saturating_add(1),
+            })),
         }
     }
 
     pub(crate) fn assign(&self, alloc: AllocationId) -> Result<GuestNetworkPlan> {
-        let mut held = self.held.lock();
-        if let Some(plan) = held.get(&alloc) {
+        let mut state = self.held.lock();
+        if let Some(plan) = state.plans.get(&alloc) {
             let plan = plan.clone();
-            drop(held);
             return Ok(plan);
         }
 
         let network = u32::from(self.node_prefix.network());
         let broadcast = u32::from(self.node_prefix.broadcast());
         let capacity = broadcast.saturating_sub(network).saturating_sub(2);
-        let address = (network.saturating_add(1)..broadcast)
-            .filter(|candidate| *candidate != u32::from(self.gateway))
-            .find(|candidate| {
-                !held.values().any(|plan| u32::from(plan.assignment.address) == *candidate)
-            });
+        let first = state.next_candidate.clamp(network.saturating_add(1), broadcast);
+        let mut address = None;
+        for candidate in (first..broadcast).chain(network.saturating_add(1)..first) {
+            if candidate != u32::from(self.gateway) && !state.addresses.contains(&candidate) {
+                address = Some(candidate);
+                break;
+            }
+        }
         let Some(address) = address else {
-            let held_count = u32::try_from(held.len()).unwrap_or(u32::MAX);
+            let held_count = u32::try_from(state.plans.len()).unwrap_or(u32::MAX);
             return Err(GuestNetworkError::PoolExhausted { held: held_count, capacity });
         };
 
@@ -448,16 +460,29 @@ impl GuestAddressPool {
             node_prefix: self.node_prefix,
             assignment,
         };
-        held.insert(alloc, plan.clone());
+        let address_u32 = u32::from(address);
+        state.next_candidate = if address_u32.saturating_add(1) >= broadcast {
+            network.saturating_add(1)
+        } else {
+            address_u32.saturating_add(1)
+        };
+        state.addresses.insert(address_u32);
+        state.plans.insert(alloc, plan.clone());
+        drop(state);
         Ok(plan)
     }
 
     pub(crate) fn release(&self, alloc: &AllocationId) {
-        self.held.lock().remove(alloc);
+        let mut state = self.held.lock();
+        if let Some(plan) = state.plans.remove(alloc) {
+            let address = u32::from(plan.assignment.address);
+            state.addresses.remove(&address);
+            state.next_candidate = state.next_candidate.min(address);
+        }
     }
 
     pub(crate) fn snapshot(&self) -> BTreeMap<AllocationId, GuestNetworkPlan> {
-        self.held.lock().clone()
+        self.held.lock().plans.clone()
     }
 }
 
@@ -605,58 +630,470 @@ trait SharedGuestNetworkScratchIo: Send + Sync {
     ) -> std::result::Result<u32, GuestTcxError>;
 }
 
-#[derive(Debug, Default)]
-struct RealSharedGuestNetworkScratchIo;
+struct RealSharedGuestNetworkScratchIo {
+    program: parking_lot::Mutex<Option<GuestTcxProgram>>,
+    inventory: parking_lot::Mutex<Option<GuestTcxInventoryIdentity>>,
+    adopted: parking_lot::Mutex<Option<overdrive_dataplane::guest_tcx::GuestTcxAdoptedState>>,
+    pending_link: parking_lot::Mutex<Option<overdrive_dataplane::guest_tcx::GuestTcxLink>>,
+}
+
+impl RealSharedGuestNetworkScratchIo {
+    fn new() -> Self {
+        Self {
+            program: parking_lot::Mutex::new(None),
+            inventory: parking_lot::Mutex::new(None),
+            adopted: parking_lot::Mutex::new(None),
+            pending_link: parking_lot::Mutex::new(None),
+        }
+    }
+
+    fn guard_spec(plan: &GuestNetworkScratchPlan) -> Result<BridgeGuardSpec, BridgeGuardError> {
+        BridgeGuardSpec::new(
+            plan.guard_table.clone(),
+            plan.guard_chain.clone(),
+            plan.guard_set.clone(),
+            -300,
+            0x295a,
+            0x295b,
+        )
+        .map_err(BridgeGuardError::Validation)
+    }
+
+    fn ifindex(plan: &GuestNetworkScratchPlan) -> std::io::Result<u32> {
+        let value = std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", plan.tap))?;
+        value.trim().parse().map_err(std::io::Error::other)
+    }
+}
 
 #[async_trait::async_trait]
 impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
     async fn apply_netlink(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _action: GuestNetworkScratchNetlinkAction,
+        plan: &GuestNetworkScratchPlan,
+        action: GuestNetworkScratchNetlinkAction,
     ) -> std::result::Result<(), NetlinkError> {
-        Ok(())
+        match action {
+            GuestNetworkScratchNetlinkAction::ConvergeBridge => {
+                let client = overdrive_netlink::Client::new()?;
+                client.ensure_bridge(&plan.bridge).await?;
+                client.set_link_down(&plan.bridge).await?;
+                client
+                    .set_link_mac(&plan.bridge, overdrive_core::dataplane::GUEST_BRIDGE_MAC)
+                    .await?;
+                client
+                    .converge_addr(&plan.bridge, plan.assignment.gateway, plan.assignment.prefix)
+                    .await?;
+                client.set_link_up(&plan.bridge).await
+            }
+            GuestNetworkScratchNetlinkAction::CreateTap => {
+                overdrive_netlink::create_persistent_tap(
+                    &plan.tap,
+                    overdrive_core::vm::config::OVERDRIVE_VMM_UID,
+                )
+            }
+            GuestNetworkScratchNetlinkAction::AttachTapToBridge => {
+                overdrive_netlink::Client::new()?.set_link_master(&plan.tap, &plan.bridge).await
+            }
+            GuestNetworkScratchNetlinkAction::SetTapUp => {
+                overdrive_netlink::Client::new()?.set_link_up(&plan.tap).await
+            }
+            GuestNetworkScratchNetlinkAction::SetTapDown => {
+                overdrive_netlink::Client::new()?.set_link_down(&plan.tap).await
+            }
+            GuestNetworkScratchNetlinkAction::DeleteTap => {
+                overdrive_netlink::Client::new()?.del_link(&plan.tap).await
+            }
+            GuestNetworkScratchNetlinkAction::DeleteBridge => {
+                overdrive_netlink::Client::new()?.del_link(&plan.bridge).await
+            }
+            GuestNetworkScratchNetlinkAction::CreateGuardTable => {
+                overdrive_netlink::nft::bridge::converge_table(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft("guard-table", std::io::Error::other(error.to_string()))
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-table", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::CreateGuardChain => {
+                overdrive_netlink::nft::bridge::converge_chain(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft("guard-chain", std::io::Error::other(error.to_string()))
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-chain", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::CreateGuardSet => {
+                overdrive_netlink::nft::bridge::converge_set(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft("guard-set", std::io::Error::other(error.to_string()))
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-set", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::CreateGuardRules => {
+                overdrive_netlink::nft::bridge::converge_rules(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft("guard-rules", std::io::Error::other(error.to_string()))
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-rules", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::InsertGuardMember => {
+                overdrive_netlink::nft::bridge::insert_member(
+                    &Self::guard_spec(plan).map_err(|error| {
+                        NetlinkError::nft("guard-member", std::io::Error::other(error.to_string()))
+                    })?,
+                    &plan.tap,
+                )
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-member", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::DeleteGuardMember => {
+                overdrive_netlink::nft::bridge::delete_member(
+                    &Self::guard_spec(plan).map_err(|error| {
+                        NetlinkError::nft(
+                            "guard-member-delete",
+                            std::io::Error::other(error.to_string()),
+                        )
+                    })?,
+                    &plan.tap,
+                )
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft(
+                        "guard-member-delete",
+                        std::io::Error::other(error.to_string()),
+                    )
+                })
+            }
+            GuestNetworkScratchNetlinkAction::DeleteGuardRules => {
+                overdrive_netlink::nft::bridge::delete_rules(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft(
+                            "guard-rules-delete",
+                            std::io::Error::other(error.to_string()),
+                        )
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft(
+                        "guard-rules-delete",
+                        std::io::Error::other(error.to_string()),
+                    )
+                })
+            }
+            GuestNetworkScratchNetlinkAction::DeleteGuardSet => {
+                overdrive_netlink::nft::bridge::delete_set(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft(
+                            "guard-set-delete",
+                            std::io::Error::other(error.to_string()),
+                        )
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft("guard-set-delete", std::io::Error::other(error.to_string()))
+                })
+            }
+            GuestNetworkScratchNetlinkAction::DeleteGuardChain => {
+                overdrive_netlink::nft::bridge::delete_chain(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft(
+                            "guard-chain-delete",
+                            std::io::Error::other(error.to_string()),
+                        )
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft(
+                        "guard-chain-delete",
+                        std::io::Error::other(error.to_string()),
+                    )
+                })
+            }
+            GuestNetworkScratchNetlinkAction::DeleteGuardTable => {
+                overdrive_netlink::nft::bridge::delete_table(&Self::guard_spec(plan).map_err(
+                    |error| {
+                        NetlinkError::nft(
+                            "guard-table-delete",
+                            std::io::Error::other(error.to_string()),
+                        )
+                    },
+                )?)
+                .map(|_| ())
+                .map_err(|error| {
+                    NetlinkError::nft(
+                        "guard-table-delete",
+                        std::io::Error::other(error.to_string()),
+                    )
+                })
+            }
+        }
     }
 
     async fn apply_tcx(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _action: GuestNetworkScratchTcxAction,
+        plan: &GuestNetworkScratchPlan,
+        action: GuestNetworkScratchTcxAction,
     ) -> std::result::Result<(), GuestTcxError> {
-        Ok(())
+        match action {
+            GuestNetworkScratchTcxAction::LoadProgramAndMaps => {
+                let capture = GuestTcxInventoryIdentity::capture(
+                    plan.endpoint_map_pin.clone(),
+                    plan.counter_map_pin.clone(),
+                );
+                let (identity, disposition) = capture.into_parts();
+                // Retain the identity before moving the one genuine capture
+                // error.  The D5 cleanup complement must still observe every
+                // failed domain as source-less unavailable.
+                *self.inventory.lock() = Some(identity.clone());
+                disposition?;
+                let program = GuestTcxProgram::load(&identity)?;
+                *self.program.lock() = Some(program);
+                Ok(())
+            }
+            GuestNetworkScratchTcxAction::PinEndpointMap => self
+                .program
+                .lock()
+                .as_mut()
+                .ok_or_else(|| GuestTcxError::ObjectMissing {
+                    object: overdrive_dataplane::guest_tcx::GuestTcxObject::EndpointMap,
+                })?
+                .pin_endpoint_map(&plan.endpoint_map_pin)
+                .map(|_| ()),
+            GuestNetworkScratchTcxAction::PinCounterMap => self
+                .program
+                .lock()
+                .as_mut()
+                .ok_or_else(|| GuestTcxError::ObjectMissing {
+                    object: overdrive_dataplane::guest_tcx::GuestTcxObject::CounterMap,
+                })?
+                .pin_counter_map(&plan.counter_map_pin)
+                .map(|_| ()),
+            GuestNetworkScratchTcxAction::InsertEndpoint => {
+                let ifindex = Self::ifindex(plan).map_err(|source| GuestTcxError::Io { source })?;
+                self.program
+                    .lock()
+                    .as_mut()
+                    .ok_or_else(|| GuestTcxError::ObjectMissing {
+                        object: overdrive_dataplane::guest_tcx::GuestTcxObject::EndpointMap,
+                    })?
+                    .insert_endpoint(
+                        ifindex,
+                        GuestTcxEndpoint {
+                            source_ipv4: plan.assignment.address,
+                            source_mac: plan.assignment.mac,
+                            bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                        },
+                    )
+            }
+            GuestNetworkScratchTcxAction::AttachLink => {
+                let link = self
+                    .program
+                    .lock()
+                    .as_mut()
+                    .ok_or_else(|| GuestTcxError::ObjectMissing {
+                        object: overdrive_dataplane::guest_tcx::GuestTcxObject::Classifier,
+                    })?
+                    .attach_first_ingress(&plan.tap)?;
+                *self.pending_link.lock() = Some(link);
+                Ok(())
+            }
+            GuestNetworkScratchTcxAction::PinLink => {
+                let link = self.pending_link.lock().take().ok_or_else(|| {
+                    GuestTcxError::ObjectMissing {
+                        object: overdrive_dataplane::guest_tcx::GuestTcxObject::Classifier,
+                    }
+                })?;
+                link.pin(&plan.tcx_link_pin)
+            }
+            GuestNetworkScratchTcxAction::AdoptEndpointMap
+            | GuestNetworkScratchTcxAction::AdoptCounterMap
+            | GuestNetworkScratchTcxAction::AdoptLink => {
+                if self.adopted.lock().is_none() {
+                    let identity = self.inventory.lock().clone().ok_or_else(|| {
+                        GuestTcxError::CaptureUnavailable {
+                            family:
+                                overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+                        }
+                    })?;
+                    *self.adopted.lock() =
+                        Some(overdrive_dataplane::guest_tcx::GuestTcxAdoptedState::for_inventory(
+                            &identity,
+                            plan.tcx_link_pin.clone(),
+                        ));
+                }
+                let mut adopted = self.adopted.lock();
+                let Some(adopted) = adopted.as_mut() else {
+                    return Err(GuestTcxError::CaptureUnavailable {
+                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+                    });
+                };
+                match action {
+                    GuestNetworkScratchTcxAction::AdoptEndpointMap => {
+                        adopted.adopt_endpoint_map().map(|_| ())
+                    }
+                    GuestNetworkScratchTcxAction::AdoptCounterMap => {
+                        adopted.adopt_counter_map().map(|_| ())
+                    }
+                    _ => adopted.adopt_link(),
+                }
+            }
+            GuestNetworkScratchTcxAction::QueryLink => {
+                let attachment = overdrive_dataplane::guest_tcx::query_attachment(
+                    &plan.tap,
+                    TcxAttachPoint::Ingress,
+                )?;
+                if attachment.program_ids.is_empty() {
+                    Err(GuestTcxError::InventoryAmbiguous {
+                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+            GuestNetworkScratchTcxAction::DeleteEndpoint => {
+                overdrive_dataplane::guest_tcx::remove_endpoint(
+                    &plan.endpoint_map_pin,
+                    Self::ifindex(plan).map_err(|source| GuestTcxError::Io { source })?,
+                )
+            }
+            GuestNetworkScratchTcxAction::UnpinLink => self
+                .adopted
+                .lock()
+                .as_mut()
+                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+                })?
+                .unpin_link()
+                .map(|link| {
+                    *self.pending_link.lock() = link;
+                }),
+            GuestNetworkScratchTcxAction::DetachLink => {
+                let pending = self.pending_link.lock().take();
+                if let Some(link) = pending { link.detach() } else { Ok(()) }
+            }
+            GuestNetworkScratchTcxAction::UnpinCounterMap => self
+                .adopted
+                .lock()
+                .as_mut()
+                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::CounterMap,
+                })?
+                .unpin_counter_map(),
+            GuestNetworkScratchTcxAction::UnpinEndpointMap => self
+                .adopted
+                .lock()
+                .as_mut()
+                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointMap,
+                })?
+                .unpin_endpoint_map(),
+        }
     }
 
     fn close_loader_handles(&self, _plan: &GuestNetworkScratchPlan) {
-        // Real aya loader handles are owned by the private adapter and are
-        // dropped at this boundary. The inventory pass below is authoritative.
+        self.program.lock().take();
     }
 
     fn release_adopted_handles(&self, _plan: &GuestNetworkScratchPlan) {
-        // Adopted handles are RAII values in the private adapter.
+        self.adopted.lock().take();
     }
 
     async fn exercise(
         &self,
-        _plan: &GuestNetworkScratchPlan,
+        plan: &GuestNetworkScratchPlan,
         _stage: GuestNetworkProbeStage,
     ) -> std::io::Result<bool> {
-        Ok(true)
+        let ifindex = Self::ifindex(plan)?;
+        Ok(self
+            .program
+            .lock()
+            .as_ref()
+            .and_then(|program| program.read_endpoint(ifindex).ok())
+            .flatten()
+            .is_some())
     }
 
     async fn count_netlink(
         &self,
-        _plan: &GuestNetworkScratchPlan,
-        _resource: GuestNetworkScratchNetlinkResource,
+        plan: &GuestNetworkScratchPlan,
+        resource: GuestNetworkScratchNetlinkResource,
     ) -> std::result::Result<u32, NetlinkError> {
-        Ok(0)
+        let client = overdrive_netlink::Client::new()?;
+        let count = match resource {
+            GuestNetworkScratchNetlinkResource::Bridge => {
+                u32::from(client.observe_link(&plan.bridge).await?.is_some())
+            }
+            GuestNetworkScratchNetlinkResource::Tap => {
+                u32::from(client.observe_link(&plan.tap).await?.is_some())
+            }
+            _ => 0,
+        };
+        Ok(count)
     }
 
     async fn count_tcx(
         &self,
         _plan: &GuestNetworkScratchPlan,
-        _resource: GuestNetworkScratchTcxResource,
+        resource: GuestNetworkScratchTcxResource,
     ) -> std::result::Result<u32, GuestTcxError> {
-        Ok(0)
+        let inventory =
+            self.inventory.lock().clone().ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                family: match resource {
+                    GuestNetworkScratchTcxResource::EndpointMap => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointMap
+                    }
+                    GuestNetworkScratchTcxResource::CounterMap => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::CounterMap
+                    }
+                    GuestNetworkScratchTcxResource::EndpointEntry => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointEntry
+                    }
+                    GuestNetworkScratchTcxResource::TcxProgram => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxProgram
+                    }
+                    GuestNetworkScratchTcxResource::TcxLink => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink
+                    }
+                    GuestNetworkScratchTcxResource::EndpointMapPin => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointMapPin
+                    }
+                    GuestNetworkScratchTcxResource::CounterMapPin => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::CounterMapPin
+                    }
+                    GuestNetworkScratchTcxResource::TcxLinkPin => {
+                        overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLinkPin
+                    }
+                },
+            })?;
+        match resource {
+            GuestNetworkScratchTcxResource::EndpointMap => inventory.observe_endpoint_maps(),
+            GuestNetworkScratchTcxResource::CounterMap => inventory.observe_counter_maps(),
+            GuestNetworkScratchTcxResource::EndpointEntry => inventory.observe_endpoint_entries(),
+            GuestNetworkScratchTcxResource::TcxProgram => inventory.observe_tcx_programs(),
+            GuestNetworkScratchTcxResource::TcxLink => inventory.observe_tcx_links(),
+            GuestNetworkScratchTcxResource::EndpointMapPin => inventory.observe_endpoint_map_pins(),
+            GuestNetworkScratchTcxResource::CounterMapPin => inventory.observe_counter_map_pins(),
+            GuestNetworkScratchTcxResource::TcxLinkPin => inventory.observe_tcx_link_pins(),
+        }
     }
 }
 
@@ -724,7 +1161,7 @@ trait GuestNetworkAllocationIo: Send + Sync {
     ) -> std::result::Result<BridgeGuardObservation, BridgeGuardError>;
     fn insert_endpoint(
         &self,
-        plan: &GuestNetworkPlan,
+        _plan: &GuestNetworkPlan,
         ifindex: u32,
     ) -> std::result::Result<(), GuestTcxError>;
     fn read_endpoint(
@@ -734,7 +1171,7 @@ trait GuestNetworkAllocationIo: Send + Sync {
     ) -> std::result::Result<Option<GuestTcxEndpoint>, GuestTcxError>;
     fn remove_endpoint(
         &self,
-        plan: &GuestNetworkPlan,
+        _plan: &GuestNetworkPlan,
         ifindex: u32,
     ) -> std::result::Result<(), GuestTcxError>;
     fn attach_first_ingress(
@@ -762,10 +1199,10 @@ struct HostGuestTcxState {
     inventory: GuestTcxInventoryIdentity,
 }
 
-#[allow(dead_code, reason = "D12A exact private RED real leaf")]
 struct HostGuestNetworkAllocationIo {
     tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
     guard: BridgeGuardSpec,
+    pending_links: parking_lot::Mutex<BTreeMap<AllocationId, GuestTcxLink>>,
 }
 
 impl HostGuestNetworkAllocationIo {
@@ -773,122 +1210,213 @@ impl HostGuestNetworkAllocationIo {
         tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
         guard: BridgeGuardSpec,
     ) -> Self {
-        Self { tcx, guard }
+        Self { tcx, guard, pending_links: parking_lot::Mutex::new(BTreeMap::new()) }
     }
-}
 
-macro_rules! allocation_io_red {
-    ($message:literal) => {
-        panic!(concat!("Not yet implemented -- RED scaffold (", $message, ")"))
-    };
+    fn endpoint_pin() -> PathBuf {
+        PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints")
+    }
+
+    fn link_pin(plan: &GuestNetworkPlan) -> PathBuf {
+        PathBuf::from(format!(
+            "/sys/fs/bpf/overdrive/mtls-endpoints/links/{}-ingress",
+            plan.assignment().tap
+        ))
+    }
+
+    fn missing_object() -> GuestTcxError {
+        GuestTcxError::ObjectMissing {
+            object: overdrive_dataplane::guest_tcx::GuestTcxObject::Classifier,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
-    async fn create_tap(&self, _plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
-        allocation_io_red!("GH #295 D12A create TAP")
+    async fn create_tap(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
+        overdrive_netlink::create_persistent_tap(
+            &plan.assignment().tap,
+            overdrive_core::vm::config::OVERDRIVE_VMM_UID,
+        )
     }
     async fn attach_tap_to_bridge(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), NetlinkError> {
-        allocation_io_red!("GH #295 D12A attach TAP")
+        let client = overdrive_netlink::Client::new()?;
+        client.set_link_master(&plan.assignment().tap, plan.bridge()).await
     }
-    async fn set_tap_up(&self, _plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
-        allocation_io_red!("GH #295 D12A TAP up")
+    async fn set_tap_up(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
+        overdrive_netlink::Client::new()?.set_link_up(&plan.assignment().tap).await
     }
-    async fn set_tap_down(
-        &self,
-        _plan: &GuestNetworkPlan,
-    ) -> std::result::Result<(), NetlinkError> {
-        allocation_io_red!("GH #295 D12A TAP down")
+    async fn set_tap_down(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
+        overdrive_netlink::Client::new()?.set_link_down(&plan.assignment().tap).await
     }
-    async fn delete_tap(&self, _plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
-        allocation_io_red!("GH #295 D12A delete TAP")
+    async fn delete_tap(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
+        overdrive_netlink::Client::new()?.del_link(&plan.assignment().tap).await
     }
     async fn observe_tap(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<GuestNetworkAllocationTapObservation, NetlinkError> {
-        allocation_io_red!("GH #295 D12A observe TAP")
+        match overdrive_netlink::Client::new()?
+            .observe_persistent_tap_identity(&plan.assignment().tap)
+            .await?
+        {
+            overdrive_netlink::PersistentTapIdentity::Absent { name } => {
+                Ok(GuestNetworkAllocationTapObservation::Absent { name })
+            }
+            overdrive_netlink::PersistentTapIdentity::Incompatible {
+                link,
+                persistent,
+                owner_uid,
+            } => Ok(GuestNetworkAllocationTapObservation::Incompatible {
+                name: link.name,
+                ifindex: link.ifindex,
+                kind: link_kind(link.kind),
+                persistent,
+                up: link.up,
+                owner_uid,
+                master_ifindex: link.master_ifindex,
+            }),
+            overdrive_netlink::PersistentTapIdentity::Persistent { link, owner_uid } => {
+                Ok(GuestNetworkAllocationTapObservation::Persistent {
+                    name: link.name,
+                    ifindex: link.ifindex,
+                    up: link.up,
+                    owner_uid,
+                    master_ifindex: link.master_ifindex,
+                })
+            }
+        }
     }
     async fn observe_bridge(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<GuestNetworkAllocationBridgeObservation, NetlinkError> {
-        allocation_io_red!("GH #295 D12A observe bridge")
+        match overdrive_netlink::Client::new()?.observe_link_identity(plan.bridge()).await? {
+            None => Ok(GuestNetworkAllocationBridgeObservation::Absent {
+                name: plan.bridge().to_owned(),
+            }),
+            Some(link) => Ok(GuestNetworkAllocationBridgeObservation::Present {
+                name: link.name,
+                ifindex: link.ifindex,
+                kind: link_kind(link.kind),
+            }),
+        }
     }
     fn insert_guard_member(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        allocation_io_red!("GH #295 D12A insert guard member")
+        overdrive_netlink::nft::bridge::insert_member(&self.guard, &plan.assignment().tap)
     }
     fn delete_guard_member(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        allocation_io_red!("GH #295 D12A delete guard member")
+        overdrive_netlink::nft::bridge::delete_member(&self.guard, &plan.assignment().tap)
     }
     fn observe_guard(
         &self,
-        _expected_members: &BTreeSet<String>,
+        expected_members: &BTreeSet<String>,
     ) -> std::result::Result<BridgeGuardObservation, BridgeGuardError> {
-        allocation_io_red!("GH #295 D12A observe guard")
+        overdrive_netlink::nft::bridge::observe(&self.guard, expected_members)
     }
     fn insert_endpoint(
         &self,
-        _plan: &GuestNetworkPlan,
-        _ifindex: u32,
+        plan: &GuestNetworkPlan,
+        ifindex: u32,
     ) -> std::result::Result<(), GuestTcxError> {
-        allocation_io_red!("GH #295 D12A insert endpoint")
+        let mut state = self.tcx.lock();
+        state.as_mut().ok_or_else(Self::missing_object)?.program.insert_endpoint(
+            ifindex,
+            GuestTcxEndpoint {
+                source_ipv4: plan.assignment().address,
+                source_mac: plan.assignment().mac,
+                bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+            },
+        )
     }
     fn read_endpoint(
         &self,
         _plan: &GuestNetworkPlan,
-        _ifindex: u32,
+        ifindex: u32,
     ) -> std::result::Result<Option<GuestTcxEndpoint>, GuestTcxError> {
-        allocation_io_red!("GH #295 D12A read endpoint")
+        self.tcx.lock().as_ref().ok_or_else(Self::missing_object)?.program.read_endpoint(ifindex)
     }
     fn remove_endpoint(
         &self,
         _plan: &GuestNetworkPlan,
-        _ifindex: u32,
+        ifindex: u32,
     ) -> std::result::Result<(), GuestTcxError> {
-        allocation_io_red!("GH #295 D12A remove endpoint")
+        overdrive_dataplane::guest_tcx::remove_endpoint(Self::endpoint_pin(), ifindex)
     }
     fn attach_first_ingress(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), GuestTcxError> {
-        allocation_io_red!("GH #295 D12A attach first ingress")
+        let link = self
+            .tcx
+            .lock()
+            .as_mut()
+            .ok_or_else(Self::missing_object)?
+            .program
+            .attach_first_ingress(&plan.assignment().tap)?;
+        self.pending_links.lock().insert(plan.alloc().clone(), link);
+        Ok(())
     }
-    fn pin_link(&self, _plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError> {
-        allocation_io_red!("GH #295 D12A pin link")
+    fn pin_link(&self, plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError> {
+        let link =
+            self.pending_links.lock().remove(plan.alloc()).ok_or_else(Self::missing_object)?;
+        let program_id = link.program_id();
+        link.pin(&Self::link_pin(plan))?;
+        Ok(program_id)
     }
     fn query_attachment(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
-        allocation_io_red!("GH #295 D12A query attachment")
+        overdrive_dataplane::guest_tcx::query_attachment(
+            &plan.assignment().tap,
+            TcxAttachPoint::Ingress,
+        )
     }
     fn link_pin_present(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<bool, GuestTcxError> {
-        allocation_io_red!("GH #295 D12A observe link pin")
+        Ok(Self::link_pin(plan).exists())
     }
     fn detach_pending_link(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), GuestTcxError> {
-        allocation_io_red!("GH #295 D12A detach pending link")
+        if let Some(link) = self.pending_links.lock().remove(plan.alloc()) {
+            link.detach()?;
+        }
+        Ok(())
     }
     fn detach_pinned_link(
         &self,
-        _plan: &GuestNetworkPlan,
+        plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), GuestTcxError> {
-        allocation_io_red!("GH #295 D12A detach pinned link")
+        let pin = Self::link_pin(plan);
+        if !pin.exists() {
+            return Ok(());
+        }
+        overdrive_dataplane::guest_tcx::detach_pinned_link(pin)
+    }
+}
+
+fn link_kind(kind: overdrive_netlink::ObservedLinkKind) -> GuestLinkKind {
+    match kind {
+        overdrive_netlink::ObservedLinkKind::Bridge => GuestLinkKind::Bridge,
+        overdrive_netlink::ObservedLinkKind::Tap => GuestLinkKind::Tap,
+        overdrive_netlink::ObservedLinkKind::Tun => GuestLinkKind::Tun,
+        overdrive_netlink::ObservedLinkKind::Veth | overdrive_netlink::ObservedLinkKind::Other => {
+            GuestLinkKind::Other
+        }
     }
 }
 
@@ -925,7 +1453,7 @@ impl HostSharedGuestNetworkOwner {
         let allocation_io =
             Arc::new(HostGuestNetworkAllocationIo::new(Arc::clone(&tcx), Self::guard_spec()));
         Self {
-            scratch_io: Arc::new(RealSharedGuestNetworkScratchIo),
+            scratch_io: Arc::new(RealSharedGuestNetworkScratchIo::new()),
             allocation_io,
             tcx,
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
@@ -942,7 +1470,7 @@ impl HostSharedGuestNetworkOwner {
     #[cfg(test)]
     fn with_allocation_io(allocation_io: Arc<dyn GuestNetworkAllocationIo>) -> Self {
         Self {
-            scratch_io: Arc::new(RealSharedGuestNetworkScratchIo),
+            scratch_io: Arc::new(RealSharedGuestNetworkScratchIo::new()),
             allocation_io,
             tcx: Arc::new(parking_lot::Mutex::new(None)),
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
@@ -1064,12 +1592,17 @@ impl HostSharedGuestNetworkOwner {
         GuestNetworkFact::LinkMaster { ifindex, master_ifindex }
     }
 
-    fn expected_guard_members(&self, extra: Option<&GuestNetworkPlan>) -> BTreeSet<String> {
+    fn expected_guard_members(
+        &self,
+        extra: Option<&GuestNetworkPlan>,
+        exclude: Option<&AllocationId>,
+    ) -> BTreeSet<String> {
         let mut members = self
             .allocations
             .lock()
-            .values()
-            .map(|state| format!("ovd-tp-{:04x}", state.ifindex.saturating_sub(293)))
+            .iter()
+            .filter(|(alloc, _)| exclude.is_none_or(|excluded| excluded != *alloc))
+            .map(|(_, state)| format!("ovd-tp-{:04x}", state.ifindex.saturating_sub(293)))
             .collect::<BTreeSet<_>>();
         if let Some(plan) = extra {
             members.insert(plan.assignment().tap.clone());
@@ -1111,14 +1644,18 @@ impl HostSharedGuestNetworkOwner {
                 Self::netlink_error(GuestNetworkOperation::BridgeObserve, source)
             })?;
         let (expected, actual, ifindex) = Self::bridge_fact(plan, &observed);
-        if expected != actual.clone().unwrap_or_else(|| expected.clone()) || ifindex.is_none() {
+        if expected != actual.clone().unwrap_or_else(|| expected.clone()) {
             return Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::BridgeObserve,
                 expected,
                 observed: actual,
             });
         }
-        Ok(ifindex.expect("bridge identity checked above"))
+        ifindex.ok_or_else(|| GuestNetworkError::PostconditionMismatch {
+            operation: GuestNetworkOperation::BridgeObserve,
+            expected,
+            observed: actual,
+        })
     }
 
     fn ensure_master(
@@ -1561,7 +2098,9 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
             let (expected, observed) = Self::tap_fact(plan, &first_tap, false);
-            if expected != observed.clone().unwrap_or_else(|| expected.clone()) {
+            if observed.is_none()
+                || expected != observed.clone().unwrap_or_else(|| expected.clone())
+            {
                 return Err(GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::TapObserve,
                     expected,
@@ -1604,27 +2143,47 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
-            let (expected, observed) = Self::tap_fact(plan, &second_tap, false);
-            if expected != observed.clone().unwrap_or_else(|| expected.clone()) {
-                return Err(GuestNetworkError::PostconditionMismatch {
-                    operation: GuestNetworkOperation::TapObserve,
-                    expected,
-                    observed,
-                });
-            }
-            let second_master = match second_tap {
-                GuestNetworkAllocationTapObservation::Persistent { master_ifindex, .. }
-                | GuestNetworkAllocationTapObservation::Incompatible { master_ifindex, .. } => {
-                    master_ifindex
-                }
-                GuestNetworkAllocationTapObservation::Absent { .. } => None,
+            let (_, observed) = Self::tap_fact(plan, &second_tap, false);
+            let second_tap_for_final = match observed {
+                None => None,
+                Some(_) => Some(second_tap.clone()),
             };
-            Self::ensure_master(tap_ifindex, bridge_ifindex, second_master.or(tap_master))?;
+            if let Some(second_tap) = &second_tap_for_final {
+                let (_, second_observed) = Self::tap_fact(plan, second_tap, false);
+                let valid_identity = matches!(
+                    second_observed,
+                    Some(GuestNetworkFact::Tap {
+                        name,
+                        ifindex: Some(observed_ifindex),
+                        link_kind: GuestLinkKind::Tap,
+                        persistent: true,
+                        owner_uid: Some(observed_owner),
+                        ..
+                    }) if name == plan.assignment().tap
+                        && observed_ifindex == tap_ifindex
+                        && observed_owner == overdrive_core::vm::config::OVERDRIVE_VMM_UID
+                );
+                if valid_identity {
+                    let second_master = match second_tap {
+                        GuestNetworkAllocationTapObservation::Persistent {
+                            master_ifindex, ..
+                        }
+                        | GuestNetworkAllocationTapObservation::Incompatible {
+                            master_ifindex,
+                            ..
+                        } => *master_ifindex,
+                        GuestNetworkAllocationTapObservation::Absent { .. } => None,
+                    };
+                    Self::ensure_master(tap_ifindex, bridge_ifindex, second_master.or(tap_master))?;
+                }
+            } else {
+                Self::ensure_master(tap_ifindex, bridge_ifindex, tap_master)?;
+            }
 
             self.allocation_io.insert_guard_member(plan).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
             })?;
-            let expected_members = self.expected_guard_members(Some(plan));
+            let expected_members = self.expected_guard_members(Some(plan), None);
             let guard = self.allocation_io.observe_guard(&expected_members).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
             })?;
@@ -1715,13 +2274,19 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
+            let final_tap =
+                if matches!(final_tap, GuestNetworkAllocationTapObservation::Absent { .. }) {
+                    second_tap_for_final.clone().unwrap_or(final_tap)
+                } else {
+                    final_tap
+                };
             let (mut expected, observed) = Self::tap_fact(plan, &final_tap, true);
-            if matches!(final_tap, GuestNetworkAllocationTapObservation::Absent { .. }) {
-                if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
-                    *ifindex = Some(tap_ifindex);
-                }
+            if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
+                *ifindex = Some(tap_ifindex);
             }
-            if expected != observed.clone().unwrap_or_else(|| expected.clone()) {
+            if observed.is_none()
+                || expected != observed.clone().unwrap_or_else(|| expected.clone())
+            {
                 return Err(GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::TapObserve,
                     expected,
@@ -1756,13 +2321,34 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             let cleanup = self.rollback_provision(plan, ifindex).await;
             return Err(cleanup.unwrap_or(error));
         }
-        self.allocations.lock().insert(
-            plan.alloc().clone(),
-            HostGuestNetworkAllocationState {
-                ifindex: ifindex.expect("successful provision observes TAP ifindex"),
-                program_id: program_id.expect("successful provision queries program identity"),
-            },
-        );
+        let Some(ifindex) = ifindex else {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapObserve,
+                expected: GuestNetworkFact::Tap {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: None,
+                    link_kind: GuestLinkKind::Tap,
+                    persistent: true,
+                    up: true,
+                    owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                },
+                observed: None,
+            });
+        };
+        let Some(program_id) = program_id else {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TcxQuery,
+                expected: GuestNetworkFact::TcxAttachment {
+                    ifindex,
+                    program_id: None,
+                    attach_point: Some(TcxAttachPoint::Ingress),
+                },
+                observed: None,
+            });
+        };
+        self.allocations
+            .lock()
+            .insert(plan.alloc().clone(), HostGuestNetworkAllocationState { ifindex, program_id });
         Ok(())
     }
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
@@ -1917,7 +2503,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     }
                 })
         );
-        let expected_members = self.expected_guard_members(None);
+        let expected_members = self.expected_guard_members(None, Some(plan.alloc()));
         attempt!(
             self.allocation_io
                 .observe_guard(&expected_members)
@@ -1951,16 +2537,98 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn sweep_stale(&self) -> Result<()> {
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
-            let entries = std::fs::read_dir("/sys/class/net")
-                .map_err(overdrive_netlink::NetlinkError::connect)?;
-            for entry in entries {
-                let entry = entry.map_err(overdrive_netlink::NetlinkError::connect)?;
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with("ovd-tp-") {
-                    client.del_link(&name).await?;
+            let mut first_error = None;
+            match std::fs::read_dir("/sys/class/net") {
+                Ok(entries) => {
+                    for entry in entries {
+                        let entry = match entry {
+                            Ok(entry) => entry,
+                            Err(source) => {
+                                if first_error.is_none() {
+                                    first_error =
+                                        Some(overdrive_netlink::NetlinkError::connect(source));
+                                }
+                                continue;
+                            }
+                        };
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if name.starts_with("ovd-tp-") {
+                            if let Err(error) = client.del_link(&name).await {
+                                if first_error.is_none() {
+                                    first_error = Some(error);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(source) => {
+                    first_error = Some(overdrive_netlink::NetlinkError::connect(source));
                 }
             }
-            Ok(())
+            for path in [
+                "/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints",
+                "/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters",
+            ] {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        if first_error.is_none() {
+                            first_error =
+                                Some(overdrive_netlink::NetlinkError::nft("stale-pin", error));
+                        }
+                    }
+                }
+            }
+            let links = std::path::Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/links");
+            if let Ok(entries) = std::fs::read_dir(links) {
+                for entry in entries {
+                    let path = match entry {
+                        Ok(entry) => entry.path(),
+                        Err(source) => {
+                            if first_error.is_none() {
+                                first_error =
+                                    Some(overdrive_netlink::NetlinkError::connect(source));
+                            }
+                            continue;
+                        }
+                    };
+                    match std::fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) if first_error.is_none() => {
+                            first_error =
+                                Some(overdrive_netlink::NetlinkError::nft("stale-link-pin", error));
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+            let guard = BridgeGuardSpec::new(
+                "overdrive-mtls".to_owned(),
+                "prerouting".to_owned(),
+                "managed_taps".to_owned(),
+                -300,
+                0x295a,
+                0x295b,
+            )
+            .map_err(|error| {
+                overdrive_netlink::NetlinkError::nft(
+                    "stale-guard",
+                    std::io::Error::other(error.to_string()),
+                )
+            })?;
+            if let Err(error) =
+                overdrive_netlink::nft::bridge::delete_owned_guard(&guard, &BTreeSet::new())
+            {
+                if first_error.is_none() {
+                    first_error = Some(overdrive_netlink::NetlinkError::nft(
+                        "stale-guard",
+                        std::io::Error::other(error.to_string()),
+                    ));
+                }
+            }
+            first_error.map_or(Ok(()), Err)
         })
         .map_err(|source| GuestNetworkError::Netlink {
             operation: GuestNetworkOperation::TapDelete,
@@ -2066,9 +2734,134 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         Ok(())
     }
     async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
+        let bridge = overdrive_netlink::block_on_host_netlink(|| async {
+            let client = overdrive_netlink::Client::new()?;
+            client.observe_link_identity("ovd-gbr0").await
+        })
+        .map_err(|source| SharedGuestNetworkAuditError {
+            component: SharedGuestNetworkComponent::Bridge,
+            source: GuestNetworkError::Netlink {
+                operation: GuestNetworkOperation::BridgeObserve,
+                source,
+            },
+        })?;
+        let bridge_ok = bridge.as_ref().is_some_and(|identity| {
+            matches!(identity.kind, overdrive_netlink::ObservedLinkKind::Bridge)
+                && identity.mac == Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC)
+                && identity.up
+        });
+        if !bridge_ok {
+            return Err(SharedGuestNetworkAuditError {
+                component: SharedGuestNetworkComponent::Bridge,
+                source: GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::BridgeObserve,
+                    expected: GuestNetworkFact::Bridge {
+                        name: "ovd-gbr0".to_owned(),
+                        ifindex: None,
+                        link_kind: GuestLinkKind::Bridge,
+                        mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                        up: true,
+                        gateway: Some(Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 1), 16)),
+                    },
+                    observed: None,
+                },
+            });
+        }
+        let guard = BridgeGuardSpec::new(
+            "overdrive-mtls".to_owned(),
+            "prerouting".to_owned(),
+            "managed_taps".to_owned(),
+            -300,
+            0x295a,
+            0x295b,
+        )
+        .map_err(|error| SharedGuestNetworkAuditError {
+            component: SharedGuestNetworkComponent::Bridge,
+            source: GuestNetworkError::Io {
+                operation: GuestNetworkOperation::BridgeObserve,
+                source: std::io::Error::other(error.to_string()),
+            },
+        })?;
+        let expected_members = self.expected_guard_members(None, None);
+        match overdrive_netlink::nft::bridge::observe(&guard, &expected_members).map_err(
+            |error| SharedGuestNetworkAuditError {
+                component: SharedGuestNetworkComponent::Bridge,
+                source: GuestNetworkError::Io {
+                    operation: GuestNetworkOperation::BridgeObserve,
+                    source: std::io::Error::other(error.to_string()),
+                },
+            },
+        )? {
+            BridgeGuardObservation::Exact { .. } => {}
+            BridgeGuardObservation::Absent { .. } | BridgeGuardObservation::Conflict { .. } => {
+                return Err(SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    source: GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::BridgeObserve,
+                        expected: GuestNetworkFact::BridgeLinkIdentity {
+                            name: "ovd-gbr0".to_owned(),
+                            ifindex: None,
+                            link_kind: GuestLinkKind::Bridge,
+                        },
+                        observed: None,
+                    },
+                });
+            }
+        }
+        let tcx = self.tcx.lock();
+        let Some(tcx) = tcx.as_ref() else {
+            return Err(SharedGuestNetworkAuditError {
+                component: SharedGuestNetworkComponent::TcxLink,
+                source: GuestNetworkError::Tcx {
+                    operation: GuestNetworkOperation::TcxLoad,
+                    source: GuestTcxError::CaptureUnavailable {
+                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxProgram,
+                    },
+                },
+            });
+        };
+        for (component, observed) in [
+            (SharedGuestNetworkComponent::EndpointMap, tcx.inventory.observe_endpoint_maps()),
+            (SharedGuestNetworkComponent::CounterMap, tcx.inventory.observe_counter_maps()),
+            (SharedGuestNetworkComponent::TcxLink, tcx.inventory.observe_tcx_links()),
+        ] {
+            if let Err(source) = observed {
+                return Err(SharedGuestNetworkAuditError {
+                    component,
+                    source: GuestNetworkError::Tcx {
+                        operation: GuestNetworkOperation::CleanupComplement,
+                        source,
+                    },
+                });
+            }
+        }
         Ok(())
     }
     async fn quiesce_managed_taps(&self) -> Result<()> {
+        let taps: Vec<String> = self
+            .allocations
+            .lock()
+            .values()
+            .map(|state| format!("ovd-tp-{:04x}", state.ifindex.saturating_sub(293)))
+            .collect();
+        for tap in taps {
+            let down = overdrive_netlink::block_on_host_netlink(|| async {
+                let client = overdrive_netlink::Client::new()?;
+                client.set_link_down(&tap).await?;
+                client.observe_link(&tap).await
+            })
+            .map_err(|source| GuestNetworkError::Netlink {
+                operation: GuestNetworkOperation::TapSetDown,
+                source,
+            })?;
+            if down != Some(false) {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapSetDown,
+                    expected: GuestNetworkFact::LinkUp { ifindex: 0, up: false },
+                    observed: Some(GuestNetworkFact::LinkUp { ifindex: 0, up: true }),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -2996,8 +3789,10 @@ mod allocation_owner_acceptance {
             )),
             CleanupFailureKind::Netlink => assert!(matches!(
                 error,
-                GuestNetworkError::Netlink { operation: actual, source }
-                    if actual == operation && source.errno() == Some(libc::EBUSY)
+                GuestNetworkError::Netlink {
+                    operation: actual,
+                    source: NetlinkError::Connect { source },
+                } if actual == operation && source.raw_os_error() == Some(libc::EBUSY)
             )),
         }
     }
@@ -3661,7 +4456,11 @@ mod pool_acceptance {
             bridge: "ovd-gbr0".to_owned(),
             gateway: "100.95.0.1".parse().expect("gateway"),
             dns: "100.95.0.1".parse().expect("DNS"),
-            held: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+            held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState {
+                plans: BTreeMap::new(),
+                addresses: BTreeSet::new(),
+                next_candidate: u32::from(Ipv4Addr::new(100, 95, 0, 0)).saturating_add(1),
+            })),
         }
     }
 

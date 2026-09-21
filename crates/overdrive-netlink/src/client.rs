@@ -341,6 +341,19 @@ impl Client {
             .map_err(|err| NetlinkError::link("set-mac", err))
     }
 
+    /// Enslave one link to the named bridge/master by ifindex.
+    #[doc(hidden)]
+    pub async fn set_link_master(&self, iface: &str, master: &str) -> Result<(), NetlinkError> {
+        let index = self.require_index(iface).await?;
+        let master_index = self.require_index(master).await?;
+        self.handle
+            .link()
+            .set(LinkUnspec::new_with_index(index).controller(master_index).build())
+            .execute()
+            .await
+            .map_err(|err| NetlinkError::link("set-master", err))
+    }
+
     /// Observe whether `name` is the exact persistent TAP resource.
     ///
     /// This inspects typed `RTM_GETLINK` attributes: `IFLA_INFO_KIND=tun`,
@@ -1014,8 +1027,16 @@ fn persistent_tap_identity_from_message(
     let Some(message) = message else {
         return PersistentTapIdentity::Absent { name: name.to_owned() };
     };
-    let link = observed_link_identity_from_message(name, Some(message))
-        .expect("an RTM_GETLINK reply always has one semantic identity");
+    let link = observed_link_identity_from_message(name, Some(message)).unwrap_or_else(|| {
+        ObservedLinkIdentity {
+            name: name.to_owned(),
+            ifindex: message.header.index,
+            kind: ObservedLinkKind::Other,
+            up: message.header.flags.contains(LinkFlags::Up),
+            master_ifindex: None,
+            mac: None,
+        }
+    });
     let mut kind_is_tun = false;
     let mut tun_type = None;
     let mut persistent = None;
@@ -1066,12 +1087,12 @@ fn observed_link_identity_from_message(
                 LinkInfo::Kind(InfoKind::Tun) => kind = ObservedLinkKind::Tun,
                 LinkInfo::Kind(InfoKind::Veth) => kind = ObservedLinkKind::Veth,
                 LinkInfo::Kind(InfoKind::Other(_)) => kind = ObservedLinkKind::Other,
-                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
+                LinkInfo::Data(InfoData::Tun(tun_infos))
                     if tun_infos.iter().any(|tun_info| {
                         matches!(tun_info, InfoTun::Other(nla) if nla.kind() & NLA_TYPE_MASK == IFLA_TUN_TYPE && nla_u8(nla) == u8::try_from(libc::IFF_TAP).ok())
-                    }) {
-                        kind = ObservedLinkKind::Tap;
-                    }
+                    }) =>
+                {
+                    kind = ObservedLinkKind::Tap;
                 }
                 _ => {}
             }

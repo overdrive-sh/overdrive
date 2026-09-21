@@ -373,10 +373,9 @@ pub struct AppState {
     /// `SimDataplane`-override boot (no real BPF to intercept on). The
     /// action-shim reads `state.mtls_worker` and fires `if let Some`.
     pub mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
-    /// Per-host network-slot free-list (transparent-mtls-enrollment, D-TME-12
-    /// G3; step 04-01). Hands out the host-unique, collision-free-by-
-    /// construction [`veth_provisioner::NetSlot`] each live allocation's
-    /// netns/veth/subnet is keyed from, at the action-shim C3 provision seam.
+    /// DNS reply-source fallback allocator. It is retained only by the DNS
+    /// responder's source-pinning adapter; guest attachment ownership lives in
+    /// `SharedGuestNetworkOwner`.
     ///
     /// NOT an `Option`: unlike `mtls_worker`, the allocator is harmless on the
     /// non-mTLS fixture surface (it just hands out slots nobody provisions),
@@ -386,6 +385,11 @@ pub struct AppState {
     /// exactly like `IdentityMgr`), so the field is a plain value — no outer
     /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
     /// on a fresh process boot nothing is held (criterion 6).
+    pub(crate) dns_slots: veth_provisioner::NetSlotAllocator,
+    /// Legacy fixture-only compatibility storage; production guest
+    /// attachment ownership never reads this value.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
     pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
     /// Per-host stable per-`<workload>` frontend-address allocator
     /// (dial-by-name-responder step 01-05; ADR-0072 REV-2/REV-3, GH #243).
@@ -716,6 +720,8 @@ impl AppState {
             // `reconciler_runtime`/`listener_facts` callers need no change.
             // On a fresh process boot nothing is held; still-Running allocs
             // re-assign on their next lifecycle pass (criterion 6).
+            dns_slots: veth_provisioner::NetSlotAllocator::new(),
+            #[cfg(any(test, feature = "integration-tests"))]
             net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
             // The per-host frontend-address allocator is now a CONSTRUCTOR
             // PARAMETER (02-01) — NOT default-constructed here. DDN-2 requires
@@ -3248,7 +3254,7 @@ pub async fn run_server_with_obs_and_drivers(
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.6/§105a.10 AC3, GH #42): the `VmReclamation` boot-epoch drive
-    // runs IMMEDIATELY BEFORE `adopt_on_restart_recovery` below, so any
+    // runs IMMEDIATELY BEFORE the shared-switch stale sweep below, so any
     // `rmdir` it issues via `kill_scope` has settled (succeeded or
     // NotFound) before that pass reads the same cgroup tree
     // (`VmHostState::kill_scope`'s own settle postcondition; S-VM-23).
@@ -3318,7 +3324,7 @@ pub async fn run_server_with_obs_and_drivers(
     // `let mut … = None` then conditionally `Some(...)` inside the
     // `mtls_worker.is_some()` block — NOT collapsible to a `let x = if {…} else
     // {None}` expression because the block contains several `?`-propagating
-    // boot-refusal `return Err(...)` paths (netns adopt, nft sweep, frontend
+    // boot-refusal `return Err(...)` paths (shared-switch sweep, frontend
     // rebuild, responder probe) that must short-circuit `run_server`, not the
     // expression. The seq form is the correct shape here.
     #[allow(
@@ -3333,7 +3339,8 @@ pub async fn run_server_with_obs_and_drivers(
                   a let-else-None expression cannot host them"
     )]
     let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
-    // Ordinary netns adoption/GC follows the boot-epoch VM reclamation drive.
+    // Ordinary shared-switch stale cleanup follows the boot-epoch VM
+    // reclamation drive.
     // Reclamation has already killed every unsupervised non-terminal VM and
     // committed Platform Reclamation, so this pass does not reconstruct a live
     // survivor. It adopts any still-valid supervised ownership and garbage-
@@ -3341,24 +3348,7 @@ pub async fn run_server_with_obs_and_drivers(
     // reconciliation can assign that slot again. A correlation conflict still
     // refuses boot via `health.startup.refused`, reason `netns.adopt`.
     if state.mtls_worker.is_some() {
-        if let Err(source) = veth_provisioner::adopt_on_restart_recovery(
-            state.obs.as_ref(),
-            &state.net_slot_allocator,
-            std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
-        )
-        .await
-        {
-            tracing::warn!(
-                name: "health.startup.refused",
-                reason = "netns.adopt",
-                error = %source,
-                "adopt-on-restart boot recovery failed; refusing to boot \
-                 (a surviving slot↔alloc map could not be rebuilt)"
-            );
-            return Err(error::ControlPlaneError::NetnsRecovery(source));
-        }
-
-        // After netns adoption/GC, sweep the original per-workload rules whose
+        // After VM reclamation, sweep the original per-workload rules whose
         // mark-first programs remained in the kernel while their serve-owner
         // listeners disappeared. Reclamation has already made the old VM
         // terminal, so removing those dead redirects cannot reopen a live
@@ -3395,14 +3385,14 @@ pub async fn run_server_with_obs_and_drivers(
         // pass re-derives every `<workload> → F` binding from the declared-Service intent
         // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
         // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
-        // the netns adopt + nft sweep above (preserving the PINNED boot order
+        // the shared-switch sweep above (preserving the PINNED boot order
         // adopt → GC → sweep → rebuild → serve) and BEFORE the convergence loop /
         // responder serve spawn (so the `name_index` reader the responder reads —
         // once 02-01 injects the shared instance — never observes an
         // empty-but-trusted allocator).
         //
         // GATED on `state.mtls_worker.is_some()` — the SAME composition gate the
-        // netns adopt above uses, and (the load-bearing reason) the SAME gate the
+        // shared-switch sweep above uses, and (the load-bearing reason) the SAME gate the
         // 02-01 responder + its `name_index` reader are themselves built behind
         // (feature-delta DDN-6; the responder is constructed inside this very
         // real-dataplane block). On a non-mTLS boot there is therefore NO
@@ -3462,7 +3452,7 @@ pub async fn run_server_with_obs_and_drivers(
         let responder = Arc::new(crate::dns_responder::responder::DnsResponder::new(
             Arc::clone(&state.obs),
             config.clock.clone(),
-            state.net_slot_allocator.clone(),
+            state.dns_slots.clone(),
             state.frontend_addr_allocator.clone(),
         ));
         // The test-only `dns_probe_fault` seam forces the DNS responder probe

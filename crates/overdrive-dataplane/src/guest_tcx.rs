@@ -1,6 +1,5 @@
 //! Semantic boundary for the shared guest-network TCX adapter (GH #295).
 
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -161,6 +160,26 @@ const fn counter_index(counter: GuestTcxCounter) -> u32 {
     }
 }
 
+const TCX_INGRESS_ATTACH_TYPE: u32 = 46;
+
+const fn expected_map_schema(endpoint: bool) -> GuestTcxMapSchema {
+    if endpoint {
+        GuestTcxMapSchema {
+            kind: GuestTcxMapKind::Hash,
+            key: GuestTcxMapKeyShape::U32,
+            value: GuestTcxMapValueShape::EndpointAbi,
+            capacity: GuestTcxMapCapacity::EndpointMaximum,
+        }
+    } else {
+        GuestTcxMapSchema {
+            kind: GuestTcxMapKind::Array,
+            key: GuestTcxMapKeyShape::U32,
+            value: GuestTcxMapValueShape::CounterU64,
+            capacity: GuestTcxMapCapacity::CounterSlots,
+        }
+    }
+}
+
 #[allow(dead_code, reason = "exact query normalization helper activated by D6 query_attachment")]
 fn sorted_program_ids(mut program_ids: Vec<u32>) -> Vec<u32> {
     program_ids.sort_unstable();
@@ -239,7 +258,7 @@ pub enum GuestTcxError {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, reason = "D12 exact private RED scaffold")]
+#[allow(dead_code, reason = "private aya projection records remain source-local")]
 struct RawGuestTcxMapObservation {
     id: u32,
     kind: aya::maps::MapType,
@@ -250,7 +269,7 @@ struct RawGuestTcxMapObservation {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, reason = "D12 exact private RED scaffold")]
+#[allow(dead_code, reason = "private aya projection records remain source-local")]
 struct RawGuestTcxProgramObservation {
     id: u32,
     tag: u64,
@@ -260,7 +279,7 @@ struct RawGuestTcxProgramObservation {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, reason = "D12 exact private RED scaffold")]
+#[allow(dead_code, reason = "private aya projection records remain source-local")]
 struct RawGuestTcxLinkObservation {
     id: u32,
     program_id: u32,
@@ -269,7 +288,7 @@ struct RawGuestTcxLinkObservation {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, reason = "D12 exact private RED scaffold")]
+#[allow(dead_code, reason = "private aya projection records remain source-local")]
 enum RawGuestTcxPinObservation {
     Absent,
     Map(RawGuestTcxMapObservation),
@@ -373,7 +392,7 @@ fn schema_for_map(
     }
 }
 
-#[allow(dead_code, reason = "D12 exact private RED scaffold")]
+#[allow(dead_code, reason = "private source trait is exercised by the production aya adapter")]
 trait GuestTcxInventorySource: Send + Sync {
     fn loaded_maps(&self) -> Result<Vec<RawGuestTcxMapObservation>, GuestTcxError>;
     fn loaded_programs(&self) -> Result<Vec<RawGuestTcxProgramObservation>, GuestTcxError>;
@@ -429,7 +448,7 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
                 let id = link.id;
                 let mut observation = RawGuestTcxLinkObservation {
                     id,
-                    program_id: 0,
+                    program_id: link.prog_id,
                     target_ifindex: 0,
                     attach_type: 0,
                 };
@@ -467,6 +486,53 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
         })
     }
     fn observe_pin(&self, path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError> {
+        if path.components().any(|component| component.as_os_str() == "links") {
+            match aya::programs::links::PinnedLink::from_pin(path) {
+                Ok(_link) => {
+                    // Aya does not expose the pinned link's info fd.  Resolve
+                    // the exact kernel identity from the private link dump,
+                    // using the interface encoded by the accepted pin name.
+                    // A missing or non-unique candidate is ambiguity, never a
+                    // fabricated zero identity.
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .and_then(|name| name.strip_suffix("-ingress"));
+                    let Some(name) = name else {
+                        return Err(GuestTcxError::InventoryAmbiguous {
+                            family: GuestTcxInventoryFamily::TcxLinkPin,
+                        });
+                    };
+                    let ifindex = std::fs::read_to_string(format!("/sys/class/net/{name}/ifindex"))
+                        .map_err(|source| GuestTcxError::Io { source })?
+                        .trim()
+                        .parse::<u32>()
+                        .map_err(|source| GuestTcxError::Io {
+                            source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+                        })?;
+                    let candidates = self
+                        .loaded_links()?
+                        .into_iter()
+                        .filter(|link| {
+                            link.target_ifindex == ifindex
+                                && link.attach_type == TCX_INGRESS_ATTACH_TYPE
+                        })
+                        .collect::<Vec<_>>();
+                    return match candidates.as_slice() {
+                        [link] => Ok(RawGuestTcxPinObservation::Link(link.clone())),
+                        _ => Err(GuestTcxError::InventoryAmbiguous {
+                            family: GuestTcxInventoryFamily::TcxLinkPin,
+                        }),
+                    };
+                }
+                Err(aya::programs::links::LinkError::SyscallError(error))
+                    if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    return Ok(RawGuestTcxPinObservation::Absent);
+                }
+                Err(source) => return Err(GuestTcxError::Link { source }),
+            }
+        }
         match aya::maps::MapInfo::from_pin(path) {
             Ok(map) => Ok(RawGuestTcxPinObservation::Map(RawGuestTcxMapObservation {
                 id: map.id(),
@@ -479,27 +545,7 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
             Err(aya::maps::MapError::SyscallError(error))
                 if error.io_error.kind() == std::io::ErrorKind::NotFound =>
             {
-                match aya::programs::links::PinnedLink::from_pin(path) {
-                    Ok(link) => {
-                        let _fd = link.unpin().map_err(|source| GuestTcxError::Io { source })?;
-                        // Aya's opaque FdLinkId intentionally does not expose
-                        // the descriptor. The link identity is recovered by
-                        // the later private link-info enumeration.
-                        let id = 0;
-                        Ok(RawGuestTcxPinObservation::Link(RawGuestTcxLinkObservation {
-                            id,
-                            program_id: 0,
-                            target_ifindex: 0,
-                            attach_type: 0,
-                        }))
-                    }
-                    Err(aya::programs::links::LinkError::SyscallError(error))
-                        if error.io_error.kind() == std::io::ErrorKind::NotFound =>
-                    {
-                        Ok(RawGuestTcxPinObservation::Absent)
-                    }
-                    Err(source) => Err(GuestTcxError::Link { source }),
-                }
+                Ok(RawGuestTcxPinObservation::Absent)
             }
             Err(source) => Err(GuestTcxError::Map { source }),
         }
@@ -555,7 +601,7 @@ fn capture_with_source(
     GuestTcxInventoryCapture { identity, disposition: first_error.map_or(Ok(()), Err) }
 }
 
-fn project_map_kind(raw: aya::maps::MapType) -> GuestTcxMapKind {
+const fn project_map_kind(raw: aya::maps::MapType) -> GuestTcxMapKind {
     match raw {
         aya::maps::MapType::Hash => GuestTcxMapKind::Hash,
         aya::maps::MapType::Array => GuestTcxMapKind::Array,
@@ -630,6 +676,9 @@ struct GuestTcxInventoryReceipts {
     endpoint_ifindices: BTreeSet<u32>,
     program_id: Option<u32>,
     link_id: Option<u32>,
+    link_program_id: Option<u32>,
+    link_target_ifindex: Option<u32>,
+    link_attach_type: Option<u32>,
     endpoint_map_pin_id: Option<u32>,
     counter_map_pin_id: Option<u32>,
     link_pin_id: Option<u32>,
@@ -637,6 +686,7 @@ struct GuestTcxInventoryReceipts {
 
 #[doc(hidden)]
 pub struct GuestTcxProgram {
+    inventory: GuestTcxInventoryIdentity,
     bpf: aya::Ebpf,
     endpoint_map: Option<HashMap<MapData, u32, EndpointAbi>>,
     counter_map: Option<Array<MapData, u64>>,
@@ -650,6 +700,9 @@ pub struct GuestTcxProgram {
 pub struct GuestTcxLink {
     link: Option<FdLink>,
     program_id: u32,
+    target_ifindex: u32,
+    attach_type: u32,
+    inventory: GuestTcxInventoryIdentity,
 }
 
 #[doc(hidden)]
@@ -663,15 +716,28 @@ pub struct GuestTcxAdoptedState {
 
 impl GuestTcxProgram {
     pub fn load(inventory: &GuestTcxInventoryIdentity) -> Result<Self, GuestTcxError> {
-        let bpf = aya::EbpfLoader::new()
+        let mut bpf = aya::EbpfLoader::new()
             .allow_unsupported_maps()
             .load(super::OVERDRIVE_BPF_OBJ)
             .map_err(|source| GuestTcxError::Load { source })?;
-        let _program = bpf
-            .program("gh295c_endpoint")
+        for (name, object) in
+            [("ENDPOINTS", GuestTcxObject::EndpointMap), ("COUNTERS", GuestTcxObject::CounterMap)]
+        {
+            if bpf.map(name).is_none() {
+                return Err(GuestTcxError::ObjectMissing { object });
+            }
+        }
+        let program = bpf
+            .program_mut("gh295c_endpoint")
             .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::Classifier })?;
-        let program_id = inventory.receipts.lock().program_id.unwrap_or_default();
+        let classifier: &mut SchedClassifier =
+            program.try_into().map_err(|source| GuestTcxError::Program { source })?;
+        classifier.load().map_err(|source| GuestTcxError::Program { source })?;
+        let program_id =
+            classifier.info().map_err(|source| GuestTcxError::Program { source })?.id();
+        inventory.receipts.lock().program_id = Some(program_id);
         Ok(Self {
+            inventory: inventory.clone(),
             bpf,
             endpoint_map: None,
             counter_map: None,
@@ -687,9 +753,19 @@ impl GuestTcxProgram {
             .take_map("ENDPOINTS")
             .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
         let schema = schema_for_map(&map, true)?;
+        let map_id = if let Map::HashMap(data) = &map {
+            Some(data.info().map_err(|source| GuestTcxError::Map { source })?.id())
+        } else {
+            None
+        };
+        let map_id = map_id.ok_or(GuestTcxError::MapSchemaMismatch {
+            expected: expected_map_schema(true),
+            observed: schema,
+        })?;
         map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
         self.endpoint_map =
             Some(HashMap::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
+        self.inventory.receipts.lock().endpoint_map_id = Some(map_id);
         self.endpoint_map_pin = Some(pin.to_path_buf());
         Ok(schema)
     }
@@ -699,9 +775,19 @@ impl GuestTcxProgram {
             .take_map("COUNTERS")
             .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::CounterMap })?;
         let schema = schema_for_map(&map, false)?;
+        let map_id = if let Map::Array(data) = &map {
+            Some(data.info().map_err(|source| GuestTcxError::Map { source })?.id())
+        } else {
+            None
+        };
+        let map_id = map_id.ok_or(GuestTcxError::MapSchemaMismatch {
+            expected: expected_map_schema(false),
+            observed: schema,
+        })?;
         map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
         self.counter_map =
             Some(Array::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
+        self.inventory.receipts.lock().counter_map_id = Some(map_id);
         self.counter_map_pin = Some(pin.to_path_buf());
         Ok(schema)
     }
@@ -714,6 +800,7 @@ impl GuestTcxProgram {
             .endpoint_map
             .as_mut()
             .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
+        self.inventory.receipts.lock().endpoint_ifindices.insert(ifindex);
         map.insert(ifindex, EndpointAbi::from(endpoint), 0)
             .map_err(|source| GuestTcxError::Map { source })?;
         self.endpoints.insert(ifindex, endpoint);
@@ -733,6 +820,13 @@ impl GuestTcxProgram {
         })
     }
     pub fn attach_first_ingress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
+        let target_ifindex = std::fs::read_to_string(format!("/sys/class/net/{interface}/ifindex"))
+            .map_err(|source| GuestTcxError::Io { source })?
+            .trim()
+            .parse::<u32>()
+            .map_err(|source| GuestTcxError::Io {
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+            })?;
         let program = self
             .bpf
             .program_mut("gh295c_endpoint")
@@ -748,19 +842,53 @@ impl GuestTcxProgram {
             .map_err(|source| GuestTcxError::Program { source })?;
         let link = classifier.take_link(id).map_err(|source| GuestTcxError::Program { source })?;
         let fd_link: FdLink = link.try_into().map_err(|source| GuestTcxError::Link { source })?;
-        Ok(GuestTcxLink { link: Some(fd_link), program_id: self.program_id })
+        Ok(GuestTcxLink {
+            link: Some(fd_link),
+            program_id: self.program_id,
+            target_ifindex,
+            attach_type: TCX_INGRESS_ATTACH_TYPE,
+            inventory: self.inventory.clone(),
+        })
     }
 }
 
 impl GuestTcxLink {
-    pub fn program_id(&self) -> u32 {
+    pub const fn program_id(&self) -> u32 {
         self.program_id
     }
     pub fn pin(mut self, pin: &Path) -> Result<(), GuestTcxError> {
+        *self.inventory.link_pin.lock() = Some(pin.to_path_buf());
+        let candidates = self
+            .inventory
+            .source
+            .loaded_links()?
+            .into_iter()
+            .filter(|link| {
+                link.program_id == self.program_id
+                    && link.target_ifindex == self.target_ifindex
+                    && link.attach_type == self.attach_type
+            })
+            .collect::<Vec<_>>();
+        let link_id = match candidates.as_slice() {
+            [link] => link.id,
+            _ => {
+                return Err(GuestTcxError::InventoryAmbiguous {
+                    family: GuestTcxInventoryFamily::TcxLink,
+                });
+            }
+        };
         let link = self.link.take().ok_or_else(|| GuestTcxError::Io {
             source: std::io::Error::other("TCX link already consumed"),
         })?;
-        link.pin(pin).map(|_| ()).map_err(|source| GuestTcxError::Pin { source })
+        link.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
+        let mut receipts = self.inventory.receipts.lock();
+        receipts.link_id = Some(link_id);
+        receipts.link_pin_id = Some(link_id);
+        receipts.link_program_id = Some(self.program_id);
+        receipts.link_target_ifindex = Some(self.target_ifindex);
+        receipts.link_attach_type = Some(self.attach_type);
+        drop(receipts);
+        Ok(())
     }
     pub fn detach(mut self) -> Result<(), GuestTcxError> {
         if let Some(link) = self.link.take() {
@@ -782,23 +910,66 @@ impl GuestTcxAdoptedState {
         }
     }
     pub fn adopt_endpoint_map(&mut self) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        if self.endpoint_map.is_some() {
+            return Ok(expected_map_schema(true));
+        }
         let map = aya::maps::MapData::from_pin(&self.inventory.endpoint_map_pin)
             .map_err(|source| GuestTcxError::Map { source })?;
         let schema = schema_for_map_data(&map, true)?;
+        let map_id = map.info().map_err(|source| GuestTcxError::Map { source })?.id();
+        if self.inventory.receipts.lock().endpoint_map_id != Some(map_id) {
+            return Err(GuestTcxError::OwnershipMismatch {
+                family: GuestTcxInventoryFamily::EndpointMapPin,
+            });
+        }
         self.endpoint_map = Some(
             HashMap::try_from(Map::HashMap(map)).map_err(|source| GuestTcxError::Map { source })?,
         );
         Ok(schema)
     }
     pub fn adopt_counter_map(&mut self) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        if self.counter_map.is_some() {
+            return Ok(expected_map_schema(false));
+        }
         let map = aya::maps::MapData::from_pin(&self.inventory.counter_map_pin)
             .map_err(|source| GuestTcxError::Map { source })?;
         let schema = schema_for_map_data(&map, false)?;
+        let map_id = map.info().map_err(|source| GuestTcxError::Map { source })?.id();
+        if self.inventory.receipts.lock().counter_map_id != Some(map_id) {
+            return Err(GuestTcxError::OwnershipMismatch {
+                family: GuestTcxInventoryFamily::CounterMapPin,
+            });
+        }
         self.counter_map =
             Some(Array::try_from(Map::Array(map)).map_err(|source| GuestTcxError::Map { source })?);
         Ok(schema)
     }
     pub fn adopt_link(&mut self) -> Result<(), GuestTcxError> {
+        if self.link.is_some() {
+            return Ok(());
+        }
+        let receipts = self.inventory.receipts.lock();
+        let Some(link_id) = receipts.link_id else {
+            return Err(GuestTcxError::CaptureUnavailable {
+                family: GuestTcxInventoryFamily::TcxLink,
+            });
+        };
+        let Some(candidate) =
+            self.inventory.source.loaded_links()?.into_iter().find(|link| link.id == link_id)
+        else {
+            return Err(GuestTcxError::OwnershipMismatch {
+                family: GuestTcxInventoryFamily::TcxLinkPin,
+            });
+        };
+        if receipts.link_program_id != Some(candidate.program_id)
+            || receipts.link_target_ifindex != Some(candidate.target_ifindex)
+            || receipts.link_attach_type != Some(candidate.attach_type)
+        {
+            return Err(GuestTcxError::OwnershipMismatch {
+                family: GuestTcxInventoryFamily::TcxLinkPin,
+            });
+        }
+        drop(receipts);
         self.link = Some(
             aya::programs::links::PinnedLink::from_pin(&self.link_pin)
                 .map_err(|source| GuestTcxError::Link { source })?,
@@ -821,6 +992,14 @@ impl GuestTcxAdoptedState {
         Ok(Some(GuestTcxLink {
             link: Some(fd),
             program_id: self.inventory.receipts.lock().program_id.unwrap_or_default(),
+            target_ifindex: self.inventory.receipts.lock().link_target_ifindex.unwrap_or_default(),
+            attach_type: self
+                .inventory
+                .receipts
+                .lock()
+                .link_attach_type
+                .unwrap_or(TCX_INGRESS_ATTACH_TYPE),
+            inventory: self.inventory.clone(),
         }))
     }
     pub fn unpin_counter_map(&mut self) -> Result<(), GuestTcxError> {
@@ -856,20 +1035,32 @@ impl GuestTcxInventoryIdentity {
         self.observe_maps(false)
     }
     pub fn observe_endpoint_entries(&self) -> Result<u32, GuestTcxError> {
-        let baseline = self.baseline.lock();
-        if !baseline.maps_available {
+        let maps_available = self.baseline.lock().maps_available;
+        if !maps_available {
             return Err(GuestTcxError::CaptureUnavailable {
                 family: GuestTcxInventoryFamily::EndpointEntry,
             });
         }
-        let receipts = self.receipts.lock();
+        let (endpoint_map_id, endpoint_ifindices) = {
+            let receipts = self.receipts.lock();
+            (receipts.endpoint_map_id, receipts.endpoint_ifindices.clone())
+        };
         let candidate_maps = self.source.loaded_maps().map_err(|_| {
             GuestTcxError::InventoryAmbiguous { family: GuestTcxInventoryFamily::EndpointEntry }
         })?;
-        if !receipts.endpoint_ifindices.is_empty() {
-            let Some(map_id) = receipts.endpoint_map_id else { return Ok(0) };
+        if !endpoint_ifindices.is_empty() {
+            let Some(map_id) = endpoint_map_id else { return Ok(0) };
+            let Some(map) = self.source.map_by_id(map_id)? else { return Ok(0) };
+            let observed_schema = project_map_schema(&map);
+            let expected_schema = expected_map_schema(true);
+            if observed_schema != expected_schema {
+                return Err(GuestTcxError::MapSchemaMismatch {
+                    expected: expected_schema,
+                    observed: observed_schema,
+                });
+            }
             let mut count = 0;
-            for ifindex in &receipts.endpoint_ifindices {
+            for ifindex in &endpoint_ifindices {
                 if self.source.endpoint_present_by_id(map_id, *ifindex)? {
                     count += 1;
                 }
@@ -922,7 +1113,16 @@ impl GuestTcxInventoryIdentity {
         let maps =
             self.source.loaded_maps().map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
         if let Some(id) = receipt {
-            return Ok(u32::from(maps.iter().any(|map| map.id == id)));
+            let Some(map) = maps.iter().find(|map| map.id == id) else {
+                return Ok(0);
+            };
+            let observed = project_map_schema(map);
+            let expected = expected_map_schema(endpoint);
+            if observed != expected {
+                return Err(GuestTcxError::MapSchemaMismatch { expected, observed });
+            }
+            let expected_name: &[u8] = if endpoint { b"ENDPOINTS" } else { b"COUNTERS" };
+            return Ok(u32::from(map.name.as_slice() == expected_name));
         }
         let baseline = self.baseline.lock();
         let expected = maps
@@ -948,8 +1148,27 @@ impl GuestTcxInventoryIdentity {
             .source
             .loaded_programs()
             .map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
-        if let Some(id) = self.receipts.lock().program_id {
-            return Ok(u32::from(programs.iter().any(|program| program.id == id)));
+        let program_receipt = self.receipts.lock().program_id;
+        if let Some(id) = program_receipt {
+            let Some(program) = programs.iter().find(|program| program.id == id) else {
+                return Ok(0);
+            };
+            let (endpoint_map_id, counter_map_id) = {
+                let expected_maps = self.receipts.lock();
+                (expected_maps.endpoint_map_id, expected_maps.counter_map_id)
+            };
+            let map_ids_match = endpoint_map_id
+                .is_none_or(|map_id| program.map_ids.contains(&map_id))
+                && counter_map_id.is_none_or(|map_id| program.map_ids.contains(&map_id));
+            if !map_ids_match {
+                return Err(GuestTcxError::OwnershipMismatch {
+                    family: GuestTcxInventoryFamily::TcxProgram,
+                });
+            }
+            return Ok(u32::from(
+                program.name.as_slice() == b"gh295c_endpoint"
+                    && program.program_type == aya::programs::ProgramType::SchedClassifier,
+            ));
         }
         let baseline = self.baseline.lock();
         let candidates =
@@ -964,8 +1183,22 @@ impl GuestTcxInventoryIdentity {
         }
         let links =
             self.source.loaded_links().map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
-        if let Some(id) = self.receipts.lock().link_id {
-            return Ok(u32::from(links.iter().any(|link| link.id == id)));
+        let link_receipt = self.receipts.lock().link_id;
+        if let Some(id) = link_receipt {
+            let Some(link) = links.iter().find(|link| link.id == id) else {
+                return Ok(0);
+            };
+            let (link_program_id, link_target_ifindex, link_attach_type) = {
+                let receipts = self.receipts.lock();
+                (receipts.link_program_id, receipts.link_target_ifindex, receipts.link_attach_type)
+            };
+            if link_program_id != Some(link.program_id)
+                || link_target_ifindex != Some(link.target_ifindex)
+                || link_attach_type != Some(link.attach_type)
+            {
+                return Err(GuestTcxError::OwnershipMismatch { family });
+            }
+            return Ok(1);
         }
         let baseline = self.baseline.lock();
         let candidates = links.iter().filter(|link| !baseline.links.contains_key(&link.id)).count();
@@ -987,8 +1220,14 @@ impl GuestTcxInventoryIdentity {
                 } else {
                     self.receipts.lock().counter_map_pin_id
                 };
+                let observed = project_map_schema(&map);
+                let expected = expected_map_schema(endpoint);
+                if observed != expected {
+                    return Err(GuestTcxError::MapSchemaMismatch { expected, observed });
+                }
+                let expected_name: &[u8] = if endpoint { b"ENDPOINTS" } else { b"COUNTERS" };
                 match receipt {
-                    Some(id) if id == map.id => Ok(1),
+                    Some(id) if id == map.id && map.name.as_slice() == expected_name => Ok(1),
                     Some(_) => Err(GuestTcxError::OwnershipMismatch { family }),
                     None => Err(GuestTcxError::InventoryAmbiguous { family }),
                 }
@@ -1001,11 +1240,21 @@ impl GuestTcxInventoryIdentity {
         let family = GuestTcxInventoryFamily::TcxLinkPin;
         match self.source.observe_pin(path)? {
             RawGuestTcxPinObservation::Absent => Ok(0),
-            RawGuestTcxPinObservation::Link(link) => match self.receipts.lock().link_pin_id {
-                Some(id) if id == link.id => Ok(1),
-                Some(_) => Err(GuestTcxError::OwnershipMismatch { family }),
-                None => Err(GuestTcxError::InventoryAmbiguous { family }),
-            },
+            RawGuestTcxPinObservation::Link(link) => {
+                let receipts = self.receipts.lock();
+                match receipts.link_pin_id {
+                    Some(id)
+                        if id == link.id
+                            && receipts.link_program_id == Some(link.program_id)
+                            && receipts.link_target_ifindex == Some(link.target_ifindex)
+                            && receipts.link_attach_type == Some(link.attach_type) =>
+                    {
+                        Ok(1)
+                    }
+                    Some(_) => Err(GuestTcxError::OwnershipMismatch { family }),
+                    None => Err(GuestTcxError::InventoryAmbiguous { family }),
+                }
+            }
             _ => Err(GuestTcxError::InventoryAmbiguous { family }),
         }
     }
@@ -1461,14 +1710,19 @@ mod tests {
         RawGuestTcxProgramObservation {
             id,
             tag: 0x295,
-            name: b"guest_tcx_classifier".to_vec(),
+            name: b"gh295c_endpoint".to_vec(),
             program_type: aya::programs::ProgramType::SchedClassifier,
             map_ids,
         }
     }
 
     fn ingress_link(id: u32, program_id: u32) -> RawGuestTcxLinkObservation {
-        RawGuestTcxLinkObservation { id, program_id, target_ifindex: 295, attach_type: 0 }
+        RawGuestTcxLinkObservation {
+            id,
+            program_id,
+            target_ifindex: 295,
+            attach_type: TCX_INGRESS_ATTACH_TYPE,
+        }
     }
 
     /// S-ND295-00 — capture failure preserves observation and first-source truth.
@@ -1672,6 +1926,9 @@ mod tests {
             endpoint_ifindices: BTreeSet::from([295]),
             program_id: Some(297),
             link_id: Some(298),
+            link_program_id: Some(297),
+            link_target_ifindex: Some(295),
+            link_attach_type: Some(TCX_INGRESS_ATTACH_TYPE),
             endpoint_map_pin_id: Some(295),
             counter_map_pin_id: Some(296),
             link_pin_id: Some(298),

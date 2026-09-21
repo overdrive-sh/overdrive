@@ -152,6 +152,7 @@ fn tick(counter: u64) -> TickContext {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch.
 #[tokio::test]
 async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
     let tmp = TempDir::new().expect("tempdir");
@@ -184,6 +185,7 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch.
 #[tokio::test]
 async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse() {
     let tmp = TempDir::new().expect("tempdir");

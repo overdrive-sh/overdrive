@@ -539,6 +539,19 @@ impl Driver for SimDriver {
         Some(ids.into_iter().collect())
     }
 
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        if !matches!(self.r#type, DriverType::Vm) {
+            return false;
+        }
+        if self.allocations.lock().contains_key(alloc)
+            || self.ending_in_flight.lock().contains(alloc)
+        {
+            return false;
+        }
+        self.ending_in_flight.lock().insert(alloc.clone());
+        true
+    }
+
     /// Retire this driver's supervision claim on `alloc` — the releaser
     /// symmetric with [`Self::live_allocations`], per the trait
     /// contract. Only a `Vm`-typed `SimDriver` holds a claim to retire;
