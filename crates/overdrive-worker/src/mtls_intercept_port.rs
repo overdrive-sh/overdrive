@@ -7,9 +7,9 @@
 //! shell-outs) — plus [`InterceptGuard`], the marker trait its RAII install
 //! handles satisfy, and [`HostMtlsIntercept`], the production binding.
 //!
-//! Production wires [`HostMtlsIntercept`], whose three methods are one-line
-//! delegations to the same `crate::mtls_intercept` free functions
-//! `start_alloc` called before this port existed; tests wire
+//! Production wires [`HostMtlsIntercept`], whose allocation methods delegate to
+//! the existing `crate::mtls_intercept` free functions and whose shared-owner
+//! methods drive the normalized nft adapter; tests wire
 //! `overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept`.
 
 #![allow(
@@ -21,8 +21,9 @@ use std::net::SocketAddrV4;
 use std::sync::Arc;
 
 use crate::mtls_intercept::{
-    InterceptPostcondition, NetlinkError, Result, TproxyInterceptGuard, install_inbound_tproxy,
-    install_outbound_tproxy, make_transparent_listener,
+    InterceptError, InterceptPostcondition, InterceptSharedRollbackOperation, NetlinkError, Result,
+    TproxyInterceptGuard, install_inbound_tproxy, install_outbound_tproxy,
+    make_transparent_listener,
 };
 
 /// Module-private effect seam for the shared-program observe/atomic-replace
@@ -58,6 +59,17 @@ trait SharedInterceptProgramIo: Send + Sync {
 pub trait InterceptGuard: Send + Sync {}
 
 impl InterceptGuard for TproxyInterceptGuard {}
+
+/// Node-owned guard for the shared constant IP program.
+///
+/// The shared program's lifetime is deliberately controlled by the worker's
+/// boot/shutdown owner.  A failed unpublished startup drops this marker, while
+/// a published owner uses its sealed relinquish path so the constant rules and
+/// empty sets remain available for the next boot's identity check.
+#[derive(Debug, Default)]
+struct SharedInterceptGuard;
+
+impl InterceptGuard for SharedInterceptGuard {}
 
 /// The per-allocation transparent-mTLS **install** driven port.
 ///
@@ -297,46 +309,179 @@ impl HostMtlsIntercept {
         Self { shared_program_io: io }
     }
 
-    #[expect(
-        clippy::panic,
-        reason = "RED scaffold; DELIVER implements the GH #295 replacement/read-back/rollback algorithm above this exact private I/O seam"
-    )]
-    #[allow(dead_code, reason = "activated by the accepted shared-rule port single cut")]
+    #[allow(dead_code, reason = "private algorithm seam is driven by in-module acceptance bodies")]
     fn replace_shared_program_for_boot(
         &self,
-        _requested: InterceptPostcondition,
+        requested: InterceptPostcondition,
     ) -> Result<Box<dyn InterceptGuard>> {
-        let _ = &self.shared_program_io;
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept replacement)")
+        let prior = self.shared_program_io.observe().map_err(|source| {
+            InterceptError::NftSharedReplaceFailed {
+                prior: None,
+                requested: requested.clone(),
+                source,
+            }
+        })?;
+        self.replace_observed_shared_program(prior, requested)
     }
 
-    #[expect(
-        clippy::panic,
-        reason = "RED scaffold; DELIVER implements the GH #295 non-repairing runtime identity check"
-    )]
-    #[allow(dead_code, reason = "activated by the accepted shared-rule port single cut")]
-    fn require_shared_program_at_runtime(&self, _expected: InterceptPostcondition) -> Result<()> {
-        let _ = &self.shared_program_io;
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept runtime audit)")
+    fn replace_observed_shared_program(
+        &self,
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+    ) -> Result<Box<dyn InterceptGuard>> {
+        if prior.as_ref() == Some(&requested) {
+            return Ok(Box::new(SharedInterceptGuard));
+        }
+
+        self.shared_program_io.replace_atomically(prior.as_ref(), Some(&requested)).map_err(
+            |source| InterceptError::NftSharedReplaceFailed {
+                prior: prior.clone(),
+                requested: requested.clone(),
+                source,
+            },
+        )?;
+
+        let replacement_observed = self.shared_program_io.observe().map_err(|source| {
+            InterceptError::NftSharedRollbackFailed {
+                operation: InterceptSharedRollbackOperation::ReadBackPrior,
+                prior: prior.clone(),
+                requested: requested.clone(),
+                replacement_observed: None,
+                source,
+            }
+        })?;
+        if replacement_observed.as_ref() == Some(&requested) {
+            return Ok(Box::new(SharedInterceptGuard));
+        }
+
+        self.shared_program_io
+            // The private seam uses `desired = None` as the exact rollback
+            // arm. `expected_current` carries the captured prior when it is
+            // present; `None` means restore first-boot absence.
+            .replace_atomically(prior.as_ref(), None)
+            .map_err(|source| InterceptError::NftSharedRollbackFailed {
+                operation: InterceptSharedRollbackOperation::RestorePrior,
+                prior: prior.clone(),
+                requested: requested.clone(),
+                replacement_observed: replacement_observed.clone(),
+                source,
+            })?;
+
+        let rollback_observed = self.shared_program_io.observe().map_err(|source| {
+            InterceptError::NftSharedRollbackFailed {
+                operation: InterceptSharedRollbackOperation::ReadBackPrior,
+                prior: prior.clone(),
+                requested: requested.clone(),
+                replacement_observed: replacement_observed.clone(),
+                source,
+            }
+        })?;
+        if rollback_observed == prior {
+            return Err(InterceptError::NftSharedReplacementMismatchRolledBack {
+                prior,
+                requested,
+                replacement_observed,
+            });
+        }
+        Err(InterceptError::NftSharedRollbackPostconditionMismatch {
+            prior,
+            requested,
+            replacement_observed,
+            rollback_observed,
+        })
     }
+
+    #[allow(dead_code, reason = "private runtime audit seam is driven by worker recovery wiring")]
+    fn require_shared_program_at_runtime(&self, expected: InterceptPostcondition) -> Result<()> {
+        let observed = self.shared_program_io.observe().map_err(|source| {
+            InterceptError::NftRuleInstallFailed { op: "observe-shared-runtime", source }
+        })?;
+        if observed == Some(expected.clone()) {
+            Ok(())
+        } else {
+            Err(InterceptError::PostconditionMismatch { expected, observed })
+        }
+    }
+}
+
+fn shared_program_for_targets(
+    leg_f: SocketAddrV4,
+    leg_c: SocketAddrV4,
+) -> Result<InterceptPostcondition> {
+    let program =
+        overdrive_netlink::nft::ip::SharedProgram::expected(leg_f.port(), leg_c.port()).map_err(
+            |source| InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", source },
+        )?;
+    Ok(postcondition_from_shared_program(&program))
+}
+
+fn observe_shared_ip_program() -> std::result::Result<Option<InterceptPostcondition>, NetlinkError>
+{
+    overdrive_netlink::nft::ip::observe()
+        .map(|program| program.map(|program| postcondition_from_shared_program(&program)))
+}
+
+fn replace_shared_ip_program(
+    expected_current: Option<&InterceptPostcondition>,
+    desired: Option<&InterceptPostcondition>,
+) -> std::result::Result<(), NetlinkError> {
+    let current = overdrive_netlink::nft::ip::observe()?;
+    let expected = expected_current.map(shared_program_from_postcondition).transpose()?;
+    if let Some(desired) = desired {
+        let desired = shared_program_from_postcondition(desired)?;
+        return overdrive_netlink::nft::ip::replace_atomically(expected.as_ref(), Some(&desired));
+    }
+
+    // The private seam's `desired = None` is the rollback arm. A present
+    // expected value is the exact prior restore target; `None` means restore
+    // first-boot absence. The low-level adapter still receives the observed
+    // replacement as its expected current identity.
+    overdrive_netlink::nft::ip::replace_atomically(current.as_ref(), expected.as_ref())
+}
+
+fn postcondition_from_shared_program(
+    program: &overdrive_netlink::nft::ip::SharedProgram,
+) -> InterceptPostcondition {
+    let (table_and_chains, sets, prerouting, output) = program.components();
+    InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
+}
+
+fn shared_program_from_postcondition(
+    postcondition: &InterceptPostcondition,
+) -> std::result::Result<overdrive_netlink::nft::ip::SharedProgram, NetlinkError> {
+    let InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output } =
+        postcondition
+    else {
+        return Err(NetlinkError::nft(
+            "shared-ip-program",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "shared IP postcondition is not a constant-rule identity",
+            ),
+        ));
+    };
+    overdrive_netlink::nft::ip::SharedProgram::from_components(
+        table_and_chains.clone(),
+        sets.clone(),
+        prerouting.clone(),
+        output.clone(),
+    )
 }
 
 #[derive(Debug)]
 struct RealSharedInterceptProgramIo;
 
 impl SharedInterceptProgramIo for RealSharedInterceptProgramIo {
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER wires normalized nft read-back")]
     fn observe(&self) -> std::result::Result<Option<InterceptPostcondition>, NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept observe)")
+        crate::mtls_intercept_port::observe_shared_ip_program()
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER wires atomic nft replacement")]
     fn replace_atomically(
         &self,
-        _expected_current: Option<&InterceptPostcondition>,
-        _desired: Option<&InterceptPostcondition>,
+        expected_current: Option<&InterceptPostcondition>,
+        desired: Option<&InterceptPostcondition>,
     ) -> std::result::Result<(), NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept atomic replace)")
+        crate::mtls_intercept_port::replace_shared_ip_program(expected_current, desired)
     }
 }
 
@@ -351,19 +496,29 @@ impl MtlsIntercept for HostMtlsIntercept {
         make_transparent_listener(addr)
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER wires approved shared convergence")]
     fn converge_shared(
         &self,
-        _prior: Option<&InterceptPostcondition>,
-        _leg_f: SocketAddrV4,
-        _leg_c: SocketAddrV4,
+        prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
     ) -> Result<Box<dyn InterceptGuard>> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept convergence)")
+        let requested = shared_program_for_targets(leg_f, leg_c)?;
+        let observed = self.shared_program_io.observe().map_err(|source| {
+            InterceptError::NftRuleInstallFailed { op: "observe-shared", source }
+        })?;
+        if observed.as_ref() != prior {
+            return Err(InterceptError::PostconditionMismatch {
+                expected: prior.cloned().unwrap_or_else(|| requested.clone()),
+                observed,
+            });
+        }
+        self.replace_observed_shared_program(observed, requested)
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER wires normalized observation")]
     fn observe_shared(&self) -> Result<Option<InterceptPostcondition>> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared intercept observation)")
+        self.shared_program_io
+            .observe()
+            .map_err(|source| InterceptError::NftRuleInstallFailed { op: "observe-shared", source })
     }
 
     fn install_outbound(
@@ -463,7 +618,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 shared-program replacement/rollback algorithm"]
     #[allow(
         clippy::too_many_lines,
         reason = "one finite table keeps the five disjoint source-honest rollback dispositions together"
@@ -611,7 +765,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 successful shared-program replacement/adoption"]
     fn fresh_replace_exact_prior_rollback_and_idempotent_reapply_are_complete() {
         let requested = program(20_000);
 
@@ -679,7 +832,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 non-repairing runtime shared-program audit"]
     fn runtime_present_wrong_target_is_reported_without_mutation() {
         let expected = program(20_000);
         let wrong_target = program(20_100);
