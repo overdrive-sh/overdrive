@@ -962,7 +962,9 @@ impl RealSharedGuestNetworkScratchIo {
         frame[36..38].copy_from_slice(&local_port.to_be_bytes());
         frame[42..].copy_from_slice(MARKER);
         enable_bridge_nf_call_iptables(&plan.bridge)?;
-        std::thread::sleep(Duration::from_millis(10));
+        for _ in 0..64 {
+            std::thread::yield_now();
+        }
         file.write_all(&frame)?;
         enable_bridge_nf_call_iptables(&plan.bridge)?;
         let deadline = Instant::now() + Duration::from_millis(250);
