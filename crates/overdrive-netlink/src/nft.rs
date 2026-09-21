@@ -2947,6 +2947,69 @@ pub fn delete_rule(table: &str, chain: &str, handle: u64) -> Result<(), NetlinkE
     send_batched(NFT_MSG_DELRULE, 0, &delrule_payload(table, chain, handle), "delete-rule")
 }
 
+/// Canonical semantic identity of the node-shared IPv4 intercept program.
+///
+/// Kernel handles and dump-generation receipts remain private to this module.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedIpInterceptIdentity {
+    _private: (),
+}
+
+impl SharedIpInterceptIdentity {
+    /// Build the canonical identity for exact non-zero listener ports.
+    #[doc(hidden)]
+    #[expect(
+        clippy::panic,
+        reason = "D15 exact RED scaffold; DELIVER implements semantic construction"
+    )]
+    pub fn for_listener_ports(_leg_f_port: u16, _leg_c_port: u16) -> Result<Self, NetlinkError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP listener identity)")
+    }
+
+    /// Validate and rebuild the canonical identity from normalized parts.
+    #[doc(hidden)]
+    #[expect(
+        clippy::panic,
+        reason = "D15 exact RED scaffold; DELIVER implements semantic validation"
+    )]
+    pub fn from_normalized_parts(
+        _table_and_chains: Vec<Vec<u8>>,
+        _sets: Vec<Vec<u8>>,
+        _prerouting: Vec<Vec<u8>>,
+        _output: Vec<Vec<u8>>,
+    ) -> Result<Self, NetlinkError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP normalized identity)")
+    }
+
+    /// Project the canonical worker-owned normalized identity carrier.
+    #[doc(hidden)]
+    #[expect(
+        clippy::panic,
+        reason = "D15 exact RED scaffold; DELIVER implements semantic projection"
+    )]
+    pub fn normalized_parts(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP identity projection)")
+    }
+}
+
+/// Observe one generation-consistent shared IPv4 intercept identity.
+#[doc(hidden)]
+#[expect(clippy::panic, reason = "D15 exact RED scaffold; DELIVER implements real observation")]
+pub fn observe_shared_ip_intercept() -> Result<Option<SharedIpInterceptIdentity>, NetlinkError> {
+    panic!("Not yet implemented -- RED scaffold (GH #295 shared IP observation)")
+}
+
+/// Conditionally replace the complete shared IPv4 intercept object graph.
+#[doc(hidden)]
+#[expect(clippy::panic, reason = "D15 exact RED scaffold; DELIVER implements atomic replacement")]
+pub fn replace_shared_ip_intercept_atomically(
+    _expected_current: Option<&SharedIpInterceptIdentity>,
+    _desired: Option<&SharedIpInterceptIdentity>,
+) -> Result<(), NetlinkError> {
+    panic!("Not yet implemented -- RED scaffold (GH #295 shared IP atomic replacement)")
+}
+
 /// Semantic IPv4 shared-intercept adapter used by the worker's private
 /// `SharedInterceptProgramIo` seam.
 pub mod ip {

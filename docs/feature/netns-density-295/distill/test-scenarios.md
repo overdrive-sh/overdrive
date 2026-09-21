@@ -45,8 +45,9 @@ owners; fixtures may inject faults only through accepted driven ports.
 | S-ND295-10 | bounded-change | Lima deliberate D6 detach + D9 guard/counter/capture/audit | `shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | reasoned-pending compiled RED scaffold; fixture owns only external typed detach and observations |
 | S-ND295-11 | bounded-change | D12A source-local netlink projection and real-owner order/identity tables plus Lima production read-back | `overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`; `guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`; and `shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start` | reasoned-pending; three non-waived source-local bodies fail at the exact parser/projection or owner behavior gap, while the user-waived Lima placeholder remains a separate production-composition layer |
 | S-ND295-12 | bounded-change | D12A source-local failure/continuation plus Lima two-attachment complement | `guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` and `shared_guest_network_startup::two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal` | reasoned-pending; source-local RED is current no-op teardown and its finite table compiles every exact cleanup-leaf operation/source/continuation row; the Lima body remains a waived production-composition scaffold |
-| S-ND295-13 | bounded-change | seeded production-helper ordering, separate GREEN telemetry, native VMM/kernel complement | `overdrive_sim::invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm`; `shared_guest_network_startup::{production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts,native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance}` | the non-waived seeded invariant fails reproducibly on the actual sweep snapshot with shrunk seed `0`; the telemetry and native reasoned-pending placeholders are user-waived from this remediation gate, and native execution still requires `OVERDRIVE_METAL_TARGET` |
-| S-ND295-14..19 | bounded-change | shared nft replacement/rollback | `mtls_intercept_port::shared_program_rollback_acceptance::{replacement_and_every_rollback_disposition_preserve_exact_identity_and_source,runtime_present_wrong_target_is_reported_without_mutation}` plus Tier-3 normalized read-back | exact private seam; absent/exact prior, rejection, successful rollback, rollback write/read source, source-less wrong identity, and runtime no-rewrite are executable |
+| S-ND295-13 | bounded-change | seeded production-helper ordering, separate GREEN telemetry, native VMM/kernel complement | `overdrive_sim::invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm`; `shared_guest_network_startup::{production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts,native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance}` | the non-waived seeded invariant fails reproducibly on the actual sweep snapshot with shrunk seed `0`; the telemetry and native reasoned-pending placeholders are user-waived from this remediation gate, and workspace `.env` supplies the native-metal target when that separate body is executed |
+| S-ND295-14..18 | bounded-change | paired private state machine + Lima real shared-IP adapter + 02-03 unpublished-owner refusal | source-local `mtls_intercept_port::shared_program_rollback_acceptance::{shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior,shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta,shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement}`; Lima `mtls_intercept_install::{shared_program_absence_create_readback_idempotence_and_guard_drop,shared_program_replaces_only_listener_targets_and_preserves_foreign_complement,shared_program_refuses_ambiguous_owned_state_without_mutation}`; existing 02-03 start/refusal bodies | All six D15 bodies are authored reasoned-pending with exact closed universes and RED: source-local now includes zero-port and `Error::source()` contracts; Lima includes exact requested identities, foreign-family coexistence, and an isolated conflicting-set-schema fixture. S14..18 close only after 02-02's source-local/Lima layers and 02-03's owner layer all pass. |
+| S-ND295-19 | bounded-change | three-layer canonical wrong-target no-rewrite plus published retry/deadline/fail-stop | S19-A `02-02`: source-local `runtime_present_wrong_target_and_observe_error_are_non_mutating` plus Lima `mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating`; `02-03` prerequisite: current worker published-owner conflict/guard body; S19-B `03-03`: control-plane `shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | All layers are authored reasoned-pending and RED. Adapter observation is exactly `Ok(Some(canonical_wrong_target))`; partial/foreign/duplicate/malformed/lower observation is the existing typed error. `PostconditionMismatch` begins only at the worker. S19 closes only in `03-03`; 02-02 remains independently approvable after S19-A. |
 | S-ND295-20..26 | bounded-change | node-shared listener/capability lifecycle | `netns_density_shared_owner::*`, `capability_registry_acceptance::*`, plus existing real-enforcement retirement/zero-copy suites | complete reasoned-pending owner start, leg-F/leg-C/rule partial cleanup, exact-port recovery/occupied refusal, D7 generation/conflict/Pending/claim/publication/scoped-drain/reuse, isolated handle and shutdown bodies |
 | S-ND295-27 | bounded-change | Rust acceptance | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` | one active RED + five reasoned-pending recovery/fail-stop/model/table bodies authored |
 | S-ND295-28 | bounded-change | generated gate PBT plus deterministic real-`VmDriver` schedules | `generated_operation_sequences_match_the_gate_model`, `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, `backpressured_exec_release_cannot_delay_stop_deadline`, `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`, and `start_allocation_awaits_release_and_cancellation_owns_the_future` | no seeded-sim writer or injected supervisor consequence |
@@ -82,7 +83,117 @@ outcome → scenario reverse-trace is total:
 Marker discipline: every body added or transitioned by the phase-02 remediation
 names exact step `02-01` in its reasoned `#[ignore]` marker. Revised `02-01`
 owns S-ND295-00, 02..04, and 06..13; S-ND295-05 remains exclusively `03-01`;
-S-ND295-14..19 remain `02-02`; S-ND295-20..26 remain `02-03`.
+the three D15 source-local and three Lima bodies name exact step `02-02`, but
+are not scenario closure without the repeated S-ND295-14..18 owner layer in
+`02-03`. S19-A's transitioned Host body and new Lima body name `02-02`; the
+worker publication/conflict prerequisite remains `02-03`; S19-B's sole closing
+body names `03-03`; S-ND295-20..26 remain `02-03`.
+Every new/transitioned D15 body carries the exact rustdoc line
+`/// CONTRACT_SHAPE: bounded-change.`. All ten layered bodies are authored,
+exact-selector executable, and honestly RED at current production scaffolds or
+behavior. The existing worker body remains explicitly non-closing.
+
+## D15 authoring handoff — exact paired evidence
+
+The acceptance designer must author or transition these bodies before the
+roadmap can return to `approved`. Source-local bodies use
+`#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]`;
+Lima bodies use
+`#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]`;
+the S19-B closing body uses
+`#[ignore = "pending DELIVER step 03-03 D-295-DISTILL-15 control-plane supervisor evidence"]`.
+Existing 02-03 owner bodies retain their current reasoned markers.
+
+| Evidence layer | Closed state universe | Required complement |
+|---|---|---|
+| Source-local stateful `SharedInterceptProgramIo` | `owned_program: Option<InterceptPostcondition>`; exact elements of all three shared sets; ordered foreign-object bytes; conditional mutation journal; remaining fault schedule | Existing rollback rows assert their transition. S19-A canonical wrong target returns `Ok(Some(identity))`; injected lower observe failure returns existing typed `NftRuleInstallFailed`. Both preserve owned/dynamic/foreign snapshots and add only one Observe journal entry; no `PostconditionMismatch`, listener/task/EXEC/kernel-handle claim. |
+| Lima public `HostMtlsIntercept` | Real IP table, two chains, three typed sets/all elements, eight ordered normalized rules, private handles/ruleset generation, unrelated foreign-table sentinel | Semantic identity ignores handles. Target-only replacement preserves every other normalized byte; exact reapply/refusal emits no generation mutation; guard Drop restores absence; foreign sentinel remains byte-equal. No injected rollback fault. |
+| 02-03 published worker prerequisite | Two socket addresses/fds, two task slots, node guard, owner lifecycle/publication, capability registry/elements/handles | Startup failure returns to Absent/BootClosed. One wrong-target `audit_shared_owner` / `converge_shared_owner` result is structured and observe-only; guard stays retained and shutdown relinquishes. No clock, retry, deadline, or request claim. |
+| 03-03 private control-plane supervisor | Existing `SharedNetworkSupervisorHandle`, production-used `run_mtls_owner`, paired EXEC state, same injected clock, real worker, request channel, shutdown token, and source-local real `ServerHandle` terminal fixture | Before each boundary: exact prior attempts/elapsed, empty request, unchanged journal. After 249 ms, elapsed advances by 249 ms while attempts/journal/request stay fixed. Final 1 ms yields Recovering attempt `n` only for 1..19; boundary 20 yields the sole FailStop `20/5s` request, never observable Recovering(20). No later attempt. Terminal ownership remains `ServerHandle`. |
+
+The source-local post-commit table covers, for both `prior = Some(identity)`
+and `prior = None`: desired semantic mismatch and desired lower read failure;
+rollback write lower failure; rollback read lower failure after commit; exact
+rollback; and semantic rollback mismatch. It asserts the exact D15 error fields
+and source chain, including separate desired-read and rollback sources. Failed
+rollback write leaves the post-commit owned state; failed rollback read leaves
+the restored prior but unverified; exact rollback equals prior; semantic
+rollback mismatch equals the returned wrong observation.
+
+The S19-B body is source-local because only
+`crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance`
+can name the module-private supervisor without reversing the crate edge. Its
+exact signature is:
+
+```rust
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 03-03 D-295-DISTILL-15 control-plane supervisor evidence"]
+async fn published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop();
+```
+
+It drives the production-used private
+`SharedNetworkSupervisorHandle::run_mtls_owner` future with a real worker and
+the same `SimClock` used by paired EXEC wiring. No exported helper, public
+constructor, worker reverse dependency, test-only supervisor seam, or manual
+retry loop is permitted.
+
+The timing oracle is boundary-exact. After detection at one second it asserts
+`attempts = 0`, `elapsed = 0`, and no request. For each `n = 1..=20`, it first
+asserts `n-1` and `(n-1)*250 ms`; after advancing 249 ms, attempts/journal/
+request remain fixed but elapsed must equal `(n-1)*250 ms + 249 ms`. After the
+final 1 ms, `n = 1..19` must expose Recovering with exact `attempts = n` and
+`elapsed = n*250 ms`. For `n = 20`, Recovering(20) is neither required nor
+allowed as the oracle: at 4,999 ms attempts remain 19/no request, and the
+5,000 ms boundary is observed solely as one
+`IpRules/RecoveryDeadlineExceeded/20/5s` FailStop request. Advancing another
+interval produces no attempt 21 and no second request. `>=`, batched wakeups,
+fixture-authored attempts, and receipt-field-only timing proof are forbidden.
+
+The pre-terminal effect journal is also exact: one worker audit/adapter observe
+for detection; one already-designed `quiesce_managed_taps` before retry; and
+twenty worker converge calls whose persistent wrong-target branch performs one
+adapter observe each. No provision, teardown, startup probe, sweep,
+shared-switch converge/audit, repeat quiesce, listener bind, fresh shared-IP
+converge, element install, or relinquish may occur before terminal ownership.
+The exact receipts are `shared_owner.calls() == [TapSetDown]` and intercept
+delta `(bind = 0, fresh_converge = 0, observe = 21, guard_drop = 0)`.
+
+After the typed request, the body observes it through a source-local real
+`ServerHandle::shutdown_requested`, then calls existing
+`ServerHandle::shutdown(drain_deadline)`. That existing terminal owner alone
+awaits `mtls_worker_owner.shutdown_owner()` and sealed relinquishment, then
+resolver shutdown, then private supervisor cancellation/join. The parked
+`run_mtls_owner` returns normally only after that cancellation and never shuts
+down the worker itself. Return from `ServerHandle::shutdown` is the join oracle;
+guard retention is asserted before it, and the exact journal plus zero guard
+Drop remain unchanged after it. No post-terminal audit adds a twenty-second
+observe.
+
+Exact selectors are:
+
+```text
+cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior)' --run-ignored ignored-only --no-fail-fast
+cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta)' --run-ignored ignored-only --no-fail-fast
+cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement)' --run-ignored ignored-only --no-fail-fast
+cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop)' --run-ignored ignored-only --no-fail-fast
+cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_replaces_only_listener_targets_and_preserves_foreign_complement)' --run-ignored ignored-only --no-fail-fast
+cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_refuses_ambiguous_owned_state_without_mutation)' --run-ignored ignored-only --no-fail-fast
+# S19-A adapter no-rewrite; both are 02-02 and non-closing.
+cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::runtime_present_wrong_target_and_observe_error_are_non_mutating)' --run-ignored ignored-only --no-fail-fast
+cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating)' --run-ignored ignored-only --no-fail-fast
+# Existing 02-03 worker prerequisite; not S19 closure.
+cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::published_wrong_shared_target_is_observe_only_until_bounded_fail_stop)' --run-ignored ignored-only --no-fail-fast
+# S19-B sole closure in 03-03.
+cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(=shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop)' --run-ignored ignored-only --no-fail-fast
+```
+
+Every exact filter selects its reviewed body. `red-classification.md` records
+the S19-A source-local scaffold RED, S19-A Lima real-kernel RED, worker
+prerequisite RED, and S19-B's early owner-start RED. The S19-B specification
+includes the completed P02-20/21/22 boundary-exact cadence, receipt, journal,
+and sole-terminal-owner correction, so that earlier production-scaffold RED is
+creditable. DELIVER never authors or materially repairs these bodies.
 
 ## Acceptance specification
 
@@ -439,10 +550,13 @@ AND every prior owned and foreign object remains byte-equal
 `@tier3 @error @real-io @contract-shape:bounded-change`
 
 ```gherkin
-GIVEN an exact owned prior program and a committed replacement whose mandatory read-back mismatches
+GIVEN an exact owned prior program or genuine absence and a committed replacement
+AND its mandatory desired read-back either returns the wrong semantic identity or a real lower error
 WHEN one atomic rollback commits and its full read-back equals the captured prior identity
-THEN startup still refuses with `NftSharedReplacementMismatchRolledBack`
-AND the outcome carries prior, requested, and replacement observations with no fabricated source
+THEN a semantic trigger refuses with source-less `NftSharedReplacementMismatchRolledBack`
+AND a lower read trigger refuses with `NftSharedReplacementReadFailedRolledBack`
+AND each outcome carries prior and requested plus exactly its real observation or read source
+AND `prior = None` is read back as genuine absence, never a fabricated program
 AND fresh listeners/tasks close and EXEC remains BootClosed
 ```
 
@@ -451,11 +565,12 @@ AND fresh listeners/tasks close and EXEC remains BootClosed
 `@tier3 @error @real-io @contract-shape:bounded-change`
 
 ```gherkin
-GIVEN replacement read-back mismatched
+GIVEN committed replacement read-back mismatched semantically or failed with a real lower source
 WHEN rollback write fails or rollback read fails at the netlink boundary
 THEN `NftSharedRollbackFailed` names `RestorePrior` or `ReadBackPrior` respectively
-AND it carries the real `NetlinkError` plus prior, requested, and replacement observations
-AND no semantic mismatch is disguised as an I/O source
+AND `source` is the real rollback-operation `NetlinkError`
+AND the trigger is retained as either `replacement_observed` or `replacement_read_source`, never both
+AND neither lower source is overwritten, substituted, or fabricated
 ```
 
 ### S-ND295-18 — A node refuses when prior protection cannot be restored exactly
@@ -463,11 +578,13 @@ AND no semantic mismatch is disguised as an I/O source
 `@tier3 @error @real-io @contract-shape:bounded-change`
 
 ```gherkin
-GIVEN rollback write and read both completed successfully
+GIVEN desired read-back mismatched semantically or failed with a real lower source
+AND rollback write and read both completed successfully
 WHEN the rollback observation does not equal the captured prior program
 THEN startup refuses with `NftSharedRollbackPostconditionMismatch`
-AND both replacement and rollback observations are retained
-AND no `NetlinkError` is fabricated
+AND the rollback observation plus exactly the replacement observation or earlier read source is retained
+AND a semantic trigger remains source-less while a lower read trigger retains only its real source
+AND no rollback `NetlinkError` is fabricated
 ```
 
 ### S-ND295-19 — Live repair never redirects protection to a different listener
@@ -476,10 +593,15 @@ AND no `NetlinkError` is fabricated
 
 ```gherkin
 GIVEN the node owner is running and one owned constant rule names a different listener target
-WHEN runtime convergence audits the shared program
-THEN it reports a structured conflict without mutation
-AND it never binds port zero or substitutes a port
-AND bounded recovery eventually fail-stops if the conflict persists
+WHEN the retained control-plane supervisor audits the worker and drives its production recovery future
+THEN `HostMtlsIntercept::observe_shared` returns that canonical different identity without mutation
+AND malformed observation returns the existing typed observe error with the complete complement unchanged
+AND the worker alone compares recorded versus observed identity and reports structured `PostconditionMismatch`
+AND neither layer binds port zero, calls fresh-process shared convergence, or substitutes a port
+AND no attempt occurs before each 250 ms boundary and exactly one occurs at it
+AND twenty completed observe-only attempts occur with no twenty-first attempt
+AND at five seconds the supervisor emits exactly one typed `IpRules` recovery-deadline fail-stop
+AND the existing `ServerHandle` terminal path then drains/relinquishes the worker before cancelling and joining the supervisor
 ```
 
 ### S-ND295-20 — All local workloads share one protected connection entry pair
@@ -800,7 +922,10 @@ and VMM capacity are excluded.
 - The committed whole-binary nextest override
   `package(overdrive-control-plane) & binary(integration)` keeps every
   `shared_guest_network_startup` body, including D14A S00, in the one-thread
-  `host-kernel-shared` group. Source-level serialization is not substituted.
+  `host-kernel-shared` group. The separate committed whole-binary
+  `package(overdrive-worker) & binary(integration)` assignment likewise keeps
+  all three D15 Lima bodies in that same one-thread group. Source-level
+  serialization is not substituted.
 - S-ND295-13 is three separately selected lanes: the seeded sweep-call
   invariant is in-process Sim wrapped by the explicit Lima Linux runner only
   for repository/toolchain execution (not real-kernel evidence); structured
@@ -899,3 +1024,30 @@ test home; its only oracle is the five-event production trace. Real-kernel
 execution remains an honest environment gate and is never claimed from Docker,
 Sim, or source-local tables. The eight waived placeholders remain outside this
 D14A evidence and score.
+
+### D15 executable audit
+
+| Check | D15 disposition |
+|---|---|
+| C1a empty/minimum | PASS — genuine `prior = None`, exact absence observation, first create, rollback-to-absence, and guard-Drop absence are explicit. |
+| C1b boundaries | PASS — both listener targets are non-zero and independently changed; zero/one/duplicate owned-rule and dynamic-member boundaries are present. |
+| C2a state machine documented | PASS — desired commit, desired read, one rollback attempt, rollback read, armed unpublished guard, and published-owner states are explicit. |
+| C2b illegal event per state | PASS — S19-B asserts the exact prior snapshot/request/journal before every attempt; each 249 ms subinterval changes only elapsed; each final 1 ms triggers one attempt; Recovering is exact only through attempt 19; attempt 20 exists only in the typed `20/5s` receipt; no attempt 21 or second receipt exists; supervisor cancellation never owns worker shutdown. |
+| C3 zero/one/many | PASS — absent/present program, eight exact rules, three exact sets, zero/one dynamic element, and duplicate rule are covered. |
+| C4a apply twice | PASS — identical reapply asserts generation/rule equality and no notification or desired mutation. |
+| C4b inverse without prerequisite | PASS — `prior = None` rollback and stale conditional guard cleanup are explicit no-fabrication/no-foreign-delete partitions. |
+| C5a mode combinations | PASS — fresh-process adapter replacement and published runtime observe-only behavior remain separate bodies/steps. |
+| C5b orthogonality | PASS — semantic versus lower desired-read triggers, optional prior, rollback outcomes, dynamic elements, and foreign complement vary independently. |
+| C6a malformed input | PASS — foreign family/child, unknown userdata, duplicate/incomplete rules, conflicting set schema, and non-empty dynamic set are finite real-kernel rows. |
+| C6b each declared error | PASS — replace rejection, both restored dispositions, rollback write/read failures, rollback semantic mismatch, and prior mismatch are asserted. |
+| C6c closed error set | PASS — every D15 terminal error asserts exact trigger fields, operation, optional earlier source, later source, observation, and prior. |
+| C7a degraded resource | PASS — current real nft `ENODATA`, scripted desired-read failure, rollback write/read failure, malformed inventory, and wrong runtime target are covered. |
+| C7b interruption | PASS — commit-before-read failure and restored-but-unverified rollback-read failure are distinct state/source rows. |
+| C7c concurrent actors | PASS — caller-prior drift and stale guard cleanup assert conditional no-mutation against a changed current identity. |
+
+The D15 executable audit is **COMPLETE — 15/15 executable**. S19-A and the
+non-closing worker prerequisite retain their reviewed evidence; S19-B compiles,
+exact-selects, and carries the completed P02-20/21/22 cadence, journal, receipt,
+and terminal-ownership oracle. It remains RED at the earlier production owner
+scaffold. Roadmap validation remains pending independent acceptance and roadmap
+review.

@@ -1,12 +1,11 @@
 # Pre-DELIVER RED classification — `netns-density-295`
 
-All commands below ran in an aarch64 Linux Docker container with the workspace
-mounted read-only and a zero-byte build-only `OVERDRIVE_BPF_OBJECT` override.
-That environment compiles Rust/aya/netlink surfaces but is not kernel evidence.
-`cargo xtask lima run -- true` failed because the existing `overdrive` Lima VM
-refused SSH before and after restart. A host-native Darwin retry stopped in the
-Linux-only `linux-keyutils` dependency before repository code compiled, so it
-is not RED evidence. `OVERDRIVE_METAL_TARGET` is unset.
+The earlier phase-02 commands below ran in an aarch64 Linux Docker container
+with a zero-byte build-only `OVERDRIVE_BPF_OBJECT` override and therefore make
+no kernel-evidence claim. D15 was rerun through the working Lima-root runner
+with an isolated writable target directory and the same build-only BPF object;
+its three real-adapter failures are actual nft/netlink evidence. Workspace
+`.env` supplies the native-metal target, but D15 assigns no body to metal.
 
 ## Phase-02 non-waived remediation bodies
 
@@ -26,6 +25,50 @@ is not RED evidence. `OVERDRIVE_METAL_TARGET` is unset.
 | S-ND295-11 `every_incompatible_tap_or_bridge_identity_refuses_owner_publication` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_incompatible_tap_or_bridge_identity_refuses_owner_publication -- --ignored --exact` | first finite-table case expected an owner-authored `TapObserve` mismatch; current provision returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; both checkpoints' exact Tap/BridgeLinkIdentity/LinkMaster facts and publication refusal assertions compile. |
 | S-ND295-12 `every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement -- --ignored --exact` | expected first `EndpointDelete` source while a later TAP-delete failure is retained for continuation; current teardown returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; the separate eleven-row table covers every cleanup mutation/read and both TAP-observation occurrences with exact operation/source, complete continuation, and retained state; same-owner retry, held lease, complement, and unrelated facts also compile. |
 | S-ND295-13 `reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm` | `PROPTEST_CASES=1024 cargo test -p overdrive-sim --lib invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm -- --ignored --exact --nocapture` | actual sweep-call snapshot retained seeded run directory/scope; proptest shrank to `seed = 0` | **RED — MISSING_FUNCTIONALITY / reproduced ordering defect**; production helper, same Sim host, real sweep port call, and seed printing all executed. |
+
+## D-295-DISTILL-15 authored evidence
+
+All ten layered D15 bodies compile, exact selectors discover one body each, and
+every authored body carries the approved bounded-change declaration and reasoned
+step marker. S14..18, S19-A source-local/Lima, the non-closing worker
+prerequisite, and S19-B are creditable RED for current missing behavior. S19-B
+now carries the reviewed P02-20/21/22 boundary-exact clock, request, journal,
+and sole-terminal-owner assertions; no fixture retry/request is accepted.
+
+| Scenario / exact required body | Exact command | Observed result | Classification |
+|---|---|---|---|
+| S-ND295-14..18 `shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior)' --run-ignored ignored-only --no-fail-fast` | The first semantic-trigger rollback used the current pre-D15 conditional arguments, so the stateful seam returned `conditional-identity-mismatch/EAGAIN` instead of the scripted rollback-operation source. | **RED — MISSING_FUNCTIONALITY**; both optional priors, both trigger classes, four rollback outcomes, state/complement/full journal/fault schedule, structured fields, and the actual Rust `Error::source()`/source-less chain compile behind the incorrect production rollback state machine. |
+| S-ND295-14..18 `shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta)' --run-ignored ignored-only --no-fail-fast` | After successful absence-create/read-back, dropping the returned guard left `owned_program = Some(requested)` instead of exact absence. | **RED — MISSING_FUNCTIONALITY**; rejection, create, retarget, reapply, and cleanup each assert the exact conditional mutation journal; current `SharedInterceptGuard` has no conditional cleanup ownership. |
+| S-ND295-15 `shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement)' --run-ignored ignored-only --no-fail-fast` | The stale-prior partition remains complete and unchanged; the added independent zero-leg-F row then returned the current non-D15 error after consuming I/O instead of `shared-ip-expected` before I/O. | **RED — MISSING_FUNCTIONALITY**; both zero-port axes preserve the complete state/journal/fault schedule. |
+| S-ND295-14/16 `shared_program_absence_create_readback_idempotence_and_guard_drop` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop)' --run-ignored ignored-only --no-fail-fast` | Real `HostMtlsIntercept::converge_shared(None, …)` reached the real nft adapter and returned `NftSharedReplaceFailed` from `atomic-rule-transaction` with `ENODATA`. | **RED — MISSING_FUNCTIONALITY / REAL KERNEL**; exact set ABI and atomic full-object create are missing, not fixture setup. |
+| S-ND295-14 `shared_program_replaces_only_listener_targets_and_preserves_foreign_complement` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_replaces_only_listener_targets_and_preserves_foreign_complement)' --run-ignored ignored-only --no-fail-fast` | Real public-adapter prior creation reached the same `atomic-rule-transaction` `ENODATA` before retarget assertions. | **RED — MISSING_FUNCTIONALITY / REAL KERNEL**; the body now compares old/new read-back byte-for-byte with D15's exact semantic identities for both requested non-zero target pairs. |
+| S-ND295-15 `shared_program_refuses_ambiguous_owned_state_without_mutation` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_refuses_ambiguous_owned_state_without_mutation)' --run-ignored ignored-only --no-fail-fast` | The first exact valid-IP seed reached real prior creation and failed with `atomic-rule-transaction` `ENODATA`. | **RED — MISSING_FUNCTIONALITY / REAL KERNEL**; the finite kernel table now seeds valid IP plus same-name bridge coexistence, uses only pre-D15 raw delete/insert/append fixtures for unknown userdata, and restores all eight rules around one independently conflicting set schema. |
+| S19-A `runtime_present_wrong_target_and_observe_error_are_non_mutating` | `cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::runtime_present_wrong_target_and_observe_error_are_non_mutating)' --run-ignored ignored-only --no-fail-fast` | Exact body selected and stopped at D15's `SharedIpInterceptIdentity::for_listener_ports` RED scaffold. | **RED — MISSING_FUNCTIONALITY**, step `02-02`; canonical wrong target `Ok(Some(identity))` plus partial/foreign/duplicate/malformed/lower typed-error rows compile with exact one-Observe/no-mutation universes. |
+| S19-A `shared_program_valid_wrong_target_observation_is_non_mutating` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating)' --run-ignored ignored-only --no-fail-fast` | Exact Lima body reached real public-host creation and failed at current `atomic-rule-transaction/ENODATA`. | **RED — MISSING_FUNCTIONALITY / REAL KERNEL**, step `02-02`; exact canonical wrong identity, generation/notification no-mutation, target inventory, and foreign complement compile. |
+| S19 published-worker prerequisite `published_wrong_shared_target_is_observe_only_until_bounded_fail_stop` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::published_wrong_shared_target_is_observe_only_until_bounded_fail_stop)' --run-ignored ignored-only --no-fail-fast` | Body selects and stops at `start_shared_owner`; canonical different non-zero target and single observe-only worker conflict compile. | **RED — PREREQUISITE ONLY**, step `02-03`; no cadence/deadline/request credit. |
+| S19-B `published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(=shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop)' --run-ignored ignored-only --no-fail-fast` | Exact body compiled, selected one test, and stopped at the earlier `MtlsInterceptWorker::start_shared_owner` RED scaffold. The later compiled oracle asserts 249 ms elapsed-only subintervals, attempts 1..19 as exact Recovering snapshots, attempt 20 only through the typed `20/5s` request, no attempt 21/second request, exact closed journals, and terminal ownership only through `ServerHandle::shutdown`. | **RED — MISSING_FUNCTIONALITY**, step `03-03`; P02-20/21/22 specification remediation is complete and the current failure is the expected earlier production scaffold. |
+
+Every row requires `/// CONTRACT_SHAPE: bounded-change.` plus the exact
+reasoned marker recorded in `test-scenarios.md`. The source-local complement is
+all three dynamic-set element inventories plus ordered foreign bytes; the Lima
+complement is the complete target-table semantic inventory plus an unrelated
+foreign-table sentinel; the worker prerequisite complement is retained
+published socket/task/guard state. The control-plane pre-terminal journal is
+exactly one detection observe, one designed quiesce, and twenty attempt
+observes; provision/teardown/probe/sweep/shared-converge/shared-audit/repeat-
+quiesce/bind/fresh-converge/install/relinquish are forbidden. Terminal
+relinquishment appears only after existing `ServerHandle::shutdown` invokes the
+worker owner, before supervisor cancel/join. Required receipts are exactly
+`shared_owner.calls() == [TapSetDown]` and intercept delta
+`(bind=0, fresh_converge=0, observe=21, guard_drop=0)` pre-terminal.
+No DELIVER crafter may author or materially repair these bodies.
+
+The 2026-09-21 S19-B rerun encountered the Lima guest root filesystem already
+remounted read-only, so the canonical shared `CARGO_TARGET_DIR` could not create
+`.cargo-lock`. The exact Lima selector was rerun against a disposable writable
+target seeded from the same guest cache; compilation completed and the body
+failed only at the production `start_shared_owner` scaffold above. No
+real-kernel claim depends on this source-local body.
 
 The prior bounded gate scored ten non-waived bodies. D14A transitions S00 to
 the four exact bodies above: all three source-local filters are invoked
@@ -51,7 +94,30 @@ neither RED classifications nor approval conditions here:
 
 ## Compiler and unchanged-suite evidence
 
-D14A verification update:
+D15 verification update:
+
+- Lima-root `cargo check --workspace --all-targets --features integration-tests`
+  passed with the authored bodies and exact D15 error-algebra scaffold.
+- Focused worker `cargo clippy -p overdrive-worker --lib --tests --features
+  integration-tests --no-deps -- -D warnings` passed. The broader dependency-
+  lint run remains blocked by already-recorded `overdrive-control-plane`
+  production warnings outside D15; no D15 warning remains.
+- Every fully-qualified selector discovers exactly one ignored body. S19-B's
+  current early RED is non-creditable until its cadence/journal/terminal oracle
+  is remediated; the other failures retain the classifications above.
+- The unchanged worker library lane remains green: **60 passed, 0 failed, 14
+  reasoned ignored**.
+- `nextest show-config test-groups` assigns all four exact Lima body names to
+  `host-kernel-shared` with `max-threads = 1` through the whole worker
+  integration-binary override.
+- Lima is currently reachable and all three D15 host-adapter bodies reached
+  real nft/netlink. No D15 body is mapped to native metal; `.env` supplies the
+  metal target for the separate native-VMM lanes.
+- Roadmap JSON parses, validation remains `pending`, all original seven names/markers/
+  Contract Shape declarations are mechanically present, and `cargo fmt --all
+  -- --check` plus `git diff --check` pass.
+
+Historical D14A verification update:
 
 - Linux compile passed for `overdrive-dataplane --lib --tests` and
   `overdrive-control-plane --lib --tests --features integration-tests`.

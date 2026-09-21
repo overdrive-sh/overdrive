@@ -68,10 +68,12 @@ use std::time::Duration;
 use overdrive_core::AllocationId;
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
+use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
 use overdrive_worker::mtls_intercept::{
-    accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
-    install_outbound_tproxy, make_transparent_listener,
+    InterceptPostcondition, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
+    install_inbound_tproxy, install_outbound_tproxy, make_transparent_listener,
 };
+use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state.
 ///
@@ -246,6 +248,460 @@ fn clean_shared_infra() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+const D15_FOREIGN_TABLE: &str = "nd295_d15_foreign";
+const D15_LEG_F_OLD: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 31_501);
+const D15_LEG_C_OLD: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 31_502);
+const D15_LEG_F_NEW: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 31_601);
+const D15_LEG_C_NEW: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 31_602);
+
+fn nft_script(script: &str) {
+    let mut child = Command::new("nft")
+        .args(["-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn nft fixture transaction");
+    child
+        .stdin
+        .as_mut()
+        .expect("nft fixture stdin")
+        .write_all(script.as_bytes())
+        .expect("write nft fixture transaction");
+    let output = child.wait_with_output().expect("wait for nft fixture transaction");
+    assert!(
+        output.status.success(),
+        "nft fixture transaction failed: {}\nscript:\n{script}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+}
+
+fn nft_table_json(family: &str, table: &str) -> Option<Vec<u8>> {
+    let output = Command::new("nft")
+        .args(["-j", "-a", "list", "table", family, table])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn nft JSON table dump");
+    output.status.success().then_some(output.stdout)
+}
+
+fn d15_target_snapshot() -> Vec<(String, Vec<u8>)> {
+    ["ip", "bridge"]
+        .into_iter()
+        .filter_map(|family| {
+            nft_table_json(family, "overdrive-mtls").map(|bytes| (family.to_owned(), bytes))
+        })
+        .collect()
+}
+
+fn create_d15_foreign_sentinel() {
+    nft_script(&format!(
+        "add table ip {D15_FOREIGN_TABLE}\nadd chain ip {D15_FOREIGN_TABLE} sentinel\nadd rule ip {D15_FOREIGN_TABLE} sentinel counter accept comment \"d15-foreign-sentinel\"\n"
+    ));
+}
+
+fn clean_d15_shared_ip_fixture() {
+    for (family, table) in
+        [("ip", "overdrive-mtls"), ("bridge", "overdrive-mtls"), ("ip", D15_FOREIGN_TABLE)]
+    {
+        let _ = Command::new("nft")
+            .args(["delete", "table", family, table])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+struct D15KernelSandbox;
+
+impl D15KernelSandbox {
+    fn fresh() -> Self {
+        clean_d15_shared_ip_fixture();
+        Self
+    }
+}
+
+impl Drop for D15KernelSandbox {
+    fn drop(&mut self) {
+        clean_d15_shared_ip_fixture();
+    }
+}
+
+type ConstantRuleParts<'a> = (&'a [Vec<u8>], &'a [Vec<u8>], &'a [Vec<u8>], &'a [Vec<u8>]);
+
+#[derive(Clone, Copy, Debug)]
+enum D15AmbiguousState {
+    ForeignFamily,
+    IncompleteProgram,
+    DuplicateOwnedRule,
+    UnknownUserdata,
+    ConflictingSetSchema,
+    ForeignTableChild,
+    NonEmptyDynamicSet,
+}
+
+fn constant_rule_parts(observation: &InterceptPostcondition) -> ConstantRuleParts<'_> {
+    let InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output } =
+        observation
+    else {
+        panic!("shared host adapter must expose the constant-rule identity")
+    };
+    (table_and_chains, sets, prerouting, output)
+}
+
+fn expected_shared_identity(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
+    let (table_and_chains, sets, prerouting, output) =
+        SharedIpInterceptIdentity::for_listener_ports(leg_f.port(), leg_c.port())
+            .expect("non-zero D15 listener targets form one canonical identity")
+            .normalized_parts();
+    InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
+}
+
+fn replace_managed_set_with_conflicting_schema() {
+    let prerouting = nft::list_rules("overdrive-mtls", "prerouting")
+        .expect("capture canonical prerouting rules before fixture mutation");
+    let output = nft::list_rules("overdrive-mtls", "output")
+        .expect("capture canonical output rules before fixture mutation");
+    for rule in &prerouting {
+        nft::delete_rule("overdrive-mtls", "prerouting", rule.handle)
+            .expect("remove one prerouting rule while replacing its referenced set schema");
+    }
+    for rule in &output {
+        nft::delete_rule("overdrive-mtls", "output", rule.handle)
+            .expect("remove one output rule while replacing its referenced set schema");
+    }
+    nft_script(
+        "delete set ip overdrive-mtls managed_guest_ips\n\
+         add set ip overdrive-mtls managed_guest_ips { type inet_service; comment \"d15-conflicting-schema\"; }\n",
+    );
+    for (chain, rules) in [("prerouting", prerouting), ("output", output)] {
+        for (index, rule) in rules.into_iter().enumerate() {
+            let result = if index == 0 {
+                nft::insert_rule("overdrive-mtls", chain, &rule.normalized_program, &rule.userdata)
+            } else {
+                nft::append_rule("overdrive-mtls", chain, &rule.normalized_program, &rule.userdata)
+            };
+            result.expect("restore every canonical rule around the one conflicting set schema");
+        }
+    }
+}
+
+fn assert_three_empty_sets_and_eight_rules(observation: &InterceptPostcondition) {
+    let (tables, sets, prerouting, output) = constant_rule_parts(observation);
+    assert_eq!(tables.len(), 3, "one table plus two base chains");
+    assert_eq!(sets.len(), 3, "exact shared-IP set schemas");
+    assert_eq!(prerouting.len(), 5, "five canonical prerouting rules");
+    assert_eq!(output.len(), 3, "three canonical output rules");
+    for set in ["managed_guest_ips", "outbound_sources", "inbound_destinations"] {
+        let json = nft_table_json("ip", "overdrive-mtls")
+            .expect("shared-IP table remains present while its guard is owned");
+        let rendered = String::from_utf8_lossy(&json);
+        assert!(rendered.contains(set), "set `{set}` is present: {rendered}");
+    }
+    let table = nft_table_json("ip", "overdrive-mtls").expect("shared-IP table dump");
+    let rendered = String::from_utf8_lossy(&table);
+    assert!(
+        !rendered.contains("\"elem\"") && !rendered.contains("\"elements\""),
+        "all three dynamic sets remain empty: {rendered}"
+    );
+}
+
+fn assert_only_listener_targets_changed(
+    prior: &InterceptPostcondition,
+    replacement: &InterceptPostcondition,
+) {
+    let (prior_tables, prior_sets, prior_prerouting, prior_output) = constant_rule_parts(prior);
+    let (next_tables, next_sets, next_prerouting, next_output) = constant_rule_parts(replacement);
+    assert_eq!(prior_tables, next_tables);
+    assert_eq!(prior_sets, next_sets);
+    assert_eq!(prior_output, next_output);
+    assert_eq!(prior_prerouting.len(), 5);
+    assert_eq!(next_prerouting.len(), 5);
+    for index in [0, 2, 4] {
+        assert_eq!(prior_prerouting[index], next_prerouting[index]);
+    }
+    for index in [1, 3] {
+        assert_ne!(prior_prerouting[index], next_prerouting[index]);
+    }
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
+fn shared_program_absence_create_readback_idempotence_and_guard_drop() {
+    assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = D15KernelSandbox::fresh();
+    create_d15_foreign_sentinel();
+    let foreign_before =
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel table exists");
+    let host = HostMtlsIntercept::new();
+
+    assert_eq!(host.observe_shared().expect("genuine absence is observable"), None);
+    let first_guard = host
+        .converge_shared(None, D15_LEG_F_OLD, D15_LEG_C_OLD)
+        .expect("one atomic create installs the complete shared-IP program");
+    let created = host
+        .observe_shared()
+        .expect("created program read-back succeeds")
+        .expect("created program is present");
+    assert_three_empty_sets_and_eight_rules(&created);
+    assert_eq!(created, expected_shared_identity(D15_LEG_F_OLD, D15_LEG_C_OLD));
+
+    let mut observer =
+        nft::NftRuleObserver::subscribe().expect("subscribe before exact-identity reapply");
+    let prerouting_before = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("stable prerouting snapshot before exact reapply");
+    let output_before = observer
+        .snapshot("overdrive-mtls", "output")
+        .expect("stable output snapshot before exact reapply");
+    let adopted_guard = host
+        .converge_shared(Some(&created), D15_LEG_F_OLD, D15_LEG_C_OLD)
+        .expect("identical reapply adopts without mutation");
+    let prerouting_after = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("stable prerouting snapshot after exact reapply");
+    let output_after = observer
+        .snapshot("overdrive-mtls", "output")
+        .expect("stable output snapshot after exact reapply");
+    assert_eq!(prerouting_after, prerouting_before);
+    assert_eq!(output_after, output_before);
+    observer.ensure_no_notifications().expect("exact reapply emits no nft mutation notification");
+    assert_eq!(host.observe_shared().expect("idempotent identity read-back"), Some(created));
+
+    drop(adopted_guard);
+    assert_eq!(
+        host.observe_shared().expect("unpublished guard cleanup is observable"),
+        None,
+        "guard Drop conditionally deletes the complete owned object graph"
+    );
+    drop(first_guard);
+    assert_eq!(
+        host.observe_shared().expect("second stale guard is harmless"),
+        None,
+        "stale conditional cleanup cannot recreate or delete foreign state"
+    );
+    assert_eq!(
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel survives"),
+        foreign_before
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
+fn shared_program_replaces_only_listener_targets_and_preserves_foreign_complement() {
+    assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = D15KernelSandbox::fresh();
+    create_d15_foreign_sentinel();
+    let foreign_before =
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel table exists");
+    let host = HostMtlsIntercept::new();
+
+    let prior_guard = host
+        .converge_shared(None, D15_LEG_F_OLD, D15_LEG_C_OLD)
+        .expect("seed exact owned prior through the public host adapter");
+    let prior = host
+        .observe_shared()
+        .expect("old targets read back")
+        .expect("old target identity is present");
+    assert_three_empty_sets_and_eight_rules(&prior);
+    assert_eq!(prior, expected_shared_identity(D15_LEG_F_OLD, D15_LEG_C_OLD));
+
+    let replacement_guard = host
+        .converge_shared(Some(&prior), D15_LEG_F_NEW, D15_LEG_C_NEW)
+        .expect("one atomic target-only replacement succeeds");
+    let replacement = host
+        .observe_shared()
+        .expect("new targets read back")
+        .expect("new target identity is present");
+    assert_three_empty_sets_and_eight_rules(&replacement);
+    assert_only_listener_targets_changed(&prior, &replacement);
+    assert_eq!(replacement, expected_shared_identity(D15_LEG_F_NEW, D15_LEG_C_NEW));
+    assert_eq!(
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel survives replacement"),
+        foreign_before
+    );
+
+    drop(prior_guard);
+    assert_eq!(
+        host.observe_shared().expect("stale old guard cannot delete retargeted state"),
+        Some(replacement)
+    );
+    drop(replacement_guard);
+    assert_eq!(host.observe_shared().expect("current unpublished guard restores absence"), None);
+    assert_eq!(
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel survives cleanup"),
+        foreign_before
+    );
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
+fn shared_program_valid_wrong_target_observation_is_non_mutating() {
+    assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = D15KernelSandbox::fresh();
+    create_d15_foreign_sentinel();
+    let foreign_before =
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel table exists");
+    let host = HostMtlsIntercept::new();
+    let guard = host
+        .converge_shared(None, D15_LEG_F_NEW, D15_LEG_C_NEW)
+        .expect("seed a canonical different non-zero target through the public host adapter");
+    let recorded_identity = expected_shared_identity(D15_LEG_F_OLD, D15_LEG_C_OLD);
+    let wrong_target_identity = expected_shared_identity(D15_LEG_F_NEW, D15_LEG_C_NEW);
+    assert_ne!(wrong_target_identity, recorded_identity);
+
+    let target_before = d15_target_snapshot();
+    let mut observer = nft::NftRuleObserver::subscribe()
+        .expect("subscribe before the non-mutating runtime observation");
+    let prerouting_before = observer
+        .snapshot("overdrive-mtls", "prerouting")
+        .expect("stable prerouting snapshot before runtime observation");
+    let output_before = observer
+        .snapshot("overdrive-mtls", "output")
+        .expect("stable output snapshot before runtime observation");
+
+    assert_eq!(
+        host.observe_shared().expect("canonical wrong target is still an owned identity"),
+        Some(wrong_target_identity)
+    );
+    assert_eq!(
+        observer
+            .snapshot("overdrive-mtls", "prerouting")
+            .expect("stable prerouting snapshot after runtime observation"),
+        prerouting_before
+    );
+    assert_eq!(
+        observer
+            .snapshot("overdrive-mtls", "output")
+            .expect("stable output snapshot after runtime observation"),
+        output_before
+    );
+    observer
+        .ensure_no_notifications()
+        .expect("runtime observation emits no nft mutation notification");
+    assert_eq!(d15_target_snapshot(), target_before);
+    assert_eq!(
+        nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel survives observation"),
+        foreign_before
+    );
+
+    drop(guard);
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one finite real-kernel table enumerates every accepted ambiguous owned-state partition"
+)]
+fn shared_program_refuses_ambiguous_owned_state_without_mutation() {
+    assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+
+    for row in [
+        D15AmbiguousState::ForeignFamily,
+        D15AmbiguousState::IncompleteProgram,
+        D15AmbiguousState::DuplicateOwnedRule,
+        D15AmbiguousState::UnknownUserdata,
+        D15AmbiguousState::ConflictingSetSchema,
+        D15AmbiguousState::ForeignTableChild,
+        D15AmbiguousState::NonEmptyDynamicSet,
+    ] {
+        let _sandbox = D15KernelSandbox::fresh();
+        create_d15_foreign_sentinel();
+        let host = HostMtlsIntercept::new();
+        let seeded_guard = host
+            .converge_shared(None, D15_LEG_F_OLD, D15_LEG_C_OLD)
+            .expect("seed exact owned program through HostMtlsIntercept");
+
+        match row {
+            D15AmbiguousState::ForeignFamily => {
+                nft_script("add table bridge overdrive-mtls\n");
+            }
+            D15AmbiguousState::IncompleteProgram => {
+                let rule = nft::list_rules("overdrive-mtls", "prerouting")
+                    .expect("list canonical prerouting rules")
+                    .pop()
+                    .expect("five canonical prerouting rules");
+                nft::delete_rule("overdrive-mtls", "prerouting", rule.handle)
+                    .expect("delete one owned rule to seed incompleteness");
+            }
+            D15AmbiguousState::DuplicateOwnedRule => {
+                let rule = nft::list_rules("overdrive-mtls", "prerouting")
+                    .expect("list canonical prerouting rules")
+                    .into_iter()
+                    .next()
+                    .expect("five canonical prerouting rules");
+                nft::append_rule(
+                    "overdrive-mtls",
+                    "prerouting",
+                    &rule.normalized_program,
+                    &rule.userdata,
+                )
+                .expect("append an exact duplicate owned identity");
+            }
+            D15AmbiguousState::UnknownUserdata => {
+                let rule = nft::list_rules("overdrive-mtls", "prerouting")
+                    .expect("list canonical prerouting rules")
+                    .into_iter()
+                    .next()
+                    .expect("five canonical prerouting rules");
+                nft::delete_rule("overdrive-mtls", "prerouting", rule.handle)
+                    .expect("delete one canonical rule before changing userdata");
+                nft::insert_rule(
+                    "overdrive-mtls",
+                    "prerouting",
+                    &rule.normalized_program,
+                    b"foreign-d15-userdata",
+                )
+                .expect("restore the canonical program with unknown userdata");
+            }
+            D15AmbiguousState::ConflictingSetSchema => {
+                replace_managed_set_with_conflicting_schema();
+            }
+            D15AmbiguousState::ForeignTableChild => {
+                nft_script("add chain ip overdrive-mtls foreign_child\n");
+            }
+            D15AmbiguousState::NonEmptyDynamicSet => {
+                nft_script("add element ip overdrive-mtls managed_guest_ips { 100.95.0.2 }\n");
+            }
+        }
+
+        let target_before = d15_target_snapshot();
+        let foreign_before =
+            nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel before refusal");
+        assert!(
+            host.observe_shared().is_err(),
+            "{row:?}: non-repairing observation refuses ambiguous owned state"
+        );
+        assert!(
+            host.converge_shared(None, D15_LEG_F_NEW, D15_LEG_C_NEW).is_err(),
+            "{row:?}: convergence refuses before target mutation"
+        );
+        assert_eq!(d15_target_snapshot(), target_before, "{row:?}: target state is byte-equal");
+        assert_eq!(
+            nft_table_json("ip", D15_FOREIGN_TABLE).expect("foreign sentinel after refusal"),
+            foreign_before,
+            "{row:?}: unrelated foreign table is byte-equal"
+        );
+
+        drop(seeded_guard);
+        assert_eq!(
+            d15_target_snapshot(),
+            target_before,
+            "{row:?}: a stale unpublished guard cannot delete changed or ambiguous state"
+        );
+    }
 }
 
 const ADOPTION_NS: &str = "ns-d7-adopt";

@@ -2101,3 +2101,1426 @@ The final D14A DESIGN-to-DISTILL translation now enforces the complete private
 semantic validator contract and deterministic first-mismatch order while
 preserving every approved API, owner, evidence boundary, and real-kernel gate.
 Independent roadmap approval remains required before DELIVER step `02-01`.
+
+## Iteration 12 — D-295-DISTILL-15 DESIGN and revised-roadmap review
+
+### Scope
+
+This iteration reviews only proposed D-295-DISTILL-15 and its revised
+`02-02`/`02-03` roadmap allocation. The previously approved D12/D12A/D13/D14/
+D14A decisions and completed findings DESIGN-P02-01 through DESIGN-P02-12 are
+not reopened.
+
+The proposed architecture closes the implementation review's D1-D5 shape
+problems in a bounded way:
+
+- the cross-crate boundary is exactly one doc-hidden
+  `SharedIpInterceptIdentity`, its three semantic constructor/projection
+  methods, and two IP-intercept-specific observe/conditional-replace
+  functions; `Client`, a public `nft::ip` bundle, family parameters, raw
+  builders, observed-handle values, and `AtomicRuleMutation::Append/Replace`
+  are all excluded;
+- semantic equality contains canonical table/base-chain definitions, exact
+  aligned set schemas, ordered normalized rules, exact userdata, and the two
+  listener targets, while kernel handles remain private mutation receipts;
+- `None -> Some`, `Some -> Some`, and `Some -> None` each use one complete nft
+  batch, so rejected first-boot creation cannot leave the partial
+  table/chain/set state reproduced by the step reviewer;
+- the literal conditional-replacement arguments make valid wrong-read-back
+  rollback exact for both `prior = Some(identity)` and `prior = None`, without
+  fabricating an absence identity;
+- the private guard's conditional Drop is sufficient for unpublished startup,
+  and the `02-03` owner alone retains then privately forgets the erased guard
+  after listener/task/element drain. No public relinquish method, downcast,
+  second guard type, runtime mode, or ownership transfer is introduced; and
+- the intended evidence split is honest in principle: deterministic failure
+  partitions belong in the source-local stateful algorithm universe, actual
+  nft schemas/transactions/read-back/complements belong in Lima, and
+  BootClosed/publication/runtime retry/fail-stop/published relinquishment
+  belong only to `02-03`. In particular, the private runtime helper receives no
+  S-ND295-19 credit.
+
+Two blocking gaps prevent approval.
+
+### Finding DESIGN-P02-13 — Blocking: a failed mandatory replacement read-back has no source-honest transition or return shape
+
+**Evidence:**
+
+- The accepted fresh-process contract says that after a successful replacement
+  commit, **any failed or mismatched** full read-back triggers one atomic
+  rollback and a second read-back (`feature-delta.md:2641-2648`).
+- D15 defines rollback only "after a valid but wrong replacement read-back" as
+  `replace_atomically(replacement_observed.as_ref(), prior.as_ref())`
+  (`feature-delta.md:2423-2431`). It does not define the expected-current
+  argument, retained primary source, or returned disposition when that first
+  post-commit `observe()` returns `Err(NetlinkError)`.
+- None of the accepted public errors can represent that path honestly.
+  `NftSharedReplaceFailed` asserts that the batch was rejected and the prior
+  state is intact (`feature-delta.md:3585-3588`);
+  `NftSharedRollbackFailed` is explicitly limited to a lower failure from the
+  rollback write or rollback read (`feature-delta.md:3599-3603`); and the two
+  remaining rollback dispositions are source-less semantic outcomes.
+- The production algorithm demonstrates the concrete ambiguity today:
+  `replace_observed_shared_program` commits at
+  `mtls_intercept_port.rs:336-342`, then maps a failed replacement read-back at
+  `:344-352` to `NftSharedRollbackFailed { operation: ReadBackPrior }` and
+  returns without executing the rollback at `:357-378`. Thus the operation tag
+  claims a rollback read which never occurred, and the accepted rollback-on-
+  failed-read guarantee is not implementable from the pinned contract.
+- D15 says the stateful I/O can fail at each observe/replace stage
+  (`feature-delta.md:2417-2421`), but its exact evidence list covers batch
+  rejection, valid post-commit mismatch, rollback write/read failures, and
+  semantic rollback mismatch only (`:2452-2456`, `:2470-2475`). No body forces
+  this missing transition for either optional-prior branch.
+
+**Consequence:** A crafter must either mislabel the initial post-commit read
+failure as a rollback-read failure, skip the mandatory rollback, discard the
+real primary source, or invent a new public error/operation shape. Each choice
+violates an accepted statement, and the repository's exact-API rule forbids the
+crafter from choosing among them.
+
+**Required bounded disposition:** Reopen only this transition in DESIGN and pin
+the exact algorithm and accepted error shape for a failed first post-commit
+read-back: the conditional rollback expectation for both `prior = Some` and
+`prior = None`, retention of the real read-back source, rollback write/read/
+semantic outcomes, and the final returned disposition. If that requires a new
+or changed public error variant/field, obtain explicit approval rather than
+delegating the shape to DELIVER. DISTILL must then add stateful rows for both
+optional-prior branches. Do not change the approved doc-hidden netlink API or
+move the owner/runtime behavior into `02-02` to close this finding.
+
+### Finding DESIGN-P02-14 — Blocking: the revised roadmap credits bodies that DISTILL has not authored or allocated
+
+**Evidence:**
+
+- D15 names three exact Lima bodies and one exact `02-03` runtime body
+  (`feature-delta.md:2470-2484`), and the roadmap credits those names at
+  `roadmap.json:244-245` and `:292-300`. None of
+  `shared_program_absence_create_readback_idempotence_and_guard_drop`,
+  `shared_program_replaces_only_listener_targets_and_preserves_foreign_complement`,
+  `shared_program_refuses_ambiguous_owned_state_without_mutation`, or
+  `published_wrong_shared_target_is_observe_only_until_bounded_fail_stop`
+  exists in the test tree.
+- The two credited source-local functions do exist, but their current
+  `ScriptedIo` is a pair of queued results plus call kinds
+  (`mtls_intercept_port.rs:545-604`), the exact non-stateful evidence D15
+  rejects. They are active tests, not authored reasoned-pending RED bodies, and
+  their current assertions do not own the declared program/complement state.
+- The DISTILL scenario matrix remains on the superseded allocation: it names
+  only the old source-local body plus a generic Tier-3 read-back and says all
+  S-ND295-14..19 remain in `02-02`
+  (`distill/test-scenarios.md:49`, `:82-85`). The revised roadmap instead gives
+  `02-02` S-ND295-14..18 as incomplete adapter layers and repeats S-ND295-14..18
+  in `02-03`, with S-ND295-19 exclusively activated there
+  (`roadmap.json:246-251`, `:269-300`).
+- `distill/red-classification.md` contains no D15 body, command, observed RED,
+  or environment-pending Lima classification. A DELIVER crafter would have to
+  author or materially repair the tests to satisfy the roadmap, contrary to
+  the roadmap's own no-re-authoring rule and the repository's acceptance-
+  designer ownership rule.
+- The verification selectors do not detect the omissions. `test(mtls_intercept_install)`
+  runs the existing legacy module even when all three named D15 bodies are
+  absent (`roadmap.json:260-262`), and `test(netns_density_shared_owner)` can
+  pass after other owner bodies activate without the named S-ND295-19 body
+  (`:317-322`). A green command therefore would not prove the roadmap's exact
+  paired evidence.
+
+**Consequence:** The proposed paired allocation is conceptually sound but is
+not an executable DISTILL handoff. Current source, DISTILL SSOT, roadmap IDs,
+and runner filters disagree about which step owns and closes S-ND295-14..19.
+Advancing would either lose the Lima/runtime obligations or force a crafter to
+invent acceptance evidence during DELIVER.
+
+**Required bounded disposition:** Send D15 through DISTILL before roadmap
+approval. The acceptance designer must transition the two source-local bodies
+to the specified stateful universe, author the three exact Lima bodies and the
+exact published-owner S-ND295-19 body, give every new/transitioned test its
+required Contract Shape declaration and reasoned-pending ownership, record
+their RED/environment classification, and update the scenario matrix so
+S-ND295-14..18 close only after both steps while S-ND295-19 closes only in
+`02-03`. Then make the `02-02` and `02-03` verification filters name the exact
+credited bodies so their absence yields zero selected evidence rather than a
+green legacy-module run. This remediation must preserve D15's source-local /
+Lima / owner-layer separation.
+
+### Mechanical and boundary checks
+
+| Check | Iteration-12 result |
+| --- | --- |
+| Exact doc-hidden netlink API | PASS — necessary, sufficient for the named worker translation, and no generic/raw surface is authorized. |
+| Semantic identity versus private handles | PASS — identity equality excludes handles; the adapter retains live handles only for the conditional batch. |
+| Exact set ABI and complete-object atomicity | PASS at DESIGN — IPv4 and aligned IPv4/service schemas plus one mixed-object batch are explicit. |
+| Optional-prior valid-mismatch rollback | PASS — `replacement_observed -> prior`, including deletion to genuine absence. |
+| Failed replacement read-back | **FAIL — DESIGN-P02-13.** |
+| Unpublished Drop / published relinquish ownership | PASS — `02-02` conditional cleanup and `02-03` private forget are disjoint; no public guard API is added. |
+| Runtime wrong-target allocation | PASS at DESIGN — observe-only conflict/retry/fail-stop remains exclusive to `02-03`; the private helper is uncredited. |
+| Stateful source-local / Lima / owner evidence split | PASS conceptually, **not executable — DESIGN-P02-14.** |
+| DISTILL scenario/test/RED alignment | **FAIL — DESIGN-P02-14.** |
+| Runner selectors | **FAIL — broad legacy-module filters do not require the named D15 bodies.** |
+| Roadmap schema / JSON hygiene | PASS — `jq empty`; `validation.status` remains `pending`. |
+| Diff hygiene | PASS — `git diff --check`. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-12 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-12 | Remain CLOSED. |
+| DESIGN-P02-13 — failed replacement read-back has no honest rollback/error disposition | OPEN, blocking DESIGN/API completion. |
+| DESIGN-P02-14 — D15 tests, DISTILL ownership, RED classification, and exact runner selection are absent or stale | OPEN, blocking DISTILL/roadmap execution. |
+| D15 doc-hidden adapter shape, handle privacy, atomic valid transitions, and 02-02/02-03 owner split | ACCEPTED portions; do not reopen while resolving P02-13/14. |
+
+## Iteration 12 final verdict
+
+# CHANGES_REQUIRED
+
+D-295-DISTILL-15 correctly removes the rejected public `nft::ip`/
+`AtomicRuleMutation` expansion, supplies a minimal implementable semantic
+cross-crate boundary, keeps handles private, makes valid optional-prior
+rollback atomic, and defers published-owner runtime/relinquish behavior to
+`02-03` without weakening `02-02`. It is not yet complete: the accepted
+rollback contract has no source-honest outcome for a failed first post-commit
+read-back, and the paired evidence exists only in DESIGN/roadmap prose rather
+than aligned DISTILL bodies and exact runner selectors. Resolve
+DESIGN-P02-13/14 and re-review before approving D15 or resuming step `02-02`.
+
+## Iteration 13 — D-295-DISTILL-15 remediation re-review
+
+### Scope
+
+This iteration re-reviews only DESIGN-P02-13 and DESIGN-P02-14 against the
+amended D15 rollback algebra, exact pending-authoring evidence handoff, revised
+DISTILL prose, and revised `02-02`/`02-03` roadmap. The iteration-12 accepted
+doc-hidden netlink boundary, handle-private semantic identity, mixed-object nft
+atomicity, unpublished/published guard ownership split, and runtime deferral are
+not reopened.
+
+### DESIGN-P02-13 disposition — CLOSED
+
+The amended state machine now covers the formerly unrepresentable committed-
+replacement / failed-desired-read path without overloading an existing
+disposition:
+
+- `prior` is captured once; `replace_atomically(prior, Some(requested)) ->
+  Ok(())` is the single desired commit boundary. No later branch can return
+  `NftSharedReplaceFailed` or submit the desired replacement a second time.
+- A successful wrong semantic read records `replacement_observed` and no
+  desired-read source, then conditionally rolls back from that exact observed
+  identity.
+- A failed desired read records the real `replacement_read_source`, records no
+  observation, and conditionally rolls back from `requested`. This expectation
+  is honest because the desired batch already acknowledged commit; the
+  netlink adapter still performs a fresh complete observation and refuses the
+  conditional batch without mutation if `requested` is no longer current.
+- Both trigger classes perform one rollback attempt. A successful rollback is
+  followed by one read-back; a failed rollback write performs no fabricated
+  read. `prior = None` remains the literal deletion-to-absence target.
+- Exact restoration after a semantic trigger returns the existing source-less
+  `NftSharedReplacementMismatchRolledBack`. Exact restoration after a lower
+  desired-read failure returns the new
+  `NftSharedReplacementReadFailedRolledBack` and retains that real source.
+- Rollback write/read failure returns `NftSharedRollbackFailed`; its annotated
+  `source` is always the failing rollback operation, while optional
+  `replacement_read_source` separately retains an earlier lower trigger.
+- A successful rollback read of the wrong identity returns
+  `NftSharedRollbackPostconditionMismatch`. It remains source-less for a
+  semantic trigger and exposes the earlier desired-read error as its sole
+  source only for the lower-error trigger.
+
+The trigger partitions do not overlap. `replacement_read_source = Some(_)`
+requires `replacement_observed = None`; with no desired-read source,
+`replacement_observed` carries the successful observation and may itself be
+`None` to represent genuine observed absence. The optional prior is independent
+of that trigger distinction and is preserved in every rollback disposition.
+The state table distinguishes rejected desired batch, committed desired state,
+failed rollback write, restored-but-unverified rollback read failure, verified
+exact restoration, and successful wrong rollback observation without
+inventing a fifth mutation.
+
+### Public API and Rust error-source feasibility
+
+The API impact is minimal and exact:
+
+- one public `InterceptError` variant,
+  `NftSharedReplacementReadFailedRolledBack`;
+- one `replacement_read_source: Option<NetlinkError>` field added to
+  `NftSharedRollbackFailed`; and
+- the same optional field, annotated `#[source]`, added to
+  `NftSharedRollbackPostconditionMismatch`.
+
+No method, trait, parameter, guard operation, netlink type, or ownership API is
+added. Reusing `NftSharedReplacementMismatchRolledBack` would conflate a
+source-less semantic mismatch with a lower read failure; using
+`NftSharedRollbackFailed` after successful restoration would falsely report a
+rollback failure. The new variant is therefore the smallest honest successful-
+restoration disposition, and the two optional fields are the smallest way to
+retain the earlier source when a later rollback outcome also must be reported.
+
+The shape is implementable with the repository's actual Rust types.
+`NetlinkError` is move-only, but each terminal branch consumes the saved
+desired-read error exactly once, so no `Clone` requirement is introduced.
+`thiserror` 2.x supports `#[source] Option<T>` by returning `None` for the empty
+case and the contained `T` otherwise. Only one field is the Rust error-chain
+source in each variant: the rollback operation for
+`NftSharedRollbackFailed`, the optional desired-read error for
+`NftSharedRollbackPostconditionMismatch`, and the required desired-read error
+for `NftSharedReplacementReadFailedRolledBack`. When two real errors exist,
+the later rollback failure remains the chain source and the earlier desired-
+read error remains structured evidence; neither is overwritten or falsely
+chained as the other operation.
+
+### DESIGN-P02-14 disposition — CLOSED at the DESIGN-to-DISTILL handoff
+
+The amended artifacts now name exactly seven new or transitioned bodies:
+
+1. `shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior`
+2. `shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta`
+3. `shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement`
+4. `shared_program_absence_create_readback_idempotence_and_guard_drop`
+5. `shared_program_replaces_only_listener_targets_and_preserves_foreign_complement`
+6. `shared_program_refuses_ambiguous_owned_state_without_mutation`
+7. `published_wrong_shared_target_is_observe_only_until_bounded_fail_stop`
+
+Their homes, exact fully-qualified nextest selectors, exact Contract Shape
+line, reasoned markers, and present `PENDING_AUTHORING` status agree across
+`feature-delta.md`, `distill/test-scenarios.md`,
+`distill/red-classification.md`, and `deliver/roadmap.json`. The artifacts no
+longer claim absent bodies as RED, executable, or environment-blocked. The
+roadmap remains `pending`, explicitly forbids DELIVER from authoring or
+repairing the bodies, and requires acceptance authoring plus independent
+DISTILL/roadmap review before `02-02` resumes.
+
+The evidence universes are complete and non-overlapping:
+
+- source-local owns the semantic program, exact contents of all three dynamic
+  sets, ordered foreign bytes, conditional mutation journal, and remaining
+  fault schedule. Its finite table covers both optional priors, both desired-
+  read triggers, rollback write/read failures, exact restoration, and semantic
+  rollback mismatch, with exact program/complement deltas and both real
+  sources where applicable;
+- Lima owns actual IP-family table/chains/set schemas/elements/eight rules,
+  generation-consistent semantic observation, target-only replacement,
+  idempotence/no mutation, malformed/foreign refusal, unrelated-table
+  preservation, and successful unpublished guard Drop. It drives public
+  `HostMtlsIntercept` and does not manufacture rollback faults; and
+- `02-03` owns BootClosed/zero-managed-TAP gating, listener/task publication
+  and cleanup, retained published guard, observe-only wrong-target retry,
+  bounded fail-stop, and private published relinquishment. The new S-ND295-19
+  body is exclusive to `02-03`; the private helper remains uncredited.
+
+S-ND295-14..18 therefore close only after the source-local and Lima layers from
+`02-02` and the existing owner-refusal/publication layer from `02-03` pass.
+S-ND295-19 closes only through the new published-owner body in `02-03`. This is
+paired evidence, not weakened single-layer substitution.
+
+### Environment routing and evidence honesty
+
+D15's real nft/netlink bodies correctly remain on Lima root; they require no
+KVM or microVM. Source-local state-machine and `02-03` owner bodies may use
+Lima only as the explicit Linux runner and receive no kernel credit from that
+fact. Native VMM/microVM bodies elsewhere in the roadmap remain routed through
+`cargo xtask metal run --`; compile/clippy commands may still use Lima because
+they do not claim KVM execution.
+
+The current workspace has `OVERDRIVE_METAL_TARGET` configured in `.env`, and
+`cargo xtask metal --help` succeeds while documenting that the runner loads the
+target from either the process environment or workspace `.env`. The user's
+confirmation that `cargo xtask metal run --` works is authoritative current
+environment evidence. Consequently, an inherited interactive shell lacking an
+exported variable is never grounds for classifying metal unavailable.
+
+Two older sentences remain stale but do not affect D15's API/evidence design:
+`feature-delta.md:7232-7235` and `distill/red-classification.md:3-10` describe
+the earlier run as though `OVERDRIVE_METAL_TARGET` were currently unset. They
+must be read as historical execution context or corrected before the next
+global DISTILL/roadmap evidence review; they are not a current environment
+blocker and do not authorize rerouting a KVM/microVM body to Lima.
+
+### Mechanical checks
+
+| Check | Iteration-13 result |
+| --- | --- |
+| P02-13 complete transition table | PASS — two triggers × rollback write/read/exact/mismatch outcomes, for both optional priors. |
+| Trigger/prior/state/source distinction | PASS — exact non-overlap and no fabricated, substituted, or lost source. |
+| Rust feasibility | PASS — move-only `NetlinkError` is consumed once; `thiserror` optional-source derivation is supported. |
+| Public API minimality | PASS — one necessary variant plus two necessary optional evidence fields; no port/owner/netlink expansion. |
+| Seven-body handoff | PASS — exact names, homes, markers, selectors, universes, and `PENDING_AUTHORING` truthfulness. |
+| Paired evidence allocation | PASS — source-local algorithm, Lima real adapter, and `02-03` owner/runtime remain distinct and jointly complete. |
+| Runtime/published relinquish deferral | PASS — exclusive to `02-03`; no `02-02` credit or API escape hatch. |
+| Metal/Lima routing | PASS — nft-only D15 stays Lima; native VMM/microVM execution stays metal. |
+| Metal configuration | AVAILABLE — workspace `.env` is configured; runner help succeeds; user confirms remote runner works. |
+| Roadmap JSON and execution status | PASS — valid JSON and correctly `pending` until acceptance authoring/review. |
+| Diff hygiene | PASS — `git diff --check`. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+### Iteration-13 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-12 | Remain CLOSED. |
+| DESIGN-P02-13 — failed replacement read-back lacked an honest rollback/error disposition | **CLOSED** by the exact trigger/state table and minimal source-retaining error amendment. |
+| DESIGN-P02-14 — D15 test ownership/selectors/evidence were absent or stale | **CLOSED at DESIGN handoff** by the exact seven-body `PENDING_AUTHORING` contract and aligned artifacts. Actual body authoring and DISTILL review remain mandatory downstream gates. |
+| D15 doc-hidden netlink boundary, handle privacy, atomic valid transitions, guard ownership, and 02-02/02-03 split | Remain accepted and unchanged. |
+
+No unresolved D15 DESIGN finding remains.
+
+## Iteration 13 final verdict
+
+# APPROVED
+
+D-295-DISTILL-15 is now exact, minimal, source-honest, implementable, and
+properly layered. It represents the committed-replacement / failed-desired-read
+path without corrupting the established rollback variants, retains two real
+causes without conflation when rollback also fails, preserves genuine absence,
+and adds no ownership or mutation surface beyond the necessary error-algebra
+amendment. The seven-body handoff is precise and truthfully pending; D15's Lima
+adapter evidence and `02-03` runtime/published-owner evidence remain separate.
+Approval of D15 does not approve the roadmap for execution: the acceptance
+designer must author/transition and independently review all seven bodies, then
+the roadmap must be independently reapproved before DELIVER step `02-02` may
+resume.
+
+## Iteration 14 — D15 DESIGN-to-DISTILL translation review
+
+### Scope
+
+This iteration reviews only the authored D15 acceptance translation: the seven
+exact body names, test boundaries, declared state universes, error scaffolds,
+source-local/Lima pairing, deferred `02-03` runtime evidence, and executable
+selectors. D15's iteration-13 architecture is not reopened. No production
+implementation, test, DESIGN, DES, or commit change is part of this review.
+
+The translation preserves several load-bearing decisions:
+
+- all seven required bodies exist at the exact approved homes, carry the exact
+  `/// CONTRACT_SHAPE: bounded-change.` line and step-specific reasoned marker,
+  and exact-select one body each;
+- the three source-local bodies use the module-private production algorithm and
+  a stateful seam whose declared universe includes owned program, three dynamic
+  element inventories, ordered foreign bytes, conditional mutation journal,
+  and remaining fault schedule;
+- the three Lima bodies enter through public `HostMtlsIntercept`, use real
+  nft/netlink under the serialized worker integration binary, and do not inject
+  deterministic rollback faults;
+- the S-ND295-19 body remains in `02-03`; the private host-adapter helper still
+  receives no scenario credit;
+- the only production scaffold changes are D15's exact one error variant, two
+  optional earlier-source fields, and neutral construction fallout. No method,
+  parameter, guard operation, netlink family parameter, raw identity type, or
+  ownership API was added; and
+- RED classification is honest: two source-local bodies, three Lima bodies,
+  and the owner body are RED at production gaps; the stale-prior body is
+  recorded GREEN-on-arrival rather than fabricated as RED.
+
+Three blocking translation gaps remain.
+
+### Finding DESIGN-P02-15 — Blocking: the S-ND295-19 body neither supplies a valid wrong target nor reaches bounded fail-stop
+
+**Evidence:**
+
+- The accepted scenario is a published owner whose canonical rule names a
+  different but valid listener target, followed by the production 250 ms / 5 s
+  recovery budget and one fail-stop request (`feature-delta.md:2498`,
+  `deliver/roadmap.json:275-284`, `distill/test-scenarios.md:529-538`).
+- The authored body mutates the fixture identity by appending `0xff` to
+  `prerouting[0]` (`netns_density_shared_owner.rs:354-361`). That is a malformed
+  byte vector, not the same canonical identity carrying a different non-zero
+  listener port. An implementation that distinguishes malformed identity from
+  a valid wrong target is not exercised.
+- The body manually calls `converge_shared_owner()` twenty times in an
+  immediate loop (`:378-407`). It advances no injected clock, observes no
+  250 ms cadence or five-second deadline, drives no retained control-plane
+  supervisor, and asserts no `ServeShutdownRequest`, FailStop transition,
+  component/cause, attempts, or elapsed duration.
+- Its own comment states that the control-plane supervisor owns the clock and
+  fail-stop request (`:378-381`), but that owner is absent from the test. After
+  the manual calls, the test invokes ordinary `shutdown_owner()` (`:421-425`).
+  Thus the exact body can become green even if persistent target conflict never
+  produces fail-stop.
+
+**Consequence:** The body proves only repeated worker-level observe-only
+conflict and sealed guard relinquishment. It cannot close the named
+`until_bounded_fail_stop` scenario or the roadmap's exclusive S-ND295-19
+activation.
+
+**Required bounded disposition:** Keep target replacement forbidden and add no
+public hook. Seed an otherwise canonical observed identity whose leg-F or
+leg-C target is a different valid non-zero port. Then drive the existing
+production owner/supervisor composition that consumes this exact
+`MtlsSharedOwnerError::Intercept`, using its accepted clock, and assert the
+250 ms / five-second budget, exact attempt count, one typed fail-stop request,
+no bind/converge/port substitution, retained published guard during retries,
+and private relinquishment during terminal drain. If the accepted worker-file
+home cannot reach that existing consumer because of the dependency direction,
+reconcile the test-home/pairing in DESIGN/DISTILL; do not add a worker method or
+test-only production seam.
+
+### Finding DESIGN-P02-16 — Blocking: the Lima bodies do not force exact target semantics or isolate every ambiguity regression
+
+**Evidence:**
+
+- `assert_only_listener_targets_changed` proves only that prerouting entries 1
+  and 3 differ from their old bytes (`mtls_intercept_install.rs:375-391`). It
+  never proves that either changed register equals the requested
+  `D15_LEG_F_NEW.port()` / `D15_LEG_C_NEW.port()`. The absence/create body also
+  checks counts and emptiness but not the exact initially requested targets
+  (`:394-436`). A consistently wrong target encoder can therefore satisfy both
+  success bodies.
+- The `ForeignFamily` row seeds only `table bridge overdrive-mtls` on an absent
+  IP-family program (`:515-532`). It does not seed an exact valid IP program
+  and then add the same-named foreign-family table. Consequently it cannot
+  catch the concrete review defect in which the foreign-family check runs only
+  when the IPv4 table is absent.
+- The `ConflictingSetSchema` row creates table/chains/sets but no eight-rule
+  program (`:533-541`). It therefore contains both a conflicting schema and an
+  incomplete program. Because the assertion checks only `is_err()`, an adapter
+  that wrongly accepts the set schema but later refuses missing rules remains
+  green. This is not an isolated schema partition.
+- The DISTILL executable audit nevertheless claims exact target boundaries,
+  every malformed partition, and COMPLETE 15/15 coverage. Those claims exceed
+  the executable assertions.
+
+**Consequence:** The real-kernel layer proves useful effect reachability but
+does not yet pin D15's two target registers as the sole exact delta or reproduce
+two of the implementation review's specific ambiguity failures.
+
+**Required bounded disposition:** Within the existing three Lima bodies,
+assert that observed/new nft target registers equal both requested listener
+ports, not merely that bytes changed, while every non-target normalized byte
+remains equal. Add the valid-IP-plus-same-name-foreign-family coexistence row.
+Make the conflicting-set-schema row invalid on the schema axis only (or provide
+an exact typed semantic oracle that proves schema refusal before any independent
+incompleteness can decide the case). Retain public-host-adapter entry, external
+fixture-only mutation, real-kernel serialization, and the unrelated foreign-
+table complement; add no production inspection API.
+
+### Finding DESIGN-P02-17 — Blocking: source-local tests do not assert the complete declared error/universe contract
+
+**Evidence:**
+
+- The post-commit table destructures and checks both stored `NetlinkError`
+  fields, but never calls `std::error::Error::source` on the returned
+  `InterceptError` (`mtls_intercept_port.rs:928-1053`). Removing or moving the
+  `#[source]` annotations would leave the body green even though D15 explicitly
+  requires the rollback-operation error to be the chain source for
+  `NftSharedRollbackFailed`, the desired-read error to be the source for
+  `NftSharedReplacementReadFailedRolledBack`, and the optional desired-read
+  error to be the sole source of the lower-trigger rollback semantic mismatch.
+- The rejected desired-batch row asserts only
+  `conditional_mutations.len() == 1` (`:1119-1153`), the target-retarget row
+  asserts no journal value at all (`:1196-1219`), and exact reapply asserts only
+  one cleanup mutation by count (`:1221-1240`). The declared source-local
+  universe and DISTILL prose require the exact conditional mutation journal,
+  including expected-current, desired target, and committed/rejected
+  disposition, on every row.
+- No authored body exercises D15's explicit `for_listener_ports` boundary that
+  rejects leg-F zero and leg-C zero independently before I/O
+  (`feature-delta.md:2395-2398`). Merely asserting successful production-bound
+  ports are non-zero does not falsify an implementation that accepts zero.
+
+**Consequence:** Field retention is well covered, but Rust source-chain
+behavior, portions of the claimed closed state universe, and the semantic API's
+minimum boundary can regress while all three source-local selectors remain
+green.
+
+**Required bounded disposition:** Extend the existing source-local bodies—do
+not add a new public seam—to assert `Error::source()` for every semantic/lower
+trigger disposition (including `None` for source-less semantic outcomes), exact
+journal entries for refusal/retarget/reapply/cleanup, and independent zero
+leg-F / zero leg-C rejection with no observe or mutation. Keep the seven-name
+allocation unless the acceptance designer proves a separate body is required;
+DELIVER must not author these missing assertions.
+
+### Selector, boundary, and completeness checks
+
+| Check | Iteration-14 result |
+| --- | --- |
+| Seven exact names/homes/markers | PASS. |
+| Exact nextest selection | PASS — recorded runs discover one ignored body per selector. |
+| Real-kernel serialization | PASS — all three Lima names resolve to `host-kernel-shared`. |
+| D15 public error scaffolds | PASS — exact variant/fields/annotations only; neutral fallout is bounded. |
+| Source-local stateful rollback matrix | PASS for two priors × two triggers × four rollback outcomes; FAIL for source-chain and complete-journal assertions (P02-17). |
+| Lima public-adapter boundary | PASS; exact-target and isolated ambiguity oracles FAIL (P02-16). |
+| `02-03` runtime deferral | PASS in ownership; executable bounded fail-stop proof FAIL (P02-15). |
+| API/ownership drift | PASS — no unauthorized public surface or owner movement. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+| Mutation testing | NOT RUN — final DELIVER gate only. |
+
+### Canonical D15 completeness audit
+
+| Item | Result |
+| --- | --- |
+| C1a | PASS — genuine prior absence/create/rollback/Drop. |
+| C1b | FAIL — zero-port boundary and exact requested target values are not asserted. |
+| C2a | PASS — commit/read/rollback/guard/published states are documented. |
+| C2b | FAIL — persistent wrong target never reaches the required terminal fail-stop transition. |
+| C3 | PASS — absent/present, exact rule/set counts, zero/one dynamic element, duplicate rule. |
+| C4a | PASS — exact reapply/no-write is exercised. |
+| C4b | PASS — rollback-to-absence and stale conditional guard cleanup. |
+| C5a | PASS — semantic/lower triggers, optional prior, rollback outcomes, and fresh/runtime modes are enumerated. |
+| C5b | PASS — complements remain independent of the allowed owned-program delta. |
+| C6a | FAIL — foreign-family coexistence and set-schema-only malformed partitions are absent. |
+| C6b | FAIL — declared Rust error-chain source behavior is not asserted. |
+| C6c | PASS — terminal variants and trigger fields are otherwise closed by exhaustive matching. |
+| C7a | PASS — real nft failure plus scripted read/write failures and malformed inventory. |
+| C7b | PASS — commit-before-read and restored-but-unverified interruption states. |
+| C7c | PASS — stale prior and stale guard conditional no-mutation. |
+
+Mechanical score: **11/15 — ACCEPTABLE_WITH_DOCUMENTED_GAPS** under the
+canonical threshold, but the four failures map directly to mandatory D15
+acceptance criteria and S-ND295-19 scenario closure. Coverage-completeness and
+observable-boundary gaps therefore remain blocking for this handoff.
+
+### Iteration-14 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-14 | Remain CLOSED at their approved scopes. |
+| DESIGN-P02-15 — S-ND295-19 lacks valid-target and bounded-fail-stop proof | OPEN, blocking DISTILL translation. |
+| DESIGN-P02-16 — Lima exact-target and ambiguity partitions are not falsifying | OPEN, blocking DISTILL translation. |
+| DESIGN-P02-17 — source-chain, journal, and zero-port assertions are incomplete | OPEN, blocking DISTILL translation. |
+| D15 architecture/API/owner allocation | Remains APPROVED; findings require test remediation only unless P02-15 confirms the approved test home cannot reach the existing production consumer. |
+
+## Iteration 14 final verdict
+
+# CHANGES_REQUIRED
+
+The translation has the correct seven names, exact selectors, layered
+source-local/Lima/owner boundaries, and sanctioned error scaffolds, but it does
+not yet enforce the complete D15 contract. The runtime body substitutes a
+malformed identity and manual calls for the accepted valid wrong-target /
+bounded fail-stop path; the Lima layer omits exact requested-port equality and
+two isolated ambiguity regressions; and the source-local layer does not assert
+Rust source-chain behavior, its complete mutation journal, or zero-port
+rejection. Remediate P02-15/16/17 within the approved architecture, rerun exact
+RED classification and completeness audit, and re-review before roadmap
+approval or DELIVER step `02-02`.
+
+## Iteration 15 — P02-15 layered S-ND295-19 DESIGN review
+
+### Scope
+
+This iteration reviews only P02-15's proposed S-ND295-19 layering:
+
+- `02-02` source-local plus Lima adapter no-rewrite evidence;
+- `02-03` published-worker conflict/guard prerequisite;
+- `03-03` control-plane-private runtime cadence/deadline/request closure through
+  `SharedNetworkSupervisorHandle::run_mtls_owner`.
+
+The previously approved D15 adapter/error algebra and P02-16/P02-17 DISTILL
+findings are not reopened. The proposed S19-A and S19-B bodies remain pending
+acceptance authoring, so this review validates their exact contract and homes,
+not executable RED.
+
+### Accepted architecture and evidence allocation
+
+The relocation of retry/fail-stop ownership from the worker test to the
+control-plane supervisor is correct:
+
+- `MtlsInterceptWorker` exposes only the already-approved seven lifecycle
+  methods. It has no clock, retry budget, request sender, EXEC write
+  capability, runtime mode, or fail-stop method, so it cannot honestly close
+  S-ND295-19 by itself.
+- `overdrive-control-plane` already depends on `overdrive-worker` and may hold
+  `Arc<MtlsInterceptWorker>`; there is no worker-to-control-plane edge. Placing
+  the closing body in the control-plane source-local module preserves the
+  acyclic dependency graph.
+- The exact private production join point is implementable and sufficient:
+
+  ```rust
+  async fn run_mtls_owner(
+      shared_guest_network: Arc<dyn SharedGuestNetworkOwner>,
+      mtls_worker: Arc<MtlsInterceptWorker>,
+      exec: Arc<GuestNetworkExecSupervisor>,
+      clock: Arc<dyn Clock>,
+      request_tx: tokio::sync::mpsc::Sender<ServeShutdownRequest>,
+      shutdown: CancellationToken,
+  ) -> Result<(), SharedNetworkSupervisorError>;
+  ```
+
+  Each argument is owned by the existing composition: shared-network quiesce,
+  real worker audit/recovery, paired EXEC mutation, the same injected clock as
+  `GuestNetworkExecWiring`, the existing capacity-one request channel, and the
+  existing intentional-shutdown token. The function is module-private,
+  production-used, and directly reachable only from its child acceptance
+  module; no exported constructor, test-only callback, second supervisor, or
+  public port is introduced.
+- Ordinary `run_server` retains one supervisor task and polls this future
+  alongside its already-owned signals. The method is a private future, not a
+  detached task or second lifecycle owner.
+- S19-B's exact home in
+  `crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance`
+  can drive the same private function as production with a real worker and one
+  shared `SimClock`. The harness advances time; it does not implement the retry
+  loop.
+- The timing/oracle contract is precise: no detection before the one-second
+  audit; `Open -> Recovering(IpRules)` at detection; twenty completed failed
+  attempts separated by twenty 250 ms sleeps; one
+  `SharedGuestNetwork { component: IpRules, cause:
+  RecoveryDeadlineExceeded, attempts: 20, elapsed: 5s }` request; EXEC remains
+  closed; the supervisor parks until intentional shutdown.
+- The prerequisite layers remain independent and necessary. S19-A proves the
+  canonical wrong target is observable without adapter mutation; `02-03`
+  proves a published worker retains its guard, returns one structured
+  observe-only conflict, and relinquishes through the existing terminal worker
+  shutdown path. S19-B proves cadence/deadline/request closure and retains the
+  guard throughout recovery. S19 closes only after all layers pass.
+
+The roadmap dependency order is sufficient: `02-02 -> 02-03 -> 03-01 ->
+03-02 -> 03-03`. Repeated S-ND295-19 IDs are explicitly labeled layer evidence,
+and only `03-03` claims scenario closure. The exact future selector and
+reasoned marker are pinned; their present zero-selection state is honestly
+`PENDING_AUTHORING` rather than environment failure or RED.
+
+Two blocking contract inconsistencies remain.
+
+### Finding DESIGN-P02-18 — Blocking: S19-A asks `HostMtlsIntercept::observe_shared` to return a structured mismatch it cannot produce
+
+**Evidence:**
+
+- D15's accepted five-method port defines `observe_shared()` as a non-mutating
+  complete identity observation. A canonical program with a different target
+  is therefore `Ok(Some(observed_identity))`; comparison with the published
+  expected identity belongs to the worker's `audit_shared_owner` /
+  `converge_shared_owner` decision.
+- The correction correctly requires the transitioned source-local S19-A body
+  to use the public `HostMtlsIntercept::observe_shared` boundary and rejects the
+  private helper as evidence. However, the normative D15 table still says the
+  two `02-02` Host bodies "return the structured mismatch"
+  (`feature-delta.md:2499`), and the `02-02` roadmap repeats that both S19-A
+  bodies prove a "structured mismatch" (`roadmap.json:242`).
+- No approved adapter method can produce `InterceptError::PostconditionMismatch`
+  from observe-only state. `converge_shared` is fresh-process mutation authority
+  and is forbidden at runtime; reusing the private helper would recreate the
+  uncredited/no-production-caller defect; adding a method would be public API
+  drift.
+
+**Consequence:** The acceptance designer cannot implement the exact `02-02`
+criterion without either fabricating the mismatch in the test, calling an
+uncredited private helper, invoking the forbidden mutation path, or inventing
+surface.
+
+**Required bounded disposition:** Narrow S19-A to its actual adapter contract:
+public `observe_shared` returns the canonical different non-zero target, with
+zero bind/replace/notification and complete complement preservation. Assign
+the first structured `PostconditionMismatch` exclusively to the existing
+`02-03` published-worker prerequisite, and retain all cadence/deadline/request
+behavior exclusively in S19-B/`03-03`. Update the D15 table, roadmap criterion,
+and pending-body prose consistently; add no adapter method or runtime mode.
+
+### Finding DESIGN-P02-19 — Blocking: authoritative D15 ownership/universe prose still assigns retry and fail-stop to `02-03`
+
+**Evidence:**
+
+- The corrected traceability table says `02-03` is publication/conflict/guard
+  prerequisite only and `03-03` exclusively owns the runtime retry/deadline/
+  typed request (`feature-delta.md:2499-2512`, roadmap delivery protocol and
+  steps `02-02`/`02-03`/`03-03`).
+- The immediately following "exact test homes" paragraph still assigns
+  `tests/acceptance/netns_density_shared_owner.rs` responsibility for
+  "runtime retry, and fail-stop ownership" (`feature-delta.md:2501-2508`).
+- The declared `02-03` owner universe still includes "retry clock/attempts,
+  and fail-stop request" (`feature-delta.md:2561-2564`), although the correction
+  explicitly says the worker owns none of those and the 03-03 private
+  supervisor owns them.
+- These are normative statements inside the same D15 section, not historical
+  review text. They conflict with the new roadmap and coverage map and could
+  direct the `02-03` crafter to reintroduce the very worker-owned retry loop the
+  correction rejects.
+
+**Consequence:** Scenario IDs are mechanically aligned, but the SSOT still has
+two competing owner assignments. That violates the repository's precise-owner
+terminology rule and makes the handoff unsafe despite the sound dependency
+choice.
+
+**Required bounded disposition:** Rewrite only those stale D15 paragraphs:
+the `02-03` test home/universe ends at published sockets/tasks/guard, one
+structured observe-only conflict, and sealed relinquishment; the `03-03`
+control-plane universe owns clock, detection, attempts, deadline, EXEC
+FailStop, typed request, and terminal orchestration. Preserve the approved
+method signatures and roadmap order.
+
+### Terminal relinquishment and public-surface audit
+
+Terminal ownership remains implementable without extending `run_mtls_owner`'s
+signature. The private future retains the published guard during detection and
+all retries, sends one fail-stop request, and parks on the existing shutdown
+token. The existing `ServerHandle` terminal path already calls
+`MtlsInterceptWorker::shutdown_owner`, whose `02-03` acceptance prerequisite
+proves listener/task/capability drain and sealed constant-program guard
+relinquishment. S19-B may join those accepted layers; it must not make
+`run_mtls_owner` a second worker-shutdown owner or add a new shutdown error
+variant merely to duplicate the existing terminal owner.
+
+No public seam is required or permitted. `SharedNetworkSupervisorHandle`,
+`run_mtls_owner`, its error, and its test home all remain control-plane-private;
+`ServerHandle::shutdown_requested` is the unchanged public delegation. The
+worker port, netlink API, EXEC capabilities, and shared-network owner port are
+unchanged.
+
+### Mechanical checks
+
+| Check | Iteration-15 result |
+| --- | --- |
+| Exact private signature | PASS — necessary arguments only; no `pub`/`pub(crate)` method or test-only parameter. |
+| Dependency direction | PASS — control-plane -> worker/core; no reverse edge. |
+| Sole supervisor ownership | PASS — one retained task/handle; private future is polled, not spawned as a second owner. |
+| One-second / 20 × 250 ms / five-second contract | PASS at DESIGN — exact clock, attempt, component, cause, and request fields are pinned. |
+| Published guard prerequisite / terminal relinquish | PASS as layered evidence — worker retains during retries; existing terminal owner relinquishes. |
+| S19 test homes and selectors | PASS structurally — S19-A `02-02`, worker prerequisite `02-03`, S19-B `03-03`; pending bodies are honestly unexecuted. |
+| S19-A adapter observable | FAIL — P02-18 requires an impossible adapter-authored structured mismatch. |
+| Ownership SSOT consistency | FAIL — P02-19 leaves retry/fail-stop in the `02-03` paragraphs. |
+| Public API / ownership drift | PASS in the selected mechanism; remediation must not add surface. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+| Mutation testing | NOT RUN — final DELIVER gate only. |
+
+### Iteration-15 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-01 through DESIGN-P02-14, P02-16 and P02-17 | Unchanged from their prior scopes. |
+| DESIGN-P02-15 — worker body could not own bounded fail-stop | **PARTIALLY CLOSED** — correct private control-plane future/home/timing contract selected; P02-18/19 must close before approval. |
+| DESIGN-P02-18 — impossible adapter-authored structured mismatch | OPEN, blocking. |
+| DESIGN-P02-19 — stale `02-03` retry/fail-stop ownership prose | OPEN, blocking. |
+
+## Iteration 15 final verdict
+
+# CHANGES_REQUIRED
+
+P02-15 selects the correct architecture: S19-A adapter no-rewrite in `02-02`,
+published-worker conflict/guard prerequisite in `02-03`, and sole runtime
+closure in `03-03` through the production-used private control-plane
+`run_mtls_owner` future. Its signature, dependency direction, timing contract,
+typed `IpRules` fail-stop, test home, terminal ownership join, and lack of
+public surface are sound. The handoff is not yet exact because `02-02` still
+demands a structured mismatch from an observe-only adapter, and two normative
+D15 paragraphs still assign retry/fail-stop state to the worker step. Resolve
+P02-18/19 without adding API or moving behavior, then re-review before S19
+acceptance authoring or roadmap approval.
+
+## Iteration 16 — P02-18/P02-19 correction re-review
+
+### Scope
+
+This iteration re-reviews only the P02-18 adapter-observation correction and
+the P02-19 `02-03`/`03-03` ownership correction. P02-16/P02-17's acceptance-
+body findings remain outside this bounded pass.
+
+### P02-18 disposition — CLOSED
+
+The S19-A contract now matches the accepted five-method adapter exactly:
+
+- public `HostMtlsIntercept::observe_shared` returns
+  `Ok(Some(canonical_wrong_target))` for a complete owned identity carrying a
+  different valid non-zero target;
+- partial, foreign, duplicate, malformed, or lower observation failure maps
+  through the existing typed
+  `NftRuleInstallFailed { op: "observe-shared", source }` path;
+- the adapter never authors `PostconditionMismatch` and never calls the
+  fresh-process `converge_shared` path at runtime;
+- the stateful S19-A body snapshots the exact owned program, three dynamic-set
+  inventories, ordered foreign bytes, mutation journal, and remaining schedule
+  around both the canonical-wrong-target success and lower-observe-error rows;
+  the sole allowed harness delta is one `Observe` journal entry; and
+- the Lima S19-A body retains public-host entry, generation/notification
+  observation, exact semantic/foreign complement, and zero nft mutation. It
+  proves adapter no-rewrite only and claims no publication, retry, deadline, or
+  fail-stop.
+
+The first structured `PostconditionMismatch` is now assigned exclusively to
+the `02-03` published worker, which owns the comparison between the observed
+identity and its recorded target. This removes the prior impossible test
+requirement without reviving the private helper, calling `converge_shared`, or
+adding API.
+
+The exact transitioned name
+`runtime_present_wrong_target_and_observe_error_are_non_mutating`, Lima name
+`shared_program_valid_wrong_target_observation_is_non_mutating`, markers,
+fully-qualified selectors, status, and expected result/error semantics agree
+across feature delta, DISTILL matrix, RED classification, and roadmap.
+
+### P02-19 disposition — CLOSED
+
+The normative owner/universe statements are now unambiguous:
+
+- `02-03` ends at two published sockets/addresses, two task slots, node guard,
+  lifecycle/publication state, capability registry/elements/handles, one
+  compare-and-return structured conflict, and sealed worker relinquishment;
+- `02-03` explicitly owns no clock, attempt count, deadline, EXEC mutation,
+  request sender, or terminal orchestration;
+- `03-03` exclusively owns the injected clock, one-second detection, twenty
+  completed attempts on the 250 ms cadence, five-second deadline, paired EXEC
+  FailStop, typed `IpRules/RecoveryDeadlineExceeded` request, supervisor
+  shutdown token, and terminal orchestration; and
+- the exact test-home paragraph now names worker acceptance only for
+  publication/conflict/relinquishment and the control-plane source-local module
+  for clock/attempt/deadline/request behavior.
+
+This matches the roadmap's layered repeated-ID protocol: S19-A is independently
+approvable in `02-02`, `02-03` supplies a non-closing published-worker
+prerequisite, and only `03-03` closes S-ND295-19 through the production-used
+private `SharedNetworkSupervisorHandle::run_mtls_owner` future.
+
+### Boundary and drift audit
+
+The correction adds no method, trait, parameter, error variant, guard
+operation, persisted state, reverse dependency, or public/test-only seam.
+`run_mtls_owner` remains module-private and production-used inside the sole
+retained supervisor task. Control-plane already depends on worker/core; worker
+does not depend on control-plane. Terminal guard relinquishment remains with
+the existing worker shutdown owner, joined by the existing `ServerHandle`
+terminal path; the private runtime future does not become a second shutdown
+owner.
+
+### Mechanical checks
+
+| Check | Iteration-16 result |
+| --- | --- |
+| Canonical wrong-target observation | PASS — `Ok(Some(identity))`, not adapter-authored mismatch. |
+| Lower observe error | PASS — existing typed `NftRuleInstallFailed` with exact operation/source. |
+| Stateful no-mutation universe | PASS at contract — exact snapshots plus one Observe journal delta only. |
+| 02-03 publication prerequisite | PASS — one worker conflict, guard retention, sealed relinquishment; no runtime budget claim. |
+| 03-03 runtime closure | PASS — sole owner of detection, cadence, deadline, EXEC FailStop, typed request, and terminal orchestration. |
+| Test names/homes/selectors/traceability | PASS — aligned and honestly `PENDING_AUTHORING` where absent. |
+| API/dependency/ownership drift | PASS — none. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+
+### Iteration-16 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-15 — worker body could not own bounded fail-stop | **CLOSED at DESIGN** by the approved three-layer S19 allocation and private control-plane future. |
+| DESIGN-P02-18 — impossible adapter-authored structured mismatch | **CLOSED** by exact observe result/error semantics and worker-owned comparison. |
+| DESIGN-P02-19 — stale `02-03` retry/fail-stop ownership prose | **CLOSED** by exact worker/control-plane universe and test-home separation. |
+| DESIGN-P02-16/P02-17 | Unchanged; remain acceptance-translation findings outside this correction review. |
+
+No unresolved P02-18/P02-19 DESIGN finding remains.
+
+## Iteration 16 final verdict
+
+# APPROVED
+
+The correction is exact and non-expansive. S19-A now proves only what the
+observe-only Host adapter can expose, the published worker is the first owner
+of a structured target conflict, and the existing private control-plane
+supervisor alone owns one-second detection, twenty 250 ms attempts, the
+five-second typed `IpRules` fail-stop, and terminal orchestration. Traceability,
+test homes, selectors, dependency direction, and public-surface constraints are
+consistent. This approval closes P02-18/P02-19 only; P02-16/P02-17 and pending
+S19 acceptance authoring/review continue to block roadmap execution.
+
+## Iteration 17 — final D15/S19 DESIGN-to-DISTILL translation review
+
+### Scope
+
+This iteration reviews the final authored D15/S19 acceptance translation
+against approved Iteration 16: exact layer homes and names, public-adapter
+no-mutation, published-worker prerequisite, private `run_mtls_owner` closure,
+no API/ownership drift, and preservation of P02-16/P02-17 evidence.
+
+### Translation portions that pass
+
+The layer allocation is preserved exactly:
+
+- S19-A source-local
+  `runtime_present_wrong_target_and_observe_error_are_non_mutating` lives under
+  the worker-private stateful seam but enters through public
+  `HostMtlsIntercept::observe_shared`. Canonical wrong target returns
+  `Ok(Some(identity))`; partial/foreign/duplicate/malformed/lower observation
+  returns the existing typed error. Every row proves one Observe journal entry,
+  no conditional mutation, and exact owned/dynamic/foreign complement.
+- S19-A Lima
+  `shared_program_valid_wrong_target_observation_is_non_mutating` drives public
+  `HostMtlsIntercept`, exact canonical old/new identities, stable generation/
+  rule snapshots, zero nft notifications, complete target-table equality, and
+  unrelated foreign-table preservation. It claims no worker comparison or
+  runtime budget.
+- The `02-03` worker body now constructs an exact canonical different non-zero
+  leg-F target through `SharedIpInterceptIdentity`, proves one
+  `PostconditionMismatch` from `audit_shared_owner` and one from
+  `converge_shared_owner`, asserts zero bind/fresh convergence/target rewrite,
+  retains the node guard, and proves sealed worker relinquishment. Its removed
+  manual retry loop receives no closure credit.
+- S19-B
+  `published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop`
+  lives in the control-plane-private acceptance module, constructs a real
+  worker, invokes the exact production-private
+  `SharedNetworkSupervisorHandle::run_mtls_owner` future, uses the same
+  `SimClock` for EXEC wiring, and scripts only accepted adapter state. No
+  fixture retry loop, public constructor, reverse dependency, or test-only
+  production method is introduced.
+- The private production scaffold has the exact approved signature and remains
+  non-public. Control-plane already depends on worker/core; no reverse edge or
+  second retained supervisor is added.
+- Names, exact selectors, Contract Shape declarations, markers, RED results,
+  scenario IDs, and `02-02`/`02-03`/`03-03` traceability agree across feature
+  delta, DISTILL, RED classification, and roadmap. All three S19 bodies are
+  honestly reasoned-pending/RED at current production scaffolds.
+
+P02-16/P02-17 evidence remains intact. Source-local rollback rows assert actual
+Rust error-chain sources, exact conditional journals, and independent zero-port
+rejection. Lima success compares against exact requested semantic identities;
+the ambiguity table seeds valid IP plus same-name foreign family and rebuilds
+all eight rules around a schema-only conflict. No prior falsifier was weakened.
+
+Two blocking S19-B test defects remain.
+
+### Finding DESIGN-P02-20 — Blocking: S19-B makes `run_mtls_owner` a second worker-shutdown owner
+
+**Evidence:**
+
+- Iteration 16 approved terminal ownership explicitly: the private future
+  sends the fail-stop request and parks on its shutdown token; the existing
+  `ServerHandle` terminal path remains the owner that calls
+  `MtlsInterceptWorker::shutdown_owner`, then shuts down/joins the supervisor.
+  `run_mtls_owner` must not become a second worker-shutdown owner.
+- The production contract still says cancellation makes `run_mtls_owner`
+  return normally and does not assign it worker shutdown
+  (`feature-delta.md:4056-4068`).
+- The authored S19-B body calls only `owner.shutdown().await`, which merely
+  cancels the supervisor token and joins its task, then asserts that the worker
+  is already `OwnerShutdown`/`NotStarted` and that its node guard was privately
+  relinquished (`overdrive-control-plane/src/lib.rs:1733-1742`). It never calls
+  the existing worker terminal owner or a `ServerHandle` terminal path.
+
+**Consequence:** For the body to become green, DELIVER must add
+`mtls_worker.shutdown_owner()` inside `run_mtls_owner`. That duplicates the
+existing `ServerHandle` shutdown ownership, changes approved private behavior,
+and can double-drive worker shutdown. Leaving the future faithful to Iteration
+16 makes the acceptance body impossible.
+
+**Required bounded disposition:** Preserve the approved future: after the
+typed request it parks, and cancellation returns normally. In the body, execute
+the existing production terminal order—worker `shutdown_owner()` through the
+existing terminal-owner path, followed by private supervisor shutdown/join—
+then assert sealed relinquishment and terminal worker state. Do not move worker
+shutdown into `run_mtls_owner`, add a shutdown parameter/error, or invent a
+second owner.
+
+### Finding DESIGN-P02-21 — Blocking: the S19-B loop does not prove exact 250 ms cadence or fail-stop-not-before-five-seconds
+
+**Evidence:**
+
+- The body correctly proves no detection at 999 ms and recovery begins at one
+  second (`lib.rs:1692-1697`).
+- For each recovery attempt it then advances 250 ms and waits only until
+  `progress.attempts >= expected` (`:1571-1587`, `:1699-1702`). It never asserts
+  the previous attempt count remains unchanged before the tick, never checks
+  the recovery snapshot's exact elapsed duration after each attempt, and uses
+  `>=` rather than equality.
+- An implementation that performs the first attempt immediately at detection,
+  batches multiple attempts after one wake, or reaches FailStop at 4.75 seconds
+  can still satisfy the loop: later ticks occur after the request is already
+  queued, the final total can remain twenty observations, and the body does not
+  call `shutdown_requested` until all twenty harness ticks have elapsed.
+- The final request assertion proves its reported fields are `20`/`5s`; it does
+  not prove the production attempt schedule or request emission time generated
+  those fields honestly.
+
+**Consequence:** The body can pass a retry loop that violates the exact
+twenty-times-250-ms recovery contract while fabricating or delaying observation
+of the expected final receipt.
+
+**Required bounded disposition:** Before each tick, assert the recovery state
+is still exactly attempt `n-1`, its elapsed duration is the prior 250 ms
+multiple, and FailStop/request has not occurred. Advance logical time to each
+deadline, then wait for and assert exactly attempt `n` with elapsed
+`n * 250 ms`—not `>=`. Before the twentieth deadline, prove no request/FailStop;
+at the twentieth, prove the single exact request becomes observable. The
+harness may advance `SimClock` and observe production state, but it must not
+author retries or requests.
+
+### Boundary and mechanical checks
+
+| Check | Iteration-17 result |
+| --- | --- |
+| S19-A public observe semantics/no mutation | PASS. |
+| Lima canonical identity/generation/foreign complement | PASS. |
+| `02-03` worker comparison/guard prerequisite | PASS and non-closing. |
+| Private `run_mtls_owner` signature/home/dependency | PASS. |
+| IpRules component, typed cause, attempts and elapsed fields | PASS for final receipt. |
+| Exact per-attempt cadence / not-before deadline | FAIL — P02-21. |
+| Terminal ownership/relinquishment join | FAIL — P02-20. |
+| P02-16/P02-17 evidence preservation | PASS. |
+| Public API / error / owner drift | PASS in production scaffolds; the S19-B test would force private ownership drift unless remediated. |
+| Selectors/markers/traceability | PASS. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+
+### Iteration-17 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-15/P02-18/P02-19 | Remain CLOSED at DESIGN. |
+| DESIGN-P02-16 — Lima falsifiers | **CLOSED in final translation**; exact target and isolated ambiguity evidence is preserved. |
+| DESIGN-P02-17 — source chain/journal/zero-port | **CLOSED in final translation**; all required assertions are preserved. |
+| DESIGN-P02-20 — S19-B duplicates worker shutdown ownership | OPEN, blocking DISTILL translation. |
+| DESIGN-P02-21 — S19-B does not prove exact cadence/deadline | OPEN, blocking DISTILL translation. |
+
+## Iteration 17 final verdict
+
+# CHANGES_REQUIRED
+
+The final translation preserves the approved adapter, worker, and private
+control-plane layers; exact names/homes/selectors; P02-16/P02-17 falsifiers;
+and the no-public-surface/no-reverse-dependency contract. S19-B is not yet an
+executable specification of Iteration 16: its terminal assertions require the
+private future to become a second worker-shutdown owner, and its logical-time
+loop permits early or batched attempts while still observing a final 20/5s
+receipt. Remediate P02-20/P02-21 inside the existing body without changing
+production API or ownership, rerun exact RED classification, and re-review
+before roadmap approval.
+
+## Iteration 18 — P02-20/P02-21 correction review
+
+### Scope
+
+This iteration reviews only the proposed P02-20/P02-21 correction: private
+future cancellation, sole terminal-owner ordering, exact 249 ms + 1 ms cadence,
+4,999/5,000 ms request boundaries, no attempt 21, and closed pre-terminal
+effect journals. Previously approved S19 layer homes and APIs are not reopened.
+
+### P02-20 ownership correction — PASS
+
+The terminal contract now preserves Iteration 16 exactly:
+
+- `run_mtls_owner` detects, recovers, enters FailStop once, sends the typed
+  request once, and parks on the existing shutdown token;
+- cancellation makes the private future return normally;
+- `run_mtls_owner` never invokes `MtlsInterceptWorker::shutdown_owner` and does
+  not gain a shutdown result, callback, or second ownership field;
+- the source-local S19-B body receives the request through a real private-field
+  `ServerHandle` fixture and invokes existing `ServerHandle::shutdown`;
+- that established terminal owner alone awaits worker drain/sealed guard
+  relinquishment, resolver shutdown, then private supervisor cancellation and
+  join; and
+- guard retention belongs to the pre-terminal supervisor phase, while terminal
+  worker state and zero guard Drop belong to the disjoint ServerHandle phase.
+
+This is implementable from existing private fields and methods in the same
+control-plane module. It adds no API, reverse dependency, error variant, or
+second task/owner. The closed pre-terminal journal is also exact and sufficient:
+one detection observe, one designed `quiesce_managed_taps`, twenty attempt
+observes, zero bind/fresh convergence/guard Drop, and no unrelated
+provision/teardown/probe/sweep/shared-converge/shared-audit/repeat-quiesce/
+element effect.
+
+### P02-21 cadence correction — directionally correct, one blocking specification defect remains
+
+The correction properly requires equality rather than `>=`, separates each
+deadline into 249 ms + 1 ms, proves no request at 4,999 ms, requires one exact
+request at 5,000 ms, and prohibits attempt 21 or a second request. The harness
+advances only `SimClock` and observes production snapshots/journals; it does not
+author attempts or request values.
+
+However, the exact prose currently requires two impossible or racy
+observations.
+
+### Finding DESIGN-P02-22 — Blocking: the boundary oracle conflates elapsed-time projection with stable state and requires an unobservable terminal recovery snapshot
+
+**Evidence:**
+
+- Before each deadline the proposed body records `attempts = n-1` and
+  `elapsed = (n-1)*250 ms`, then advances 249 ms and says those values/state
+  remain unchanged (`feature-delta.md:4232-4240`;
+  `distill/test-scenarios.md:141-149`). `GuestNetworkExecSupervisor::recovery_progress`
+  computes `elapsed` from the injected clock on every read. After the tick it
+  must therefore be `(n-1)*250 ms + 249 ms`, even though attempts, journal,
+  component, and request remain unchanged. Requiring elapsed to remain at the
+  prior boundary is incompatible with the approved clock semantics.
+- The prose also requires a Recovering snapshot with exactly attempt `n` after
+  the final one-millisecond tick for every `n = 1..=20`. On attempt 20 the same
+  production future completes the attempt, synchronously calls `fail_stop`, and
+  sends the request. There is no required await/yield between
+  `complete_attempt(Some(IpRules))` and `fail_stop`; the task awaiting
+  `recovery_progress()` is not guaranteed to observe the transient
+  Recovering(attempts=20) state before it becomes FailStop.
+- The final typed request already is the authoritative attempt-20 receipt:
+  `IpRules`, `RecoveryDeadlineExceeded`, `attempts = 20`, `elapsed = 5s`.
+  Requiring both that receipt and an observable transient snapshot would force
+  a production yield/test seam or make the test scheduler-dependent.
+
+**Consequence:** An acceptance designer cannot implement the stated oracle
+against the approved state machine without asserting a false elapsed value or
+adding production scheduling behavior solely to expose attempt 20.
+
+**Required bounded disposition:** Specify the boundary oracle as follows:
+
+- before attempt `n`, assert exact attempts `n-1`, component `IpRules`, elapsed
+  `(n-1)*250 ms`, empty request, and exact journal prefix;
+- after advancing 249 ms, assert attempts/component/journal/request are
+  unchanged **and elapsed is exactly the prior boundary plus 249 ms**;
+- for attempts 1..19, advance the final 1 ms and assert an observable
+  Recovering snapshot with exact attempts `n` and elapsed `n*250 ms`;
+- before attempt 20, prove attempts 19 and no request at 4,999 ms; at 5,000 ms,
+  await the single typed request and use its `attempts=20, elapsed=5s` fields as
+  the terminal receipt rather than requiring an intermediate recovery snapshot;
+  and
+- advance later time and prove FailStop remains terminal, journals remain
+  closed, no attempt 21 occurs, and no second request appears.
+
+Do not add a yield, timer accessor, request probe, public state accessor, or
+test-only production hook.
+
+### Mechanical and boundary checks
+
+| Check | Iteration-18 result |
+| --- | --- |
+| `run_mtls_owner` fail-stop/send/park only | PASS. |
+| Cancellation returns normally | PASS. |
+| Sole `ServerHandle` terminal worker ownership | PASS. |
+| Pre-terminal closed journals | PASS. |
+| 249 ms + 1 ms attempt boundaries | PASS in intent; elapsed assertion requires P02-22 correction. |
+| 4,999 ms no request / 5,000 ms one request | PASS in intent; terminal receipt must replace transient attempt-20 snapshot. |
+| No attempt 21 / no second request | PASS. |
+| API/dependency/ownership scope | PASS — no drift. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+
+### Iteration-18 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-20 — duplicated worker shutdown ownership | **CLOSED** by real ServerHandle terminal ordering. |
+| DESIGN-P02-21 — cadence/deadline oracle | **PARTIALLY CLOSED** — exact boundaries and terminal uniqueness are selected; P02-22 must correct observable snapshots. |
+| DESIGN-P02-22 — false 249 ms elapsed / unobservable attempt-20 snapshot | OPEN, blocking. |
+
+## Iteration 18 final verdict
+
+# CHANGES_REQUIRED
+
+The correction restores sole terminal ownership, cancellation semantics, closed
+effect journals, exact retry boundaries, request uniqueness, and scope/API
+discipline. One narrow oracle defect remains: elapsed time necessarily advances
+during each 249 ms pre-boundary interval, and attempt 20 transitions directly
+to FailStop without an observable Recovering(20) guarantee. Correct P02-22 in
+the test contract without changing production scheduling or surface, then
+re-review before acceptance-body remediation or roadmap approval.
+
+## Iteration 19 — P02-22 correction re-review
+
+### Scope
+
+This iteration re-reviews only P02-22's boundary oracle: independent elapsed
+advance during 249 ms subintervals, observable Recovering snapshots through
+attempt 19, the 4,999/5,000 ms terminal boundary, and no attempt 21 or second
+request. P02-20's terminal ownership and all earlier D15 layers remain fixed.
+
+### P02-22 disposition — CLOSED
+
+The corrected oracle now matches `GuestNetworkExecSupervisor` and `SimClock`
+semantics exactly:
+
+- detection at one second produces Recovering(`IpRules`) with `attempts = 0`,
+  `elapsed = 0`, one detection observe, one designed quiesce, and no request;
+- before each attempt `n`, the snapshot is exactly `attempts = n-1`, component
+  `IpRules`, and elapsed `(n-1)*250 ms`, with the exact journal prefix and empty
+  request receiver;
+- advancing 249 ms changes only the projected elapsed value to the prior
+  boundary plus 249 ms. Attempt count, component, adapter/shared-owner journals,
+  guard ownership, EXEC recovery state, and request receiver remain unchanged;
+- for attempts 1 through 19, the final one-millisecond tick yields an
+  observable Recovering snapshot with exact attempt equality and elapsed
+  `n*250 ms`;
+- at 4,999 ms the authoritative state remains Recovering with attempts 19 and
+  no request;
+- the 5,000 ms boundary is observed solely through one typed
+  `IpRules/RecoveryDeadlineExceeded/attempts=20/elapsed=5s` FailStop request.
+  No transient Recovering(20) snapshot is required or credited; and
+- later logical time leaves FailStop and both closed journals byte-equal,
+  produces no attempt 21, and yields no second request.
+
+This removes both defects from iteration 18. Elapsed is no longer falsely
+frozen during a clock advance, and the acceptance body no longer depends on a
+scheduler-visible gap between synchronous attempt completion and FailStop.
+The terminal request is the authoritative twentieth-attempt receipt.
+
+### Ownership, cancellation, and feasibility
+
+The correction preserves P02-20:
+
+- `run_mtls_owner` calls FailStop, sends once, parks, and returns normally only
+  after its shutdown token is cancelled;
+- the private future never calls worker shutdown;
+- the real private-field `ServerHandle` fixture receives the request and drives
+  the existing production terminal order: worker drain/sealed relinquishment,
+  resolver shutdown, then supervisor cancellation/join; and
+- pre-terminal effects remain exactly one detection observe, one quiesce, and
+  twenty attempt observes, with zero bind/fresh convergence/guard Drop and no
+  unrelated owner operation.
+
+The oracle is implementable without a yield added to production, timer/request
+accessor, public state method, test-only callback, alternate clock, or duplicated
+retry loop. The test harness controls only the already-injected `SimClock` and
+observes existing private production state/channel fields from the source-local
+child module.
+
+### Mechanical checks
+
+| Check | Iteration-19 result |
+| --- | --- |
+| 249 ms elapsed projection | PASS — elapsed advances; attempts/effects/request remain fixed. |
+| Attempts 1..19 Recovering equality | PASS — exact equality, never `>=`. |
+| 4,999 ms boundary | PASS — attempts 19, persistent Recovering, empty request. |
+| 5,000 ms terminal boundary | PASS — one typed 20/5s request; no Recovering(20) dependency. |
+| Later time | PASS — no attempt 21, second request, or journal delta. |
+| Sole terminal owner / cancellation | PASS — unchanged ServerHandle ordering. |
+| API/dependency/ownership scope | PASS — no drift. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+
+### Iteration-19 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-20 — duplicated worker shutdown ownership | Remains CLOSED. |
+| DESIGN-P02-21 — cadence/deadline oracle | **CLOSED** by exact boundary-specific observation. |
+| DESIGN-P02-22 — false elapsed / unobservable attempt-20 snapshot | **CLOSED** by independent elapsed assertions and terminal request receipt. |
+
+No unresolved P02-20/P02-21/P02-22 DESIGN finding remains.
+
+## Iteration 19 final verdict
+
+# APPROVED
+
+The corrected timing contract is exact, deterministic, and faithful to the
+approved state machine. It distinguishes elapsed-time projection from attempt
+mutation, observes only stable Recovering snapshots, uses the typed 20/5s
+FailStop request as the sole terminal receipt, and preserves the singular
+ServerHandle shutdown owner and closed effect journals. Approval covers the
+P02-20/P02-21/P02-22 correction contract; the authored S19-B body must still be
+remediated to that contract, reclassified, and independently reviewed before
+roadmap execution.
+
+## Iteration 20 — final D15/S19 translation re-review
+
+### Scope
+
+This iteration reviews the remediated executable D15/S19 translation against
+Iteration 19: S19-A adapter behavior, the non-closing worker prerequisite,
+S19-B's exact private production future, timing/request oracle, closed journals,
+sole terminal ownership, and preservation of every earlier D15 falsifier.
+
+### S19-B executable contract
+
+The authored body now implements the approved oracle rather than merely
+describing it:
+
+- it constructs a real `MtlsInterceptWorker` over a test-local implementation
+  of the accepted port and uses `SharedIpInterceptIdentity::for_listener_ports`
+  for both the healthy identity and a canonical different non-zero leg-F
+  target;
+- it invokes the exact module-private production
+  `SharedNetworkSupervisorHandle::run_mtls_owner` future, not a copied retry
+  loop or test-only wrapper;
+- it uses one `SimClock` shared with `GuestNetworkExecWiring` and proves no
+  detection at 999 ms;
+- at one second it observes Recovering(`IpRules`) with attempts 0, elapsed 0,
+  one adapter observation, one `TapSetDown`, an empty request receiver, and no
+  other effect;
+- for attempts 1 through 19 it asserts the exact prior snapshot/journal,
+  advances 249 ms and observes only elapsed advance, then advances the final
+  one millisecond and waits for equality with the exact new attempt and elapsed
+  boundary;
+- at 4,999 ms it observes attempts 19 and no request;
+- at 5,000 ms it consumes one exact
+  `IpRules/RecoveryDeadlineExceeded/attempts=20/elapsed=5s` request, treats that
+  receipt as the sole attempt-20 oracle, and confirms Recovering has become
+  FailStop;
+- after another five seconds it proves no attempt 21, second request, adapter
+  delta, shared-owner delta, or supervisor return; and
+- it then calls real `ServerHandle::shutdown`, whose existing terminal order
+  owns worker drain/sealed relinquishment before supervisor cancellation/join.
+  Return is the join oracle; the private runtime future never calls worker
+  shutdown.
+
+The pre-terminal journals are mechanically closed. The intercept delta is
+exactly zero bind, zero fresh shared convergence, twenty-one observations,
+zero allocation installs, and zero guard Drop. The shared-network owner journal
+is exactly `[TapSetDown]`. Provision, teardown, startup probe, sweep,
+shared-switch converge/audit, repeat quiesce, element install, and
+relinquishment are absent until the terminal ServerHandle phase.
+
+### Layer and non-regression audit
+
+All earlier D15 layers remain aligned:
+
+- S19-A source-local uses public `observe_shared`, returns canonical identity
+  or the existing typed observation error, asserts one Observe journal entry,
+  and preserves the complete state/complement;
+- S19-A Lima proves exact canonical wrong-target observation with stable rule/
+  generation snapshots, zero notification, and foreign complement;
+- the `02-03` worker body proves exact target recording, one structured
+  compare-and-return conflict, zero bind/fresh convergence/target rewrite,
+  retained guard, and sealed relinquishment only;
+- S19-B alone owns clock, detection, attempts, deadline, EXEC FailStop, typed
+  request, and terminal orchestration in `03-03`;
+- P02-16's exact requested identities, valid-IP-plus-foreign-family row, and
+  schema-only conflict remain present; and
+- P02-17's actual `Error::source()` assertions, exact conditional journals,
+  and independent zero-leg-F/zero-leg-C refusal remain present.
+
+The exact names, homes, Contract Shape lines, markers, selectors, RED
+classification, and repeated-ID traceability match across source, feature
+delta, DISTILL, and roadmap. S19-B exact-selects one body and fails at the
+earlier worker owner-start production scaffold, so its later oracle is compiled
+without fabricating an executable consequence.
+
+### API, dependency, and ownership audit
+
+No public or architectural surface was added beyond the already-approved D15
+error/netlink scaffolds. `run_mtls_owner` remains private and production-used;
+the source-local child module can call it without exporting it. Control-plane
+depends on worker/core and no reverse edge exists. One retained supervisor task,
+one request receiver, one EXEC supervisor, one worker owner, and one
+ServerHandle terminal path remain the complete ownership graph.
+
+Several feature-delta status sentences still say P02-20/P02-21/P02-22
+"requires remediation" or is merely "PROPOSED" even though the body and RED
+classification now contain the reviewed correction (for example
+`feature-delta.md:2530`, `:6805`, `:6841-6863`, and `:7287`). This is
+post-review status bookkeeping, not a competing signature, behavior, test
+home, or owner contract. It should be updated when this verdict is reconciled,
+but it does not invalidate the executable translation.
+
+### Mechanical and completeness checks
+
+| Check | Iteration-20 result |
+| --- | --- |
+| S19-A source-local/Lima no mutation | PASS. |
+| `02-03` published-worker prerequisite | PASS and non-closing. |
+| Private S19-B production future | PASS. |
+| 999 ms / one-second detection | PASS. |
+| Attempts 1..19, 249 ms + 1 ms equality | PASS. |
+| 4,999 ms no request / 5,000 ms one 20/5s request | PASS. |
+| No Recovering(20), attempt 21, or second request | PASS. |
+| Closed pre-terminal effect journals | PASS. |
+| Real ServerHandle terminal ownership/join | PASS. |
+| P02-16/P02-17 falsifiers | PASS and unchanged. |
+| Names/homes/selectors/markers/traceability | PASS. |
+| Public API/dependency/owner drift | PASS — none. |
+| Canonical completeness | PASS — 15/15 executable checks. |
+| Roadmap JSON / formatting / diff hygiene | PASS — `jq empty`, `cargo fmt --all -- --check`, and `git diff --check`. |
+| Mutation testing | NOT RUN — final DELIVER gate only. |
+
+### Iteration-20 finding disposition
+
+| Finding | Status |
+| --- | --- |
+| DESIGN-P02-15 through DESIGN-P02-19 | Remain CLOSED. |
+| DESIGN-P02-16/P02-17 translation gaps | Remain CLOSED in the final bodies. |
+| DESIGN-P02-20 — duplicated shutdown ownership | CLOSED in the executable S19-B body. |
+| DESIGN-P02-21 — aggregate/non-falsifying cadence | CLOSED in the executable S19-B body. |
+| DESIGN-P02-22 — false elapsed/transient attempt-20 oracle | CLOSED in the executable S19-B body. |
+
+No unresolved D15/S19 DESIGN-to-DISTILL finding remains.
+
+## Iteration 20 final verdict
+
+# APPROVED
+
+The final D15/S19 translation is exact, executable, layered, and non-expansive.
+It proves adapter no-rewrite, worker comparison/guard ownership, private
+control-plane cadence/deadline/fail-stop, and the singular ServerHandle terminal
+path at their correct boundaries. The 249 ms/1 ms schedule, 4,999/5,000 ms
+transition, terminal request, no-attempt-21 complement, and closed effect
+journals are mechanically falsifying. All earlier D15 acceptance evidence and
+API/ownership constraints remain intact. Independent roadmap validation remains
+the final pre-DELIVER approval gate.

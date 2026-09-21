@@ -1043,3 +1043,493 @@ postcondition, classifier tag receipt, and second TAP checkpoint are not yet
 source-honest. Return step `02-01` to the original crafter for bounded
 remediation and re-review; do not advance to `02-02`. The eight waived
 placeholders remain ignored and unscored.
+
+## Iteration 6 — D14/D14A remediation review
+
+### Scope and mechanical evidence
+
+- Reviewer: fresh isolated replacement software-crafter reviewer
+- Step: `netns-density-295` / `02-01`
+- Remediation commit: `0faa312865a082425b53ab29f4f619d235a12287`, on top of
+  `90aea574`
+- Commit scope: 3 files, 863 insertions, 119 deletions
+- Marcus remains author with exactly one Codex co-author and one `Step-Id:
+  02-01` trailer.
+- Fresh DES events are RED/PASS at `09:20:44Z`, GREEN/PASS at `09:21:42Z`,
+  and COMMIT/PASS at `09:22:06Z`.
+
+The crafter reports dataplane 10 plus one pre-existing ignored test, owner 12
+plus two superseded ignores, netlink 56, active release BPF, verifier 5/5,
+and fmt/diff green. Fresh broad clippy was capacity-blocked, with prior green
+focused evidence retained. Lima D14 execution remains honestly pending. The
+eight user-waived placeholders remain unscored and mutation testing remains
+deferred.
+
+### Prior-finding dispositions
+
+| Prior finding | Iteration-6 disposition |
+|---|---|
+| F-16 packet-level D5 exercise | **Implementation closed.** D14 now runs peer/gateway semantic TCP probes, validates verdict/mark/MAC/original destination/all eight counter deltas, and performs the real detached-TAP/D9 counter oracle. |
+| F-22 owner guard postcondition | **Closed.** `converge_shared` now generation-observes the complete bridge guard before publishing TCX state. |
+| F-23 classifier tag receipt | **Closed.** Program tag is retained and compared in inventory observation. |
+| F-24 incompatible second TAP checkpoint | **Closed.** Any absent/incompatible/non-persistent/wrong-identity second observation returns the exact mismatch before guard insertion. |
+| F-21 runtime audit/quiesce caller | **Deferred by orchestrator disposition; not an approval condition.** Roadmap `03-03` owns those later supervisor/recovery callsites; `02-01` supplies real bodies. |
+| All earlier F-08..F-15 findings | **No regression found.** Production legacy routing, guest cleanup, metadata, receipts, formatting, and reported non-waived Linux evidence remain as in iteration 5. |
+
+### Design/API and source comparison
+
+The D14/D14A additive dataplane surface matches the approved exact shape:
+opaque doc-hidden semantic probe input/outcome values and one
+`GuestTcxProgram::probe_tcp_intercept` method. Raw SKB context, BPF syscall
+attributes, packet bytes, FDs, action/mark numbers, and counter slots remain
+private to dataplane. The control-plane validator is private and preserves the
+approved mismatch/lower-source ordering. The private TAP ioctl/UDP/D9 guard
+probe remains in the existing scratch adapter; no second owner or public test
+hook was added.
+
+The changed hydration trajectory only updates the grouped transient
+`AllocationSpec` shape; it does not change its lifecycle/action trajectory.
+
+### Remaining finding
+
+#### F-25 — Blocking: the mandatory ordinary-boot D14A evidence remains ignored and unexecuted
+
+The authored D14A ordinary-boot integration body
+`production_startup_exercises_classifier_and_detached_guard_before_admission`
+still carries `#[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A deterministic ordinary-boot trace"]`
+(`crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs:422-431`).
+Its body is now substantive: it drives ordinary `run_server`, captures the five
+ordered production events, checks both TCP stages, attachment identity,
+detached-guard counter transition, and cleanup. It is nevertheless not an
+executed/green evidence layer.
+
+The approved DISTILL contract makes this ordinary Lima body mandatory and
+distinct from the source-local D14A tables; it cannot be replaced by the
+privileged Linux BPF/verifier report or by Sim (`docs/feature/netns-density-295/distill/test-scenarios.md:41,179-183,876-901`).
+It is not one of the eight user-waived placeholders. The crafter reports Lima
+D14 execution pending, and no existing valid run establishes the five-event
+ordinary-boot trace. A runner outage is an evidence gap, not GREEN.
+
+Required bounded remediation: run this exact existing body through the approved
+Lima `host-kernel-shared` lane, or record the still-pending environment as a
+blocking verification gap until that evidence exists. Do not remove the ignore
+marker without the real ordinary-boot evidence, and do not author a substitute
+test or expand the architecture.
+
+### Test honesty and verification
+
+The active BPF test, D14 semantic projection/validator tables, owner order and
+cleanup tables, D9 bridge integration, and verifier evidence are reported green.
+The two superseded setup/failure source-local tests remain explicitly ignored
+because D14A replaced their order contract; they are not silently weakened.
+The ordinary-boot D14A body is separately ignored and is the sole remaining
+non-waived evidence gap identified here.
+
+Focused local formatting and diff checks pass. Broad clippy could not complete
+because of the pre-existing workspace capacity/broad-lint condition; no changed
+code warning was independently established. No mutation testing was run.
+
+| Gate | Result |
+|---|---|
+| Exact D14/D14A API shape and raw-ABI fence | PASS |
+| D5 semantic packet stages and detached guard implementation | PASS at source/privileged Linux evidence level |
+| D9 full inventory/idempotence/foreign/exclusive adapter | PASS at source/active integration evidence level |
+| D12 receipts/tag/source honesty | PASS |
+| D12A exact allocation/TAP checkpoint and complement | PASS |
+| Contract/status metadata | PASS for changed D14/D14A status and anchors |
+| Test integrity | PASS; superseded tests are explicitly ignored, not weakened |
+| Ordinary Lima D14A boot evidence | BLOCKED — F-25 |
+| DES RED/GREEN/COMMIT | PASS mechanically and reported evidence available |
+| `cargo fmt --all -- --check` / `git diff --check` | PASS |
+| Mutation testing | NOT RUN, correctly deferred |
+
+### Verdict
+
+# CHANGES_REQUIRED
+
+F-25 is an unresolved blocking evidence finding. The D14/D14A production code
+and source-local/privileged Linux evidence close the prior implementation
+findings, but the mandatory non-waived ordinary-boot Lima witness remains
+ignored and unexecuted. Keep step `02-01` in review/remediation and do not
+advance to `02-02`; leave the eight user-waived placeholders ignored and
+unscored.
+
+## Iteration 7 — final D14A activation and guard-packet stabilization review
+
+### Scope and mechanical evidence
+
+- Reviewer: fresh isolated replacement software-crafter reviewer
+- Feature / step: `netns-density-295` / `02-01`
+- Cumulative baseline: `cc752bcf0cd83707c06071dcc88b2b0bbfd88b37`
+- Final remediation commits: `da7b00477c9589e4a52fa5be05ef848fc61b72b5` and
+  `3e8b0326319b867eb244c81fbbb07d7dc0362a93`, on top of `0faa3128`
+- `da7b0047` changes four files (152 insertions, 39 deletions); `3e8b0326`
+  changes one file (3 insertions, 1 deletion). Marcus remains the author on
+  both commits, each has exactly one `Co-Authored-By: Codex
+  <codex@openai.com>` trailer and one `Step-Id: 02-01` trailer.
+- Fresh DES events are RED/PASS at `2026-09-21T10:02:34Z`, GREEN/PASS at
+  `11:24:06Z`, COMMIT/PASS at `11:24:49Z`, followed by GREEN/PASS at
+  `11:29:12Z` and COMMIT/PASS at `11:29:33Z`.
+
+The final changes correctly make the D14A ordinary-boot body active, repair
+tracing-event-name capture, make the detached frame a valid broadcast IPv4/
+UDP frame with its marker at the post-Ethernet/L4 payload offset, and enable
+and read back bridge netfilter delivery before the guard packet. The dataplane
+loader/probe and family-filter changes preserve the approved private D12/D14
+surface. No production/test file was modified by this review.
+
+### Verification evidence
+
+The repaired Lima runner independently produced the following bounded results:
+
+| Gate | Result |
+|---|---|
+| D14A ordinary boot, exact roadmap selector | PASS: one active test passed; the four selected S10/S11/S13 bodies stayed ignored and were skipped by the normal command |
+| D14A ordinary boot with `--run-ignored all` | PASS for `production_startup_exercises_classifier_and_detached_guard_before_admission`; the four unconditional panic bodies failed only as the explicit user-waived placeholders and are not scored |
+| Dataplane guest-TCX unit scope | PASS: 10/10 selected tests |
+| Control-plane guest-network unit scope | PASS: 12/12 selected tests |
+| Netlink library scope | PASS: 56/56 tests |
+| Netlink bridge guard integration | PASS: 1/1 active real-kernel test |
+| Seeded S13 invariant | PASS with `PROPTEST_CASES=1024` |
+| BPF classifier integration | PASS: 1/1 active release-BPF test |
+| Verifier regression | PASS: 5/5 programs within budget |
+| Workspace check | PASS: `cargo check --workspace --all-targets --features integration-tests` |
+| Formatting / whitespace | PASS: `cargo fmt --all -- --check`; `git diff --check` |
+| Roadmap pool/scratch acceptance selector | No tests discovered and no pass claimed; see metadata disposition below |
+| Mutation testing | NOT RUN, correctly deferred to the final DELIVER gate |
+
+Strict netlink clippy remains stopped by the already-existing
+`nft.rs:4062` `eprintln!`/`clippy::print_stderr` warning. The broader
+control-plane `-D warnings` output likewise contains cumulative pre-existing
+lint categories in the large D5/D9 worktree; none is introduced by the two
+final guard-packet commits. Per the supplied review scope, this baseline lint
+is not an approval blocker. Focused source-local test and check evidence is
+green.
+
+The roadmap command
+`cargo nextest run -p overdrive-control-plane --test acceptance -E
+'test(pool_acceptance) or test(scratch_probe_acceptance)'` selects an
+acceptance binary that contains neither module. It is stale roadmap metadata,
+not a missing implementation or a silently claimed pass: the same production
+unit target was independently run with
+`cargo nextest run -p overdrive-control-plane --lib -E 'test(guest_network)'`
+and passed 12/12, including the pool and scratch source-local bodies. No
+roadmap or test file is changed by this review.
+
+### Design and API comparison
+
+The exact approved shape remains intact. Control-plane still re-exports only
+`GuestTcxError`, `TcxAttachPoint`, and the four approved bridge-rule semantic
+values. D12/D14 opaque values, one `probe_tcp_intercept` method, D12 receipt
+identity/tag/map checks, D12A netlink semantic observations, the private
+allocation leaf, and the D13 helper/Sim observation remain at their approved
+visibility. No raw aya/netlink ABI, second owner, compatibility path,
+persistence/recovery subsystem, test-only production path, or 02-02/02-03
+behavior is introduced.
+
+The D14 validator still enforces the approved order and all eight counter
+records; source-local D14 projection/validator tables, D5 exercise-before-
+close/lazy-adoption cleanup, D9 generation-bracketed inventory, and the active
+release BPF evidence remain unchanged. `converge_shared` performs the complete
+D9 guard read-back before publishing shared TCX state, and D12 retains exact
+program tag/map/link/pin receipts. The latest broadcast/payload/netfilter
+adjustment is a private real-kernel implementation correction, not a public
+surface change.
+
+### Prior finding dispositions
+
+| Prior finding | Iteration-7 disposition |
+|---|---|
+| F-16 D14 packet stages and detached guard | **Closed.** The real scratch adapter now drives the opaque peer/gateway TCP probes through the private validator and the detached TAP/D9 counter oracle; the Lima D14A witness passed the ordered stage/attachment/guard/cleanup trace. |
+| F-22 owner guard postcondition | **Closed.** Full generation-bracketed D9 observation occurs after convergence and before shared TCX publication. |
+| F-23 classifier tag receipt | **Closed.** The loader records the tag and the inventory observer compares tag, program identity, and map relationship. |
+| F-24 down-TAP identity checkpoint | **Closed.** The owner refuses absent/incompatible/non-persistent/wrong-identity observations before guard insertion and retains exact TAP/bridge/master facts. |
+| F-25 ordinary-boot D14A evidence | **Closed.** The `#[ignore]` marker is removed and the exact normal roadmap filter plus an explicit ignored run passed in repaired Lima. |
+| F-21 audit/quiescence caller | **Deferred by orchestrator disposition; not an approval condition.** Roadmap `03-03` owns the one-second audit/quiescence/supervisor/recovery callsites; this review checks only the real `02-01` method bodies. |
+| F-08..F-15 and all other prior findings | **No regression found.** Legacy production routing remains cut, owner effects/receipts/metadata/formatting remain as previously closed, and the approved eight-placeholder waiver remains unchanged. |
+
+### New findings
+
+#### F-26 — Blocking: provision rollback omits the required postcondition read-back
+
+The approved D12A rollback contract requires, after endpoint/link cleanup and
+before returning the original or cleanup error, endpoint absence plus
+attachment/pin absence while the TAP still exists, then TAP absence and the
+complete guard-member complement (`feature-delta.md:5997-6009`). The production
+`HostSharedGuestNetworkOwner::rollback_provision` at
+`crates/overdrive-control-plane/src/guest_network.rs:2211-2262` calls only
+`remove_endpoint`, pending/pinned detach, TAP-down, TAP-delete, and guard-member
+delete. It never calls the existing `read_endpoint`, `query_attachment`,
+`link_pin_present`, `observe_tap`, or `observe_guard` leaves. Therefore a
+successful mutation return is treated as a complete rollback without the
+required source-honest `CleanupComplement` proof.
+
+This path is reachable through the ordinary owner: production `run_server`
+composes `HostSharedGuestNetworkOwner` (`lib.rs:2240-2253`), action dispatch
+assigns the plan and awaits `GuestNetworkProvisioner::provision`
+(`action_shim/mod.rs:1391-1401`), and every primary provision failure enters
+`rollback_provision` (`guest_network.rs:2887-2891`). If a real cleanup leaf
+fails, the owner has not yet published `allocations` (publication is only at
+`:2918-2925`), so the subsequent action cleanup
+(`action_shim/mod.rs:1586-1595`) sees an unpublished owner state, returns
+success without a retry/read-back, and releases the action-pool lease. No
+owner-side evidence proves that the failed partial effects are absent before
+that release.
+
+Required bounded remediation for the replacement crafter: complete the
+existing rollback algorithm with the already-approved private leaf read-backs
+and exact first-source/complement handling. Preserve the one owner and the
+existing D12A boundary; do not add a public rollback method, compatibility
+path, persistence subsystem, or later supervisor behavior. If retaining a
+retryable partial rollback state cannot be expressed within the approved
+owner/lease contract, return this as a separate DESIGN gap rather than
+inventing recovery machinery.
+
+#### F-27 — Blocking: the non-waived S11 table does not exercise final bridge/master mismatches
+
+The source-local body
+`guest_network::allocation_owner_acceptance::every_incompatible_tap_or_bridge_identity_refuses_owner_publication`
+claims both TAP/bridge checkpoints, but its `final_cases` fixture supplies only
+two TAP observations (`guest_network.rs:5610-5622`): `valid_down` and the row's
+`final_tap`. The production owner consumes the second observation at the
+down-TAP checkpoint (`:2720-2750`). Every final row with `up: true` therefore
+fails at that earlier checkpoint and never executes the final bridge refresh at
+`:2841` or final TAP/master comparison at `:2842-2885`. The rows labelled with
+absent, wrong-kind, or replacement `final_bridge` values at `:5463-5490` thus
+do not test those final bridge cases; they only observe the earlier TAP-up
+mismatch. The source-local test passes while leaving final bridge identity and
+final `LinkMaster` mismatch branches unproved.
+
+The approved S11 contract explicitly requires absent/wrong-kind/replaced
+bridge observations and exact master comparisons at both checkpoints
+(`feature-delta.md:5904-5909,6022-6027`). This is a mechanically proven test
+oracle gap, not a request for a new production seam.
+
+Required bounded remediation for the replacement crafter: extend the existing
+scripted leaf sequence with a valid down observation, a valid down bridge
+checkpoint, and a distinct final TAP/bridge observation for final-case rows;
+assert the exact final `BridgeLinkIdentity`, `Tap`, and `LinkMaster` facts and
+publication refusal. Keep the existing private owner and test boundary; do not
+author an integration substitute or alter the approved API.
+
+### Test honesty and final verdict
+
+The RED/GREEN/COMMIT history is honest for the final remediation: the D14A
+body was independently run after removing its marker, and the exact normal
+roadmap command passed while the four waived placeholder bodies remained
+ignored. The source-local and Sim gates above were independently rerun; no
+mutation score or waived placeholder was credited. The D14A event collector
+and guard-packet changes do not weaken assertions. F-21 remains deferred as
+directed, and native metal is not required for this bounded review.
+
+### Verdict
+
+# CHANGES_REQUIRED
+
+F-26 (rollback postcondition/read-back) and F-27 (S11 final-checkpoint test
+oracle) remain unresolved non-waived implementation/evidence defects. Return
+`02-01` to the replacement crafter for these bounded corrections and repeat
+review iteration 8; do not advance to `02-02`. The eight user-waived
+placeholders remain ignored and unscored.
+
+## Iteration 8 — rollback retry and final identity re-review
+
+### Scope and mechanical evidence
+
+- Reviewer: fresh isolated replacement software-crafter reviewer
+- Feature / step: `netns-density-295` / `02-01`
+- Remediation commit: `b45eefa1aaf6df8c5966b692a383fd391097051d`, on top of
+  `3e8b0326`
+- The commit changes one production file with 303 insertions and 60 deletions.
+  Marcus remains author with exactly one Codex co-author and one `Step-Id:
+  02-01` trailer.
+- Fresh DES events are RED/PASS at `2026-09-21T12:26:16Z`, GREEN/PASS at
+  `13:22:09Z`, and COMMIT/PASS at `13:22:56Z`.
+
+The remediation adds private, process-local rollback retry state correlated to
+the existing allocation lease, completes endpoint/attachment/pin/TAP/guard
+read-backs and first-source continuation, and supplies a three-observation S11
+fixture so final bridge, TAP, and master mismatches are actually reached. It
+adds no public method/type/field, persisted state, second owner, or later-step
+behavior.
+
+### Verification evidence
+
+| Gate | Result |
+|---|---|
+| Control-plane guest-network unit scope | PASS: 12/12 |
+| Dataplane guest-TCX unit scope | PASS: 10/10 |
+| Netlink library scope | PASS: 56/56 |
+| Netlink bridge guard integration | PASS: 1/1 |
+| Seeded S13 invariant | PASS with `PROPTEST_CASES=1024` |
+| BPF classifier integration | PASS: 1/1 |
+| Verifier regression | PASS: 5/5 programs within budget |
+| Workspace check | PASS: `cargo check --workspace --all-targets --features integration-tests` |
+| Exact normal D14A roadmap selector | PASS: one active test; waived bodies skipped |
+| D14A with `--run-ignored all` | Three consecutive reruns passed after one transient first-run timeout in the repaired Lima kernel lane; no waived placeholder was credited |
+| Formatting / whitespace | PASS: `cargo fmt --all -- --check`; `git diff --check` |
+| Mutation testing | NOT RUN, correctly deferred |
+
+The strict control-plane clippy scope still reports the pre-existing broad
+worktree lint categories (including the known netlink `eprintln!` warning and
+large cumulative owner methods). No new API or warning-specific remediation is
+required by this bounded review; the changed code compiles and the focused
+non-waived tests/checks pass.
+
+### F-26 and F-27 dispositions
+
+#### F-26 rollback checkpoints and lease-safe retry — substantially closed
+
+`rollback_provision` now executes the approved endpoint absence, attachment
+absence, link-pin absence, TAP absence, and full guard-complement read-backs,
+continues after each leaf failure while retaining the first source, and records
+the private pending rollback state until the same teardown boundary proves an
+empty complement. The action path therefore does not release the action-pool
+lease while `rollback_pending` remains. This closes the previous missing
+read-back and lease-release path for failures after a TAP/TCX effect exists.
+
+#### F-27 final S11 identity branches — closed
+
+The final-case fixture now supplies two valid down-TAP observations before the
+final bridge refresh, then a distinct final observation. The table reaches and
+asserts final absent/wrong-kind/replaced-bridge identities, final
+`LinkMaster`, final TAP kind/persistence/ifindex/owner/up facts, and refusal
+without publication. Rollback read-backs are seeded so a cleanup source cannot
+replace the intended final checkpoint mismatch.
+
+### New finding
+
+#### F-28 — Blocking: rollback retry re-queries TCX on an absent TAP
+
+The new retry state tracks `tap_removed`, but `rollback_provision` calls
+`rollback_attachment_absence(plan, ifindex)` unconditionally at
+`crates/overdrive-control-plane/src/guest_network.rs:2380-2384`, even when
+`tap_removed == true` or `ifindex == None`. The real allocation leaf delegates
+that call to `GuestTcx::query_attachment` at `:1910-1918`; the dataplane query
+maps a missing interface to a source-bearing `GuestTcxError::Program` rather
+than an empty attachment (`crates/overdrive-dataplane/src/guest_tcx.rs:1741-1755`).
+
+This is reachable through the production failure path. A primary failure after
+TAP deletion but before the guard-complement read-back stores
+`GuestNetworkPendingRollback { tap_removed: true, ... }` at
+`:3032-3045`; the action owner retries it through `teardown` at `:3086-3105`.
+The retry then asks for TCX attachment on the already absent TAP, records that
+error as the first source, and leaves `rollback_pending`/the action-pool lease
+held even if the guard complement has become empty. The same unconditional
+query is also reached for an early create/observe failure with no `ifindex`,
+where no TAP/TCX attachment was ever established. Thus the new retry state can
+turn an otherwise clean absence into a permanent retry loop.
+
+Required bounded remediation for the replacement crafter: make attachment
+absence observation conditional on an existing TAP/known attached interface, or
+map the existing absent-interface result to the approved empty semantic
+observation at this private owner boundary. Preserve the existing read-back,
+first-source, lease-safe retry, and action-pool behavior; do not add a public
+API, persistence mechanism, second owner, or later-step recovery caller. Add a
+source-local regression through the existing owner/leaf seam for a final
+post-delete read-back failure followed by a successful retry, plus the no-TAP
+early-failure partition.
+
+### Regression and test honesty
+
+The exact API/visibility fence, D14/D14A production effects, D9 inventory,
+D12 receipts, ordinary caller path, F21 deferral, eight-placeholder waiver,
+and no-mutation rule remain intact. The first D14A ignored rerun timed out in
+the 250ms detached-guard window, but three immediate reruns passed; the exact
+normal roadmap selector passed. This is recorded as a transient runner/kernel
+timing observation, not credited as additional evidence.
+
+### Verdict
+
+# CHANGES_REQUIRED
+
+F-28 remains an unresolved non-waived rollback/retry correctness defect. Return
+`02-01` to the replacement crafter for this bounded absence/readback fix and
+repeat review iteration 9; do not advance to `02-02`. The eight user-waived
+placeholders remain ignored and unscored.
+
+## Iteration 9 — final conditional rollback re-review
+
+### Scope and mechanical evidence
+
+- Reviewer: fresh isolated replacement software-crafter reviewer
+- Feature / step: `netns-density-295` / `02-01`
+- Remediation commit: `f1071c9d1b8349ca1eea2c1917bf7291f1fb37ad`, on top of
+  `b45eefa1`
+- The commit changes one owned production file (87 insertions, 1 deletion),
+  retains Marcus as author, and has exactly one Codex co-author and one
+  `Step-Id: 02-01` trailer.
+- Fresh DES events are RED/PASS at `2026-09-21T13:44:48Z`, GREEN/PASS at
+  `13:50:54Z`, and COMMIT/PASS at `13:51:24Z`.
+
+The remediation gates rollback attachment observation on both a known interface
+and a TAP that has not already been proven absent. It adds source-local
+regressions for post-delete retry and early no-TAP failure. No public API,
+persistence/recovery subsystem, second owner, compatibility path, or later-step
+behavior was added.
+
+### F-28 disposition — closed
+
+`rollback_provision` now calls `rollback_attachment_absence` only when
+`!tap_removed && ifindex.is_some()`. A post-delete retry therefore continues to
+the guard read-back without querying TCX against an absent interface, and an
+early failure before a TAP/ifindex exists cannot fabricate a TCX source.
+
+The new source-local tests independently prove both paths:
+
+- `rollback_retry_skips_attachment_query_after_tap_removal` injects a second
+  guard-observation failure, retries through the same owner, asserts no retry
+  `QueryAttachment`, observes the guard again, and verifies
+  `rollback_pending` is removed.
+- `early_provision_failure_without_tap_skips_attachment_query` injects an
+  absent first TAP observation plus a failure if TCX were queried, then proves
+  the exact TAP mismatch, no query, and no retained pending rollback.
+
+Endpoint/pin/TAP/guard read-backs, continuation, and first-source precedence
+remain intact. The action-pool lease is released only after the pending rollback
+teardown succeeds; the private retry state is not published or persisted.
+
+### Regression and verification
+
+| Gate | Result |
+|---|---|
+| Control-plane guest-network unit scope | PASS: 14/14 selected tests |
+| Dataplane guest-TCX unit scope | PASS: 10/10 |
+| Netlink library scope | PASS: 56/56 |
+| Netlink bridge guard integration | PASS: 1/1 |
+| Seeded S13 invariant | PASS with `PROPTEST_CASES=1024` |
+| BPF classifier integration | PASS: 1/1 |
+| Verifier regression | PASS: 5/5 programs within budget |
+| Workspace check | PASS: `cargo check --workspace --all-targets --features integration-tests` |
+| Exact normal D14A roadmap selector | PASS: one active test; waived bodies skipped |
+| Formatting / whitespace | PASS: `cargo fmt --all -- --check`; `git diff --check` |
+| Mutation testing | NOT RUN, correctly deferred |
+
+The earlier transient D14A ignored-run timeout was followed by three immediate
+passes; the current exact normal roadmap selector also passes. Strict clippy
+continues to report the pre-existing broad worktree warnings, including the
+known netlink `eprintln!`; no new changed-code lint is treated as a blocker.
+The pool/scratch acceptance selector still discovers no tests because its
+roadmap target is stale; the corresponding production unit target remains
+green, with no pass claimed for the stale selector.
+
+### Cumulative final disposition
+
+- F-16, F-22, F-23, F-24, F-25, F-26, F-27, and all earlier bounded findings
+  are closed with no regression.
+- D12/D12A/D13/D14/D14A API visibility, one-owner production wiring, D9
+  inventory/foreign preservation, exact bpffs ownership, classifier semantics,
+  eight counters, bridge/TAP facts, and cleanup complements remain aligned with
+  the approved design.
+- F-21 remains deferred to roadmap `03-03` by orchestrator disposition.
+- The eight user-waived real-I/O panic placeholders remain ignored, unscored,
+  and are not credited as evidence. Native metal is not required for this
+  bounded step review.
+
+### Verdict
+
+# APPROVED
+
+No unresolved non-waived finding remains for roadmap step `02-01`. The review
+artifact is complete; the step may advance to `02-02` subject to the
+orchestrator's mechanical handoff rules.

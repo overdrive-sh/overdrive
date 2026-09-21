@@ -1283,6 +1283,22 @@ impl SharedNetworkSupervisorHandle {
         panic!("Not yet implemented -- RED scaffold (GH #295 retained supervisor outcome)")
     }
 
+    #[expect(
+        clippy::panic,
+        clippy::unused_async,
+        reason = "D15 exact private RED scaffold; DELIVER implements the production mTLS recovery future"
+    )]
+    async fn run_mtls_owner(
+        _shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+        _mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+        _exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+        _clock: Arc<dyn Clock>,
+        _request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
+        _shutdown: CancellationToken,
+    ) -> std::result::Result<(), SharedNetworkSupervisorError> {
+        panic!("Not yet implemented -- RED scaffold (GH #295 mTLS owner recovery supervisor)")
+    }
+
     async fn shutdown(mut self) {
         self.shutdown.cancel();
         if let Some(task) = self.task.take() {
@@ -1369,15 +1385,28 @@ impl DnsServeTaskOwner {
     reason = "D-295-DISTILL-8 acceptance tables use exact Contract Shape markers and diagnostics"
 )]
 mod shared_network_task_owner_acceptance {
+    use std::net::{SocketAddrV4, TcpListener};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use overdrive_core::guest_network::{
         GuestNetworkExecWiring, ServeShutdownRequest, SharedGuestNetworkComponent,
-        SharedGuestNetworkFailStop, SharedGuestNetworkFailStopCause,
+        SharedGuestNetworkFailStop, SharedGuestNetworkFailStopCause, SharedGuestNetworkRecovery,
     };
     use overdrive_core::id::NodeId;
+    use overdrive_core::traits::IdentityRead;
+    use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
     use overdrive_core::traits::observation_store::ObservationStore;
+    use overdrive_netlink::nft::SharedIpInterceptIdentity;
+    use overdrive_sim::adapters::SimIdentityRead;
     use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_worker::mtls_intercept::{InterceptError, InterceptPostcondition};
+    use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+    use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+    use parking_lot::Mutex;
 
     #[derive(Clone, Copy)]
     enum SupervisorExitCase {
@@ -1402,6 +1431,452 @@ mod shared_network_task_owner_acceptance {
         SharedGuestNetworkComponent::IpSets,
         SharedGuestNetworkComponent::Supervisor,
     ];
+
+    struct S19NodeGuard(Arc<AtomicUsize>);
+
+    impl InterceptGuard for S19NodeGuard {}
+
+    impl Drop for S19NodeGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct S19Intercept {
+        shared_observation: Mutex<Option<InterceptPostcondition>>,
+        listener_addresses: Mutex<Vec<SocketAddrV4>>,
+        bind_calls: AtomicUsize,
+        converge_calls: AtomicUsize,
+        observe_calls: AtomicUsize,
+        outbound_install_calls: AtomicUsize,
+        inbound_install_calls: AtomicUsize,
+        guard_drops: Arc<AtomicUsize>,
+    }
+
+    impl S19Intercept {
+        fn new() -> Self {
+            Self {
+                shared_observation: Mutex::new(None),
+                listener_addresses: Mutex::new(Vec::new()),
+                bind_calls: AtomicUsize::new(0),
+                converge_calls: AtomicUsize::new(0),
+                observe_calls: AtomicUsize::new(0),
+                outbound_install_calls: AtomicUsize::new(0),
+                inbound_install_calls: AtomicUsize::new(0),
+                guard_drops: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn identity(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
+            let (table_and_chains, sets, prerouting, output) =
+                SharedIpInterceptIdentity::for_listener_ports(leg_f.port(), leg_c.port())
+                    .expect("non-zero S19 targets form one canonical identity")
+                    .normalized_parts();
+            InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
+        }
+
+        fn publish_wrong_leg_f(&self, recorded_f: SocketAddrV4, recorded_c: SocketAddrV4) {
+            let wrong_port = recorded_f.port().checked_add(1).unwrap_or(1);
+            assert_ne!(wrong_port, recorded_f.port());
+            *self.shared_observation.lock() =
+                Some(Self::identity(SocketAddrV4::new(*recorded_f.ip(), wrong_port), recorded_c));
+        }
+
+        fn observation(&self) -> Option<InterceptPostcondition> {
+            self.shared_observation.lock().clone()
+        }
+
+        fn listener_addresses(&self) -> Vec<SocketAddrV4> {
+            self.listener_addresses.lock().clone()
+        }
+
+        fn counts(&self) -> (usize, usize, usize, usize, usize) {
+            (
+                self.bind_calls.load(Ordering::SeqCst),
+                self.converge_calls.load(Ordering::SeqCst),
+                self.observe_calls.load(Ordering::SeqCst),
+                self.outbound_install_calls.load(Ordering::SeqCst),
+                self.inbound_install_calls.load(Ordering::SeqCst),
+            )
+        }
+
+        fn guard_drops(&self) -> usize {
+            self.guard_drops.load(Ordering::SeqCst)
+        }
+    }
+
+    struct S19InertGuard;
+
+    impl InterceptGuard for S19InertGuard {}
+
+    impl MtlsIntercept for S19Intercept {
+        fn bind_transparent(
+            &self,
+            addr: SocketAddrV4,
+        ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+            self.bind_calls.fetch_add(1, Ordering::SeqCst);
+            let listener = TcpListener::bind(addr)
+                .map_err(|source| InterceptError::TransparentListener { addr, source })?;
+            let bound = match listener
+                .local_addr()
+                .map_err(|source| InterceptError::TransparentListener { addr, source })?
+            {
+                std::net::SocketAddr::V4(bound) => bound,
+                std::net::SocketAddr::V6(_) => unreachable!("S19 fixture binds IPv4 loopback"),
+            };
+            self.listener_addresses.lock().push(bound);
+            Ok(listener)
+        }
+
+        fn converge_shared(
+            &self,
+            _prior: Option<&InterceptPostcondition>,
+            leg_f: SocketAddrV4,
+            leg_c: SocketAddrV4,
+        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            self.converge_calls.fetch_add(1, Ordering::SeqCst);
+            *self.shared_observation.lock() = Some(Self::identity(leg_f, leg_c));
+            Ok(Box::new(S19NodeGuard(Arc::clone(&self.guard_drops))))
+        }
+
+        fn observe_shared(
+            &self,
+        ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
+            self.observe_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.shared_observation.lock().clone())
+        }
+
+        fn install_outbound(
+            &self,
+            _host_veth: &str,
+            _agent_leg_f_port: u16,
+        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            self.outbound_install_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(S19InertGuard))
+        }
+
+        fn install_inbound(
+            &self,
+            _virt: SocketAddrV4,
+            _agent_leg_c_port: u16,
+        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            self.inbound_install_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(S19InertGuard))
+        }
+    }
+
+    fn s19_worker(intercept: Arc<S19Intercept>, clock: Arc<SimClock>) -> Arc<MtlsInterceptWorker> {
+        let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
+        let enforcement: Arc<dyn MtlsEnforcement> =
+            Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+        let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            BTreeMap::new(),
+            MtlsResolution::NonMesh,
+        ));
+        Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock, intercept))
+    }
+
+    async fn wait_for_s19_progress(
+        exec: &overdrive_core::guest_network::GuestNetworkExecSupervisor,
+        expected: SharedGuestNetworkRecovery,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if exec.recovery_progress().as_ref() == Some(&expected) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("production mTLS supervisor exposes the exact logical-time recovery snapshot");
+    }
+
+    #[derive(Default)]
+    struct S19SharedOwner {
+        calls: Mutex<Vec<guest_network::GuestNetworkOperation>>,
+    }
+
+    impl S19SharedOwner {
+        fn record(&self, operation: guest_network::GuestNetworkOperation) {
+            self.calls.lock().push(operation);
+        }
+
+        fn calls(&self) -> Vec<guest_network::GuestNetworkOperation> {
+            self.calls.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl guest_network::GuestNetworkProvisioner for S19SharedOwner {
+        async fn provision(
+            &self,
+            _plan: &guest_network::GuestNetworkPlan,
+        ) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::TapCreate);
+            Ok(())
+        }
+
+        async fn teardown(
+            &self,
+            _plan: &guest_network::GuestNetworkPlan,
+        ) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::TapDelete);
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl guest_network::SharedGuestNetworkOwner for S19SharedOwner {
+        async fn probe_startup(&self) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::StartupProbe);
+            Ok(())
+        }
+
+        async fn sweep_stale(&self) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::CleanupComplement);
+            Ok(())
+        }
+
+        async fn converge_shared(&self) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::BridgeConverge);
+            Ok(())
+        }
+
+        async fn audit_shared(
+            &self,
+        ) -> std::result::Result<(), guest_network::SharedGuestNetworkAuditError> {
+            self.record(guest_network::GuestNetworkOperation::BridgeObserve);
+            Ok(())
+        }
+
+        async fn quiesce_managed_taps(&self) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::TapSetDown);
+            Ok(())
+        }
+    }
+
+    fn s19_inert_task(shutdown: &CancellationToken) -> tokio::task::JoinHandle<()> {
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move { shutdown.cancelled().await })
+    }
+
+    fn s19_server_handle(
+        shared_network_supervisor: SharedNetworkSupervisorHandle,
+        mtls_worker_owner: Arc<MtlsInterceptWorker>,
+    ) -> ServerHandle {
+        let convergence_shutdown = CancellationToken::new();
+        let emit_drain_shutdown = CancellationToken::new();
+        let interest_router_shutdown = CancellationToken::new();
+        ServerHandle {
+            inner: AxumHandle::new(),
+            server_task: tokio::spawn(async { Ok::<(), std::io::Error>(()) }),
+            convergence_task: s19_inert_task(&convergence_shutdown),
+            exit_observer_tasks: Vec::new(),
+            emit_drain_task: s19_inert_task(&emit_drain_shutdown),
+            interest_router_task: s19_inert_task(&interest_router_shutdown),
+            dns_responder_task: None,
+            dns_responder: None,
+            convergence_shutdown,
+            exit_observer_shutdown: CancellationToken::new(),
+            emit_drain_shutdown,
+            interest_router_shutdown,
+            mtls_worker_owner: Some(mtls_worker_owner),
+            mtls_resolve_owner: None,
+            shared_network_supervisor,
+        }
+    }
+
+    fn assert_s19_recovery(
+        exec: &overdrive_core::guest_network::GuestNetworkExecSupervisor,
+        attempts: u32,
+        elapsed: Duration,
+    ) {
+        assert_eq!(
+            exec.recovery_progress(),
+            Some(SharedGuestNetworkRecovery {
+                component: SharedGuestNetworkComponent::IpRules,
+                attempts,
+                elapsed,
+            })
+        );
+    }
+
+    fn assert_s19_preterminal_journal(
+        intercept: &S19Intercept,
+        counts_before: (usize, usize, usize, usize, usize),
+        shared_owner: &S19SharedOwner,
+        completed_attempts: u32,
+    ) {
+        assert_eq!(
+            intercept.counts(),
+            (
+                counts_before.0,
+                counts_before.1,
+                counts_before.2 + 1 + completed_attempts as usize,
+                counts_before.3,
+                counts_before.4,
+            ),
+            "only detection and one observe per completed attempt are permitted; bind, fresh converge, and per-allocation installs stay absent"
+        );
+        assert_eq!(
+            shared_owner.calls(),
+            [guest_network::GuestNetworkOperation::TapSetDown],
+            "the complete shared-owner journal is the one detection-time TAP quiesce"
+        );
+        assert_eq!(intercept.guard_drops(), 0, "the published guard remains retained");
+    }
+
+    fn assert_s19_request_empty(server: &mut ServerHandle) {
+        assert!(matches!(
+            server.shared_network_supervisor.request_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    fn assert_s19_supervisor_parked(server: &ServerHandle) {
+        assert!(
+            server.shared_network_supervisor.task.as_ref().is_some_and(|task| !task.is_finished())
+        );
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 03-03 D-295-DISTILL-15 control-plane supervisor evidence"]
+    async fn published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop()
+     {
+        let clock = Arc::new(SimClock::new());
+        let intercept = Arc::new(S19Intercept::new());
+        let worker = s19_worker(Arc::clone(&intercept), Arc::clone(&clock));
+        worker.start_shared_owner().await.expect("publish the healthy two-listener owner");
+        worker.audit_shared_owner().await.expect("published owner starts healthy");
+        let addresses = intercept.listener_addresses();
+        assert_eq!(addresses.len(), 2);
+        assert!(addresses.iter().all(|address| address.port() != 0));
+        let healthy_identity = S19Intercept::identity(addresses[0], addresses[1]);
+        assert_eq!(intercept.observation(), Some(healthy_identity));
+        intercept.publish_wrong_leg_f(addresses[0], addresses[1]);
+        let wrong_identity = intercept.observation().expect("canonical wrong target is present");
+
+        let wiring = GuestNetworkExecWiring::new(clock.clone());
+        let exec = wiring.supervisor();
+        assert!(exec.open_after_boot());
+        let shared_owner = Arc::new(S19SharedOwner::default());
+        let shared_port: Arc<dyn guest_network::SharedGuestNetworkOwner> = shared_owner.clone();
+        let shutdown = CancellationToken::new();
+        let task_shutdown = shutdown.clone();
+        let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+        let counts_before = intercept.counts();
+        let task = tokio::spawn(SharedNetworkSupervisorHandle::run_mtls_owner(
+            shared_port,
+            Arc::clone(&worker),
+            Arc::clone(&exec),
+            clock.clone(),
+            request_tx,
+            task_shutdown,
+        ));
+        let owner =
+            SharedNetworkSupervisorHandle::new(request_rx, task, Arc::clone(&exec), shutdown);
+        let mut server = s19_server_handle(owner, Arc::clone(&worker));
+
+        tokio::task::yield_now().await;
+        clock.tick(Duration::from_millis(999));
+        tokio::task::yield_now().await;
+        assert!(exec.recovery_progress().is_none(), "detection never fires before one second");
+        assert_s19_request_empty(&mut server);
+        assert_eq!(intercept.counts(), counts_before);
+        assert!(shared_owner.calls().is_empty());
+        clock.tick(Duration::from_millis(1));
+        wait_for_s19_progress(
+            &exec,
+            SharedGuestNetworkRecovery {
+                component: SharedGuestNetworkComponent::IpRules,
+                attempts: 0,
+                elapsed: Duration::ZERO,
+            },
+        )
+        .await;
+        assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, 0);
+        assert_s19_request_empty(&mut server);
+
+        for attempt in 1..=19 {
+            let prior = Duration::from_millis(u64::from(attempt - 1) * 250);
+            assert_s19_recovery(&exec, attempt - 1, prior);
+            assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, attempt - 1);
+            assert_s19_request_empty(&mut server);
+
+            clock.tick(Duration::from_millis(249));
+            assert_s19_recovery(&exec, attempt - 1, prior + Duration::from_millis(249));
+            assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, attempt - 1);
+            assert_s19_request_empty(&mut server);
+
+            clock.tick(Duration::from_millis(1));
+            wait_for_s19_progress(
+                &exec,
+                SharedGuestNetworkRecovery {
+                    component: SharedGuestNetworkComponent::IpRules,
+                    attempts: attempt,
+                    elapsed: Duration::from_millis(u64::from(attempt) * 250),
+                },
+            )
+            .await;
+            assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, attempt);
+            assert_s19_request_empty(&mut server);
+        }
+
+        assert_s19_recovery(&exec, 19, Duration::from_millis(4_750));
+        clock.tick(Duration::from_millis(249));
+        assert_s19_recovery(&exec, 19, Duration::from_millis(4_999));
+        assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, 19);
+        assert_s19_request_empty(&mut server);
+        clock.tick(Duration::from_millis(1));
+
+        let expected = ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
+            component: SharedGuestNetworkComponent::IpRules,
+            cause: SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+            attempts: 20,
+            elapsed: Duration::from_secs(5),
+        });
+        assert_eq!(server.shutdown_requested().await, expected);
+        assert!(
+            exec.fail_stop(SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded).is_none(),
+            "the production owner already entered FailStop exactly once"
+        );
+        assert!(exec.recovery_progress().is_none(), "FailStop consumes the recovery snapshot");
+        assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, 20);
+        assert_eq!(intercept.observation(), Some(wrong_identity));
+        assert_s19_request_empty(&mut server);
+        assert_s19_supervisor_parked(&server);
+
+        let terminal_counts = intercept.counts();
+        let terminal_calls = shared_owner.calls();
+        clock.tick(Duration::from_secs(5));
+        tokio::task::yield_now().await;
+        assert_eq!(intercept.counts(), terminal_counts, "no twenty-first recovery attempt");
+        assert_eq!(shared_owner.calls(), terminal_calls, "FailStop adds no shared-owner effect");
+        assert_s19_request_empty(&mut server);
+        assert_s19_supervisor_parked(&server);
+
+        server
+            .shutdown(Duration::from_millis(10))
+            .await
+            .expect("the sole terminal ServerHandle owner drains and joins every retained owner");
+        assert_eq!(
+            intercept.counts(),
+            terminal_counts,
+            "supervisor cancellation returns its parked future without worker/intercept effects"
+        );
+        assert_eq!(
+            shared_owner.calls(),
+            terminal_calls,
+            "supervisor cancellation returns without a second shared-owner effect"
+        );
+        assert_eq!(
+            intercept.guard_drops(),
+            0,
+            "sealed terminal relinquishment does not invoke the constant-program guard's Drop"
+        );
+    }
 
     fn supervisor_handle(
         case: SupervisorExitCase,

@@ -191,6 +191,7 @@ pub enum InterceptError {
         operation: InterceptSharedRollbackOperation,
         prior: Option<InterceptPostcondition>,
         requested: InterceptPostcondition,
+        replacement_read_source: Option<NetlinkError>,
         replacement_observed: Option<InterceptPostcondition>,
         #[source]
         source: NetlinkError,
@@ -199,6 +200,8 @@ pub enum InterceptError {
     NftSharedRollbackPostconditionMismatch {
         prior: Option<InterceptPostcondition>,
         requested: InterceptPostcondition,
+        #[source]
+        replacement_read_source: Option<NetlinkError>,
         replacement_observed: Option<InterceptPostcondition>,
         rollback_observed: Option<InterceptPostcondition>,
     },
@@ -207,6 +210,15 @@ pub enum InterceptError {
         prior: Option<InterceptPostcondition>,
         requested: InterceptPostcondition,
         replacement_observed: Option<InterceptPostcondition>,
+    },
+    #[error(
+        "shared mTLS replacement read failed after commit and the exact prior identity was restored"
+    )]
+    NftSharedReplacementReadFailedRolledBack {
+        prior: Option<InterceptPostcondition>,
+        requested: InterceptPostcondition,
+        #[source]
+        replacement_read_source: NetlinkError,
     },
     #[error("shared mTLS set element update failed")]
     NftElementUpdateFailed {

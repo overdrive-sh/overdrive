@@ -3,10 +3,10 @@
     "project_id": "netns-density-295",
     "feature_id": "netns-density-295",
     "created_at": "2026-09-20T12:28:19Z",
-    "goal": "Deliver GH #295: cut VmDriver::new to its accepted seven-argument gate-coupled shape (F-01), stand up the node-shared guest-network owner (shared bridge, TCX classifier plus proof-mark guard, constant nft rules, two node-owned transparent listeners), and activate independently approved DISTILL evidence (S-ND295-00..37, B-ND295-T1-BASE/T1-PORT4) across overdrive-core/control-plane/worker/dataplane/netlink/sim/cli in roadmap order. Revised 02-01 remains blocked while D14's newly authored S-ND295-00 projection, owner-order, and ordinary-boot Lima bodies await independent DISTILL and roadmap review. Delivery closes with the production-composed walking skeleton, recurring conformance, and two attachment-capacity receipts.",
+    "goal": "Deliver GH #295 through the accepted shared bridge/classifier/constant-rule/two-listener architecture and S-ND295-00..37 evidence. P02-15 and P02-20/21/22 acceptance bodies are authored; phase-02 remains blocked pending independent DISTILL/roadmap review. S19 closes only at the existing private control-plane supervisor; no worker reverse edge or public API is added.",
     "total_steps": 11,
     "total_estimate_hours": 214,
-    "estimate_basis": "Phase 01 lands the single dependency-neutral API cut that every gate-coupled scaffold needs (8h). Phase 02 builds three acyclic production slices in dependency order -- the complete shared-switch attachment owner with its classifier, typed TCX lifecycle, and semantic bridge guard (48h); IP-family constant-rule replacement/rollback (10h); and listener/capability lifecycle (30h). The phase-02 total remains 88h; the 2026-09-20 remediation redistributes the prior 28h/30h split so no owner step consumes later-step effects. Phase 03 activates the gate/release/recovery acceptance bodies against those owners (18h + 16h + 26h). Phase 04 proves the whole cut end-to-end on native metal: the walking skeleton (24h), the recurring conformance suite (10h), non-regression plus the Tier-3 timed double-loss scenario (16h), and the two T1 benchmark receipts (8h).",
+    "estimate_basis": "Phase 01 lands the 8h dependency-neutral API cut. Phase 02 remains 88h: shared-switch owner/classifier/guard (48h), shared-IP adapter/rollback/S19-A no-rewrite (10h), and listener/capability publication (30h). Phase 03's existing 18h/16h/26h slices include S19-B in 03-03's retained supervisor recovery matrix. Phase 04 retains walking skeleton, conformance, non-regression/double-loss, and capacity receipts.",
     "design_refs": [
       "docs/feature/netns-density-295/feature-delta.md",
       "docs/feature/netns-density-295/distill/test-scenarios.md",
@@ -27,7 +27,7 @@
     ],
     "delivery_protocol": [
       "Execute in the fixed dependency order 01-01 -> 02-01 -> 02-02 -> 02-03 -> 03-01 -> 03-02 -> 03-03 -> 04-01 -> 04-02 -> 04-03 -> 04-04; every phase-02/03 step needs the shared-owner surface the prior step left compiling.",
-      "Every step activates only the reasoned-#[ignore] bodies its scenario_ids name. A crafter may not weaken, replace, re-author, or repair an acceptance body authored in DISTILL -- only remove the reasoned-pending marker and supply the implementation the body already specifies.",
+      "Every step activates only the reasoned-#[ignore] bodies its scenario_ids name. D15 layered exceptions are explicit: S14..18 pair 02-02 adapter evidence with 02-03 owner closure. S19-A adapter/no-rewrite is independently approvable in 02-02; 02-03 supplies published-worker prerequisite only; 03-03 exclusively closes S19 through the private control-plane supervisor's cadence/deadline/request body. Repeated IDs record required layers, not premature scenario closure. DELIVER never authors or repairs acceptance bodies.",
       "The feature delta (feature-delta.md) pins the exact public/private contract, including every doc-hidden port. Any new public method, type, port, error variant, or persisted field beyond what feature-delta.md names is a blocker -- surface it, do not improvise a shape (root CLAUDE.md, 'Implement to the design').",
       "Each step's crafter runs the Lima-routed compile/clippy/nextest gates named in its verification list before requesting review; each reviewer records deliver/review-<step-id>.md with APPROVED before advancement.",
       "Mutation testing (cargo xtask mutants) is the single final DELIVER gate after every roadmap step and review per .claude/rules/testing.md -- it is never run per step.",
@@ -105,7 +105,7 @@
     {
       "id": "02",
       "name": "Node-shared guest-network infrastructure: complete shared-switch owner, IP intercept program, listener/capability lifecycle",
-      "description": "Build three acyclic slices: 02-01 owns the complete shared-switch attachment owner, classifier, typed TCX lifecycle, and bridge guard; 02-02 owns IP-family rule/set replacement and rollback; 02-03 owns shared listeners and capabilities. Revised 02-01 waits for independent review of the authored remediation bodies and roadmap approval.",
+      "description": "Build three acyclic slices: 02-01 owns the shared switch/classifier/guard; 02-02 owns D15 adapter/rollback/unpublished guard plus S19-A no-rewrite; 02-03 owns listener publication, one worker conflict trigger, relinquish, and capabilities. Runtime cadence/deadline/fail-stop remains 03-03. Validation is pending.",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
       "depends_on": [
@@ -228,20 +228,21 @@
         {
           "id": "02-02",
           "name": "Shared IP intercept constant-rule replacement and rollback",
-          "description": "Implement only PORT-295-C/C-295-C's fresh-process IP-family constant-rule/set replacement and S2-F01's atomic rollback contract in the worker's MtlsIntercept host adapter: converge_shared/observe_shared over the already-approved private SharedInterceptProgramIo seam. The classifier, D-295-DISTILL-6 TCX adapter, and D-295-DISTILL-9 bridge guard are complete prerequisites owned and approved in 02-01. Activates S-ND295-14..19.",
+          "description": "Implement D15's shared-IP semantic adapter, rollback, guard cleanup, and S19-A canonical wrong-target no-rewrite evidence. S14..18 still require 02-03 owner closure; S19 publication is a 02-03 prerequisite and cadence/deadline/fail-stop closes only in 03-03.",
           "agent": "nw-software-crafter",
           "deps": [
             "02-01"
           ],
           "estimate_hours": 10,
           "criteria": [
-            "MtlsIntercept gains exactly converge_shared(prior, leg_f, leg_c) -> Result<Box<dyn InterceptGuard>> and observe_shared() -> Result<Option<InterceptPostcondition>> alongside the unchanged bind_transparent/install_outbound/install_inbound; observe_shared is a non-mutating complete dump returning None only for genuine absence (any partial/foreign/duplicate/malformed identity is a typed error, never absence); converge_shared requires the live observation to equal the caller's prior snapshot, atomically creates/adopts the three sets and eight normalized rules for the exact passed targets, reads them back, and returns one node-scoped guard owning only those shared objects; reapplying identical targets is idempotent.",
-            "The fresh-process target-recovery ordering in S2-F01 is implemented exactly: BootClosed + zero-managed-TAP precondition -> observe_shared dump without mutation -> fresh port-zero F/C binds -> converge_shared with the captured prior identity replacing only the two owned TPROXY target ports while preserving every other rule/set/userdata/foreign object -> full read-back of both sockets, three sets, eight constant rules, two new target ports, and zero dynamic-element complement -> publish and open_after_boot only after every read-back passes; port zero is never used at runtime and runtime never invokes this branch.",
-            "The four disjoint rollback outcomes are source-honest exactly as ERR-295-A/PORT-295-C pin them: NftSharedReplaceFailed (batch rejected, prior state intact); NftSharedReplacementMismatchRolledBack (mismatch + rollback committed and read back equal to prior, including prior = None meaning first-boot create rolled back to absence -- source-less); NftSharedRollbackFailed (a genuine lower-level rollback write/read NetlinkError, tagged RestorePrior or ReadBackPrior); NftSharedRollbackPostconditionMismatch (rollback write+read both succeeded but the read-back differs from prior -- deliberately source-less, no fabricated NetlinkError). Runtime converge_shared_owner never passes port zero, recreates only a missing owned rule at the same recorded target, and treats a present owned rule with a different target as a conflict that consumes the bounded 250ms/5s retry.",
-            "S-ND295-14..19 (constant-rule replacement, refusal, exact rollback, source-honest rollback failure, semantic mismatch, and runtime no-rewrite) plus the Tier-3 normalized read-back bodies are activated against the real host adapter -- no acceptance body is weakened, replaced, or re-authored."
+            "MtlsIntercept remains exactly the accepted five-method C-295-C surface. SharedInterceptProgramIo and its cfg(test)-only constructor remain module-private; converge_shared has no runtime-mode parameter. Runtime callers are neither implemented nor credited in this step.",
+            "overdrive-netlink exposes exactly D-295-DISTILL-15's doc-hidden SharedIpInterceptIdentity with for_listener_ports/from_normalized_parts/normalized_parts plus observe_shared_ip_intercept and replace_shared_ip_intercept_atomically. Fields and observed handles stay private; no nft::ip bundle, family parameter, raw builder, observed-handle type, or AtomicRuleMutation variant is added.",
+            "The real adapter uses exact ipv4_addr and aligned ipv4_addr . inet_service schemas; observes one generation-consistent complete semantic identity; compares without handles; commits complete absence/create, target replacement, or conditional deletion in one nft batch; rejects partial/foreign/duplicate/malformed/non-empty dynamic state without mutation; and preserves unrelated foreign tables.",
+            "After initial (prior, Some(requested)) commits, desired semantic mismatch rolls back from replacement_observed while desired read Err rolls back conditionally from requested. Exactly one rollback/read follows. Exact semantic restoration returns source-less NftSharedReplacementMismatchRolledBack; exact restoration after read Err returns NftSharedReplacementReadFailedRolledBack with that source; rollback write/read failure retains optional earlier replacement_read_source plus its separate operation-tagged source; rollback semantic mismatch retains its observation and optional earlier source. Both prior Some and None are mandatory; no source is fabricated/lost and no second replacement occurs.",
+            "The authored S14..18 bodies remain binding. S19-A adds source-local runtime_present_wrong_target_and_observe_error_are_non_mutating plus Lima shared_program_valid_wrong_target_observation_is_non_mutating. Public observe_shared returns Ok(Some(canonical_wrong_target)); malformed/lower observation returns existing typed NftRuleInstallFailed. Both snapshot exact owned/dynamic/foreign complements and prove zero bind/replace/notification. PostconditionMismatch begins only in 02-03; 02-02 claims no publication, retry, deadline, or fail-stop."
           ],
           "test_file": "crates/overdrive-worker/src/mtls_intercept_port.rs",
-          "scenario_name": "shared_program_rollback_acceptance::replacement_and_every_rollback_disposition_preserve_exact_identity_and_source",
+          "scenario_name": "S14..18 authored D15 bodies plus S19-A {runtime_present_wrong_target_and_observe_error_are_non_mutating,shared_program_valid_wrong_target_observation_is_non_mutating}",
           "scenario_ids": [
             "S-ND295-14",
             "S-ND295-15",
@@ -257,18 +258,24 @@
             "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(shared_program_rollback_acceptance)' --no-fail-fast",
-            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(mtls_intercept_install)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::runtime_present_wrong_target_and_observe_error_are_non_mutating)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest show-config test-groups -p overdrive-worker --test integration --features integration-tests --run-ignored all --groups host-kernel-shared -E 'test(=integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop) or test(=integration::mtls_intercept_install::shared_program_replaces_only_listener_targets_and_preserves_foreign_complement) or test(=integration::mtls_intercept_install::shared_program_refuses_ambiguous_owned_state_without_mutation) or test(=integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating)' --no-pager",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_replaces_only_listener_targets_and_preserves_foreign_complement)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_refuses_ambiguous_owned_state_without_mutation)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
-            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
-            "cargo verifier-regress"
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "This step starts only after revised 02-01 is independently APPROVED. It owns the worker's IP-family eight-rule/three-set program and optional-prior replacement/read-back/rollback algorithm, not any TCX or bridge-family guard behavior. Rollback bodies are source-honest by construction: never add a source to NftSharedRollbackPostconditionMismatch or NftSharedReplacementMismatchRolledBack, and never represent prior absence with a fabricated empty program. Do not invent MtlsIntercept surface beyond the exact five-method C-295-C fence; SharedInterceptProgramIo and its cfg(test)-only constructor are the sole sanctioned private test seam. Existing IPv4 APIs may share the private family-aware codec landed in 02-01, but this step adds no public family parameter and does not modify the approved D6/D9 surface."
+          "implementation_notes": "This step starts only after P02-15 DESIGN, S19-A acceptance authoring, DISTILL, and roadmap approval. It owns adapter/algorithm/guard behavior only. S19-A is independently approvable and cannot be rejected for missing control-plane runtime evidence; the repeated S19 ID records layering. DELIVER must not author/repair bodies or add a runtime mode, clock, retry loop, fail-stop request, public API, or control-plane dependency."
         },
         {
           "id": "02-03",
           "name": "Node-shared leg-F/leg-C listener owner and private capability registry",
-          "description": "Implement MtlsInterceptWorker's node-shared listener lifecycle (start_shared_owner/wait_shared_owner_failure/converge_shared_owner/audit_shared_owner/shutdown_owner plus per-allocation start_alloc/stop_alloc) over C-295-L, and the module-private D-295-DISTILL-7 CapabilityRegistry state machine (checked generation, Pending/Active/Retiring, RAII claims, publication fence, scoped drain, address-reuse exclusion) with GEN-295-A's checked_add(1)-then-publish generation ownership and PORT-295-C's userspace source/destination registry. Activates S-ND295-20..26.",
+          "description": "Implement C-295-L's node-shared worker and D7 capability registry. Complete S14..18 owner closure, publish/retain the S19 worker prerequisite and one observe-only conflict trigger, and activate S20..26. Control-plane retry/deadline/fail-stop remains exclusively 03-03.",
           "agent": "nw-software-crafter",
           "deps": [
             "02-02"
@@ -276,7 +283,8 @@
           "estimate_hours": 30,
           "criteria": [
             "The node listener owner binds exactly one leg-F and one leg-C transparent TCP listener that survive every allocation stop and close only with their node owner; they are ordinary node-owned sockets recreated at boot, never pinned/adopted per-allocation state.",
-            "start_shared_owner captures observe_shared, binds F and C once at the boot owner boundary, records both concrete non-zero SocketAddrV4 values, calls converge_shared with the captured prior identity, retains its node-scoped guard, starts exactly two accept tasks, and audits both socket and rule identities before returning; a partial bind/rule/task-start failure closes every listener, rule guard, and task acquired by that invocation and refuses boot without ever publishing a half-started owner.",
+            "start_shared_owner proves BootClosed and zero managed TAPs through their accepted owners, captures observe_shared, binds F and C once, records both concrete non-zero SocketAddrV4 values, calls converge_shared only on this fresh-process path, retains the node guard, starts exactly two accept tasks, and publishes/opens only after socket/rule audit; every S-ND295-14..18 failure closes tasks/listeners, drops unpublished guard ownership, leaves EXEC BootClosed, and publishes nothing.",
+            "audit_shared_owner and one converge_shared_owner call compare observe_shared only with the recorded exact target: they never call fresh-process converge_shared, bind port zero, recreate a rule, or substitute a target. The current canonical wrong-target body proves this conflict plus retained guard/relinquish as prerequisite coverage only; the worker owns no clock, retry cadence, deadline, or typed fail-stop request.",
             "Leg F resolves the accepted socket's validated source guest address to an immutable (AllocationId, generation, SpiffeId) capability and separately recovers the original destination; leg C resolves the recovered destination IPv4 to one destination registration, requires the recovered TCP port in allowed_ports, then captures that capability; unknown IP or disallowed port closes fail-closed; an accepted predecessor connection is never re-looked-up or re-attributed to an address-reuse successor.",
             "CapabilityRegistry::begin_registration performs checked_add(1) before any reservation or kernel effect (returning MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX } with no registry/nft effect on overflow, u64::MAX never minted), then atomically reserves the allocation/source/destination keys as Pending; a conflicting Pending/Active/Retiring key returns RegistrationConflict before element acquisition.",
             "PendingCapability::activate re-enters the lock: if still Pending it moves guards into the record, transitions Pending -> Active, publishes claimable source/destination indexes atomically, wakes waiters, and returns Activated; if retirement already owns the generation it moves guards into the Retiring record, publishes no index, and returns Retired -- and MtlsInterceptWorker::start_alloc projects Retired to exactly `MtlsInterceptInstallError::RegistrationRetired { alloc_id }`, never Ok(()), with stage projection `\"registration_retired\"`.",
@@ -284,13 +292,19 @@
             "begin_retire is idempotent and marks the exact record/generation Retiring, removing claimable indexes immediately for Active or transferring retirement ownership for Pending; wait_for_claims holds no mutex while waiting and yields CapabilityDrain only once in_flight == 0 and the pending-owner flag is clear; stop_alloc drains only that generation's handles/elements via CapabilityDrain::take_handles/take_elements/complete, removes the recorded 2+P nft elements with read-back, tears down TAP/TCX/guard membership, and releases the address last -- unrelated handles/capabilities and both shared listeners remain live throughout.",
             "Address reuse is remove-before-reassign: predecessor registrations and its active generation are gone before successor registration is accepted; a successor using the same address is refused until the predecessor's drain completes.",
             "A production-path test (or focused integration case) holds real enforcement across a retirement race after claim, returns a real handle, and observes awaited teardown with zero publication -- closing the one race Part D's spike evidence did not execute.",
-            "shutdown_owner closes both listener admissions, retires all exact capabilities, waits every in-flight claim, drains every published handle, removes their allocation elements, joins both accept tasks, closes both listener sockets, then deliberately relinquishes the node-scoped shared-rule guard without deleting the constant rules/empty sets, preserving the listenerless mark/local-route fail-closed state until next-boot revalidation.",
-            "S-ND295-20..26 (two-listener owner start, atomic capability/port membership, generation exhaustion, late-handle fence, address reuse, isolated allocation stop, and owner shutdown) are activated against the real registry and worker, including the D-295-DISTILL-7 model tables and Tier-3 real-listener/enforcement cases for S-ND295-25 -- no acceptance body is weakened, replaced, or re-authored.",
+            "shutdown_owner closes both listener admissions, retires all exact capabilities, waits every in-flight claim, drains every published handle, removes their allocation elements, joins both accept tasks, closes both listener sockets, then its private sealed path consumes and deliberately forgets the erased node-guard box so Drop cannot delete the constant empty program; no InterceptGuard method, downcast, or public disarm/relinquish operation is added.",
+            "At execution, owner portions of S14..18 and S20..26 activate against the real registry/worker. The repeated S19 ID records only publication/conflict/relinquish prerequisite evidence; 03-03 closes S19. D7/Tier-3 cases remain mandatory, and DELIVER never authors or repairs acceptance bodies.",
             "The pre-existing real-enforcement zero-copy regression suite (crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::outbound_enforce_substrate_bidirectional_splice_zero_copy) remains green and unmodified against the new CapabilityRegistry-backed listener owner -- capability retirement itself is new #295 surface covered by this step's own criteria (begin_retire, wait_for_claims, the production-path retirement-race test above), not a pre-existing suite this step must merely preserve."
           ],
           "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
-          "scenario_name": "lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds",
+          "scenario_name": "existing netns_density_shared_owner start/refusal bodies plus non-closing published_wrong_shared_target_is_observe_only_until_bounded_fail_stop prerequisite",
           "scenario_ids": [
+            "S-ND295-14",
+            "S-ND295-15",
+            "S-ND295-16",
+            "S-ND295-17",
+            "S-ND295-18",
+            "S-ND295-19",
             "S-ND295-20",
             "S-ND295-21",
             "S-ND295-22",
@@ -308,13 +322,18 @@
             "crates/overdrive-sim/src/adapters/mtls_intercept.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_shared_owner) or test(capability_registry_acceptance) or test(shared_listener_task_owner_acceptance)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::published_wrong_shared_target_is_observe_only_until_bounded_fail_stop)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(capability_registry_acceptance) or test(shared_listener_task_owner_acceptance)' --no-fail-fast",
             "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(mtls_intercept_equivalence)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
             "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(outbound_enforce_substrate_bidirectional_splice_zero_copy)' --no-fail-fast"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: CapabilityRegistry is exactly the feature delta's 'Node-shared capability register/claim/publish/retire' bounded-change row -- its closed universe is named field-by-field (generation counter, Pending/Active/Retiring reservations, pending-owner flag, source/destination indexes, in-flight count, published handles, waiter notifications, completion fence); drive it with seeded state-machine proptests over interleaved begin_registration/claim/publish/begin_retire/drop call orders and assert the declared universe via assert_always!-shaped invariants (no drain before in_flight==0 and pending-owner clear; no reservation released until Pending atomically activates or relinquishes). Do not add a public generation setter, lifecycle hook, or second test registry -- CapabilityRegistry::with_next_generation is #[cfg(test)]-only and module-private. Do not invent MtlsInterceptWorker public methods beyond the exact seven-method surface in C-295-L's F-03 fence."
+          "implementation_notes": "CapabilityRegistry remains the accepted bounded-change state machine. D15/P02-15 is binding: 02-03 owns boot gating, publication refusal, one observe-only wrong-target conflict, and private guard relinquish; it must not add a clock, retry loop, deadline, request sender, runtime mode, public guard operation, or control-plane dependency. S19 closure belongs to 03-03's existing private supervisor."
         }
       ]
     },
@@ -401,7 +420,7 @@
         {
           "id": "03-03",
           "name": "Retained supervisor: owner-port recovery matrix, run_server composition, and DNS task lifecycle",
-          "description": "Use ordinary run_server's already-composed real HostSharedGuestNetworkOwner and the cumulative vm_host_state/shared_guest_network/guest_network_exec helper signature completed in step 02-01; land D-295-DISTILL-8's retained SharedNetworkSupervisorHandle owning the sole join, request receiver, paired EXEC supervisor, and intentional-shutdown token; drive RUN-295-B's full bounded-reconvergence-then-fail-stop matrix (bridge, listeners, DNS, TCX/maps/pins, nft guard) and re-home DnsResponder to the shared-bridge gateway with its private DnsServeTaskOwner. Activates S-ND295-29..32 and S-ND295-34.",
+          "description": "Land D8's retained private supervisor and DNS owner over the existing production composition. Drive RUN-295-B's complete recovery matrix and close S19's canonical wrong-target 250ms/5s typed fail-stop through the private control-plane mTLS future. Activates S19, S29..32, and S34.",
           "agent": "nw-software-crafter",
           "deps": [
             "03-02"
@@ -410,16 +429,21 @@
           "criteria": [
             "Ordinary run_server already constructs and supplies the one real HostSharedGuestNetworkOwner from step 02-01. The injected helpers' cumulative signature is vm_host_state: Arc<dyn VmHostState>, shared_guest_network: Arc<dyn SharedGuestNetworkOwner>, guest_network_exec: GuestNetworkExecWiring exactly per D-295-DISTILL-1/13 and needs no change in this step.",
             "SharedNetworkSupervisorHandle is the sole module-private ServerHandle field holding request_rx, the retained task JoinHandle, the paired GuestNetworkExecSupervisor, and a CancellationToken; ServerHandle's already-public shutdown_requested delegates to it and adds no new public method.",
+            "SharedNetworkSupervisorHandle::run_mtls_owner(shared_guest_network, mtls_worker, exec, clock, request_tx, shutdown) is a module-private production future polled by the sole supervisor task, never a spawned second supervisor or test seam. The same private function is callable only from the source-local control-plane acceptance module; no public API or worker reverse dependency is added.",
             "The one-second kernel audit and 250ms-retry/5s-fail-stop reconvergence loop is implemented exactly per RUN-295-B's table: a bridge/TAP-membership, leg-F/leg-C listener, DNS-loop, or TCX-link/map/pin mismatch each closes EXEC release, quiesces every managed TAP down before repair (or cgroup-kills and fail-stops if quiesce cannot be confirmed), and a pure listener/DNS task exit does not require TAP-down; listener recovery only ever rebinds the exact previously recorded address/port and never rewrites an nft target or replaces a port.",
+            "S19-B proves exact cadence with time independent of attempts: after detection assert 0/0. Before each n-th deadline assert attempts=n-1, elapsed=(n-1)*250ms, empty request. After 249ms attempts/journal/request stay fixed while elapsed equals prior+249ms. Final 1ms exposes Recovering n/n*250ms only for n=1..19. At 4,999ms attempts remain 19/no request; at 5,000ms attempt 20 is observed solely as one exact IpRules/RecoveryDeadlineExceeded/20/5s FailStop request, never required Recovering(20). Later time yields no attempt 21/second request; >=/batching are forbidden.",
+            "S19-B's pre-terminal journals are exact: shared_owner.calls() == [TapSetDown] (the one RUN-295-B-designed quiesce) and the intercept delta is bind=0, fresh-converge=0, observe=21 (one detection plus twenty attempts), guard_drop=0. Provision, teardown, startup probe, sweep, shared-switch converge/audit, repeat quiesce, element install, and relinquish are absent until the terminal-owner phase.",
+            "After the typed request, run_mtls_owner remains parked and never shuts down the worker. The source-local body receives the request through a real private-field ServerHandle fixture and invokes existing ServerHandle::shutdown(drain_deadline), whose established terminal step awaits mtls_worker_owner.shutdown_owner (drain plus sealed relinquish), then resolver shutdown, then shared_network_supervisor.shutdown cancellation/join. Return proves join; guard retention is asserted before, and the exact journal plus zero guard Drop remain unchanged after, with no post-terminal audit adding a twenty-second observe.",
             "S-ND295-29 (lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds) and S-ND295-30 (occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port) both pass against the real retained supervisor and worker, proving the exact-port recovery contract and its EADDRINUSE refusal with no alternate port ever selected.",
             "D8's actual-Tokio-primitive matrix is exercised across every one of the twelve SharedGuestNetworkComponent snapshot components: task return, I/O error, panic, cancellation, and channel-close each classify to the correct typed cause with no fabricated consequence.",
             "DnsResponder::new's third dependency changes from NetSlotAllocator to the shared-bridge gateway Ipv4Addr; probe() binds 0.0.0.0:53 first and falls back to exactly <shared-gateway>:53 on EADDRINUSE; all other constructor dependencies and the probe/serve surface remain unchanged; DnsServeTaskOwner classifies live/exited task replacement, intentional shutdown, and invalid-state transitions and replaces only the exact recovered task.",
             "S-ND295-31A and S-ND295-31B (the two distinct actual-socket-state bodies) and S-ND295-32 (typed handler fail-stop) are activated; S-ND295-34's Tier-3 real shared-gateway UDP bind/wire evidence is produced under cargo xtask metal run --.",
             "No acceptance body across S-ND295-29..32 or S-ND295-34 is weakened, replaced, or re-authored; every reasoned-#[ignore] marker these scenarios named is removed only by supplying the real implementation."
           ],
-          "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
-          "scenario_name": "occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port",
+          "test_file": "crates/overdrive-control-plane/src/lib.rs",
+          "scenario_name": "shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop plus retained recovery/task matrix",
           "scenario_ids": [
+            "S-ND295-19",
             "S-ND295-29",
             "S-ND295-30",
             "S-ND295-31A",
@@ -433,14 +457,15 @@
             "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_network_task_owner_acceptance)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(=shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(shared_network_task_owner_acceptance)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_shared_owner)' --no-fail-fast",
             "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(dns_responder_bind)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(interest_router_run_server) or test(node_health_writer_runs_at_boot) or test(observation_empty_rows) or test(convergence_loop_spawned_in_production_boot)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking (assert on a declared universe of what changed vs. what's asserted unchanged) take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: NEW code = Stage 0. Translate to Rust: the twelve-component fail-stop/recovery matrix is a finite closed table -- use table-driven tests over every (SharedGuestNetworkComponent, detection signal) pair and pair with real Tokio task join/panic/cancel fixtures. The run_server_with_obs_and_driver(s) signature and real owner composition are no longer this step's concern: step 01-01 added the shared-owner/EXEC surface and revised 02-01 completed D13's VmHostState parameter plus the real owner cut. This step lands only the retained supervisor, DNS task owner, and reconvergence/fail-stop behavior around them."
+          "implementation_notes": "The twelve-component matrix remains table-driven. P02-20/21/22 remediation changes assertions only. Test advances SimClock: 249ms must change elapsed but nothing else; the last 1ms triggers the attempt. Recovering equality is required only through attempt 19; request 20/5s is the terminal receipt. Invoke existing ServerHandle::shutdown for ownership. Do not add worker shutdown to run_mtls_owner, freeze elapsed, require Recovering(20), add effects, expose a hook, or duplicate retries."
         }
       ]
     },
@@ -635,7 +660,7 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "D-295-DISTILL-14/14A approved by independent DESIGN reviews through iteration 11. Transitioned D14A DISTILL evidence approved by bounded acceptance review iteration 8 and platform review; prior phase-02 product and architecture approvals remain in force. Existing user waiver and unrelated whole-roadmap exclusions are unchanged.",
-    "approved_at": "2026-09-21T08:16:22Z"
+    "reviewer": "D-295-DISTILL-15 and P02-15/18/19/20/21/22 approved by independent DESIGN reviews through iteration 20. Final layered S14-S19 DISTILL evidence approved by acceptance review iteration 13 and platform review; paired source-local/Lima evidence and 02-03/03-03 ownership are exact.",
+    "approved_at": "2026-09-21T19:52:37Z"
   }
 }

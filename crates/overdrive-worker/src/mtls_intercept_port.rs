@@ -346,6 +346,7 @@ impl HostMtlsIntercept {
                 operation: InterceptSharedRollbackOperation::ReadBackPrior,
                 prior: prior.clone(),
                 requested: requested.clone(),
+                replacement_read_source: None,
                 replacement_observed: None,
                 source,
             }
@@ -363,6 +364,7 @@ impl HostMtlsIntercept {
                 operation: InterceptSharedRollbackOperation::RestorePrior,
                 prior: prior.clone(),
                 requested: requested.clone(),
+                replacement_read_source: None,
                 replacement_observed: replacement_observed.clone(),
                 source,
             })?;
@@ -372,6 +374,7 @@ impl HostMtlsIntercept {
                 operation: InterceptSharedRollbackOperation::ReadBackPrior,
                 prior: prior.clone(),
                 requested: requested.clone(),
+                replacement_read_source: None,
                 replacement_observed: replacement_observed.clone(),
                 source,
             }
@@ -386,6 +389,7 @@ impl HostMtlsIntercept {
         Err(InterceptError::NftSharedRollbackPostconditionMismatch {
             prior,
             requested,
+            replacement_read_source: None,
             replacement_observed,
             rollback_observed,
         })
@@ -541,9 +545,15 @@ impl MtlsIntercept for HostMtlsIntercept {
 }
 
 #[cfg(test)]
-#[allow(clippy::doc_markdown, clippy::expect_used)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::significant_drop_tightening,
+    reason = "stateful acceptance fixture holds its private universe lock for each atomic port call"
+)]
 mod shared_program_rollback_acceptance {
     use std::collections::VecDeque;
+    use std::error::Error as _;
 
     use parking_lot::Mutex;
 
@@ -605,15 +615,794 @@ mod shared_program_rollback_acceptance {
 
     fn program(port: u16) -> InterceptPostcondition {
         InterceptPostcondition::ConstantRules {
-            table_and_chains: vec![b"table-and-chains".to_vec()],
-            sets: vec![b"three-set-schemas".to_vec()],
-            prerouting: vec![format!("leg-f:{port}").into_bytes()],
-            output: vec![format!("leg-c:{}", port + 1).into_bytes()],
+            table_and_chains: vec![
+                b"table:overdrive-mtls".to_vec(),
+                b"chain:prerouting".to_vec(),
+                b"chain:output".to_vec(),
+            ],
+            sets: vec![
+                b"set:managed_guest_ips:ipv4_addr".to_vec(),
+                b"set:outbound_sources:ipv4_addr".to_vec(),
+                b"set:inbound_destinations:ipv4_addr.inet_service".to_vec(),
+            ],
+            prerouting: vec![
+                b"rule:prerouting:0:leg-s-exemption".to_vec(),
+                format!("rule:prerouting:1:leg-f:{port}").into_bytes(),
+                b"rule:prerouting:2:unregistered-source-drop".to_vec(),
+                format!("rule:prerouting:3:leg-c:{}", port + 1).into_bytes(),
+                b"rule:prerouting:4:managed-guest-drop".to_vec(),
+            ],
+            output: vec![
+                b"rule:output:0:leg-s-exemption".to_vec(),
+                b"rule:output:1:registered-destination-mark".to_vec(),
+                b"rule:output:2:managed-guest-drop".to_vec(),
+            ],
         }
+    }
+
+    fn canonical_program(forward_port: u16, capture_port: u16) -> InterceptPostcondition {
+        let (table_and_chains, sets, prerouting, output) =
+            overdrive_netlink::nft::SharedIpInterceptIdentity::for_listener_ports(
+                forward_port,
+                capture_port,
+            )
+            .expect("non-zero D15 targets form one canonical identity")
+            .normalized_parts();
+        InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
     }
 
     fn netlink_error(op: &'static str, errno: i32) -> NetlinkError {
         NetlinkError::nft(op, std::io::Error::from_raw_os_error(errno))
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum StatefulStep {
+        ObserveCurrent,
+        ObserveError { operation: &'static str, errno: i32 },
+        ObserveState(Option<InterceptPostcondition>),
+        ReplaceCommit,
+        ReplaceError { operation: &'static str, errno: i32 },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum MutationDisposition {
+        Committed,
+        Rejected { operation: &'static str, errno: i32 },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ConditionalMutation {
+        expected_current: Option<InterceptPostcondition>,
+        desired: Option<InterceptPostcondition>,
+        disposition: MutationDisposition,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum ObservationDisposition {
+        Returned(Option<InterceptPostcondition>),
+        Failed { operation: &'static str, errno: i32 },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SharedProgramUniverse {
+        owned_program: Option<InterceptPostcondition>,
+        dynamic_elements: [Vec<Vec<u8>>; 3],
+        foreign_objects: Vec<Vec<u8>>,
+        observations: Vec<ObservationDisposition>,
+        conditional_mutations: Vec<ConditionalMutation>,
+        remaining_fault_schedule: VecDeque<StatefulStep>,
+    }
+
+    struct StatefulIo {
+        universe: Mutex<SharedProgramUniverse>,
+    }
+
+    impl StatefulIo {
+        fn new(
+            owned_program: Option<InterceptPostcondition>,
+            steps: impl IntoIterator<Item = StatefulStep>,
+        ) -> Self {
+            Self {
+                universe: Mutex::new(SharedProgramUniverse {
+                    owned_program,
+                    dynamic_elements: [
+                        vec![b"managed:100.95.0.2".to_vec()],
+                        vec![b"source:100.95.0.2".to_vec()],
+                        vec![b"destination:100.95.0.2:8443".to_vec()],
+                    ],
+                    foreign_objects: vec![
+                        b"table:foreign-sentinel".to_vec(),
+                        b"rule:foreign-sentinel:accept".to_vec(),
+                    ],
+                    observations: Vec::new(),
+                    conditional_mutations: Vec::new(),
+                    remaining_fault_schedule: steps.into_iter().collect(),
+                }),
+            }
+        }
+
+        fn snapshot(&self) -> SharedProgramUniverse {
+            self.universe.lock().clone()
+        }
+
+        fn next_step(
+            universe: &mut SharedProgramUniverse,
+            operation: &'static str,
+        ) -> std::result::Result<StatefulStep, NetlinkError> {
+            universe
+                .remaining_fault_schedule
+                .pop_front()
+                .ok_or_else(|| netlink_error(operation, libc::EPROTO))
+        }
+    }
+
+    impl SharedInterceptProgramIo for StatefulIo {
+        fn observe(&self) -> std::result::Result<Option<InterceptPostcondition>, NetlinkError> {
+            let mut universe = self.universe.lock();
+            match Self::next_step(&mut universe, "unexpected-observe")? {
+                StatefulStep::ObserveCurrent => {
+                    let observed = universe.owned_program.clone();
+                    universe.observations.push(ObservationDisposition::Returned(observed.clone()));
+                    Ok(observed)
+                }
+                StatefulStep::ObserveError { operation, errno } => {
+                    universe.observations.push(ObservationDisposition::Failed { operation, errno });
+                    Err(netlink_error(operation, errno))
+                }
+                StatefulStep::ObserveState(observed) => {
+                    universe.owned_program.clone_from(&observed);
+                    universe.observations.push(ObservationDisposition::Returned(observed.clone()));
+                    Ok(observed)
+                }
+                StatefulStep::ReplaceCommit | StatefulStep::ReplaceError { .. } => {
+                    Err(netlink_error("observe-out-of-order", libc::EPROTO))
+                }
+            }
+        }
+
+        fn replace_atomically(
+            &self,
+            expected_current: Option<&InterceptPostcondition>,
+            desired: Option<&InterceptPostcondition>,
+        ) -> std::result::Result<(), NetlinkError> {
+            let mut universe = self.universe.lock();
+            let expected_current = expected_current.cloned();
+            let desired = desired.cloned();
+            if universe.owned_program != expected_current {
+                universe.conditional_mutations.push(ConditionalMutation {
+                    expected_current,
+                    desired,
+                    disposition: MutationDisposition::Rejected {
+                        operation: "conditional-identity-mismatch",
+                        errno: libc::EAGAIN,
+                    },
+                });
+                return Err(netlink_error("conditional-identity-mismatch", libc::EAGAIN));
+            }
+            match Self::next_step(&mut universe, "unexpected-replace")? {
+                StatefulStep::ReplaceCommit => {
+                    universe.conditional_mutations.push(ConditionalMutation {
+                        expected_current,
+                        desired: desired.clone(),
+                        disposition: MutationDisposition::Committed,
+                    });
+                    universe.owned_program = desired;
+                    Ok(())
+                }
+                StatefulStep::ReplaceError { operation, errno } => {
+                    universe.conditional_mutations.push(ConditionalMutation {
+                        expected_current,
+                        desired,
+                        disposition: MutationDisposition::Rejected { operation, errno },
+                    });
+                    Err(netlink_error(operation, errno))
+                }
+                StatefulStep::ObserveCurrent
+                | StatefulStep::ObserveError { .. }
+                | StatefulStep::ObserveState(_) => {
+                    Err(netlink_error("replace-out-of-order", libc::EPROTO))
+                }
+            }
+        }
+    }
+
+    fn assert_nft_source(error: &NetlinkError, operation: &'static str, errno: i32) {
+        assert!(
+            matches!(
+                error,
+                NetlinkError::Nft { op, source }
+                    if *op == operation && source.raw_os_error() == Some(errno)
+            ),
+            "expected nft {operation}/{errno}, observed {error:?}"
+        );
+    }
+
+    fn assert_error_chain_source(error: &InterceptError, expected: Option<(&'static str, i32)>) {
+        match (error.source(), expected) {
+            (Some(source), Some((operation, errno))) => {
+                let source = source
+                    .downcast_ref::<NetlinkError>()
+                    .expect("D15 InterceptError source remains the typed NetlinkError");
+                assert_nft_source(source, operation, errno);
+            }
+            (None, None) => {}
+            (actual, expected) => {
+                panic!("wrong D15 error-chain source: expected {expected:?}, got {actual:?}")
+            }
+        }
+    }
+
+    fn assert_program_target_only_delta(
+        prior: &InterceptPostcondition,
+        requested: &InterceptPostcondition,
+    ) {
+        let (
+            InterceptPostcondition::ConstantRules {
+                table_and_chains: prior_tables,
+                sets: prior_sets,
+                prerouting: prior_prerouting,
+                output: prior_output,
+            },
+            InterceptPostcondition::ConstantRules {
+                table_and_chains: requested_tables,
+                sets: requested_sets,
+                prerouting: requested_prerouting,
+                output: requested_output,
+            },
+        ) = (prior, requested)
+        else {
+            panic!("stateful shared-IP fixture uses only constant-rule identities")
+        };
+        assert_eq!(prior_tables, requested_tables);
+        assert_eq!(prior_sets, requested_sets);
+        assert_eq!(prior_output, requested_output);
+        assert_eq!(prior_prerouting.len(), 5);
+        assert_eq!(requested_prerouting.len(), 5);
+        for index in [0, 2, 4] {
+            assert_eq!(prior_prerouting[index], requested_prerouting[index]);
+        }
+        for index in [1, 3] {
+            assert_ne!(prior_prerouting[index], requested_prerouting[index]);
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the finite table is the closed two-prior by two-trigger by four-rollback-outcome contract"
+    )]
+    fn shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior() {
+        #[derive(Clone, Copy, Debug)]
+        enum Trigger {
+            SemanticMismatch,
+            DesiredReadFailure,
+        }
+
+        #[derive(Clone, Copy, Debug)]
+        enum RollbackOutcome {
+            WriteFailure,
+            ReadFailure,
+            ExactRestoration,
+            SemanticMismatch,
+        }
+
+        let requested = program(20_000);
+        let wrong_replacement = program(21_000);
+        let wrong_rollback = program(18_000);
+
+        for prior in [None, Some(program(19_000))] {
+            for trigger in [Trigger::SemanticMismatch, Trigger::DesiredReadFailure] {
+                for rollback in [
+                    RollbackOutcome::WriteFailure,
+                    RollbackOutcome::ReadFailure,
+                    RollbackOutcome::ExactRestoration,
+                    RollbackOutcome::SemanticMismatch,
+                ] {
+                    let semantic_replacement_observed =
+                        if prior.is_some() { None } else { Some(wrong_replacement.clone()) };
+                    let semantic_rollback_observed =
+                        if prior.is_some() { None } else { Some(wrong_rollback.clone()) };
+                    let mut steps = vec![StatefulStep::ObserveCurrent, StatefulStep::ReplaceCommit];
+                    let post_commit = match trigger {
+                        Trigger::SemanticMismatch => {
+                            steps.push(StatefulStep::ObserveState(
+                                semantic_replacement_observed.clone(),
+                            ));
+                            semantic_replacement_observed.clone()
+                        }
+                        Trigger::DesiredReadFailure => {
+                            steps.push(StatefulStep::ObserveError {
+                                operation: "desired-read",
+                                errno: libc::EIO,
+                            });
+                            Some(requested.clone())
+                        }
+                    };
+                    match rollback {
+                        RollbackOutcome::WriteFailure => {
+                            steps.push(StatefulStep::ReplaceError {
+                                operation: "rollback-write",
+                                errno: libc::EBUSY,
+                            });
+                        }
+                        RollbackOutcome::ReadFailure => {
+                            steps.extend([
+                                StatefulStep::ReplaceCommit,
+                                StatefulStep::ObserveError {
+                                    operation: "rollback-read",
+                                    errno: libc::ENODATA,
+                                },
+                            ]);
+                        }
+                        RollbackOutcome::ExactRestoration => {
+                            steps.extend([
+                                StatefulStep::ReplaceCommit,
+                                StatefulStep::ObserveCurrent,
+                            ]);
+                        }
+                        RollbackOutcome::SemanticMismatch => {
+                            steps.extend([
+                                StatefulStep::ReplaceCommit,
+                                StatefulStep::ObserveState(semantic_rollback_observed.clone()),
+                            ]);
+                        }
+                    }
+
+                    let io = Arc::new(StatefulIo::new(prior.clone(), steps));
+                    let before = io.snapshot();
+                    let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+                    let error = host
+                        .replace_shared_program_for_boot(requested.clone())
+                        .err()
+                        .expect("every post-commit read-back fault refuses startup");
+
+                    match (trigger, rollback, &error) {
+                        (
+                            Trigger::SemanticMismatch,
+                            RollbackOutcome::WriteFailure | RollbackOutcome::ReadFailure,
+                            InterceptError::NftSharedRollbackFailed {
+                                operation,
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_read_source,
+                                replacement_observed,
+                                source,
+                            },
+                        ) => {
+                            let expected_operation = match rollback {
+                                RollbackOutcome::WriteFailure => {
+                                    InterceptSharedRollbackOperation::RestorePrior
+                                }
+                                RollbackOutcome::ReadFailure => {
+                                    InterceptSharedRollbackOperation::ReadBackPrior
+                                }
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch => unreachable!(),
+                            };
+                            assert_eq!(*operation, expected_operation);
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert!(replacement_read_source.is_none());
+                            assert_eq!(replacement_observed, &semantic_replacement_observed);
+                            let (source_op, source_errno) = match rollback {
+                                RollbackOutcome::WriteFailure => ("rollback-write", libc::EBUSY),
+                                RollbackOutcome::ReadFailure => ("rollback-read", libc::ENODATA),
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch => unreachable!(),
+                            };
+                            assert_nft_source(source, source_op, source_errno);
+                        }
+                        (
+                            Trigger::DesiredReadFailure,
+                            RollbackOutcome::WriteFailure | RollbackOutcome::ReadFailure,
+                            InterceptError::NftSharedRollbackFailed {
+                                operation,
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_read_source: Some(read_source),
+                                replacement_observed,
+                                source,
+                            },
+                        ) => {
+                            let expected_operation = match rollback {
+                                RollbackOutcome::WriteFailure => {
+                                    InterceptSharedRollbackOperation::RestorePrior
+                                }
+                                RollbackOutcome::ReadFailure => {
+                                    InterceptSharedRollbackOperation::ReadBackPrior
+                                }
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch => unreachable!(),
+                            };
+                            assert_eq!(*operation, expected_operation);
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert!(replacement_observed.is_none());
+                            assert_nft_source(read_source, "desired-read", libc::EIO);
+                            let (source_op, source_errno) = match rollback {
+                                RollbackOutcome::WriteFailure => ("rollback-write", libc::EBUSY),
+                                RollbackOutcome::ReadFailure => ("rollback-read", libc::ENODATA),
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch => unreachable!(),
+                            };
+                            assert_nft_source(source, source_op, source_errno);
+                        }
+                        (
+                            Trigger::SemanticMismatch,
+                            RollbackOutcome::ExactRestoration,
+                            InterceptError::NftSharedReplacementMismatchRolledBack {
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_observed,
+                            },
+                        ) => {
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert_eq!(replacement_observed, &semantic_replacement_observed);
+                        }
+                        (
+                            Trigger::DesiredReadFailure,
+                            RollbackOutcome::ExactRestoration,
+                            InterceptError::NftSharedReplacementReadFailedRolledBack {
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_read_source,
+                            },
+                        ) => {
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert_nft_source(replacement_read_source, "desired-read", libc::EIO);
+                        }
+                        (
+                            Trigger::SemanticMismatch,
+                            RollbackOutcome::SemanticMismatch,
+                            InterceptError::NftSharedRollbackPostconditionMismatch {
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_read_source,
+                                replacement_observed,
+                                rollback_observed,
+                            },
+                        ) => {
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert!(replacement_read_source.is_none());
+                            assert_eq!(replacement_observed, &semantic_replacement_observed);
+                            assert_eq!(rollback_observed, &semantic_rollback_observed);
+                        }
+                        (
+                            Trigger::DesiredReadFailure,
+                            RollbackOutcome::SemanticMismatch,
+                            InterceptError::NftSharedRollbackPostconditionMismatch {
+                                prior: actual_prior,
+                                requested: actual_requested,
+                                replacement_read_source: Some(read_source),
+                                replacement_observed,
+                                rollback_observed,
+                            },
+                        ) => {
+                            assert_eq!(actual_prior, &prior);
+                            assert_eq!(actual_requested, &requested);
+                            assert_nft_source(read_source, "desired-read", libc::EIO);
+                            assert!(replacement_observed.is_none());
+                            assert_eq!(rollback_observed, &semantic_rollback_observed);
+                        }
+                        _ => {
+                            panic!("wrong D15 disposition for {trigger:?}/{rollback:?}: {error:?}")
+                        }
+                    }
+                    assert_error_chain_source(
+                        &error,
+                        match (trigger, rollback) {
+                            (_, RollbackOutcome::WriteFailure) => {
+                                Some(("rollback-write", libc::EBUSY))
+                            }
+                            (_, RollbackOutcome::ReadFailure) => {
+                                Some(("rollback-read", libc::ENODATA))
+                            }
+                            (
+                                Trigger::SemanticMismatch,
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch,
+                            ) => None,
+                            (
+                                Trigger::DesiredReadFailure,
+                                RollbackOutcome::ExactRestoration
+                                | RollbackOutcome::SemanticMismatch,
+                            ) => Some(("desired-read", libc::EIO)),
+                        },
+                    );
+
+                    let after = io.snapshot();
+                    assert_eq!(after.dynamic_elements, before.dynamic_elements);
+                    assert_eq!(after.foreign_objects, before.foreign_objects);
+                    assert!(after.remaining_fault_schedule.is_empty());
+                    assert_eq!(
+                        after.owned_program,
+                        match rollback {
+                            RollbackOutcome::WriteFailure => post_commit,
+                            RollbackOutcome::ReadFailure | RollbackOutcome::ExactRestoration => {
+                                prior.clone()
+                            }
+                            RollbackOutcome::SemanticMismatch => {
+                                semantic_rollback_observed.clone()
+                            }
+                        }
+                    );
+
+                    let rollback_expected = match trigger {
+                        Trigger::SemanticMismatch => semantic_replacement_observed,
+                        Trigger::DesiredReadFailure => Some(requested.clone()),
+                    };
+                    let rollback_disposition = match rollback {
+                        RollbackOutcome::WriteFailure => MutationDisposition::Rejected {
+                            operation: "rollback-write",
+                            errno: libc::EBUSY,
+                        },
+                        RollbackOutcome::ReadFailure
+                        | RollbackOutcome::ExactRestoration
+                        | RollbackOutcome::SemanticMismatch => MutationDisposition::Committed,
+                    };
+                    assert_eq!(
+                        after.conditional_mutations,
+                        [
+                            ConditionalMutation {
+                                expected_current: prior.clone(),
+                                desired: Some(requested.clone()),
+                                disposition: MutationDisposition::Committed,
+                            },
+                            ConditionalMutation {
+                                expected_current: rollback_expected,
+                                desired: prior.clone(),
+                                disposition: rollback_disposition,
+                            },
+                        ]
+                    );
+                }
+            }
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one state-delta narrative covers refusal, create, retarget, reapply, and unpublished cleanup"
+    )]
+    fn shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta()
+    {
+        let prior = program(19_000);
+        let requested = program(20_000);
+        assert_program_target_only_delta(&prior, &requested);
+
+        // A rejected desired batch preserves every owned and complementary
+        // byte and never manufactures a rollback mutation.
+        {
+            let io = Arc::new(StatefulIo::new(
+                Some(prior.clone()),
+                [
+                    StatefulStep::ObserveCurrent,
+                    StatefulStep::ReplaceError { operation: "desired-replace", errno: libc::EBUSY },
+                ],
+            ));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let error = host
+                .replace_shared_program_for_boot(requested.clone())
+                .err()
+                .expect("rejected desired batch refuses without rollback");
+            match &error {
+                InterceptError::NftSharedReplaceFailed {
+                    prior: Some(actual_prior),
+                    requested: actual_requested,
+                    source,
+                } => {
+                    assert_eq!(actual_prior, &prior);
+                    assert_eq!(actual_requested, &requested);
+                    assert_nft_source(source, "desired-replace", libc::EBUSY);
+                }
+                other => panic!("wrong rejected-batch disposition: {other:?}"),
+            }
+            assert_error_chain_source(&error, Some(("desired-replace", libc::EBUSY)));
+            let after = io.snapshot();
+            assert_eq!(after.owned_program, before.owned_program);
+            assert_eq!(after.dynamic_elements, before.dynamic_elements);
+            assert_eq!(after.foreign_objects, before.foreign_objects);
+            assert!(after.remaining_fault_schedule.is_empty());
+            assert_eq!(
+                after.conditional_mutations,
+                [ConditionalMutation {
+                    expected_current: Some(prior.clone()),
+                    desired: Some(requested.clone()),
+                    disposition: MutationDisposition::Rejected {
+                        operation: "desired-replace",
+                        errno: libc::EBUSY,
+                    },
+                }]
+            );
+        }
+
+        // Genuine absence creates the requested program, reads it back, and
+        // arms one conditional unpublished cleanup on guard Drop.
+        {
+            let io = Arc::new(StatefulIo::new(
+                None,
+                [
+                    StatefulStep::ObserveCurrent,
+                    StatefulStep::ReplaceCommit,
+                    StatefulStep::ObserveCurrent,
+                    StatefulStep::ReplaceCommit,
+                ],
+            ));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let guard = host
+                .replace_shared_program_for_boot(requested.clone())
+                .expect("fresh create returns an armed unpublished guard");
+            assert_eq!(io.snapshot().owned_program.as_ref(), Some(&requested));
+            drop(guard);
+            let after = io.snapshot();
+            assert_eq!(after.owned_program, None);
+            assert_eq!(after.dynamic_elements, before.dynamic_elements);
+            assert_eq!(after.foreign_objects, before.foreign_objects);
+            assert!(after.remaining_fault_schedule.is_empty());
+            assert_eq!(
+                after.conditional_mutations,
+                [
+                    ConditionalMutation {
+                        expected_current: None,
+                        desired: Some(requested.clone()),
+                        disposition: MutationDisposition::Committed,
+                    },
+                    ConditionalMutation {
+                        expected_current: Some(requested.clone()),
+                        desired: None,
+                        disposition: MutationDisposition::Committed,
+                    },
+                ]
+            );
+        }
+
+        // Existing-prior retarget changes only the two listener registers.
+        {
+            let io = Arc::new(StatefulIo::new(
+                Some(prior.clone()),
+                [
+                    StatefulStep::ObserveCurrent,
+                    StatefulStep::ReplaceCommit,
+                    StatefulStep::ObserveCurrent,
+                    StatefulStep::ReplaceCommit,
+                ],
+            ));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let guard = host
+                .replace_shared_program_for_boot(requested.clone())
+                .expect("target-only replacement reads back exact");
+            assert_eq!(io.snapshot().owned_program.as_ref(), Some(&requested));
+            drop(guard);
+            let after = io.snapshot();
+            assert_eq!(after.owned_program, None);
+            assert_eq!(after.dynamic_elements, before.dynamic_elements);
+            assert_eq!(after.foreign_objects, before.foreign_objects);
+            assert!(after.remaining_fault_schedule.is_empty());
+            assert_eq!(
+                after.conditional_mutations,
+                [
+                    ConditionalMutation {
+                        expected_current: Some(prior),
+                        desired: Some(requested.clone()),
+                        disposition: MutationDisposition::Committed,
+                    },
+                    ConditionalMutation {
+                        expected_current: Some(requested.clone()),
+                        desired: None,
+                        disposition: MutationDisposition::Committed,
+                    },
+                ]
+            );
+        }
+
+        // Exact reapply performs no desired write, but the adopted
+        // unpublished guard remains responsible for conditional cleanup.
+        {
+            let io = Arc::new(StatefulIo::new(
+                Some(requested.clone()),
+                [StatefulStep::ObserveCurrent, StatefulStep::ReplaceCommit],
+            ));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let guard = host
+                .replace_shared_program_for_boot(requested.clone())
+                .expect("exact identity is adopted without a desired write");
+            assert!(io.snapshot().conditional_mutations.is_empty());
+            drop(guard);
+            let after = io.snapshot();
+            assert_eq!(after.owned_program, None);
+            assert_eq!(after.dynamic_elements, before.dynamic_elements);
+            assert_eq!(after.foreign_objects, before.foreign_objects);
+            assert!(after.remaining_fault_schedule.is_empty());
+            assert_eq!(
+                after.conditional_mutations,
+                [ConditionalMutation {
+                    expected_current: Some(requested),
+                    desired: None,
+                    disposition: MutationDisposition::Committed,
+                }]
+            );
+        }
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
+    fn shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement() {
+        let actual = program(19_000);
+        let stale_caller_prior = program(18_000);
+        let io = Arc::new(StatefulIo::new(Some(actual.clone()), [StatefulStep::ObserveCurrent]));
+        let before = io.snapshot();
+        let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+
+        let error = host
+            .converge_shared(
+                Some(&stale_caller_prior),
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 20_000),
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 20_001),
+            )
+            .err()
+            .expect("a stale caller snapshot refuses before mutation");
+        assert!(matches!(
+            &error,
+            InterceptError::PostconditionMismatch {
+                expected,
+                observed: Some(observed),
+            } if expected == &stale_caller_prior && observed == &actual
+        ));
+        assert_error_chain_source(&error, None);
+
+        let after = io.snapshot();
+        assert_eq!(after.owned_program, before.owned_program);
+        assert_eq!(after.dynamic_elements, before.dynamic_elements);
+        assert_eq!(after.foreign_objects, before.foreign_objects);
+        assert!(after.conditional_mutations.is_empty());
+        assert!(after.remaining_fault_schedule.is_empty());
+
+        for (leg_f, leg_c, label) in [
+            (
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 20_001),
+                "leg F",
+            ),
+            (
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 20_000),
+                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
+                "leg C",
+            ),
+        ] {
+            let io =
+                Arc::new(StatefulIo::new(Some(actual.clone()), [StatefulStep::ObserveCurrent]));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let error = host
+                .converge_shared(Some(&actual), leg_f, leg_c)
+                .err()
+                .unwrap_or_else(|| panic!("zero {label} port must refuse before I/O"));
+            assert!(matches!(
+                &error,
+                InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", .. }
+            ));
+            let source =
+                error.source().expect("zero-port refusal retains its semantic-construction source");
+            assert!(source.is::<NetlinkError>());
+            assert_eq!(
+                io.snapshot(),
+                before,
+                "zero {label} refusal consumes no observation, fault, or mutation"
+            );
+        }
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -755,6 +1544,7 @@ mod shared_program_rollback_acceptance {
                     requested: ref actual_requested,
                     replacement_observed: Some(ref replacement),
                     rollback_observed: Some(ref rollback),
+                    ..
                 } if actual_prior == &prior
                     && actual_requested == &requested
                     && replacement == &wrong_replacement
@@ -832,22 +1622,62 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    fn runtime_present_wrong_target_is_reported_without_mutation() {
-        let expected = program(20_000);
-        let wrong_target = program(20_100);
-        let io = Arc::new(ScriptedIo::new(vec![Ok(Some(wrong_target.clone()))], Vec::new()));
+    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
+    fn runtime_present_wrong_target_and_observe_error_are_non_mutating() {
+        let wrong_target = canonical_program(20_100, 20_101);
+        let io =
+            Arc::new(StatefulIo::new(Some(wrong_target.clone()), [StatefulStep::ObserveCurrent]));
+        let before = io.snapshot();
         let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+        assert_eq!(
+            host.observe_shared().expect("canonical wrong target remains a valid observation"),
+            Some(wrong_target.clone())
+        );
+        let after = io.snapshot();
+        assert_eq!(after.owned_program, before.owned_program);
+        assert_eq!(after.dynamic_elements, before.dynamic_elements);
+        assert_eq!(after.foreign_objects, before.foreign_objects);
+        assert_eq!(after.observations, [ObservationDisposition::Returned(Some(wrong_target))]);
+        assert!(after.conditional_mutations.is_empty());
+        assert!(after.remaining_fault_schedule.is_empty());
 
-        let error = host
-            .require_shared_program_at_runtime(expected.clone())
-            .expect_err("present wrong target is a structured conflict");
-        assert!(matches!(
-            error,
-            InterceptError::PostconditionMismatch {
-                expected: ref actual_expected,
-                observed: Some(ref actual_observed),
-            } if actual_expected == &expected && actual_observed == &wrong_target
-        ));
-        assert_eq!(io.calls(), [Call::Observe], "runtime audit never rewrites a present target");
+        for (label, operation, errno) in [
+            ("partial", "observe-partial", libc::ENODATA),
+            ("foreign", "observe-foreign", libc::EEXIST),
+            ("duplicate", "observe-duplicate", libc::EBUSY),
+            ("malformed", "observe-malformed", libc::EINVAL),
+            ("lower", "observe-lower", libc::EIO),
+        ] {
+            let io = Arc::new(StatefulIo::new(
+                Some(canonical_program(20_100, 20_101)),
+                [StatefulStep::ObserveError { operation, errno }],
+            ));
+            let before = io.snapshot();
+            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
+            let error =
+                host.observe_shared().expect_err("invalid or failed observation remains typed");
+            assert!(
+                matches!(
+                    &error,
+                    InterceptError::NftRuleInstallFailed {
+                        op: "observe-shared",
+                        source,
+                    } if matches!(
+                        source,
+                        NetlinkError::Nft { op, source }
+                            if *op == operation && source.raw_os_error() == Some(errno)
+                    )
+                ),
+                "{label} observation did not retain its exact typed source: {error:?}"
+            );
+            assert_error_chain_source(&error, Some((operation, errno)));
+            let after = io.snapshot();
+            assert_eq!(after.owned_program, before.owned_program);
+            assert_eq!(after.dynamic_elements, before.dynamic_elements);
+            assert_eq!(after.foreign_objects, before.foreign_objects);
+            assert_eq!(after.observations, [ObservationDisposition::Failed { operation, errno }]);
+            assert!(after.conditional_mutations.is_empty());
+            assert!(after.remaining_fault_schedule.is_empty());
+        }
     }
 }
