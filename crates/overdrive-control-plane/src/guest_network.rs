@@ -29,6 +29,28 @@ use overdrive_netlink::NetlinkError;
 #[cfg(target_os = "linux")]
 nix::ioctl_write_ptr_bad!(d14_tun_set_iff, libc::TUNSETIFF, libc::ifreq);
 
+fn enable_bridge_nf_call_iptables(bridge: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = format!("/sys/class/net/{bridge}/bridge/nf_call_iptables");
+        let mut file = OpenOptions::new().write(true).open(&path)?;
+        file.write_all(b"1\n")?;
+        let observed = std::fs::read_to_string(path)?;
+        if observed.trim() != "1" {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "bridge netfilter flag did not read back as enabled",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = bridge;
+        Ok(())
+    }
+}
+
 use overdrive_dataplane::guest_tcx::{
     GuestTcxAttachment, GuestTcxCounter, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxLink,
     GuestTcxProbeCounterObservation, GuestTcxProbeMark, GuestTcxProbeVerdict, GuestTcxProgram,
@@ -925,7 +947,7 @@ impl RealSharedGuestNetworkScratchIo {
         }
         const MARKER: &[u8] = b"nd295-d14-detached";
         let mut frame = vec![0_u8; 14 + 20 + 8 + MARKER.len()];
-        frame[..6].copy_from_slice(&overdrive_core::dataplane::GUEST_BRIDGE_MAC);
+        frame[..6].copy_from_slice(&[0xff; 6]);
         frame[6..12].copy_from_slice(&plan.assignment.mac);
         frame[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
         frame[14] = 0x45;
@@ -938,8 +960,11 @@ impl RealSharedGuestNetworkScratchIo {
         frame[30..34].copy_from_slice(&plan.assignment.gateway.octets());
         frame[34..36].copy_from_slice(&49_295_u16.to_be_bytes());
         frame[36..38].copy_from_slice(&local_port.to_be_bytes());
-        frame[38..].copy_from_slice(MARKER);
+        frame[42..].copy_from_slice(MARKER);
+        enable_bridge_nf_call_iptables(&plan.bridge)?;
+        std::thread::sleep(Duration::from_millis(10));
         file.write_all(&frame)?;
+        enable_bridge_nf_call_iptables(&plan.bridge)?;
         let deadline = Instant::now() + Duration::from_millis(250);
         loop {
             let after_guard = counter(
@@ -1057,6 +1082,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                 overdrive_netlink::Client::new()?.del_link(&plan.bridge).await
             }
             GuestNetworkScratchNetlinkAction::CreateGuardTable => {
+                enable_bridge_nf_call_iptables(&plan.bridge).map_err(NetlinkError::connect)?;
                 overdrive_netlink::nft::bridge::converge_table(&Self::guard_spec(plan).map_err(
                     |error| {
                         NetlinkError::nft("guard-table", std::io::Error::other(error.to_string()))
@@ -3213,6 +3239,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             client.set_link_mac(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
             client.converge_addr(BRIDGE, GATEWAY, 16).await?;
             client.set_link_up(BRIDGE).await?;
+            enable_bridge_nf_call_iptables(BRIDGE).map_err(NetlinkError::connect)?;
             Ok(())
         })
         .map_err(|source| GuestNetworkError::Netlink {

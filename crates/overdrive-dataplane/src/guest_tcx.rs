@@ -579,7 +579,12 @@ fn run_tcp_probe(
                 "probe frame is too large",
             ),
         })?,
-        data_size_out: 0,
+        data_size_out: u32::try_from(output.len()).map_err(|_| GuestTcxError::Io {
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "probe output buffer is too large",
+            ),
+        })?,
         data_in: frame.as_ptr() as u64,
         data_out: output.as_mut_ptr() as u64,
         repeat: 1,
@@ -601,7 +606,7 @@ fn run_tcp_probe(
     let result = unsafe {
         libc::syscall(
             libc::SYS_bpf,
-            14_i32,
+            10_i32,
             &raw mut attr,
             libc::c_uint::try_from(std::mem::size_of::<GuestTcxBpfAttr>()).map_err(|_| {
                 GuestTcxError::Io {
@@ -808,8 +813,15 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
             .collect()
     }
     fn map_by_id(&self, id: u32) -> Result<Option<RawGuestTcxMapObservation>, GuestTcxError> {
-        let info =
-            aya::maps::MapInfo::from_id(id).map_err(|source| GuestTcxError::Map { source })?;
+        let info = match aya::maps::MapInfo::from_id(id) {
+            Ok(info) => info,
+            Err(aya::maps::MapError::SyscallError(error))
+                if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(None);
+            }
+            Err(source) => return Err(GuestTcxError::Map { source }),
+        };
         Ok(Some(RawGuestTcxMapObservation {
             id: info.id(),
             kind: info.map_type().map_err(|source| GuestTcxError::Map { source })?,
@@ -820,10 +832,17 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
         }))
     }
     fn endpoint_present_by_id(&self, map_id: u32, ifindex: u32) -> Result<bool, GuestTcxError> {
-        let map = aya::maps::HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(
-            aya::maps::MapData::from_id(map_id).map_err(|source| GuestTcxError::Map { source })?,
-        ))
-        .map_err(|source| GuestTcxError::Map { source })?;
+        let map_data = match aya::maps::MapData::from_id(map_id) {
+            Ok(map_data) => map_data,
+            Err(aya::maps::MapError::SyscallError(error))
+                if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(false);
+            }
+            Err(source) => return Err(GuestTcxError::Map { source }),
+        };
+        let map = aya::maps::HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(map_data))
+            .map_err(|source| GuestTcxError::Map { source })?;
         map.get(&ifindex, 0).map(|_| true).or_else(|error| match error {
             aya::maps::MapError::KeyNotFound => Ok(false),
             source => Err(GuestTcxError::Map { source }),
@@ -1061,10 +1080,48 @@ pub struct GuestTcxAdoptedState {
 
 impl GuestTcxProgram {
     pub fn load(inventory: &GuestTcxInventoryIdentity) -> Result<Self, GuestTcxError> {
-        let mut bpf = aya::EbpfLoader::new()
+        // Aya's slice loader rejects the BTF-less release object on the
+        // production kernel with an ELF alignment error, while its file
+        // loader accepts the same bytes (the dataplane root uses this path
+        // for the same reason).  Materialise the embedded object only for
+        // the duration of parsing; no path or artifact escapes this leaf.
+        let bpf_temp_path =
+            std::env::temp_dir().join(format!("overdrive_guest_tcx-{}.o", std::process::id()));
+        std::fs::write(&bpf_temp_path, super::OVERDRIVE_BPF_OBJ)
+            .map_err(|source| GuestTcxError::Io { source })?;
+        let pin_dir = Path::new(super::DEFAULT_PIN_DIR);
+        std::fs::create_dir_all(pin_dir).map_err(|source| GuestTcxError::Io { source })?;
+        let service_map_pin = pin_dir.join(super::SERVICE_MAP_NAME);
+        let ephemeral_service_map = if service_map_pin.exists() {
+            None
+        } else {
+            let handle = crate::maps::hash_of_maps::HashOfMapsHandle::<
+                crate::maps::wire::ServiceKey,
+                u32,
+            >::new_pinned_with_array_inner(
+                super::SERVICE_MAP_NAME,
+                super::SERVICE_MAP_OUTER_CAPACITY,
+                super::SERVICE_MAP_INNER_CAPACITY,
+                pin_dir,
+            )
+            .map_err(|error| match error {
+                crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source }
+                | crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                    GuestTcxError::Io { source }
+                }
+            })?;
+            Some(handle)
+        };
+        let loaded = aya::EbpfLoader::new()
             .allow_unsupported_maps()
-            .load(super::OVERDRIVE_BPF_OBJ)
-            .map_err(|source| GuestTcxError::Load { source })?;
+            .map_pin_path(pin_dir)
+            .load_file(&bpf_temp_path);
+        let _ = std::fs::remove_file(&bpf_temp_path);
+        if ephemeral_service_map.is_some() {
+            let _ = std::fs::remove_file(&service_map_pin);
+        }
+        drop(ephemeral_service_map);
+        let mut bpf = loaded.map_err(|source| GuestTcxError::Load { source })?;
         for (name, object) in
             [("ENDPOINTS", GuestTcxObject::EndpointMap), ("COUNTERS", GuestTcxObject::CounterMap)]
         {
@@ -1097,6 +1154,7 @@ impl GuestTcxProgram {
         })
     }
     pub fn pin_endpoint_map(&mut self, pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        ensure_pin_parent(pin)?;
         let map = self
             .bpf
             .take_map("ENDPOINTS")
@@ -1122,6 +1180,7 @@ impl GuestTcxProgram {
         Ok(schema)
     }
     pub fn pin_counter_map(&mut self, pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        ensure_pin_parent(pin)?;
         let map = self
             .bpf
             .take_map("COUNTERS")
@@ -1238,11 +1297,30 @@ impl GuestTcxProgram {
     }
 }
 
+fn ensure_pin_parent(pin: &Path) -> Result<(), GuestTcxError> {
+    if !pin.starts_with(Path::new(super::DEFAULT_PIN_DIR)) {
+        return Err(GuestTcxError::Io {
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "guest TCX pins must stay under the accepted bpffs hierarchy",
+            ),
+        });
+    }
+    let parent = pin.parent().ok_or_else(|| GuestTcxError::Io {
+        source: std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "guest TCX pin has no parent directory",
+        ),
+    })?;
+    std::fs::create_dir_all(parent).map_err(|source| GuestTcxError::Io { source })
+}
+
 impl GuestTcxLink {
     pub const fn program_id(&self) -> u32 {
         self.program_id
     }
     pub fn pin(mut self, pin: &Path) -> Result<(), GuestTcxError> {
+        ensure_pin_parent(pin)?;
         *self.inventory.link_pin.lock() = Some(pin.to_path_buf());
         let candidates = self
             .inventory
@@ -1375,16 +1453,19 @@ impl GuestTcxAdoptedState {
     pub fn unpin_link(&mut self) -> Result<Option<GuestTcxLink>, GuestTcxError> {
         let Some(link) = self.link.take() else { return Ok(None) };
         let fd = link.unpin().map_err(|source| GuestTcxError::Io { source })?;
+        let (program_id, target_ifindex, attach_type) = {
+            let receipts = self.inventory.receipts.lock();
+            (
+                receipts.program_id.unwrap_or_default(),
+                receipts.link_target_ifindex.unwrap_or_default(),
+                receipts.link_attach_type.unwrap_or(TCX_INGRESS_ATTACH_TYPE),
+            )
+        };
         Ok(Some(GuestTcxLink {
             link: Some(fd),
-            program_id: self.inventory.receipts.lock().program_id.unwrap_or_default(),
-            target_ifindex: self.inventory.receipts.lock().link_target_ifindex.unwrap_or_default(),
-            attach_type: self
-                .inventory
-                .receipts
-                .lock()
-                .link_attach_type
-                .unwrap_or(TCX_INGRESS_ATTACH_TYPE),
+            program_id,
+            target_ifindex,
+            attach_type,
             inventory: self.inventory.clone(),
         }))
     }

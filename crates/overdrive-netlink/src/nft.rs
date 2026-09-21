@@ -2381,7 +2381,7 @@ fn list_chain_info_family(
         &family_table_payload(family, table, NFTA_CHAIN_TABLE),
         "list-chains",
     )?;
-    bodies
+    let entries = bodies
         .into_iter()
         .map(|body| {
             let mut observed_table = None;
@@ -2485,12 +2485,13 @@ fn list_chain_info_family(
                 NetlinkError::nft("list-chains", invalid_data("chain table is missing"))
             })?;
             if observed_table != table {
-                return Err(NetlinkError::nft(
-                    "list-chains",
-                    invalid_data("chain escaped requested table"),
-                ));
+                // Some kernels ignore the table selector on a family dump
+                // and return foreign-table children as well.  They are not
+                // candidates for this table; preserve them by excluding
+                // them from this table-local projection.
+                return Ok(None);
             }
-            Ok(RawChainInfo {
+            Ok(Some(RawChainInfo {
                 table: observed_table,
                 name: name.ok_or_else(|| {
                     NetlinkError::nft("list-chains", invalid_data("chain name is missing"))
@@ -2501,9 +2502,10 @@ fn list_chain_info_family(
                 hook,
                 chain_type,
                 policy,
-            })
+            }))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(entries.into_iter().flatten().collect())
 }
 
 fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo>, NetlinkError> {
@@ -2513,7 +2515,7 @@ fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo
         &family_table_payload(family, table, NFTA_SET_TABLE),
         "list-sets",
     )?;
-    bodies
+    let entries = bodies
         .into_iter()
         .map(|body| {
             let mut observed_table = None;
@@ -2564,12 +2566,9 @@ fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo
                 NetlinkError::nft("list-sets", invalid_data("set table is missing"))
             })?;
             if observed_table != table {
-                return Err(NetlinkError::nft(
-                    "list-sets",
-                    invalid_data("set escaped requested table"),
-                ));
+                return Ok(None);
             }
-            Ok(RawSetInfo {
+            Ok(Some(RawSetInfo {
                 name: name.ok_or_else(|| {
                     NetlinkError::nft("list-sets", invalid_data("set name is missing"))
                 })?,
@@ -2580,9 +2579,10 @@ fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo
                     NetlinkError::nft("list-sets", invalid_data("set key length is missing"))
                 })?,
                 id: id.unwrap_or(1),
-            })
+            }))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(entries.into_iter().flatten().collect())
 }
 
 fn list_other_children_family(

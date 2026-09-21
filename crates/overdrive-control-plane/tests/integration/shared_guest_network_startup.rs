@@ -99,10 +99,16 @@ where
     fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
         let mut visitor = FieldVisitor::default();
         event.record(&mut visitor);
+        let name = visitor
+            .fields
+            .get("event")
+            .or_else(|| visitor.fields.get("name"))
+            .cloned()
+            .unwrap_or_else(|| event.metadata().name().to_owned());
         self.inner
             .lock()
             .expect("event collector lock")
-            .push(EventRow { name: event.metadata().name().to_owned(), fields: visitor.fields });
+            .push(EventRow { name, fields: visitor.fields });
     }
 }
 
@@ -427,7 +433,6 @@ fn assert_tcp_stage_event(
     reason = "one real-boot D14A trace keeps every completion field auditable"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A deterministic ordinary-boot trace"]
 async fn production_startup_exercises_classifier_and_detached_guard_before_admission() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     if unsafe { libc::geteuid() } != 0 {
