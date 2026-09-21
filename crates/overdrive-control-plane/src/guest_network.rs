@@ -2380,7 +2380,9 @@ impl HostSharedGuestNetworkOwner {
         if let Some(ifindex) = ifindex {
             attempt!(self.rollback_endpoint_absence(plan, ifindex));
         }
-        attempt!(self.rollback_attachment_absence(plan, ifindex));
+        if !tap_removed && ifindex.is_some() {
+            attempt!(self.rollback_attachment_absence(plan, ifindex));
+        }
         attempt!(self.rollback_link_pin_absence(plan));
         if !tap_removed {
             let delete =
@@ -5873,6 +5875,90 @@ mod allocation_owner_acceptance {
             assert_mismatch(error, operation, expected, observed);
             assert!(!owner.allocations.lock().contains_key(plan.alloc()));
         }
+    }
+
+    /// F-28 — a post-delete read-back failure retries without querying TCX on
+    /// an interface that has already been observed absent.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn rollback_retry_skips_attachment_query_after_tap_removal() {
+        let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
+        let bridge = GuestNetworkAllocationBridgeObservation::Present {
+            name: "ovd-gbr0".to_owned(),
+            ifindex: 29,
+            kind: GuestLinkKind::Bridge,
+        };
+        let valid_down = GuestNetworkAllocationTapObservation::Persistent {
+            name: "ovd-tp-0002".to_owned(),
+            ifindex: 295,
+            up: false,
+            owner_uid: Some(uid),
+            master_ifindex: Some(29),
+        };
+        let io = ScriptedAllocationIo::with_observations(
+            [
+                valid_down.clone(),
+                valid_down,
+                GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
+                GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
+            ],
+            [bridge.clone(), bridge],
+        );
+        io.attachment_reads
+            .lock()
+            .push_back(GuestTcxAttachment { revision: 1, program_ids: Vec::new() });
+        io.pin_reads.lock().extend([false, false]);
+        io.failures.lock().insert((AllocationCall::ObserveGuard, 2));
+
+        let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
+        let plan = plan("nd295-f28-post-delete", Ipv4Addr::new(100, 95, 0, 2));
+        let error = owner
+            .provision(&plan)
+            .await
+            .expect_err("final guard read-back failure retains a retryable rollback");
+        assert!(matches!(
+            error,
+            GuestNetworkError::Netlink {
+                operation: GuestNetworkOperation::CleanupComplement,
+                source: NetlinkError::Connect { source },
+            } if source.raw_os_error() == Some(libc::EBUSY)
+        ));
+
+        let retry_start = io.calls().len();
+        owner
+            .teardown(&plan)
+            .await
+            .expect("same-owner retry converges after TAP absence is proven");
+        let retry_calls = &io.calls()[retry_start..];
+        assert!(!retry_calls.contains(&AllocationCall::QueryAttachment));
+        assert!(retry_calls.contains(&AllocationCall::ObserveGuard));
+        assert!(!owner.rollback_pending.lock().contains_key(plan.alloc()));
+    }
+
+    /// F-28 — an early failure with no TAP/ifindex never queries TCX.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn early_provision_failure_without_tap_skips_attachment_query() {
+        let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
+        let io = ScriptedAllocationIo::with_observations(
+            [GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() }],
+            [],
+        );
+        io.failures.lock().insert((AllocationCall::QueryAttachment, 1));
+        let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
+        let plan = plan("nd295-f28-early", Ipv4Addr::new(100, 95, 0, 2));
+        let error = owner
+            .provision(&plan)
+            .await
+            .expect_err("an absent first TAP checkpoint refuses publication");
+        assert_mismatch(
+            error,
+            GuestNetworkOperation::TapObserve,
+            tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, Some(uid)),
+            None,
+        );
+        assert!(!io.calls().contains(&AllocationCall::QueryAttachment));
+        assert!(!owner.rollback_pending.lock().contains_key(plan.alloc()));
     }
 
     /// S-ND295-12 — teardown continues, returns the first source, and retries empty.
