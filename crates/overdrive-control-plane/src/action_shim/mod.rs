@@ -1131,8 +1131,48 @@ pub async fn dispatch_with_workflow_intent(
     let mtls_lifecycle =
         state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
 
-    let dispatch_result = dispatch(
-        dispatchable,
+    let dispatch_result =
+        dispatch_with_network_owner(dispatchable, state, tick, mtls_lifecycle).await;
+
+    // Pre-flight error wins (it is chronologically first); otherwise the
+    // dispatch result (which itself carries dispatch()'s own first_error
+    // aggregation over the surviving actions).
+    preflight_err.map_or(dispatch_result, Err)
+}
+
+/// Production action composition for the one shared guest-network owner.
+/// The old netns adapter remains available only to bounded historical fixture
+/// callers; ordinary handler/reconciler actions always take this path.
+async fn dispatch_with_network_owner(
+    actions: Vec<Action>,
+    state: &crate::AppState,
+    tick: &TickContext,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+) -> Result<(), ShimError> {
+    let Some(shared_guest_network) = state.shared_guest_network.as_ref() else {
+        return dispatch(
+            actions,
+            state.drivers.as_ref(),
+            &state.alloc_drivers,
+            state.obs.as_ref(),
+            state.dataplane.as_ref(),
+            state.ca.as_ref(),
+            state.clock.as_ref(),
+            state.identity.as_ref(),
+            state.lifecycle_events.as_ref(),
+            tick,
+            &state.node_id,
+            Arc::clone(&state.allocator),
+            state.runtime.broker_mutex(),
+            Some(state.workflow_engine.as_ref()),
+            state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle),
+            &state.net_slot_allocator,
+            state.vm_host_state.as_ref(),
+        )
+        .await;
+    };
+    dispatch_with_network_provisioner_and_guest(
+        actions,
         state.drivers.as_ref(),
         &state.alloc_drivers,
         state.obs.as_ref(),
@@ -1143,19 +1183,16 @@ pub async fn dispatch_with_workflow_intent(
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
-        std::sync::Arc::clone(&state.allocator),
+        Arc::clone(&state.allocator),
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
         mtls_lifecycle,
         &state.net_slot_allocator,
+        &HostNetworkProvisioner,
+        Some(shared_guest_network.as_ref()),
         state.vm_host_state.as_ref(),
     )
-    .await;
-
-    // Pre-flight error wins (it is chronologically first); otherwise the
-    // dispatch result (which itself carries dispatch()'s own first_error
-    // aggregation over the surviving actions).
-    preflight_err.map_or(dispatch_result, Err)
+    .await
 }
 
 /// Integration-test form of [`dispatch_with_workflow_intent`] that preserves

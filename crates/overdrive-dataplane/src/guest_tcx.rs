@@ -1,11 +1,15 @@
 //! Semantic boundary for the shared guest-network TCX adapter (GH #295).
 
-// SCAFFOLD: true — netns-density-295 D-295-DISTILL-6.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use aya::Pod;
+use aya::maps::{Array, HashMap, Map, MapData};
+use aya::programs::links::{FdLink, Link as _};
+use aya::programs::tc::{SchedClassifier, TcAttachOptions, TcAttachType};
 
 /// Adapter-neutral TCX attachment point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,11 +85,21 @@ impl std::fmt::Debug for GuestTcxUnsupportedMapProperty {
 }
 
 #[doc(hidden)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GuestTcxMapKind {
     Hash,
     Array,
     Unsupported(GuestTcxUnsupportedMapKind),
+}
+
+impl std::fmt::Debug for GuestTcxMapKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hash => formatter.write_str("Hash"),
+            Self::Array => formatter.write_str("Array"),
+            Self::Unsupported(_) => formatter.write_str("Unsupported"),
+        }
+    }
 }
 
 #[doc(hidden)]
@@ -263,6 +277,102 @@ enum RawGuestTcxPinObservation {
     Other,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct EndpointAbi {
+    source_ip: u32,
+    source_mac: [u8; 6],
+    source_pad: [u8; 2],
+    bridge_mac: [u8; 6],
+    bridge_pad: [u8; 2],
+}
+
+// SAFETY: EndpointAbi is a C-layout collection of integers and byte arrays.
+unsafe impl Pod for EndpointAbi {}
+
+impl From<GuestTcxEndpoint> for EndpointAbi {
+    fn from(value: GuestTcxEndpoint) -> Self {
+        Self {
+            source_ip: u32::from_be_bytes(value.source_ipv4.octets()),
+            source_mac: value.source_mac,
+            source_pad: [0; 2],
+            bridge_mac: value.bridge_mac,
+            bridge_pad: [0; 2],
+        }
+    }
+}
+
+impl From<EndpointAbi> for GuestTcxEndpoint {
+    fn from(value: EndpointAbi) -> Self {
+        Self {
+            source_ipv4: Ipv4Addr::from(value.source_ip.to_be_bytes()),
+            source_mac: value.source_mac,
+            bridge_mac: value.bridge_mac,
+        }
+    }
+}
+
+fn schema_for_map_data(map: &MapData, endpoint: bool) -> Result<GuestTcxMapSchema, GuestTcxError> {
+    let info = map.info().map_err(|source| GuestTcxError::Map { source })?;
+    let raw = RawGuestTcxMapObservation {
+        id: info.id(),
+        kind: info.map_type().map_err(|source| GuestTcxError::Map { source })?,
+        key_size: info.key_size(),
+        value_size: info.value_size(),
+        max_entries: info.max_entries(),
+        name: if endpoint { b"ENDPOINTS".to_vec() } else { b"COUNTERS".to_vec() },
+    };
+    let observed = project_map_schema(&raw);
+    let expected = if endpoint {
+        GuestTcxMapSchema {
+            kind: GuestTcxMapKind::Hash,
+            key: GuestTcxMapKeyShape::U32,
+            value: GuestTcxMapValueShape::EndpointAbi,
+            capacity: GuestTcxMapCapacity::EndpointMaximum,
+        }
+    } else {
+        GuestTcxMapSchema {
+            kind: GuestTcxMapKind::Array,
+            key: GuestTcxMapKeyShape::U32,
+            value: GuestTcxMapValueShape::CounterU64,
+            capacity: GuestTcxMapCapacity::CounterSlots,
+        }
+    };
+    if observed != expected {
+        return Err(GuestTcxError::MapSchemaMismatch { expected, observed });
+    }
+    Ok(observed)
+}
+
+fn schema_for_map(
+    map: &aya::maps::Map,
+    endpoint: bool,
+) -> Result<GuestTcxMapSchema, GuestTcxError> {
+    match map {
+        aya::maps::Map::Array(data)
+        | aya::maps::Map::HashMap(data)
+        | aya::maps::Map::Unsupported(data)
+        | aya::maps::Map::PerCpuArray(data)
+        | aya::maps::Map::PerCpuHashMap(data)
+        | aya::maps::Map::LruHashMap(data)
+        | aya::maps::Map::PerCpuLruHashMap(data)
+        | aya::maps::Map::BloomFilter(data)
+        | aya::maps::Map::CpuMap(data)
+        | aya::maps::Map::DevMap(data)
+        | aya::maps::Map::DevMapHash(data)
+        | aya::maps::Map::LpmTrie(data)
+        | aya::maps::Map::PerfEventArray(data)
+        | aya::maps::Map::ProgramArray(data)
+        | aya::maps::Map::Queue(data)
+        | aya::maps::Map::RingBuf(data)
+        | aya::maps::Map::SockHash(data)
+        | aya::maps::Map::SockMap(data)
+        | aya::maps::Map::Stack(data)
+        | aya::maps::Map::StackTraceMap(data)
+        | aya::maps::Map::XskMap(data) => schema_for_map_data(data, endpoint),
+    }
+}
+
 #[allow(dead_code, reason = "D12 exact private RED scaffold")]
 trait GuestTcxInventorySource: Send + Sync {
     fn loaded_maps(&self) -> Result<Vec<RawGuestTcxMapObservation>, GuestTcxError>;
@@ -276,51 +386,206 @@ trait GuestTcxInventorySource: Send + Sync {
 struct AyaGuestTcxInventorySource;
 
 impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     fn loaded_maps(&self) -> Result<Vec<RawGuestTcxMapObservation>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 loaded maps)")
+        aya::maps::loaded_maps()
+            .map(|result| {
+                let map = result.map_err(|source| GuestTcxError::Map { source })?;
+                Ok(RawGuestTcxMapObservation {
+                    id: map.id(),
+                    kind: map.map_type().map_err(|source| GuestTcxError::Map { source })?,
+                    key_size: map.key_size(),
+                    value_size: map.value_size(),
+                    max_entries: map.max_entries(),
+                    name: map.name().to_vec(),
+                })
+            })
+            .collect()
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     fn loaded_programs(&self) -> Result<Vec<RawGuestTcxProgramObservation>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 loaded programs)")
+        aya::programs::loaded_programs()
+            .map(|result| {
+                let program = result.map_err(|source| GuestTcxError::Program { source })?;
+                Ok(RawGuestTcxProgramObservation {
+                    id: program.id(),
+                    tag: program.tag(),
+                    name: program.name().to_vec(),
+                    program_type: program
+                        .program_type()
+                        .map_err(|source| GuestTcxError::Program { source })?,
+                    map_ids: program
+                        .map_ids()
+                        .map_err(|source| GuestTcxError::Program { source })?
+                        .unwrap_or_default(),
+                })
+            })
+            .collect()
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     fn loaded_links(&self) -> Result<Vec<RawGuestTcxLinkObservation>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 loaded links)")
+        aya::programs::loaded_links()
+            .map(|result| {
+                let link = result.map_err(|source| GuestTcxError::Program { source })?;
+                // `bpf_link_info` is intentionally decoded only here.  The
+                // control-plane sees the semantic projection below.
+                let id = link.id;
+                let mut observation = RawGuestTcxLinkObservation {
+                    id,
+                    program_id: 0,
+                    target_ifindex: 0,
+                    attach_type: 0,
+                };
+                if link.type_ == 11 {
+                    // SAFETY: the kernel reports a TCX link and initializes
+                    // the tcx union arm as part of BPF_OBJ_GET_INFO_BY_FD.
+                    let tcx = unsafe { link.__bindgen_anon_1.tcx };
+                    observation.target_ifindex = tcx.ifindex;
+                    observation.attach_type = tcx.attach_type;
+                }
+                Ok(observation)
+            })
+            .collect()
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    fn map_by_id(&self, _id: u32) -> Result<Option<RawGuestTcxMapObservation>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 map-by-id)")
+    fn map_by_id(&self, id: u32) -> Result<Option<RawGuestTcxMapObservation>, GuestTcxError> {
+        let info =
+            aya::maps::MapInfo::from_id(id).map_err(|source| GuestTcxError::Map { source })?;
+        Ok(Some(RawGuestTcxMapObservation {
+            id: info.id(),
+            kind: info.map_type().map_err(|source| GuestTcxError::Map { source })?,
+            key_size: info.key_size(),
+            value_size: info.value_size(),
+            max_entries: info.max_entries(),
+            name: info.name().to_vec(),
+        }))
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    fn endpoint_present_by_id(&self, _map_id: u32, _ifindex: u32) -> Result<bool, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-by-id)")
+    fn endpoint_present_by_id(&self, map_id: u32, ifindex: u32) -> Result<bool, GuestTcxError> {
+        let map = aya::maps::HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(
+            aya::maps::MapData::from_id(map_id).map_err(|source| GuestTcxError::Map { source })?,
+        ))
+        .map_err(|source| GuestTcxError::Map { source })?;
+        map.get(&ifindex, 0).map(|_| true).or_else(|error| match error {
+            aya::maps::MapError::KeyNotFound => Ok(false),
+            source => Err(GuestTcxError::Map { source }),
+        })
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    fn observe_pin(&self, _path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 pin observation)")
+    fn observe_pin(&self, path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError> {
+        match aya::maps::MapInfo::from_pin(path) {
+            Ok(map) => Ok(RawGuestTcxPinObservation::Map(RawGuestTcxMapObservation {
+                id: map.id(),
+                kind: map.map_type().map_err(|source| GuestTcxError::Map { source })?,
+                key_size: map.key_size(),
+                value_size: map.value_size(),
+                max_entries: map.max_entries(),
+                name: map.name().to_vec(),
+            })),
+            Err(aya::maps::MapError::SyscallError(error))
+                if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                match aya::programs::links::PinnedLink::from_pin(path) {
+                    Ok(link) => {
+                        let _fd = link.unpin().map_err(|source| GuestTcxError::Io { source })?;
+                        // Aya's opaque FdLinkId intentionally does not expose
+                        // the descriptor. The link identity is recovered by
+                        // the later private link-info enumeration.
+                        let id = 0;
+                        Ok(RawGuestTcxPinObservation::Link(RawGuestTcxLinkObservation {
+                            id,
+                            program_id: 0,
+                            target_ifindex: 0,
+                            attach_type: 0,
+                        }))
+                    }
+                    Err(aya::programs::links::LinkError::SyscallError(error))
+                        if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        Ok(RawGuestTcxPinObservation::Absent)
+                    }
+                    Err(source) => Err(GuestTcxError::Link { source }),
+                }
+            }
+            Err(source) => Err(GuestTcxError::Map { source }),
+        }
     }
 }
 
-#[expect(clippy::panic, reason = "D12 RED scaffold; DELIVER binds real aya inventory")]
 fn capture_with_source(
-    _endpoint_map_pin: PathBuf,
-    _counter_map_pin: PathBuf,
-    _source: Arc<dyn GuestTcxInventorySource>,
+    endpoint_map_pin: PathBuf,
+    counter_map_pin: PathBuf,
+    source: Arc<dyn GuestTcxInventorySource>,
 ) -> GuestTcxInventoryCapture {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D12 inventory capture)")
+    let mut first_error = None;
+    let (maps, maps_available) = match source.loaded_maps() {
+        Ok(maps) => (maps, true),
+        Err(error) => {
+            first_error = Some(error);
+            (Vec::new(), false)
+        }
+    };
+    let (programs, programs_available) = match source.loaded_programs() {
+        Ok(programs) => (programs, true),
+        Err(error) => {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+            (Vec::new(), false)
+        }
+    };
+    let (links, links_available) = match source.loaded_links() {
+        Ok(links) => (links, true),
+        Err(error) => {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+            (Vec::new(), false)
+        }
+    };
+    let identity = GuestTcxInventoryIdentity {
+        source,
+        endpoint_map_pin,
+        counter_map_pin,
+        link_pin: Arc::new(parking_lot::Mutex::new(None)),
+        receipts: Arc::new(parking_lot::Mutex::new(GuestTcxInventoryReceipts::default())),
+        baseline: Arc::new(parking_lot::Mutex::new(GuestTcxInventoryBaseline {
+            maps: maps.into_iter().map(|map| (map.id, map)).collect(),
+            programs: programs.into_iter().map(|program| (program.id, program)).collect(),
+            links: links.into_iter().map(|link| (link.id, link)).collect(),
+            maps_available,
+            programs_available,
+            links_available,
+        })),
+    };
+    GuestTcxInventoryCapture { identity, disposition: first_error.map_or(Ok(()), Err) }
 }
 
-#[expect(clippy::panic, reason = "D12 RED scaffold; DELIVER projects every aya map kind")]
-#[allow(dead_code, reason = "D12 source-local table activates this projection")]
-fn project_map_kind(_raw: aya::maps::MapType) -> GuestTcxMapKind {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D12 map-kind projection)")
+fn project_map_kind(raw: aya::maps::MapType) -> GuestTcxMapKind {
+    match raw {
+        aya::maps::MapType::Hash => GuestTcxMapKind::Hash,
+        aya::maps::MapType::Array => GuestTcxMapKind::Array,
+        unsupported => GuestTcxMapKind::Unsupported(GuestTcxUnsupportedMapKind(unsupported as u32)),
+    }
 }
 
-#[expect(clippy::panic, reason = "D12 RED scaffold; DELIVER projects private map metadata")]
-#[allow(dead_code, reason = "D12 source-local table activates this projection")]
-fn project_map_schema(_raw: &RawGuestTcxMapObservation) -> GuestTcxMapSchema {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D12 map-schema projection)")
+fn project_map_schema(raw: &RawGuestTcxMapObservation) -> GuestTcxMapSchema {
+    let key = if raw.key_size == 4 {
+        GuestTcxMapKeyShape::U32
+    } else {
+        GuestTcxMapKeyShape::Unsupported(GuestTcxUnsupportedMapProperty(raw.key_size))
+    };
+    let endpoint = raw.name.as_slice() == b"ENDPOINTS";
+    let counter = raw.name.as_slice() == b"COUNTERS";
+    let value = if endpoint && (raw.value_size == 16 || raw.value_size == 20) {
+        GuestTcxMapValueShape::EndpointAbi
+    } else if counter && raw.value_size == 8 {
+        GuestTcxMapValueShape::CounterU64
+    } else {
+        GuestTcxMapValueShape::Unsupported(GuestTcxUnsupportedMapProperty(raw.value_size))
+    };
+    let capacity = if endpoint && raw.max_entries == 65_536 {
+        GuestTcxMapCapacity::EndpointMaximum
+    } else if counter && raw.max_entries == 8 {
+        GuestTcxMapCapacity::CounterSlots
+    } else {
+        GuestTcxMapCapacity::Unsupported(GuestTcxUnsupportedMapProperty(raw.max_entries))
+    };
+    GuestTcxMapSchema { kind: project_map_kind(raw.kind), key, value, capacity }
 }
 
 #[doc(hidden)]
@@ -344,6 +609,17 @@ pub struct GuestTcxInventoryIdentity {
     counter_map_pin: PathBuf,
     link_pin: Arc<parking_lot::Mutex<Option<PathBuf>>>,
     receipts: Arc<parking_lot::Mutex<GuestTcxInventoryReceipts>>,
+    baseline: Arc<parking_lot::Mutex<GuestTcxInventoryBaseline>>,
+}
+
+#[derive(Default)]
+struct GuestTcxInventoryBaseline {
+    maps: BTreeMap<u32, RawGuestTcxMapObservation>,
+    programs: BTreeMap<u32, RawGuestTcxProgramObservation>,
+    links: BTreeMap<u32, RawGuestTcxLinkObservation>,
+    maps_available: bool,
+    programs_available: bool,
+    links_available: bool,
 }
 
 #[derive(Default)]
@@ -361,115 +637,210 @@ struct GuestTcxInventoryReceipts {
 
 #[doc(hidden)]
 pub struct GuestTcxProgram {
-    _private: (),
+    bpf: aya::Ebpf,
+    endpoint_map: Option<HashMap<MapData, u32, EndpointAbi>>,
+    counter_map: Option<Array<MapData, u64>>,
+    endpoint_map_pin: Option<PathBuf>,
+    counter_map_pin: Option<PathBuf>,
+    endpoints: BTreeMap<u32, GuestTcxEndpoint>,
+    program_id: u32,
 }
 
 #[doc(hidden)]
 pub struct GuestTcxLink {
-    _private: (),
+    link: Option<FdLink>,
+    program_id: u32,
 }
 
 #[doc(hidden)]
 pub struct GuestTcxAdoptedState {
-    _private: (),
+    inventory: GuestTcxInventoryIdentity,
+    link_pin: PathBuf,
+    endpoint_map: Option<HashMap<MapData, u32, EndpointAbi>>,
+    counter_map: Option<Array<MapData, u64>>,
+    link: Option<aya::programs::links::PinnedLink>,
 }
 
-#[allow(
-    clippy::needless_pass_by_ref_mut,
-    clippy::unused_self,
-    reason = "D12 exact stateful RED signatures precede implementation"
-)]
 impl GuestTcxProgram {
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn load(_inventory: &GuestTcxInventoryIdentity) -> Result<Self, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 TCX load)")
+    pub fn load(inventory: &GuestTcxInventoryIdentity) -> Result<Self, GuestTcxError> {
+        let bpf = aya::EbpfLoader::new()
+            .allow_unsupported_maps()
+            .load(super::OVERDRIVE_BPF_OBJ)
+            .map_err(|source| GuestTcxError::Load { source })?;
+        let _program = bpf
+            .program("gh295c_endpoint")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::Classifier })?;
+        let program_id = inventory.receipts.lock().program_id.unwrap_or_default();
+        Ok(Self {
+            bpf,
+            endpoint_map: None,
+            counter_map: None,
+            endpoint_map_pin: None,
+            counter_map_pin: None,
+            endpoints: BTreeMap::new(),
+            program_id,
+        })
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn pin_endpoint_map(&mut self, _pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-map pin)")
+    pub fn pin_endpoint_map(&mut self, pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        let map = self
+            .bpf
+            .take_map("ENDPOINTS")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
+        let schema = schema_for_map(&map, true)?;
+        map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
+        self.endpoint_map =
+            Some(HashMap::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
+        self.endpoint_map_pin = Some(pin.to_path_buf());
+        Ok(schema)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn pin_counter_map(&mut self, _pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 counter-map pin)")
+    pub fn pin_counter_map(&mut self, pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
+        let map = self
+            .bpf
+            .take_map("COUNTERS")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::CounterMap })?;
+        let schema = schema_for_map(&map, false)?;
+        map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
+        self.counter_map =
+            Some(Array::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
+        self.counter_map_pin = Some(pin.to_path_buf());
+        Ok(schema)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn insert_endpoint(
         &mut self,
-        _ifindex: u32,
-        _endpoint: GuestTcxEndpoint,
+        ifindex: u32,
+        endpoint: GuestTcxEndpoint,
     ) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint insert)")
+        let map = self
+            .endpoint_map
+            .as_mut()
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
+        map.insert(ifindex, EndpointAbi::from(endpoint), 0)
+            .map_err(|source| GuestTcxError::Map { source })?;
+        self.endpoints.insert(ifindex, endpoint);
+        Ok(())
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn read_endpoint(&self, _ifindex: u32) -> Result<Option<GuestTcxEndpoint>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint read-back)")
+    pub fn read_endpoint(&self, ifindex: u32) -> Result<Option<GuestTcxEndpoint>, GuestTcxError> {
+        if let Some(endpoint) = self.endpoints.get(&ifindex) {
+            return Ok(Some(*endpoint));
+        }
+        let map = self
+            .endpoint_map
+            .as_ref()
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
+        map.get(&ifindex, 0).map(|endpoint| Some(endpoint.into())).or_else(|error| match error {
+            aya::maps::MapError::KeyNotFound => Ok(None),
+            source => Err(GuestTcxError::Map { source }),
+        })
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn attach_first_ingress(
-        &mut self,
-        _interface: &str,
-    ) -> Result<GuestTcxLink, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 first-ingress attach)")
+    pub fn attach_first_ingress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
+        let program = self
+            .bpf
+            .program_mut("gh295c_endpoint")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::Classifier })?;
+        let classifier: &mut SchedClassifier =
+            program.try_into().map_err(|source| GuestTcxError::Program { source })?;
+        let id = classifier
+            .attach_with_options(
+                interface,
+                TcAttachType::Ingress,
+                TcAttachOptions::TcxOrder(aya::programs::LinkOrder::first()),
+            )
+            .map_err(|source| GuestTcxError::Program { source })?;
+        let link = classifier.take_link(id).map_err(|source| GuestTcxError::Program { source })?;
+        let fd_link: FdLink = link.try_into().map_err(|source| GuestTcxError::Link { source })?;
+        Ok(GuestTcxLink { link: Some(fd_link), program_id: self.program_id })
     }
 }
 
-#[allow(clippy::unused_self, reason = "D12 exact consuming RED signatures")]
 impl GuestTcxLink {
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn program_id(&self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 link program identity)")
+        self.program_id
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn pin(self, _pin: &Path) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 link pin)")
+    pub fn pin(mut self, pin: &Path) -> Result<(), GuestTcxError> {
+        let link = self.link.take().ok_or_else(|| GuestTcxError::Io {
+            source: std::io::Error::other("TCX link already consumed"),
+        })?;
+        link.pin(pin).map(|_| ()).map_err(|source| GuestTcxError::Pin { source })
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn detach(self) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 link detach)")
+    pub fn detach(mut self) -> Result<(), GuestTcxError> {
+        if let Some(link) = self.link.take() {
+            link.detach().map_err(|source| GuestTcxError::Program { source })?;
+        }
+        Ok(())
     }
 }
 
-#[allow(
-    clippy::needless_pass_by_ref_mut,
-    clippy::unused_self,
-    reason = "D12 exact stateful RED signatures precede implementation"
-)]
 impl GuestTcxAdoptedState {
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn for_inventory(_inventory: &GuestTcxInventoryIdentity, _link_pin: PathBuf) -> Self {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopted state)")
+    pub fn for_inventory(inventory: &GuestTcxInventoryIdentity, link_pin: PathBuf) -> Self {
+        *inventory.link_pin.lock() = Some(link_pin.clone());
+        Self {
+            inventory: inventory.clone(),
+            link_pin,
+            endpoint_map: None,
+            counter_map: None,
+            link: None,
+        }
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn adopt_endpoint_map(&mut self) -> Result<GuestTcxMapSchema, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopt endpoint map)")
+        let map = aya::maps::MapData::from_pin(&self.inventory.endpoint_map_pin)
+            .map_err(|source| GuestTcxError::Map { source })?;
+        let schema = schema_for_map_data(&map, true)?;
+        self.endpoint_map = Some(
+            HashMap::try_from(Map::HashMap(map)).map_err(|source| GuestTcxError::Map { source })?,
+        );
+        Ok(schema)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn adopt_counter_map(&mut self) -> Result<GuestTcxMapSchema, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopt counter map)")
+        let map = aya::maps::MapData::from_pin(&self.inventory.counter_map_pin)
+            .map_err(|source| GuestTcxError::Map { source })?;
+        let schema = schema_for_map_data(&map, false)?;
+        self.counter_map =
+            Some(Array::try_from(Map::Array(map)).map_err(|source| GuestTcxError::Map { source })?);
+        Ok(schema)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn adopt_link(&mut self) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopt link)")
+        self.link = Some(
+            aya::programs::links::PinnedLink::from_pin(&self.link_pin)
+                .map_err(|source| GuestTcxError::Link { source })?,
+        );
+        Ok(())
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
-    pub fn read_endpoint(&self, _ifindex: u32) -> Result<Option<GuestTcxEndpoint>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopted endpoint read-back)")
+    pub fn read_endpoint(&self, ifindex: u32) -> Result<Option<GuestTcxEndpoint>, GuestTcxError> {
+        let map = self
+            .endpoint_map
+            .as_ref()
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EndpointMap })?;
+        map.get(&ifindex, 0).map(|endpoint| Some(endpoint.into())).or_else(|error| match error {
+            aya::maps::MapError::KeyNotFound => Ok(None),
+            source => Err(GuestTcxError::Map { source }),
+        })
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn unpin_link(&mut self) -> Result<Option<GuestTcxLink>, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 adopted link unpin)")
+        let Some(link) = self.link.take() else { return Ok(None) };
+        let fd = link.unpin().map_err(|source| GuestTcxError::Io { source })?;
+        Ok(Some(GuestTcxLink {
+            link: Some(fd),
+            program_id: self.inventory.receipts.lock().program_id.unwrap_or_default(),
+        }))
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn unpin_counter_map(&mut self) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 counter-map unpin)")
+        let _ = self.counter_map.take();
+        match std::fs::remove_file(&self.inventory.counter_map_pin) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(GuestTcxError::Io { source }),
+        }
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn unpin_endpoint_map(&mut self) -> Result<(), GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-map unpin)")
+        let _ = self.endpoint_map.take();
+        match std::fs::remove_file(&self.inventory.endpoint_map_pin) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(GuestTcxError::Io { source }),
+        }
     }
 }
 
-#[allow(clippy::unused_self, reason = "D12 exact observation RED signatures")]
 impl GuestTcxInventoryIdentity {
     pub fn capture(
         endpoint_map_pin: PathBuf,
@@ -478,85 +849,239 @@ impl GuestTcxInventoryIdentity {
         capture_with_source(endpoint_map_pin, counter_map_pin, Arc::new(AyaGuestTcxInventorySource))
     }
 
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_endpoint_maps(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-map inventory)")
+        self.observe_maps(true)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_counter_maps(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 counter-map inventory)")
+        self.observe_maps(false)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_endpoint_entries(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-entry inventory)")
+        let baseline = self.baseline.lock();
+        if !baseline.maps_available {
+            return Err(GuestTcxError::CaptureUnavailable {
+                family: GuestTcxInventoryFamily::EndpointEntry,
+            });
+        }
+        let receipts = self.receipts.lock();
+        let candidate_maps = self.source.loaded_maps().map_err(|_| {
+            GuestTcxError::InventoryAmbiguous { family: GuestTcxInventoryFamily::EndpointEntry }
+        })?;
+        if !receipts.endpoint_ifindices.is_empty() {
+            let Some(map_id) = receipts.endpoint_map_id else { return Ok(0) };
+            let mut count = 0;
+            for ifindex in &receipts.endpoint_ifindices {
+                if self.source.endpoint_present_by_id(map_id, *ifindex)? {
+                    count += 1;
+                }
+            }
+            return Ok(count);
+        }
+        for map in candidate_maps {
+            if project_map_schema(&map).kind == GuestTcxMapKind::Hash
+                && self.source.endpoint_present_by_id(map.id, map.id)?
+            {
+                return Err(GuestTcxError::InventoryAmbiguous {
+                    family: GuestTcxInventoryFamily::EndpointEntry,
+                });
+            }
+        }
+        Ok(0)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_tcx_programs(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 program inventory)")
+        self.observe_programs()
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_tcx_links(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 link inventory)")
+        self.observe_links()
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_endpoint_map_pins(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 endpoint-map-pin inventory)")
+        self.observe_pin(true)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_counter_map_pins(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 counter-map-pin inventory)")
+        self.observe_pin(false)
     }
-    #[expect(clippy::panic, reason = "D12 RED scaffold")]
     pub fn observe_tcx_link_pins(&self) -> Result<u32, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12 link-pin inventory)")
+        let path = self.link_pin.lock().clone();
+        let Some(path) = path else { return Ok(0) };
+        self.observe_link_pin_path(&path)
+    }
+
+    fn observe_maps(&self, endpoint: bool) -> Result<u32, GuestTcxError> {
+        let family = if endpoint {
+            GuestTcxInventoryFamily::EndpointMap
+        } else {
+            GuestTcxInventoryFamily::CounterMap
+        };
+        if !self.baseline.lock().maps_available {
+            return Err(GuestTcxError::CaptureUnavailable { family });
+        }
+        let receipt = if endpoint {
+            self.receipts.lock().endpoint_map_id
+        } else {
+            self.receipts.lock().counter_map_id
+        };
+        let maps =
+            self.source.loaded_maps().map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
+        if let Some(id) = receipt {
+            return Ok(u32::from(maps.iter().any(|map| map.id == id)));
+        }
+        let baseline = self.baseline.lock();
+        let expected = maps
+            .iter()
+            .filter(|map| {
+                let schema = project_map_schema(map);
+                (endpoint && map.name == b"ENDPOINTS" && schema.kind == GuestTcxMapKind::Hash)
+                    || (!endpoint
+                        && map.name == b"COUNTERS"
+                        && schema.kind == GuestTcxMapKind::Array)
+            })
+            .filter(|map| !baseline.maps.contains_key(&map.id))
+            .count();
+        if expected > 0 { Err(GuestTcxError::InventoryAmbiguous { family }) } else { Ok(0) }
+    }
+
+    fn observe_programs(&self) -> Result<u32, GuestTcxError> {
+        let family = GuestTcxInventoryFamily::TcxProgram;
+        if !self.baseline.lock().programs_available {
+            return Err(GuestTcxError::CaptureUnavailable { family });
+        }
+        let programs = self
+            .source
+            .loaded_programs()
+            .map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
+        if let Some(id) = self.receipts.lock().program_id {
+            return Ok(u32::from(programs.iter().any(|program| program.id == id)));
+        }
+        let baseline = self.baseline.lock();
+        let candidates =
+            programs.iter().filter(|program| !baseline.programs.contains_key(&program.id)).count();
+        if candidates > 0 { Err(GuestTcxError::InventoryAmbiguous { family }) } else { Ok(0) }
+    }
+
+    fn observe_links(&self) -> Result<u32, GuestTcxError> {
+        let family = GuestTcxInventoryFamily::TcxLink;
+        if !self.baseline.lock().links_available {
+            return Err(GuestTcxError::CaptureUnavailable { family });
+        }
+        let links =
+            self.source.loaded_links().map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
+        if let Some(id) = self.receipts.lock().link_id {
+            return Ok(u32::from(links.iter().any(|link| link.id == id)));
+        }
+        let baseline = self.baseline.lock();
+        let candidates = links.iter().filter(|link| !baseline.links.contains_key(&link.id)).count();
+        if candidates > 0 { Err(GuestTcxError::InventoryAmbiguous { family }) } else { Ok(0) }
+    }
+
+    fn observe_pin(&self, endpoint: bool) -> Result<u32, GuestTcxError> {
+        let family = if endpoint {
+            GuestTcxInventoryFamily::EndpointMapPin
+        } else {
+            GuestTcxInventoryFamily::CounterMapPin
+        };
+        let path = if endpoint { &self.endpoint_map_pin } else { &self.counter_map_pin };
+        match self.source.observe_pin(path)? {
+            RawGuestTcxPinObservation::Absent => Ok(0),
+            RawGuestTcxPinObservation::Map(map) => {
+                let receipt = if endpoint {
+                    self.receipts.lock().endpoint_map_pin_id
+                } else {
+                    self.receipts.lock().counter_map_pin_id
+                };
+                match receipt {
+                    Some(id) if id == map.id => Ok(1),
+                    Some(_) => Err(GuestTcxError::OwnershipMismatch { family }),
+                    None => Err(GuestTcxError::InventoryAmbiguous { family }),
+                }
+            }
+            _ => Err(GuestTcxError::InventoryAmbiguous { family }),
+        }
+    }
+
+    fn observe_link_pin_path(&self, path: &Path) -> Result<u32, GuestTcxError> {
+        let family = GuestTcxInventoryFamily::TcxLinkPin;
+        match self.source.observe_pin(path)? {
+            RawGuestTcxPinObservation::Absent => Ok(0),
+            RawGuestTcxPinObservation::Link(link) => match self.receipts.lock().link_pin_id {
+                Some(id) if id == link.id => Ok(1),
+                Some(_) => Err(GuestTcxError::OwnershipMismatch { family }),
+                None => Err(GuestTcxError::InventoryAmbiguous { family }),
+            },
+            _ => Err(GuestTcxError::InventoryAmbiguous { family }),
+        }
     }
 }
 
 /// Query one real interface/attach-point pair.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER binds aya TCX query")]
 pub fn query_attachment(
-    _interface: &str,
-    _attach_point: TcxAttachPoint,
+    interface: &str,
+    attach_point: TcxAttachPoint,
 ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 query TCX attachment)")
+    let attach = match attach_point {
+        TcxAttachPoint::Ingress => TcAttachType::Ingress,
+        TcxAttachPoint::Egress => TcAttachType::Egress,
+        TcxAttachPoint::Custom(parent) => TcAttachType::Custom(parent),
+    };
+    let (revision, programs) = SchedClassifier::query_tcx(interface, attach)
+        .map_err(|source| GuestTcxError::Program { source })?;
+    Ok(GuestTcxAttachment {
+        revision,
+        program_ids: sorted_program_ids(programs.into_iter().map(|program| program.id()).collect()),
+    })
 }
 
 /// Detach the exact owned pinned TCX link.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER binds pinned-link detach")]
-pub fn detach_pinned_link(_link_pin: impl AsRef<Path>) -> std::result::Result<(), GuestTcxError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 detach pinned TCX link)")
+pub fn detach_pinned_link(link_pin: impl AsRef<Path>) -> std::result::Result<(), GuestTcxError> {
+    let link = aya::programs::links::PinnedLink::from_pin(link_pin.as_ref())
+        .map_err(|source| GuestTcxError::Link { source })?;
+    let fd = link.unpin().map_err(|source| GuestTcxError::Io { source })?;
+    fd.detach().map_err(|source| GuestTcxError::Program { source })
 }
 
 /// Report whether one ifindex is present in the pinned endpoint map.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER binds endpoint lookup")]
 pub fn endpoint_present(
-    _endpoint_map_pin: impl AsRef<Path>,
-    _ifindex: u32,
+    endpoint_map_pin: impl AsRef<Path>,
+    ifindex: u32,
 ) -> std::result::Result<bool, GuestTcxError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 endpoint presence)")
+    let map = HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(
+        MapData::from_pin(endpoint_map_pin).map_err(|source| GuestTcxError::Map { source })?,
+    ))
+    .map_err(|source| GuestTcxError::Map { source })?;
+    map.get(&ifindex, 0).map(|_| true).or_else(|error| match error {
+        aya::maps::MapError::KeyNotFound => Ok(false),
+        source => Err(GuestTcxError::Map { source }),
+    })
 }
 
 /// Remove one ifindex from the pinned endpoint map.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER binds endpoint removal")]
 pub fn remove_endpoint(
-    _endpoint_map_pin: impl AsRef<Path>,
-    _ifindex: u32,
+    endpoint_map_pin: impl AsRef<Path>,
+    ifindex: u32,
 ) -> std::result::Result<(), GuestTcxError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 endpoint removal)")
+    let mut map = HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(
+        MapData::from_pin(endpoint_map_pin).map_err(|source| GuestTcxError::Map { source })?,
+    ))
+    .map_err(|source| GuestTcxError::Map { source })?;
+    map.remove(&ifindex).or_else(|error| match error {
+        aya::maps::MapError::KeyNotFound => Ok(()),
+        source => Err(GuestTcxError::Map { source }),
+    })
 }
 
 /// Read one semantic slot from the pinned counter array.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER binds counter read")]
 pub fn read_counter(
-    _counter_map_pin: impl AsRef<Path>,
-    _counter: GuestTcxCounter,
+    counter_map_pin: impl AsRef<Path>,
+    counter: GuestTcxCounter,
 ) -> std::result::Result<u64, GuestTcxError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 guest TCX counter read)")
+    let map = Array::<_, u64>::try_from(Map::Array(
+        MapData::from_pin(counter_map_pin).map_err(|source| GuestTcxError::Map { source })?,
+    ))
+    .map_err(|source| GuestTcxError::Map { source })?;
+    map.get(&counter_index(counter), 0).map_err(|source| GuestTcxError::Map { source })
 }
 
 #[cfg(test)]
@@ -636,7 +1161,6 @@ mod tests {
     /// S-ND295-00 — every valid raw map kind keeps an honest semantic identity.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D12 closed raw map-kind projection"]
     fn every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics() {
         use aya::maps::MapType;
 
@@ -691,7 +1215,6 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[allow(clippy::too_many_lines, reason = "one closed schema table is easier to audit intact")]
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D12 opaque schema projection"]
     fn wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less() {
         let endpoint = RawGuestTcxMapObservation {
             id: 17,
@@ -951,7 +1474,6 @@ mod tests {
     /// S-ND295-00 — capture failure preserves observation and first-source truth.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D12 once-moved capture failure and eight-family continuation"]
     fn capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source() {
         for (fail_maps, fail_programs, fail_links) in [
             (true, false, false),
@@ -1050,7 +1572,6 @@ mod tests {
     /// S-ND295-00 — an unreceipted candidate is never attributed as owned.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D12 receipt-only owned inventory"]
     fn a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count() {
         let source = Arc::new(ScriptedInventorySource::default());
         let endpoint_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints");
@@ -1112,7 +1633,6 @@ mod tests {
     /// S-ND295-00 — exact private receipts are the only source of positive counts.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 exact positive receipted inventory"]
     fn every_receipted_family_returns_one_and_clean_families_return_exact_zero() {
         let source = Arc::new(ScriptedInventorySource::default());
         let endpoint_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints");
@@ -1172,7 +1692,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 typed aya query/open error projection"]
+    #[ignore = "pending DELIVER step 02-01: typed aya query/open error projection is outside the ten non-waived bodies"]
     fn absent_real_objects_preserve_the_operation_specific_source_family() {
         let missing = format!("/sys/fs/bpf/overdrive/absent-{}", std::process::id());
         assert!(matches!(

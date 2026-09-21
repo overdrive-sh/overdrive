@@ -226,6 +226,9 @@ pub struct AppState {
     /// `mtls_worker: None` / empty-registry `workflow_engine` defaults on
     /// that constructor).
     pub vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
+    /// The one production shared guest-network owner used by boot and every
+    /// allocation action path.
+    pub(crate) shared_guest_network: Option<Arc<dyn guest_network::SharedGuestNetworkOwner>>,
     /// Alloc → driver-kind routing index (ADR-0083 §D2a(b), GH #42).
     /// `Action::StopAllocation` / `Action::FinalizeFailed` carry no
     /// `AllocationSpec`, so the action shim cannot re-derive which driver
@@ -689,6 +692,7 @@ impl AppState {
             runtime,
             drivers,
             vm_host_state,
+            shared_guest_network: None,
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
@@ -2563,26 +2567,6 @@ pub async fn run_server_with_obs_and_drivers(
         );
         return Err(error::ControlPlaneError::from(cause));
     }
-    if let Err(cause) = shared_guest_network.sweep_stale().await {
-        tracing::error!(
-            name: "health.startup.refused",
-            target: "overdrive::health",
-            reason = "guest_network.sweep",
-            cause = %cause,
-            "shared guest-network stale sweep refused"
-        );
-        return Err(error::ControlPlaneError::from(cause));
-    }
-    if let Err(cause) = shared_guest_network.converge_shared().await {
-        tracing::error!(
-            name: "health.startup.refused",
-            target: "overdrive::health",
-            reason = "guest_network.converge",
-            cause = %cause,
-            "shared guest-network convergence refused"
-        );
-        return Err(error::ControlPlaneError::from(cause));
-    }
     let (_request_tx, request_rx) = tokio::sync::mpsc::channel(1);
     let shared_network_supervisor = SharedNetworkSupervisorHandle {
         request_rx,
@@ -3229,7 +3213,7 @@ pub async fn run_server_with_obs_and_drivers(
     // lives — and because the index is under `data_dir` (never `/run`) it
     // survives a restart that loses the in-memory `RootfsPlan` (S-VM-84
     // ending 3).
-    let state: AppState = AppState::new_with_workflow_engine(
+    let mut state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
         obs,
@@ -3257,6 +3241,10 @@ pub async fn run_server_with_obs_and_drivers(
         // re-keyed `MtlsResolve` above.
         frontend_addr_allocator.clone(),
     );
+    // Keep the boot owner and the action/reconciler owner as one shared
+    // instance. The field's fixture default is replaced before any action can
+    // be dispatched, so production never constructs a second owner.
+    state.shared_guest_network = Some(Arc::clone(&shared_guest_network));
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.6/§105a.10 AC3, GH #42): the `VmReclamation` boot-epoch drive
@@ -3268,6 +3256,12 @@ pub async fn run_server_with_obs_and_drivers(
     // VM allocations exist whether or not mTLS is composed, and
     // `state.vm_host_state` is composed unconditionally (never gated on
     // the `Vm` registry entry either — S-VM-30).
+    tracing::info!(
+        name: "guest_network.shared_owner_boot_phase",
+        node_id = %state.node_id,
+        phase = "vm_reclamation",
+        transition = "started",
+    );
     vm_reclamation_boot::converge(&state).await.map_err(|source| {
         tracing::warn!(
             name: "health.startup.refused",
@@ -3277,6 +3271,44 @@ pub async fn run_server_with_obs_and_drivers(
         );
         error::ControlPlaneError::VmReclamationBoot(source)
     })?;
+    tracing::info!(
+        name: "guest_network.shared_owner_boot_phase",
+        node_id = %state.node_id,
+        phase = "vm_reclamation",
+        transition = "completed",
+    );
+    tracing::info!(
+        name: "guest_network.shared_owner_boot_phase",
+        node_id = %state.node_id,
+        phase = "stale_sweep",
+        transition = "started",
+    );
+    if let Err(cause) = shared_guest_network.sweep_stale().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.sweep",
+            cause = %cause,
+            "shared guest-network stale sweep refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
+    tracing::info!(
+        name: "guest_network.shared_owner_boot_phase",
+        node_id = %state.node_id,
+        phase = "stale_sweep",
+        transition = "completed",
+    );
+    if let Err(cause) = shared_guest_network.converge_shared().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.converge",
+            cause = %cause,
+            "shared guest-network convergence refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
 
     // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
     // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a

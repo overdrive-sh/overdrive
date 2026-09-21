@@ -362,30 +362,34 @@ impl Client {
 
     /// Observe one persistent TAP without collapsing incompatible identity.
     #[doc(hidden)]
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "D12A RED scaffold; DELIVER retains typed TAP identity"
-    )]
     pub async fn observe_persistent_tap_identity(
         &self,
-        _name: &str,
+        name: &str,
     ) -> Result<PersistentTapIdentity, NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12A persistent TAP identity)")
+        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
+        match stream.try_next().await {
+            Ok(Some(message)) => Ok(persistent_tap_identity_from_message(name, Some(&message))),
+            Ok(None) => Ok(PersistentTapIdentity::Absent { name: name.to_owned() }),
+            Err(err) => absent_or_err("get-tap-identity", err)
+                .map(|_| PersistentTapIdentity::Absent { name: name.to_owned() }),
+        }
     }
 
     /// Observe one named link as a semantic identity without a desired-state verdict.
     #[doc(hidden)]
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "D12A RED scaffold; DELIVER projects typed link identity"
-    )]
     pub async fn observe_link_identity(
         &self,
-        _name: &str,
+        name: &str,
     ) -> Result<Option<ObservedLinkIdentity>, NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D12A link identity)")
+        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
+        match stream.try_next().await {
+            Ok(Some(message)) => Ok(observed_link_identity_from_message(name, Some(&message))),
+            Ok(None) => Ok(None),
+            Err(err) => {
+                let typed = NetlinkError::link("get-link-identity", err);
+                if typed.errno() == Some(NEG_ENODEV) { Ok(None) } else { Err(typed) }
+            }
+        }
     }
 
     /// `ip link add <a> type veth peer name <b>` — atomic veth-pair creation.
@@ -1003,22 +1007,94 @@ fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
     }
 }
 
-#[allow(dead_code, reason = "D12A exact private projection RED scaffold")]
-#[expect(clippy::panic, reason = "D12A RED scaffold; DELIVER binds the existing parser")]
 fn persistent_tap_identity_from_message(
-    _name: &str,
-    _message: Option<&LinkMessage>,
+    name: &str,
+    message: Option<&LinkMessage>,
 ) -> PersistentTapIdentity {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D12A TAP identity projection)")
+    let Some(message) = message else {
+        return PersistentTapIdentity::Absent { name: name.to_owned() };
+    };
+    let link = observed_link_identity_from_message(name, Some(message))
+        .expect("an RTM_GETLINK reply always has one semantic identity");
+    let mut kind_is_tun = false;
+    let mut tun_type = None;
+    let mut persistent = None;
+    let mut owner_uid = None;
+    for attribute in &message.attributes {
+        let LinkAttribute::LinkInfo(infos) = attribute else { continue };
+        for info in infos {
+            match info {
+                LinkInfo::Kind(InfoKind::Tun) => kind_is_tun = true,
+                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
+                    for tun_info in tun_infos {
+                        let InfoTun::Other(nla) = tun_info else { continue };
+                        match nla.kind() & NLA_TYPE_MASK {
+                            IFLA_TUN_TYPE => tun_type = nla_u8(nla),
+                            IFLA_TUN_PERSIST => persistent = nla_u8(nla),
+                            IFLA_TUN_OWNER => owner_uid = nla_u32(nla),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let is_tap = tun_type == u8::try_from(libc::IFF_TAP).ok();
+    if kind_is_tun && is_tap && persistent == Some(1) {
+        PersistentTapIdentity::Persistent { link, owner_uid }
+    } else {
+        PersistentTapIdentity::Incompatible {
+            link,
+            persistent: kind_is_tun.then_some(persistent == Some(1)),
+            owner_uid: kind_is_tun.then_some(owner_uid).flatten(),
+        }
+    }
 }
 
-#[allow(dead_code, reason = "D12A exact private projection RED scaffold")]
-#[expect(clippy::panic, reason = "D12A RED scaffold; DELIVER binds semantic link projection")]
 fn observed_link_identity_from_message(
-    _name: &str,
-    _message: Option<&LinkMessage>,
+    name: &str,
+    message: Option<&LinkMessage>,
 ) -> Option<ObservedLinkIdentity> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D12A link identity projection)")
+    let message = message?;
+    let mut kind = ObservedLinkKind::Other;
+    for attribute in &message.attributes {
+        let LinkAttribute::LinkInfo(infos) = attribute else { continue };
+        for info in infos {
+            match info {
+                LinkInfo::Kind(InfoKind::Bridge) => kind = ObservedLinkKind::Bridge,
+                LinkInfo::Kind(InfoKind::Tun) => kind = ObservedLinkKind::Tun,
+                LinkInfo::Kind(InfoKind::Veth) => kind = ObservedLinkKind::Veth,
+                LinkInfo::Kind(InfoKind::Other(_)) => kind = ObservedLinkKind::Other,
+                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
+                    if tun_infos.iter().any(|tun_info| {
+                        matches!(tun_info, InfoTun::Other(nla) if nla.kind() & NLA_TYPE_MASK == IFLA_TUN_TYPE && nla_u8(nla) == u8::try_from(libc::IFF_TAP).ok())
+                    }) {
+                        kind = ObservedLinkKind::Tap;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let master_ifindex = message.attributes.iter().find_map(|attribute| match attribute {
+        LinkAttribute::Controller(index) => Some(*index),
+        _ => None,
+    });
+    let mac = message.attributes.iter().find_map(|attribute| match attribute {
+        LinkAttribute::Address(address) if address.len() == 6 => {
+            Some([address[0], address[1], address[2], address[3], address[4], address[5]])
+        }
+        _ => None,
+    });
+    Some(ObservedLinkIdentity {
+        name: name.to_owned(),
+        ifindex: message.header.index,
+        kind,
+        up: message.header.flags.contains(LinkFlags::Up),
+        master_ifindex,
+        mac,
+    })
 }
 
 /// Read the one-byte payload used by the kernel's `IFLA_TUN_*` attributes.
@@ -1197,7 +1273,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-11 D12A netlink identity projection"]
     fn persistent_tap_and_bridge_projection_preserves_every_observable_identity_field() {
         let uid = 4_200;
         let iff_tap = u8::try_from(libc::IFF_TAP).expect("IFF_TAP fits u8");

@@ -197,7 +197,6 @@ fn assert_single_counter(counters: &Array<&mut aya::maps::MapData, u64>, expecte
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER step for GH #295 production SCHED_CLS program/maps"]
 fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
     let artifact = super::bpf_artifact::path();
     let pin_dir = std::path::PathBuf::from(format!(

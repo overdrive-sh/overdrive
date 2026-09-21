@@ -118,7 +118,6 @@ mod tests {
         /// S-ND295-13 — old VM owners are reclaimed before stale attachment sweep.
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step 02-01: S-ND295-13 reclamation-before-sweep ordering"]
         fn reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm(
             seed in any::<u64>(),
         ) {
