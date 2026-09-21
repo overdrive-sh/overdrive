@@ -765,7 +765,10 @@ impl GuestTcxProgram {
         map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
         self.endpoint_map =
             Some(HashMap::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
-        self.inventory.receipts.lock().endpoint_map_id = Some(map_id);
+        let mut receipts = self.inventory.receipts.lock();
+        receipts.endpoint_map_id = Some(map_id);
+        receipts.endpoint_map_pin_id = Some(map_id);
+        drop(receipts);
         self.endpoint_map_pin = Some(pin.to_path_buf());
         Ok(schema)
     }
@@ -787,7 +790,10 @@ impl GuestTcxProgram {
         map.pin(pin).map_err(|source| GuestTcxError::Pin { source })?;
         self.counter_map =
             Some(Array::try_from(map).map_err(|source| GuestTcxError::Map { source })?);
-        self.inventory.receipts.lock().counter_map_id = Some(map_id);
+        let mut receipts = self.inventory.receipts.lock();
+        receipts.counter_map_id = Some(map_id);
+        receipts.counter_map_pin_id = Some(map_id);
+        drop(receipts);
         self.counter_map_pin = Some(pin.to_path_buf());
         Ok(schema)
     }

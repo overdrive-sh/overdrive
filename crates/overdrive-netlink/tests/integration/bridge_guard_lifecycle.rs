@@ -39,7 +39,6 @@ fn spec() -> BridgeGuardSpec {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step for D-295-DISTILL-9 real bridge-family codec"]
 fn staged_converge_membership_idempotence_reverse_cleanup_and_exact_delete_are_real() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     if unsafe { libc::geteuid() } != 0 {

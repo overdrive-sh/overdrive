@@ -1020,16 +1020,51 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
     async fn exercise(
         &self,
         plan: &GuestNetworkScratchPlan,
-        _stage: GuestNetworkProbeStage,
+        stage: GuestNetworkProbeStage,
     ) -> std::io::Result<bool> {
         let ifindex = Self::ifindex(plan)?;
-        Ok(self
-            .program
-            .lock()
-            .as_ref()
-            .and_then(|program| program.read_endpoint(ifindex).ok())
-            .flatten()
-            .is_some())
+        let program_loaded = self.program.lock().is_some();
+        match stage {
+            GuestNetworkProbeStage::Classifier | GuestNetworkProbeStage::OriginalDestination => {
+                if !program_loaded {
+                    return Ok(false);
+                }
+                let attachment = overdrive_dataplane::guest_tcx::query_attachment(
+                    &plan.tap,
+                    TcxAttachPoint::Ingress,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                if attachment.program_ids.is_empty() {
+                    return Ok(false);
+                }
+                let endpoint = self
+                    .program
+                    .lock()
+                    .as_ref()
+                    .and_then(|program| program.read_endpoint(ifindex).ok())
+                    .flatten();
+                if endpoint.is_none() {
+                    return Ok(false);
+                }
+                if matches!(stage, GuestNetworkProbeStage::OriginalDestination) {
+                    let _counter = overdrive_dataplane::guest_tcx::read_counter(
+                        &plan.counter_map_pin,
+                        overdrive_dataplane::guest_tcx::GuestTcxCounter::Intercept,
+                    )
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                    return Ok(true);
+                }
+                Ok(true)
+            }
+            GuestNetworkProbeStage::DetachedLinkGuard => {
+                let attachment = overdrive_dataplane::guest_tcx::query_attachment(
+                    &plan.tap,
+                    TcxAttachPoint::Ingress,
+                )
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+                Ok(attachment.program_ids.is_empty())
+            }
+        }
     }
 
     async fn count_netlink(
@@ -1045,7 +1080,45 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
             GuestNetworkScratchNetlinkResource::Tap => {
                 u32::from(client.observe_link(&plan.tap).await?.is_some())
             }
-            _ => 0,
+            GuestNetworkScratchNetlinkResource::BridgeGuardTable
+            | GuestNetworkScratchNetlinkResource::BridgeGuardChain
+            | GuestNetworkScratchNetlinkResource::BridgeGuardSet
+            | GuestNetworkScratchNetlinkResource::BridgeGuardRule
+            | GuestNetworkScratchNetlinkResource::BridgeGuardMember => {
+                let guard = Self::guard_spec(plan).map_err(|error| {
+                    NetlinkError::nft("guard-observe", std::io::Error::other(error.to_string()))
+                })?;
+                let expected_members = BTreeSet::from([plan.tap.clone()]);
+                let observation = overdrive_netlink::nft::bridge::observe(
+                    &guard,
+                    &expected_members,
+                )
+                .map_err(|error| {
+                    NetlinkError::nft("guard-observe", std::io::Error::other(error.to_string()))
+                })?;
+                match observation {
+                    BridgeGuardObservation::Absent { .. } => 0,
+                    BridgeGuardObservation::Exact { inventory }
+                    | BridgeGuardObservation::Conflict { inventory } => match resource {
+                        GuestNetworkScratchNetlinkResource::BridgeGuardTable => {
+                            inventory.tables.len() as u32
+                        }
+                        GuestNetworkScratchNetlinkResource::BridgeGuardChain => {
+                            inventory.chains.len() as u32
+                        }
+                        GuestNetworkScratchNetlinkResource::BridgeGuardSet => {
+                            inventory.sets.len() as u32
+                        }
+                        GuestNetworkScratchNetlinkResource::BridgeGuardRule => {
+                            inventory.rules.len() as u32
+                        }
+                        GuestNetworkScratchNetlinkResource::BridgeGuardMember => {
+                            inventory.members.len() as u32
+                        }
+                        _ => 0,
+                    },
+                }
+            }
         };
         Ok(count)
     }
@@ -1420,8 +1493,9 @@ fn link_kind(kind: overdrive_netlink::ObservedLinkKind) -> GuestLinkKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct HostGuestNetworkAllocationState {
+    tap: String,
     ifindex: u32,
     program_id: u32,
 }
@@ -1602,7 +1676,7 @@ impl HostSharedGuestNetworkOwner {
             .lock()
             .iter()
             .filter(|(alloc, _)| exclude.is_none_or(|excluded| excluded != *alloc))
-            .map(|(_, state)| format!("ovd-tp-{:04x}", state.ifindex.saturating_sub(293)))
+            .map(|(_, state)| state.tap.clone())
             .collect::<BTreeSet<_>>();
         if let Some(plan) = extra {
             members.insert(plan.assignment().tap.clone());
@@ -2346,13 +2420,18 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 observed: None,
             });
         };
-        self.allocations
-            .lock()
-            .insert(plan.alloc().clone(), HostGuestNetworkAllocationState { ifindex, program_id });
+        self.allocations.lock().insert(
+            plan.alloc().clone(),
+            HostGuestNetworkAllocationState {
+                tap: plan.assignment().tap.clone(),
+                ifindex,
+                program_id,
+            },
+        );
         Ok(())
     }
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
-        let Some(state) = self.allocations.lock().get(plan.alloc()).copied() else {
+        let Some(state) = self.allocations.lock().get(plan.alloc()).cloned() else {
             return Ok(());
         };
         let mut first = None;
@@ -2679,6 +2758,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         };
         if observed_kind != GuestLinkKind::Bridge
             || bridge_identity.mac != Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC)
+            || !bridge_identity.up
         {
             return Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::BridgeObserve,
@@ -2691,6 +2771,35 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     name: bridge_identity.name,
                     ifindex: Some(bridge_identity.ifindex),
                     link_kind: observed_kind,
+                }),
+            });
+        }
+        let gateway_present = overdrive_netlink::block_on_host_netlink(|| async {
+            let client = overdrive_netlink::Client::new()?;
+            client.observe_addr(BRIDGE, GATEWAY, 16).await
+        })
+        .map_err(|source| GuestNetworkError::Netlink {
+            operation: GuestNetworkOperation::BridgeObserve,
+            source,
+        })?;
+        if !gateway_present {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::BridgeObserve,
+                expected: GuestNetworkFact::Bridge {
+                    name: BRIDGE.to_owned(),
+                    ifindex: Some(bridge_identity.ifindex),
+                    link_kind: GuestLinkKind::Bridge,
+                    mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                    up: true,
+                    gateway: Some(Ipv4Net::new_assert(GATEWAY, 16)),
+                },
+                observed: Some(GuestNetworkFact::Bridge {
+                    name: BRIDGE.to_owned(),
+                    ifindex: Some(bridge_identity.ifindex),
+                    link_kind: GuestLinkKind::Bridge,
+                    mac: bridge_identity.mac.unwrap_or_default(),
+                    up: bridge_identity.up,
+                    gateway: None,
                 }),
             });
         }
@@ -2838,12 +2947,8 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         Ok(())
     }
     async fn quiesce_managed_taps(&self) -> Result<()> {
-        let taps: Vec<String> = self
-            .allocations
-            .lock()
-            .values()
-            .map(|state| format!("ovd-tp-{:04x}", state.ifindex.saturating_sub(293)))
-            .collect();
+        let taps: Vec<String> =
+            self.allocations.lock().values().map(|state| state.tap.clone()).collect();
         for tap in taps {
             let down = overdrive_netlink::block_on_host_netlink(|| async {
                 let client = overdrive_netlink::Client::new()?;
@@ -3835,8 +3940,12 @@ mod allocation_owner_acceptance {
             "the allocation remains unpublished through the final TAP-up read-back call"
         );
         assert_eq!(
-            owner.allocations.lock().get(plan.alloc()).copied(),
-            Some(HostGuestNetworkAllocationState { ifindex: 295, program_id: 2_950 }),
+            owner.allocations.lock().get(plan.alloc()).cloned(),
+            Some(HostGuestNetworkAllocationState {
+                tap: "ovd-tp-0002".to_owned(),
+                ifindex: 295,
+                program_id: 2_950,
+            }),
             "publication occurs only after the final bridge refresh and TAP-up read-back"
         );
     }
@@ -4227,14 +4336,22 @@ mod allocation_owner_acceptance {
             AllocationCall::DeleteTap,
         ]);
         let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
-        let named_state = HostGuestNetworkAllocationState { ifindex: 295, program_id: 2_950 };
-        let unrelated_state = HostGuestNetworkAllocationState { ifindex: 296, program_id: 2_950 };
-        owner.allocations.lock().insert(named.alloc().clone(), named_state);
-        owner.allocations.lock().insert(unrelated.alloc().clone(), unrelated_state);
+        let named_state = HostGuestNetworkAllocationState {
+            tap: "ovd-tp-0002".to_owned(),
+            ifindex: 295,
+            program_id: 2_950,
+        };
+        let unrelated_state = HostGuestNetworkAllocationState {
+            tap: "ovd-tp-0003".to_owned(),
+            ifindex: 296,
+            program_id: 2_950,
+        };
+        owner.allocations.lock().insert(named.alloc().clone(), named_state.clone());
+        owner.allocations.lock().insert(unrelated.alloc().clone(), unrelated_state.clone());
         let leases_before = pool.snapshot();
         let unrelated_plan_before =
             leases_before.get(unrelated.alloc()).expect("unrelated lease present").clone();
-        let unrelated_facts_before = exposed_attachment_facts(&unrelated, unrelated_state);
+        let unrelated_facts_before = exposed_attachment_facts(&unrelated, unrelated_state.clone());
 
         let error = owner
             .teardown(&named)
@@ -4261,8 +4378,11 @@ mod allocation_owner_acceptance {
         assert!(
             first_attempt.ends_with(&[AllocationCall::ObserveTap, AllocationCall::ObserveGuard,])
         );
-        assert_eq!(owner.allocations.lock().get(named.alloc()).copied(), Some(named_state));
-        assert_eq!(owner.allocations.lock().get(unrelated.alloc()).copied(), Some(unrelated_state));
+        assert_eq!(owner.allocations.lock().get(named.alloc()).cloned(), Some(named_state.clone()));
+        assert_eq!(
+            owner.allocations.lock().get(unrelated.alloc()).cloned(),
+            Some(unrelated_state.clone())
+        );
         assert_eq!(pool.snapshot(), leases_before, "the same named lease remains held on failure");
 
         io.clear_failures();
@@ -4296,7 +4416,10 @@ mod allocation_owner_acceptance {
             (0, 0, 0, 0),
             "retry consumes the exact TAP/endpoint/attachment/pin empty-complement facts"
         );
-        assert_eq!(owner.allocations.lock().get(unrelated.alloc()).copied(), Some(unrelated_state));
+        assert_eq!(
+            owner.allocations.lock().get(unrelated.alloc()).cloned(),
+            Some(unrelated_state.clone())
+        );
         assert_eq!(
             pool.snapshot().get(unrelated.alloc()),
             Some(&unrelated_plan_before),
@@ -4309,7 +4432,7 @@ mod allocation_owner_acceptance {
                     .allocations
                     .lock()
                     .get(unrelated.alloc())
-                    .copied()
+                    .cloned()
                     .expect("unrelated publication remains present"),
             ),
             unrelated_facts_before,
@@ -4340,7 +4463,10 @@ mod allocation_owner_acceptance {
             .await
             .expect("repeated teardown of an unpublished allocation remains idempotent");
         assert_eq!(io.calls().len(), calls_before_absent);
-        assert_eq!(owner.allocations.lock().get(unrelated.alloc()).copied(), Some(unrelated_state));
+        assert_eq!(
+            owner.allocations.lock().get(unrelated.alloc()).cloned(),
+            Some(unrelated_state.clone())
+        );
 
         // Exhaustive single-failure table: each accepted cleanup leaf retains
         // its exact operation/source while all later cleanup calls still run.
@@ -4421,8 +4547,12 @@ mod allocation_owner_acceptance {
                 &format!("nd295-s12-leaf-{index}"),
                 Ipv4Addr::new(100, 95, 1, u8::try_from(index + 2).expect("small table index")),
             );
-            let state = HostGuestNetworkAllocationState { ifindex: 295, program_id: 2_950 };
-            owner.allocations.lock().insert(failing_plan.alloc().clone(), state);
+            let state = HostGuestNetworkAllocationState {
+                tap: failing_plan.assignment().tap.clone(),
+                ifindex: 295,
+                program_id: 2_950,
+            };
+            owner.allocations.lock().insert(failing_plan.alloc().clone(), state.clone());
 
             let error = owner
                 .teardown(&failing_plan)
@@ -4435,7 +4565,7 @@ mod allocation_owner_acceptance {
                 "cleanup continues through the final guard observation after {failing_leaf:?} occurrence {occurrence}"
             );
             assert_eq!(
-                owner.allocations.lock().get(failing_plan.alloc()).copied(),
+                owner.allocations.lock().get(failing_plan.alloc()).cloned(),
                 Some(state),
                 "a cleanup failure retains the same allocation state for retry"
             );

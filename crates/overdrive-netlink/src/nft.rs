@@ -60,6 +60,7 @@ const NFNL_MSG_BATCH_END: u16 = 17;
 
 // nf_tables message ops (`enum nf_tables_msg_types`).
 const NFT_MSG_NEWTABLE: u16 = 0;
+const NFT_MSG_GETTABLE: u16 = 1;
 const NFT_MSG_DELTABLE: u16 = 2;
 const NFT_MSG_NEWCHAIN: u16 = 3;
 const NFT_MSG_GETCHAIN: u16 = 4;
@@ -112,6 +113,7 @@ const IPPROTO_TCP: u8 = 6;
 const NFTA_TABLE_NAME: u16 = 1;
 // chain attrs.
 const NFTA_CHAIN_TABLE: u16 = 1;
+const NFTA_CHAIN_HANDLE: u16 = 2;
 const NFTA_CHAIN_NAME: u16 = 3;
 const NFTA_CHAIN_HOOK: u16 = 4;
 const NFTA_CHAIN_POLICY: u16 = 5;
@@ -129,18 +131,32 @@ const NFTA_SET_TABLE: u16 = 1;
 const NFTA_SET_NAME: u16 = 2;
 const NFTA_SET_KEY_TYPE: u16 = 4;
 const NFTA_SET_KEY_LEN: u16 = 5;
+const NFTA_SET_ID: u16 = 10;
+const NFTA_SET_USERDATA: u16 = 13;
+// flowtable/object attrs.
+const NFTA_FLOWTABLE_TABLE: u16 = 1;
+const NFTA_FLOWTABLE_NAME: u16 = 2;
+const NFTA_FLOWTABLE_HANDLE: u16 = 6;
+const NFTA_OBJ_TABLE: u16 = 1;
+const NFTA_OBJ_NAME: u16 = 2;
+const NFTA_OBJ_HANDLE: u16 = 6;
 const NFTA_SET_ELEM_KEY: u16 = 1;
 const NFTA_SET_ELEM_LIST_TABLE: u16 = 1;
 const NFTA_SET_ELEM_LIST_SET: u16 = 2;
 const NFTA_SET_ELEM_LIST_ELEMENTS: u16 = 3;
+const NFTA_SET_ELEM_LIST_SET_ID: u16 = 4;
 const NFTA_SET_ELEM_LIST_ELEMENTS_NESTED: u16 = NFTA_SET_ELEM_LIST_ELEMENTS | NLA_F_NESTED;
-const NFTA_SET_ELEM_KEY_NESTED: u16 = NFTA_SET_ELEM_KEY | NLA_F_NESTED;
 const NFT_MSG_NEWSET: u16 = 9;
 const NFT_MSG_DELSET: u16 = 11;
 const NFT_MSG_GETSET: u16 = 10;
 const NFT_MSG_NEWSETELEM: u16 = 12;
 const NFT_MSG_GETSETELEM: u16 = 13;
 const NFT_MSG_DELSETELEM: u16 = 14;
+// NFT_MSG_TRACE (17) sits between GETGEN and stateful-object messages.
+const NFT_MSG_NEWOBJ: u16 = 18;
+const NFT_MSG_GETOBJ: u16 = 19;
+const NFT_MSG_NEWFLOWTABLE: u16 = 22;
+const NFT_MSG_GETFLOWTABLE: u16 = 23;
 // ruleset generation attrs.
 const NFTA_GEN_ID: u16 = 1;
 // list + expr framing.
@@ -152,6 +168,7 @@ const NFTA_COUNTER_BYTES: u16 = 1;
 const NFTA_COUNTER_PACKETS: u16 = 2;
 // data.
 const NFTA_DATA_VALUE: u16 = 1;
+const NFT_IFNAME_KEY_TYPE: u32 = 41;
 const NFTA_DATA_VERDICT: u16 = 2;
 const NFTA_VERDICT_CODE: u16 = 1;
 // payload.
@@ -172,6 +189,7 @@ const NFTA_IMMEDIATE_DREG: u16 = 1;
 const NFTA_IMMEDIATE_DATA: u16 = 2;
 const NFTA_LOOKUP_SET: u16 = 1;
 const NFTA_LOOKUP_SREG: u16 = 2;
+const NFTA_LOOKUP_FLAGS: u16 = 5;
 // meta.
 const NFTA_META_DREG: u16 = 1;
 const NFTA_META_KEY: u16 = 2;
@@ -794,8 +812,10 @@ fn newset_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
     attr(&mut payload, NFTA_SET_NAME, &cstr(set));
     // `NFT_DATA_VALUE` is informational for an ifname key.  The kernel uses
     // the explicit key length and validates the family-specific set schema.
-    attr_be32(&mut payload, NFTA_SET_KEY_TYPE, u32::from(NFTA_DATA_VALUE));
+    attr_be32(&mut payload, NFTA_SET_KEY_TYPE, NFT_IFNAME_KEY_TYPE);
     attr_be32(&mut payload, NFTA_SET_KEY_LEN, IFNAMSIZ as u32);
+    attr_be32(&mut payload, NFTA_SET_ID, 1);
+    attr(&mut payload, NFTA_SET_USERDATA, &[0x00, 0x04, 0x01, 0x00, 0x00, 0x00]);
     payload
 }
 
@@ -808,99 +828,39 @@ fn set_elem_payload_family(
     let mut element = Vec::new();
     let mut key = Vec::new();
     attr(&mut key, NFTA_DATA_VALUE, member);
-    attr(&mut element, NFTA_SET_ELEM_KEY_NESTED, &key);
+    // `NFTA_SET_ELEM_LIST_ELEMENTS` is a list: each element receives its own
+    // nested index attribute, whose payload is the nested key attribute.
+    // Omitting either wrapper produces an indistinguishable-looking packet
+    // but the kernel rejects it with EINVAL.
+    let mut key_element = Vec::new();
+    attr(&mut key_element, NFTA_SET_ELEM_KEY | NLA_F_NESTED, &key);
+    attr(&mut element, NLA_F_NESTED | 1, &key_element);
     let mut payload = nfgenmsg(family.nfproto(), 0);
     attr(&mut payload, NFTA_SET_ELEM_LIST_TABLE, &cstr(table));
     attr(&mut payload, NFTA_SET_ELEM_LIST_SET, &cstr(set));
+    // The kernel requires the numeric set id on NEW/DELSETELEM requests;
+    // it is the id assigned by NEWSET above, not an ABI-visible public id.
+    attr_be32(&mut payload, NFTA_SET_ELEM_LIST_SET_ID, 1);
     attr(&mut payload, NFTA_SET_ELEM_LIST_ELEMENTS_NESTED, &element);
     payload
 }
 
-fn get_set_elements_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
+fn get_set_elements_payload_family(family: NftFamily, table: &str, set: &str, id: u32) -> Vec<u8> {
     let mut payload = nfgenmsg(family.nfproto(), 0);
     attr(&mut payload, NFTA_SET_ELEM_LIST_TABLE, &cstr(table));
     attr(&mut payload, NFTA_SET_ELEM_LIST_SET, &cstr(set));
+    attr_be32(&mut payload, NFTA_SET_ELEM_LIST_SET_ID, id);
     payload
-}
-
-fn get_set_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
-    let mut payload = nfgenmsg(family.nfproto(), 0);
-    attr(&mut payload, NFTA_SET_TABLE, &cstr(table));
-    attr(&mut payload, NFTA_SET_NAME, &cstr(set));
-    payload
-}
-
-fn observe_set_family(
-    family: NftFamily,
-    table: &str,
-    set: &str,
-) -> Result<Option<(u32, u32)>, NetlinkError> {
-    let sock = NfSock::open().map_err(|source| NetlinkError::nft("observe-set", source))?;
-    let payload = get_set_payload_family(family, table, set);
-    let mut message = Vec::new();
-    nlmsg(&mut message, nft_msg_type(NFT_MSG_GETSET), NLM_F_REQUEST, 1, &payload);
-    sock.send(&message).map_err(|source| NetlinkError::nft("observe-set", source))?;
-    let mut datagram = vec![0_u8; 65_535];
-    let received =
-        sock.recv(&mut datagram).map_err(|source| NetlinkError::nft("observe-set", source))?;
-    let mut offset = 0;
-    while offset + 16 <= received {
-        let length = ne_u32(&datagram, offset).map_or(0, |value| value as usize);
-        if length < 16 || offset + length > received {
-            return Err(NetlinkError::nft(
-                "observe-set",
-                invalid_data("invalid set observation length"),
-            ));
-        }
-        let kind = ne_u16(&datagram, offset + 4).unwrap_or_default();
-        if kind == NLMSG_ERROR {
-            let code = ne_u32(&datagram, offset + 16).map_or(0, |value| value as i32);
-            if code.abs() == libc::ENOENT {
-                return Ok(None);
-            }
-            if code != 0 {
-                return Err(NetlinkError::nft(
-                    "observe-set",
-                    std::io::Error::from_raw_os_error(code.abs()),
-                ));
-            }
-        } else if kind == nft_msg_type(NFT_MSG_NEWSET) {
-            let body = &datagram[offset + 16..offset + length];
-            let mut key_type = None;
-            let mut key_len = None;
-            for (attribute, _, value) in exact_attrs(body.get(4..).unwrap_or_default())
-                .map_err(|source| NetlinkError::nft("observe-set", source))?
-            {
-                match attribute {
-                    NFTA_SET_KEY_TYPE => {
-                        key_type = Some(
-                            exact_be_u32(value, "set key type")
-                                .map_err(|source| NetlinkError::nft("observe-set", source))?,
-                        );
-                    }
-                    NFTA_SET_KEY_LEN => {
-                        key_len = Some(
-                            exact_be_u32(value, "set key length")
-                                .map_err(|source| NetlinkError::nft("observe-set", source))?,
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            return Ok(Some((key_type.unwrap_or_default(), key_len.unwrap_or_default())));
-        }
-        offset += (length + 3) & !3;
-    }
-    Ok(None)
 }
 
 fn list_set_elements_family(
     family: NftFamily,
     table: &str,
     set: &str,
+    id: u32,
 ) -> Result<Vec<Vec<u8>>, NetlinkError> {
     let sock = NfSock::open().map_err(|source| NetlinkError::nft("list-set-elements", source))?;
-    let payload = get_set_elements_payload_family(family, table, set);
+    let payload = get_set_elements_payload_family(family, table, set, id);
     let mut message = Vec::new();
     nlmsg(&mut message, nft_msg_type(NFT_MSG_GETSETELEM), NLM_F_REQUEST | NLM_F_DUMP, 1, &payload);
     sock.send(&message).map_err(|source| NetlinkError::nft("list-set-elements", source))?;
@@ -1084,11 +1044,42 @@ fn canonical_attr_set(data: &[u8], nested_data_kinds: &[u16]) -> std::io::Result
     Ok(canonical)
 }
 
-fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>> {
+fn canonical_expression_data(
+    name: &str,
+    data: &[u8],
+    allow_unknown: bool,
+) -> std::io::Result<Vec<u8>> {
     match name {
         "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
         "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
-        "meta" | "payload" | "tproxy" | "lookup" => canonical_attr_set(data, &[]),
+        "meta" | "payload" | "tproxy" => canonical_attr_set(data, &[]),
+        // nftables materializes the implicit zero lookup flags in GETRULE
+        // replies. The producer omits that default, so the private identity
+        // projection removes only this one semantic default.
+        "lookup" => {
+            let attrs = exact_attrs(data)?;
+            let mut canonical = Vec::with_capacity(data.len());
+            let mut seen = BTreeSet::new();
+            let mut sorted = attrs;
+            sorted.sort_by_key(|(kind, _, _)| *kind);
+            for (kind, _, payload) in sorted {
+                if !seen.insert(kind) {
+                    return Err(invalid_data("duplicate lookup-data attribute"));
+                }
+                if kind == NFTA_LOOKUP_FLAGS && exact_be_u32(payload, "lookup flags")? == 0 {
+                    continue;
+                }
+                attr(&mut canonical, kind, payload);
+            }
+            Ok(canonical)
+        }
+        // The bridge adapter must retain a well-formed expression it does not
+        // understand as a semantic conflict.  Preserve its canonical
+        // attribute framing here; the closed bridge projection names it as an
+        // `Unknown` expression without exposing raw ABI bytes.  The existing
+        // IPv4 decoder remains strict and still fails closed on unknown
+        // expressions.
+        _ if allow_unknown => canonical_attr_set(data, &[]),
         _ => Err(invalid_data(format!("unknown nft expression {name:?}"))),
     }
 }
@@ -1096,6 +1087,14 @@ fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>
 fn normalize_rule_program(
     expressions: &[u8],
     require_sampled_counter: bool,
+) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
+    normalize_rule_program_with_unknown(expressions, require_sampled_counter, false)
+}
+
+fn normalize_rule_program_with_unknown(
+    expressions: &[u8],
+    require_sampled_counter: bool,
+    allow_unknown: bool,
 ) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
     let mut normalized = Vec::with_capacity(expressions.len());
     let mut counter = None;
@@ -1156,7 +1155,7 @@ fn normalize_rule_program(
             });
             normalized.extend(e_anonymous_counter());
         } else {
-            normalized.extend(expr(name, &canonical_expression_data(name, data)?));
+            normalized.extend(expr(name, &canonical_expression_data(name, data, allow_unknown)?));
         }
     }
     Ok((normalized, counter))
@@ -1211,7 +1210,11 @@ fn decode_rule_message_family(
                 userdata = Some(value.to_vec());
             }
             NFTA_RULE_EXPRESSIONS if program.is_none() => {
-                program = Some(normalize_rule_program(value, true)?);
+                program = Some(normalize_rule_program_with_unknown(
+                    value,
+                    true,
+                    family == NftFamily::Bridge,
+                )?);
             }
             NFTA_RULE_TABLE
             | NFTA_RULE_CHAIN
@@ -1691,6 +1694,71 @@ fn send_atomic_rule_transaction(mutations: &[AtomicRuleMutation<'_>]) -> Result<
     Ok(())
 }
 
+struct BridgeRuleMutation<'a> {
+    table: &'a str,
+    chain: &'a str,
+    expressions: &'a [u8],
+    userdata: &'a [u8],
+    append: bool,
+}
+
+fn send_atomic_bridge_rule_transaction(
+    mutations: &[BridgeRuleMutation<'_>],
+) -> Result<(), NetlinkError> {
+    if mutations.is_empty() {
+        return Ok(());
+    }
+    let sock = NfSock::open()
+        .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
+    let mut batch = Vec::new();
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_BEGIN,
+        NLM_F_REQUEST,
+        1,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    for (index, mutation) in mutations.iter().enumerate() {
+        let mut flags = NLM_F_CREATE;
+        if mutation.append {
+            flags |= NLM_F_APPEND;
+        }
+        nlmsg(
+            &mut batch,
+            nft_msg_type(NFT_MSG_NEWRULE),
+            NLM_F_REQUEST | NLM_F_ACK | flags,
+            index as u32 + 2,
+            &newrule_payload_family(
+                NftFamily::Bridge,
+                mutation.table,
+                mutation.chain,
+                mutation.expressions,
+                mutation.userdata,
+            ),
+        );
+    }
+    nlmsg(
+        &mut batch,
+        NFNL_MSG_BATCH_END,
+        NLM_F_REQUEST,
+        mutations.len() as u32 + 2,
+        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+    );
+    sock.send(&batch)
+        .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
+    let end = mutations.len() as u32 + 2;
+    let mut pending = (2..end).collect::<BTreeSet<_>>();
+    while !pending.is_empty() {
+        let mut buffer = vec![0_u8; 32_768];
+        let received = sock
+            .recv(&mut buffer)
+            .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
+        collect_atomic_rule_acks(&buffer[..received], &mut pending)
+            .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
+    }
+    Ok(())
+}
+
 /// Send one batched nftables mutation (`BATCH_BEGIN` + `msg` + `BATCH_END`) and
 /// read its ACK. `op` is the `NFT_MSG_*` op; `flags` the extra flags on the
 /// mutation message (`NLM_F_ACK` is always added). `-EEXIST` is NOT swallowed
@@ -1758,6 +1826,19 @@ fn send_batched_family(
     let mut buf = vec![0u8; 32_768];
     let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft(sock_op, e))?;
     batch_ack(&buf[..n]).map_err(|e| NetlinkError::nft(sock_op, e))
+}
+
+fn send_batched_family_idempotent(
+    family: NftFamily,
+    op: u16,
+    payload: &[u8],
+    sock_op: &'static str,
+) -> Result<(), NetlinkError> {
+    match send_batched_family(family, op, NLM_F_CREATE, payload, sock_op) {
+        Ok(()) => Ok(()),
+        Err(error) if error.errno() == Some(NEG_EEXIST) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Send a mutation, swallowing `-EEXIST` as idempotent success (the netlink
@@ -2065,6 +2146,531 @@ fn list_rules_family(
     .map_err(|source| NetlinkError::nft("list-rules", source))
 }
 
+/// One raw chain identity recovered from a family-specific GETCHAIN dump.
+///
+/// This stays private to the codec.  The bridge adapter projects it into its
+/// closed semantic chain shape only after the complete dump has been read.
+#[derive(Debug, Clone)]
+struct RawChainInfo {
+    table: String,
+    name: String,
+    handle: u64,
+    hook: Option<(u32, i32)>,
+    chain_type: Option<String>,
+    policy: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct RawSetInfo {
+    name: String,
+    key_type: u32,
+    key_len: u32,
+    id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawOtherChildKind {
+    Flowtable,
+    StatefulObject,
+}
+
+#[derive(Debug, Clone)]
+struct RawOtherChildInfo {
+    kind: RawOtherChildKind,
+    name: String,
+    handle: Option<u64>,
+}
+
+/// Complete one family-specific multipart dump, preserving every data
+/// message and rejecting sequence, framing, family, and generation errors at
+/// this private boundary.
+fn receive_nft_dump_family(
+    family: NftFamily,
+    operation: u16,
+    payload: &[u8],
+    label: &'static str,
+) -> Result<Vec<Vec<u8>>, NetlinkError> {
+    let sock = NfSock::open().map_err(|source| NetlinkError::nft(label, source))?;
+    let sequence = 1;
+    let mut message = Vec::with_capacity((16 + payload.len()).next_multiple_of(4));
+    nlmsg(&mut message, nft_msg_type(operation), NLM_F_REQUEST | NLM_F_DUMP, sequence, payload);
+    sock.send(&message).map_err(|source| NetlinkError::nft(label, source))?;
+    let expected_type = nft_msg_type(match operation {
+        NFT_MSG_GETTABLE => NFT_MSG_NEWTABLE,
+        NFT_MSG_GETCHAIN => NFT_MSG_NEWCHAIN,
+        NFT_MSG_GETSET => NFT_MSG_NEWSET,
+        NFT_MSG_GETSETELEM => NFT_MSG_NEWSETELEM,
+        NFT_MSG_GETOBJ => NFT_MSG_NEWOBJ,
+        NFT_MSG_GETFLOWTABLE => NFT_MSG_NEWFLOWTABLE,
+        _ => operation,
+    });
+    let deadline = Instant::now() + OBSERVATION_DEADLINE;
+    let mut data = Vec::new();
+    let mut done = false;
+    while !done {
+        sock.set_recv_timeout(
+            remaining_until(deadline).map_err(|source| NetlinkError::nft(label, source))?,
+        )
+        .map_err(|source| NetlinkError::nft(label, source))?;
+        let mut datagram = vec![0_u8; 65_535];
+        let (received, _) = sock
+            .recv_from(&mut datagram, libc::MSG_TRUNC)
+            .map_err(|source| NetlinkError::nft(label, source))?;
+        if received == 0 || received > datagram.len() {
+            return Err(NetlinkError::nft(label, invalid_data("truncated nft dump datagram")));
+        }
+        let mut offset = 0usize;
+        while offset < received {
+            if received - offset < 16 {
+                return Err(NetlinkError::nft(label, invalid_data("truncated nft dump header")));
+            }
+            let length = ne_u32(&datagram, offset)
+                .ok_or_else(|| NetlinkError::nft(label, invalid_data("missing nft dump length")))?
+                as usize;
+            let kind = ne_u16(&datagram, offset + 4)
+                .ok_or_else(|| NetlinkError::nft(label, invalid_data("missing nft dump type")))?;
+            let flags = ne_u16(&datagram, offset + 6)
+                .ok_or_else(|| NetlinkError::nft(label, invalid_data("missing nft dump flags")))?;
+            let observed_sequence = ne_u32(&datagram, offset + 8).ok_or_else(|| {
+                NetlinkError::nft(label, invalid_data("missing nft dump sequence"))
+            })?;
+            if length < 16 || offset + length > received {
+                return Err(NetlinkError::nft(
+                    label,
+                    invalid_data("invalid nft dump message length"),
+                ));
+            }
+            let aligned = (offset + length + 3) & !3;
+            if aligned > received
+                || datagram[offset + length..aligned].iter().any(|byte| *byte != 0)
+            {
+                return Err(NetlinkError::nft(
+                    label,
+                    invalid_data("invalid nft dump message padding"),
+                ));
+            }
+            if observed_sequence != sequence {
+                return Err(NetlinkError::nft(label, invalid_data("nft dump sequence mismatch")));
+            }
+            if flags & NLM_F_DUMP_INTR != 0 {
+                return Err(NetlinkError::nft(label, invalid_data("nft dump was interrupted")));
+            }
+            let body = &datagram[offset + 16..offset + length];
+            match kind {
+                value if value == expected_type => {
+                    if flags & NLM_F_MULTI == 0 || body.len() < 4 {
+                        return Err(NetlinkError::nft(
+                            label,
+                            invalid_data("nft dump data lacks multipart/family framing"),
+                        ));
+                    }
+                    if body[0] != family.nfproto() || body[1] != 0 {
+                        return Err(NetlinkError::nft(
+                            label,
+                            invalid_data("nft dump data carries the wrong family"),
+                        ));
+                    }
+                    // Validate all nested attributes now; individual decoders
+                    // below then receive a structurally safe payload.
+                    exact_attrs(&body[4..]).map_err(|source| NetlinkError::nft(label, source))?;
+                    data.push(body.to_vec());
+                }
+                NLMSG_DONE => {
+                    if body.len() != 4 || ne_u32(body, 0) != Some(0) || done {
+                        return Err(NetlinkError::nft(
+                            label,
+                            invalid_data("invalid or duplicate nft dump completion"),
+                        ));
+                    }
+                    done = true;
+                    if aligned != received {
+                        return Err(NetlinkError::nft(
+                            label,
+                            invalid_data("nft dump data follows completion"),
+                        ));
+                    }
+                }
+                NLMSG_ERROR => {
+                    let code = ne_u32(body, 0).map_or(0, |value| value as i32);
+                    if code != 0 {
+                        return Err(NetlinkError::nft(label, Error::from_raw_os_error(code.abs())));
+                    }
+                    return Err(NetlinkError::nft(
+                        label,
+                        invalid_data("unexpected nft dump acknowledgement"),
+                    ));
+                }
+                NLMSG_OVERRUN => {
+                    return Err(NetlinkError::nft(label, invalid_data("nft dump overrun")));
+                }
+                _ => {
+                    return Err(NetlinkError::nft(
+                        label,
+                        invalid_data("unexpected nft dump message type"),
+                    ));
+                }
+            }
+            offset = aligned;
+        }
+    }
+    Ok(data)
+}
+
+fn family_only_payload(family: NftFamily) -> Vec<u8> {
+    nfgenmsg(family.nfproto(), 0)
+}
+
+fn family_table_payload(family: NftFamily, table: &str, table_attr: u16) -> Vec<u8> {
+    let mut payload = nfgenmsg(family.nfproto(), 0);
+    attr(&mut payload, table_attr, &cstr(table));
+    payload
+}
+
+fn list_table_names_family(family: NftFamily) -> Result<Vec<String>, NetlinkError> {
+    let bodies = receive_nft_dump_family(
+        family,
+        NFT_MSG_GETTABLE,
+        &family_only_payload(family),
+        "list-tables",
+    )?;
+    bodies
+        .into_iter()
+        .map(|body| {
+            let mut name = None;
+            for (kind, raw_kind, value) in exact_attrs(&body[4..])
+                .map_err(|source| NetlinkError::nft("list-tables", source))?
+            {
+                if kind == NFTA_TABLE_NAME && raw_kind & NLA_F_NESTED == 0 {
+                    if name
+                        .replace(
+                            exact_cstr(value, "NFTA_TABLE_NAME")
+                                .map_err(|source| NetlinkError::nft("list-tables", source))?
+                                .to_owned(),
+                        )
+                        .is_some()
+                    {
+                        return Err(NetlinkError::nft(
+                            "list-tables",
+                            invalid_data("duplicate table name"),
+                        ));
+                    }
+                }
+            }
+            name.ok_or_else(|| {
+                NetlinkError::nft("list-tables", invalid_data("table name is missing"))
+            })
+        })
+        .collect()
+}
+
+fn list_chain_info_family(
+    family: NftFamily,
+    table: &str,
+) -> Result<Vec<RawChainInfo>, NetlinkError> {
+    let bodies = receive_nft_dump_family(
+        family,
+        NFT_MSG_GETCHAIN,
+        &family_table_payload(family, table, NFTA_CHAIN_TABLE),
+        "list-chains",
+    )?;
+    bodies
+        .into_iter()
+        .map(|body| {
+            let mut observed_table = None;
+            let mut name = None;
+            let mut handle = None;
+            let mut hook = None;
+            let mut chain_type = None;
+            let mut policy = None;
+            for (kind, raw_kind, value) in exact_attrs(&body[4..])
+                .map_err(|source| NetlinkError::nft("list-chains", source))?
+            {
+                match kind {
+                    NFTA_CHAIN_TABLE
+                        if raw_kind & NLA_F_NESTED == 0 && observed_table.is_none() =>
+                    {
+                        observed_table = Some(
+                            exact_cstr(value, "NFTA_CHAIN_TABLE")
+                                .map_err(|source| NetlinkError::nft("list-chains", source))?
+                                .to_owned(),
+                        );
+                    }
+                    NFTA_CHAIN_NAME if raw_kind & NLA_F_NESTED == 0 && name.is_none() => {
+                        name = Some(
+                            exact_cstr(value, "NFTA_CHAIN_NAME")
+                                .map_err(|source| NetlinkError::nft("list-chains", source))?
+                                .to_owned(),
+                        );
+                    }
+                    NFTA_CHAIN_HANDLE if raw_kind & NLA_F_NESTED == 0 && handle.is_none() => {
+                        handle = Some(
+                            exact_be_u64(value, "NFTA_CHAIN_HANDLE")
+                                .map_err(|source| NetlinkError::nft("list-chains", source))?,
+                        );
+                    }
+                    // Kernels in the supported range omit NLA_F_NESTED on
+                    // this reply even though the payload is the nested hook
+                    // attribute set; decode the semantic payload, not that
+                    // optional wire flag.
+                    NFTA_CHAIN_HOOK if hook.is_none() => {
+                        let mut hooknum = None;
+                        let mut priority = None;
+                        for (hook_kind, hook_raw, hook_value) in exact_attrs(value)
+                            .map_err(|source| NetlinkError::nft("list-chains", source))?
+                        {
+                            match hook_kind {
+                                NFTA_HOOK_HOOKNUM
+                                    if hook_raw & NLA_F_NESTED == 0 && hooknum.is_none() =>
+                                {
+                                    hooknum = Some(
+                                        exact_be_u32(hook_value, "NFTA_HOOK_HOOKNUM").map_err(
+                                            |source| NetlinkError::nft("list-chains", source),
+                                        )?,
+                                    );
+                                }
+                                NFTA_HOOK_PRIORITY
+                                    if hook_raw & NLA_F_NESTED == 0 && priority.is_none() =>
+                                {
+                                    priority = Some(i32::from_be_bytes(
+                                        exact_be_u32(hook_value, "NFTA_HOOK_PRIORITY")
+                                            .map_err(|source| {
+                                                NetlinkError::nft("list-chains", source)
+                                            })?
+                                            .to_be_bytes(),
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        }
+                        hook = Some((
+                            hooknum.ok_or_else(|| {
+                                NetlinkError::nft(
+                                    "list-chains",
+                                    invalid_data("chain hook number is missing"),
+                                )
+                            })?,
+                            priority.ok_or_else(|| {
+                                NetlinkError::nft(
+                                    "list-chains",
+                                    invalid_data("chain hook priority is missing"),
+                                )
+                            })?,
+                        ));
+                    }
+                    NFTA_CHAIN_TYPE if raw_kind & NLA_F_NESTED == 0 && chain_type.is_none() => {
+                        chain_type = Some(
+                            exact_cstr(value, "NFTA_CHAIN_TYPE")
+                                .map_err(|source| NetlinkError::nft("list-chains", source))?
+                                .to_owned(),
+                        );
+                    }
+                    NFTA_CHAIN_POLICY if raw_kind & NLA_F_NESTED == 0 && policy.is_none() => {
+                        policy = Some(
+                            exact_be_u32(value, "NFTA_CHAIN_POLICY")
+                                .map_err(|source| NetlinkError::nft("list-chains", source))?,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            let observed_table = observed_table.ok_or_else(|| {
+                NetlinkError::nft("list-chains", invalid_data("chain table is missing"))
+            })?;
+            if observed_table != table {
+                return Err(NetlinkError::nft(
+                    "list-chains",
+                    invalid_data("chain escaped requested table"),
+                ));
+            }
+            Ok(RawChainInfo {
+                table: observed_table,
+                name: name.ok_or_else(|| {
+                    NetlinkError::nft("list-chains", invalid_data("chain name is missing"))
+                })?,
+                handle: handle.ok_or_else(|| {
+                    NetlinkError::nft("list-chains", invalid_data("chain handle is missing"))
+                })?,
+                hook,
+                chain_type,
+                policy,
+            })
+        })
+        .collect()
+}
+
+fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo>, NetlinkError> {
+    let bodies = receive_nft_dump_family(
+        family,
+        NFT_MSG_GETSET,
+        &family_table_payload(family, table, NFTA_SET_TABLE),
+        "list-sets",
+    )?;
+    bodies
+        .into_iter()
+        .map(|body| {
+            let mut observed_table = None;
+            let mut name = None;
+            let mut key_type = None;
+            let mut key_len = None;
+            let mut id = None;
+            for (kind, raw_kind, value) in
+                exact_attrs(&body[4..]).map_err(|source| NetlinkError::nft("list-sets", source))?
+            {
+                match kind {
+                    NFTA_SET_TABLE if raw_kind & NLA_F_NESTED == 0 && observed_table.is_none() => {
+                        observed_table = Some(
+                            exact_cstr(value, "NFTA_SET_TABLE")
+                                .map_err(|source| NetlinkError::nft("list-sets", source))?
+                                .to_owned(),
+                        );
+                    }
+                    NFTA_SET_NAME if raw_kind & NLA_F_NESTED == 0 && name.is_none() => {
+                        name = Some(
+                            exact_cstr(value, "NFTA_SET_NAME")
+                                .map_err(|source| NetlinkError::nft("list-sets", source))?
+                                .to_owned(),
+                        );
+                    }
+                    NFTA_SET_KEY_TYPE if raw_kind & NLA_F_NESTED == 0 && key_type.is_none() => {
+                        key_type = Some(
+                            exact_be_u32(value, "NFTA_SET_KEY_TYPE")
+                                .map_err(|source| NetlinkError::nft("list-sets", source))?,
+                        );
+                    }
+                    NFTA_SET_KEY_LEN if raw_kind & NLA_F_NESTED == 0 && key_len.is_none() => {
+                        key_len = Some(
+                            exact_be_u32(value, "NFTA_SET_KEY_LEN")
+                                .map_err(|source| NetlinkError::nft("list-sets", source))?,
+                        );
+                    }
+                    NFTA_SET_ID if raw_kind & NLA_F_NESTED == 0 && id.is_none() => {
+                        id = Some(
+                            exact_be_u32(value, "NFTA_SET_ID")
+                                .map_err(|source| NetlinkError::nft("list-sets", source))?,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            let observed_table = observed_table.ok_or_else(|| {
+                NetlinkError::nft("list-sets", invalid_data("set table is missing"))
+            })?;
+            if observed_table != table {
+                return Err(NetlinkError::nft(
+                    "list-sets",
+                    invalid_data("set escaped requested table"),
+                ));
+            }
+            Ok(RawSetInfo {
+                name: name.ok_or_else(|| {
+                    NetlinkError::nft("list-sets", invalid_data("set name is missing"))
+                })?,
+                key_type: key_type.ok_or_else(|| {
+                    NetlinkError::nft("list-sets", invalid_data("set key type is missing"))
+                })?,
+                key_len: key_len.ok_or_else(|| {
+                    NetlinkError::nft("list-sets", invalid_data("set key length is missing"))
+                })?,
+                id: id.unwrap_or(1),
+            })
+        })
+        .collect()
+}
+
+fn list_other_children_family(
+    family: NftFamily,
+    table: &str,
+) -> Result<Vec<RawOtherChildInfo>, NetlinkError> {
+    let mut children = Vec::new();
+    for (operation, kind, label, table_attr, name_attr, handle_attr) in [
+        (
+            NFT_MSG_GETFLOWTABLE,
+            RawOtherChildKind::Flowtable,
+            "list-flowtables",
+            NFTA_FLOWTABLE_TABLE,
+            NFTA_FLOWTABLE_NAME,
+            NFTA_FLOWTABLE_HANDLE,
+        ),
+        (
+            NFT_MSG_GETOBJ,
+            RawOtherChildKind::StatefulObject,
+            "list-objects",
+            NFTA_OBJ_TABLE,
+            NFTA_OBJ_NAME,
+            NFTA_OBJ_HANDLE,
+        ),
+    ] {
+        let bodies = receive_nft_dump_family(
+            family,
+            operation,
+            &family_table_payload(family, table, table_attr),
+            label,
+        )?;
+        for body in bodies {
+            let mut observed_table = None;
+            let mut name = None;
+            let mut handle = None;
+            for (attribute, raw_attribute, payload) in
+                exact_attrs(&body[4..]).map_err(|source| NetlinkError::nft(label, source))?
+            {
+                match attribute {
+                    attr_kind
+                        if attr_kind == table_attr
+                            && raw_attribute & NLA_F_NESTED == 0
+                            && observed_table.is_none() =>
+                    {
+                        observed_table = Some(
+                            exact_cstr(payload, "child table")
+                                .map_err(|source| NetlinkError::nft(label, source))?
+                                .to_owned(),
+                        );
+                    }
+                    attr_kind
+                        if attr_kind == name_attr
+                            && raw_attribute & NLA_F_NESTED == 0
+                            && name.is_none() =>
+                    {
+                        name = Some(
+                            exact_cstr(payload, "child name")
+                                .map_err(|source| NetlinkError::nft(label, source))?
+                                .to_owned(),
+                        );
+                    }
+                    attr_kind
+                        if attr_kind == handle_attr
+                            && raw_attribute & NLA_F_NESTED == 0
+                            && handle.is_none() =>
+                    {
+                        handle = Some(
+                            exact_be_u64(payload, "child handle")
+                                .map_err(|source| NetlinkError::nft(label, source))?,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            let observed_table = observed_table
+                .ok_or_else(|| NetlinkError::nft(label, invalid_data("child table is missing")))?;
+            if observed_table == table {
+                children.push(RawOtherChildInfo {
+                    kind,
+                    name: name.ok_or_else(|| {
+                        NetlinkError::nft(label, invalid_data("child name is missing"))
+                    })?,
+                    handle,
+                });
+            }
+        }
+    }
+    Ok(children)
+}
+
+fn read_nft_generation() -> Result<u32, NetlinkError> {
+    let sock = NfSock::open().map_err(|source| NetlinkError::nft("observe-generation", source))?;
+    request_generation(&sock, 1, Instant::now() + OBSERVATION_DEADLINE)
+        .map_err(|source| NetlinkError::nft("observe-generation", source))
+}
+
 /// True iff `ip <table> <chain>` exists, via `GETCHAIN`.
 ///
 /// The kernel `-ENOENT` maps to `Ok(false)` — the structural replacement for
@@ -2139,13 +2745,16 @@ pub mod bridge {
     use std::collections::BTreeSet;
 
     use super::{
-        BaseChainSpec, ChainKind, NF_ACCEPT, NFT_META_MARK, NFT_MSG_DELCHAIN, NFT_MSG_DELSET,
-        NFT_MSG_DELSETELEM, NFT_MSG_DELTABLE, NFT_MSG_NEWCHAIN, NFT_MSG_NEWRULE, NFT_MSG_NEWSET,
-        NFT_MSG_NEWSETELEM, NFT_MSG_NEWTABLE, NFT_REG_2, NLM_F_APPEND, NLM_F_CREATE, NetlinkError,
-        NftFamily, RuleCounterSnapshot, e_anonymous_counter, e_cmp_eq, e_iifname_lookup,
-        e_immediate_value, e_immediate_verdict, e_meta_load, e_meta_set, list_set_elements_family,
-        newchain_payload_family, newrule_payload_family, newset_payload_family,
-        newtable_payload_family, observe_set_family, send_batched_family, set_elem_payload_family,
+        BaseChainSpec, BridgeRuleMutation, ChainKind, NF_ACCEPT, NFT_META_MARK, NFT_MSG_DELCHAIN,
+        NFT_MSG_DELSET, NFT_MSG_DELSETELEM, NFT_MSG_DELTABLE, NFT_MSG_NEWCHAIN, NFT_MSG_NEWSET,
+        NFT_MSG_NEWSETELEM, NFT_MSG_NEWTABLE, NFT_REG_2, NetlinkError, NftFamily, RawChainInfo,
+        RawOtherChildKind, RuleCounterSnapshot, e_anonymous_counter, e_cmp_eq, e_iifname_lookup,
+        e_immediate_value, e_immediate_verdict, e_meta_load, e_meta_set, invalid_data,
+        list_chain_info_family, list_other_children_family, list_set_elements_family,
+        list_set_info_family, list_table_names_family, newchain_payload_family,
+        newset_payload_family, newtable_payload_family, normalized_rule_program_identity,
+        read_nft_generation, send_atomic_bridge_rule_transaction, send_batched_family,
+        send_batched_family_idempotent, set_elem_payload_family,
     };
 
     const MAX_IDENTIFIER_BYTES: usize = 255;
@@ -2534,6 +3143,150 @@ pub mod bridge {
         }
     }
 
+    fn table_fact(name: &str) -> BridgeGuardTableFact {
+        BridgeGuardTableFact { family: BridgeGuardObservedFamily::Bridge, name: name.to_owned() }
+    }
+
+    fn project_chain(raw: RawChainInfo) -> BridgeGuardChainOccurrence {
+        let definition = match (raw.hook, raw.chain_type.as_deref(), raw.policy) {
+            (Some((hooknum, priority)), Some(chain_type), policy) => {
+                BridgeGuardChainDefinition::Base {
+                    chain_type: match chain_type {
+                        "filter" => BridgeGuardChainType::Filter,
+                        "route" => BridgeGuardChainType::Route,
+                        "nat" => BridgeGuardChainType::Nat,
+                        _ => BridgeGuardChainType::Other,
+                    },
+                    hook: match hooknum {
+                        0 => BridgeGuardChainHook::Prerouting,
+                        1 => BridgeGuardChainHook::Input,
+                        2 => BridgeGuardChainHook::Forward,
+                        3 => BridgeGuardChainHook::Output,
+                        4 => BridgeGuardChainHook::Postrouting,
+                        _ => BridgeGuardChainHook::Other,
+                    },
+                    priority,
+                    policy: policy.map(|policy| match policy {
+                        NF_ACCEPT => BridgeGuardChainPolicy::Accept,
+                        0 => BridgeGuardChainPolicy::Drop,
+                        _ => BridgeGuardChainPolicy::Other,
+                    }),
+                }
+            }
+            (None, None, None) => BridgeGuardChainDefinition::Regular,
+            _ => BridgeGuardChainDefinition::Unsupported,
+        };
+        BridgeGuardChainOccurrence {
+            table: table_fact(&raw.table),
+            name: raw.name,
+            handle: Some(raw.handle),
+            definition,
+        }
+    }
+
+    fn rule_expressions(spec: &BridgeGuardSpec, index: usize) -> Vec<u8> {
+        let mut expressions = e_iifname_lookup(&spec.managed_taps_set);
+        match index {
+            0 => {
+                expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
+                expressions.extend(e_cmp_eq(NFT_REG_2, &spec.intercept_mark.to_ne_bytes()));
+                expressions.extend(e_immediate_verdict(NF_ACCEPT));
+            }
+            1 => {
+                expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
+                expressions.extend(e_cmp_eq(NFT_REG_2, &spec.accepted_mark.to_ne_bytes()));
+                expressions.extend(e_immediate_value(NFT_REG_2, &0_u32.to_ne_bytes()));
+                expressions.extend(e_meta_set(NFT_META_MARK, NFT_REG_2));
+                expressions.extend(e_immediate_verdict(NF_ACCEPT));
+            }
+            _ => {
+                expressions.extend(e_anonymous_counter());
+                expressions.extend(e_immediate_verdict(0));
+            }
+        }
+        expressions
+    }
+
+    fn expected_rule_programs(spec: &BridgeGuardSpec) -> Vec<Vec<u8>> {
+        (0..spec.expected_rule_facts().len())
+            .map(|index| {
+                normalized_rule_program_identity(&rule_expressions(spec, index)).unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn rule_expression_names(program: &[u8]) -> Vec<String> {
+        let Ok(elements) = super::exact_attrs(program) else {
+            return vec!["malformed".to_owned()];
+        };
+        elements
+            .into_iter()
+            .filter_map(|(kind, _, element)| {
+                if kind != super::NFTA_LIST_ELEM {
+                    return Some("malformed".to_owned());
+                }
+                super::exact_attrs(element).ok()?.into_iter().find_map(|(attribute, _, value)| {
+                    (attribute == super::NFTA_EXPR_NAME)
+                        .then(|| {
+                            super::exact_cstr(value, "expression name").ok().map(str::to_owned)
+                        })
+                        .flatten()
+                })
+            })
+            .collect()
+    }
+
+    fn project_rule(
+        spec: &BridgeGuardSpec,
+        table: &BridgeGuardTableFact,
+        chain: &str,
+        rule: super::RuleInfo,
+        expected_programs: &[Vec<u8>],
+    ) -> BridgeGuardRuleOccurrence {
+        let expected_rules = spec.expected_rule_facts();
+        let owned_index = rule
+            .userdata
+            .strip_prefix(b"ovd295-bridge-")
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .and_then(|value| value.parse::<usize>().ok());
+        let expression_names = rule_expression_names(&rule.normalized_program);
+        let fact = owned_index
+            .and_then(|index| expected_rules.get(index).cloned())
+            .and_then(|fact| {
+                let index = owned_index?;
+                if expected_programs.get(index) == Some(&rule.normalized_program) {
+                    Some(fact)
+                } else {
+                    Some(BridgeGuardRuleFact {
+                        identity: fact.identity,
+                        program: BridgeGuardRuleProgram {
+                            expressions: expression_names
+                                .clone()
+                                .into_iter()
+                                .map(|name| BridgeGuardRuleExpression::Unknown { name })
+                                .collect(),
+                        },
+                    })
+                }
+            })
+            .unwrap_or(BridgeGuardRuleFact {
+                identity: BridgeGuardRuleIdentity::Foreign,
+                program: BridgeGuardRuleProgram {
+                    expressions: expression_names
+                        .into_iter()
+                        .map(|name| BridgeGuardRuleExpression::Unknown { name })
+                        .collect(),
+                },
+            });
+        BridgeGuardRuleOccurrence {
+            table: table.clone(),
+            chain: chain.to_owned(),
+            handle: rule.handle,
+            fact,
+            counter: rule.counter,
+        }
+    }
+
     fn encode_member(value: &str) -> Result<[u8; 16], BridgeGuardValidationError> {
         validate_member(value)?;
         let mut encoded = [0_u8; 16];
@@ -2559,8 +3312,16 @@ pub mod bridge {
                         && observed.fact == expected.fact
                 },
             );
+        let chains_match = observed_inventory.chains.len() == expected.chains.len()
+            && observed_inventory.chains.iter().zip(expected.chains.iter()).all(
+                |(observed, expected)| {
+                    observed.table == expected.table
+                        && observed.name == expected.name
+                        && observed.definition == expected.definition
+                },
+            );
         if observed_inventory.tables == expected.tables
-            && observed_inventory.chains == expected.chains
+            && chains_match
             && observed_inventory.sets == expected.sets
             && owned_rules_match
             && observed_inventory
@@ -2583,10 +3344,14 @@ pub mod bridge {
     pub fn converge_table(
         spec: &BridgeGuardSpec,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        send_batched_family(
+        if list_table_names_family(NftFamily::Bridge)?.iter().any(|name| name == &spec.table) {
+            return Ok(BridgeGuardMutationOutcome::Converged {
+                observed: expected_inventory(spec),
+            });
+        }
+        send_batched_family_idempotent(
             NftFamily::Bridge,
             NFT_MSG_NEWTABLE,
-            NLM_F_CREATE,
             &newtable_payload_family(NftFamily::Bridge, &spec.table),
             "bridge-newtable",
         )?;
@@ -2595,10 +3360,30 @@ pub mod bridge {
     pub fn converge_chain(
         spec: &BridgeGuardSpec,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        send_batched_family(
+        if let Some(existing) = list_chain_info_family(NftFamily::Bridge, &spec.table)?
+            .into_iter()
+            .find(|chain| chain.name == spec.chain)
+        {
+            let observed = project_chain(existing);
+            let expected = expected_inventory(spec).chains[0].clone();
+            if observed.table == expected.table
+                && observed.name == expected.name
+                && observed.definition == expected.definition
+            {
+                return Ok(BridgeGuardMutationOutcome::Converged {
+                    observed: expected_inventory(spec),
+                });
+            }
+            let observed = match observe(spec, &BTreeSet::new())? {
+                BridgeGuardObservation::Absent { inventory }
+                | BridgeGuardObservation::Exact { inventory }
+                | BridgeGuardObservation::Conflict { inventory } => inventory,
+            };
+            return Ok(BridgeGuardMutationOutcome::Conflict { observed });
+        }
+        send_batched_family_idempotent(
             NftFamily::Bridge,
             NFT_MSG_NEWCHAIN,
-            NLM_F_CREATE,
             &newchain_payload_family(
                 NftFamily::Bridge,
                 &spec.table,
@@ -2616,10 +3401,27 @@ pub mod bridge {
     pub fn converge_set(
         spec: &BridgeGuardSpec,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        send_batched_family(
+        if let Some(existing) = list_set_info_family(NftFamily::Bridge, &spec.table)?
+            .into_iter()
+            .find(|set| set.name == spec.managed_taps_set)
+        {
+            if existing.key_type == super::NFT_IFNAME_KEY_TYPE
+                && existing.key_len == super::IFNAMSIZ as u32
+            {
+                return Ok(BridgeGuardMutationOutcome::Converged {
+                    observed: expected_inventory(spec),
+                });
+            }
+            let observed = match observe(spec, &BTreeSet::new())? {
+                BridgeGuardObservation::Absent { inventory }
+                | BridgeGuardObservation::Exact { inventory }
+                | BridgeGuardObservation::Conflict { inventory } => inventory,
+            };
+            return Ok(BridgeGuardMutationOutcome::Conflict { observed });
+        }
+        send_batched_family_idempotent(
             NftFamily::Bridge,
             NFT_MSG_NEWSET,
-            NLM_F_CREATE,
             &newset_payload_family(NftFamily::Bridge, &spec.table, &spec.managed_taps_set),
             "bridge-newset",
         )?;
@@ -2628,6 +3430,46 @@ pub mod bridge {
     pub fn converge_rules(
         spec: &BridgeGuardSpec,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+        let expected_programs = expected_rule_programs(spec);
+        match super::list_rules_family(NftFamily::Bridge, &spec.table, &spec.chain) {
+            Ok(existing) if !existing.is_empty() => {
+                let mut owned = BTreeSet::new();
+                let mut conflict = false;
+                for rule in &existing {
+                    let Some(index) = rule
+                        .userdata
+                        .strip_prefix(b"ovd295-bridge-")
+                        .and_then(|value| std::str::from_utf8(value).ok())
+                        .and_then(|value| value.parse::<usize>().ok())
+                    else {
+                        conflict = true;
+                        continue;
+                    };
+                    if index >= spec.expected_rule_facts().len()
+                        || !owned.insert(index)
+                        || expected_programs.get(index) != Some(&rule.normalized_program)
+                    {
+                        conflict = true;
+                    }
+                }
+                if !conflict && owned.len() == spec.expected_rule_facts().len() {
+                    return Ok(BridgeGuardMutationOutcome::Converged {
+                        observed: expected_inventory(spec),
+                    });
+                }
+                let observation = observe(spec, &BTreeSet::new())?;
+                let BridgeGuardObservation::Conflict { inventory } = observation else {
+                    return Ok(BridgeGuardMutationOutcome::Conflict {
+                        observed: expected_inventory(spec),
+                    });
+                };
+                return Ok(BridgeGuardMutationOutcome::Conflict { observed: inventory });
+            }
+            Ok(_) => {}
+            Err(error) if error.errno() == Some(-libc::ENOENT) => {}
+            Err(error) => return Err(BridgeGuardError::Netlink(error)),
+        }
+        let mut mutations = Vec::with_capacity(3);
         for index in 0..3 {
             let mut expressions = e_iifname_lookup(&spec.managed_taps_set);
             match index {
@@ -2649,20 +3491,19 @@ pub mod bridge {
                 }
             }
             let userdata = format!("ovd295-bridge-{index}").into_bytes();
-            send_batched_family(
-                NftFamily::Bridge,
-                NFT_MSG_NEWRULE,
-                NLM_F_CREATE | if index == 0 { 0 } else { NLM_F_APPEND },
-                &newrule_payload_family(
-                    NftFamily::Bridge,
-                    &spec.table,
-                    &spec.chain,
-                    &expressions,
-                    &userdata,
-                ),
-                "bridge-newrule",
-            )?;
+            mutations.push((expressions, userdata, index != 0));
         }
+        let bridge_mutations = mutations
+            .iter()
+            .map(|(expressions, userdata, append)| BridgeRuleMutation {
+                table: &spec.table,
+                chain: &spec.chain,
+                expressions,
+                userdata,
+                append: *append,
+            })
+            .collect::<Vec<_>>();
+        send_atomic_bridge_rule_transaction(&bridge_mutations)?;
         Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
     }
 
@@ -2670,81 +3511,101 @@ pub mod bridge {
         spec: &BridgeGuardSpec,
         expected_members: &BTreeSet<String>,
     ) -> Result<BridgeGuardObservation, BridgeGuardError> {
-        let rules = match super::list_rules_family(NftFamily::Bridge, &spec.table, &spec.chain) {
-            Ok(rules) => rules,
-            Err(error) if error.errno() == Some(-libc::ENOENT) => {
-                return Ok(BridgeGuardObservation::Absent {
-                    inventory: BridgeGuardInventory {
-                        generation: 0,
-                        tables: Vec::new(),
-                        chains: Vec::new(),
-                        sets: Vec::new(),
-                        rules: Vec::new(),
-                        members: Vec::new(),
-                        other_children: Vec::new(),
-                    },
+        let before = read_nft_generation()?;
+        let tables = list_table_names_family(NftFamily::Bridge)?;
+        if !tables.iter().any(|name| name == &spec.table) {
+            let after = read_nft_generation()?;
+            if before != after {
+                return Err(BridgeGuardError::Netlink(NetlinkError::nft(
+                    "bridge-observe-generation",
+                    invalid_data("bridge inventory changed while table was absent"),
+                )));
+            }
+            return Ok(BridgeGuardObservation::Absent {
+                inventory: BridgeGuardInventory {
+                    generation: before,
+                    tables: Vec::new(),
+                    chains: Vec::new(),
+                    sets: Vec::new(),
+                    rules: Vec::new(),
+                    members: Vec::new(),
+                    other_children: Vec::new(),
+                },
+            });
+        }
+
+        let table = table_fact(&spec.table);
+        let raw_chains = list_chain_info_family(NftFamily::Bridge, &spec.table)?;
+        let chains = raw_chains.iter().cloned().map(project_chain).collect::<Vec<_>>();
+        let raw_sets = list_set_info_family(NftFamily::Bridge, &spec.table)?;
+        let sets = raw_sets
+            .iter()
+            .map(|set| BridgeGuardSetFact {
+                table: table.clone(),
+                name: set.name.clone(),
+                key_len: set.key_len,
+                ifname_key: set.key_type == super::NFT_IFNAME_KEY_TYPE,
+            })
+            .collect::<Vec<_>>();
+        let expected_programs = expected_rule_programs(spec);
+        let mut rules = Vec::new();
+        for chain in &chains {
+            for rule in super::list_rules_family(NftFamily::Bridge, &spec.table, &chain.name)? {
+                rules.push(project_rule(spec, &table, &chain.name, rule, &expected_programs));
+            }
+        }
+        let mut members = Vec::new();
+        if let Some(set) = raw_sets.iter().find(|set| set.name == spec.managed_taps_set) {
+            for member in list_set_elements_family(
+                NftFamily::Bridge,
+                &spec.table,
+                &spec.managed_taps_set,
+                set.id,
+            )? {
+                let identity = if member.len() == super::IFNAMSIZ {
+                    let nul = member.iter().position(|byte| *byte == 0).unwrap_or(member.len());
+                    std::str::from_utf8(&member[..nul]).map_or(
+                        BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: member.len() },
+                        |name| BridgeGuardMemberIdentity::Ifname(name.to_owned()),
+                    )
+                } else {
+                    BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: member.len() }
+                };
+                members.push(BridgeGuardMemberOccurrence {
+                    table: table.clone(),
+                    set: set.name.clone(),
+                    identity,
                 });
             }
-            Err(error) => return Err(BridgeGuardError::Netlink(error)),
+        }
+        let other_children = list_other_children_family(NftFamily::Bridge, &spec.table)?
+            .into_iter()
+            .map(|child| BridgeGuardOtherChildOccurrence {
+                table: table.clone(),
+                kind: match child.kind {
+                    RawOtherChildKind::Flowtable => BridgeGuardOtherChildKind::Flowtable,
+                    RawOtherChildKind::StatefulObject => BridgeGuardOtherChildKind::StatefulObject,
+                },
+                name: Some(child.name),
+                handle: child.handle,
+            })
+            .collect::<Vec<_>>();
+        let after = read_nft_generation()?;
+        if before != after {
+            return Err(BridgeGuardError::Netlink(NetlinkError::nft(
+                "bridge-observe-generation",
+                invalid_data("bridge inventory changed during generation-bracketed observation"),
+            )));
+        }
+        let observed = BridgeGuardInventory {
+            generation: before,
+            tables: vec![table],
+            chains,
+            sets,
+            rules,
+            members,
+            other_children,
         };
-        let mut observed = expected_inventory(spec);
-        observed.generation = 1;
-        observed.rules = rules
-            .into_iter()
-            .map(|rule| {
-                let owned_index = rule
-                    .userdata
-                    .strip_prefix(b"ovd295-bridge-")
-                    .and_then(|value| std::str::from_utf8(value).ok())
-                    .and_then(|value| value.parse::<usize>().ok());
-                let expected_rules = spec.expected_rule_facts();
-                let fact = owned_index.and_then(|index| expected_rules.get(index).cloned()).map_or(
-                    BridgeGuardRuleFact {
-                        identity: BridgeGuardRuleIdentity::Foreign,
-                        program: BridgeGuardRuleProgram { expressions: Vec::new() },
-                    },
-                    |fact| fact,
-                );
-                BridgeGuardRuleOccurrence {
-                    table: observed.tables[0].clone(),
-                    chain: spec.chain.clone(),
-                    handle: rule.handle,
-                    fact,
-                    counter: rule.counter,
-                }
-            })
-            .collect();
-        observed.sets = observe_set_family(NftFamily::Bridge, &spec.table, &spec.managed_taps_set)?
-            .map(|(key_type, key_len)| BridgeGuardSetFact {
-                table: observed.tables[0].clone(),
-                name: spec.managed_taps_set.clone(),
-                key_len,
-                ifname_key: key_type == u32::from(super::NFTA_DATA_VALUE),
-            })
-            .into_iter()
-            .collect();
-        observed.members =
-            list_set_elements_family(NftFamily::Bridge, &spec.table, &spec.managed_taps_set)?
-                .into_iter()
-                .map(|member| {
-                    let identity = if member.len() == super::IFNAMSIZ {
-                        let nul = member.iter().position(|byte| *byte == 0).unwrap_or(member.len());
-                        std::str::from_utf8(&member[..nul]).map_or(
-                            BridgeGuardMemberIdentity::ForeignEncoding {
-                                encoded_len: member.len(),
-                            },
-                            |name| BridgeGuardMemberIdentity::Ifname(name.to_owned()),
-                        )
-                    } else {
-                        BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: member.len() }
-                    };
-                    BridgeGuardMemberOccurrence {
-                        table: observed.tables[0].clone(),
-                        set: spec.managed_taps_set.clone(),
-                        identity,
-                    }
-                })
-                .collect();
         Ok(classify_inventory(spec, expected_members, observed))
     }
 
@@ -2753,10 +3614,9 @@ pub mod bridge {
         tap: &str,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
         let member = encode_member(tap)?;
-        send_batched_family(
+        send_batched_family_idempotent(
             NftFamily::Bridge,
             NFT_MSG_NEWSETELEM,
-            NLM_F_CREATE,
             &set_elem_payload_family(
                 NftFamily::Bridge,
                 &spec.table,
@@ -2773,7 +3633,7 @@ pub mod bridge {
         tap: &str,
     ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
         let member = encode_member(tap)?;
-        send_batched_family(
+        match send_batched_family(
             NftFamily::Bridge,
             NFT_MSG_DELSETELEM,
             0,
@@ -2784,7 +3644,11 @@ pub mod bridge {
                 &member,
             ),
             "bridge-delete-member",
-        )?;
+        ) {
+            Ok(()) => {}
+            Err(error) if error.errno() == Some(-libc::ENOENT) => {}
+            Err(error) => return Err(BridgeGuardError::Netlink(error)),
+        }
         Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
     }
 
@@ -2895,7 +3759,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 private family projection"]
         fn private_family_projection_is_closed_and_exact() {
             assert_eq!(NftFamily::Ipv4.nfproto(), 2);
             assert_eq!(NftFamily::Bridge.nfproto(), 7);
@@ -2903,7 +3766,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 error projection"]
         fn error_algebra_keeps_validation_distinct_from_source_bearing_netlink_failure() {
             let validation = BridgeGuardError::from(BridgeGuardValidationError::EmptyMember);
             assert!(matches!(validation, BridgeGuardError::Validation(_)));
@@ -2919,7 +3781,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 canonical rule facts"]
         fn expected_rule_facts_are_the_single_ordered_semantic_program() {
             let facts = spec().expected_rule_facts();
             assert_eq!(facts.len(), 3);
@@ -2995,7 +3856,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 semantic inventory classification"]
         fn semantic_classification_preserves_absent_exact_and_every_conflict_partition() {
             let sut = spec();
             let expected_members = BTreeSet::from(["ovd-tp-0002".to_owned()]);
@@ -3066,7 +3926,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 specification validation"]
         fn specification_validation_covers_identifier_and_fixed_policy_boundaries() {
             let identifier_cases = [
                 (
@@ -3144,7 +4003,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 member validation"]
         fn member_validation_rejects_without_entering_the_netlink_scaffold() {
             let sut = spec();
             for (tap, expected) in [
@@ -3178,7 +4036,6 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 member encoding"]
         fn member_encoding_accepts_one_through_fifteen_utf8_bytes_and_never_truncates() {
             for tap in ["a", "ovd-tp-0002", "123456789012345", "ééééééé"] {
                 let encoded = encode_member(tap).expect("valid member");
@@ -3189,11 +4046,24 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step for D-295-DISTILL-9 semantic observation and exact-exclusive deletion"]
         fn observe_and_delete_preserve_order_duplicates_foreign_children_and_full_conflicts() {
+            // This is a real-kernel adapter test; the source-local lane is
+            // also runnable in isolation, so establish the exact production
+            // guard through the adapter before taking its read-only receipt.
+            if unsafe { libc::geteuid() } != 0 {
+                eprintln!("SKIP bridge source observation: root required");
+                return;
+            }
             let sut = spec();
             let expected_members =
                 BTreeSet::from(["ovd-tp-0002".to_owned(), "ovd-tp-0003".to_owned()]);
+            let _ = converge_table(&sut).expect("converge source-local bridge table");
+            let _ = converge_chain(&sut).expect("converge source-local bridge chain");
+            let _ = converge_set(&sut).expect("converge source-local bridge set");
+            let _ = converge_rules(&sut).expect("converge source-local bridge rules");
+            for member in &expected_members {
+                let _ = insert_member(&sut, member).expect("converge source-local bridge member");
+            }
             let observation = observe(&sut, &expected_members).expect("read-only observation");
             let BridgeGuardObservation::Exact { inventory } = observation else {
                 panic!("healthy production guard is exact");

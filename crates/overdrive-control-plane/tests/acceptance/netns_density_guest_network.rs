@@ -61,6 +61,7 @@ fn scratch_complement(counts: &[Option<u32>]) -> GuestNetworkScratchComplement {
 
 proptest! {
     /// CONTRACT_SHAPE: pure-function.
+    /// Outcome anchor: DISCUSS Elevator Pitch.
     #[test]
     fn scratch_complement_never_fabricates_zero(
         counts in prop::collection::vec(prop::option::of(0_u32..4), 15..=15),

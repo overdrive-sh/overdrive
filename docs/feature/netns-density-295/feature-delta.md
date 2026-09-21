@@ -83,8 +83,8 @@ API/order/telemetry plus Sim RED oracle are APPROVED through phase-02 DESIGN
 review iteration 6.** Ownership remains one real control-plane owner; no public
 product hook or second adapter owner is added. The required S-ND295-00/10/11/
 12/13 RED bodies are authored, have completed bounded iteration-2 review
-corrections, and await independent DISTILL iteration-3 re-review. DELIVER
-remains unauthorized while DISTILL or roadmap validation is pending.
+corrections, and completed independent DISTILL iteration-3 re-review. DELIVER
+remains unauthorized while later wave validation is pending.
 **Documentation density:** `lean` (`expansion_prompt=ask-intelligent`,
 `provenance=explicit_override`). Only Tier-1 `[REF]` sections are emitted in
 this feature delta. The Level-3 SSOT diagram is the solution-architect role's
