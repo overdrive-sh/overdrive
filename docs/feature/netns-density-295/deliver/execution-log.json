@@ -274,6 +274,48 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created the scoped D15 remediation commit after RED/GREEN; owned production, evidence, and DES log paths committed with original Marcus author and one Codex trailer",
       "t": "2026-09-21T20:29:23Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-21T20:31:43Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-21T20:31:45Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-09-21T20:31:45Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: exact owner acceptance selector failed semantically in stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once because retirement completed before Pending activation; capability/listener scaffolds compiled after required PendingCapability Debug implementation.",
+      "t": "2026-09-21T21:34:00Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: implemented the exact seven-method node-shared owner and private D7 registry: boot/refusal/zero-TAP-compatible lifecycle, two listener task observers, exact-port recovery/conflict audit, total unpublished cleanup and sealed guard relinquish, Pending/Active/Retiring generation reservations, RAII claims/publication/retirement/drain, remove-before-reassign, owner shutdown, and shared listener capability dispatch with retirement-race late-handle teardown. Exact owner acceptance selector: 6 passed, 2 retained ignored for 03-03 recovery. Capability registry suite: 7 passed. Listener task-owner suite: 2 passed. Real enforcement retirement race: 1 passed. cargo check --workspace --all-targets: PASS. cargo clippy -p overdrive-worker --lib --features integration-tests -D warnings: PASS. cargo xtask metal run KVM/VMM integration suite: 27 passed. cargo xtask metal run dataplane zero-copy integration suite: 54 passed, 6 skipped. Authored Lima owner selector attempted but blocked by Lima read-only target and no-space tmpfs; metal evidence passed. Workspace all-target clippy remains blocked by pre-existing overdrive-netlink nft.rs eprintln and unrelated overdrive-control-plane clippy findings.",
+      "t": "2026-09-21T22:09:55Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: final terminating evidence remained green after the bounded Pending-owner handoff adjustment; des-commit is next with explicit owned production, acceptance, and execution-log paths, Step-Id 02-03, original Marcus author, and one Codex trailer.",
+      "t": "2026-09-21T22:12:15Z"
     }
   ]
 }

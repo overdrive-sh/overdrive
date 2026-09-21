@@ -40,7 +40,6 @@ fn worker(intercept: Arc<dyn MtlsIntercept>) -> Arc<MtlsInterceptWorker> {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 node-shared mTLS owner"]
 async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
     let worker = worker(Arc::new(SimMtlsIntercept::new()));
 
@@ -59,7 +58,6 @@ async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 node-shared mTLS owner"]
 async fn initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication() {
     for errno in [libc::EADDRINUSE, libc::EPERM, libc::EMFILE] {
         let intercept = Arc::new(SimMtlsIntercept::new());
@@ -245,7 +243,6 @@ impl MtlsIntercept for RecordingSharedIntercept {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 partial shared-listener start cleanup"]
 async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_bind(2));
     let worker = worker(intercept.clone());
@@ -261,7 +258,6 @@ async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owne
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 partial shared-rule start cleanup"]
 async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_converge());
     let worker = worker(intercept.clone());
@@ -341,7 +337,6 @@ async fn occupied_original_leg_f_address_refuses_recovery_without_selecting_anot
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 02-03 D-295-DISTILL-15 published-owner evidence"]
 #[allow(
     clippy::too_many_lines,
     reason = "one published-owner narrative keeps exact targets, observe-only conflict, retained guard, and terminal drain together"
@@ -582,7 +577,6 @@ fn allocation_spec(name: &str) -> AllocationSpec {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step for GH #295 Pending-registration stop/shutdown races"]
 async fn stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once()
  {
     for owner_shutdown in [false, true] {

@@ -81,6 +81,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::{NonZeroU16, NonZeroU64};
+use std::os::fd::AsRawFd as _;
 #[cfg(any(test, feature = "integration-tests"))]
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -94,11 +95,12 @@ use overdrive_core::traits::mtls_enforcement::{
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_core::{AllocationId, SpiffeId};
 use parking_lot::{Mutex, RwLock};
-use tokio::sync::watch;
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::mtls_intercept::{
-    InterceptError, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
+    InterceptError, InterceptLeg, InterceptPostcondition, accept_inbound_leg,
+    accept_outbound_and_recover_orig_dst,
 };
 use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 
@@ -315,7 +317,11 @@ struct AbortOnDropListenerTask {
 }
 
 impl Drop for AbortOnDropListenerTask {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
 }
 
 #[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
@@ -334,55 +340,134 @@ struct SharedListenerTaskSlots {
 #[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
 struct SharedListenerTaskOwner {
     slots: Mutex<SharedListenerTaskSlots>,
-    event_tx: tokio::sync::mpsc::WeakSender<SharedListenerTaskEvent>,
-    event_rx: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<SharedListenerTaskEvent>>,
+    event_tx: mpsc::Sender<SharedListenerTaskEvent>,
+    event_rx: tokio::sync::Mutex<mpsc::Receiver<SharedListenerTaskEvent>>,
 }
 
-#[allow(dead_code, clippy::unused_self, reason = "D11 exact private RED scaffold")]
+#[allow(
+    dead_code,
+    clippy::significant_drop_tightening,
+    clippy::unused_self,
+    reason = "D11 exact private task-owner surface intentionally holds mutex guards through each linearized slot operation"
+)]
 impl SharedListenerTaskOwner {
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains and observes listener tasks")]
     fn new(
-        _leg_f: tokio::task::JoinHandle<SharedListenerTaskResult>,
-        _leg_c: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        leg_f: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        leg_c: tokio::task::JoinHandle<SharedListenerTaskResult>,
     ) -> Self {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared listener task owner)")
+        let (event_tx, event_rx) = mpsc::channel(4);
+        let leg_f = Self::observe(InterceptLeg::F, leg_f, &event_tx);
+        let leg_c = Self::observe(InterceptLeg::C, leg_c, &event_tx);
+        Self {
+            slots: Mutex::new(SharedListenerTaskSlots { leg_f: Some(leg_f), leg_c: Some(leg_c) }),
+            event_tx,
+            event_rx: tokio::sync::Mutex::new(event_rx),
+        }
     }
 
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER receives the actual listener-task event"
-    )]
     async fn wait_failure(&self) -> MtlsSharedOwnerError {
-        panic!("Not yet implemented -- RED scaffold (GH #295 listener task failure wait)")
+        let mut events = self.event_rx.lock().await;
+        match events.try_recv() {
+            Ok(event) => return classify_shared_listener_task_exit(event.leg, event.joined),
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                return MtlsSharedOwnerError::TaskObserverClosed;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {}
+        }
+        if self.observer_closed() {
+            return MtlsSharedOwnerError::TaskObserverClosed;
+        }
+        match events.recv().await {
+            Some(event) => classify_shared_listener_task_exit(event.leg, event.joined),
+            None => MtlsSharedOwnerError::TaskObserverClosed,
+        }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER replaces one terminal task")]
     fn replace_terminal(
         &self,
-        _leg: crate::mtls_intercept::InterceptLeg,
-        _task: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        leg: crate::mtls_intercept::InterceptLeg,
+        task: tokio::task::JoinHandle<SharedListenerTaskResult>,
     ) -> std::result::Result<(), MtlsSharedOwnerError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 terminal listener replacement)")
+        let mut slots = self.slots.lock();
+        let slot = match leg {
+            InterceptLeg::F => &mut slots.leg_f,
+            InterceptLeg::C => &mut slots.leg_c,
+        };
+        let Some(slot) = slot else {
+            return Err(MtlsSharedOwnerError::TaskObserverClosed);
+        };
+        if !slot.observer.is_finished() {
+            return Err(MtlsSharedOwnerError::TaskObserverClosed);
+        }
+        *slot = Self::observe(leg, task, &self.event_tx);
+        Ok(())
     }
 
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER aborts and joins both task slots"
-    )]
-    async fn shutdown(self) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 listener task shutdown)")
+    async fn shutdown(&self) {
+        let slots = std::mem::take(&mut *self.slots.lock());
+        let mut observers = Vec::new();
+        for slot in [slots.leg_f, slots.leg_c].into_iter().flatten() {
+            slot.task_abort.abort();
+            observers.push(slot.observer);
+        }
+        for observer in observers {
+            let _ = observer.await;
+        }
+    }
+
+    fn observe(
+        leg: crate::mtls_intercept::InterceptLeg,
+        task: tokio::task::JoinHandle<SharedListenerTaskResult>,
+        event_tx: &mpsc::Sender<SharedListenerTaskEvent>,
+    ) -> SharedListenerTaskSlot {
+        let task_abort = task.abort_handle();
+        let observer_tx = event_tx.clone();
+        let observer = tokio::spawn(async move {
+            let joined = task.await;
+            let _ = observer_tx.send(SharedListenerTaskEvent { leg, joined }).await;
+        });
+        SharedListenerTaskSlot { task_abort, observer }
+    }
+
+    fn observer_closed(&self) -> bool {
+        let slots = self.slots.lock();
+        [slots.leg_f.as_ref(), slots.leg_c.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|slot| slot.observer.is_finished())
+    }
+
+    fn is_live(&self, leg: InterceptLeg) -> bool {
+        let slots = self.slots.lock();
+        match leg {
+            InterceptLeg::F => slots.leg_f.as_ref(),
+            InterceptLeg::C => slots.leg_c.as_ref(),
+        }
+        .is_some_and(|slot| !slot.observer.is_finished())
+    }
+
+    fn dead_leg(&self) -> Option<InterceptLeg> {
+        if !self.is_live(InterceptLeg::F) {
+            return Some(InterceptLeg::F);
+        }
+        if !self.is_live(InterceptLeg::C) {
+            return Some(InterceptLeg::C);
+        }
+        None
     }
 }
 
-#[allow(dead_code, reason = "D11 RED classifier is driven only by pending source-local tests")]
-#[expect(clippy::panic, reason = "RED scaffold; DELIVER classifies actual Tokio join outcomes")]
 fn classify_shared_listener_task_exit(
-    _leg: crate::mtls_intercept::InterceptLeg,
-    _joined: std::result::Result<SharedListenerTaskResult, tokio::task::JoinError>,
+    leg: crate::mtls_intercept::InterceptLeg,
+    joined: std::result::Result<SharedListenerTaskResult, tokio::task::JoinError>,
 ) -> MtlsSharedOwnerError {
-    panic!("Not yet implemented -- RED scaffold (GH #295 listener task exit classifier)")
+    match joined {
+        Ok(Ok(())) => MtlsSharedOwnerError::TaskReturned { leg },
+        Ok(Err(source)) => MtlsSharedOwnerError::TaskFailed { leg, source },
+        Err(source) if source.is_panic() => MtlsSharedOwnerError::TaskPanicked { leg },
+        Err(source) if source.is_cancelled() => MtlsSharedOwnerError::TaskCancelled { leg },
+        Err(_) => MtlsSharedOwnerError::TaskCancelled { leg },
+    }
 }
 
 #[cfg(test)]
@@ -398,7 +483,6 @@ mod shared_listener_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step for GH #295 actual shared-listener task classification"]
     async fn actual_tokio_return_error_panic_and_cancel_map_to_the_exact_public_error() {
         let returned = tokio::spawn(async { Ok(()) }).await;
         assert!(matches!(
@@ -438,7 +522,6 @@ mod shared_listener_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step for GH #295 shared-listener task ownership"]
     async fn observer_close_replacement_and_intentional_shutdown_use_real_owned_tasks() {
         let owner = SharedListenerTaskOwner::new(
             tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
@@ -573,40 +656,53 @@ enum CapabilityLifecycle {
     Retiring,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
 struct CapabilityElements {
     outbound: Option<Box<dyn InterceptGuard>>,
     inbound: Vec<Box<dyn InterceptGuard>>,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+#[derive(Clone)]
 struct CapabilityRegistry {
-    _private: (),
+    inner: Arc<CapabilityRegistryInner>,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
-#[derive(Debug)]
 struct PendingCapability {
-    _private: (),
+    inner: Arc<CapabilityRegistryInner>,
+    key: CapabilityKey,
+    elements: Option<CapabilityElements>,
+    completed: bool,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
+impl std::fmt::Debug for PendingCapability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PendingCapability")
+            .field("key", &self.key)
+            .field("completed", &self.completed)
+            .finish_non_exhaustive()
+    }
+}
+
 struct CapabilityClaim {
+    inner: Arc<CapabilityRegistryInner>,
+    key: CapabilityKey,
     capability: Capability,
+    completed: bool,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
 struct CapabilityRetirement {
-    _private: (),
+    inner: Arc<CapabilityRegistryInner>,
+    key: CapabilityKey,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
 struct CapabilityDrain {
+    inner: Arc<CapabilityRegistryInner>,
+    key: CapabilityKey,
     handles: Vec<EnforcedConnection>,
     elements: CapabilityElements,
+    completed: bool,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold precedes implementation")]
 enum PublishDisposition {
     Published,
     Retired(EnforcedConnection),
@@ -619,117 +715,336 @@ enum ActivationDisposition {
     Retired,
 }
 
-#[allow(
-    dead_code,
-    clippy::unused_self,
-    reason = "D-295-DISTILL-7 exact private API scaffold retains its approved receiver signatures before implementation"
-)]
+struct CapabilityRecord {
+    capability: Capability,
+    lifecycle: CapabilityLifecycle,
+    elements: CapabilityElements,
+    handles: Vec<EnforcedConnection>,
+    in_flight: usize,
+    pending_owner: bool,
+}
+
+struct RegistryState {
+    next_generation: u64,
+    records: BTreeMap<CapabilityKey, CapabilityRecord>,
+    allocations: BTreeMap<AllocationId, CapabilityKey>,
+    sources: BTreeMap<Ipv4Addr, CapabilityKey>,
+    destinations: BTreeMap<Ipv4Addr, CapabilityKey>,
+}
+
+struct CapabilityRegistryInner {
+    state: Mutex<RegistryState>,
+    wake: Notify,
+}
+
+impl RegistryState {
+    const fn empty(next_generation: u64) -> Self {
+        Self {
+            next_generation,
+            records: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            sources: BTreeMap::new(),
+            destinations: BTreeMap::new(),
+        }
+    }
+
+    fn remove_indexes(&mut self, key: &CapabilityKey) {
+        if self.sources.get(&key_source(self, key)).is_some_and(|value| value == key) {
+            self.sources.remove(&key_source(self, key));
+        }
+        if self.destinations.get(&key_source(self, key)).is_some_and(|value| value == key) {
+            self.destinations.remove(&key_source(self, key));
+        }
+    }
+}
+
+fn key_source(state: &RegistryState, key: &CapabilityKey) -> Ipv4Addr {
+    state.records.get(key).map_or(Ipv4Addr::UNSPECIFIED, |record| record.capability.source_addr)
+}
+
+#[allow(clippy::significant_drop_tightening)]
 impl CapabilityRegistry {
-    const fn new() -> Self {
-        Self { _private: () }
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(CapabilityRegistryInner {
+                state: Mutex::new(RegistryState::empty(1)),
+                wake: Notify::new(),
+            }),
+        }
     }
 
     #[cfg(test)]
-    const fn with_next_generation(_next_generation: u64) -> Self {
-        Self { _private: () }
+    fn with_next_generation(next_generation: u64) -> Self {
+        Self {
+            inner: Arc::new(CapabilityRegistryInner {
+                state: Mutex::new(RegistryState::empty(next_generation)),
+                wake: Notify::new(),
+            }),
+        }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements registration")]
     fn begin_registration(
         &self,
-        _alloc: AllocationId,
-        _source_addr: Ipv4Addr,
-        _spiffe_id: SpiffeId,
-        _allowed_ports: BTreeSet<NonZeroU16>,
+        alloc: AllocationId,
+        source_addr: Ipv4Addr,
+        spiffe_id: SpiffeId,
+        allowed_ports: BTreeSet<NonZeroU16>,
     ) -> Result<PendingCapability, MtlsInterceptInstallError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 capability registration)")
+        let mut state = self.inner.state.lock();
+        let next_generation = state.next_generation;
+        let next = next_generation
+            .checked_add(1)
+            .ok_or(MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX })?;
+        let address_reserved = state.records.values().any(|record| {
+            record.capability.source_addr == source_addr || record.capability.key.alloc == alloc
+        });
+        if address_reserved {
+            return Err(MtlsInterceptInstallError::RegistrationConflict { address: source_addr });
+        }
+        let Some(generation) = NonZeroU64::new(next_generation) else {
+            return Err(MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX });
+        };
+        let key =
+            CapabilityKey { alloc: alloc.clone(), generation: RegistrationGeneration(generation) };
+        let capability = Capability { key: key.clone(), spiffe_id, source_addr, allowed_ports };
+        state.next_generation = next;
+        state.allocations.insert(alloc, key.clone());
+        state.records.insert(
+            key.clone(),
+            CapabilityRecord {
+                capability,
+                lifecycle: CapabilityLifecycle::Pending,
+                elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                handles: Vec::new(),
+                in_flight: 0,
+                pending_owner: true,
+            },
+        );
+        Ok(PendingCapability {
+            inner: Arc::clone(&self.inner),
+            key,
+            elements: Some(CapabilityElements { outbound: None, inbound: Vec::new() }),
+            completed: false,
+        })
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements source claim")]
-    fn claim_source(&self, _source_addr: Ipv4Addr) -> Option<CapabilityClaim> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 source capability claim)")
+    fn claim_source(&self, source_addr: Ipv4Addr) -> Option<CapabilityClaim> {
+        let mut state = self.inner.state.lock();
+        let key = state.sources.get(&source_addr)?.clone();
+        Self::claim_locked(&self.inner, &mut state, key)
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements destination claim")]
     fn claim_destination(
         &self,
-        _destination_addr: Ipv4Addr,
-        _destination_port: NonZeroU16,
+        destination_addr: Ipv4Addr,
+        destination_port: NonZeroU16,
     ) -> Option<CapabilityClaim> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 destination capability claim)")
+        let mut state = self.inner.state.lock();
+        let key = state.destinations.get(&destination_addr)?.clone();
+        let allowed = state.records.get(&key)?.capability.allowed_ports.contains(&destination_port);
+        if !allowed {
+            return None;
+        }
+        Self::claim_locked(&self.inner, &mut state, key)
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements retirement")]
-    fn begin_retire(&self, _alloc: &AllocationId) -> Option<CapabilityRetirement> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 capability retirement)")
+    fn begin_retire(&self, alloc: &AllocationId) -> Option<CapabilityRetirement> {
+        let mut state = self.inner.state.lock();
+        let key = state.allocations.get(alloc)?.clone();
+        let was_active = state
+            .records
+            .get(&key)
+            .is_some_and(|record| record.lifecycle == CapabilityLifecycle::Active);
+        if let Some(record) = state.records.get_mut(&key) {
+            record.lifecycle = CapabilityLifecycle::Retiring;
+        }
+        if was_active {
+            state.remove_indexes(&key);
+        }
+        self.inner.wake.notify_waiters();
+        Some(CapabilityRetirement { inner: Arc::clone(&self.inner), key })
+    }
+
+    fn claim_locked(
+        inner: &Arc<CapabilityRegistryInner>,
+        state: &mut RegistryState,
+        key: CapabilityKey,
+    ) -> Option<CapabilityClaim> {
+        let record = state.records.get_mut(&key)?;
+        if record.lifecycle != CapabilityLifecycle::Active {
+            return None;
+        }
+        record.in_flight += 1;
+        Some(CapabilityClaim {
+            inner: Arc::clone(inner),
+            key,
+            capability: record.capability.clone(),
+            completed: false,
+        })
     }
 }
 
-#[allow(
-    dead_code,
-    clippy::needless_pass_by_ref_mut,
-    clippy::unused_self,
-    reason = "D-295-DISTILL-7 exact private API scaffold retains approved mutable ownership methods before implementation"
-)]
+#[allow(clippy::significant_drop_tightening)]
 impl PendingCapability {
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains outbound guard")]
-    fn retain_outbound(&mut self, _guard: Box<dyn InterceptGuard>) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 retain outbound element)")
+    fn retain_outbound(&mut self, guard: Box<dyn InterceptGuard>) {
+        if let Some(elements) = self.elements.as_mut() {
+            elements.outbound = Some(guard);
+        }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER retains inbound guard")]
-    fn retain_inbound(&mut self, _guard: Box<dyn InterceptGuard>) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 retain inbound element)")
+    fn retain_inbound(&mut self, guard: Box<dyn InterceptGuard>) {
+        if let Some(elements) = self.elements.as_mut() {
+            elements.inbound.push(guard);
+        }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements activation")]
-    fn activate(self) -> ActivationDisposition {
-        panic!("Not yet implemented -- RED scaffold (GH #295 capability activation)")
+    fn activate(mut self) -> ActivationDisposition {
+        let elements = self
+            .elements
+            .take()
+            .unwrap_or(CapabilityElements { outbound: None, inbound: Vec::new() });
+        let mut disposition = ActivationDisposition::Retired;
+        let inner = Arc::clone(&self.inner);
+        {
+            let mut state = inner.state.lock();
+            if let Some(record) = state.records.get_mut(&self.key) {
+                record.elements = elements;
+                match record.lifecycle {
+                    CapabilityLifecycle::Pending => {
+                        record.lifecycle = CapabilityLifecycle::Active;
+                        record.pending_owner = false;
+                        let source = record.capability.source_addr;
+                        state.sources.insert(source, self.key.clone());
+                        state.destinations.insert(source, self.key.clone());
+                        disposition = ActivationDisposition::Activated;
+                    }
+                    CapabilityLifecycle::Retiring => {
+                        record.pending_owner = false;
+                    }
+                    CapabilityLifecycle::Active => {}
+                }
+            }
+        }
+        self.completed = true;
+        inner.wake.notify_waiters();
+        disposition
     }
 }
 
-#[allow(
-    dead_code,
-    clippy::unused_self,
-    reason = "D-295-DISTILL-7 exact private API scaffold retains its approved receiver signatures before implementation"
-)]
 impl CapabilityClaim {
     const fn capability(&self) -> &Capability {
         &self.capability
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements publication fence")]
-    fn publish(self, _handle: EnforcedConnection) -> PublishDisposition {
-        panic!("Not yet implemented -- RED scaffold (GH #295 capability publication)")
+    fn publish(mut self, handle: EnforcedConnection) -> PublishDisposition {
+        let disposition = {
+            let mut state = self.inner.state.lock();
+            match state.records.get_mut(&self.key) {
+                Some(record) => {
+                    record.in_flight = record.in_flight.saturating_sub(1);
+                    match record.lifecycle {
+                        CapabilityLifecycle::Active => {
+                            record.handles.push(handle);
+                            PublishDisposition::Published
+                        }
+                        CapabilityLifecycle::Pending | CapabilityLifecycle::Retiring => {
+                            PublishDisposition::Retired(handle)
+                        }
+                    }
+                }
+                None => PublishDisposition::Retired(handle),
+            }
+        };
+        self.completed = true;
+        self.inner.wake.notify_waiters();
+        disposition
     }
 }
 
+#[allow(clippy::significant_drop_tightening)]
 impl Drop for PendingCapability {
-    fn drop(&mut self) {}
-}
-
-impl Drop for CapabilityClaim {
-    fn drop(&mut self) {}
-}
-
-#[allow(
-    dead_code,
-    clippy::unused_async,
-    clippy::unused_self,
-    reason = "D-295-DISTILL-7 exact private async waiter scaffold precedes implementation"
-)]
-impl CapabilityRetirement {
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements claim wait")]
-    async fn wait_for_claims(self) -> CapabilityDrain {
-        panic!("Not yet implemented -- RED scaffold (GH #295 retirement wait)")
+    fn drop(&mut self) {
+        let elements = self.elements.take();
+        drop(elements);
+        if self.completed {
+            return;
+        }
+        let mut state = self.inner.state.lock();
+        let mut remove = false;
+        if let Some(record) = state.records.get_mut(&self.key) {
+            match record.lifecycle {
+                CapabilityLifecycle::Pending => remove = true,
+                CapabilityLifecycle::Retiring => record.pending_owner = false,
+                CapabilityLifecycle::Active => {}
+            }
+        }
+        if remove {
+            state.allocations.remove(&self.key.alloc);
+            state.records.remove(&self.key);
+        }
+        self.inner.wake.notify_waiters();
     }
 }
 
-#[allow(
-    dead_code,
-    clippy::unused_self,
-    reason = "D-295-DISTILL-7 exact private drain scaffold precedes implementation"
-)]
+#[allow(clippy::significant_drop_tightening)]
+impl Drop for CapabilityClaim {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        if let Some(record) = self.inner.state.lock().records.get_mut(&self.key) {
+            record.in_flight = record.in_flight.saturating_sub(1);
+        }
+        self.inner.wake.notify_waiters();
+    }
+}
+
+#[allow(clippy::significant_drop_tightening)]
+impl CapabilityRetirement {
+    async fn wait_for_claims(self) -> CapabilityDrain {
+        loop {
+            let notified = self.inner.wake.notified();
+            let ready = {
+                let mut state = self.inner.state.lock();
+                let Some(record) = state.records.get_mut(&self.key) else {
+                    return CapabilityDrain {
+                        inner: Arc::clone(&self.inner),
+                        key: self.key,
+                        handles: Vec::new(),
+                        elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                        completed: false,
+                    };
+                };
+                if record.lifecycle == CapabilityLifecycle::Retiring
+                    && record.in_flight == 0
+                    && !record.pending_owner
+                {
+                    Some((
+                        std::mem::take(&mut record.handles),
+                        std::mem::replace(
+                            &mut record.elements,
+                            CapabilityElements { outbound: None, inbound: Vec::new() },
+                        ),
+                    ))
+                } else {
+                    None
+                }
+            };
+            if let Some((handles, elements)) = ready {
+                return CapabilityDrain {
+                    inner: Arc::clone(&self.inner),
+                    key: self.key,
+                    handles,
+                    elements,
+                    completed: false,
+                };
+            }
+            notified.await;
+        }
+    }
+}
+
+#[allow(clippy::significant_drop_tightening)]
 impl CapabilityDrain {
     fn take_handles(&mut self) -> Vec<EnforcedConnection> {
         std::mem::take(&mut self.handles)
@@ -742,7 +1057,158 @@ impl CapabilityDrain {
         )
     }
 
-    fn complete(self) {}
+    fn complete(mut self) {
+        if self.completed {
+            return;
+        }
+        let mut state = self.inner.state.lock();
+        if state.records.remove(&self.key).is_some() {
+            state.allocations.remove(&self.key.alloc);
+        }
+        self.completed = true;
+        self.inner.wake.notify_waiters();
+    }
+}
+
+struct SharedOwner {
+    leg_f_addr: SocketAddrV4,
+    leg_c_addr: SocketAddrV4,
+    leg_f_listener: Option<std::net::TcpListener>,
+    leg_c_listener: Option<std::net::TcpListener>,
+    stop: Arc<AtomicBool>,
+    tasks: Arc<SharedListenerTaskOwner>,
+    guard: Option<Box<dyn InterceptGuard>>,
+    expected: InterceptPostcondition,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SharedOwnerLifecycle {
+    Absent,
+    Starting,
+    Published,
+    ShuttingDown,
+}
+
+struct SharedOwnerState {
+    lifecycle: SharedOwnerLifecycle,
+    owner: Option<SharedOwner>,
+}
+
+impl SharedOwnerState {
+    const fn new() -> Self {
+        Self { lifecycle: SharedOwnerLifecycle::Absent, owner: None }
+    }
+}
+
+fn shared_listener_task(
+    listener: std::net::TcpListener,
+    stop: Arc<AtomicBool>,
+    worker: Weak<MtlsInterceptWorker>,
+    leg: InterceptLeg,
+) -> tokio::task::JoinHandle<SharedListenerTaskResult> {
+    tokio::task::spawn_blocking(move || {
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            if matches!(
+                await_pending_connection(&listener, &stop, &worker),
+                ConnectionReady::Stopped
+            ) {
+                return Ok(());
+            }
+            let Some(worker) = worker.upgrade() else {
+                return Ok(());
+            };
+            match leg {
+                InterceptLeg::F => match accept_outbound_and_recover_orig_dst(&listener) {
+                    Ok((leg_f, orig_dst)) => {
+                        let source_addr = peer_addr(&leg_f)?;
+                        worker.handle_shared_outbound(source_addr, leg_f, orig_dst);
+                    }
+                    Err(InterceptError::Accept { source, .. }) => return Err(source),
+                    Err(source) => {
+                        tracing::warn!(
+                            name: "health.mtls.shared_leg_f_acquire_failed",
+                            error = %source,
+                            "shared leg-F acquisition failed; dropping the connection"
+                        );
+                    }
+                },
+                InterceptLeg::C => {
+                    let placeholder =
+                        AllocationId::new("shared-listener-pending").unwrap_or_else(|_| {
+                            unreachable!("static placeholder allocation id is valid")
+                        });
+                    match accept_inbound_leg(&listener, placeholder) {
+                        Ok(connection) => worker.handle_shared_inbound(connection),
+                        Err(InterceptError::Accept { source, .. }) => return Err(source),
+                        Err(source) => {
+                            tracing::warn!(
+                                name: "health.mtls.shared_leg_c_acquire_failed",
+                                error = %source,
+                                "shared leg-C acquisition failed; dropping the connection"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+#[allow(clippy::cast_possible_truncation, reason = "sockaddr_in has a fixed platform ABI size")]
+fn peer_addr(leg: &std::os::fd::OwnedFd) -> std::io::Result<Ipv4Addr> {
+    let mut address: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    let mut length = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+    // SAFETY: `address` and `length` describe a writable IPv4 sockaddr buffer
+    // owned by this call, and `leg` remains live for the syscall.
+    let result = unsafe {
+        libc::getpeername(
+            leg.as_raw_fd(),
+            std::ptr::from_mut(&mut address).cast(),
+            std::ptr::from_mut(&mut length),
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr)))
+}
+
+fn shared_listener_address(
+    leg: InterceptLeg,
+    listener: &std::net::TcpListener,
+) -> Result<SocketAddrV4, MtlsSharedOwnerError> {
+    match listener.local_addr() {
+        Ok(std::net::SocketAddr::V4(address)) if address.port() != 0 => Ok(address),
+        Ok(std::net::SocketAddr::V4(address)) => Err(MtlsSharedOwnerError::ListenerPostcondition {
+            leg,
+            expected: address,
+            observed: Some(address),
+        }),
+        Ok(std::net::SocketAddr::V6(_)) => Err(MtlsSharedOwnerError::ListenerPostcondition {
+            leg,
+            expected: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1),
+            observed: None,
+        }),
+        Err(source) => Err(MtlsSharedOwnerError::ListenerLocalAddr { leg, source }),
+    }
+}
+
+fn shared_identity_for_ports(
+    leg_f: SocketAddrV4,
+    leg_c: SocketAddrV4,
+) -> Result<InterceptPostcondition, MtlsSharedOwnerError> {
+    let identity = overdrive_netlink::nft::SharedIpInterceptIdentity::for_listener_ports(
+        leg_f.port(),
+        leg_c.port(),
+    )
+    .map_err(|source| MtlsSharedOwnerError::Intercept {
+        source: InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", source },
+    })?;
+    let (table_and_chains, sets, prerouting, output) = identity.normalized_parts();
+    Ok(InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output })
 }
 
 #[cfg(test)]
@@ -791,7 +1257,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 capability registration generation"]
     fn generation_boundaries_and_every_lifecycle_conflict_precede_effects() {
         let exhausted = CapabilityRegistry::with_next_generation(u64::MAX);
         let error = exhausted
@@ -854,7 +1319,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 checked generation max-minus-one boundary"]
     fn max_minus_one_is_minted_once_then_max_is_refused_without_advancing_or_reserving() {
         let registry = CapabilityRegistry::with_next_generation(u64::MAX - 1);
         let first_alloc = alloc("generation-max-minus-one");
@@ -898,7 +1362,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 Pending-retirement ownership"]
     async fn pending_retirement_waits_for_activation_and_drains_transferred_elements_once() {
         let registry = CapabilityRegistry::new();
         let allocation = alloc("pending-retirement");
@@ -937,7 +1400,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 capability claim/publication fence"]
     async fn claim_drop_and_late_publication_wake_retirement_without_reattribution() {
         let registry = CapabilityRegistry::new();
         let allocation = alloc("claim-retirement");
@@ -973,7 +1435,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 published-handle scoped drain"]
     async fn publication_before_retirement_is_owned_by_only_that_generation_and_allocation() {
         let registry = CapabilityRegistry::new();
         let first = alloc("published-first");
@@ -1013,7 +1474,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 predecessor/successor generation fencing"]
     async fn released_address_selects_only_the_successor_and_never_reattributes_a_stale_claim() {
         let registry = CapabilityRegistry::new();
         let address = Ipv4Addr::new(100, 95, 0, 10);
@@ -1048,7 +1508,6 @@ mod capability_registry_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 Pending cancellation"]
     async fn pending_cancellation_relinquishes_partial_effects_without_releasing_a_retiring_key() {
         for retire_first in [false, true] {
             let registry = CapabilityRegistry::new();
@@ -1102,6 +1561,9 @@ mod capability_registry_acceptance {
 /// torn down on `stop_alloc`. This is lifecycle bookkeeping keyed by
 /// `AllocationId` (NOT a liveness loop — D-MTLS-16).
 struct AllocIntercept {
+    /// `true` when this record is backed by the node-shared capability
+    /// registry. Legacy host-netns fixtures retain their local owner shape.
+    capability_owned: bool,
     /// The OUTBOUND egress-capture guard for this alloc's host-side veth
     /// ([`MtlsIntercept::install_outbound`], D-TME-4 / ADR-0071 Path A).
     /// Dropping it releases exactly what that install acquired, and nothing
@@ -1425,10 +1887,18 @@ pub struct MtlsInterceptWorker {
     /// One process-local registration/capability state machine.
     #[allow(dead_code, reason = "D-295-DISTILL-7 RED scaffold activated by the single cut")]
     capabilities: CapabilityRegistry,
+    /// The one node-owned listener/rule owner. Allocation records refer to
+    /// this owner; they never own or replace its sockets.
+    shared_owner: Mutex<SharedOwnerState>,
     /// Per-alloc teardown bookkeeping (D-MTLS-16). `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice" — the
     /// set is drained deterministically on stop.
     intercepts: Mutex<BTreeMap<AllocationId, AllocIntercept>>,
+    /// Allocations whose shared capability registration has acquired effects
+    /// but has not reached the atomic Pending -> Active/Retired linearization.
+    /// A stop that arrives in this window transfers retirement ownership to
+    /// the capability registry and waits for the pending owner handshake.
+    pending_allocations: Mutex<BTreeSet<AllocationId>>,
     /// In-progress and completed stop generations. Kept until owner shutdown
     /// so duplicate callers and terminal retries observe the same result.
     stopping: Mutex<BTreeMap<AllocationId, Vec<Arc<AllocStop>>>>,
@@ -1495,7 +1965,9 @@ impl MtlsInterceptWorker {
             _clock: clock,
             intercept,
             capabilities: CapabilityRegistry::new(),
+            shared_owner: Mutex::new(SharedOwnerState::new()),
             intercepts: Mutex::new(BTreeMap::new()),
+            pending_allocations: Mutex::new(BTreeSet::new()),
             stopping: Mutex::new(BTreeMap::new()),
             lifecycle: RwLock::new(WorkerLifecycle::Open),
             shutdown: Arc::new(OwnerStop::new()),
@@ -1508,43 +1980,270 @@ impl MtlsInterceptWorker {
 
     /// Start and publish the one node-shared listener owner only after its
     /// sockets, node guard, tasks, and full audit are complete.
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER implements GH #295 shared owner start"
-    )]
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn start_shared_owner(self: &Arc<Self>) -> Result<(), MtlsSharedOwnerError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS owner start)")
+        {
+            let mut state = self.shared_owner.lock();
+            match state.lifecycle {
+                SharedOwnerLifecycle::Published => return Ok(()),
+                SharedOwnerLifecycle::Starting => return Err(MtlsSharedOwnerError::NotStarted),
+                SharedOwnerLifecycle::ShuttingDown => {
+                    return Err(MtlsSharedOwnerError::OwnerShutdown);
+                }
+                SharedOwnerLifecycle::Absent => state.lifecycle = SharedOwnerLifecycle::Starting,
+            }
+        }
+
+        let result = self.start_shared_owner_inner().await;
+        let mut state = self.shared_owner.lock();
+        match result {
+            Ok(owner) => {
+                state.owner = Some(owner);
+                state.lifecycle = SharedOwnerLifecycle::Published;
+                Ok(())
+            }
+            Err(source) => {
+                state.owner = None;
+                state.lifecycle = SharedOwnerLifecycle::Absent;
+                Err(source)
+            }
+        }
     }
 
     /// Resolve when the retained F/C task observer reports an abnormal exit.
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER implements GH #295 task observation"
-    )]
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn wait_shared_owner_failure(&self) -> MtlsSharedOwnerError {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS task observer)")
+        let tasks = {
+            let state = self.shared_owner.lock();
+            let Some(owner) = state.owner.as_ref() else {
+                return match state.lifecycle {
+                    SharedOwnerLifecycle::ShuttingDown => MtlsSharedOwnerError::OwnerShutdown,
+                    _ => MtlsSharedOwnerError::NotStarted,
+                };
+            };
+            Arc::clone(&owner.tasks)
+        };
+        tasks.wait_failure().await
     }
 
     /// Repair only the failed shared listener/task at its recorded address.
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "RED scaffold; DELIVER implements GH #295 exact-port recovery"
-    )]
+    #[allow(clippy::unused_async, reason = "the exact seven-method worker surface remains async")]
     pub async fn converge_shared_owner(self: &Arc<Self>) -> Result<(), MtlsSharedOwnerError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS convergence)")
+        let mut owner = {
+            let mut state = self.shared_owner.lock();
+            if state.lifecycle == SharedOwnerLifecycle::ShuttingDown {
+                return Err(MtlsSharedOwnerError::OwnerShutdown);
+            }
+            let Some(owner) = state.owner.take() else {
+                return Err(MtlsSharedOwnerError::NotStarted);
+            };
+            state.lifecycle = SharedOwnerLifecycle::Starting;
+            owner
+        };
+        let result = self.converge_shared_owner_inner(&mut owner);
+        let mut state = self.shared_owner.lock();
+        state.owner = Some(owner);
+        state.lifecycle = SharedOwnerLifecycle::Published;
+        result
     }
 
     /// Non-repairing read-back of sockets, tasks, and the shared rule program.
-    #[expect(
-        clippy::panic,
+    #[allow(
+        clippy::significant_drop_tightening,
         clippy::unused_async,
-        reason = "RED scaffold; DELIVER implements GH #295 shared mTLS audit"
+        reason = "the exact seven-method worker surface remains async"
     )]
     pub async fn audit_shared_owner(&self) -> Result<(), MtlsSharedOwnerError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared mTLS audit)")
+        let state = self.shared_owner.lock();
+        let Some(owner) = state.owner.as_ref() else {
+            return match state.lifecycle {
+                SharedOwnerLifecycle::ShuttingDown => Err(MtlsSharedOwnerError::OwnerShutdown),
+                _ => Err(MtlsSharedOwnerError::NotStarted),
+            };
+        };
+        self.audit_shared_owner_snapshot(owner)
+    }
+
+    #[allow(clippy::similar_names)]
+    async fn start_shared_owner_inner(
+        self: &Arc<Self>,
+    ) -> Result<SharedOwner, MtlsSharedOwnerError> {
+        let prior = self
+            .intercept
+            .observe_shared()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        let requested = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
+        let leg_f_listener = self.intercept.bind_transparent(requested).map_err(|source| {
+            MtlsSharedOwnerError::ListenerBind { leg: InterceptLeg::F, requested, source }
+        })?;
+        let leg_f_addr = shared_listener_address(InterceptLeg::F, &leg_f_listener)?;
+        let leg_c_listener = match self.intercept.bind_transparent(requested) {
+            Ok(listener) => listener,
+            Err(source) => {
+                return Err(MtlsSharedOwnerError::ListenerBind {
+                    leg: InterceptLeg::C,
+                    requested,
+                    source,
+                });
+            }
+        };
+        let leg_c_addr = shared_listener_address(InterceptLeg::C, &leg_c_listener)?;
+        let guard = self
+            .intercept
+            .converge_shared(prior.as_ref(), leg_f_addr, leg_c_addr)
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        let expected = self
+            .intercept
+            .observe_shared()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?
+            .or_else(|| shared_identity_for_ports(leg_f_addr, leg_c_addr).ok())
+            .ok_or_else(|| MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: shared_identity_for_ports(leg_f_addr, leg_c_addr).unwrap_or_else(
+                        |_| InterceptPostcondition::ListenerPort {
+                            leg: InterceptLeg::F,
+                            port: leg_f_addr.port(),
+                        },
+                    ),
+                    observed: None,
+                },
+            })?;
+        let task_f_listener = leg_f_listener.try_clone().map_err(|source| {
+            MtlsSharedOwnerError::ListenerLocalAddr { leg: InterceptLeg::F, source }
+        })?;
+        let task_c_listener = leg_c_listener.try_clone().map_err(|source| {
+            MtlsSharedOwnerError::ListenerLocalAddr { leg: InterceptLeg::C, source }
+        })?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let tasks = Arc::new(SharedListenerTaskOwner::new(
+            shared_listener_task(
+                task_f_listener,
+                Arc::clone(&stop),
+                Arc::downgrade(self),
+                InterceptLeg::F,
+            ),
+            shared_listener_task(
+                task_c_listener,
+                Arc::clone(&stop),
+                Arc::downgrade(self),
+                InterceptLeg::C,
+            ),
+        ));
+        let owner = SharedOwner {
+            leg_f_addr,
+            leg_c_addr,
+            leg_f_listener: Some(leg_f_listener),
+            leg_c_listener: Some(leg_c_listener),
+            stop,
+            tasks,
+            guard: Some(guard),
+            expected,
+        };
+        if let Err(source) = self.audit_shared_owner_snapshot(&owner) {
+            owner.stop.store(true, Ordering::SeqCst);
+            owner.tasks.shutdown().await;
+            drop(owner);
+            return Err(source);
+        }
+        Ok(owner)
+    }
+
+    fn audit_shared_owner_snapshot(&self, owner: &SharedOwner) -> Result<(), MtlsSharedOwnerError> {
+        let observed_f = owner
+            .leg_f_listener
+            .as_ref()
+            .ok_or(MtlsSharedOwnerError::TaskObserverClosed)
+            .and_then(|listener| shared_listener_address(InterceptLeg::F, listener))?;
+        if observed_f != owner.leg_f_addr {
+            return Err(MtlsSharedOwnerError::ListenerPostcondition {
+                leg: InterceptLeg::F,
+                expected: owner.leg_f_addr,
+                observed: Some(observed_f),
+            });
+        }
+        let observed_c = owner
+            .leg_c_listener
+            .as_ref()
+            .ok_or(MtlsSharedOwnerError::TaskObserverClosed)
+            .and_then(|listener| shared_listener_address(InterceptLeg::C, listener))?;
+        if observed_c != owner.leg_c_addr {
+            return Err(MtlsSharedOwnerError::ListenerPostcondition {
+                leg: InterceptLeg::C,
+                expected: owner.leg_c_addr,
+                observed: Some(observed_c),
+            });
+        }
+        if !owner.tasks.is_live(InterceptLeg::F) {
+            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F });
+        }
+        if !owner.tasks.is_live(InterceptLeg::C) {
+            return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::C });
+        }
+        let observed = self
+            .intercept
+            .observe_shared()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        if observed != Some(owner.expected.clone()) {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: owner.expected.clone(),
+                    observed,
+                },
+            });
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::unused_async, reason = "exact-port recovery retains the async owner boundary")]
+    fn converge_shared_owner_inner(
+        self: &Arc<Self>,
+        owner: &mut SharedOwner,
+    ) -> Result<(), MtlsSharedOwnerError> {
+        let observed = self
+            .intercept
+            .observe_shared()
+            .map_err(|source| MtlsSharedOwnerError::Intercept { source })?;
+        if observed != Some(owner.expected.clone()) {
+            return Err(MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected: owner.expected.clone(),
+                    observed,
+                },
+            });
+        }
+        let Some(dead_leg) = owner.tasks.dead_leg() else {
+            return self.audit_shared_owner_snapshot(owner);
+        };
+        let (address, listener_slot) = match dead_leg {
+            InterceptLeg::F => (owner.leg_f_addr, &mut owner.leg_f_listener),
+            InterceptLeg::C => (owner.leg_c_addr, &mut owner.leg_c_listener),
+        };
+        drop(listener_slot.take());
+        let listener = self.intercept.bind_transparent(address).map_err(|source| {
+            MtlsSharedOwnerError::ListenerBind { leg: dead_leg, requested: address, source }
+        })?;
+        let rebound = shared_listener_address(dead_leg, &listener)?;
+        if rebound != address {
+            return Err(MtlsSharedOwnerError::ListenerPostcondition {
+                leg: dead_leg,
+                expected: address,
+                observed: Some(rebound),
+            });
+        }
+        let task_listener = listener
+            .try_clone()
+            .map_err(|source| MtlsSharedOwnerError::ListenerLocalAddr { leg: dead_leg, source })?;
+        *listener_slot = Some(listener);
+        owner.tasks.replace_terminal(
+            dead_leg,
+            shared_listener_task(
+                task_listener,
+                Arc::clone(&owner.stop),
+                Arc::downgrade(self),
+                dead_leg,
+            ),
+        )?;
+        self.audit_shared_owner_snapshot(owner)
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
@@ -1624,9 +2323,15 @@ impl MtlsInterceptWorker {
                 .await
                 .map_err(|source| MtlsInterceptInstallError::PriorTeardown { source })?;
         }
-        let lifecycle = self.lifecycle.read();
-        if *lifecycle == WorkerLifecycle::Shutdown {
-            return Err(MtlsInterceptInstallError::OwnerShutdown);
+        {
+            let lifecycle = self.lifecycle.read();
+            if *lifecycle == WorkerLifecycle::Shutdown {
+                return Err(MtlsInterceptInstallError::OwnerShutdown);
+            }
+        }
+
+        if spec.network.is_some() {
+            return self.start_shared_allocation(spec).await;
         }
 
         // The agent's leg-F (outbound, workload-facing plaintext) listener
@@ -1771,7 +2476,102 @@ impl MtlsInterceptWorker {
             inbound_listener,
             leg_c_addr,
         );
-        drop(lifecycle);
+        Ok(())
+    }
+
+    #[allow(clippy::similar_names)]
+    #[allow(clippy::significant_drop_tightening)]
+    async fn start_shared_allocation(
+        self: &Arc<Self>,
+        spec: &AllocationSpec,
+    ) -> Result<(), MtlsInterceptInstallError> {
+        let (leg_f_addr, leg_c_addr) = {
+            let state = self.shared_owner.lock();
+            let Some(owner) = state.owner.as_ref() else {
+                return Err(MtlsInterceptInstallError::SharedOwner {
+                    source: match state.lifecycle {
+                        SharedOwnerLifecycle::ShuttingDown => MtlsSharedOwnerError::OwnerShutdown,
+                        _ => MtlsSharedOwnerError::NotStarted,
+                    },
+                });
+            };
+            (owner.leg_f_addr, owner.leg_c_addr)
+        };
+        let allowed_ports = spec.service_ports.iter().copied().collect::<BTreeSet<_>>();
+        let Some(network) = spec.network.as_ref() else {
+            return Err(MtlsInterceptInstallError::SharedOwner {
+                source: MtlsSharedOwnerError::NotStarted,
+            });
+        };
+        let mut pending = {
+            let lifecycle = self.lifecycle.write();
+            if *lifecycle == WorkerLifecycle::Shutdown {
+                return Err(MtlsInterceptInstallError::OwnerShutdown);
+            }
+            let pending = self.capabilities.begin_registration(
+                spec.alloc.clone(),
+                network.address,
+                spec.identity.clone(),
+                allowed_ports,
+            )?;
+            self.pending_allocations.lock().insert(spec.alloc.clone());
+            pending
+        };
+        let effects = (|| {
+            let outbound = self
+                .intercept
+                .install_outbound(&network.tap, leg_f_addr.port())
+                .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?;
+            pending.retain_outbound(outbound);
+            for port in &spec.service_ports {
+                let inbound = self.intercept.install_inbound(
+                    SocketAddrV4::new(network.address, port.get()),
+                    leg_c_addr.port(),
+                )?;
+                pending.retain_inbound(inbound);
+            }
+            Ok::<(), MtlsInterceptInstallError>(())
+        })();
+        if let Err(source) = effects {
+            drop(pending);
+            self.pending_allocations.lock().remove(&spec.alloc);
+            return Err(source);
+        }
+        // Let a concurrent stop/shutdown owner transfer retirement before the
+        // Pending -> Active linearization.  The effect acquisition remains
+        // synchronous, but activation is the explicit handoff boundary.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        let activation = {
+            // `begin_stop_alloc` holds the read side while it transfers
+            // retirement ownership. Taking the write side here makes that
+            // transfer and Pending -> Active mutually exclusive even when the
+            // runtime schedules both callers on different worker threads.
+            let lifecycle = self.lifecycle.write();
+            if *lifecycle == WorkerLifecycle::Shutdown {
+                let _ = self.capabilities.begin_retire(&spec.alloc);
+            }
+            pending.activate()
+        };
+        self.pending_allocations.lock().remove(&spec.alloc);
+        if activation == ActivationDisposition::Retired {
+            return Err(MtlsInterceptInstallError::RegistrationRetired {
+                alloc_id: spec.alloc.clone(),
+            });
+        }
+        self.intercepts.lock().insert(
+            spec.alloc.clone(),
+            AllocIntercept {
+                capability_owned: true,
+                _outbound_tproxy_guard: None,
+                _inbound_tproxy_guards: Vec::new(),
+                leg_c_addr,
+                stop: Arc::new(AtomicBool::new(false)),
+                enforced: EnforcedSet::new(),
+                tasks: AllocationTaskOwner::new(),
+            },
+        );
         Ok(())
     }
 
@@ -1839,6 +2639,9 @@ impl MtlsInterceptWorker {
         let lifecycle = self.lifecycle.read();
         let intercept = self.intercepts.lock().remove(alloc_id);
         let Some(intercept) = intercept else {
+            if self.pending_allocations.lock().contains(alloc_id) {
+                return self.begin_pending_stop(alloc_id);
+            }
             let previous =
                 self.stopping.lock().get(alloc_id).and_then(|stops| stops.last()).cloned();
             let previous = previous?;
@@ -1861,10 +2664,12 @@ impl MtlsInterceptWorker {
         let stop = Arc::new(AllocStop::new());
         self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
         let enforcement = Arc::clone(&self.enforcement);
+        let capabilities = self.capabilities.clone();
         let alloc_id = alloc_id.clone();
         let stop_for_work = Arc::clone(&stop);
         stop.fence.start_with(move || async move {
             let AllocIntercept {
+                capability_owned,
                 _outbound_tproxy_guard: outbound_tproxy_guard,
                 _inbound_tproxy_guards: inbound_tproxy_guards,
                 leg_c_addr: _,
@@ -1878,10 +2683,67 @@ impl MtlsInterceptWorker {
             drop(outbound_tproxy_guard);
             drop(inbound_tproxy_guards);
             tasks.abort_and_join().await;
-
+            if capability_owned && let Some(retirement) = capabilities.begin_retire(&alloc_id) {
+                let mut drain = retirement.wait_for_claims().await;
+                let handles = drain.take_handles();
+                let mut failures = Vec::new();
+                for handle in handles {
+                    let id = handle.id().clone();
+                    if let Err(source) = enforcement.teardown(handle).await {
+                        failures.push(format!("{id}: {source}"));
+                    }
+                }
+                drop(drain.take_elements());
+                drain.complete();
+                *stop_for_work.result.lock() = Some(if failures.is_empty() {
+                    Ok(())
+                } else {
+                    Err(MtlsInterceptStopError { alloc_id, failures })
+                });
+                return;
+            }
             finish_handle_teardown(&stop_for_work, enforcement, alloc_id, enforced.drain()).await;
         });
         drop(lifecycle);
+        Some(stop)
+    }
+
+    /// Transfer retirement ownership for a shared registration that is still
+    /// acquiring its per-allocation effects.  The registry keeps the address
+    /// reservation and pending-owner bit until the installer either activates
+    /// or drops its `PendingCapability`; the stop owner therefore cannot return
+    /// before the exact partial-effect set has been drained.
+    #[allow(clippy::significant_drop_in_scrutinee)]
+    fn begin_pending_stop(self: &Arc<Self>, alloc_id: &AllocationId) -> Option<Arc<AllocStop>> {
+        if let Some(previous) =
+            self.stopping.lock().get(alloc_id).and_then(|stops| stops.last()).cloned()
+        {
+            return Some(previous);
+        }
+        let retirement = self.capabilities.begin_retire(alloc_id)?;
+        let stop = Arc::new(AllocStop::new());
+        self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
+        let enforcement = Arc::clone(&self.enforcement);
+        let alloc_id = alloc_id.clone();
+        let stop_for_work = Arc::clone(&stop);
+        stop.fence.start_with(move || async move {
+            let mut drain = retirement.wait_for_claims().await;
+            let handles = drain.take_handles();
+            let mut failures = Vec::new();
+            for handle in handles {
+                let id = handle.id().clone();
+                if let Err(source) = enforcement.teardown(handle).await {
+                    failures.push(format!("{id}: {source}"));
+                }
+            }
+            drop(drain.take_elements());
+            drain.complete();
+            *stop_for_work.result.lock() = Some(if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(MtlsInterceptStopError { alloc_id, failures })
+            });
+        });
         Some(stop)
     }
 
@@ -1937,14 +2799,28 @@ impl MtlsInterceptWorker {
         clippy::significant_drop_tightening,
         reason = "the lifecycle write guard intentionally spans both owner-map snapshots: it is the atomic install/stop registration fence"
     )]
+    #[allow(clippy::too_many_lines)]
     fn begin_shutdown_owner(self: &Arc<Self>) -> Arc<OwnerStop> {
         let attempt = Arc::clone(&self.shutdown);
         let owner = Arc::clone(self);
         let attempt_for_work = Arc::clone(&attempt);
+        // Seal admission synchronously, before the one-shot drain task is
+        // scheduled.  A Pending registration that reaches its activation
+        // fence in the same executor turn therefore observes owner shutdown
+        // and is retired rather than published.
+        {
+            let mut lifecycle = self.lifecycle.write();
+            *lifecycle = WorkerLifecycle::Shutdown;
+        }
         attempt.fence.start_with(move || async move {
-            let (active, in_progress) = {
+            let (active, pending, in_progress, shared) = {
                 let mut lifecycle = owner.lifecycle.write();
                 *lifecycle = WorkerLifecycle::Shutdown;
+                let shared = {
+                    let mut state = owner.shared_owner.lock();
+                    state.lifecycle = SharedOwnerLifecycle::ShuttingDown;
+                    state.owner.take()
+                };
                 let active = std::mem::take(&mut *owner.intercepts.lock());
                 let in_progress = owner
                     .stopping
@@ -1952,12 +2828,29 @@ impl MtlsInterceptWorker {
                     .values()
                     .filter_map(|stops| stops.last().cloned())
                     .collect::<Vec<_>>();
-                (active, in_progress)
+                let pending = owner.pending_allocations.lock().iter().cloned().collect::<Vec<_>>();
+                (active, pending, in_progress, shared)
             };
 
             let mut failures = Vec::new();
+            let pending_stops = pending
+                .iter()
+                .filter_map(|alloc_id| owner.begin_pending_stop(alloc_id))
+                .collect::<Vec<_>>();
+            if let Some(mut shared) = shared {
+                shared.stop.store(true, Ordering::SeqCst);
+                shared.tasks.shutdown().await;
+                drop(shared.leg_f_listener.take());
+                drop(shared.leg_c_listener.take());
+                if let Some(guard) = shared.guard.take() {
+                    // The sealed owner path intentionally retains the
+                    // constant empty program for next-boot revalidation.
+                    std::mem::forget(guard);
+                }
+            }
             for (alloc_id, intercept) in active {
                 let AllocIntercept {
+                    capability_owned,
                     _outbound_tproxy_guard: outbound_tproxy_guard,
                     _inbound_tproxy_guards: inbound_tproxy_guards,
                     leg_c_addr: _,
@@ -1979,6 +2872,26 @@ impl MtlsInterceptWorker {
                 }
 
                 tasks.abort_and_join().await;
+                if capability_owned
+                    && let Some(retirement) = owner.capabilities.begin_retire(&alloc_id)
+                {
+                    let mut drain = retirement.wait_for_claims().await;
+                    let handles = drain.take_handles();
+                    let mut teardown_failures = Vec::new();
+                    for handle in handles {
+                        let id = handle.id().clone();
+                        if let Err(source) = owner.enforcement.teardown(handle).await {
+                            teardown_failures.push(format!("{id}: {source}"));
+                        }
+                    }
+                    drop(drain.take_elements());
+                    drain.complete();
+                    if !teardown_failures.is_empty() {
+                        failures
+                            .push(MtlsInterceptStopError { alloc_id, failures: teardown_failures });
+                    }
+                    continue;
+                }
                 let stop = Arc::new(AllocStop::new());
                 start_handle_teardown(
                     &stop,
@@ -1991,6 +2904,11 @@ impl MtlsInterceptWorker {
                 }
             }
             for stop in in_progress {
+                if let Err(source) = stop.wait().await {
+                    failures.push(source);
+                }
+            }
+            for stop in pending_stops {
                 if let Err(source) = stop.wait().await {
                     failures.push(source);
                 }
@@ -2220,6 +3138,112 @@ impl MtlsInterceptWorker {
         }
     }
 
+    /// Dispatch one connection accepted by the node-shared leg-F listener.
+    /// The source address is claimed before the asynchronous resolve/enforce
+    /// work starts, so the immutable generation stays attached to the
+    /// connection even if the address is retired and reused meanwhile.
+    fn handle_shared_outbound(
+        self: &Arc<Self>,
+        source_addr: Ipv4Addr,
+        leg_f: std::os::fd::OwnedFd,
+        orig_dst: SocketAddrV4,
+    ) {
+        let Some(claim) = self.capabilities.claim_source(source_addr) else {
+            drop(leg_f);
+            return;
+        };
+        let runtime = tokio::runtime::Handle::current();
+        let resolution = match runtime.block_on(self.resolve.resolve(orig_dst)) {
+            Ok(resolution) => resolution,
+            Err(source) => {
+                tracing::warn!(
+                    name: "health.mtls.shared_resolve_failed",
+                    source_addr = %source_addr,
+                    orig_dst = %orig_dst,
+                    error = %source,
+                    "shared leg-F resolution failed; dropping the connection"
+                );
+                drop(claim);
+                drop(leg_f);
+                return;
+            }
+        };
+        match decide_outbound(&resolution) {
+            OutboundAction::Enforce { peer } => {
+                let alloc = claim.capability().key.alloc.clone();
+                self.spawn_shared_enforcement(
+                    claim,
+                    InterceptedConnection {
+                        leg: leg_f,
+                        routed: Routed::Outbound { peer },
+                        alloc,
+                        expected_peer: None,
+                    },
+                );
+            }
+            OutboundAction::PassThrough => {
+                let alloc = claim.capability().key.alloc.clone();
+                drop(claim);
+                drop(spawn_cleartext_passthrough(&runtime, alloc, leg_f, orig_dst));
+            }
+            OutboundAction::FailClosed => {
+                drop(claim);
+                drop(leg_f);
+            }
+        }
+    }
+
+    /// Dispatch one connection accepted by the node-shared leg-C listener.
+    /// The recovered destination address and port select the exact active
+    /// capability; an unknown address or disallowed port is closed without
+    /// entering enforcement.
+    fn handle_shared_inbound(self: &Arc<Self>, mut connection: InterceptedConnection) {
+        let Routed::Inbound { orig_dst } = connection.routed else {
+            drop(connection);
+            return;
+        };
+        let Some(port) = NonZeroU16::new(orig_dst.port()) else {
+            drop(connection);
+            return;
+        };
+        let Some(claim) = self.capabilities.claim_destination(*orig_dst.ip(), port) else {
+            drop(connection);
+            return;
+        };
+        connection.alloc = claim.capability().key.alloc.clone();
+        self.spawn_shared_enforcement(claim, connection);
+    }
+
+    /// Hold the exact capability claim across the awaited production
+    /// enforcement call. A late returned handle is torn down immediately when
+    /// retirement won the publication race; it is never inserted into a
+    /// successor generation's drain set.
+    fn spawn_shared_enforcement(
+        self: &Arc<Self>,
+        claim: CapabilityClaim,
+        connection: InterceptedConnection,
+    ) {
+        let enforcement = Arc::clone(&self.enforcement);
+        tokio::spawn(async move {
+            match enforcement.enforce(connection).await {
+                Ok(handle) => match claim.publish(handle) {
+                    PublishDisposition::Published => {}
+                    PublishDisposition::Retired(handle) => {
+                        let _ = enforcement.teardown(handle).await;
+                    }
+                },
+                Err(source) => {
+                    tracing::warn!(
+                        name: "health.mtls.shared_enforce_failed",
+                        error = %source,
+                        "shared mTLS enforcement refused the connection"
+                    );
+                    drop(claim);
+                }
+            }
+        });
+    }
+
     /// Hand an [`InterceptedConnection`] to `enforce` on the tokio runtime.
     /// `enforce` is the single fail-closed gate; on `Ok` its handle joins the
     /// alloc's teardown set, on `Err` the port has already closed the leg and no
@@ -2274,6 +3298,7 @@ impl MtlsInterceptWorker {
         self.intercepts.lock().insert(
             alloc,
             AllocIntercept {
+                capability_owned: false,
                 _outbound_tproxy_guard: outbound_tproxy_guard,
                 _inbound_tproxy_guards: inbound_tproxy_guards,
                 leg_c_addr,
@@ -3336,7 +4361,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step for GH #295 enforcement-held capability retirement"]
     async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
      {
         let enforcement = GatedEnforcement::new();
