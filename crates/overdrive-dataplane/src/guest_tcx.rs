@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsFd as _, AsRawFd as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -375,7 +377,7 @@ enum RawGuestTcxPinObservation {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, reason = "D14 private raw-result projection RED scaffold")]
+#[allow(dead_code, reason = "D14 private raw-result projection remains source-local")]
 struct RawGuestTcxTcpProbeResult {
     action: u32,
     mark: u32,
@@ -384,10 +386,258 @@ struct RawGuestTcxTcpProbeResult {
     counters_after: [u64; 8],
 }
 
-#[expect(clippy::panic, reason = "D14 RED scaffold; DELIVER projects private BPF test-run output")]
-#[allow(dead_code, reason = "D14 source-local table activates this projection")]
-fn project_tcp_probe_result(_raw: &RawGuestTcxTcpProbeResult) -> GuestTcxTcpProbeOutcome {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D14 TCP probe projection)")
+fn project_tcp_probe_result(raw: &RawGuestTcxTcpProbeResult) -> GuestTcxTcpProbeOutcome {
+    let verdict = match raw.action {
+        0 => GuestTcxProbeVerdict::Accept,
+        2 => GuestTcxProbeVerdict::Drop,
+        _ => GuestTcxProbeVerdict::Unexpected,
+    };
+    let mark = match raw.mark {
+        0 => GuestTcxProbeMark::None,
+        0x295a => GuestTcxProbeMark::Intercept,
+        0x295b => GuestTcxProbeMark::Accepted,
+        _ => GuestTcxProbeMark::Unexpected,
+    };
+    let source_mac = (raw.output.len() >= 12).then(|| {
+        let mut mac = [0_u8; 6];
+        mac.copy_from_slice(&raw.output[6..12]);
+        mac
+    });
+    let destination_mac = (raw.output.len() >= 6).then(|| {
+        let mut mac = [0_u8; 6];
+        mac.copy_from_slice(&raw.output[..6]);
+        mac
+    });
+    let original_destination = (raw.output.len() >= 34)
+        .then(|| {
+            let ether_type = u16::from_be_bytes([raw.output[12], raw.output[13]]);
+            let version_ihl = raw.output[14];
+            let header_len = usize::from(version_ihl & 0x0f) * 4;
+            if ether_type != 0x0800
+                || version_ihl >> 4 != 4
+                || header_len < 20
+                || raw.output.len() < 14 + header_len + 4
+                || raw.output[23] != 6
+            {
+                return None;
+            }
+            let destination =
+                Ipv4Addr::new(raw.output[30], raw.output[31], raw.output[32], raw.output[33]);
+            let port_offset = 14 + header_len + 2;
+            let port = u16::from_be_bytes([raw.output[port_offset], raw.output[port_offset + 1]]);
+            Some(SocketAddrV4::new(destination, port))
+        })
+        .flatten();
+    let counters = [
+        GuestTcxCounter::GatewayHostPass,
+        GuestTcxCounter::Intercept,
+        GuestTcxCounter::EndpointMapMiss,
+        GuestTcxCounter::SourceMacSpoof,
+        GuestTcxCounter::SourceIpArpSpoof,
+        GuestTcxCounter::DirectBypassDrop,
+        GuestTcxCounter::ArpPass,
+        GuestTcxCounter::MalformedDrop,
+    ];
+    let counters = std::array::from_fn(|index| GuestTcxProbeCounterObservation {
+        counter: counters[index],
+        before: raw.counters_before[index],
+        after: raw.counters_after[index],
+    });
+    GuestTcxTcpProbeOutcome {
+        verdict,
+        mark,
+        source_mac,
+        destination_mac,
+        original_destination,
+        counters,
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GuestTcxSkBuffContext {
+    len: u32,
+    pkt_type: u32,
+    mark: u32,
+    queue_mapping: u32,
+    protocol: u32,
+    vlan_present: u32,
+    vlan_tci: u32,
+    vlan_proto: u32,
+    priority: u32,
+    ingress_ifindex: u32,
+    ifindex: u32,
+    tc_index: u32,
+    cb: [u32; 5],
+    hash: u32,
+    tc_classid: u32,
+    data: u32,
+    data_end: u32,
+    napi_id: u32,
+    family: u32,
+    remote_ip4: u32,
+    local_ip4: u32,
+    remote_ip6: [u32; 4],
+    local_ip6: [u32; 4],
+    remote_port: u32,
+    local_port: u32,
+    data_meta: u32,
+    flow_keys: u64,
+    tstamp: u64,
+    wire_len: u32,
+    gso_segs: u32,
+    sk: u64,
+    gso_size: u32,
+    tstamp_type_and_padding: [u8; 4],
+    hwtstamp: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GuestTcxBpfTestAttr {
+    prog_fd: u32,
+    retval: u32,
+    data_size_in: u32,
+    data_size_out: u32,
+    data_in: u64,
+    data_out: u64,
+    repeat: u32,
+    duration: u32,
+    ctx_size_in: u32,
+    ctx_size_out: u32,
+    ctx_in: u64,
+    ctx_out: u64,
+    flags: u32,
+    cpu: u32,
+    batch_size: u32,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+union GuestTcxBpfAttr {
+    test: GuestTcxBpfTestAttr,
+    padding: [u8; 144],
+}
+
+#[cfg(target_os = "linux")]
+fn read_probe_counters(map: &Array<MapData, u64>) -> Result<[u64; 8], GuestTcxError> {
+    let mut counters = [0_u64; 8];
+    for (index, counter) in [
+        GuestTcxCounter::GatewayHostPass,
+        GuestTcxCounter::Intercept,
+        GuestTcxCounter::EndpointMapMiss,
+        GuestTcxCounter::SourceMacSpoof,
+        GuestTcxCounter::SourceIpArpSpoof,
+        GuestTcxCounter::DirectBypassDrop,
+        GuestTcxCounter::ArpPass,
+        GuestTcxCounter::MalformedDrop,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        counters[index] =
+            map.get(&counter_index(counter), 0).map_err(|source| GuestTcxError::Map { source })?;
+    }
+    Ok(counters)
+}
+
+#[cfg(target_os = "linux")]
+fn run_tcp_probe(
+    program_fd: &aya::programs::ProgramFd,
+    input: GuestTcxTcpProbeInput,
+    counters: &Array<MapData, u64>,
+) -> Result<RawGuestTcxTcpProbeResult, GuestTcxError> {
+    let mut frame = [0_u8; 54];
+    frame[..6].copy_from_slice(&input.destination_mac);
+    frame[6..12].copy_from_slice(&input.source_mac);
+    frame[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+    frame[14] = 0x45;
+    frame[15] = 0;
+    frame[16..18].copy_from_slice(&40_u16.to_be_bytes());
+    frame[22] = 64;
+    frame[23] = 6;
+    frame[26..30].copy_from_slice(&input.source_ipv4.octets());
+    frame[30..34].copy_from_slice(&input.original_destination.ip().octets());
+    frame[34..36].copy_from_slice(&49_295_u16.to_be_bytes());
+    frame[36..38].copy_from_slice(&input.original_destination.port().to_be_bytes());
+    let counters_before = read_probe_counters(counters)?;
+    let mut output = vec![0_u8; frame.len().max(64)];
+    let mut input_context: GuestTcxSkBuffContext = unsafe { std::mem::zeroed() };
+    let mut output_context: GuestTcxSkBuffContext = unsafe { std::mem::zeroed() };
+    input_context.ingress_ifindex = input.ingress_ifindex;
+    let mut attr = GuestTcxBpfAttr { padding: [0_u8; 144] };
+    let mut test = GuestTcxBpfTestAttr {
+        prog_fd: u32::try_from(program_fd.as_fd().as_raw_fd()).map_err(|_| GuestTcxError::Io {
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "program fd is negative"),
+        })?,
+        retval: 0,
+        data_size_in: u32::try_from(frame.len()).map_err(|_| GuestTcxError::Io {
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "probe frame is too large",
+            ),
+        })?,
+        data_size_out: 0,
+        data_in: frame.as_ptr() as u64,
+        data_out: output.as_mut_ptr() as u64,
+        repeat: 1,
+        duration: 0,
+        ctx_size_in: u32::try_from(std::mem::size_of::<GuestTcxSkBuffContext>())
+            .unwrap_or(u32::MAX),
+        ctx_size_out: u32::try_from(std::mem::size_of::<GuestTcxSkBuffContext>())
+            .unwrap_or(u32::MAX),
+        ctx_in: std::ptr::from_ref(&input_context) as u64,
+        ctx_out: std::ptr::from_mut(&mut output_context) as u64,
+        flags: 0,
+        cpu: 0,
+        batch_size: 0,
+    };
+    // The union arm is the exact private BPF_PROG_TEST_RUN layout; all
+    // pointed-to storage remains live until the syscall returns.
+    attr.test = test;
+    // SAFETY: Linux bpf(2) receives a valid command, union, and size.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_bpf,
+            14_i32,
+            &raw mut attr,
+            libc::c_uint::try_from(std::mem::size_of::<GuestTcxBpfAttr>()).map_err(|_| {
+                GuestTcxError::Io {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "BPF test attribute is too large",
+                    ),
+                }
+            })?,
+        )
+    };
+    if result < 0 {
+        return Err(GuestTcxError::Io { source: std::io::Error::last_os_error() });
+    }
+    // SAFETY: the syscall initialized the test arm.
+    test = unsafe { attr.test };
+    let output_len = usize::try_from(test.data_size_out).map_err(|_| GuestTcxError::Io {
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid probe output length"),
+    })?;
+    if output_len > output.len() {
+        return Err(GuestTcxError::Io {
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "probe output exceeds buffer",
+            ),
+        });
+    }
+    output.truncate(output_len);
+    let counters_after = read_probe_counters(counters)?;
+    Ok(RawGuestTcxTcpProbeResult {
+        action: test.retval,
+        mark: output_context.mark,
+        output,
+        counters_before,
+        counters_after,
+    })
 }
 
 #[repr(C)]
@@ -925,16 +1175,34 @@ impl GuestTcxProgram {
         })
     }
 
-    #[expect(
-        clippy::panic,
-        clippy::unused_self,
-        reason = "D14 exact opaque-program RED scaffold precedes production implementation"
-    )]
     pub fn probe_tcp_intercept(
         &self,
-        _input: GuestTcxTcpProbeInput,
+        input: GuestTcxTcpProbeInput,
     ) -> Result<GuestTcxTcpProbeOutcome, GuestTcxError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 D14 semantic TCP probe)")
+        #[cfg(target_os = "linux")]
+        {
+            let program = self
+                .bpf
+                .program("gh295c_endpoint")
+                .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::Classifier })?;
+            let program_fd = program.fd().map_err(|source| GuestTcxError::Program { source })?;
+            let counters = self
+                .counter_map
+                .as_ref()
+                .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::CounterMap })?;
+            let raw = run_tcp_probe(program_fd, input, counters)?;
+            Ok(project_tcp_probe_result(&raw))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = input;
+            Err(GuestTcxError::Io {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "guest TCX packet probe requires Linux BPF_PROG_TEST_RUN",
+                ),
+            })
+        }
     }
 
     pub fn attach_first_ingress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
@@ -1572,7 +1840,6 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[allow(clippy::too_many_lines, reason = "one closed D14A projection table is audited intact")]
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A semantic TCP probe projection"]
     fn startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi() {
         const ACCEPT: u32 = 0;
         const DROP: u32 = 2;

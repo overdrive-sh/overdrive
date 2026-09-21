@@ -2184,6 +2184,10 @@ struct RawOtherChildInfo {
 /// Complete one family-specific multipart dump, preserving every data
 /// message and rejecting sequence, framing, family, and generation errors at
 /// this private boundary.
+#[allow(
+    clippy::too_many_lines,
+    reason = "strict private multipart decoder keeps all framing checks together"
+)]
 fn receive_nft_dump_family(
     family: NftFamily,
     operation: u16,
@@ -2340,20 +2344,20 @@ fn list_table_names_family(family: NftFamily) -> Result<Vec<String>, NetlinkErro
             for (kind, raw_kind, value) in exact_attrs(&body[4..])
                 .map_err(|source| NetlinkError::nft("list-tables", source))?
             {
-                if kind == NFTA_TABLE_NAME && raw_kind & NLA_F_NESTED == 0 {
-                    if name
+                if kind == NFTA_TABLE_NAME
+                    && raw_kind & NLA_F_NESTED == 0
+                    && name
                         .replace(
                             exact_cstr(value, "NFTA_TABLE_NAME")
                                 .map_err(|source| NetlinkError::nft("list-tables", source))?
                                 .to_owned(),
                         )
                         .is_some()
-                    {
-                        return Err(NetlinkError::nft(
-                            "list-tables",
-                            invalid_data("duplicate table name"),
-                        ));
-                    }
+                {
+                    return Err(NetlinkError::nft(
+                        "list-tables",
+                        invalid_data("duplicate table name"),
+                    ));
                 }
             }
             name.ok_or_else(|| {
@@ -2363,6 +2367,10 @@ fn list_table_names_family(family: NftFamily) -> Result<Vec<String>, NetlinkErro
         .collect()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "strict private chain decoder keeps all semantic fields together"
+)]
 fn list_chain_info_family(
     family: NftFamily,
     table: &str,
@@ -3240,7 +3248,7 @@ pub mod bridge {
         spec: &BridgeGuardSpec,
         table: &BridgeGuardTableFact,
         chain: &str,
-        rule: super::RuleInfo,
+        rule: &super::RuleInfo,
         expected_programs: &[Vec<u8>],
     ) -> BridgeGuardRuleOccurrence {
         let expected_rules = spec.expected_rule_facts();
@@ -3269,7 +3277,7 @@ pub mod bridge {
                     })
                 }
             })
-            .unwrap_or(BridgeGuardRuleFact {
+            .unwrap_or_else(|| BridgeGuardRuleFact {
                 identity: BridgeGuardRuleIdentity::Foreign,
                 program: BridgeGuardRuleProgram {
                     expressions: expression_names
@@ -3551,7 +3559,7 @@ pub mod bridge {
         let mut rules = Vec::new();
         for chain in &chains {
             for rule in super::list_rules_family(NftFamily::Bridge, &spec.table, &chain.name)? {
-                rules.push(project_rule(spec, &table, &chain.name, rule, &expected_programs));
+                rules.push(project_rule(spec, &table, &chain.name, &rule, &expected_programs));
             }
         }
         let mut members = Vec::new();

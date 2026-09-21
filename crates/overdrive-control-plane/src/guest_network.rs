@@ -9,15 +9,25 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{Ipv4Addr, SocketAddrV4};
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
+#[cfg(target_os = "linux")]
+use std::io::Write;
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd as _;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use ipnet::Ipv4Net;
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::GuestNetworkAssignment;
 use overdrive_netlink::NetlinkError;
+
+#[cfg(target_os = "linux")]
+nix::ioctl_write_ptr_bad!(d14_tun_set_iff, libc::TUNSETIFF, libc::ifreq);
 
 use overdrive_dataplane::guest_tcx::{
     GuestTcxAttachment, GuestTcxCounter, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxLink,
@@ -529,14 +539,20 @@ struct GuestNetworkScratchPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "D14A private production validator RED scaffold")]
+#[allow(
+    dead_code,
+    reason = "D14A private production validator is exercised by source-local tables"
+)]
 enum GuestNetworkTcpProbeRequirement {
     Classifier,
     OriginalDestination,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code, reason = "D14A private production observation RED scaffold")]
+#[allow(
+    dead_code,
+    reason = "D14A private production observation is exercised by source-local tables"
+)]
 struct GuestNetworkTcpProbeObservation {
     verdict: GuestTcxProbeVerdict,
     mark: GuestTcxProbeMark,
@@ -580,14 +596,95 @@ enum GuestNetworkTcpProbeValidation {
     Mismatch(GuestNetworkTcpProbeMismatch),
 }
 
-#[expect(clippy::panic, reason = "D14A RED scaffold; DELIVER implements the production decision")]
-#[allow(dead_code, reason = "D14A source-local table activates the production validator")]
 fn validate_guest_tcx_tcp_probe(
-    _requirement: GuestNetworkTcpProbeRequirement,
-    _expected: &GuestTcxTcpProbeInput,
-    _observed: std::result::Result<GuestNetworkTcpProbeObservation, GuestTcxError>,
+    requirement: GuestNetworkTcpProbeRequirement,
+    expected: &GuestTcxTcpProbeInput,
+    observed: std::result::Result<GuestNetworkTcpProbeObservation, GuestTcxError>,
 ) -> std::io::Result<GuestNetworkTcpProbeValidation> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 D14A semantic TCP validator)")
+    let observed = observed.map_err(std::io::Error::other)?;
+    if observed.verdict != GuestTcxProbeVerdict::Accept {
+        return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+            GuestNetworkTcpProbeMismatch::Verdict { observed: observed.verdict },
+        ));
+    }
+    if observed.mark != GuestTcxProbeMark::Intercept {
+        return Ok(GuestNetworkTcpProbeValidation::Mismatch(GuestNetworkTcpProbeMismatch::Mark {
+            observed: observed.mark,
+        }));
+    }
+    if observed.source_mac != Some(expected.source_mac) {
+        return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+            GuestNetworkTcpProbeMismatch::SourceMac {
+                expected: expected.source_mac,
+                observed: observed.source_mac,
+            },
+        ));
+    }
+    if observed.destination_mac != Some(expected.bridge_mac) {
+        return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+            GuestNetworkTcpProbeMismatch::DestinationMac {
+                expected: expected.bridge_mac,
+                observed: observed.destination_mac,
+            },
+        ));
+    }
+    if matches!(requirement, GuestNetworkTcpProbeRequirement::OriginalDestination)
+        && observed.original_destination != Some(expected.original_destination)
+    {
+        return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+            GuestNetworkTcpProbeMismatch::OriginalDestination {
+                expected: expected.original_destination,
+                observed: observed.original_destination,
+            },
+        ));
+    }
+    let expected_counters = [
+        GuestTcxCounter::GatewayHostPass,
+        GuestTcxCounter::Intercept,
+        GuestTcxCounter::EndpointMapMiss,
+        GuestTcxCounter::SourceMacSpoof,
+        GuestTcxCounter::SourceIpArpSpoof,
+        GuestTcxCounter::DirectBypassDrop,
+        GuestTcxCounter::ArpPass,
+        GuestTcxCounter::MalformedDrop,
+    ];
+    for (index, (expected_counter, actual)) in
+        expected_counters.into_iter().zip(observed.counters).enumerate()
+    {
+        let index = u8::try_from(index).unwrap_or_default();
+        if actual.counter != expected_counter {
+            return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+                GuestNetworkTcpProbeMismatch::CounterIdentity {
+                    index,
+                    expected: expected_counter,
+                    observed: actual.counter,
+                },
+            ));
+        }
+        let Some(delta) = actual.after.checked_sub(actual.before) else {
+            return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+                GuestNetworkTcpProbeMismatch::CounterDecrease {
+                    counter: actual.counter,
+                    before: actual.before,
+                    after: actual.after,
+                },
+            ));
+        };
+        let expected_delta = u64::from(actual.counter == GuestTcxCounter::Intercept);
+        if delta != expected_delta {
+            return Ok(GuestNetworkTcpProbeValidation::Mismatch(
+                GuestNetworkTcpProbeMismatch::CounterDelta {
+                    counter: actual.counter,
+                    expected: expected_delta,
+                    observed: delta,
+                },
+            ));
+        }
+    }
+    Ok(GuestNetworkTcpProbeValidation::Passed {
+        intercept_before: observed.counters[1].before,
+        intercept_after: observed.counters[1].after,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -674,6 +771,11 @@ trait SharedGuestNetworkScratchIo: Send + Sync {
 
     fn close_loader_handles(&self, plan: &GuestNetworkScratchPlan);
     fn release_adopted_handles(&self, plan: &GuestNetworkScratchPlan);
+    fn probe_program_id(&self) -> Option<u32>;
+    fn probe_attachment(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+    ) -> std::result::Result<GuestTcxAttachment, GuestTcxError>;
 
     async fn exercise(
         &self,
@@ -696,6 +798,7 @@ trait SharedGuestNetworkScratchIo: Send + Sync {
 
 struct RealSharedGuestNetworkScratchIo {
     program: parking_lot::Mutex<Option<GuestTcxProgram>>,
+    probe_program_id: parking_lot::Mutex<Option<u32>>,
     inventory: parking_lot::Mutex<Option<GuestTcxInventoryIdentity>>,
     adopted: parking_lot::Mutex<Option<overdrive_dataplane::guest_tcx::GuestTcxAdoptedState>>,
     pending_link: parking_lot::Mutex<Option<overdrive_dataplane::guest_tcx::GuestTcxLink>>,
@@ -705,6 +808,7 @@ impl RealSharedGuestNetworkScratchIo {
     fn new() -> Self {
         Self {
             program: parking_lot::Mutex::new(None),
+            probe_program_id: parking_lot::Mutex::new(None),
             inventory: parking_lot::Mutex::new(None),
             adopted: parking_lot::Mutex::new(None),
             pending_link: parking_lot::Mutex::new(None),
@@ -726,6 +830,188 @@ impl RealSharedGuestNetworkScratchIo {
     fn ifindex(plan: &GuestNetworkScratchPlan) -> std::io::Result<u32> {
         let value = std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", plan.tap))?;
         value.trim().parse().map_err(std::io::Error::other)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[allow(
+        unsafe_code,
+        clippy::items_after_statements,
+        clippy::redundant_closure,
+        clippy::too_many_lines,
+        clippy::unused_self,
+        reason = "D14 private TAP ioctl/socket host-adapter boundary"
+    )]
+    fn detached_guard_packet(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+    ) -> std::io::Result<(u64, u64, u64, u64, u64, u64)> {
+        let guard =
+            Self::guard_spec(plan).map_err(|error| std::io::Error::other(error.to_string()))?;
+        let expected_members = BTreeSet::from([plan.tap.clone()]);
+        let counter = |observation: BridgeGuardObservation| {
+            let BridgeGuardObservation::Exact { inventory } = observation else {
+                return Err(std::io::Error::other("detached guard inventory is not exact"));
+            };
+            inventory
+                .rules
+                .into_iter()
+                .find_map(|rule| {
+                    (matches!(
+                        rule.fact.identity,
+                        overdrive_netlink::nft::bridge::BridgeGuardRuleIdentity::Owned(
+                            overdrive_netlink::nft::bridge::BridgeGuardRuleKind::DefaultDrop
+                        )
+                    ))
+                    .then(|| rule.counter)
+                })
+                .flatten()
+                .map(|counter| (counter.packets, counter.bytes))
+                .ok_or_else(|| std::io::Error::other("detached guard counter is unavailable"))
+        };
+        let udp = UdpSocket::bind(SocketAddrV4::new(plan.assignment.gateway, 0))?;
+        udp.set_nonblocking(true)?;
+        let interface = std::ffi::CString::new(plan.bridge.clone()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "bridge contains NUL")
+        })?;
+        // SAFETY: the socket is owned by this function and the interface bytes
+        // remain live for the complete setsockopt call.
+        let bind_result = unsafe {
+            libc::setsockopt(
+                udp.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_BINDTODEVICE,
+                interface.as_ptr().cast(),
+                libc::socklen_t::try_from(interface.as_bytes_with_nul().len()).map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "interface name too long")
+                })?,
+            )
+        };
+        if bind_result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let local_port = match udp.local_addr()? {
+            std::net::SocketAddr::V4(address) if address.port() != 0 => address.port(),
+            _ => return Err(std::io::Error::other("kernel did not allocate a UDP probe port")),
+        };
+        let before_guard = counter(
+            overdrive_netlink::nft::bridge::observe(&guard, &expected_members)
+                .map_err(|error| std::io::Error::other(error.to_string()))?,
+        )?;
+        let before_classifier = overdrive_dataplane::guest_tcx::read_counter(
+            &plan.counter_map_pin,
+            GuestTcxCounter::Intercept,
+        )
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let mut file = OpenOptions::new().read(true).write(true).open("/dev/net/tun")?;
+        let mut request: libc::ifreq = unsafe { std::mem::zeroed() };
+        let name = plan.tap.as_bytes();
+        if name.is_empty() || name.len() >= libc::IFNAMSIZ {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid TAP name"));
+        }
+        // SAFETY: request is initialized storage and the validated name fits
+        // the kernel ifreq name field.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                name.as_ptr(),
+                request.ifr_name.as_mut_ptr().cast::<u8>(),
+                name.len(),
+            );
+            request.ifr_ifru.ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI)
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid TAP flags")
+                })?;
+            d14_tun_set_iff(file.as_raw_fd(), &raw const request)
+                .map_err(|errno| std::io::Error::from(errno))?;
+        }
+        const MARKER: &[u8] = b"nd295-d14-detached";
+        let mut frame = vec![0_u8; 14 + 20 + 8 + MARKER.len()];
+        frame[..6].copy_from_slice(&overdrive_core::dataplane::GUEST_BRIDGE_MAC);
+        frame[6..12].copy_from_slice(&plan.assignment.mac);
+        frame[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+        frame[14] = 0x45;
+        frame[16..18].copy_from_slice(
+            &u16::try_from(20 + 8 + MARKER.len()).unwrap_or(u16::MAX).to_be_bytes(),
+        );
+        frame[22] = 64;
+        frame[23] = 17;
+        frame[26..30].copy_from_slice(&plan.assignment.address.octets());
+        frame[30..34].copy_from_slice(&plan.assignment.gateway.octets());
+        frame[34..36].copy_from_slice(&49_295_u16.to_be_bytes());
+        frame[36..38].copy_from_slice(&local_port.to_be_bytes());
+        frame[38..].copy_from_slice(MARKER);
+        file.write_all(&frame)?;
+        let deadline = Instant::now() + Duration::from_millis(250);
+        loop {
+            let after_guard = counter(
+                overdrive_netlink::nft::bridge::observe(&guard, &expected_members)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?,
+            )?;
+            let after_classifier = overdrive_dataplane::guest_tcx::read_counter(
+                &plan.counter_map_pin,
+                GuestTcxCounter::Intercept,
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let mut datagram = [0_u8; 2048];
+            match udp.recv(&mut datagram) {
+                Ok(length) => {
+                    if datagram[..length].windows(MARKER.len()).any(|window| window == MARKER) {
+                        return Err(std::io::Error::other("detached marker reached host UDP"));
+                    }
+                    return Err(std::io::Error::other("unexpected host UDP datagram"));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => return Err(error),
+            }
+            if after_classifier == before_classifier
+                && after_guard.0 == before_guard.0 + 1
+                && after_guard.1 > before_guard.1
+            {
+                return Ok((
+                    before_classifier,
+                    after_classifier,
+                    before_guard.0,
+                    after_guard.0,
+                    before_guard.1,
+                    after_guard.1,
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "detached guard packet did not reach the exact drop transition",
+                ));
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn detached_guard_packet(
+        &self,
+        _plan: &GuestNetworkScratchPlan,
+    ) -> std::io::Result<(u64, u64, u64, u64, u64, u64)> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "detached TAP packet probe requires Linux",
+        ))
+    }
+
+    fn ensure_adopted_for_cleanup(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+    ) -> Result<(), GuestTcxError> {
+        if self.adopted.lock().is_some() {
+            return Ok(());
+        }
+        let identity = self.inventory.lock().clone().ok_or(GuestTcxError::CaptureUnavailable {
+            family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+        })?;
+        *self.adopted.lock() =
+            Some(overdrive_dataplane::guest_tcx::GuestTcxAdoptedState::for_inventory(
+                &identity,
+                plan.tcx_link_pin.clone(),
+            ));
+        Ok(())
     }
 }
 
@@ -977,6 +1263,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                         object: overdrive_dataplane::guest_tcx::GuestTcxObject::Classifier,
                     })?
                     .attach_first_ingress(&plan.tap)?;
+                *self.probe_program_id.lock() = Some(link.program_id());
                 *self.pending_link.lock() = Some(link);
                 Ok(())
             }
@@ -1039,42 +1326,60 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                     Self::ifindex(plan).map_err(|source| GuestTcxError::Io { source })?,
                 )
             }
-            GuestNetworkScratchTcxAction::UnpinLink => self
-                .adopted
-                .lock()
-                .as_mut()
-                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
-                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
-                })?
-                .unpin_link()
-                .map(|link| {
-                    *self.pending_link.lock() = link;
-                }),
+            GuestNetworkScratchTcxAction::UnpinLink => {
+                self.ensure_adopted_for_cleanup(plan)?;
+                self.adopted
+                    .lock()
+                    .as_mut()
+                    .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
+                    })?
+                    .unpin_link()
+                    .map(|link| {
+                        *self.pending_link.lock() = link;
+                    })
+            }
             GuestNetworkScratchTcxAction::DetachLink => {
                 let pending = self.pending_link.lock().take();
                 if let Some(link) = pending { link.detach() } else { Ok(()) }
             }
-            GuestNetworkScratchTcxAction::UnpinCounterMap => self
-                .adopted
-                .lock()
-                .as_mut()
-                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
-                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::CounterMap,
-                })?
-                .unpin_counter_map(),
-            GuestNetworkScratchTcxAction::UnpinEndpointMap => self
-                .adopted
-                .lock()
-                .as_mut()
-                .ok_or_else(|| GuestTcxError::CaptureUnavailable {
-                    family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointMap,
-                })?
-                .unpin_endpoint_map(),
+            GuestNetworkScratchTcxAction::UnpinCounterMap => {
+                self.ensure_adopted_for_cleanup(plan)?;
+                self.adopted
+                    .lock()
+                    .as_mut()
+                    .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::CounterMap,
+                    })?
+                    .unpin_counter_map()
+            }
+            GuestNetworkScratchTcxAction::UnpinEndpointMap => {
+                self.ensure_adopted_for_cleanup(plan)?;
+                self.adopted
+                    .lock()
+                    .as_mut()
+                    .ok_or_else(|| GuestTcxError::CaptureUnavailable {
+                        family:
+                            overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::EndpointMap,
+                    })?
+                    .unpin_endpoint_map()
+            }
         }
     }
 
     fn close_loader_handles(&self, _plan: &GuestNetworkScratchPlan) {
         self.program.lock().take();
+    }
+
+    fn probe_program_id(&self) -> Option<u32> {
+        (*self.probe_program_id.lock()).as_ref().copied()
+    }
+
+    fn probe_attachment(
+        &self,
+        plan: &GuestNetworkScratchPlan,
+    ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+        overdrive_dataplane::guest_tcx::query_attachment(&plan.tap, TcxAttachPoint::Ingress)
     }
 
     fn release_adopted_handles(&self, _plan: &GuestNetworkScratchPlan) {
@@ -1087,37 +1392,73 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         stage: GuestNetworkProbeStage,
     ) -> std::io::Result<bool> {
         let ifindex = Self::ifindex(plan)?;
-        let program_loaded = self.program.lock().is_some();
         match stage {
             GuestNetworkProbeStage::Classifier | GuestNetworkProbeStage::OriginalDestination => {
-                if !program_loaded {
-                    return Ok(false);
-                }
-                let attachment = overdrive_dataplane::guest_tcx::query_attachment(
-                    &plan.tap,
-                    TcxAttachPoint::Ingress,
-                )
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
-                if attachment.program_ids.is_empty() {
-                    return Ok(false);
-                }
-                let endpoint = self
-                    .program
-                    .lock()
+                let requirement = match stage {
+                    GuestNetworkProbeStage::Classifier => {
+                        GuestNetworkTcpProbeRequirement::Classifier
+                    }
+                    GuestNetworkProbeStage::OriginalDestination => {
+                        GuestNetworkTcpProbeRequirement::OriginalDestination
+                    }
+                    GuestNetworkProbeStage::DetachedLinkGuard => unreachable!(),
+                };
+                let program_id = (*self.probe_program_id.lock())
+                    .ok_or_else(|| std::io::Error::other("classifier identity is unavailable"))?;
+                let source_mac = plan.assignment.mac;
+                let peer_input = GuestTcxTcpProbeInput {
+                    ingress_ifindex: ifindex,
+                    source_ipv4: plan.assignment.address,
+                    source_mac,
+                    bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                    destination_mac: [0x02, 0x00, 100, 95, 255, 253],
+                    original_destination: plan.original_destination,
+                };
+                let gateway_input = GuestTcxTcpProbeInput {
+                    destination_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                    original_destination: SocketAddrV4::new(plan.assignment.gateway, 8443),
+                    ..peer_input
+                };
+                let program = self.program.lock();
+                let program = program
                     .as_ref()
-                    .and_then(|program| program.read_endpoint(ifindex).ok())
-                    .flatten();
-                if endpoint.is_none() {
+                    .ok_or_else(|| std::io::Error::other("classifier loader handle is closed"))?;
+                let peer = GuestNetworkTcpProbeObservation::from_outcome(
+                    &program.probe_tcp_intercept(peer_input).map_err(std::io::Error::other)?,
+                );
+                let gateway = GuestNetworkTcpProbeObservation::from_outcome(
+                    &program.probe_tcp_intercept(gateway_input).map_err(std::io::Error::other)?,
+                );
+                let peer_validation =
+                    validate_guest_tcx_tcp_probe(requirement, &peer_input, Ok(peer))?;
+                let gateway_validation =
+                    validate_guest_tcx_tcp_probe(requirement, &gateway_input, Ok(gateway))?;
+                let (
+                    GuestNetworkTcpProbeValidation::Passed {
+                        intercept_before: peer_before,
+                        intercept_after: peer_after,
+                    },
+                    GuestNetworkTcpProbeValidation::Passed {
+                        intercept_before: gateway_before,
+                        intercept_after: gateway_after,
+                    },
+                ) = (peer_validation, gateway_validation)
+                else {
                     return Ok(false);
-                }
-                if matches!(stage, GuestNetworkProbeStage::OriginalDestination) {
-                    let _counter = overdrive_dataplane::guest_tcx::read_counter(
-                        &plan.counter_map_pin,
-                        overdrive_dataplane::guest_tcx::GuestTcxCounter::Intercept,
-                    )
-                    .map_err(|error| std::io::Error::other(error.to_string()))?;
-                    return Ok(true);
-                }
+                };
+                tracing::info!(
+                    event = "guest_network.shared_owner_startup_probe_tcp_stage_completed",
+                    stage = match stage {
+                        GuestNetworkProbeStage::Classifier => "classifier",
+                        GuestNetworkProbeStage::OriginalDestination => "original_destination",
+                        GuestNetworkProbeStage::DetachedLinkGuard => unreachable!(),
+                    },
+                    program_id,
+                    peer_intercept_before = peer_before,
+                    peer_intercept_after = peer_after,
+                    gateway_intercept_before = gateway_before,
+                    gateway_intercept_after = gateway_after,
+                );
                 Ok(true)
             }
             GuestNetworkProbeStage::DetachedLinkGuard => {
@@ -1126,7 +1467,35 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                     TcxAttachPoint::Ingress,
                 )
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-                Ok(attachment.program_ids.is_empty())
+                if !attachment.program_ids.is_empty() {
+                    return Ok(false);
+                }
+                let (
+                    classifier_before,
+                    classifier_after,
+                    guard_packets_before,
+                    guard_packets_after,
+                    guard_bytes_before,
+                    guard_bytes_after,
+                ) = self.detached_guard_packet(plan)?;
+                let passed = classifier_before == classifier_after
+                    && guard_packets_after == guard_packets_before + 1
+                    && guard_bytes_after > guard_bytes_before;
+                if passed {
+                    let program_id = (*self.probe_program_id.lock()).unwrap_or_default();
+                    tracing::info!(
+                        event = "guest_network.shared_owner_startup_probe_detached_guard_completed",
+                        program_id,
+                        classifier_intercept_before = classifier_before,
+                        classifier_intercept_after = classifier_after,
+                        guard_packets_before,
+                        guard_packets_after,
+                        guard_bytes_before,
+                        guard_bytes_after,
+                        host_datagrams = 0_u64,
+                    );
+                }
+                Ok(passed)
             }
         }
     }
@@ -1885,7 +2254,7 @@ impl HostSharedGuestNetworkOwner {
             guard_table: "overdrive-probe".to_owned(),
             guard_chain: "ingress".to_owned(),
             guard_set: "members".to_owned(),
-            original_destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 254), 8443),
+            original_destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 255, 253), 8443),
         }
     }
 
@@ -1978,6 +2347,8 @@ impl HostSharedGuestNetworkOwner {
         for (action, operation) in tcx_actions {
             self.tcx(plan, action, operation).await?;
         }
+        self.exercise(plan, GuestNetworkProbeStage::Classifier).await?;
+        self.exercise(plan, GuestNetworkProbeStage::OriginalDestination).await?;
         self.scratch_io.close_loader_handles(plan);
         for (action, operation) in [
             (
@@ -1990,8 +2361,49 @@ impl HostSharedGuestNetworkOwner {
         ] {
             self.tcx(plan, action, operation).await?;
         }
-        self.exercise(plan, GuestNetworkProbeStage::Classifier).await?;
-        self.exercise(plan, GuestNetworkProbeStage::OriginalDestination).await?;
+        if let Some(program_id) = self.scratch_io.probe_program_id() {
+            let attachment = self
+                .scratch_io
+                .probe_attachment(plan)
+                .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxQuery, source))?;
+            if attachment.program_ids != vec![program_id] {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TcxQuery,
+                    expected: GuestNetworkFact::TcxAttachment {
+                        ifindex: std::fs::read_to_string(format!(
+                            "/sys/class/net/{}/ifindex",
+                            plan.tap
+                        ))
+                        .ok()
+                        .and_then(|value| value.trim().parse::<u32>().ok())
+                        .unwrap_or_default(),
+                        program_id: Some(program_id),
+                        attach_point: Some(TcxAttachPoint::Ingress),
+                    },
+                    observed: Some(GuestNetworkFact::TcxAttachment {
+                        ifindex: std::fs::read_to_string(format!(
+                            "/sys/class/net/{}/ifindex",
+                            plan.tap
+                        ))
+                        .ok()
+                        .and_then(|value| value.trim().parse::<u32>().ok())
+                        .unwrap_or_default(),
+                        program_id: attachment.program_ids.first().copied(),
+                        attach_point: Some(TcxAttachPoint::Ingress),
+                    }),
+                });
+            }
+            tracing::info!(
+                event = "guest_network.shared_owner_startup_probe_attachment_reopened",
+                program_id,
+                revision = attachment.revision,
+                program_count = attachment.program_ids.len(),
+                ifindex = std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", plan.tap))
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u32>().ok())
+                    .unwrap_or_default(),
+            );
+        }
         self.tcx(
             plan,
             GuestNetworkScratchTcxAction::UnpinLink,
@@ -2298,9 +2710,14 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     master_ifindex
                 }
                 GuestNetworkAllocationTapObservation::Incompatible { .. }
-                | GuestNetworkAllocationTapObservation::Absent { .. } => unreachable!(
-                    "tap_fact accepted only persistent TAP state at the down-TAP checkpoint"
-                ),
+                | GuestNetworkAllocationTapObservation::Absent { .. } => {
+                    let (expected, observed) = Self::tap_fact(plan, &second_tap, false);
+                    return Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapObserve,
+                        expected,
+                        observed,
+                    });
+                }
             };
             Self::ensure_master(tap_ifindex, bridge_ifindex, second_master.or(tap_master))?;
 
@@ -2653,6 +3070,28 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         let plan = Self::scratch_plan();
         let primary = self.run_probe(&plan).await.err();
         let (cleanup, observed) = self.cleanup(&plan).await;
+        tracing::info!(
+            event = "guest_network.shared_owner_startup_probe_cleanup_observed",
+            primary_failed = primary.is_some(),
+            cleanup_failed = cleanup.is_some(),
+            fully_observed = observed.is_fully_observed(),
+            empty = observed.is_empty(),
+            bridges = ?observed.bridges,
+            taps = ?observed.taps,
+            endpoint_maps = ?observed.endpoint_maps,
+            counter_maps = ?observed.counter_maps,
+            endpoint_entries = ?observed.endpoint_entries,
+            tcx_programs = ?observed.tcx_programs,
+            tcx_links = ?observed.tcx_links,
+            endpoint_map_pins = ?observed.endpoint_map_pins,
+            counter_map_pins = ?observed.counter_map_pins,
+            tcx_link_pins = ?observed.tcx_link_pins,
+            bridge_guard_tables = ?observed.bridge_guard_tables,
+            bridge_guard_chains = ?observed.bridge_guard_chains,
+            bridge_guard_sets = ?observed.bridge_guard_sets,
+            bridge_guard_rules = ?observed.bridge_guard_rules,
+            bridge_guard_members = ?observed.bridge_guard_members,
+        );
         if cleanup.is_none() && observed.is_empty() {
             return primary.map_or(Ok(()), Err);
         }
@@ -3180,6 +3619,17 @@ mod scratch_probe_acceptance {
             let _ = self.record(ScratchCall::ReleaseAdopted);
         }
 
+        fn probe_program_id(&self) -> Option<u32> {
+            Some(297)
+        }
+
+        fn probe_attachment(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+        ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+            Ok(GuestTcxAttachment { revision: 1, program_ids: vec![297] })
+        }
+
         async fn exercise(
             &self,
             _plan: &GuestNetworkScratchPlan,
@@ -3560,6 +4010,17 @@ mod scratch_probe_packet_acceptance {
             self.record(PacketProbeCall::ReleaseAdopted);
         }
 
+        fn probe_program_id(&self) -> Option<u32> {
+            Some(297)
+        }
+
+        fn probe_attachment(
+            &self,
+            _plan: &GuestNetworkScratchPlan,
+        ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+            Ok(GuestTcxAttachment { revision: 1, program_ids: vec![297] })
+        }
+
         async fn exercise(
             &self,
             _plan: &GuestNetworkScratchPlan,
@@ -3733,7 +4194,6 @@ mod scratch_probe_packet_acceptance {
     /// CONTRACT_SHAPE: pure-function.
     #[allow(clippy::too_many_lines, reason = "one finite D14A mismatch table is audited intact")]
     #[test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A production validator"]
     fn every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator() {
         let expected = d14_expected_input();
         let valid = d14_valid_observation();
@@ -4063,7 +4523,6 @@ mod scratch_probe_packet_acceptance {
     /// S-ND295-00 — D14A probes twice per stage before close and cleanup remains complete.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A probe order and lazy cleanup"]
     async fn classifier_runs_precede_close_and_each_stage_is_fresh() {
         let io = Arc::new(PacketProbeIo::default());
         HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
@@ -4233,6 +4692,13 @@ mod allocation_owner_acceptance {
             Arc::new(Self {
                 calls: parking_lot::Mutex::new(Vec::new()),
                 tap_observations: parking_lot::Mutex::new(VecDeque::from([
+                    GuestNetworkAllocationTapObservation::Persistent {
+                        name: "ovd-tp-0002".to_owned(),
+                        ifindex: 295,
+                        up: false,
+                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        master_ifindex: Some(29),
+                    },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
                         ifindex: 295,
@@ -4930,13 +5396,16 @@ mod allocation_owner_acceptance {
         }
 
         let first_master_io = ScriptedAllocationIo::with_observations(
-            [GuestNetworkAllocationTapObservation::Persistent {
-                name: "ovd-tp-0002".to_owned(),
-                ifindex: 295,
-                up: false,
-                owner_uid: Some(uid),
-                master_ifindex: Some(30),
-            }],
+            [
+                valid_down.clone(),
+                GuestNetworkAllocationTapObservation::Persistent {
+                    name: "ovd-tp-0002".to_owned(),
+                    ifindex: 295,
+                    up: false,
+                    owner_uid: Some(uid),
+                    master_ifindex: Some(30),
+                },
+            ],
             [bridge_29.clone()],
         );
         let first_master_owner = HostSharedGuestNetworkOwner::with_allocation_io(first_master_io);
@@ -4958,15 +5427,15 @@ mod allocation_owner_acceptance {
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, Some(uid)),
                 None,
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Absent { name: "ovd-gbr0".to_owned() },
                 valid_up.clone(),
-                GuestNetworkOperation::BridgeObserve,
-                bridge_fact("ovd-gbr0", None, GuestLinkKind::Bridge),
-                None,
+                GuestNetworkOperation::TapObserve,
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Present {
@@ -4975,9 +5444,9 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Other,
                 },
                 valid_up.clone(),
-                GuestNetworkOperation::BridgeObserve,
-                bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Bridge),
-                Some(bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Other)),
+                GuestNetworkOperation::TapObserve,
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Present {
@@ -4987,8 +5456,8 @@ mod allocation_owner_acceptance {
                 },
                 valid_up.clone(),
                 GuestNetworkOperation::TapObserve,
-                master_fact(295, Some(30)),
-                Some(master_fact(295, Some(29))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
                 bridge_29.clone(),
@@ -5000,8 +5469,8 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(30),
                 },
                 GuestNetworkOperation::TapObserve,
-                master_fact(295, Some(29)),
-                Some(master_fact(295, Some(30))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
                 bridge_29.clone(),
@@ -5015,7 +5484,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tun, true, true, Some(uid))),
             ),
             (
@@ -5030,7 +5499,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, true, None)),
             ),
             (
@@ -5043,7 +5512,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
@@ -5056,7 +5525,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
@@ -5078,7 +5547,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
