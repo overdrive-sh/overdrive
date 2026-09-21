@@ -207,6 +207,7 @@ const NFT_REG_VERDICT: u32 = 0;
 const NFT_REG_1: u32 = 1;
 const NFT_REG_2: u32 = 2;
 const NFT_REG_3: u32 = 3;
+const NFT_REG_9: u32 = 9;
 // verdict.
 const NF_ACCEPT: u32 = 1;
 // `IFNAMSIZ` — the kernel `meta iifname` load copies a NUL-padded 16-byte name.
@@ -320,30 +321,6 @@ pub enum AtomicRuleMutation<'a> {
         table: &'a str,
         /// Chain receiving the rule.
         chain: &'a str,
-        /// Complete encoded `NFTA_RULE_EXPRESSIONS` list.
-        exprs: &'a [u8],
-        /// Exact `NFTA_RULE_USERDATA` ownership tag.
-        userdata: &'a [u8],
-    },
-    /// Append one rule at the end of a chain in the same atomic batch.
-    Append {
-        /// IPv4 nft table name.
-        table: &'a str,
-        /// Chain receiving the rule.
-        chain: &'a str,
-        /// Complete encoded `NFTA_RULE_EXPRESSIONS` list.
-        exprs: &'a [u8],
-        /// Exact `NFTA_RULE_USERDATA` ownership tag.
-        userdata: &'a [u8],
-    },
-    /// Replace one audited rule in place, preserving its chain position.
-    Replace {
-        /// IPv4 nft table name.
-        table: &'a str,
-        /// Chain containing the audited handle.
-        chain: &'a str,
-        /// Exact `NFTA_RULE_HANDLE` to replace.
-        handle: u64,
         /// Complete encoded `NFTA_RULE_EXPRESSIONS` list.
         exprs: &'a [u8],
         /// Exact `NFTA_RULE_USERDATA` ownership tag.
@@ -622,7 +599,7 @@ fn e_ipv4_tcp_destination_lookup(set: &str) -> Vec<u8> {
     let mut ex = e_meta_load(NFT_META_L4PROTO, NFT_REG_1);
     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
     ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1));
-    ex.extend(e_payload(NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2, NFT_REG_2));
+    ex.extend(e_payload(NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2, NFT_REG_9));
     ex.extend(e_lookup(set, NFT_REG_1));
     ex
 }
@@ -1000,6 +977,13 @@ fn newset_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
         1,
         &[0x00, 0x04, 0x01, 0x00, 0x00, 0x00],
     )
+}
+
+fn delete_set_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
+    let mut payload = nfgenmsg(family.nfproto(), 0);
+    attr(&mut payload, NFTA_SET_TABLE, &cstr(table));
+    attr(&mut payload, NFTA_SET_NAME, &cstr(set));
+    payload
 }
 
 fn set_elem_payload_family(
@@ -1819,27 +1803,6 @@ fn atomic_rule_batch(mutations: &[AtomicRuleMutation<'_>]) -> Vec<u8> {
                 NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE,
                 seq,
                 &newrule_payload(table, chain, exprs, userdata),
-            ),
-            AtomicRuleMutation::Append { table, chain, exprs, userdata } => nlmsg(
-                &mut batch,
-                nft_msg_type(NFT_MSG_NEWRULE),
-                NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND,
-                seq,
-                &newrule_payload(table, chain, exprs, userdata),
-            ),
-            AtomicRuleMutation::Replace { table, chain, handle, exprs, userdata } => nlmsg(
-                &mut batch,
-                nft_msg_type(NFT_MSG_NEWRULE),
-                NLM_F_REQUEST | NLM_F_ACK | NLM_F_REPLACE,
-                seq,
-                &replace_rule_payload_family(
-                    NftFamily::Ipv4,
-                    table,
-                    chain,
-                    *handle,
-                    exprs,
-                    userdata,
-                ),
             ),
         }
     }
@@ -2953,66 +2916,63 @@ pub fn delete_rule(table: &str, chain: &str, handle: u64) -> Result<(), NetlinkE
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedIpInterceptIdentity {
-    _private: (),
+    table_and_chains: Vec<Vec<u8>>,
+    sets: Vec<Vec<u8>>,
+    prerouting: Vec<Vec<u8>>,
+    output: Vec<Vec<u8>>,
 }
 
 impl SharedIpInterceptIdentity {
     /// Build the canonical identity for exact non-zero listener ports.
     #[doc(hidden)]
-    #[expect(
-        clippy::panic,
-        reason = "D15 exact RED scaffold; DELIVER implements semantic construction"
-    )]
-    pub fn for_listener_ports(_leg_f_port: u16, _leg_c_port: u16) -> Result<Self, NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP listener identity)")
+    #[allow(clippy::similar_names, clippy::type_complexity)]
+    pub fn for_listener_ports(leg_f_port: u16, leg_c_port: u16) -> Result<Self, NetlinkError> {
+        shared_ip::SharedProgram::expected(leg_f_port, leg_c_port).map(|program| program.identity())
     }
 
     /// Validate and rebuild the canonical identity from normalized parts.
     #[doc(hidden)]
-    #[expect(
-        clippy::panic,
-        reason = "D15 exact RED scaffold; DELIVER implements semantic validation"
-    )]
     pub fn from_normalized_parts(
-        _table_and_chains: Vec<Vec<u8>>,
-        _sets: Vec<Vec<u8>>,
-        _prerouting: Vec<Vec<u8>>,
-        _output: Vec<Vec<u8>>,
+        table_and_chains: Vec<Vec<u8>>,
+        sets: Vec<Vec<u8>>,
+        prerouting: Vec<Vec<u8>>,
+        output: Vec<Vec<u8>>,
     ) -> Result<Self, NetlinkError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP normalized identity)")
+        shared_ip::SharedProgram::from_components(table_and_chains, sets, prerouting, output)
+            .map(|program| program.identity())
     }
 
     /// Project the canonical worker-owned normalized identity carrier.
     #[doc(hidden)]
-    #[expect(
-        clippy::panic,
-        reason = "D15 exact RED scaffold; DELIVER implements semantic projection"
-    )]
+    #[allow(clippy::type_complexity)]
     pub fn normalized_parts(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 shared IP identity projection)")
+        (
+            self.table_and_chains.clone(),
+            self.sets.clone(),
+            self.prerouting.clone(),
+            self.output.clone(),
+        )
     }
 }
 
 /// Observe one generation-consistent shared IPv4 intercept identity.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "D15 exact RED scaffold; DELIVER implements real observation")]
 pub fn observe_shared_ip_intercept() -> Result<Option<SharedIpInterceptIdentity>, NetlinkError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 shared IP observation)")
+    shared_ip::observe()
 }
 
 /// Conditionally replace the complete shared IPv4 intercept object graph.
 #[doc(hidden)]
-#[expect(clippy::panic, reason = "D15 exact RED scaffold; DELIVER implements atomic replacement")]
 pub fn replace_shared_ip_intercept_atomically(
-    _expected_current: Option<&SharedIpInterceptIdentity>,
-    _desired: Option<&SharedIpInterceptIdentity>,
+    expected_current: Option<&SharedIpInterceptIdentity>,
+    desired: Option<&SharedIpInterceptIdentity>,
 ) -> Result<(), NetlinkError> {
-    panic!("Not yet implemented -- RED scaffold (GH #295 shared IP atomic replacement)")
+    shared_ip::replace_public(expected_current, desired)
 }
 
-/// Semantic IPv4 shared-intercept adapter used by the worker's private
-/// `SharedInterceptProgramIo` seam.
-pub mod ip {
+/// Private semantic IPv4 shared-intercept adapter used by the worker's
+/// module-private `SharedInterceptProgramIo` seam.
+mod shared_ip {
     #![allow(
         clippy::expect_used,
         clippy::similar_names,
@@ -3024,9 +2984,13 @@ pub mod ip {
 
     use super::*;
 
-    const SET_KEY_TYPE: u32 = 1; // NFT_DATA_VALUE
+    // These are the nftables datatype identifiers, not the generic
+    // NFT_DATA_* payload tags.  The concatenated key is aligned to four-byte
+    // IPv4 plus four-byte inet_service storage by the kernel ABI.
+    const IPV4_ADDR_KEY_TYPE: u32 = 7;
+    const IPV4_ADDR_INET_SERVICE_KEY_TYPE: u32 = 0x1cd;
     const MANAGED_SET_KEY_LEN: u32 = 4;
-    const DESTINATION_SET_KEY_LEN: u32 = 6;
+    const DESTINATION_SET_KEY_LEN: u32 = 8;
     const PREROUTING_RULE_COUNT: usize = 5;
     const OUTPUT_RULE_COUNT: usize = 3;
 
@@ -3055,17 +3019,20 @@ pub mod ip {
 
     /// Complete normalized identity of the worker-owned IP program.
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct SharedProgram {
-        table_and_chains: Vec<Vec<u8>>,
-        sets: Vec<Vec<u8>>,
-        prerouting: Vec<Vec<u8>>,
-        output: Vec<Vec<u8>>,
+    pub(super) struct SharedProgram {
+        identity: SharedIpInterceptIdentity,
         rules: Vec<Rule>,
     }
 
     impl SharedProgram {
         /// Construct the exact owned identity for fresh listener targets.
         pub fn expected(leg_f_port: u16, leg_c_port: u16) -> Result<Self, NetlinkError> {
+            if leg_f_port == 0 || leg_c_port == 0 {
+                return Err(NetlinkError::nft(
+                    "shared-ip-identity",
+                    invalid_data("shared IP listener ports must be non-zero"),
+                ));
+            }
             let mut rules = Vec::with_capacity(PREROUTING_RULE_COUNT + OUTPUT_RULE_COUNT);
             for index in 0..PREROUTING_RULE_COUNT {
                 rules.push(Rule {
@@ -3089,21 +3056,17 @@ pub mod ip {
                     .map_err(|source| NetlinkError::nft("shared-ip-expected", source))?,
                 });
             }
-            Ok(Self {
-                table_and_chains: expected_table_and_chains(),
-                sets: expected_sets(),
-                prerouting: rules
-                    .iter()
-                    .filter(|rule| rule.chain == Chain::Prerouting)
-                    .map(encode_rule)
-                    .collect(),
-                output: rules
-                    .iter()
-                    .filter(|rule| rule.chain == Chain::Output)
-                    .map(encode_rule)
-                    .collect(),
-                rules,
-            })
+            let table_and_chains = expected_table_and_chains();
+            let sets = expected_sets();
+            let prerouting = rules
+                .iter()
+                .filter(|rule| rule.chain == Chain::Prerouting)
+                .map(encode_rule)
+                .collect();
+            let output =
+                rules.iter().filter(|rule| rule.chain == Chain::Output).map(encode_rule).collect();
+            let program = Self::from_components(table_and_chains, sets, prerouting, output)?;
+            Ok(Self { identity: program.identity, rules })
         }
 
         /// Rebuild an identity received from the worker postcondition carrier.
@@ -3113,48 +3076,24 @@ pub mod ip {
             prerouting: Vec<Vec<u8>>,
             output: Vec<Vec<u8>>,
         ) -> Result<Self, NetlinkError> {
-            if table_and_chains != expected_table_and_chains()
-                || sets != expected_sets()
-                || prerouting.len() != PREROUTING_RULE_COUNT
-                || output.len() != OUTPUT_RULE_COUNT
-            {
-                return Err(NetlinkError::nft(
-                    "shared-ip-program",
-                    invalid_data("shared IP postcondition has an incompatible shape"),
-                ));
-            }
+            validate_components(&table_and_chains, &sets, &prerouting, &output)?;
             let mut rules = Vec::with_capacity(PREROUTING_RULE_COUNT + OUTPUT_RULE_COUNT);
-            for (index, encoded) in prerouting.iter().enumerate() {
+            for encoded in &prerouting {
                 let (userdata, expressions) = decode_rule(encoded)?;
-                if userdata != shared_ip_userdata(SHARED_IP_PREROUTING, index) {
-                    return Err(NetlinkError::nft(
-                        "shared-ip-program",
-                        invalid_data("shared IP prerouting userdata is not owned"),
-                    ));
-                }
                 rules.push(Rule { chain: Chain::Prerouting, handle: None, userdata, expressions });
             }
-            for (index, encoded) in output.iter().enumerate() {
+            for encoded in &output {
                 let (userdata, expressions) = decode_rule(encoded)?;
-                if userdata != shared_ip_userdata(SHARED_IP_OUTPUT, index) {
-                    return Err(NetlinkError::nft(
-                        "shared-ip-program",
-                        invalid_data("shared IP output userdata is not owned"),
-                    ));
-                }
                 rules.push(Rule { chain: Chain::Output, handle: None, userdata, expressions });
             }
-            Ok(Self { table_and_chains, sets, prerouting, output, rules })
+            Ok(Self {
+                identity: SharedIpInterceptIdentity { table_and_chains, sets, prerouting, output },
+                rules,
+            })
         }
 
-        /// Project the semantic identity into worker postcondition vectors.
-        pub fn components(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>) {
-            (
-                self.table_and_chains.clone(),
-                self.sets.clone(),
-                self.prerouting.clone(),
-                self.output.clone(),
-            )
+        pub(super) fn identity(&self) -> SharedIpInterceptIdentity {
+            self.identity.clone()
         }
     }
 
@@ -3219,10 +3158,178 @@ pub mod ip {
 
     fn expected_sets() -> Vec<Vec<u8>> {
         vec![
-            encode_set(SHARED_IP_MANAGED_GUESTS, SET_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            encode_set(SHARED_IP_OUTBOUND_SOURCES, SET_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            encode_set(SHARED_IP_INBOUND_DESTINATIONS, SET_KEY_TYPE, DESTINATION_SET_KEY_LEN),
+            encode_set(SHARED_IP_MANAGED_GUESTS, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
+            encode_set(SHARED_IP_OUTBOUND_SOURCES, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
+            encode_set(
+                SHARED_IP_INBOUND_DESTINATIONS,
+                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+                DESTINATION_SET_KEY_LEN,
+            ),
         ]
+    }
+
+    fn invalid_shared_ip(message: impl Into<String>) -> NetlinkError {
+        NetlinkError::nft("shared-ip-observe", invalid_data(message))
+    }
+
+    fn canonicalize_dynamic_port(data: &[u8]) -> std::io::Result<(Vec<u8>, Option<u16>)> {
+        let attrs = exact_attrs(data)?;
+        let mut dreg = None;
+        let mut immediate_data = None;
+        for (kind, raw, payload) in &attrs {
+            match *kind {
+                NFTA_IMMEDIATE_DREG if *raw & NLA_F_NESTED == 0 && dreg.is_none() => {
+                    dreg = Some(exact_be_u32(payload, "immediate destination register")?);
+                }
+                NFTA_IMMEDIATE_DATA if immediate_data.is_none() => {
+                    immediate_data = Some((*raw, *payload));
+                }
+                NFTA_IMMEDIATE_DREG | NFTA_IMMEDIATE_DATA => {
+                    return Err(invalid_data("duplicate immediate attribute"));
+                }
+                _ => return Err(invalid_data("unknown immediate attribute")),
+            }
+        }
+        if dreg != Some(NFT_REG_2) {
+            return Ok((data.to_vec(), None));
+        }
+        let (data_raw, data_payload) =
+            immediate_data.ok_or_else(|| invalid_data("immediate data is missing"))?;
+        let data_attrs = exact_attrs(data_payload)?;
+        let mut value = None;
+        for (kind, raw, payload) in &data_attrs {
+            if *kind == NFTA_DATA_VALUE && *raw & NLA_F_NESTED == 0 && value.is_none() {
+                value = Some(*payload);
+            } else if *kind == NFTA_DATA_VALUE {
+                return Err(invalid_data("duplicate immediate value"));
+            }
+        }
+        let value = value.ok_or_else(|| invalid_data("immediate value is missing"))?;
+        if value.len() != 2 {
+            return Ok((data.to_vec(), None));
+        }
+        let port = u16::from_be_bytes([value[0], value[1]]);
+        let mut rewritten_value = Vec::with_capacity(data_payload.len());
+        for (kind, raw, payload) in data_attrs {
+            if kind == NFTA_DATA_VALUE {
+                attr(&mut rewritten_value, raw, &[0, 0]);
+            } else {
+                attr(&mut rewritten_value, raw, payload);
+            }
+        }
+        let mut rewritten = Vec::with_capacity(data.len());
+        for (kind, raw, payload) in attrs {
+            if kind == NFTA_IMMEDIATE_DATA {
+                attr(&mut rewritten, data_raw, &rewritten_value);
+            } else {
+                attr(&mut rewritten, raw, payload);
+            }
+        }
+        Ok((rewritten, Some(port)))
+    }
+
+    fn canonicalize_rule(
+        chain: Chain,
+        index: usize,
+        expressions: &[u8],
+    ) -> std::io::Result<(Vec<u8>, Option<u16>)> {
+        let normalized = normalize_rule_program(expressions, false)?.0;
+        let mut canonical = Vec::with_capacity(normalized.len());
+        let mut dynamic_port = None;
+        for (kind, _raw, element) in exact_attrs(&normalized)? {
+            if kind != NFTA_LIST_ELEM {
+                return Err(invalid_data("shared IP expression list is not canonical"));
+            }
+            let mut name = None;
+            let mut data = None;
+            for (attribute, raw, payload) in exact_attrs(element)? {
+                match attribute {
+                    NFTA_EXPR_NAME if raw & NLA_F_NESTED == 0 && name.is_none() => {
+                        name = Some(exact_cstr(payload, "shared IP expression name")?);
+                    }
+                    NFTA_EXPR_DATA if data.is_none() => data = Some(payload),
+                    NFTA_EXPR_NAME | NFTA_EXPR_DATA => {
+                        return Err(invalid_data("shared IP expression has duplicate framing"));
+                    }
+                    _ => return Err(invalid_data("shared IP expression has unknown framing")),
+                }
+            }
+            let name = name.ok_or_else(|| invalid_data("shared IP expression name is missing"))?;
+            let data = data.ok_or_else(|| invalid_data("shared IP expression data is missing"))?;
+            let mut data = canonical_expression_data(name, data, false)?;
+            if name == "immediate" && matches!((chain, index), (Chain::Prerouting, 1 | 3)) {
+                let (rewritten, port) = canonicalize_dynamic_port(&data)?;
+                data = rewritten;
+                if let Some(port) = port
+                    && dynamic_port.replace(port).is_some()
+                {
+                    return Err(invalid_data("shared IP rule has duplicate listener target"));
+                }
+            }
+            canonical.extend(expr(name, &data));
+        }
+        Ok((canonical, dynamic_port))
+    }
+
+    fn validate_components(
+        table_and_chains: &[Vec<u8>],
+        sets: &[Vec<u8>],
+        prerouting: &[Vec<u8>],
+        output: &[Vec<u8>],
+    ) -> Result<(), NetlinkError> {
+        if table_and_chains != expected_table_and_chains()
+            || sets != expected_sets()
+            || prerouting.len() != PREROUTING_RULE_COUNT
+            || output.len() != OUTPUT_RULE_COUNT
+        {
+            return Err(invalid_shared_ip("shared IP identity has an incompatible shape"));
+        }
+        let mut ports = [None, None];
+        for (chain, components, count) in [
+            (Chain::Prerouting, prerouting, PREROUTING_RULE_COUNT),
+            (Chain::Output, output, OUTPUT_RULE_COUNT),
+        ] {
+            for (index, encoded) in components.iter().enumerate() {
+                let (userdata, expressions) = decode_rule(encoded)?;
+                if userdata != shared_ip_userdata(chain.name(), index) {
+                    return Err(invalid_shared_ip("shared IP rule userdata is not exact"));
+                }
+                let (canonical, dynamic_port) = canonicalize_rule(chain, index, &expressions)
+                    .map_err(|source| NetlinkError::nft("shared-ip-observe", source))?;
+                let expected = if chain == Chain::Prerouting {
+                    shared_ip_prerouting_rule_exprs(
+                        dynamic_port.filter(|_| index == 1).unwrap_or_default(),
+                        dynamic_port.filter(|_| index == 3).unwrap_or_default(),
+                        index,
+                    )
+                } else {
+                    shared_ip_output_rule_exprs(0, index)
+                };
+                let expected = canonicalize_rule(chain, index, &expected)
+                    .map_err(|source| NetlinkError::nft("shared-ip-observe", source))?
+                    .0;
+                if canonical != expected {
+                    return Err(invalid_shared_ip("shared IP rule expression is not canonical"));
+                }
+                if matches!((chain, index), (Chain::Prerouting, 1 | 3)) {
+                    let port = dynamic_port
+                        .ok_or_else(|| invalid_shared_ip("shared IP listener target is missing"))?;
+                    if port == 0 {
+                        return Err(invalid_shared_ip("shared IP listener target is zero"));
+                    }
+                    ports[usize::from(index == 3)] = Some(port);
+                } else if dynamic_port.is_some() {
+                    return Err(invalid_shared_ip("unexpected shared IP listener target"));
+                }
+                if index >= count {
+                    return Err(invalid_shared_ip("shared IP rule index is out of range"));
+                }
+            }
+        }
+        if ports[0].is_none() || ports[1].is_none() {
+            return Err(invalid_shared_ip("shared IP listener targets are incomplete"));
+        }
+        Ok(())
     }
 
     fn observed_chain_identity(chain: &RawChainInfo) -> Vec<u8> {
@@ -3266,24 +3373,13 @@ pub mod ip {
         }
     }
 
-    fn rule_index(chain: Chain, userdata: &[u8]) -> Option<usize> {
-        let prefix = format!("ovd295-ip-{}-", chain.name()).into_bytes();
-        let suffix = userdata.strip_prefix(prefix.as_slice())?;
-        std::str::from_utf8(suffix).ok()?.parse().ok()
-    }
-
-    fn collect() -> Result<Option<SharedProgram>, NetlinkError> {
+    fn collect_once() -> Result<Option<SharedProgram>, NetlinkError> {
         let tables = list_table_names_family(NftFamily::Ipv4)?;
+        if list_table_names_family(NftFamily::Bridge)?.iter().any(|table| table == SHARED_IP_TABLE)
+        {
+            return Err(invalid_shared_ip("shared IP table exists in a foreign nft family"));
+        }
         if !tables.iter().any(|table| table == SHARED_IP_TABLE) {
-            if list_table_names_family(NftFamily::Bridge)?
-                .iter()
-                .any(|table| table == SHARED_IP_TABLE)
-            {
-                return Err(NetlinkError::nft(
-                    "shared-ip-observe",
-                    invalid_data("shared IP table exists in a foreign nft family"),
-                ));
-            }
             return Ok(None);
         }
 
@@ -3316,17 +3412,22 @@ pub mod ip {
 
         let sets = list_set_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
         let expected = [
-            (SHARED_IP_MANAGED_GUESTS, MANAGED_SET_KEY_LEN),
-            (SHARED_IP_OUTBOUND_SOURCES, MANAGED_SET_KEY_LEN),
-            (SHARED_IP_INBOUND_DESTINATIONS, DESTINATION_SET_KEY_LEN),
+            (SHARED_IP_MANAGED_GUESTS, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
+            (SHARED_IP_OUTBOUND_SOURCES, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
+            (
+                SHARED_IP_INBOUND_DESTINATIONS,
+                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+                DESTINATION_SET_KEY_LEN,
+            ),
         ];
         if sets.len() != expected.len()
-            || expected.iter().any(|(name, key_len)| {
+            || expected.iter().any(|(name, key_type, key_len)| {
                 sets.iter().filter(|set| set.name == *name).count() != 1
                     || sets.iter().any(|set| {
                         set.name == *name
-                            && (set.key_type != SET_KEY_TYPE
+                            && (set.key_type != *key_type
                                 || set.key_len != *key_len
+                                || set.id == 0
                                 || set.userdata.as_deref()
                                     != Some(shared_ip_set_userdata(name).as_slice()))
                     })
@@ -3339,11 +3440,15 @@ pub mod ip {
                 ),
             ));
         }
+        for (name, _, _) in expected {
+            let set = sets.iter().find(|set| set.name == name).expect("validated set");
+            if !list_set_elements_family(NftFamily::Ipv4, SHARED_IP_TABLE, name, set.id)?.is_empty()
+            {
+                return Err(invalid_shared_ip("shared IP dynamic set state is non-empty"));
+            }
+        }
         if !list_other_children_family(NftFamily::Ipv4, SHARED_IP_TABLE)?.is_empty() {
-            return Err(NetlinkError::nft(
-                "shared-ip-observe",
-                invalid_data("shared IP table contains foreign stateful children"),
-            ));
+            return Err(invalid_shared_ip("shared IP table contains foreign stateful children"));
         }
 
         let mut rules = Vec::with_capacity(PREROUTING_RULE_COUNT + OUTPUT_RULE_COUNT);
@@ -3361,18 +3466,10 @@ pub mod ip {
             }
             let mut seen = BTreeSet::new();
             for (position, rule) in observed.into_iter().enumerate() {
-                let index = rule_index(kind, &rule.userdata).ok_or_else(|| {
-                    NetlinkError::nft(
-                        "shared-ip-observe",
-                        invalid_data("shared IP rule has foreign or malformed userdata"),
-                    )
-                })?;
-                if index >= count || index != position || !seen.insert(index) {
-                    return Err(NetlinkError::nft(
-                        "shared-ip-observe",
-                        invalid_data(
-                            "shared IP rule inventory has duplicate ownership or wrong order",
-                        ),
+                let expected_userdata = shared_ip_userdata(kind.name(), position);
+                if rule.userdata != expected_userdata || !seen.insert(position) {
+                    return Err(invalid_shared_ip(
+                        "shared IP rule inventory has duplicate ownership or wrong order",
                     ));
                 }
                 rules.push(Rule {
@@ -3389,17 +3486,16 @@ pub mod ip {
                 ));
             }
         }
-        let table_and_chains = [Chain::Prerouting, Chain::Output]
-            .into_iter()
-            .map(|kind| {
+        let table_and_chains = std::iter::once(b"table:overdrive-mtls".to_vec())
+            .chain([Chain::Prerouting, Chain::Output].into_iter().map(|kind| {
                 observed_chain_identity(
                     chains.iter().find(|chain| chain.name == kind.name()).expect("validated chain"),
                 )
-            })
+            }))
             .collect();
         let sets = expected
             .into_iter()
-            .map(|(name, _)| {
+            .map(|(name, _, _)| {
                 observed_set_identity(
                     sets.iter().find(|set| set.name == name).expect("validated set"),
                 )
@@ -3409,170 +3505,294 @@ pub mod ip {
             rules.iter().filter(|rule| rule.chain == Chain::Prerouting).map(encode_rule).collect();
         let output =
             rules.iter().filter(|rule| rule.chain == Chain::Output).map(encode_rule).collect();
-        Ok(Some(SharedProgram { table_and_chains, sets, prerouting, output, rules }))
+        let semantic = SharedProgram::from_components(table_and_chains, sets, prerouting, output)?;
+        if semantic.rules.iter().zip(rules.iter()).any(|(expected, observed)| {
+            expected.chain != observed.chain
+                || expected.userdata != observed.userdata
+                || expected.expressions != observed.expressions
+        }) {
+            return Err(invalid_shared_ip("shared IP rule semantic identity mismatch"));
+        }
+        Ok(Some(SharedProgram { identity: semantic.identity, rules }))
     }
 
-    fn delete_set_payload(table: &str, set: &str) -> Vec<u8> {
-        let mut payload = nfgenmsg(NftFamily::Ipv4.nfproto(), 0);
-        attr(&mut payload, NFTA_SET_TABLE, &cstr(table));
-        attr(&mut payload, NFTA_SET_NAME, &cstr(set));
-        payload
+    fn collect() -> Result<Option<SharedProgram>, NetlinkError> {
+        let before = read_nft_generation()?;
+        let observed = collect_once()?;
+        let after = read_nft_generation()?;
+        if before != after {
+            return Err(NetlinkError::nft(
+                "shared-ip-observe-generation",
+                invalid_data("shared IP observation crossed a ruleset generation"),
+            ));
+        }
+        Ok(observed)
+    }
+
+    #[derive(Clone, Copy)]
+    enum SharedMutation<'a> {
+        NewTable,
+        NewChain { name: &'a str, spec: BaseChainSpec },
+        NewSet { name: &'a str, key_type: u32, key_len: u32 },
+        NewRule { chain: &'a str, expressions: &'a [u8], userdata: &'a [u8], append: bool },
+        ReplaceRule { chain: &'a str, handle: u64, expressions: &'a [u8], userdata: &'a [u8] },
+        DeleteRule { chain: &'a str, handle: u64 },
+        DeleteSet { name: &'a str },
+        DeleteChain { name: &'a str },
+        DeleteTable,
+    }
+
+    fn send_transaction(mutations: &[SharedMutation<'_>]) -> Result<(), NetlinkError> {
+        if mutations.is_empty() {
+            return Ok(());
+        }
+        let sock = NfSock::open()
+            .map_err(|source| NetlinkError::nft("shared-ip-atomic-transaction", source))?;
+        let mut batch = Vec::new();
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_BEGIN,
+            NLM_F_REQUEST,
+            1,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        for (index, mutation) in mutations.iter().enumerate() {
+            let sequence = index as u32 + 2;
+            let (operation, flags, payload) = match mutation {
+                SharedMutation::NewTable => (
+                    NFT_MSG_NEWTABLE,
+                    NLM_F_CREATE,
+                    newtable_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE),
+                ),
+                SharedMutation::NewChain { name, spec } => (
+                    NFT_MSG_NEWCHAIN,
+                    NLM_F_CREATE,
+                    newchain_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE, name, *spec),
+                ),
+                SharedMutation::NewSet { name, key_type, key_len } => (
+                    NFT_MSG_NEWSET,
+                    NLM_F_CREATE,
+                    newset_payload_schema_family(
+                        NftFamily::Ipv4,
+                        SHARED_IP_TABLE,
+                        name,
+                        *key_type,
+                        *key_len,
+                        1,
+                        &shared_ip_set_userdata(name),
+                    ),
+                ),
+                SharedMutation::NewRule { chain, expressions, userdata, append } => (
+                    NFT_MSG_NEWRULE,
+                    NLM_F_CREATE | if *append { NLM_F_APPEND } else { 0 },
+                    newrule_payload_family(
+                        NftFamily::Ipv4,
+                        SHARED_IP_TABLE,
+                        chain,
+                        expressions,
+                        userdata,
+                    ),
+                ),
+                SharedMutation::ReplaceRule { chain, handle, expressions, userdata } => (
+                    NFT_MSG_NEWRULE,
+                    NLM_F_REPLACE,
+                    replace_rule_payload_family(
+                        NftFamily::Ipv4,
+                        SHARED_IP_TABLE,
+                        chain,
+                        *handle,
+                        expressions,
+                        userdata,
+                    ),
+                ),
+                SharedMutation::DeleteRule { chain, handle } => (
+                    NFT_MSG_DELRULE,
+                    0,
+                    delrule_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE, chain, *handle),
+                ),
+                SharedMutation::DeleteSet { name } => (
+                    NFT_MSG_DELSET,
+                    0,
+                    delete_set_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE, name),
+                ),
+                SharedMutation::DeleteChain { name } => (
+                    NFT_MSG_DELCHAIN,
+                    0,
+                    get_by_table_chain_family(
+                        NftFamily::Ipv4,
+                        SHARED_IP_TABLE,
+                        name,
+                        NFTA_CHAIN_NAME,
+                        NFTA_CHAIN_TABLE,
+                    ),
+                ),
+                SharedMutation::DeleteTable => {
+                    (NFT_MSG_DELTABLE, 0, newtable_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE))
+                }
+            };
+            nlmsg(
+                &mut batch,
+                nft_msg_type(operation),
+                NLM_F_REQUEST | NLM_F_ACK | flags,
+                sequence,
+                &payload,
+            );
+        }
+        let end_sequence = mutations.len() as u32 + 2;
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_END,
+            NLM_F_REQUEST,
+            end_sequence,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        sock.send(&batch)
+            .map_err(|source| NetlinkError::nft("shared-ip-atomic-transaction", source))?;
+        let mut pending = (2..end_sequence).collect::<BTreeSet<_>>();
+        while !pending.is_empty() {
+            let mut buffer = vec![0_u8; 32_768];
+            let received = sock
+                .recv(&mut buffer)
+                .map_err(|source| NetlinkError::nft("shared-ip-atomic-transaction", source))?;
+            collect_atomic_rule_acks(&buffer[..received], &mut pending)
+                .map_err(|source| NetlinkError::nft("shared-ip-atomic-transaction", source))?;
+        }
+        Ok(())
     }
 
     fn create(program: &SharedProgram) -> Result<(), NetlinkError> {
-        send_batched_family_idempotent(
-            NftFamily::Ipv4,
-            NFT_MSG_NEWTABLE,
-            &newtable_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE),
-            "shared-ip-newtable",
-        )?;
-        for (chain, hook, kind) in [
-            (SHARED_IP_PREROUTING, NF_INET_PRE_ROUTING, ChainKind::Filter),
-            (SHARED_IP_OUTPUT, NF_INET_LOCAL_OUT, ChainKind::Route),
-        ] {
-            send_batched_family_idempotent(
-                NftFamily::Ipv4,
-                NFT_MSG_NEWCHAIN,
-                &newchain_payload_family(
-                    NftFamily::Ipv4,
-                    SHARED_IP_TABLE,
-                    chain,
-                    BaseChainSpec { hooknum: hook, priority: PRIORITY_MANGLE, kind },
-                ),
-                "shared-ip-newchain",
-            )?;
-        }
-        for (name, key_len) in [
-            (SHARED_IP_MANAGED_GUESTS, MANAGED_SET_KEY_LEN),
-            (SHARED_IP_OUTBOUND_SOURCES, MANAGED_SET_KEY_LEN),
-            (SHARED_IP_INBOUND_DESTINATIONS, DESTINATION_SET_KEY_LEN),
-        ] {
-            let userdata = shared_ip_set_userdata(name);
-            send_batched_family_idempotent(
-                NftFamily::Ipv4,
-                NFT_MSG_NEWSET,
-                &newset_payload_schema_family(
-                    NftFamily::Ipv4,
-                    SHARED_IP_TABLE,
-                    name,
-                    SET_KEY_TYPE,
-                    key_len,
-                    1,
-                    &userdata,
-                ),
-                "shared-ip-newset",
-            )?;
-        }
-        let mut mutations = Vec::with_capacity(program.rules.len());
+        let mut mutations = vec![SharedMutation::NewTable];
+        mutations.extend([
+            SharedMutation::NewChain {
+                name: SHARED_IP_PREROUTING,
+                spec: BaseChainSpec {
+                    hooknum: NF_INET_PRE_ROUTING,
+                    priority: PRIORITY_MANGLE,
+                    kind: ChainKind::Filter,
+                },
+            },
+            SharedMutation::NewChain {
+                name: SHARED_IP_OUTPUT,
+                spec: BaseChainSpec {
+                    hooknum: NF_INET_LOCAL_OUT,
+                    priority: PRIORITY_MANGLE,
+                    kind: ChainKind::Route,
+                },
+            },
+        ]);
+        mutations.extend([
+            SharedMutation::NewSet {
+                name: SHARED_IP_MANAGED_GUESTS,
+                key_type: IPV4_ADDR_KEY_TYPE,
+                key_len: MANAGED_SET_KEY_LEN,
+            },
+            SharedMutation::NewSet {
+                name: SHARED_IP_OUTBOUND_SOURCES,
+                key_type: IPV4_ADDR_KEY_TYPE,
+                key_len: MANAGED_SET_KEY_LEN,
+            },
+            SharedMutation::NewSet {
+                name: SHARED_IP_INBOUND_DESTINATIONS,
+                key_type: IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+                key_len: DESTINATION_SET_KEY_LEN,
+            },
+        ]);
         for (index, rule) in program.rules.iter().enumerate() {
-            mutations.push(if index == 0 || index == PREROUTING_RULE_COUNT {
-                AtomicRuleMutation::Insert {
-                    table: SHARED_IP_TABLE,
-                    chain: rule.chain.name(),
-                    exprs: &rule.expressions,
-                    userdata: &rule.userdata,
-                }
-            } else {
-                AtomicRuleMutation::Append {
-                    table: SHARED_IP_TABLE,
-                    chain: rule.chain.name(),
-                    exprs: &rule.expressions,
-                    userdata: &rule.userdata,
-                }
+            mutations.push(SharedMutation::NewRule {
+                chain: rule.chain.name(),
+                expressions: &rule.expressions,
+                userdata: &rule.userdata,
+                append: index != 0 && index != PREROUTING_RULE_COUNT,
             });
         }
-        send_atomic_rule_transaction(&mutations)
+        send_transaction(&mutations)
     }
 
     fn delete(program: &SharedProgram) -> Result<(), NetlinkError> {
-        let mutations = program
-            .rules
-            .iter()
-            .filter_map(|rule| {
-                rule.handle.map(|handle| AtomicRuleMutation::Delete {
-                    table: SHARED_IP_TABLE,
-                    chain: rule.chain.name(),
-                    handle,
-                })
-            })
-            .collect::<Vec<_>>();
-        send_atomic_rule_transaction(&mutations)?;
-        for name in
-            [SHARED_IP_INBOUND_DESTINATIONS, SHARED_IP_OUTBOUND_SOURCES, SHARED_IP_MANAGED_GUESTS]
-        {
-            send_batched_family(
-                NftFamily::Ipv4,
-                NFT_MSG_DELSET,
-                0,
-                &delete_set_payload(SHARED_IP_TABLE, name),
-                "shared-ip-delset",
-            )?;
+        let mut mutations = Vec::with_capacity(program.rules.len() + 7);
+        for rule in &program.rules {
+            mutations.push(SharedMutation::DeleteRule {
+                chain: rule.chain.name(),
+                handle: rule.handle.ok_or_else(|| {
+                    NetlinkError::nft(
+                        "shared-ip-delete",
+                        invalid_data("shared IP delete requires private kernel handles"),
+                    )
+                })?,
+            });
         }
-        for chain in [SHARED_IP_OUTPUT, SHARED_IP_PREROUTING] {
-            send_batched(
-                NFT_MSG_DELCHAIN,
-                0,
-                &get_by_table_chain_family(
-                    NftFamily::Ipv4,
-                    SHARED_IP_TABLE,
-                    chain,
-                    NFTA_CHAIN_NAME,
-                    NFTA_CHAIN_TABLE,
-                ),
-                "shared-ip-delchain",
-            )?;
-        }
-        send_batched(
-            NFT_MSG_DELTABLE,
-            0,
-            &newtable_payload_family(NftFamily::Ipv4, SHARED_IP_TABLE),
-            "shared-ip-deltable",
-        )
+        mutations.extend([
+            SharedMutation::DeleteSet { name: SHARED_IP_INBOUND_DESTINATIONS },
+            SharedMutation::DeleteSet { name: SHARED_IP_OUTBOUND_SOURCES },
+            SharedMutation::DeleteSet { name: SHARED_IP_MANAGED_GUESTS },
+            SharedMutation::DeleteChain { name: SHARED_IP_OUTPUT },
+            SharedMutation::DeleteChain { name: SHARED_IP_PREROUTING },
+            SharedMutation::DeleteTable,
+        ]);
+        send_transaction(&mutations)
     }
 
-    /// Read the complete worker-owned constant program without mutation.
-    pub fn observe() -> Result<Option<SharedProgram>, NetlinkError> {
-        collect()
-    }
-
-    /// Replace the owned program after verifying the exact expected identity.
-    pub fn replace_atomically(
-        expected_current: Option<&SharedProgram>,
-        desired: Option<&SharedProgram>,
+    fn replace(
+        expected_current: Option<&SharedIpInterceptIdentity>,
+        desired: Option<&SharedIpInterceptIdentity>,
     ) -> Result<(), NetlinkError> {
         let current = collect()?;
-        if current.as_ref() != expected_current {
+        if current.as_ref().map(SharedProgram::identity).as_ref() != expected_current {
             return Err(NetlinkError::nft(
                 "shared-ip-replace",
-                invalid_data("shared IP current identity changed before replacement"),
+                invalid_data("shared IP current semantic identity changed before replacement"),
             ));
         }
         match (current, desired) {
-            (None, Some(program)) => create(program),
+            (None, Some(identity)) => create(&SharedProgram::from_components(
+                identity.table_and_chains.clone(),
+                identity.sets.clone(),
+                identity.prerouting.clone(),
+                identity.output.clone(),
+            )?),
             (None, None) => Ok(()),
             (Some(current), None) => delete(&current),
-            (Some(current), Some(desired)) => {
-                if current.rules.len() != desired.rules.len() {
-                    return Err(NetlinkError::nft(
-                        "shared-ip-replace",
-                        invalid_data("shared IP replacement rule count differs"),
-                    ));
-                }
+            (Some(current), Some(identity)) => {
+                let desired = SharedProgram::from_components(
+                    identity.table_and_chains.clone(),
+                    identity.sets.clone(),
+                    identity.prerouting.clone(),
+                    identity.output.clone(),
+                )?;
                 let mutations = current
                     .rules
                     .iter()
                     .zip(desired.rules.iter())
-                    .map(|(current, desired)| AtomicRuleMutation::Replace {
-                        table: SHARED_IP_TABLE,
-                        chain: current.chain.name(),
-                        handle: current.handle.expect("observed shared rule has handle"),
-                        exprs: &desired.expressions,
-                        userdata: &desired.userdata,
+                    .map(|(current, desired)| {
+                        Ok(SharedMutation::ReplaceRule {
+                            chain: current.chain.name(),
+                            handle: current.handle.ok_or_else(|| {
+                                NetlinkError::nft(
+                                    "shared-ip-replace",
+                                    invalid_data(
+                                        "shared IP replace requires private kernel handles",
+                                    ),
+                                )
+                            })?,
+                            expressions: &desired.expressions,
+                            userdata: &desired.userdata,
+                        })
                     })
-                    .collect::<Vec<_>>();
-                send_atomic_rule_transaction(&mutations)
+                    .collect::<Result<Vec<_>, NetlinkError>>()?;
+                send_transaction(&mutations)
             }
         }
+    }
+
+    pub(super) fn observe() -> Result<Option<SharedIpInterceptIdentity>, NetlinkError> {
+        collect().map(|program| program.map(|program| program.identity))
+    }
+
+    pub(super) fn replace_public(
+        expected_current: Option<&SharedIpInterceptIdentity>,
+        desired: Option<&SharedIpInterceptIdentity>,
+    ) -> Result<(), NetlinkError> {
+        replace(expected_current, desired)
     }
 }
 

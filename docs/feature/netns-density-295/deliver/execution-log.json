@@ -253,6 +253,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-09-21T14:33:01Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: exact D15 source-local rollback selector reached production rollback algebra and failed on conditional-identity-mismatch instead of the required rollback-write source (Lima writable mounted target); prior canonical Lima run was blocked by read-only cargo target",
+      "t": "2026-09-21T20:08:29Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: D15 private semantic netlink boundary, exact ABI/atomic full-object create-replace-delete, generation-bracketed canonical observation, source-honest rollback/read-failure algebra, unpublished guard cleanup, and exact source-local/Lima evidence pass; workspace check passed, focused clippy lib passed, all-target clippy only pre-existing nft.rs test eprintln baseline",
+      "t": "2026-09-21T20:28:49Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: des-commit created the scoped D15 remediation commit after RED/GREEN; owned production, evidence, and DES log paths committed with original Marcus author and one Codex trailer",
+      "t": "2026-09-21T20:29:23Z"
     }
   ]
 }

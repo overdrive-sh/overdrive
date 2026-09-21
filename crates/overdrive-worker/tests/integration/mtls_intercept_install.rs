@@ -430,7 +430,6 @@ fn assert_only_listener_targets_changed(
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
 fn shared_program_absence_create_readback_idempotence_and_guard_drop() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
     let _kernel_lock = KernelStateLock::acquire();
@@ -493,7 +492,6 @@ fn shared_program_absence_create_readback_idempotence_and_guard_drop() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
 fn shared_program_replaces_only_listener_targets_and_preserves_foreign_complement() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
     let _kernel_lock = KernelStateLock::acquire();
@@ -543,7 +541,6 @@ fn shared_program_replaces_only_listener_targets_and_preserves_foreign_complemen
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
 fn shared_program_valid_wrong_target_observation_is_non_mutating() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
     let _kernel_lock = KernelStateLock::acquire();
@@ -599,7 +596,6 @@ fn shared_program_valid_wrong_target_observation_is_non_mutating() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 Lima shared-IP evidence"]
 #[allow(
     clippy::too_many_lines,
     reason = "one finite real-kernel table enumerates every accepted ambiguous owned-state partition"

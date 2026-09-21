@@ -66,10 +66,22 @@ impl InterceptGuard for TproxyInterceptGuard {}
 /// boot/shutdown owner.  A failed unpublished startup drops this marker, while
 /// a published owner uses its sealed relinquish path so the constant rules and
 /// empty sets remain available for the next boot's identity check.
-#[derive(Debug, Default)]
-struct SharedInterceptGuard;
+struct SharedInterceptGuard {
+    io: Arc<dyn SharedInterceptProgramIo>,
+    requested: InterceptPostcondition,
+}
 
 impl InterceptGuard for SharedInterceptGuard {}
+
+impl Drop for SharedInterceptGuard {
+    fn drop(&mut self) {
+        // An unpublished guard may clean only the exact semantic identity it
+        // armed.  A changed identity (including a successor's replacement)
+        // is rejected by the conditional adapter operation and is therefore
+        // never deleted by this stale guard.
+        let _ = self.io.replace_atomically(Some(&self.requested), None);
+    }
+}
 
 /// The per-allocation transparent-mTLS **install** driven port.
 ///
@@ -330,7 +342,10 @@ impl HostMtlsIntercept {
         requested: InterceptPostcondition,
     ) -> Result<Box<dyn InterceptGuard>> {
         if prior.as_ref() == Some(&requested) {
-            return Ok(Box::new(SharedInterceptGuard));
+            return Ok(Box::new(SharedInterceptGuard {
+                io: Arc::clone(&self.shared_program_io),
+                requested,
+            }));
         }
 
         self.shared_program_io.replace_atomically(prior.as_ref(), Some(&requested)).map_err(
@@ -341,25 +356,59 @@ impl HostMtlsIntercept {
             },
         )?;
 
-        let replacement_observed = self.shared_program_io.observe().map_err(|source| {
-            InterceptError::NftSharedRollbackFailed {
-                operation: InterceptSharedRollbackOperation::ReadBackPrior,
-                prior: prior.clone(),
-                requested: requested.clone(),
-                replacement_read_source: None,
-                replacement_observed: None,
-                source,
+        let replacement_observed = match self.shared_program_io.observe() {
+            Ok(observed) => observed,
+            Err(replacement_read_source) => {
+                if let Err(source) =
+                    self.shared_program_io.replace_atomically(Some(&requested), prior.as_ref())
+                {
+                    return Err(InterceptError::NftSharedRollbackFailed {
+                        operation: InterceptSharedRollbackOperation::RestorePrior,
+                        prior,
+                        requested,
+                        replacement_read_source: Some(replacement_read_source),
+                        replacement_observed: None,
+                        source,
+                    });
+                }
+                let rollback_observed = match self.shared_program_io.observe() {
+                    Ok(observed) => observed,
+                    Err(source) => {
+                        return Err(InterceptError::NftSharedRollbackFailed {
+                            operation: InterceptSharedRollbackOperation::ReadBackPrior,
+                            prior,
+                            requested,
+                            replacement_read_source: Some(replacement_read_source),
+                            replacement_observed: None,
+                            source,
+                        });
+                    }
+                };
+                if rollback_observed == prior {
+                    return Err(InterceptError::NftSharedReplacementReadFailedRolledBack {
+                        prior,
+                        requested,
+                        replacement_read_source,
+                    });
+                }
+                return Err(InterceptError::NftSharedRollbackPostconditionMismatch {
+                    prior,
+                    requested,
+                    replacement_read_source: Some(replacement_read_source),
+                    replacement_observed: None,
+                    rollback_observed,
+                });
             }
-        })?;
+        };
         if replacement_observed.as_ref() == Some(&requested) {
-            return Ok(Box::new(SharedInterceptGuard));
+            return Ok(Box::new(SharedInterceptGuard {
+                io: Arc::clone(&self.shared_program_io),
+                requested,
+            }));
         }
 
         self.shared_program_io
-            // The private seam uses `desired = None` as the exact rollback
-            // arm. `expected_current` carries the captured prior when it is
-            // present; `None` means restore first-boot absence.
-            .replace_atomically(prior.as_ref(), None)
+            .replace_atomically(replacement_observed.as_ref(), prior.as_ref())
             .map_err(|source| InterceptError::NftSharedRollbackFailed {
                 operation: InterceptSharedRollbackOperation::RestorePrior,
                 prior: prior.clone(),
@@ -412,47 +461,42 @@ fn shared_program_for_targets(
     leg_f: SocketAddrV4,
     leg_c: SocketAddrV4,
 ) -> Result<InterceptPostcondition> {
-    let program =
-        overdrive_netlink::nft::ip::SharedProgram::expected(leg_f.port(), leg_c.port()).map_err(
-            |source| InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", source },
-        )?;
-    Ok(postcondition_from_shared_program(&program))
+    let identity = overdrive_netlink::nft::SharedIpInterceptIdentity::for_listener_ports(
+        leg_f.port(),
+        leg_c.port(),
+    )
+    .map_err(|source| InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", source })?;
+    Ok(postcondition_from_shared_identity(&identity))
 }
 
 fn observe_shared_ip_program() -> std::result::Result<Option<InterceptPostcondition>, NetlinkError>
 {
-    overdrive_netlink::nft::ip::observe()
-        .map(|program| program.map(|program| postcondition_from_shared_program(&program)))
+    overdrive_netlink::nft::observe_shared_ip_intercept()
+        .map(|identity| identity.map(|identity| postcondition_from_shared_identity(&identity)))
 }
 
 fn replace_shared_ip_program(
     expected_current: Option<&InterceptPostcondition>,
     desired: Option<&InterceptPostcondition>,
 ) -> std::result::Result<(), NetlinkError> {
-    let current = overdrive_netlink::nft::ip::observe()?;
-    let expected = expected_current.map(shared_program_from_postcondition).transpose()?;
-    if let Some(desired) = desired {
-        let desired = shared_program_from_postcondition(desired)?;
-        return overdrive_netlink::nft::ip::replace_atomically(expected.as_ref(), Some(&desired));
-    }
-
-    // The private seam's `desired = None` is the rollback arm. A present
-    // expected value is the exact prior restore target; `None` means restore
-    // first-boot absence. The low-level adapter still receives the observed
-    // replacement as its expected current identity.
-    overdrive_netlink::nft::ip::replace_atomically(current.as_ref(), expected.as_ref())
+    let expected = expected_current.map(shared_identity_from_postcondition).transpose()?;
+    let desired = desired.map(shared_identity_from_postcondition).transpose()?;
+    overdrive_netlink::nft::replace_shared_ip_intercept_atomically(
+        expected.as_ref(),
+        desired.as_ref(),
+    )
 }
 
-fn postcondition_from_shared_program(
-    program: &overdrive_netlink::nft::ip::SharedProgram,
+fn postcondition_from_shared_identity(
+    identity: &overdrive_netlink::nft::SharedIpInterceptIdentity,
 ) -> InterceptPostcondition {
-    let (table_and_chains, sets, prerouting, output) = program.components();
+    let (table_and_chains, sets, prerouting, output) = identity.normalized_parts();
     InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
 }
 
-fn shared_program_from_postcondition(
+fn shared_identity_from_postcondition(
     postcondition: &InterceptPostcondition,
-) -> std::result::Result<overdrive_netlink::nft::ip::SharedProgram, NetlinkError> {
+) -> std::result::Result<overdrive_netlink::nft::SharedIpInterceptIdentity, NetlinkError> {
     let InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output } =
         postcondition
     else {
@@ -464,7 +508,7 @@ fn shared_program_from_postcondition(
             ),
         ));
     };
-    overdrive_netlink::nft::ip::SharedProgram::from_components(
+    overdrive_netlink::nft::SharedIpInterceptIdentity::from_normalized_parts(
         table_and_chains.clone(),
         sets.clone(),
         prerouting.clone(),
@@ -868,7 +912,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
     #[allow(
         clippy::too_many_lines,
         reason = "the finite table is the closed two-prior by two-trigger by four-rollback-outcome contract"
@@ -1167,7 +1210,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
     #[allow(
         clippy::too_many_lines,
         reason = "one state-delta narrative covers refusal, create, retarget, reapply, and unpublished cleanup"
@@ -1338,7 +1380,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
     fn shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement() {
         let actual = program(19_000);
         let stale_caller_prior = program(18_000);
@@ -1411,6 +1452,7 @@ mod shared_program_rollback_acceptance {
         clippy::too_many_lines,
         reason = "one finite table keeps the five disjoint source-honest rollback dispositions together"
     )]
+    #[ignore = "superseded by D15 stateful shared-IP evidence"]
     fn replacement_and_every_rollback_disposition_preserve_exact_identity_and_source() {
         let requested = program(20_000);
         let wrong_replacement = program(20_100);
@@ -1555,6 +1597,7 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
+    #[ignore = "superseded by D15 stateful shared-IP evidence"]
     fn fresh_replace_exact_prior_rollback_and_idempotent_reapply_are_complete() {
         let requested = program(20_000);
 
@@ -1622,7 +1665,6 @@ mod shared_program_rollback_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-02 D-295-DISTILL-15 stateful shared-IP evidence"]
     fn runtime_present_wrong_target_and_observe_error_are_non_mutating() {
         let wrong_target = canonical_program(20_100, 20_101);
         let io =
