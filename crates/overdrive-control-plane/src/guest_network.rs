@@ -1961,6 +1961,21 @@ struct HostGuestNetworkAllocationState {
     program_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestNetworkRollbackLink {
+    None,
+    Pending,
+    Pinned,
+}
+
+#[derive(Debug, Clone)]
+struct GuestNetworkPendingRollback {
+    plan: GuestNetworkPlan,
+    ifindex: Option<u32>,
+    link: GuestNetworkRollbackLink,
+    tap_removed: bool,
+}
+
 /// Private host owner; its startup algorithm is independently executable from
 /// the still-pending native adapter bindings.
 #[allow(dead_code, reason = "D5 exact RED owner field is activated in DELIVER")]
@@ -1969,6 +1984,10 @@ pub(super) struct HostSharedGuestNetworkOwner {
     allocation_io: Arc<dyn GuestNetworkAllocationIo>,
     tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
     allocations: parking_lot::Mutex<BTreeMap<AllocationId, HostGuestNetworkAllocationState>>,
+    // Failed partial provisions stay private and lease-correlated until the
+    // existing teardown boundary proves the same empty complement; this is
+    // process-local retry state, never a published allocation or persistence.
+    rollback_pending: parking_lot::Mutex<BTreeMap<AllocationId, GuestNetworkPendingRollback>>,
 }
 
 // Allocation effects and node-shared effects intentionally have one concrete
@@ -1992,6 +2011,7 @@ impl HostSharedGuestNetworkOwner {
             allocation_io,
             tcx,
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
+            rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -2009,6 +2029,7 @@ impl HostSharedGuestNetworkOwner {
             allocation_io,
             tcx: Arc::new(parking_lot::Mutex::new(None)),
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
+            rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -2208,11 +2229,115 @@ impl HostSharedGuestNetworkOwner {
         })
     }
 
+    fn rollback_endpoint_absence(&self, plan: &GuestNetworkPlan, ifindex: u32) -> Result<()> {
+        self.allocation_io
+            .read_endpoint(plan, ifindex)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::EndpointMapObserve, source))
+            .and_then(|value| {
+                if value.is_some() {
+                    Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::EndpointMapObserve,
+                        expected: GuestNetworkFact::EndpointMapEntry { ifindex, value: None },
+                        observed: Some(GuestNetworkFact::EndpointMapEntry {
+                            ifindex,
+                            value: value.map(|endpoint| GuestEndpointFact {
+                                source_ip: endpoint.source_ipv4,
+                                source_mac: endpoint.source_mac,
+                                bridge_mac: endpoint.bridge_mac,
+                            }),
+                        }),
+                    })
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
+    fn rollback_attachment_absence(
+        &self,
+        plan: &GuestNetworkPlan,
+        ifindex: Option<u32>,
+    ) -> Result<()> {
+        self.allocation_io
+            .query_attachment(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxQuery, source))
+            .and_then(|attachment| {
+                if attachment.program_ids.is_empty() {
+                    Ok(())
+                } else {
+                    Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TcxQuery,
+                        expected: GuestNetworkFact::TcxAttachment {
+                            ifindex: ifindex.unwrap_or_default(),
+                            program_id: None,
+                            attach_point: None,
+                        },
+                        observed: Some(GuestNetworkFact::TcxAttachment {
+                            ifindex: ifindex.unwrap_or_default(),
+                            program_id: attachment.program_ids.first().copied(),
+                            attach_point: Some(TcxAttachPoint::Ingress),
+                        }),
+                    })
+                }
+            })
+    }
+
+    fn rollback_link_pin_absence(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        self.allocation_io
+            .link_pin_present(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxLinkPin, source))
+            .and_then(|present| {
+                if present {
+                    Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TcxLinkPin,
+                        expected: GuestNetworkFact::BpfLinkPin {
+                            path: PathBuf::new(),
+                            link_id: None,
+                        },
+                        observed: Some(GuestNetworkFact::BpfLinkPin {
+                            path: PathBuf::new(),
+                            link_id: None,
+                        }),
+                    })
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
+    async fn rollback_tap_absence(&self, plan: &GuestNetworkPlan) -> Result<bool> {
+        self.allocation_io
+            .observe_tap(plan)
+            .await
+            .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapObserve, source))
+            .and_then(|observation| match observation {
+                GuestNetworkAllocationTapObservation::Absent { .. } => Ok(true),
+                other => {
+                    let (expected, observed) = Self::tap_fact(plan, &other, false);
+                    Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapObserve,
+                        expected,
+                        observed,
+                    })
+                }
+            })
+    }
+
+    fn rollback_guard_complement(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let expected_members = self.expected_guard_members(None, Some(plan.alloc()));
+        self.allocation_io
+            .observe_guard(&expected_members)
+            .map_err(|error| Self::guard_error(GuestNetworkOperation::CleanupComplement, error))
+            .and_then(|observed| self.guard_postcondition(&expected_members, observed))
+    }
+
     async fn rollback_provision(
         &self,
         plan: &GuestNetworkPlan,
         ifindex: Option<u32>,
-    ) -> Option<GuestNetworkError> {
+        rollback_link: GuestNetworkRollbackLink,
+        tap_removed: bool,
+    ) -> (Option<GuestNetworkError>, bool) {
         let mut first = None;
         macro_rules! attempt {
             ($result:expr) => {
@@ -2230,35 +2355,59 @@ impl HostSharedGuestNetworkOwner {
                 )
             );
         }
-        attempt!(
-            self.allocation_io
-                .detach_pending_link(plan)
-                .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxDetach, source))
-        );
-        attempt!(
-            self.allocation_io
-                .detach_pinned_link(plan)
-                .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxDetach, source))
-        );
-        attempt!(
-            self.allocation_io
-                .set_tap_down(plan)
-                .await
-                .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapSetDown, source))
-        );
-        attempt!(
-            self.allocation_io
-                .delete_tap(plan)
-                .await
-                .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapDelete, source))
-        );
+        match rollback_link {
+            GuestNetworkRollbackLink::None => {}
+            GuestNetworkRollbackLink::Pending => attempt!(
+                self.allocation_io
+                    .detach_pending_link(plan)
+                    .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxDetach, source))
+            ),
+            GuestNetworkRollbackLink::Pinned => attempt!(
+                self.allocation_io
+                    .detach_pinned_link(plan)
+                    .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxDetach, source))
+            ),
+        }
+        let mut tap_removed = tap_removed;
+        if !tap_removed {
+            attempt!(
+                self.allocation_io.set_tap_down(plan).await.map_err(|source| Self::netlink_error(
+                    GuestNetworkOperation::TapSetDown,
+                    source
+                ))
+            );
+        }
+        if let Some(ifindex) = ifindex {
+            attempt!(self.rollback_endpoint_absence(plan, ifindex));
+        }
+        attempt!(self.rollback_attachment_absence(plan, ifindex));
+        attempt!(self.rollback_link_pin_absence(plan));
+        if !tap_removed {
+            let delete =
+                self.allocation_io.delete_tap(plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapDelete, source)
+                });
+            if delete.is_ok() {
+                tap_removed = true;
+            }
+            attempt!(delete);
+        }
         attempt!(
             self.allocation_io.delete_guard_member(plan).map_err(|error| Self::guard_error(
                 GuestNetworkOperation::GuardMemberDelete,
                 error
             ))
         );
-        first
+        match self.rollback_tap_absence(plan).await {
+            Ok(absent) => tap_removed |= absent,
+            Err(error) => {
+                if first.is_none() {
+                    first = Some(error);
+                }
+            }
+        }
+        attempt!(self.rollback_guard_complement(plan));
+        (first, tap_removed)
     }
 
     #[expect(clippy::expect_used, reason = "the accepted scratch prefix is a static valid CIDR")]
@@ -2665,6 +2814,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         }
         let mut ifindex = None;
         let mut program_id = None;
+        let mut rollback_link = GuestNetworkRollbackLink::None;
         let primary = async {
             self.allocation_io
                 .create_tap(plan)
@@ -2732,7 +2882,6 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     observed: observed_second,
                 });
             }
-            let second_tap_for_final = Some(second_tap.clone());
             let second_master = match second_tap {
                 GuestNetworkAllocationTapObservation::Persistent { master_ifindex, .. } => {
                     master_ifindex
@@ -2795,10 +2944,12 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             self.allocation_io
                 .attach_first_ingress(plan)
                 .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxAttach, source))?;
+            rollback_link = GuestNetworkRollbackLink::Pending;
             let attached_program = self
                 .allocation_io
                 .pin_link(plan)
                 .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxLinkPin, source))?;
+            rollback_link = GuestNetworkRollbackLink::Pinned;
             program_id = Some(attached_program);
             let attachment = self
                 .allocation_io
@@ -2843,12 +2994,6 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
-            let final_tap =
-                if matches!(final_tap, GuestNetworkAllocationTapObservation::Absent { .. }) {
-                    second_tap_for_final.clone().unwrap_or(final_tap)
-                } else {
-                    final_tap
-                };
             let (mut expected, observed) = Self::tap_fact(plan, &final_tap, true);
             if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
                 *ifindex = Some(tap_ifindex);
@@ -2887,8 +3032,21 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         }
         .await;
         if let Err(error) = primary {
-            let cleanup = self.rollback_provision(plan, ifindex).await;
-            return Err(cleanup.unwrap_or(error));
+            let (cleanup, tap_removed) =
+                self.rollback_provision(plan, ifindex, rollback_link, false).await;
+            if let Some(cleanup_error) = cleanup {
+                self.rollback_pending.lock().insert(
+                    plan.alloc().clone(),
+                    GuestNetworkPendingRollback {
+                        plan: plan.clone(),
+                        ifindex,
+                        link: rollback_link,
+                        tap_removed,
+                    },
+                );
+                return Err(cleanup_error);
+            }
+            return Err(error);
         }
         let Some(ifindex) = ifindex else {
             return Err(GuestNetworkError::PostconditionMismatch {
@@ -2926,6 +3084,26 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         Ok(())
     }
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let pending_rollback = { self.rollback_pending.lock().get(plan.alloc()).cloned() };
+        if let Some(pending) = pending_rollback {
+            let (error, tap_removed) = self
+                .rollback_provision(
+                    &pending.plan,
+                    pending.ifindex,
+                    pending.link,
+                    pending.tap_removed,
+                )
+                .await;
+            if let Some(error) = error {
+                self.rollback_pending
+                    .lock()
+                    .entry(plan.alloc().clone())
+                    .and_modify(|state| state.tap_removed = tap_removed);
+                return Err(error);
+            }
+            self.rollback_pending.lock().remove(plan.alloc());
+            return Ok(());
+        }
         let Some(state) = self.allocations.lock().get(plan.alloc()).cloned() else {
             return Ok(());
         };
@@ -4709,6 +4887,7 @@ mod allocation_owner_acceptance {
         endpoint_reads: parking_lot::Mutex<VecDeque<Option<GuestTcxEndpoint>>>,
         attachment_reads: parking_lot::Mutex<VecDeque<GuestTcxAttachment>>,
         pin_reads: parking_lot::Mutex<VecDeque<bool>>,
+        consume_unattached_readbacks: bool,
         guard_expectations: parking_lot::Mutex<Vec<BTreeSet<String>>>,
         failures: parking_lot::Mutex<BTreeSet<(AllocationCall, usize)>>,
         call_counts: parking_lot::Mutex<BTreeMap<AllocationCall, usize>>,
@@ -4761,6 +4940,7 @@ mod allocation_owner_acceptance {
                     program_ids: vec![2_950],
                 }])),
                 pin_reads: parking_lot::Mutex::new(VecDeque::from([true])),
+                consume_unattached_readbacks: false,
                 guard_expectations: parking_lot::Mutex::new(Vec::new()),
                 failures: parking_lot::Mutex::new(BTreeSet::new()),
                 call_counts: parking_lot::Mutex::new(BTreeMap::new()),
@@ -4783,6 +4963,7 @@ mod allocation_owner_acceptance {
                     program_ids: vec![2_950],
                 }])),
                 pin_reads: parking_lot::Mutex::new(VecDeque::from([true])),
+                consume_unattached_readbacks: false,
                 guard_expectations: parking_lot::Mutex::new(Vec::new()),
                 failures: parking_lot::Mutex::new(BTreeSet::new()),
                 call_counts: parking_lot::Mutex::new(BTreeMap::new()),
@@ -4811,6 +4992,7 @@ mod allocation_owner_acceptance {
                     program_ids: Vec::new(),
                 }])),
                 pin_reads: parking_lot::Mutex::new(VecDeque::from([false])),
+                consume_unattached_readbacks: true,
                 guard_expectations: parking_lot::Mutex::new(Vec::new()),
                 failures: parking_lot::Mutex::new(
                     failures.into_iter().map(|call| (call, 1)).collect(),
@@ -5015,13 +5197,20 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::ReadEndpoint) {
                 Err(tcx_failure())
             } else {
-                Ok(self.endpoint_reads.lock().pop_front().unwrap_or_else(|| {
-                    Some(GuestTcxEndpoint {
+                let calls = self.calls.lock().clone();
+                if let Some(value) = self.endpoint_reads.lock().pop_front() {
+                    Ok(value)
+                } else if calls.contains(&AllocationCall::RemoveEndpoint) {
+                    Ok(None)
+                } else if calls.contains(&AllocationCall::InsertEndpoint) {
+                    Ok(Some(GuestTcxEndpoint {
                         source_ipv4: plan.assignment().address,
                         source_mac: plan.assignment().mac,
                         bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
-                    })
-                }))
+                    }))
+                } else {
+                    Ok(None)
+                }
             }
         }
         fn remove_endpoint(
@@ -5051,10 +5240,16 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::QueryAttachment) {
                 Err(tcx_failure())
             } else {
-                Ok(self.attachment_reads.lock().pop_front().unwrap_or_else(|| GuestTcxAttachment {
-                    revision: 1,
-                    program_ids: vec![2_950],
-                }))
+                let calls = self.calls.lock().clone();
+                if !calls.contains(&AllocationCall::AttachFirstIngress)
+                    && !self.consume_unattached_readbacks
+                {
+                    Ok(GuestTcxAttachment { revision: 1, program_ids: Vec::new() })
+                } else if let Some(value) = self.attachment_reads.lock().pop_front() {
+                    Ok(value)
+                } else {
+                    Ok(GuestTcxAttachment { revision: 1, program_ids: vec![2_950] })
+                }
             }
         }
         fn link_pin_present(
@@ -5064,7 +5259,12 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::LinkPinPresent) {
                 Err(tcx_failure())
             } else {
-                Ok(self.pin_reads.lock().pop_front().unwrap_or(true))
+                let calls = self.calls.lock().clone();
+                if !calls.contains(&AllocationCall::PinLink) && !self.consume_unattached_readbacks {
+                    Ok(false)
+                } else {
+                    Ok(self.pin_reads.lock().pop_front().unwrap_or(true))
+                }
             }
         }
         fn detach_pending_link(
@@ -5456,15 +5656,15 @@ mod allocation_owner_acceptance {
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 None,
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Absent { name: "ovd-gbr0".to_owned() },
                 valid_up.clone(),
-                GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                GuestNetworkOperation::BridgeObserve,
+                bridge_fact("ovd-gbr0", None, GuestLinkKind::Bridge),
+                None,
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Present {
@@ -5473,9 +5673,9 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Other,
                 },
                 valid_up.clone(),
-                GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                GuestNetworkOperation::BridgeObserve,
+                bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Bridge),
+                Some(bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Other)),
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Present {
@@ -5485,8 +5685,8 @@ mod allocation_owner_acceptance {
                 },
                 valid_up.clone(),
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                master_fact(295, Some(30)),
+                Some(master_fact(295, Some(29))),
             ),
             (
                 bridge_29.clone(),
@@ -5498,8 +5698,8 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(30),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                master_fact(295, Some(29)),
+                Some(master_fact(295, Some(30))),
             ),
             (
                 bridge_29.clone(),
@@ -5513,7 +5713,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tun, true, true, Some(uid))),
             ),
             (
@@ -5528,7 +5728,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, true, None)),
             ),
             (
@@ -5541,7 +5741,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
             (
@@ -5554,7 +5754,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
@@ -5576,7 +5776,7 @@ mod allocation_owner_acceptance {
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
@@ -5610,8 +5810,15 @@ mod allocation_owner_acceptance {
         for (index, (final_bridge, final_tap, operation, expected, observed)) in
             final_cases.into_iter().enumerate()
         {
+            let mut tap_observations = vec![valid_down.clone(), valid_down.clone()];
+            if operation == GuestNetworkOperation::TapObserve {
+                tap_observations.push(final_tap.clone());
+            }
+            tap_observations.extend([GuestNetworkAllocationTapObservation::Absent {
+                name: "ovd-tp-0002".to_owned(),
+            }]);
             let io = ScriptedAllocationIo::with_observations(
-                [valid_down.clone(), final_tap],
+                tap_observations,
                 [
                     GuestNetworkAllocationBridgeObservation::Present {
                         name: "ovd-gbr0".to_owned(),
@@ -5621,12 +5828,48 @@ mod allocation_owner_acceptance {
                     final_bridge,
                 ],
             );
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io);
+            // The final checkpoint mismatch is the primary failure.  Seed
+            // the exact rollback read-backs after the successful setup
+            // observations so cleanup does not replace that source.
+            io.attachment_reads
+                .lock()
+                .push_back(GuestTcxAttachment { revision: 1, program_ids: Vec::new() });
+            io.pin_reads.lock().push_back(false);
+            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
             let plan = plan(&format!("nd295-s11-final-{index}"), Ipv4Addr::new(100, 95, 0, 2));
             let error = owner
                 .provision(&plan)
                 .await
                 .expect_err("final checkpoint mismatch refuses publication");
+            let calls = io.calls();
+            assert_eq!(
+                &calls[..15],
+                [
+                    AllocationCall::CreateTap,
+                    AllocationCall::ObserveTap,
+                    AllocationCall::AttachTap,
+                    AllocationCall::ObserveBridge,
+                    AllocationCall::ObserveTap,
+                    AllocationCall::InsertGuard,
+                    AllocationCall::ObserveGuard,
+                    AllocationCall::InsertEndpoint,
+                    AllocationCall::ReadEndpoint,
+                    AllocationCall::AttachFirstIngress,
+                    AllocationCall::PinLink,
+                    AllocationCall::QueryAttachment,
+                    AllocationCall::LinkPinPresent,
+                    AllocationCall::SetTapUp,
+                    AllocationCall::ObserveBridge,
+                ],
+                "final case {index} reaches the final bridge checkpoint only after both valid down-TAP observations"
+            );
+            if operation == GuestNetworkOperation::TapObserve {
+                assert_eq!(
+                    calls.get(15),
+                    Some(&AllocationCall::ObserveTap),
+                    "final case {index} reaches the final TAP/master checkpoint"
+                );
+            }
             assert_mismatch(error, operation, expected, observed);
             assert!(!owner.allocations.lock().contains_key(plan.alloc()));
         }
