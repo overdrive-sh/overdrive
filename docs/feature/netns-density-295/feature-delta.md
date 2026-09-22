@@ -7284,7 +7284,7 @@ RED-ready files authored in DISTILL:
 | `crates/overdrive-netlink/src/nft.rs` + family-specific source-local/integration bodies | Existing public IPv4 operations remain unchanged over one private family-aware codec; D9 retains its bridge surface; D15 adds only the exact doc-hidden `SharedIpInterceptIdentity` constructors/projection and two shared-IP observe/replace functions with handles private | D9 bodies remain unchanged. D15 codec/semantic projection properties plus Lima-root worker integration prove exact set ABI, complete generation-consistent observation, atomic full-object create/replace/delete, handle-insensitive equality, foreign refusal, and outside-table complement. |
 | `crates/overdrive-dataplane/src/guest_tcx.rs` + `tests/integration/guest_tcx_inventory.rs` | D12 exact semantic endpoint/map/inventory/lifecycle types, approved D14 semantic TCP input/outcome and one opaque-program method, private inventory/probe projections, and D6's unchanged operations | Retain D12 bodies. The D14 pure projection table covers verdict/mark/MAC/destination/eight counter pairs, short output, complete malformed EtherType/version/IHL/protocol/destination-port boundaries, wrong source, and decrease/wrap. Lima alone exercises the opaque method through real D5; no runner or fabricated outcome satisfies boot. |
 | `crates/overdrive-netlink/src/client.rs` | D12A doc-hidden `ObservedLinkIdentity`/`ObservedLinkKind`/`PersistentTapIdentity`, exact observation methods, and source-local raw-message projection table | method/projection bodies are explicit RED panics; the table covers absent/TAP/TUN/dummy/veth/other/correct-or-wrong bridge plus persistence, exact/missing UID, up/master/MAC identity, while Lima retains real RTM_GETLINK/persistent-TAP effect authority |
-| `crates/overdrive-worker/src/mtls_intercept{,_port,_worker}.rs` + worker acceptance/integration | Accepted intercept vocabularies/errors, D15 private seam/netlink boundary/unpublished guard, node-shared worker lifecycle and D7 registry | S14..18 bodies remain authored. S19-A adds one transitioned stateful source-local Host body and one authored Lima body. `netns_density_shared_owner` proves publication/one conflict/relinquish only; it does not own retry/fail-stop. |
+| `crates/overdrive-worker/src/mtls_intercept{,_port,_worker}.rs` + worker acceptance/integration | Accepted intercept vocabularies/errors, D15 private seam/netlink boundary/unpublished guard, node-shared worker lifecycle, D11 task owner, and D7 registry | S14..18 bodies remain authored. S19-A adds one transitioned stateful source-local Host body and one authored Lima body. Step-02-03 review remediation adds exact D11 weak-sender/abort ownership, full registry snapshots, production shared-dispatch retirement, shared teardown retry, strengthened S20, paired S25/S26 source-local/native evidence, and Outcome anchors; `netns_density_shared_owner` still owns no retry cadence/fail-stop. |
 | `crates/overdrive-control-plane/src/lib.rs` + DNS responder source-local acceptance | D8 private retained supervisor/DNS task owners, production-used private `run_mtls_owner`, and unchanged public `ServerHandle::shutdown_requested` delegation | Existing Tokio/DNS matrices remain. S19-B is authored but requires P02-20/21/22 elapsed/cadence/journal/terminal-owner assertion remediation before closure; no public/test-only seam is added. |
 | `crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs` | Complete native-metal direct-host-TAP/shared-bridge production-composition body | S37's reasoned-pending body captures the real structured `TcxLink` unhealthy event before TAP-down and retains frame/counter/timing/cleanup; supervisor call-order and core gate bodies supply the explicit cross-test EXEC-closure join, with no accessor |
 | `tests/conformance/` | Reusable direct-handler/public-API harness plus GH #295 owner-fail-stop/replacement body | exported server handler, HTTPS API, typed `ServeShutdownRequest` obtained only by delegating the retained real `ServerHandle::shutdown_requested`, same-root harness replacement, `nix`/`overdrive-netlink` host observation, and cleanup; no fixture panic/fabricated request/private supervisor, CLI, subprocess SUT, PID, assert_cmd, or trycmd |
@@ -7296,6 +7296,41 @@ inputs, compiled and semantically RED in the detached D10 overlay while the
 committed pre-cut tree remains single-shape. DELIVER verifies hashes, applies
 both patches byte-for-byte, reruns the same source hashes for RED, and may not
 weaken, repair, replace, or re-author an acceptance body.
+
+### [REF] Step 02-03 D1-D7 executable remediation
+
+The bounded post-review DISTILL correction adds no contract or API. It
+translates the already-approved D7/D11/S20/S23/S25/S26 requirements into these
+exact evidence layers:
+
+- source-local actual-Tokio D11 tests close weak-sender channel ownership,
+  abort-on-observer-drop child ownership, exact terminal-slot consumption,
+  live-slot replacement refusal, and a retained strong probe that closes only
+  when `shutdown(self)` consumes/drops the sole receiver before return;
+- source-local full registry snapshots cover the generation, every record and
+  lifecycle/effect/handle/claim field, all reservations, and both indexes;
+- the S23 race now enters the real worker through shared `start_alloc` and
+  `handle_shared_outbound`/`spawn_shared_enforcement`, never through a direct
+  test-owned `enforce`/`claim.publish` workflow;
+- shared teardown failure retains the exact stable opaque handle identity and
+  Retiring reservation, then supplies that identical identity to same-owner
+  retry before completion and successor admission;
+- S20 uses the existing recording adapter for exact bind/converge/socket/task/
+  program/guard cardinality and idempotence;
+- S25/S26 pair source-local real-owner state/complement proof with native-metal
+  `HostMtlsEnforcement`/TLS evidence at the existing
+  `outbound_enforce_substrate_splice` host-kernel-shared home; and
+- the control-plane integration body races the real worker result through
+  action-shim `dispatch`, retaining exact `registration_retired`, zero EXEC
+  release, driver-stop/mTLS/network order, address-last, and cleanup precedence.
+
+Every new or transitioned body has the required Outcome anchor, exact
+bounded-change declaration, closed observable universe/delta/complement, and
+reasoned `02-03` ignore. Current execution is honest: D1, D2, and the
+action-shim ordering scenario are semantic RED; registry/D3/S20/S25/S26 are
+GREEN evidence corrections over behavior already present; native S25/S26 are
+environment-pending because metal bootstrap lacks the selected guest kernel.
+Roadmap validation is pending independent DISTILL/roadmap review.
 
 ## Wave: DISTILL / [REF] Driving Adapter Coverage
 
@@ -7320,7 +7355,7 @@ oracles; black-box expectations do not absorb them.
 | Default in-process / explicit Linux runner | Rust production composition with injected Sim ports; the roadmap may wrap exact-name commands in Lima only as a Linux toolchain runner; no host/kernel I/O is inferred | Existing source-local evidence remains. S19-A's Host body and S19-B's control-plane-private supervisor body are authored reasoned-pending under 02-02 and 03-03 respectively. The worker body is prerequisite-only. |
 | Lima root | Linux/cgroup v2/BPF/nft/netlink, `integration-tests`, explicit whole-`overdrive-control-plane` **and whole-`overdrive-worker` integration-binary** assignments to one-thread `host-kernel-shared` verified through nextest `show-config`, named test CIDR leases | Existing D14/D15 real-adapter bodies retain their recorded state. S19-A's authored Lima `shared_program_valid_wrong_target_observation_is_non_mutating` proves only host-adapter no-mutation and is currently real-kernel RED at atomic create. S19-B is source-local control-plane timing evidence, not Lima/kernel evidence. S-ND295-34/37 retain their lanes. |
 | Native x86_64 metal — in-process S13 | canonical lease, no virtualization/nesting, usable KVM, real Cloud Hypervisor and guest artifacts; no built product binary | S-ND295-13 `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance` only |
-| Native x86_64 metal — remaining feature lanes | canonical lease, no virtualization/nesting, usable KVM, built default-feature binary, real Cloud Hypervisor and guest artifacts | S-ND295-01, S-ND295-23, S-ND295-25..26, S-ND295-35..37 and both T1 receipts |
+| Native x86_64 metal — remaining feature lanes | canonical lease, no virtualization/nesting, usable KVM, built default-feature binary, real Cloud Hypervisor and guest artifacts | S-ND295-01, S-ND295-23, S-ND295-25 `two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops`, S-ND295-26 `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle`, S-ND295-35..37 and both T1 receipts. The configured 2026-09-22 run acquired the metal lease but bootstrap refused because the selected guest-kernel artifact was absent; no native pass is claimed. |
 | Fresh-process retained owned rules | BootClosed, zero managed TAPs after VMM/attachment sweep, complete owned identity or empty state | S-ND295-13..18 |
 | Runtime tamper | already-published owner with recorded exact listener ports and append-only diagnostics | S19-A adapter no-mutation in 02-02; published worker prerequisite in 02-03; S19-B cadence/deadline/request closure plus S-ND295-29..33 in 03-03; S-ND295-37 native fault evidence later |
 

@@ -350,3 +350,171 @@ ownership, exposes an unapproved public surface, and has no honest Tier-3 /
 Contract Shape proof. Native-metal unavailability is not used as an excuse for
 these defects; the accepted Lima lane is sufficient for this step once the
 production body is repaired and actually exercised.
+
+## Iteration 2 — D15 remediation re-review
+
+### Metadata
+
+- **Reviewer:** fresh isolated DELIVER reviewer replacement
+- **Review ID:** `code_rev_20260921_223000_iteration_2`
+- **Step:** `02-02` — shared IP intercept constant-rule replacement and rollback
+- **Feature:** `netns-density-295`
+- **Reviewed cumulative commit:** `f1bd1fa1720768d09e4a12783e88ebbe39d22d23`
+- **Commit parent:** `a460cf7dce5370b4dffd4e7aab8b5c7041fd89cc`
+- **Prior review:** iteration 1 in this artifact, commit
+  `797391432fb001cae1d2ca0a0ad7de70986310fa`
+- **Final verdict:** **APPROVED**
+
+### Scope and authority
+
+This re-review covers the cumulative implementation through the reviewed
+commit, the six iteration-1 findings, the approved D-295-DISTILL-15 contract,
+the final D15/S19 translation review, and the step-02-02 roadmap criteria. It
+does not credit the pending 02-03 published-worker layer or the pending 03-03
+control-plane cadence/fail-stop layer. No production code, tests, or commits
+were changed by this reviewer; this append is the sole tracked write.
+
+### Strengths
+
+- The exact doc-hidden `SharedIpInterceptIdentity` API is present at
+  `crates/overdrive-netlink/src/nft.rs:2913-2970`, with private semantic fields
+  and no public family, raw-builder, handle, or generic mutation surface.
+- The private observed `Rule` retains kernel handles only inside the netlink
+  adapter (`nft.rs:3012-3017`, `:3467-3480`), while `SharedProgram::from_components`
+  reconstructs handle-free semantic identity (`:3072-3092`).
+- The source-local stateful fixture owns the complete declared universe,
+  conditional mutation journal, and staged fault schedule. The three live
+  bounded-change bodies cover the full optional-prior/trigger/rollback table,
+  refusal/create/retarget/reapply/drop transitions, caller-prior drift, and
+  independent zero-port refusal.
+- The four real Lima bodies drive `HostMtlsIntercept::new()` and the public
+  `MtlsIntercept` methods. They read back the real three sets/eight rules,
+  generation snapshots, notifications, dynamic complement, and unrelated
+  foreign table; the ambiguous-state body covers all seven accepted refusal
+  partitions (`mtls_intercept_install.rs:431-701`).
+- The final commit preserves Marcus as author and contains exactly one
+  `Co-Authored-By: Codex <codex@openai.com>` and one `Step-Id: 02-02` trailer.
+
+### Iteration-1 finding dispositions
+
+| Finding | Status | Evidence and disposition |
+|---|---|---|
+| **D1 — wrong set ABI / non-atomic first create** | **CLOSED** | The adapter uses the kernel IPv4 datatype `7`, concatenated datatype `0x1cd`, lengths `4` and `8` (`nft.rs:2987-2995`), and serializes table, chains, sets, and eight rules into one acknowledged nft batch (`:3545-3661`, `:3663-3708`). `None -> Some`, replacement, and `Some -> None` all use the same complete transaction boundary. Lima absence/create/read-back and guard-drop passed. |
+| **D2 — handle-dependent prior equality** | **CLOSED** | Semantic equality is made from the handle-free identity only; private handles are attached to observed rules and used only after the semantic comparison succeeds (`nft.rs:3012-3024`, `:3467-3516`, `:3735-3785`). The Lima retarget body passed with exact target-only semantic delta. |
+| **D3 — unapproved public low-level API** | **CLOSED** | The rejected `nft::ip` bundle and `AtomicRuleMutation` expansion are absent. The root-level public surface exactly matches D15: three identity methods and two doc-hidden functions (`nft.rs:2913-2970`); `AtomicRuleMutation` remains the pre-step Delete/Insert shape (`nft.rs:308-333`). |
+| **D4 — no-op shared guard** | **CLOSED for 02-02** | `SharedInterceptGuard` owns the private I/O handle plus requested identity and performs one conditional unpublished cleanup on Drop (`mtls_intercept_port.rs:63-83`). Stateful and Lima bodies prove stale guards cannot delete a successor or foreign state and that current unpublished Drop restores absence. The published relinquish path remains explicitly deferred to 02-03, as required by D15. |
+| **D5 — incomplete/non-canonical observation** | **CLOSED** | Observation is generation-bracketed (`nft.rs:3519-3529`), validates exact chains, set schemas/userdata, empty dynamic sets, foreign children/family, rule count/order/userdata, canonical expression identity, and the two non-zero target ports (`:3274-3333`, `:3376-3516`). Ambiguous real-kernel fixtures refuse without mutation. |
+| **D6 — missing production/Tier-3 and bounded-change evidence** | **CLOSED for the step boundary** | The three stateful source-local bodies and four exact Lima selectors are live, separately named, and carry `/// CONTRACT_SHAPE: bounded-change.`. The Lima bodies enter through `HostMtlsIntercept::new()` and the public port; S19-A remains adapter-only. The 02-03 worker prerequisite and 03-03 supervisor body remain pending and are not required for this step's adapter approval. |
+
+No iteration-1 correctness finding remains open. The 02-03 published owner and
+03-03 retry/deadline/fail-stop behaviors remain correctly outside this verdict.
+
+### Contract shape and test-boundary review
+
+**PASS.** The three live source-local stateful tests at
+`mtls_intercept_port.rs:919`, `:1211`, and `:1381` each declare the exact
+bounded-change Contract Shape. The S19-A source-local body at `:1666` and the
+four Lima bodies at `mtls_intercept_install.rs:431`, `:493`, `:542`, and `:597`
+also carry the declaration. The source-local bodies assert the production host
+algorithm through the approved module-private seam; the Lima bodies assert the
+real public adapter and kernel state. No test imports or exposes a private
+netlink handle, substitutes a fake production caller for Lima, or claims the
+pending worker/supervisor layers.
+
+### Behavioral evidence
+
+#### Exact schema, atomicity, and semantic identity
+
+The final code encodes the exact set schemas through
+`newset_payload_schema_family` (`nft.rs:947-965`), uses the approved IPv4 and
+concatenated datatype identifiers (`:2987-2995`), and sends one mixed-object
+batch with per-operation ACK draining (`:3545-3661`). The private `SharedMutation`
+enum is not public. `replace()` performs a complete generation-bracketed
+conditional observation before selecting create, replacement, or deletion
+(`nft.rs:3735-3785`). This closes D1 and D2 without adding a second adapter or
+public operation.
+
+#### Canonical refusal and complement preservation
+
+`collect_once()` rejects same-name foreign-family tables, partial/foreign
+chains, wrong chain schema, wrong/duplicate/missing set identity, non-empty
+dynamic sets, stateful children, wrong rule count/order/userdata, and non-
+canonical expression programs before mutation (`nft.rs:3376-3516`). The
+integration fixture enumerates foreign family, incomplete program, duplicate
+owned rule, unknown userdata, conflicting set schema, foreign child, and
+non-empty dynamic set (`mtls_intercept_install.rs:607-701`). Each row compares
+the complete target snapshot and foreign sentinel before and after refusal.
+
+#### Rollback algebra and source/state proof
+
+The desired-read failure branch rolls back conditionally from the committed
+requested identity (`mtls_intercept_port.rs:359-400`); the semantic-mismatch
+branch rolls back from the observed replacement (`:403-444`). Each branch makes
+one rollback attempt and one rollback read where specified. The source-local
+stateful table asserts both `prior = None` and `prior = Some`, all trigger and
+rollback outcomes, exact operation tags, separate desired-read and rollback
+sources, source-less semantic outcomes, complete owned-program transitions,
+unchanged dynamic/foreign complements, and closed mutation journals
+(`mtls_intercept_port.rs:919-1209`).
+
+#### Guard ownership split
+
+Successful fresh/adopt/retarget operations return the private guard only after
+the desired identity is read back (`mtls_intercept_port.rs:339-407`). Its
+conditional Drop is proven by the source-local fixture and the real Lima
+absence/create/reapply and retarget bodies. The stale prior guard refuses to
+delete a successor; the current unpublished guard deletes only the complete
+owned graph. The published-owner sealed relinquish remains the explicitly
+pending 02-03 responsibility, with no public disarm/relinquish method added.
+
+### Mechanical verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| Reviewed commit scope | PASS | `f1bd1fa1`: four files, 637 additions, 358 deletions; no unrelated production path changed in the remediation commit. |
+| Author/trailers | PASS | Marcus author; exactly one Codex trailer and one `Step-Id: 02-02`. |
+| `git diff --check` / formatting | PASS | Both pass on the reviewed tree. |
+| Lima source-local D15 selectors | PASS | Independently ran all three stateful bodies: 3 passed; independently ran S19-A: 1 passed. |
+| Lima `overdrive-netlink` library | PASS | 56 passed, 0 skipped. |
+| Lima `overdrive-worker` library | PASS | 62 passed, 12 reasoned ignored. |
+| Lima real-adapter selectors | PASS | Four exact public-adapter bodies passed; 47 unrelated integration bodies were skipped by the selector. |
+| Lima nextest group assignment | PASS | All four exact integration bodies resolve to `host-kernel-shared` with `max threads = 1`. |
+| Lima workspace check | PASS | `cargo check --workspace --all-targets --features integration-tests`. |
+| Focused worker clippy | Reported PASS; independent rerun environment-limited | The crafter/DES report records focused `-D warnings` clippy as PASS. A later independent rerun could not write more metadata because the Lima `/tmp` tmpfs was full; no changed-code warning was reported. |
+| All-target clippy | Baseline-limited | The recorded all-target run is blocked only by the pre-existing `overdrive-netlink/src/nft.rs:4838` test `eprintln!`; no D15 warning was reported. |
+| Mutation testing | NOT RUN | Correctly deferred to the final DELIVER-wave gate. |
+
+Native metal is not required for this nft-only D15 lane; the accepted matrix
+assigns these four real-adapter bodies to Lima root. The source-local macOS
+attempt was also correctly environment-limited by Linux-only netlink constants,
+not used as a production or test finding.
+
+### DES and committed-log disposition
+
+The final cumulative DES audit contains canonical replacement
+`RED/GREEN/COMMIT` events at `20:31:43Z`, `20:31:45Z`, and `20:31:45Z`, all
+`EXECUTED/PASS`. The committed execution log also preserves the earlier
+remediation attempt's historical `FAIL` and the subsequent superseded
+`GREEN/COMMIT` records. This is an audit-history/scope note only: it does not
+invalidate the canonical replacement cycle or the verified final commit, and
+the preserved history is not rewritten by this review.
+
+### New findings
+
+No new reachable behavioral, API-shape, test-honesty, ownership, or scope
+finding was identified. The only non-blocking evidence notes are the preserved
+DES history and the pre-existing all-target clippy baseline recorded above.
+
+## Iteration-2 final verdict
+
+**APPROVED**
+
+The final D15 implementation closes D1-D6 within the approved 02-02 boundary:
+exact nft schemas and atomic complete-object transitions are real-kernel green;
+semantic equality is handle-free while private handles remain available for
+replacement/deletion; the public surface is exactly the approved doc-hidden
+netlink API; unpublished Drop cleanup is distinct from the pending published
+relinquish path; observation is generation-bracketed and canonical; the
+stateful source-local and Lima evidence layers are paired and complete; and
+post-commit read-failure rollback preserves the exact error/source/state
+algebra. Step 02-02 may advance to its next orchestrated step.

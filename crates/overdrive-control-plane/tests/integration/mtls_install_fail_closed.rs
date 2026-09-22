@@ -150,10 +150,11 @@
 #![allow(clippy::doc_markdown)]
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+use std::num::NonZeroU16;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -193,7 +194,8 @@ use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::mtls_intercept_port::MtlsIntercept;
+use overdrive_worker::mtls_intercept::InterceptPostcondition;
+use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
 
@@ -1539,4 +1541,392 @@ async fn restart_driver_stop_failure_retains_mtls_and_network_protection() {
     assert_eq!(successor_row.state, AllocState::Running);
     assert_eq!(successor_row.restart_count, 0);
     assert!(successor_row.last_terminated.is_none());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RegistrationRetiredEffect {
+    NetworkProvision,
+    DriverStart,
+    DriverStop,
+    MtlsElementDrop,
+    NetworkTeardown,
+}
+
+struct RetirementBarrierGuard {
+    _inner: Box<dyn InterceptGuard>,
+    drops: Arc<AtomicUsize>,
+    effects: Arc<parking_lot::Mutex<Vec<RegistrationRetiredEffect>>>,
+}
+
+impl InterceptGuard for RetirementBarrierGuard {}
+
+impl Drop for RetirementBarrierGuard {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+        self.effects.lock().push(RegistrationRetiredEffect::MtlsElementDrop);
+    }
+}
+
+struct RetirementBarrierIntercept {
+    inner: SimMtlsIntercept,
+    entered: AtomicBool,
+    release: (StdMutex<bool>, Condvar),
+    block_once: AtomicBool,
+    drops: Arc<AtomicUsize>,
+    effects: Arc<parking_lot::Mutex<Vec<RegistrationRetiredEffect>>>,
+}
+
+impl RetirementBarrierIntercept {
+    fn new(effects: Arc<parking_lot::Mutex<Vec<RegistrationRetiredEffect>>>) -> Self {
+        Self {
+            inner: SimMtlsIntercept::new(),
+            entered: AtomicBool::new(false),
+            release: (StdMutex::new(false), Condvar::new()),
+            block_once: AtomicBool::new(true),
+            drops: Arc::new(AtomicUsize::new(0)),
+            effects,
+        }
+    }
+
+    async fn wait_entered(&self) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !self.entered.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("real worker reaches the Pending-to-Retired activation barrier");
+    }
+
+    fn release(&self) {
+        let (lock, wake) = &self.release;
+        *lock.lock().expect("release lock") = true;
+        wake.notify_all();
+    }
+
+    fn wrap(&self, inner: Box<dyn InterceptGuard>) -> Box<dyn InterceptGuard> {
+        Box::new(RetirementBarrierGuard {
+            _inner: inner,
+            drops: Arc::clone(&self.drops),
+            effects: Arc::clone(&self.effects),
+        })
+    }
+}
+
+impl MtlsIntercept for RetirementBarrierIntercept {
+    fn bind_transparent(
+        &self,
+        address: SocketAddrV4,
+    ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+        self.inner.bind_transparent(address)
+    }
+
+    fn converge_shared(
+        &self,
+        prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        self.inner.converge_shared(prior, leg_f, leg_c)
+    }
+
+    fn observe_shared(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
+        self.inner.observe_shared()
+    }
+
+    fn install_outbound(
+        &self,
+        tap: &str,
+        leg_f_port: u16,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        self.inner.install_outbound(tap, leg_f_port).map(|guard| self.wrap(guard))
+    }
+
+    fn install_inbound(
+        &self,
+        virt: SocketAddrV4,
+        leg_c_port: u16,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        if self.block_once.swap(false, Ordering::SeqCst) {
+            self.entered.store(true, Ordering::SeqCst);
+            let (lock, wake) = &self.release;
+            let mut released = lock.lock().expect("release lock");
+            while !*released {
+                released = wake.wait(released).expect("release wait");
+            }
+        }
+        self.inner.install_inbound(virt, leg_c_port).map(|guard| self.wrap(guard))
+    }
+}
+
+struct RegistrationRetiredDriver {
+    inner: SimDriver,
+    effects: Arc<parking_lot::Mutex<Vec<RegistrationRetiredEffect>>>,
+    releases: parking_lot::Mutex<Vec<AllocationId>>,
+    running: parking_lot::Mutex<Vec<AllocationId>>,
+}
+
+#[async_trait::async_trait]
+impl Driver for RegistrationRetiredDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.effects.lock().push(RegistrationRetiredEffect::DriverStart);
+        self.inner.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.effects.lock().push(RegistrationRetiredEffect::DriverStop);
+        self.inner.stop(handle).await
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.releases.lock().push(handle.alloc.clone());
+        self.inner.release_for_exit_emission(handle).await;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        self.running.lock().push(spec.alloc.clone());
+        self.inner.on_alloc_running(spec);
+    }
+}
+
+struct RegistrationRetiredNetwork {
+    alloc: AllocationId,
+    allocator: Arc<NetSlotAllocator>,
+    effects: Arc<parking_lot::Mutex<Vec<RegistrationRetiredEffect>>>,
+    guard_drops: Arc<AtomicUsize>,
+    fail_teardown: bool,
+    teardown_slot_held: AtomicBool,
+    teardown_guard_drops: AtomicUsize,
+}
+
+impl WorkloadNetworkProvisioner for RegistrationRetiredNetwork {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+        _vm_tap: &VmTapPlan,
+    ) -> Result<(), VethProvisionError> {
+        self.effects.lock().push(RegistrationRetiredEffect::NetworkProvision);
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.teardown_slot_held
+            .store(self.allocator.snapshot().contains_key(&self.alloc), Ordering::SeqCst);
+        self.teardown_guard_drops.store(self.guard_drops.load(Ordering::SeqCst), Ordering::SeqCst);
+        self.effects.lock().push(RegistrationRetiredEffect::NetworkTeardown);
+        if self.fail_teardown {
+            return Err(VethProvisionError::NetlinkConnect {
+                source: overdrive_netlink::NetlinkError::Connect {
+                    source: std::io::Error::from_raw_os_error(libc::EBUSY),
+                },
+            });
+        }
+        Ok(())
+    }
+}
+
+struct RegistrationRetiredOutcome {
+    rows: Vec<AllocStatusRow>,
+    effects: Vec<RegistrationRetiredEffect>,
+    releases: Vec<AllocationId>,
+    running: Vec<AllocationId>,
+    guard_drops: usize,
+    teardown_slot_held: bool,
+    teardown_guard_drops: usize,
+    slot_still_held: bool,
+}
+
+async fn drive_registration_retired_through_action_shim(
+    fail_teardown: bool,
+) -> RegistrationRetiredOutcome {
+    let tmp = TempDir::new().expect("tempdir");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let obs = build_obs();
+    let effects = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let intercept = Arc::new(RetirementBarrierIntercept::new(Arc::clone(&effects)));
+    let worker = build_worker(Arc::clone(&intercept) as Arc<dyn MtlsIntercept>);
+    worker.start_shared_owner().await.expect("publish the ordinary shared listener owner");
+
+    let driver = Arc::new(RegistrationRetiredDriver {
+        inner: SimDriver::new(DriverType::Vm),
+        effects: Arc::clone(&effects),
+        releases: parking_lot::Mutex::new(Vec::new()),
+        running: parking_lot::Mutex::new(Vec::new()),
+    });
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(registry)
+    };
+    let alloc_drivers = Arc::new(overdrive_control_plane::action_shim::AllocDriverIndex::default());
+    let alloc = AllocationId::new(if fail_teardown {
+        "registration-retired-cleanup-failure"
+    } else {
+        "registration-retired-cleanup-success"
+    })
+    .expect("valid allocation id");
+    let allocator = Arc::new(NetSlotAllocator::new());
+    let network = Arc::new(RegistrationRetiredNetwork {
+        alloc: alloc.clone(),
+        allocator: Arc::clone(&allocator),
+        effects: Arc::clone(&effects),
+        guard_drops: Arc::clone(&intercept.drops),
+        fail_teardown,
+        teardown_slot_held: AtomicBool::new(false),
+        teardown_guard_drops: AtomicUsize::new(0),
+    });
+    let workload = WorkloadId::new("svc-registration-retired").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let mut spec = build_spec(&alloc);
+    spec.service_ports = vec![NonZeroU16::new(8443).expect("non-zero port")];
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: workload,
+        node_id: node,
+        spec,
+        kind: WorkloadKind::Service,
+    };
+    let mut subscription = obs.subscribe_all_events().await.expect("subscribe before dispatch");
+
+    let dispatch = tokio::spawn({
+        let drivers = Arc::clone(&drivers);
+        let alloc_drivers = Arc::clone(&alloc_drivers);
+        let obs = Arc::clone(&obs);
+        let store = Arc::clone(&store);
+        let worker = Arc::clone(&worker);
+        let allocator = Arc::clone(&allocator);
+        let network = Arc::clone(&network);
+        async move {
+            let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
+            let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(0),
+            ));
+            let clock = SimClock::new();
+            let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
+            let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
+            let broker =
+                parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+            dispatch_with_network_provisioner(
+                vec![action],
+                drivers.as_ref(),
+                alloc_drivers.as_ref(),
+                obs.as_ref(),
+                &dataplane,
+                &ca,
+                &clock,
+                &identity,
+                &lifecycle_tx,
+                &tick_now(),
+                &NodeId::new("writer-1").expect("node id"),
+                build_vip_allocator(store),
+                &broker,
+                None,
+                Some(&worker as &dyn MtlsInterceptLifecycle),
+                allocator.as_ref(),
+                network.as_ref(),
+                &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
+            )
+            .await
+        }
+    });
+    intercept.wait_entered().await;
+    let retirement = tokio::spawn({
+        let worker = Arc::clone(&worker);
+        let alloc = alloc.clone();
+        async move { worker.stop_alloc(&alloc).await }
+    });
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!retirement.is_finished(), "the retirement owner waits for Pending handoff");
+    intercept.release();
+    dispatch
+        .await
+        .expect("dispatch task joins")
+        .expect("the production fail-closed arm records its terminal outcome");
+    retirement
+        .await
+        .expect("retirement task joins")
+        .expect("the action shim and external stop share one mTLS drain");
+    let rows = drain_alloc_rows(&mut subscription, &alloc).await;
+    let outcome = RegistrationRetiredOutcome {
+        rows,
+        effects: effects.lock().clone(),
+        releases: driver.releases.lock().clone(),
+        running: driver.running.lock().clone(),
+        guard_drops: intercept.drops.load(Ordering::SeqCst),
+        teardown_slot_held: network.teardown_slot_held.load(Ordering::SeqCst),
+        teardown_guard_drops: network.teardown_guard_drops.load(Ordering::SeqCst),
+        slot_still_held: allocator.snapshot().contains_key(&alloc),
+    };
+    allocator.release(&alloc);
+    worker.shutdown_owner().await.expect("shared listener owner joins");
+    outcome
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 02-03 RegistrationRetired action-shim cleanup evidence"]
+async fn registration_retired_from_real_start_alloc_keeps_exec_closed_and_releases_the_address_last()
+ {
+    for fail_teardown in [false, true] {
+        let outcome = drive_registration_retired_through_action_shim(fail_teardown).await;
+        assert_eq!(outcome.rows.len(), 2, "Running is superseded by one Failed receipt");
+        assert_eq!(outcome.rows[0].state, AllocState::Running);
+        assert_eq!(outcome.rows[1].state, AllocState::Failed);
+        assert!(outcome.releases.is_empty(), "RegistrationRetired never releases EXEC");
+        assert!(outcome.running.is_empty(), "the driver never observes accepted Running");
+        assert_eq!(outcome.guard_drops, 2, "outbound and one inbound element drain exactly once");
+        assert!(outcome.teardown_slot_held, "the address lease remains held during teardown");
+        assert_eq!(outcome.teardown_guard_drops, 2, "mTLS drain precedes guest teardown");
+        assert_eq!(
+            outcome.effects,
+            vec![
+                RegistrationRetiredEffect::NetworkProvision,
+                RegistrationRetiredEffect::DriverStart,
+                RegistrationRetiredEffect::DriverStop,
+                RegistrationRetiredEffect::MtlsElementDrop,
+                RegistrationRetiredEffect::MtlsElementDrop,
+                RegistrationRetiredEffect::NetworkTeardown,
+            ]
+        );
+        if fail_teardown {
+            assert!(outcome.slot_still_held, "failed teardown preserves the release-last lease");
+            assert!(matches!(
+                outcome.rows[1].reason,
+                Some(TransitionReason::DriverInternalError { .. })
+            ));
+            let detail = outcome.rows[1].detail.as_deref().expect("aggregate cleanup detail");
+            assert!(detail.contains("primary rejection"));
+            assert!(detail.contains("retired before activation"));
+            assert!(detail.contains("structural network teardown"));
+        } else {
+            assert!(!outcome.slot_still_held, "successful teardown releases the address last");
+            assert!(matches!(
+                outcome.rows[1].reason,
+                Some(TransitionReason::MtlsInterceptInstallFailed { ref stage, .. })
+                    if stage == "registration_retired"
+            ));
+        }
+    }
 }

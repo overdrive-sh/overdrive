@@ -142,19 +142,20 @@ use std::net::{SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
-use overdrive_core::traits::driver::{AllocationSpec, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, GuestNetworkAssignment, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::cidr_lease::TestCidrLease;
-use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
+use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
+use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, InterceptGuard, MtlsIntercept};
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use async_trait::async_trait;
@@ -633,6 +634,13 @@ impl IdentityRead for HeldIdentities {
 fn held_identities(pki: &TestPki) -> HeldIdentities {
     let mut svids = BTreeMap::new();
     svids.insert(pki.client_alloc.clone(), pki.client_svid_material());
+    HeldIdentities { svids, bundle: pki.trust_bundle() }
+}
+
+fn held_identities_for(pki: &TestPki, allocations: &[AllocationId]) -> HeldIdentities {
+    let material = pki.client_svid_material();
+    let svids =
+        allocations.iter().cloned().map(|allocation| (allocation, material.clone())).collect();
     HeldIdentities { svids, bundle: pki.trust_bundle() }
 }
 
@@ -1633,6 +1641,433 @@ async fn outbound_enforce_substrate_bidirectional_splice_zero_copy() {
     // The clean path explicitly owns and awaits worker teardown before shared
     // nft/topology removal. Drop is only the synchronous panic fallback.
     topology_guard.finish().await.expect("splice fixture worker cleanup must converge");
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MetalSharedOwnerSurface {
+    binds: usize,
+    converges: usize,
+    observes: usize,
+    addresses: Vec<SocketAddrV4>,
+    node_guard_drops: usize,
+    allocation_guard_drops: usize,
+}
+
+struct MetalOwnedGuard {
+    inner: Option<Box<dyn InterceptGuard>>,
+    drops: Arc<AtomicUsize>,
+}
+
+impl InterceptGuard for MetalOwnedGuard {}
+
+impl Drop for MetalOwnedGuard {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+        drop(self.inner.take());
+    }
+}
+
+struct MetalSharedIntercept {
+    inner: HostMtlsIntercept,
+    binds: AtomicUsize,
+    converges: AtomicUsize,
+    observes: AtomicUsize,
+    addresses: parking_lot::Mutex<Vec<SocketAddrV4>>,
+    node_guard_drops: Arc<AtomicUsize>,
+    allocation_guard_drops: Arc<AtomicUsize>,
+}
+
+impl MetalSharedIntercept {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: HostMtlsIntercept::new(),
+            binds: AtomicUsize::new(0),
+            converges: AtomicUsize::new(0),
+            observes: AtomicUsize::new(0),
+            addresses: parking_lot::Mutex::new(Vec::new()),
+            node_guard_drops: Arc::new(AtomicUsize::new(0)),
+            allocation_guard_drops: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    fn surface(&self) -> MetalSharedOwnerSurface {
+        MetalSharedOwnerSurface {
+            binds: self.binds.load(Ordering::SeqCst),
+            converges: self.converges.load(Ordering::SeqCst),
+            observes: self.observes.load(Ordering::SeqCst),
+            addresses: self.addresses.lock().clone(),
+            node_guard_drops: self.node_guard_drops.load(Ordering::SeqCst),
+            allocation_guard_drops: self.allocation_guard_drops.load(Ordering::SeqCst),
+        }
+    }
+
+    fn wrap(guard: Box<dyn InterceptGuard>, drops: &Arc<AtomicUsize>) -> Box<dyn InterceptGuard> {
+        Box::new(MetalOwnedGuard { inner: Some(guard), drops: Arc::clone(drops) })
+    }
+}
+
+impl MtlsIntercept for MetalSharedIntercept {
+    fn bind_transparent(&self, address: SocketAddrV4) -> InterceptResult<TcpListener> {
+        let listener = self.inner.bind_transparent(address)?;
+        let bound = match listener.local_addr().expect("bound shared-listener address") {
+            std::net::SocketAddr::V4(bound) => bound,
+            std::net::SocketAddr::V6(_) => panic!("shared listener is IPv4"),
+        };
+        self.binds.fetch_add(1, Ordering::SeqCst);
+        self.addresses.lock().push(bound);
+        Ok(listener)
+    }
+
+    fn converge_shared(
+        &self,
+        prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.converges.fetch_add(1, Ordering::SeqCst);
+        self.inner
+            .converge_shared(prior, leg_f, leg_c)
+            .map(|guard| Self::wrap(guard, &self.node_guard_drops))
+    }
+
+    fn observe_shared(&self) -> InterceptResult<Option<InterceptPostcondition>> {
+        self.observes.fetch_add(1, Ordering::SeqCst);
+        self.inner.observe_shared()
+    }
+
+    fn install_outbound(
+        &self,
+        tap: &str,
+        leg_f_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.inner
+            .install_outbound(tap, leg_f_port)
+            .map(|guard| Self::wrap(guard, &self.allocation_guard_drops))
+    }
+
+    fn install_inbound(
+        &self,
+        virt: SocketAddrV4,
+        leg_c_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.inner
+            .install_inbound(virt, leg_c_port)
+            .map(|guard| Self::wrap(guard, &self.allocation_guard_drops))
+    }
+}
+
+struct AllMeshResolve {
+    peer: SocketAddrV4,
+}
+
+#[async_trait]
+impl MtlsResolve for AllMeshResolve {
+    async fn probe(&self) -> Result<(), MtlsResolveError> {
+        Ok(())
+    }
+
+    async fn resolve(&self, _orig_dst: SocketAddrV4) -> Result<MtlsResolution, MtlsResolveError> {
+        Ok(MtlsResolution::Mesh(ResolvedBackend { addr: self.peer, expected_svid: None }))
+    }
+}
+
+fn shared_metal_spec(
+    pki: &TestPki,
+    allocation: AllocationId,
+    address: std::net::Ipv4Addr,
+    tap: &str,
+) -> AllocationSpec {
+    let mut spec = build_client_spec(pki, None);
+    spec.alloc = allocation;
+    spec.network = Some(GuestNetworkAssignment {
+        address,
+        tap: tap.to_owned(),
+        mac: [0x02, 0, 10, 95, 0, address.octets()[3]],
+        gateway: std::net::Ipv4Addr::LOCALHOST,
+        prefix: 8,
+        dns: std::net::Ipv4Addr::LOCALHOST,
+    });
+    spec.service_ports = vec![std::num::NonZeroU16::new(8443).expect("non-zero port")];
+    spec
+}
+
+fn shared_peer_server_config(pki: &TestPki) -> Arc<rustls::ServerConfig> {
+    use rustls::server::WebPkiClientVerifier;
+    let roots = Arc::new(ca_root_store(pki.ca_cert_pem()));
+    let verifier = WebPkiClientVerifier::builder(roots).build().expect("client verifier");
+    let mut config = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(
+            vec![pki.peer_leaf.cert_der.clone(), pki.intermediate_cert_der()],
+            pki.peer_leaf.key_der.clone_key(),
+        )
+        .expect("shared peer server config");
+    config.send_tls13_tickets = 0;
+    Arc::new(config)
+}
+
+fn shared_peer_connection(mut tcp: std::net::TcpStream, config: Arc<rustls::ServerConfig>) -> bool {
+    tcp.set_read_timeout(Some(Duration::from_secs(15))).ok();
+    tcp.set_nodelay(true).ok();
+    let mut connection = rustls::ServerConnection::new(config).expect("server connection");
+    if !drive_server_handshake(&mut connection, &mut tcp) {
+        return false;
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut buffer = [0_u8; 4096];
+    while Instant::now() < deadline {
+        let mut stream = rustls::Stream::new(&mut connection, &mut tcp);
+        match stream.read(&mut buffer) {
+            Ok(0) => return true,
+            Ok(read) => {
+                if stream.write_all(&buffer[..read]).and_then(|()| stream.flush()).is_err() {
+                    return false;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return true,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+struct SharedPeerOwner {
+    join: Option<std::thread::JoinHandle<bool>>,
+    third_entered: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    third_release: std::sync::mpsc::Sender<()>,
+}
+
+impl SharedPeerOwner {
+    fn spawn(pki: &TestPki, connections: usize, block_third: bool) -> Self {
+        let bind = SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT);
+        let config = shared_peer_server_config(pki);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let join = std::thread::spawn(move || {
+            let listener = TcpListener::bind(bind).expect("bind shared mesh peer");
+            listener.set_nonblocking(true).expect("nonblocking shared mesh peer");
+            let mut children = Vec::new();
+            for index in 0..connections {
+                let (tcp, _) = accept_with_timeout(&listener, Duration::from_secs(15))
+                    .expect("accept shared mesh connection");
+                if block_third && index == 2 {
+                    entered_tx.send(()).expect("publish third-peer barrier");
+                    release_rx.recv().expect("release third-peer barrier");
+                }
+                let config = Arc::clone(&config);
+                children.push(std::thread::spawn(move || shared_peer_connection(tcp, config)));
+            }
+            children.into_iter().all(|child| child.join().is_ok_and(|result| result))
+        });
+        Self {
+            join: Some(join),
+            third_entered: std::sync::Mutex::new(entered_rx),
+            third_release: release_tx,
+        }
+    }
+
+    async fn wait_third(&self) {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let received = self.third_entered.lock().expect("third barrier lock").try_recv();
+                match received {
+                    Ok(()) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        panic!("shared peer ended before third connection")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("third real enforcement connection reaches the peer barrier");
+    }
+
+    fn release_third(&self) {
+        self.third_release.send(()).expect("release third connection");
+    }
+
+    fn finish(mut self) {
+        let _ = self.third_release.send(());
+        assert!(self.join.take().expect("peer join").join().expect("peer thread joins"));
+    }
+}
+
+impl Drop for SharedPeerOwner {
+    fn drop(&mut self) {
+        let _ = self.third_release.send(());
+    }
+}
+
+async fn shared_client(source: std::net::Ipv4Addr, target: SocketAddrV4) -> tokio::net::TcpStream {
+    let socket = tokio::net::TcpSocket::new_v4().expect("create shared metal client");
+    socket.bind(SocketAddrV4::new(source, 0).into()).expect("bind exact source capability");
+    socket.connect(target.into()).await.expect("connect shared leg F")
+}
+
+async fn assert_shared_exchange(stream: &mut tokio::net::TcpStream, marker: &[u8]) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    stream.write_all(marker).await.expect("send shared plaintext marker");
+    let mut echoed = vec![0_u8; marker.len()];
+    tokio::time::timeout(Duration::from_secs(15), stream.read_exact(&mut echoed))
+        .await
+        .expect("real enforcement returns the byte-distinct response")
+        .expect("read shared response");
+    assert_eq!(echoed, marker);
+}
+
+fn setup_shared_peer_address() {
+    ip_quiet(&["addr", "del", &format!("{MESH_BACKEND_IP}/32"), "dev", "lo"]);
+    ip(&["addr", "add", &format!("{MESH_BACKEND_IP}/32"), "dev", "lo"]);
+}
+
+struct SharedMetalCleanup;
+
+impl Drop for SharedMetalCleanup {
+    fn drop(&mut self) {
+        clean_shared_infra();
+        teardown_topology();
+    }
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "pending DELIVER step 02-03 S-ND295-25 native real-enforcement isolation evidence"]
+async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops() {
+    if !is_root() {
+        eprintln!("SKIP S-ND295-25 native evidence: not root");
+        return;
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+    setup_shared_peer_address();
+    let _cleanup = SharedMetalCleanup;
+    let pki = TestPki::mint();
+    let first = AllocationId::new("metal-shared-first").expect("allocation id");
+    let second = AllocationId::new("metal-shared-second").expect("allocation id");
+    let identity: Arc<dyn IdentityRead> =
+        Arc::new(held_identities_for(&pki, &[first.clone(), second.clone()]));
+    let enforcement = Arc::new(HostMtlsEnforcement::new(identity, MtlsLimits::default()));
+    enforcement.probe().await.expect("real enforcement probe");
+    let intercept = MetalSharedIntercept::new();
+    let peer = SharedPeerOwner::spawn(&pki, 2, false);
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
+        peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
+    });
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+    ));
+    worker.start_shared_owner().await.expect("publish real shared owner");
+    let owner_before = intercept.surface();
+    let leg_f = owner_before.addresses[0];
+    let first_spec =
+        shared_metal_spec(&pki, first.clone(), "127.0.0.2".parse().unwrap(), "m25tap-a");
+    let second_spec =
+        shared_metal_spec(&pki, second.clone(), "127.0.0.3".parse().unwrap(), "m25tap-b");
+    worker.start_alloc(&first_spec).await.expect("publish first real capability");
+    worker.start_alloc(&second_spec).await.expect("publish second real capability");
+    let mut first_client = shared_client("127.0.0.2".parse().unwrap(), leg_f).await;
+    let mut second_client = shared_client("127.0.0.3".parse().unwrap(), leg_f).await;
+    assert_shared_exchange(&mut first_client, b"metal-shared-first-before-stop").await;
+    assert_shared_exchange(&mut second_client, b"metal-shared-second-before-stop").await;
+
+    worker.stop_alloc(&first).await.expect("first real handle drains");
+    assert_shared_exchange(&mut second_client, b"metal-shared-second-after-first-stop").await;
+    worker.audit_shared_owner().await.expect("both shared listener tasks remain live");
+    let owner_after = intercept.surface();
+    assert_eq!(owner_after.binds, owner_before.binds);
+    assert_eq!(owner_after.converges, owner_before.converges);
+    assert_eq!(owner_after.addresses, owner_before.addresses);
+    assert_eq!(owner_after.node_guard_drops, 0);
+    assert_eq!(owner_after.allocation_guard_drops, 2);
+
+    drop(first_client);
+    drop(second_client);
+    worker.stop_alloc(&second).await.expect("second real handle drains");
+    worker.shutdown_owner().await.expect("real shared owner joins");
+    assert_eq!(intercept.surface().allocation_guard_drops, 4);
+    assert_eq!(intercept.surface().node_guard_drops, 0);
+    assert!(!nft_dump_table().is_empty(), "sealed node guard relinquishes the constant program");
+    peer.finish();
+    clean_shared_infra();
+    teardown_topology();
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "pending DELIVER step 02-03 S-ND295-26 native multi-capability shutdown evidence"]
+async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle() {
+    if !is_root() {
+        eprintln!("SKIP S-ND295-26 native evidence: not root");
+        return;
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _kernel_lock = KernelStateLock::acquire();
+    clean_shared_infra();
+    setup_shared_peer_address();
+    let _cleanup = SharedMetalCleanup;
+    let pki = TestPki::mint();
+    let first = AllocationId::new("metal-shutdown-first").expect("allocation id");
+    let second = AllocationId::new("metal-shutdown-second").expect("allocation id");
+    let identity: Arc<dyn IdentityRead> =
+        Arc::new(held_identities_for(&pki, &[first.clone(), second.clone()]));
+    let enforcement = Arc::new(HostMtlsEnforcement::new(identity, MtlsLimits::default()));
+    enforcement.probe().await.expect("real enforcement probe");
+    let intercept = MetalSharedIntercept::new();
+    let peer = SharedPeerOwner::spawn(&pki, 3, true);
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
+        peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
+    });
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+    ));
+    worker.start_shared_owner().await.expect("publish real shared owner");
+    let addresses = intercept.surface().addresses;
+    let first_spec = shared_metal_spec(&pki, first, "127.0.0.4".parse().unwrap(), "m26tap-a");
+    let second_spec = shared_metal_spec(&pki, second, "127.0.0.5".parse().unwrap(), "m26tap-b");
+    worker.start_alloc(&first_spec).await.expect("publish first capability");
+    worker.start_alloc(&second_spec).await.expect("publish second capability");
+    let mut first_client = shared_client("127.0.0.4".parse().unwrap(), addresses[0]).await;
+    let mut second_client = shared_client("127.0.0.5".parse().unwrap(), addresses[0]).await;
+    assert_shared_exchange(&mut first_client, b"metal-shutdown-first-live").await;
+    assert_shared_exchange(&mut second_client, b"metal-shutdown-second-live").await;
+    let third_client = shared_client("127.0.0.5".parse().unwrap(), addresses[0]).await;
+    peer.wait_third().await;
+
+    let mut shutdown = tokio::spawn({
+        let worker = Arc::clone(&worker);
+        async move { worker.shutdown_owner().await }
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut shutdown).await.is_err(),
+        "real owner waits for the enforcement-held claim"
+    );
+    peer.release_third();
+    shutdown.await.expect("shutdown task joins").expect("all real handles and claims drain");
+    drop(first_client);
+    drop(second_client);
+    drop(third_client);
+    for address in addresses {
+        drop(TcpListener::bind(address).expect("shutdown closes each exact shared socket"));
+    }
+    assert_eq!(intercept.surface().allocation_guard_drops, 4);
+    assert_eq!(intercept.surface().node_guard_drops, 0);
+    assert!(!nft_dump_table().is_empty(), "sealed node guard relinquishes the constant program");
+    peer.finish();
+    clean_shared_infra();
+    teardown_topology();
 }
 
 // =====================================================================

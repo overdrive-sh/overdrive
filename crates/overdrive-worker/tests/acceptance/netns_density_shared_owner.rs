@@ -2,7 +2,7 @@
 
 #![allow(clippy::doc_markdown)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
 use std::sync::Arc;
@@ -15,13 +15,15 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::driver::{
     AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
 };
-use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
-use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+use overdrive_core::traits::mtls_enforcement::{
+    EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement, MtlsLimits,
+    PumpLiveness,
+};
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
 use overdrive_netlink::nft::SharedIpInterceptIdentity;
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
-use overdrive_sim::adapters::mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptWorker, MtlsSharedOwnerError};
@@ -38,42 +40,91 @@ fn worker(intercept: Arc<dyn MtlsIntercept>) -> Arc<MtlsInterceptWorker> {
     Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
 }
 
+fn worker_with_enforcement(
+    intercept: Arc<dyn MtlsIntercept>,
+    enforcement: Arc<dyn MtlsEnforcement>,
+) -> Arc<MtlsInterceptWorker> {
+    let peer = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9443);
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+        BTreeMap::new(),
+        MtlsResolution::Mesh(ResolvedBackend { addr: peer, expected_svid: None }),
+    ));
+    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 02-03 S-ND295-20 exact shared-owner publication evidence"]
 async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
-    let worker = worker(Arc::new(SimMtlsIntercept::new()));
+    let intercept = Arc::new(RecordingSharedIntercept::new());
+    let worker = worker(intercept.clone());
+    let before = intercept.surface();
 
     worker.start_shared_owner().await.expect("two listeners, two tasks, and one node guard start");
     worker.audit_shared_owner().await.expect("full listener/task/rule read-back succeeds");
+    let published = intercept.surface();
+    assert_eq!(before.call_counts, (0, 0, 0));
+    assert_eq!(published.call_counts, (2, 1, 4));
+    assert_eq!(published.listener_addresses.len(), 2);
+    assert_ne!(published.listener_addresses[0], published.listener_addresses[1]);
+    assert!(published.listener_addresses.iter().all(|address| address.port() != 0));
+    assert_eq!(published.listener_clones, 2, "one live socket exists for each recorded leg");
+    assert_eq!(published.shared_guard_drops, 0, "the published node guard remains retained");
+    assert_eq!(published.allocation_guard_drops, 0);
+    let expected = RecordingSharedIntercept::identity(
+        published.listener_addresses[0],
+        published.listener_addresses[1],
+    );
+    assert_eq!(published.observation, Some(expected));
+
     worker
         .start_shared_owner()
         .await
         .expect("repeated owner start is idempotent and adds no listener or task");
+    assert_eq!(
+        intercept.surface(),
+        published,
+        "idempotent start changes no socket, task, guard, program, or call cardinality"
+    );
+
+    intercept.release_listener_clones();
     worker.shutdown_owner().await.expect("owner shutdown drains the complete userspace tree");
-    assert!(matches!(
-        worker.audit_shared_owner().await,
-        Err(MtlsSharedOwnerError::OwnerShutdown | MtlsSharedOwnerError::NotStarted)
-    ));
+    let shutdown = intercept.surface();
+    assert_eq!(shutdown.call_counts, published.call_counts);
+    assert_eq!(shutdown.listener_addresses, published.listener_addresses);
+    assert_eq!(shutdown.observation, published.observation);
+    assert_eq!(shutdown.listener_clones, 0);
+    assert_eq!(shutdown.shared_guard_drops, 0, "sealed shutdown relinquishes the node guard");
+    assert_eq!(shutdown.allocation_guard_drops, 0);
+    for address in published.listener_addresses {
+        drop(
+            TcpListener::bind(address).expect("shutdown closes each exact shared listener socket"),
+        );
+    }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 02-03 shared-owner leg-F refusal complement evidence"]
 async fn initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication() {
     for errno in [libc::EADDRINUSE, libc::EPERM, libc::EMFILE] {
-        let intercept = Arc::new(SimMtlsIntercept::new());
-        intercept.script_bind_fault(SimInterceptFault::TransparentListener { errno });
-        let worker = worker(intercept);
+        let intercept = Arc::new(RecordingSharedIntercept::failing_bind_with_errno(1, errno));
+        let worker = worker(intercept.clone());
+        let before = intercept.surface();
 
         let error =
             worker.start_shared_owner().await.expect_err("standing bind fault refuses start");
         assert!(matches!(error, MtlsSharedOwnerError::ListenerBind { leg: InterceptLeg::F, .. }));
         assert!(matches!(worker.audit_shared_owner().await, Err(MtlsSharedOwnerError::NotStarted)));
         worker.shutdown_owner().await.expect("Absent owner shutdown is idempotent");
+        let after = intercept.surface();
+        let mut expected = before;
+        expected.call_counts = (1, 0, 1);
+        assert_eq!(after, expected, "leg-F refusal changes only observe/bind call receipts");
     }
 }
-
-struct InertGuard;
-impl InterceptGuard for InertGuard {}
 
 struct RecordingSharedIntercept {
     listener_clones: Mutex<Vec<TcpListener>>,
@@ -83,9 +134,11 @@ struct RecordingSharedIntercept {
     converge_calls: AtomicUsize,
     observe_calls: AtomicUsize,
     fail_bind_at: Option<usize>,
+    fail_bind_errno: Option<i32>,
     fail_converge: AtomicBool,
     shared_observation: Mutex<Option<InterceptPostcondition>>,
     shared_guard_drops: Arc<AtomicUsize>,
+    allocation_guard_drops: Arc<AtomicUsize>,
     occupy_exact_rebind: AtomicBool,
     blockers: Mutex<Vec<TcpListener>>,
 }
@@ -100,9 +153,11 @@ impl RecordingSharedIntercept {
             converge_calls: AtomicUsize::new(0),
             observe_calls: AtomicUsize::new(0),
             fail_bind_at: None,
+            fail_bind_errno: None,
             fail_converge: AtomicBool::new(false),
             shared_observation: Mutex::new(None),
             shared_guard_drops: Arc::new(AtomicUsize::new(0)),
+            allocation_guard_drops: Arc::new(AtomicUsize::new(0)),
             occupy_exact_rebind: AtomicBool::new(false),
             blockers: Mutex::new(Vec::new()),
         }
@@ -110,6 +165,15 @@ impl RecordingSharedIntercept {
 
     fn failing_bind(call: usize) -> Self {
         Self { retain_listener_clones: false, fail_bind_at: Some(call), ..Self::new() }
+    }
+
+    fn failing_bind_with_errno(call: usize, errno: i32) -> Self {
+        Self {
+            retain_listener_clones: false,
+            fail_bind_at: Some(call),
+            fail_bind_errno: Some(errno),
+            ..Self::new()
+        }
     }
 
     fn failing_converge() -> Self {
@@ -122,6 +186,25 @@ impl RecordingSharedIntercept {
 
     fn shared_observation(&self) -> Option<InterceptPostcondition> {
         self.shared_observation.lock().clone()
+    }
+
+    fn identity(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
+        let (table_and_chains, sets, prerouting, output) =
+            SharedIpInterceptIdentity::for_listener_ports(leg_f.port(), leg_c.port())
+                .expect("non-zero shared targets form one canonical identity")
+                .normalized_parts();
+        InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
+    }
+
+    fn surface(&self) -> SharedOwnerSurface {
+        SharedOwnerSurface {
+            call_counts: self.call_counts(),
+            listener_addresses: self.listener_addresses(),
+            listener_clones: self.listener_clone_count(),
+            observation: self.shared_observation(),
+            shared_guard_drops: self.shared_guard_drops(),
+            allocation_guard_drops: self.allocation_guard_drops(),
+        }
     }
 
     fn replace_shared_observation(&self, observation: Option<InterceptPostcondition>) {
@@ -140,6 +223,18 @@ impl RecordingSharedIntercept {
         self.shared_guard_drops.load(Ordering::SeqCst)
     }
 
+    fn allocation_guard_drops(&self) -> usize {
+        self.allocation_guard_drops.load(Ordering::SeqCst)
+    }
+
+    fn listener_clone_count(&self) -> usize {
+        self.listener_clones.lock().len()
+    }
+
+    fn release_listener_clones(&self) {
+        self.listener_clones.lock().clear();
+    }
+
     fn terminate_listener_task(&self, index: usize) {
         let listener = self.listener_clones.lock().remove(index);
         // SAFETY: `listener` owns a live TCP socket. `shutdown` changes socket
@@ -153,6 +248,16 @@ impl RecordingSharedIntercept {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SharedOwnerSurface {
+    call_counts: (usize, usize, usize),
+    listener_addresses: Vec<SocketAddrV4>,
+    listener_clones: usize,
+    observation: Option<InterceptPostcondition>,
+    shared_guard_drops: usize,
+    allocation_guard_drops: usize,
+}
+
 impl MtlsIntercept for RecordingSharedIntercept {
     fn bind_transparent(
         &self,
@@ -162,7 +267,9 @@ impl MtlsIntercept for RecordingSharedIntercept {
         if self.fail_bind_at == Some(call) {
             return Err(InterceptError::TransparentListener {
                 addr,
-                source: std::io::Error::from_raw_os_error(libc::EMFILE),
+                source: std::io::Error::from_raw_os_error(
+                    self.fail_bind_errno.unwrap_or(libc::EMFILE),
+                ),
             });
         }
         if addr.port() != 0 && self.occupy_exact_rebind.swap(false, Ordering::SeqCst) {
@@ -229,7 +336,7 @@ impl MtlsIntercept for RecordingSharedIntercept {
         _host_veth: &str,
         _leg_f_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(InertGuard))
+        Ok(Box::new(DropCountGuard(Arc::clone(&self.allocation_guard_drops))))
     }
 
     fn install_inbound(
@@ -237,15 +344,18 @@ impl MtlsIntercept for RecordingSharedIntercept {
         _virt: SocketAddrV4,
         _leg_c_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(InertGuard))
+        Ok(Box::new(DropCountGuard(Arc::clone(&self.allocation_guard_drops))))
     }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 02-03 shared-owner leg-C refusal complement evidence"]
 async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_bind(2));
     let worker = worker(intercept.clone());
+    let before = intercept.surface();
     let error = worker.start_shared_owner().await.expect_err("second bind refuses start");
     assert!(matches!(error, MtlsSharedOwnerError::ListenerBind { leg: InterceptLeg::C, .. }));
     let addresses = intercept.listener_addresses();
@@ -254,25 +364,40 @@ async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owne
     drop(rebound);
     assert!(matches!(worker.audit_shared_owner().await, Err(MtlsSharedOwnerError::NotStarted)));
     worker.shutdown_owner().await.expect("Absent owner shutdown is idempotent");
+    let after = intercept.surface();
+    let mut expected = before;
+    expected.call_counts = (2, 0, 1);
+    expected.listener_addresses = addresses;
+    assert_eq!(after, expected, "leg-C refusal changes only the exact partial-bind receipts");
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 02-03 shared-program refusal complement evidence"]
 async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_converge());
     let worker = worker(intercept.clone());
+    let before = intercept.surface();
     let error = worker.start_shared_owner().await.expect_err("shared rule convergence refuses");
     assert!(matches!(error, MtlsSharedOwnerError::Intercept { .. }));
     let addresses = intercept.listener_addresses();
     assert_eq!(addresses.len(), 2);
-    for address in addresses {
-        let rebound = TcpListener::bind(address).expect("failed start closes every partial socket");
+    for address in &addresses {
+        let rebound =
+            TcpListener::bind(*address).expect("failed start closes every partial socket");
         drop(rebound);
     }
     assert!(matches!(worker.audit_shared_owner().await, Err(MtlsSharedOwnerError::NotStarted)));
     worker.shutdown_owner().await.expect("Absent owner shutdown is idempotent");
+    let after = intercept.surface();
+    let mut expected = before;
+    expected.call_counts = (2, 1, 1);
+    expected.listener_addresses = addresses;
+    assert_eq!(after, expected, "convergence refusal changes only exact bind/converge receipts");
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER step for GH #295 exact-port shared-listener recovery"]
@@ -301,6 +426,7 @@ async fn lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds()
     worker.shutdown_owner().await.expect("shared owner drains");
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER step for GH #295 occupied exact-port fail-stop path"]
@@ -335,6 +461,7 @@ async fn occupied_original_leg_f_address_refuses_recovery_without_selecting_anot
     worker.shutdown_owner().await.expect("failed recovery still drains the owner tree");
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
@@ -545,7 +672,8 @@ impl MtlsIntercept for ActivationBarrierIntercept {
     }
 }
 
-fn allocation_spec(name: &str) -> AllocationSpec {
+fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
+    let octet = address.octets()[3];
     AllocationSpec {
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
@@ -561,9 +689,9 @@ fn allocation_spec(name: &str) -> AllocationSpec {
         resources: Resources { cpu_milli: 1, memory_bytes: 1 },
         probe_descriptors: Vec::new(),
         network: Some(GuestNetworkAssignment {
-            address: Ipv4Addr::new(100, 95, 0, 2),
-            tap: "ovd-tp-0002".to_owned(),
-            mac: [0x02, 0x00, 100, 95, 0, 2],
+            address,
+            tap: format!("ovd-tp-{octet:04}"),
+            mac: [0x02, 0x00, 100, 95, 0, octet],
             gateway: Ipv4Addr::new(100, 95, 0, 1),
             prefix: 16,
             dns: Ipv4Addr::new(100, 95, 0, 1),
@@ -575,14 +703,21 @@ fn allocation_spec(name: &str) -> AllocationSpec {
     }
 }
 
+fn allocation_spec(name: &str) -> AllocationSpec {
+    allocation_spec_at(name, Ipv4Addr::new(100, 95, 0, 2))
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 02-03 Pending-to-Retired worker-path complement evidence"]
 async fn stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once()
  {
     for owner_shutdown in [false, true] {
         let intercept = Arc::new(ActivationBarrierIntercept::new());
         let worker = worker(intercept.clone());
         worker.start_shared_owner().await.expect("shared owner is healthy");
+        let owner_before = intercept.shared.surface();
         let spec = allocation_spec(if owner_shutdown {
             "pending-owner-shutdown"
         } else {
@@ -625,5 +760,246 @@ async fn stop_and_owner_shutdown_during_pending_registration_return_registration
             3,
             "one outbound and two distinct inbound elements drop exactly once"
         );
+        let owner_after = intercept.shared.surface();
+        assert_eq!(owner_after.call_counts, owner_before.call_counts);
+        assert_eq!(owner_after.listener_addresses, owner_before.listener_addresses);
+        assert_eq!(owner_after.observation, owner_before.observation);
+        assert_eq!(owner_after.shared_guard_drops, 0);
+        assert_eq!(worker.leg_c_addr(&alloc), None);
+        if !owner_shutdown {
+            worker.shutdown_owner().await.expect("remaining shared owner joins");
+        }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EnforcementSurface {
+    active: BTreeSet<EnforcedConnectionId>,
+    torn_down: Vec<EnforcedConnectionId>,
+    enforce_calls: usize,
+}
+
+struct RecordingSharedEnforcement {
+    active: Mutex<BTreeSet<EnforcedConnectionId>>,
+    torn_down: Mutex<Vec<EnforcedConnectionId>>,
+    counter: std::sync::atomic::AtomicU64,
+    enforce_calls: AtomicUsize,
+    block_next: AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl RecordingSharedEnforcement {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            active: Mutex::new(BTreeSet::new()),
+            torn_down: Mutex::new(Vec::new()),
+            counter: std::sync::atomic::AtomicU64::new(0),
+            enforce_calls: AtomicUsize::new(0),
+            block_next: AtomicBool::new(false),
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        })
+    }
+
+    fn surface(&self) -> EnforcementSurface {
+        EnforcementSurface {
+            active: self.active.lock().clone(),
+            torn_down: self.torn_down.lock().clone(),
+            enforce_calls: self.enforce_calls.load(Ordering::SeqCst),
+        }
+    }
+
+    async fn wait_for_active(&self, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while self.active.lock().len() != expected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("production shared dispatch publishes the expected handles");
+    }
+
+    fn block_next_enforcement(&self) {
+        self.block_next.store(true, Ordering::SeqCst);
+    }
+
+    async fn wait_blocked(&self) {
+        self.entered.notified().await;
+    }
+
+    fn release_blocked(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait::async_trait]
+impl MtlsEnforcement for RecordingSharedEnforcement {
+    async fn probe(&self) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+        Ok(())
+    }
+
+    async fn enforce(
+        &self,
+        connection: InterceptedConnection,
+    ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
+        self.enforce_calls.fetch_add(1, Ordering::SeqCst);
+        if self.block_next.swap(false, Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        let sequence = self.counter.fetch_add(1, Ordering::SeqCst);
+        let id = EnforcedConnectionId::new(connection.alloc, sequence);
+        self.active.lock().insert(id.clone());
+        Ok(EnforcedConnection::new(id))
+    }
+
+    fn liveness(&self, handle: &EnforcedConnection) -> PumpLiveness {
+        if self.active.lock().contains(handle.id()) {
+            PumpLiveness::Running
+        } else {
+            PumpLiveness::Gone
+        }
+    }
+
+    async fn teardown(
+        &self,
+        handle: EnforcedConnection,
+    ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+        self.active.lock().remove(handle.id());
+        self.torn_down.lock().push(handle.id().clone());
+        Ok(())
+    }
+}
+
+async fn connect_shared_source(source: Ipv4Addr, target: SocketAddrV4) -> tokio::net::TcpStream {
+    let socket = tokio::net::TcpSocket::new_v4().expect("create shared-listener client socket");
+    socket
+        .bind(SocketAddrV4::new(source, 0).into())
+        .expect("bind the allocation's immutable source address");
+    socket.connect(target.into()).await.expect("connect through the shared leg-F listener")
+}
+
+async fn wait_listener_closed(address: SocketAddrV4) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if TcpListener::bind(address).is_ok() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("owner shutdown closes the exact shared listener socket");
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 02-03 S-ND295-25 isolated shared-allocation stop evidence"]
+async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner()
+{
+    let intercept = Arc::new(RecordingSharedIntercept::new());
+    let enforcement = RecordingSharedEnforcement::new();
+    let worker = worker_with_enforcement(
+        intercept.clone(),
+        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+    );
+    worker.start_shared_owner().await.expect("publish exact F/C owner");
+    let addresses = intercept.listener_addresses();
+    let leg_f = addresses[0];
+    let first = allocation_spec_at("shared-isolated-first", Ipv4Addr::new(127, 0, 0, 2));
+    let second = allocation_spec_at("shared-isolated-second", Ipv4Addr::new(127, 0, 0, 3));
+    worker.start_alloc(&first).await.expect("publish first capability");
+    worker.start_alloc(&second).await.expect("publish second capability");
+    let _first_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 2), leg_f).await;
+    let _second_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 3), leg_f).await;
+    enforcement.wait_for_active(2).await;
+
+    let owner_before = intercept.surface();
+    let enforcement_before = enforcement.surface();
+    let unrelated_before = enforcement_before
+        .active
+        .iter()
+        .find(|id| id.alloc() == &second.alloc)
+        .expect("second allocation owns one handle")
+        .clone();
+    worker.stop_alloc(&first.alloc).await.expect("first exact capability drains");
+
+    let owner_after = intercept.surface();
+    let enforcement_after = enforcement.surface();
+    let mut expected_owner = owner_before.clone();
+    expected_owner.allocation_guard_drops += 3;
+    assert_eq!(owner_after, expected_owner, "only the first allocation elements change");
+    assert_eq!(
+        enforcement_after.active,
+        BTreeSet::from([unrelated_before.clone()]),
+        "the unrelated handle is byte-equal and remains live"
+    );
+    assert_eq!(enforcement_after.torn_down.len(), 1);
+    assert_eq!(enforcement_after.torn_down[0].alloc(), &first.alloc);
+    assert_eq!(worker.leg_c_addr(&second.alloc), Some(addresses[1]));
+    worker.audit_shared_owner().await.expect("both listener tasks and node guard remain live");
+
+    let _second_exchange = connect_shared_source(Ipv4Addr::new(127, 0, 0, 3), leg_f).await;
+    enforcement.wait_for_active(2).await;
+    worker.stop_alloc(&second.alloc).await.expect("second capability drains independently");
+    intercept.release_listener_clones();
+    worker.shutdown_owner().await.expect("shared owner joins");
+    assert_eq!(intercept.shared_guard_drops(), 0);
+}
+
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 02-03 S-ND295-26 multi-capability owner-shutdown evidence"]
+async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener() {
+    let intercept = Arc::new(RecordingSharedIntercept::new());
+    let enforcement = RecordingSharedEnforcement::new();
+    let worker = worker_with_enforcement(
+        intercept.clone(),
+        Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+    );
+    worker.start_shared_owner().await.expect("publish exact F/C owner");
+    let addresses = intercept.listener_addresses();
+    let leg_f = addresses[0];
+    let first = allocation_spec_at("shared-shutdown-first", Ipv4Addr::new(127, 0, 0, 4));
+    let second = allocation_spec_at("shared-shutdown-second", Ipv4Addr::new(127, 0, 0, 5));
+    worker.start_alloc(&first).await.expect("publish first capability");
+    worker.start_alloc(&second).await.expect("publish second capability");
+    let _first_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 4), leg_f).await;
+    let _second_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 5), leg_f).await;
+    enforcement.wait_for_active(2).await;
+
+    enforcement.block_next_enforcement();
+    let _held_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 5), leg_f).await;
+    tokio::time::timeout(Duration::from_secs(2), enforcement.wait_blocked())
+        .await
+        .expect("third connection holds one immutable claim");
+    let owner_before = intercept.surface();
+    intercept.release_listener_clones();
+    let mut shutdown = tokio::spawn({
+        let worker = Arc::clone(&worker);
+        async move { worker.shutdown_owner().await }
+    });
+    for address in &addresses {
+        wait_listener_closed(*address).await;
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), &mut shutdown).await.is_err(),
+        "owner completion waits for the active claim"
+    );
+    enforcement.release_blocked();
+    shutdown.await.expect("shutdown task joins").expect("every handle and capability drains");
+
+    let final_enforcement = enforcement.surface();
+    assert!(final_enforcement.active.is_empty());
+    assert_eq!(final_enforcement.torn_down.len(), 3);
+    assert_eq!(intercept.allocation_guard_drops(), 6);
+    assert_eq!(intercept.shared_guard_drops(), 0, "node guard is privately relinquished");
+    let owner_after = intercept.surface();
+    assert_eq!(owner_after.call_counts, owner_before.call_counts);
+    assert_eq!(owner_after.listener_addresses, owner_before.listener_addresses);
+    assert_eq!(owner_after.observation, owner_before.observation);
+    assert_eq!(owner_after.listener_clones, 0);
 }

@@ -275,7 +275,7 @@
         {
           "id": "02-03",
           "name": "Node-shared leg-F/leg-C listener owner and private capability registry",
-          "description": "Implement C-295-L's node-shared worker and D7 capability registry. Complete S14..18 owner closure, publish/retain the S19 worker prerequisite and one observe-only conflict trigger, and activate S20..26. Control-plane retry/deadline/fail-stop remains exclusively 03-03.",
+          "description": "Implement C-295-L's node-shared worker and D7 capability registry. Complete S14..18 owner closure, publish/retain the S19 worker prerequisite and one observe-only conflict trigger, and activate S20..26. D1-D7 review remediation is now acceptance-authored and pending independent review; control-plane retry/deadline/fail-stop remains exclusively 03-03.",
           "agent": "nw-software-crafter",
           "deps": [
             "02-02"
@@ -297,7 +297,7 @@
             "The pre-existing real-enforcement zero-copy regression suite (crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::outbound_enforce_substrate_bidirectional_splice_zero_copy) remains green and unmodified against the new CapabilityRegistry-backed listener owner -- capability retirement itself is new #295 surface covered by this step's own criteria (begin_retire, wait_for_claims, the production-path retirement-race test above), not a pre-existing suite this step must merely preserve."
           ],
           "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs",
-          "scenario_name": "existing netns_density_shared_owner start/refusal bodies plus non-closing published_wrong_shared_target_is_observe_only_until_bounded_fail_stop prerequisite",
+          "scenario_name": "exact D11 task ownership, shared teardown retry, production dispatch retirement, S20/S25/S26 owner lifecycle, and action-shim RegistrationRetired bodies plus the retained S14-S19 prerequisite evidence",
           "scenario_ids": [
             "S-ND295-14",
             "S-ND295-15",
@@ -322,18 +322,19 @@
             "crates/overdrive-sim/src/adapters/mtls_intercept.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::published_wrong_shared_target_is_observe_only_until_bounded_fail_stop)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(capability_registry_acceptance) or test(shared_listener_task_owner_acceptance)' --no-fail-fast",
-            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(mtls_intercept_equivalence)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_worker::shared_listener_task_owner_acceptance::dropping_every_observer_aborts_its_listener_and_closes_the_real_event_channel) or test(=mtls_intercept_worker::shared_listener_task_owner_acceptance::one_real_join_event_removes_only_its_terminal_slot_before_replacement_and_consumed_shutdown) or test(=mtls_intercept_worker::shared_listener_task_owner_acceptance::replacement_refuses_a_still_live_occupied_slot_without_detaching_either_listener)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_worker::tests::shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_worker::tests::enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_worker::capability_registry_acceptance::generation_boundaries_and_every_lifecycle_conflict_precede_effects) or test(=mtls_intercept_worker::capability_registry_acceptance::publication_before_retirement_is_owned_by_only_that_generation_and_allocation)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication) or test(=acceptance::netns_density_shared_owner::leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner) or test(=acceptance::netns_density_shared_owner::shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree) or test(=acceptance::netns_density_shared_owner::stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once) or test(=acceptance::netns_density_shared_owner::stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner) or test(=acceptance::netns_density_shared_owner::owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(=integration::mtls_install_fail_closed::registration_retired_from_real_start_alloc_keeps_exec_closed_and_releases_the_address_last)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::outbound_enforce_substrate_splice::two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops)' --run-ignored ignored-only --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::outbound_enforce_substrate_splice::real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle)' --run-ignored ignored-only --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
-            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings",
-            "cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests,kvm-tests -E 'test(outbound_enforce_substrate_bidirectional_splice_zero_copy)' --no-fail-fast"
+            "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "CapabilityRegistry remains the accepted bounded-change state machine. D15/P02-15 is binding: 02-03 owns boot gating, publication refusal, one observe-only wrong-target conflict, and private guard relinquish; it must not add a clock, retry loop, deadline, request sender, runtime mode, public guard operation, or control-plane dependency. S19 closure belongs to 03-03's existing private supervisor."
+          "implementation_notes": "CapabilityRegistry remains the accepted bounded-change state machine. D1-D7 acceptance remediation is binding: exact WeakSender/AbortOnDrop/consume ownership; retry-retained shared CapabilityDrain; production handle_shared_* retirement dispatch; complete S20/S25/S26 universes; and real action-shim RegistrationRetired cleanup. Native S25/S26 use the existing outbound real-enforcement module and host-kernel-shared assignment through cargo xtask metal. D15/P02-15 remains binding: 02-03 owns boot gating, publication refusal, one observe-only wrong-target conflict, and private guard relinquish; it must not add a clock, retry loop, deadline, request sender, runtime mode, public guard operation, or control-plane dependency. S19 closure belongs to 03-03's existing private supervisor."
         }
       ]
     },
@@ -660,7 +661,7 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "D-295-DISTILL-15 and P02-15/18/19/20/21/22 approved by independent DESIGN reviews through iteration 20. Final layered S14-S19 DISTILL evidence approved by acceptance review iteration 13 and platform review; paired source-local/Lima evidence and 02-03/03-03 ownership are exact.",
-    "approved_at": "2026-09-21T19:52:37Z"
+    "reviewer": "Step 02-03 D1-D7 acceptance remediation approved by bounded acceptance review iteration 16 and platform review. Exact source-local, worker, action-shim, and native-metal selectors are pinned; native S25/S26 remain honest environment-pending until DELIVER metal execution.",
+    "approved_at": "2026-09-22T00:28:54Z"
   }
 }

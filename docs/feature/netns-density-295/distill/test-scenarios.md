@@ -689,6 +689,36 @@ AND it relinquishes rather than deletes the constant empty rules/sets
 AND it returns only after completion or the accepted aggregate teardown error
 ```
 
+#### Step 02-03 D1-D7 executable remediation
+
+Every new or transitioned body below carries
+`/// Outcome anchor: DISCUSS Elevator Pitch`,
+`/// CONTRACT_SHAPE: bounded-change.`, and a reasoned step-`02-03` ignore.
+Source-local bodies use the real private owner/registry/dispatch shapes; worker
+acceptance enters through public shared-owner/allocation methods and actual F/C
+listener sockets; the action-shim body drives the real `dispatch` caller; native
+bodies retain real `HostMtlsEnforcement` and TLS peers.
+
+| Finding / scenarios | Exact body | Evidence layer and complete universe |
+|---|---|---|
+| D1 / D11 task ownership | `shared_listener_task_owner_acceptance::dropping_every_observer_aborts_its_listener_and_closes_the_real_event_channel`; `one_real_join_event_removes_only_its_terminal_slot_before_replacement_and_consumed_shutdown`; `replacement_refuses_a_still_live_occupied_slot_without_detaching_either_listener` | Source-local actual Tokio tasks: both slots/observers/child Drop witnesses, genuine event-channel closure, exact consumed terminal slot, independent live slot, explicit still-live replacement refusal, and a strong sender probe that closes only when `shutdown(self)` consumes/drops the sole receiver before return. |
+| D7 / S21-S22 | `capability_registry_acceptance::generation_boundaries_and_every_lifecycle_conflict_precede_effects`; `publication_before_retirement_is_owned_by_only_that_generation_and_allocation` | Full registry snapshot: next generation, every record/capability/lifecycle/effect/handle/in-flight/pending-owner field, allocation reservations, source index, and destination index. Conflict is byte-equal; isolated retirement removes only the exact first key. |
+| D3 / S23 | `tests::enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain` | Real shared `start_alloc` followed by production `handle_shared_outbound`/`spawn_shared_enforcement`; immutable claim, stop fence, late handle teardown, zero publication, no successor identity. No direct test-owned `enforce`/`claim.publish` workflow remains. |
+| D2 / shared stop failure | `tests::shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry` | Real worker shared allocation/dispatch: exact first teardown source, stable `<allocation>#0` handle identity retained in retry ownership and observed identically on both teardown attempts, Retiring address reservation, same-owner retry, completion fence, successor admission, shared listener complement. |
+| D7 / S14-S18 owner refusal | `initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication`; `leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner`; `shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard` | Existing recording adapter snapshots the entire bind/converge/address/socket/program/guard surface. Each allowed call/address delta is exact; every task, program, guard, and unrelated owner fact remains absent/equal. |
+| D6 / S20 | `shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree` | Existing recording adapter: exact two binds, one convergence, two concrete non-zero sockets, two live task facts through audit, canonical program identity, node guard, idempotent second start, shutdown socket closure, zero guard Drop. |
+| D4 / S25 | `stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner`; native `two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops` | Source-local production-owner complement plus native real-enforcement layer: two active capabilities/handles, exact first drain, byte-equal unrelated handle, F/C sockets/tasks/program/node guard, and a later byte-distinct second-allocation exchange. |
+| D4 / S26 | `owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener`; native `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle` | Source-local production-owner complement plus native real-enforcement layer: two published handles, third active claim, closed admissions, parked shutdown, every handle/element/task/socket drained, constant program relinquished with zero node-guard Drop. |
+| D5 / `RegistrationRetired` action owner | `mtls_install_fail_closed::registration_retired_from_real_start_alloc_keeps_exec_closed_and_releases_the_address_last` | Real action-shim `StartAllocation` and worker Pending→Retired result: Running→Failed receipt, exact `registration_retired` stage, zero EXEC release/running hook, driver stop, shared mTLS drain, structural teardown, lease held during teardown/released last, and primary-vs-cleanup precedence. |
+
+The Lima source-local/acceptance selectors compile and execute. D1, D2, and
+the action-shim cleanup-order body are semantic RED on the reviewed production
+defects. Registry/D3/S20/S25/S26 bodies are honest GREEN evidence corrections:
+their required behavior already exists, so DISTILL does not manufacture a
+failure. Native S25/S26 compile on Linux but are `PENDING_ENVIRONMENT`: the
+configured metal lease succeeds, while bootstrap refuses before selection
+because the required guest-kernel artifact is absent.
+
 ### S-ND295-27 — Guest commands share one node-trust admission boundary
 
 `@property @tier1 @contract-shape:bounded-change`
@@ -1051,3 +1081,27 @@ exact-selects, and carries the completed P02-20/21/22 cadence, journal, receipt,
 and terminal-ownership oracle. It remains RED at the earlier production owner
 scaffold. Roadmap validation remains pending independent acceptance and roadmap
 review.
+
+### Step 02-03 D1-D7 executable audit
+
+| Check | 02-03 disposition |
+|---|---|
+| C1a empty/minimum | PASS — Absent owner, empty registry, zero published handle, and shutdown-before-publication complements remain explicit. |
+| C1b boundaries | PASS — generation max-1/max, zero/non-zero listener ports, one/two/three handles, and teardown success/failure are exact partitions. |
+| C2a state machine documented | PASS — Absent/Published/ShuttingDown owner plus Pending/Active/Retiring/removed capability and task-slot/channel states are named in scenarios and snapshots. |
+| C2b illegal event per state | PASS — live-slot replacement refusal remains; observer loss, conflict in every capability lifecycle, post-retirement publication, and post-failure retry are explicit. |
+| C3 zero/one/many | PASS — zero/two listener slots, zero/one/two allocations, zero/one/three handles, zero/one active claims, and one/many elements are observed. |
+| C4a apply twice | PASS — S20 second start is byte-equal; stop/retry and shutdown completion are one-owner/idempotent. |
+| C4b inverse without prerequisite | PASS — absent shutdown/stop remains covered by retained owner tests and unchanged by the remediation. |
+| C5a mode combinations | PASS — allocation stop versus node shutdown, Pending versus Active, success versus teardown failure, source-local versus native enforcement are separated. |
+| C5b orthogonality | PASS — stopping the first allocation preserves the complete second capability/listener/guard complement; cleanup failure preserves the address lease. |
+| C6a malformed input | PASS — retained S14-S24 refusal tables cover wrong target, unknown/stale source, disallowed port, and conflicting live keys. |
+| C6b each declared error | PASS — D11 return/fail/panic/cancel/channel-close plus generation/conflict/retired/teardown errors retain exact sources and outcomes. |
+| C6c closed error set | PASS — exact enums/stages are asserted; no string-derived variant selection is introduced. |
+| C7a degraded resource | PASS — observer loss, channel closure, first teardown failure, network teardown failure, and unavailable native guest artifact are explicit. |
+| C7b interruption | PASS — observer abort, retirement during enforcement, stop during Pending activation, and shutdown with an active claim are executable. |
+| C7c concurrent actors | PASS — two allocations plus a late claim, predecessor/successor reservation, and action-shim/stop co-ownership are driven. |
+
+The bounded 02-03 remediation audit is **COMPLETE — 15/15**. Native execution
+remains environment-pending rather than credited as a pass. Roadmap validation
+remains `pending` until independent DISTILL and roadmap review.

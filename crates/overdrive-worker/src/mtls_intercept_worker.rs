@@ -480,6 +480,52 @@ fn classify_shared_listener_task_exit(
 mod shared_listener_task_owner_acceptance {
     use super::*;
     use crate::mtls_intercept::InterceptLeg;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct TaskDropWitness(Arc<AtomicUsize>);
+
+    impl Drop for TaskDropWitness {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    trait EventSenderProbe {
+        fn strong_probe(&self) -> mpsc::Sender<SharedListenerTaskEvent>;
+    }
+
+    impl EventSenderProbe for mpsc::Sender<SharedListenerTaskEvent> {
+        fn strong_probe(&self) -> mpsc::Sender<SharedListenerTaskEvent> {
+            self.clone()
+        }
+    }
+
+    impl EventSenderProbe for mpsc::WeakSender<SharedListenerTaskEvent> {
+        fn strong_probe(&self) -> mpsc::Sender<SharedListenerTaskEvent> {
+            self.upgrade().expect("live observers retain the event channel before shutdown")
+        }
+    }
+
+    async fn consume_task_owner(owner: SharedListenerTaskOwner) -> bool {
+        let sender = owner.event_tx.strong_probe();
+        owner.shutdown().await;
+        sender.is_closed()
+    }
+
+    async fn consume_disconnected_task_owner(owner: SharedListenerTaskOwner) {
+        owner.shutdown().await;
+    }
+
+    fn pending_listener_task(
+        drops: Arc<AtomicUsize>,
+    ) -> tokio::task::JoinHandle<SharedListenerTaskResult> {
+        tokio::spawn(async move {
+            let _witness = TaskDropWitness(drops);
+            std::future::pending::<()>().await;
+            Ok(())
+        })
+    }
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -550,6 +596,95 @@ mod shared_listener_task_owner_acceptance {
             MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
         ));
         owner.shutdown().await;
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 weak task-owner evidence"]
+    async fn dropping_every_observer_aborts_its_listener_and_closes_the_real_event_channel() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let owner = SharedListenerTaskOwner::new(
+            pending_listener_task(Arc::clone(&drops)),
+            pending_listener_task(Arc::clone(&drops)),
+        );
+        {
+            let slots = owner.slots.lock();
+            slots.leg_f.as_ref().expect("leg F slot").observer.abort();
+            slots.leg_c.as_ref().expect("leg C slot").observer.abort();
+        }
+
+        let children_aborted = tokio::time::timeout(Duration::from_secs(2), async {
+            while drops.load(Ordering::SeqCst) != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
+        let channel_closed = {
+            let mut events = owner.event_rx.lock().await;
+            matches!(events.try_recv(), Err(mpsc::error::TryRecvError::Disconnected))
+        };
+
+        consume_disconnected_task_owner(owner).await;
+        assert!(children_aborted, "each observer owns an abort-on-drop listener task");
+        assert!(
+            channel_closed,
+            "the owner retains only a WeakSender, so loss of both observers closes the channel"
+        );
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 consumed-event ownership evidence"]
+    async fn one_real_join_event_removes_only_its_terminal_slot_before_replacement_and_consumed_shutdown()
+     {
+        let owner = SharedListenerTaskOwner::new(
+            tokio::spawn(async { Ok(()) }),
+            tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
+        );
+        assert!(matches!(
+            owner.wait_failure().await,
+            MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::F }
+        ));
+        let (leg_f_removed, leg_c_retained) = {
+            let slots = owner.slots.lock();
+            (slots.leg_f.is_none(), slots.leg_c.is_some())
+        };
+        owner
+            .replace_terminal(
+                InterceptLeg::F,
+                tokio::spawn(std::future::pending::<SharedListenerTaskResult>()),
+            )
+            .expect("only the consumed terminal slot is replaceable");
+        let receiver_consumed = consume_task_owner(owner).await;
+
+        assert!(leg_f_removed, "wait_failure consumes the exact terminal leg-F slot");
+        assert!(leg_c_retained, "the independent live leg-C slot remains owned");
+        assert!(receiver_consumed, "shutdown(self) consumes the event receiver before return");
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 live-slot replacement refusal evidence"]
+    async fn replacement_refuses_a_still_live_occupied_slot_without_detaching_either_listener() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let owner = SharedListenerTaskOwner::new(
+            pending_listener_task(Arc::clone(&drops)),
+            pending_listener_task(Arc::clone(&drops)),
+        );
+        let replacement = tokio::spawn(async { Ok(()) });
+        assert!(matches!(
+            owner.replace_terminal(InterceptLeg::F, replacement),
+            Err(MtlsSharedOwnerError::TaskObserverClosed)
+        ));
+        assert!(owner.is_live(InterceptLeg::F));
+        assert!(owner.is_live(InterceptLeg::C));
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(consume_task_owner(owner).await, "shutdown consumes the event receiver");
+        assert_eq!(drops.load(Ordering::SeqCst), 2, "both original listeners are joined");
     }
 }
 
@@ -1235,6 +1370,68 @@ mod capability_registry_acceptance {
         }
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct RegistryRecordSnapshot {
+        capability: Capability,
+        lifecycle: CapabilityLifecycle,
+        outbound_element: bool,
+        inbound_elements: usize,
+        handles: Vec<EnforcedConnectionId>,
+        in_flight: usize,
+        pending_owner: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct RegistryUniverseSnapshot {
+        next_generation: u64,
+        records: BTreeMap<CapabilityKey, RegistryRecordSnapshot>,
+        allocations: BTreeMap<AllocationId, CapabilityKey>,
+        sources: BTreeMap<Ipv4Addr, CapabilityKey>,
+        destinations: BTreeMap<Ipv4Addr, CapabilityKey>,
+    }
+
+    impl RegistryUniverseSnapshot {
+        fn without(mut self, key: &CapabilityKey) -> Self {
+            self.records.remove(key);
+            self.allocations.retain(|_, value| value != key);
+            self.sources.retain(|_, value| value != key);
+            self.destinations.retain(|_, value| value != key);
+            self
+        }
+    }
+
+    fn registry_universe(registry: &CapabilityRegistry) -> RegistryUniverseSnapshot {
+        let state = registry.inner.state.lock();
+        RegistryUniverseSnapshot {
+            next_generation: state.next_generation,
+            records: state
+                .records
+                .iter()
+                .map(|(key, record)| {
+                    (
+                        key.clone(),
+                        RegistryRecordSnapshot {
+                            capability: record.capability.clone(),
+                            lifecycle: record.lifecycle,
+                            outbound_element: record.elements.outbound.is_some(),
+                            inbound_elements: record.elements.inbound.len(),
+                            handles: record
+                                .handles
+                                .iter()
+                                .map(|handle| handle.id().clone())
+                                .collect(),
+                            in_flight: record.in_flight,
+                            pending_owner: record.pending_owner,
+                        },
+                    )
+                })
+                .collect(),
+            allocations: state.allocations.clone(),
+            sources: state.sources.clone(),
+            destinations: state.destinations.clone(),
+        }
+    }
+
     fn alloc(name: &str) -> AllocationId {
         AllocationId::new(name).expect("allocation id")
     }
@@ -1255,10 +1452,13 @@ mod capability_registry_acceptance {
         EnforcedConnection::new(EnforcedConnectionId::new(alloc.clone(), sequence))
     }
 
+    /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
+    #[ignore = "pending DELIVER step 02-03 complete registry-conflict universe evidence"]
     fn generation_boundaries_and_every_lifecycle_conflict_precede_effects() {
         let exhausted = CapabilityRegistry::with_next_generation(u64::MAX);
+        let exhausted_before = registry_universe(&exhausted);
         let error = exhausted
             .begin_registration(
                 alloc("generation-max"),
@@ -1268,6 +1468,7 @@ mod capability_registry_acceptance {
             )
             .expect_err("u64::MAX is never minted");
         assert!(matches!(error, MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX }));
+        assert_eq!(registry_universe(&exhausted), exhausted_before);
 
         for lifecycle in [
             CapabilityLifecycle::Pending,
@@ -1301,6 +1502,7 @@ mod capability_registry_acceptance {
                 lifecycle == CapabilityLifecycle::Retiring,
                 "only the Retiring partition owns a retirement token"
             );
+            let before_conflict = registry_universe(&registry);
             let error = registry
                 .begin_registration(
                     alloc(&format!("contender-{lifecycle:?}")),
@@ -1314,6 +1516,11 @@ mod capability_registry_acceptance {
                 MtlsInterceptInstallError::RegistrationConflict { address: actual }
                     if actual == address
             ));
+            assert_eq!(
+                registry_universe(&registry),
+                before_conflict,
+                "conflict mutates neither generation, records, reservations, indexes, effects, claims, nor handles"
+            );
         }
     }
 
@@ -1433,8 +1640,10 @@ mod capability_registry_acceptance {
         drain.complete();
     }
 
+    /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 02-03 isolated capability-drain complement evidence"]
     async fn publication_before_retirement_is_owned_by_only_that_generation_and_allocation() {
         let registry = CapabilityRegistry::new();
         let first = alloc("published-first");
@@ -1459,6 +1668,17 @@ mod capability_registry_acceptance {
         let second_claim = registry
             .claim_destination(second_addr, NonZeroU16::new(8443).expect("non-zero port"))
             .expect("second destination remains claimable");
+        let first_key = registry
+            .inner
+            .state
+            .lock()
+            .allocations
+            .get(&first)
+            .expect("first allocation reservation")
+            .clone();
+        assert_eq!(second_claim.capability().key.alloc, second);
+        drop(second_claim);
+        let before_retire = registry_universe(&registry);
 
         let mut first_drain =
             registry.begin_retire(&first).expect("retire first only").wait_for_claims().await;
@@ -1466,10 +1686,13 @@ mod capability_registry_acceptance {
         assert_eq!(handles.len(), 1);
         assert_eq!(handles[0].id().alloc(), &first);
         assert!(registry.claim_source(first_addr).is_none());
-        assert_eq!(second_claim.capability().key.alloc, second);
-        drop(second_claim);
         assert!(registry.claim_source(second_addr).is_some());
         first_drain.complete();
+        assert_eq!(
+            registry_universe(&registry),
+            before_retire.without(&first_key),
+            "the exact first capability is the only registry-universe delta"
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -3648,7 +3871,9 @@ mod tests {
     use super::AllocationTaskOwner;
     use async_trait::async_trait;
     use overdrive_core::traits::clock::Clock;
-    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
+    use overdrive_core::traits::driver::{
+        AllocationSpec, DriverPayload, GuestNetworkAssignment, Resources, VmPayload,
+    };
     use overdrive_core::traits::mtls_enforcement::{
         EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
         PumpLiveness, Routed,
@@ -3660,10 +3885,80 @@ mod tests {
     use parking_lot::Mutex;
 
     use super::{
-        AcceptLeg, ActivationDisposition, ConnectionReady, EnforcedSet, MtlsInterceptWorker,
-        OutboundAction, PublishDisposition, await_pending_connection, decide_outbound,
+        AcceptLeg, ConnectionReady, EnforcedSet, MtlsInterceptWorker, OutboundAction,
+        await_pending_connection, decide_outbound,
     };
-    use crate::mtls_intercept_port::InterceptGuard;
+    use crate::mtls_intercept::{InterceptError, InterceptPostcondition};
+    use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+
+    struct TestSharedGuard;
+
+    impl InterceptGuard for TestSharedGuard {}
+
+    struct TestSharedIntercept {
+        observation: Mutex<Option<InterceptPostcondition>>,
+    }
+
+    impl TestSharedIntercept {
+        fn new() -> Self {
+            Self { observation: Mutex::new(None) }
+        }
+    }
+
+    impl MtlsIntercept for TestSharedIntercept {
+        fn bind_transparent(
+            &self,
+            address: SocketAddrV4,
+        ) -> crate::mtls_intercept::Result<TcpListener> {
+            TcpListener::bind(address)
+                .map_err(|source| InterceptError::TransparentListener { addr: address, source })
+        }
+
+        fn converge_shared(
+            &self,
+            _prior: Option<&InterceptPostcondition>,
+            leg_f: SocketAddrV4,
+            leg_c: SocketAddrV4,
+        ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            let (table_and_chains, sets, prerouting, output) =
+                overdrive_netlink::nft::SharedIpInterceptIdentity::for_listener_ports(
+                    leg_f.port(),
+                    leg_c.port(),
+                )
+                .map_err(|source| InterceptError::NftRuleInstallFailed {
+                    op: "shared-test-identity",
+                    source,
+                })?
+                .normalized_parts();
+            *self.observation.lock() = Some(InterceptPostcondition::ConstantRules {
+                table_and_chains,
+                sets,
+                prerouting,
+                output,
+            });
+            Ok(Box::new(TestSharedGuard))
+        }
+
+        fn observe_shared(&self) -> crate::mtls_intercept::Result<Option<InterceptPostcondition>> {
+            Ok(self.observation.lock().clone())
+        }
+
+        fn install_outbound(
+            &self,
+            _host_veth: &str,
+            _agent_leg_f_port: u16,
+        ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            Ok(Box::new(TestSharedGuard))
+        }
+
+        fn install_inbound(
+            &self,
+            _virt: SocketAddrV4,
+            _agent_leg_c_port: u16,
+        ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+            Ok(Box::new(TestSharedGuard))
+        }
+    }
 
     /// CONTRACT_SHAPE: bounded-change (owner release stops an idle blocking accept loop).
     #[test]
@@ -3860,6 +4155,20 @@ mod tests {
             network: None,
             service_ports: Vec::new(),
         }
+    }
+
+    fn shared_spec(alloc: AllocationId, address: Ipv4Addr) -> AllocationSpec {
+        let mut spec = minimal_spec(alloc);
+        spec.network = Some(GuestNetworkAssignment {
+            address,
+            tap: format!("ovd-tp-{}", address.octets()[3]),
+            mac: [0x02, 0x00, 100, 95, 0, address.octets()[3]],
+            gateway: Ipv4Addr::new(100, 95, 0, 1),
+            prefix: 16,
+            dns: Ipv4Addr::new(100, 95, 0, 1),
+        });
+        spec.service_ports = vec![NonZeroU16::new(8443).expect("non-zero port")];
+        spec
     }
 
     /// Stand up a loopback leg-F listener + a client dial, accept the client,
@@ -4359,71 +4668,57 @@ mod tests {
         }
     }
 
+    /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 02-03 S-ND295-23 production shared-dispatch evidence"]
     async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
      {
         let enforcement = GatedEnforcement::new();
+        let (leg, orig_dst, _client) = accepted_leg_f();
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
             Arc::new(SimClock::new()),
-            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+            Arc::new(TestSharedIntercept::new()),
         ));
         let allocation = alloc("capability-enforcement-retirement");
-        let source_addr = Ipv4Addr::new(100, 95, 0, 13);
-        let pending = worker
-            .capabilities
-            .begin_registration(
-                allocation.clone(),
-                source_addr,
-                SpiffeId::new(
-                    "spiffe://overdrive.local/workload/capability/alloc/enforcement-retirement",
-                )
-                .expect("SPIFFE ID"),
-                std::iter::once(NonZeroU16::new(8443).expect("non-zero")).collect(),
-            )
-            .expect("reserve capability");
-        assert_eq!(pending.activate(), ActivationDisposition::Activated);
-        let claim = worker.capabilities.claim_source(source_addr).expect("active source claim");
-        let (leg, _, _client) = accepted_leg_f();
-        let enforce = tokio::spawn({
-            let enforcement = Arc::clone(&enforcement);
-            let allocation = allocation.clone();
-            async move {
-                let handle = enforcement
-                    .enforce(InterceptedConnection {
-                        leg,
-                        routed: Routed::Outbound {
-                            peer: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9),
-                        },
-                        alloc: allocation,
-                        expected_peer: None,
-                    })
-                    .await
-                    .expect("production enforcement returns a handle");
-                match claim.publish(handle) {
-                    PublishDisposition::Published => panic!("retirement must fence publication"),
-                    PublishDisposition::Retired(handle) => {
-                        enforcement.teardown(handle).await.expect("late handle teardown");
-                    }
-                }
-            }
-        });
+        worker.start_shared_owner().await.expect("publish the shared listener owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one real shared allocation capability");
+        tokio::task::spawn_blocking({
+            let worker = Arc::clone(&worker);
+            move || worker.handle_shared_outbound(Ipv4Addr::LOCALHOST, leg, orig_dst)
+        })
+        .await
+        .expect("production shared outbound dispatch returns");
         tokio::time::timeout(Duration::from_secs(2), enforcement.entered())
             .await
-            .expect("enforcement holds the claim");
-        let retirement = worker.capabilities.begin_retire(&allocation).expect("retire Active");
-        let waiter = tokio::spawn(async move { retirement.wait_for_claims().await });
+            .expect("production enforcement holds the immutable capability claim");
+        let waiter = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let allocation = allocation.clone();
+            async move { worker.stop_alloc(&allocation).await }
+        });
         tokio::task::yield_now().await;
-        assert!(!waiter.is_finished(), "retirement cannot pass the in-flight enforcement claim");
+        assert!(!waiter.is_finished(), "allocation stop cannot pass the in-flight claim");
         enforcement.release();
-        enforce.await.expect("enforcement publication task joins");
-        let mut drain = waiter.await.expect("last claim wakes retirement");
-        assert!(drain.take_handles().is_empty(), "late handle was torn down, never published");
-        drain.complete();
+        waiter
+            .await
+            .expect("allocation-stop owner joins")
+            .expect("late-handle teardown completes outside the registry lock");
         assert_eq!(enforcement.torn_down().len(), 1);
         assert_eq!(enforcement.torn_down()[0].alloc(), &allocation);
+        assert!(
+            worker.capabilities.claim_source(Ipv4Addr::LOCALHOST).is_none(),
+            "retirement publishes no late handle or claimable predecessor identity"
+        );
+        worker.shutdown_owner().await.expect("shared listener owner joins");
     }
 
     struct GatedTeardown {
@@ -4431,6 +4726,190 @@ mod tests {
         release: tokio::sync::Notify,
         calls: AtomicUsize,
         fail_first: AtomicBool,
+    }
+
+    struct RetryingSharedEnforcement {
+        enforced: tokio::sync::Notify,
+        counter: std::sync::atomic::AtomicU64,
+        teardown_calls: AtomicUsize,
+        teardown_ids: Mutex<Vec<EnforcedConnectionId>>,
+        fail_first: AtomicBool,
+    }
+
+    impl RetryingSharedEnforcement {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                enforced: tokio::sync::Notify::new(),
+                counter: std::sync::atomic::AtomicU64::new(0),
+                teardown_calls: AtomicUsize::new(0),
+                teardown_ids: Mutex::new(Vec::new()),
+                fail_first: AtomicBool::new(true),
+            })
+        }
+
+        async fn wait_enforced(&self) {
+            self.enforced.notified().await;
+        }
+    }
+
+    #[async_trait]
+    impl MtlsEnforcement for RetryingSharedEnforcement {
+        async fn probe(&self) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            Ok(())
+        }
+
+        async fn enforce(
+            &self,
+            connection: InterceptedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
+            let sequence = self.counter.fetch_add(1, Ordering::SeqCst);
+            let handle =
+                EnforcedConnection::new(EnforcedConnectionId::new(connection.alloc, sequence));
+            self.enforced.notify_one();
+            Ok(handle)
+        }
+
+        fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
+            PumpLiveness::Running
+        }
+
+        async fn teardown(
+            &self,
+            handle: EnforcedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            self.teardown_calls.fetch_add(1, Ordering::SeqCst);
+            self.teardown_ids.lock().push(handle.id().clone());
+            if self.fail_first.swap(false, Ordering::SeqCst) {
+                return Err(
+                    overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::TeardownFailed {
+                        id: handle.id().clone(),
+                        source: std::io::Error::other("injected shared teardown failure"),
+                    },
+                );
+            }
+            Ok(())
+        }
+    }
+
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 02-03 shared capability teardown-retry ownership evidence"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one bounded-change narrative retains first-source, identical-handle, reservation, retry, completion, and successor evidence"
+    )]
+    async fn shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry()
+     {
+        let enforcement = RetryingSharedEnforcement::new();
+        let (leg, orig_dst, _client) = accepted_leg_f();
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
+            Arc::new(SimClock::new()),
+            Arc::new(TestSharedIntercept::new()),
+        ));
+        let allocation = alloc("shared-teardown-retry");
+        let address = Ipv4Addr::LOCALHOST;
+        worker.start_shared_owner().await.expect("publish shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), address))
+            .await
+            .expect("publish shared allocation");
+        tokio::task::spawn_blocking({
+            let worker = Arc::clone(&worker);
+            move || worker.handle_shared_outbound(address, leg, orig_dst)
+        })
+        .await
+        .expect("shared dispatch returns");
+        tokio::time::timeout(Duration::from_secs(2), enforcement.wait_enforced())
+            .await
+            .expect("one shared handle reaches production publication");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let published = worker
+                    .capabilities
+                    .inner
+                    .state
+                    .lock()
+                    .records
+                    .values()
+                    .any(|record| record.handles.len() == 1);
+                if published {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the returned handle is owned before stop");
+
+        let first = worker
+            .stop_alloc(&allocation)
+            .await
+            .expect_err("the exact first teardown source is surfaced");
+        assert_eq!(first.alloc_id, allocation);
+        assert_eq!(first.failures.len(), 1);
+        assert!(first.failures[0].contains("injected shared teardown failure"));
+        let expected_handle = EnforcedConnectionId::new(allocation.clone(), 0);
+        let retained_retry_ids =
+            worker.stopping.lock().get(&allocation).and_then(|stops| stops.last()).map_or_else(
+                Vec::new,
+                |stop| {
+                    stop.retry_handles
+                        .lock()
+                        .iter()
+                        .map(|handle| handle.id().clone())
+                        .collect::<Vec<_>>()
+                },
+            );
+
+        let reservation_retained = matches!(
+            worker.capabilities.begin_registration(
+                alloc("shared-teardown-contender"),
+                address,
+                SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown/alloc/contender",)
+                    .expect("SPIFFE ID"),
+                std::iter::once(NonZeroU16::new(8443).expect("non-zero port")).collect(),
+            ),
+            Err(super::MtlsInterceptInstallError::RegistrationConflict { .. })
+        );
+
+        let retry = worker.stop_alloc(&allocation).await;
+        let retry_count = enforcement.teardown_calls.load(Ordering::SeqCst);
+        let successor = worker.capabilities.begin_registration(
+            alloc("shared-teardown-successor"),
+            address,
+            SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown/alloc/successor")
+                .expect("SPIFFE ID"),
+            std::iter::once(NonZeroU16::new(8443).expect("non-zero port")).collect(),
+        );
+        let successor_accepted = successor.is_ok();
+        drop(successor);
+        let shutdown = worker.shutdown_owner().await;
+
+        assert!(reservation_retained, "the Retiring reservation survives the failed teardown");
+        assert_eq!(
+            retained_retry_ids.as_slice(),
+            std::slice::from_ref(&expected_handle),
+            "the exact failed opaque handle identity remains retry-owned"
+        );
+        retry.expect("same-owner retry tears down the retained handle and completes the drain");
+        assert_eq!(retry_count, 2, "the identical handle is retried exactly once");
+        assert_eq!(
+            enforcement.teardown_ids.lock().as_slice(),
+            [expected_handle.clone(), expected_handle],
+            "the same stable handle identity reaches the first teardown and its retry"
+        );
+        assert!(successor_accepted, "address reuse opens only after retry completes the drain");
+        shutdown.expect("shared listener owner joins after the successful retry");
+        assert!(
+            !worker.capabilities.inner.state.lock().allocations.contains_key(&allocation),
+            "completion alone releases the exact allocation reservation"
+        );
     }
 
     #[async_trait]
