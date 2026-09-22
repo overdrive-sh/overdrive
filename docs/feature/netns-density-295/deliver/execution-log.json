@@ -484,6 +484,13 @@
       "s": "EXECUTED",
       "d": "PASS with native-metal evidence pending environment: activated only the S-ND295-01 guest traffic pair and direct-TAP topology body; rewired the authored integration evidence from retired netns/veth assumptions to production TAP/shared-bridge ownership, bridge peer-wire capture, TLS/kTLS/splice oracle, endpoint/TCX/guard/address cleanup complements, and address reuse. Writable-Lima workspace cargo check --workspace --all-targets --features integration-tests,kvm-tests passed; exact authored selectors discover one each; focused pure D7 oracle nextest passed 4/4. Canonical cargo xtask metal run -- guest_stack_mtls_egress and vm topology selectors both fail closed before test execution because selected guest kernel artifact is absent; no native pass claimed. Workspace clippy exact command remains blocked by pre-existing overdrive-control-plane/overdrive-netlink findings; focused overdrive-cli lint has only the pre-existing vm_walking_skeleton build_identifiable_datagram_emitter too-many-lines finding. cargo fmt and diff check pass. No mutation testing.",
       "t": "2026-09-22T21:26:22Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: des-commit created 6f639179214b55c91f0cc9303f5e61f9a4e32f67 with only the two step-owned integration files and DES execution log; Marcus author retained and exactly one Co-Authored-By: Codex <codex@openai.com> trailer present, with no Claude/Anthropic attribution. Unrelated AGENTS.md and .serena/project.yml remain dirty and outside scope. No mutation testing.",
+      "t": "2026-09-22T21:27:10Z"
     }
   ]
 }
