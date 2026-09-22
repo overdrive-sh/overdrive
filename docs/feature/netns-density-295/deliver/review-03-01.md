@@ -137,3 +137,86 @@ The last 03-01 events in `docs/feature/netns-density-295/deliver/execution-log.j
 All four findings are open blockers. The original step-03-01 crafter must remediate within the approved architecture and the same step reviewer must re-review this step. No later roadmap step may start until the outcome anchors, complete bounded-change evidence, deterministic typed table, and below-cap pool-error evidence are present and verified. No finding requires a new public API or architecture; any missing sanctioned private observation boundary must be surfaced as a DESIGN gap rather than invented.
 
 # CHANGES_REQUIRED
+
+---
+
+## Iteration 2 — remediation review
+
+- **Review ID:** `code_rev_20260922_170500_iteration_2`
+- **Iteration:** 2
+- **Reviewed cumulative range:** `526e961842d7..8862112537fb66b3f8f6b7a89f75a5a7b8e3c737`
+- **Remediation commits:** `d288fa813e4336efa48ef66e00c34e482f3f5c23`, `8862112537fb66b3f8f6b7a89f75a5a7b8e3c737`
+- **Prior iteration:** `CHANGES_REQUIRED`, four blockers (D1–D4)
+- **Iteration-2 verdict:** **CHANGES_REQUIRED** — D1, D3, and D4 are closed; D2 remains a blocking DESIGN/testability gap.
+
+### Remediation dispositions
+
+| Finding | Disposition | Independent evidence |
+|---|---|---|
+| D1 — missing Outcome anchors | **RESOLVED** | All six gate bodies and the placement body now carry the exact `/// Outcome anchor: DISCUSS Elevator Pitch` line. Direct scan: 6 anchors in `netns_density_exec_gate.rs`, 1 in `netns_density_placement_cap.rs`; no `#[ignore]` remains in either file. The new pool body also carries the anchor. |
+| D3 — non-exhaustive typed component/cause coverage | **RESOLVED** | `every_fail_stop_cause_is_closed_and_first_request_wins` now iterates all 12 `COMPONENTS ×` all 6 `CAUSES`, enters `Open → Recovering(component)`, and asserts typed `first.component` and `first.cause` fields (`netns_density_exec_gate.rs:282-303`). No Display/Debug matching was added. |
+| D4 — missing below-cap `PoolExhausted` evidence | **RESOLVED** | The new source-local `GuestAddressPool` body uses a `/30`, holds one lease, asserts `held=1 < 16,384`, expects typed `PoolExhausted { held: 1, capacity: 1 }`, and checks the snapshot is unchanged (`crates/overdrive-control-plane/src/guest_network.rs:6327-6349`). The exact selector passed independently. |
+| D2 — private active-claim decrement unobservable | **OPEN — DESIGN BLOCKER** | The remediation intentionally retained no production/API/test hook. The recorded RED spike removed only `GuestNetworkExecClaim::Drop`'s decrement and all six EXEC-gate selectors still passed. Source audit confirms there is no existing owner read or sanctioned private snapshot boundary. |
+
+### D1 — Contract Shape metadata is closed
+
+The live transitioned core bodies now have the required metadata:
+
+```text
+netns_density_exec_gate.rs       Outcome anchors: 6  CONTRACT_SHAPE: 6  ignores: 0
+netns_density_placement_cap.rs  Outcome anchors: 1  CONTRACT_SHAPE: 1  ignores: 0
+```
+
+The added `below_cap_pool_exhaustion_is_typed_drift_and_preserves_state` body also has both required declarations. No live test name matches the banned technical-result regex. The repository checker path named by the reviewer definition is not present in this checkout, so the result above is from direct source scanning rather than a claimed checker run.
+
+### D3 — Deterministic typed table is closed
+
+The prior randomized-only component coverage is corrected by the nested typed table. Each of the twelve closed `SharedGuestNetworkComponent` variants is recovered and each of the six closed `SharedGuestNetworkFailStopCause` variants is passed to the real public `GuestNetworkExecSupervisor::fail_stop`; the receipt fields are compared as enum values. The loop does not add a variant, string oracle, or public helper. The focused core selector passed 7 tests, including this 72-pair table, and the `PROPTEST_CASES=1024` selector passed all 6 gate tests.
+
+### D4 — Below-cap pool drift is closed
+
+The new body drives the real private `GuestAddressPool::assign` implementation through its existing owner boundary. Its `/30` has exactly one non-reserved address, so exhaustion is reproduced with one held lease—strictly below the 16,384 admission boundary—without changing `GuestAddressPool`'s API or production ownership. The typed error and unchanged snapshot are asserted. This is the requested below-cap error path; the older `/16` exhaustion body remains a separate full-pool boundary.
+
+### D2 — Blocking DESIGN/testability gap, not an invented runtime defect
+
+The D2 remediation report is reproducible and the current source confirms its reachability boundary:
+
+- The accepted Contract Shape table names `active_claims` as an allowed `+1/-1` delta and says the whole private gate state must preserve its complement (`feature-delta.md:4719-4720`).
+- The accepted EXEC code fence makes the capabilities opaque and all fields private (`feature-delta.md:3795-3810`); the design separately rejects a public gate-state accessor or test-only admission hook (`feature-delta.md:1671-1673`).
+- The DISTILL S-ND295-27 executable mapping requires the model to compare every public return and `recovery_progress` projection, plus a finite typed-cause table; it does not define a private active-count snapshot (`distill/test-scenarios.md:722-741`). S-ND295-28 assigns claim-drop evidence to the deterministic real-`VmDriver` release/cancellation schedules in the later worker step (`distill/test-scenarios.md:747-760`).
+- In production, `GuestNetworkExecState.active_claims` is incremented only by `GuestNetworkExecGate::claim_release` (`crates/overdrive-core/src/guest_network.rs:173-200`) and decremented only by `GuestNetworkExecClaim::Drop` (`:320-327`). The production owner holds the opaque claim in `_exec_claim` across `VmDriver::release_for_exit_emission` (`crates/overdrive-worker/src/vm_driver.rs:1836-1839`), but no production path reads `active_claims`; a repository-wide source scan finds only those writes and the test model's vector.
+- The current `Notify` wake on claim drop is not an existing observable boundary: callers cannot inspect the waiter registration, and the gate does not use `active_claims` to admit/refuse or drain a claim. Removing only the decrement therefore leaves the current public selectors green. The remediation DES RED event at `2026-09-22T14:41:57Z` records this exact bounded spike; the production decrement was restored before the remediation commit.
+
+This is not evidence that the restored decrement currently causes a reachable stakeholder-visible failure. It is a contradiction between the accepted private-universe wording and the sanctioned executable evidence boundary: the design names an internal delta, while the accepted opaque API and S-ND295-27 mapping expose no way to observe it in this step. Closing D2 would require a DESIGN decision on one precise question:
+
+> Is the `active_claims +1/-1` field-level delta itself a required independently observed acceptance outcome for 03-01, or is public return/projection evidence in S-ND295-27 plus the production `VmDriver` claim-lifetime evidence in S-ND295-28 the complete accepted contract?
+
+If the former is required, the design must approve a sanctioned private evidence boundary. If the latter is intended, the accepted Contract Shape wording must be reconciled so it does not require an unobservable private counter. This review does not prescribe either mechanism, add a public API, add a hook, or mandate production behavior beyond the approved architecture. Until that DESIGN/testability decision is independently approved, D2 remains blocking and this step cannot be approved.
+
+## Iteration-2 verification
+
+| Command / evidence | Result |
+|---|---|
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate) or test(netns_density_placement_cap)' --no-fail-fast` | **PASS**: 7/7 selected tests; 522 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target PROPTEST_CASES=1024 cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate)' --no-fail-fast` | **PASS**: 6/6 selected tests; 523 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo nextest run -p overdrive-control-plane --lib -E 'test(=guest_network::pool_acceptance::below_cap_pool_exhaustion_is_typed_drift_and_preserves_state)' --no-fail-fast` | **PASS**: 1/1 selected test; 247 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo check --workspace --all-targets --features integration-tests` | **PASS**. |
+| `cargo fmt --all -- --check` | **PASS**. |
+| `git diff --check 526e961842d7..8862112537fb66b3f8f6b7a89f75a5a7b8e3c737` | **PASS**. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` | **FAIL, unchanged environment/baseline** at `crates/overdrive-netlink/src/nft.rs:5121` (`clippy::print_stderr`); no remediation file is reported. |
+| Configured Lima target without override | **Environment limitation**: `/home/marcus.guest/.cargo-target-lima` is read-only; writable `/tmp` target was used for independent selectors. |
+| Contract Shape direct scan | **PASS for D1**: all transitioned core bodies have anchors/declarations and no ignores; checker executable path remains absent. |
+| Mutation testing | **NOT RUN**, as required. |
+
+### TDD, integrity, and scope re-check
+
+- The remediation DES cycle is ordered `RED 2026-09-22T14:41:57Z → GREEN 2026-09-22T14:47:53Z → COMMIT 2026-09-22T14:48:19Z`, each `EXECUTED/PASS`. The GREEN and COMMIT descriptions retain the explicit D2 DESIGN blocker rather than claiming unsupported closure.
+- The remediation strengthens evidence only: anchors were added, the typed table was expanded, and one new pool error body was added. No prior assertion was weakened, deleted, skipped, or replaced; G9 passes.
+- The cumulative remediation adds one tightly necessary private source-local pool test outside the original core file list to satisfy the roadmap's explicit `GuestAddressPool` criterion. It adds no public declaration or production ownership mechanism.
+- No mutation testing ran. Existing dirty `AGENTS.md` and `.serena/project.yml` remain untouched and uncommitted.
+
+## Iteration-2 verdict
+
+D1, D3, and D4 are **RESOLVED** with independent source and selector evidence. D2 is a reproduced, non-hypothetical DESIGN/testability contradiction: the accepted feature-delta private-universe wording names an active-claim counter delta, but the accepted opaque capabilities and existing production owner provide no sanctioned observation boundary, and the real gate selectors remain green when only that decrement is removed. This review neither invents a test hook nor treats the unobservable counter as a runtime defect. The exact DESIGN decision described above is still required.
+
+# CHANGES_REQUIRED
