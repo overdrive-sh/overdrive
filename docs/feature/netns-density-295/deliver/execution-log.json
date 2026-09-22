@@ -393,6 +393,13 @@
       "s": "EXECUTED",
       "d": "PASS with DESIGN blocker: D1 added exact Outcome anchor to all seven transitioned core bodies; D3 now deterministically exercises all 12 components x 6 causes with typed enum assertions; D4 added private below-cap /30 PoolExhausted held=1/capacity=1 state-complement evidence. Core EXEC/placement selectors, PROPTEST_CASES=1024, private pool selector, workspace check, formatting, and diff hygiene pass. D2 cannot be closed: removing only GuestNetworkExecClaim::Drop active-count decrement still passes all existing selectors, and no sanctioned private-state observation boundary exists; adding one would invent testability surface, so this is surfaced as a DESIGN/testability blocker. Workspace clippy remains pre-existing/out-of-scope blocked.",
       "t": "2026-09-22T14:47:53Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS with DESIGN blocker preserved: scoped remediation commit records D1/D3/D4 changes plus private pool evidence and GREEN event; original Git author retained, exactly one Codex trailer, unrelated AGENTS.md/.serena/project.yml excluded. D2 was not invented past the sanctioned architecture and remains explicitly blocked on a DESIGN/testability decision.",
+      "t": "2026-09-22T14:48:19Z"
     }
   ]
 }
