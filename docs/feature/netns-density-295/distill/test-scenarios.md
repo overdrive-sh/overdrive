@@ -49,8 +49,8 @@ owners; fixtures may inject faults only through accepted driven ports.
 | S-ND295-14..18 | bounded-change | paired private state machine + Lima real shared-IP adapter + 02-03 unpublished-owner refusal | source-local `mtls_intercept_port::shared_program_rollback_acceptance::{shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior,shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta,shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement}`; Lima `mtls_intercept_install::{shared_program_absence_create_readback_idempotence_and_guard_drop,shared_program_replaces_only_listener_targets_and_preserves_foreign_complement,shared_program_refuses_ambiguous_owned_state_without_mutation}`; existing 02-03 start/refusal bodies | All six D15 bodies are authored reasoned-pending with exact closed universes and RED: source-local now includes zero-port and `Error::source()` contracts; Lima includes exact requested identities, foreign-family coexistence, and an isolated conflicting-set-schema fixture. S14..18 close only after 02-02's source-local/Lima layers and 02-03's owner layer all pass. |
 | S-ND295-19 | bounded-change | three-layer canonical wrong-target no-rewrite plus published retry/deadline/fail-stop | S19-A `02-02`: source-local `runtime_present_wrong_target_and_observe_error_are_non_mutating` plus Lima `mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating`; `02-03` prerequisite: current worker published-owner conflict/guard body; S19-B `03-03`: control-plane `shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | All layers are authored reasoned-pending and RED. Adapter observation is exactly `Ok(Some(canonical_wrong_target))`; partial/foreign/duplicate/malformed/lower observation is the existing typed error. `PostconditionMismatch` begins only at the worker. S19 closes only in `03-03`; 02-02 remains independently approvable after S19-A. |
 | S-ND295-20..26 | bounded-change | node-shared listener/capability lifecycle | `netns_density_shared_owner::*`, `capability_registry_acceptance::*`, plus existing real-enforcement retirement/zero-copy suites | complete reasoned-pending owner start, leg-F/leg-C/rule partial cleanup, exact-port recovery/occupied refusal, D7 generation/conflict/Pending/claim/publication/scoped-drain/reuse, isolated handle and shutdown bodies |
-| S-ND295-27 | bounded-change | Rust acceptance | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` | one active RED + five reasoned-pending recovery/fail-stop/model/table bodies authored |
-| S-ND295-28 | bounded-change | generated gate PBT plus deterministic real-`VmDriver` schedules | `generated_operation_sequences_match_the_gate_model`, `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, `backpressured_exec_release_cannot_delay_stop_deadline`, `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`, and `start_allocation_awaits_release_and_cancellation_owns_the_future` | no seeded-sim writer or injected supervisor consequence |
+| S-ND295-27 | bounded-change | Opaque-capability Rust acceptance over public returns, recovery projection, blocking, wake, refusal, and terminal behavior | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` | complete step-`03-01` gate evidence; private `active_claims +1/-1` bookkeeping is not an independent outcome |
+| S-ND295-28 | bounded-change | generated gate PBT plus deterministic real-`VmDriver` claim-lifetime schedules | `generated_operation_sequences_match_the_gate_model`, `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, `backpressured_exec_release_cannot_delay_stop_deadline`, `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`, and `start_allocation_awaits_release_and_cancellation_owns_the_future` | production acknowledgement/cancellation ownership; no seeded-sim writer, injected supervisor consequence, or private counter oracle |
 | S-ND295-29..32 | bounded-change | owner-port schedule/recovery and finite exit table | paired gate bodies, `netns_density_shared_owner::{lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds,occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port}`, B1 host/sim owner bodies, DNS lifecycle, cgroup/VMM cleanup regressions, and `shared_network_task_owner_acceptance::*` | D8 drives actual Tokio return/error/panic/cancel/channel-close across all 12 snapshot components and DNS live/exited replacement/shutdown matrices; 31A/31B are distinct actual socket-state bodies |
 | S-ND295-33 | bounded-change | direct-handler request ownership and recurring system conformance | `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs` over `tests/conformance/src/lib.rs` | exported server handler + HTTPS API; no product CLI, subprocess SUT, PID oracle, assert_cmd, or trycmd |
 | S-ND295-34 | bounded-change | Tier 3 adapter integration | production DNS bind/wire evidence plus private `DnsServeTaskOwner` lifecycle through the retained supervisor | actual task return/panic/cancel, replacement, intentional shutdown, and invalid-state bodies compile; real shared-gateway wire evidence stays Tier 3 |
@@ -738,6 +738,13 @@ recovery projection to an independent state model. A separate finite table
 drives all six fail-stop causes. The illegal-event table explicitly attempts
 an invalid operation from each of BootClosed, Open, Recovering, and FailStop.
 
+D-295-DELIVER-03-01 makes this the complete step-`03-01` evidence boundary.
+Claim acquisition, waiting, waking, refusal, and the continued validity of a
+pre-detection opaque claim are observed through those public results and task
+schedules. The private `GuestNetworkExecState.active_claims` field-level
+`+1/-1` is implementation bookkeeping, not a separately observed acceptance
+outcome; S-ND295-27 adds no accessor, private snapshot, or test-only seam.
+
 ### S-ND295-28 — Recovery never leaks or wrongly releases a guest command
 
 `@property @tier1 @in-memory @error @contract-shape:bounded-change`
@@ -754,10 +761,12 @@ Technical mapping: the generated core operation-sequence property owns every
 legal and illegal gate transition. Deterministic real-`VmDriver` schedules use
 the existing beacon socket fixture for recovery-before-release,
 claim-before-detection with backpressured acknowledgement, cancellation after
-writer transfer, and claim drop. The existing held-`Driver` action-shim body
-proves the production owner awaits and owns cancellation. This evidence does
-not introduce a seeded simulation writer seam and never feeds a supervisor
-transition back as a cause.
+writer transfer, and the end of the opaque claim lifetime. The existing
+held-`Driver` action-shim body proves the production owner awaits and owns
+cancellation. Together these schedules are the accepted claim-lifetime/drop
+evidence; they observe owner and writer behavior, not the private
+`active_claims` storage. This evidence does not introduce a seeded simulation
+writer seam and never feeds a supervisor transition back as a cause.
 
 ### S-ND295-29 — Every shared owner follows the same bounded recovery contract
 

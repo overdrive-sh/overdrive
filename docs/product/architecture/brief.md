@@ -11571,11 +11571,15 @@ There is no unbounded-preservation operation and therefore no new Plan-returning
 API.
 
 The mandatory catalogue in the feature delta separates four easily conflated
-universes: the EXEC gate's claim capability may change only active-claim/waiter
-state; its supervisor capability may change only gate/recovery state; the
-intercept adapter may change only owned rule/set/element state; and the worker
-listener owner may change only sockets/tasks/registry/claims/handles plus its
-guard token. Tests must assert each delta and the other three universes as
+universes. The EXEC gate's opaque claim capability is observed through Open
+claim return, BootClosed/Recovering pending behavior, FailStop refusal, and task
+wake; its private active-claim/waiter bookkeeping is not independently
+asserted. S-ND295-27 owns those public return/projection/task outcomes, while
+S-ND295-28 owns the real `VmDriver` claim lifetime through acknowledgement and
+cancellation. The supervisor capability may change only gate/recovery state;
+the intercept adapter may change only owned rule/set/element state; and the
+worker listener owner may change only sockets/tasks/registry/claims/handles plus
+its guard token. Tests assert each observable delta and the other universes as
 complement-equal rather than treating the shared owner as one unconstrained
 mutation set.
 
