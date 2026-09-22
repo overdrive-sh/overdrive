@@ -8,6 +8,29 @@ its three real-adapter failures are actual nft/netlink evidence. Workspace
 `.env` supplies the native-metal target. D15 itself assigns no body to metal;
 the later 02-03 remediation assigns S25/S26 real-enforcement evidence there.
 
+## Step 03-02 acceptance-oracle correction
+
+The original S-ND295-28 claim-before-detection assertion counted raw
+`observed.windows(5) == b"EXEC "` prefixes and required zero. That observation
+contradicted the accepted EXEC-close linearization: a claim linearized before
+detection may make progress or finish, and already-written command bytes are
+not paused or frozen. A prefix without the Published Language's terminating
+newline is not a complete command.
+
+The corrected body preserves the same scenario, production `VmDriver`, real
+beacon socket, forced backpressure, Open-to-Recovering transition, release-task
+cancellation, and EOF ownership evidence. It changes only the command oracle:
+complete commands are newline-terminated frames accepted by the existing
+`BeaconMessage` parser, and cancellation forbids a second parsed `Exec` rather
+than forbidding pre-detection bytes. The cancelled release-task join proves the
+task-owned opaque claim lifetime ended; EOF proves the transferred production
+writer closed instead of detaching. No private `active_claims` inspection or
+new hook is used.
+
+| Scenario / exact body | Exact command | Observed result | Classification |
+|---|---|---|---|
+| S-ND295-28 `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR=/tmp/codex-netns-density-target TMPDIR=/tmp cargo nextest run -p overdrive-worker --test acceptance -E "test(=acceptance::netns_density_exec_release::claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer)" --run-ignored ignored-only --no-fail-fast'` | Writable Lima run `639e3523-d97b-456b-bd88-01c87b074aa8`: **1 passed**, 101 skipped, 0 failed. The release task was cancelled and joined, the production beacon reached EOF, and the typed newline-framed oracle found no second complete EXEC command. | **GREEN — ACCEPTED BEHAVIOR ALREADY PRESENT AFTER ORACLE CORRECTION.** This body is not a missing-functionality RED and authorizes no production change. The resumed step-`03-02` crafter must activate it without re-authoring; if it remains green, that is valid already-implemented acceptance evidence while the other S-ND295-28 schedules retain their independent gates. |
+
 ## Phase-02 non-waived remediation bodies
 
 | Scenario / body | Explicit command | Observed failure | Classification |

@@ -50,7 +50,7 @@ owners; fixtures may inject faults only through accepted driven ports.
 | S-ND295-19 | bounded-change | three-layer canonical wrong-target no-rewrite plus published retry/deadline/fail-stop | S19-A `02-02`: source-local `runtime_present_wrong_target_and_observe_error_are_non_mutating` plus Lima `mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating`; `02-03` prerequisite: current worker published-owner conflict/guard body; S19-B `03-03`: control-plane `shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | All layers are authored reasoned-pending and RED. Adapter observation is exactly `Ok(Some(canonical_wrong_target))`; partial/foreign/duplicate/malformed/lower observation is the existing typed error. `PostconditionMismatch` begins only at the worker. S19 closes only in `03-03`; 02-02 remains independently approvable after S19-A. |
 | S-ND295-20..26 | bounded-change | node-shared listener/capability lifecycle | `netns_density_shared_owner::*`, `capability_registry_acceptance::*`, plus existing real-enforcement retirement/zero-copy suites | complete reasoned-pending owner start, leg-F/leg-C/rule partial cleanup, exact-port recovery/occupied refusal, D7 generation/conflict/Pending/claim/publication/scoped-drain/reuse, isolated handle and shutdown bodies |
 | S-ND295-27 | bounded-change | Opaque-capability Rust acceptance over public returns, recovery projection, blocking, wake, refusal, and terminal behavior | `crates/overdrive-core/tests/acceptance/netns_density_exec_gate.rs` | complete step-`03-01` gate evidence; private `active_claims +1/-1` bookkeeping is not an independent outcome |
-| S-ND295-28 | bounded-change | generated gate PBT plus deterministic real-`VmDriver` claim-lifetime schedules | `generated_operation_sequences_match_the_gate_model`, `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, `backpressured_exec_release_cannot_delay_stop_deadline`, `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`, and `start_allocation_awaits_release_and_cancellation_owns_the_future` | production acknowledgement/cancellation ownership; no seeded-sim writer, injected supervisor consequence, or private counter oracle |
+| S-ND295-28 | bounded-change | generated gate PBT plus deterministic real-`VmDriver` claim-lifetime schedules | `generated_operation_sequences_match_the_gate_model`, `recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_precedes_ack`, `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer`, `fail_stop_wakes_the_real_vm_driver_waiter_without_writing_exec`, `writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed`, `backpressured_exec_release_cannot_delay_stop_deadline`, `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`, and `start_allocation_awaits_release_and_cancellation_owns_the_future` | production acknowledgement/cancellation ownership; the corrected claim-before-detection oracle is GREEN at current production and remains reasoned-pending for step `03-02`; no seeded-sim writer, injected supervisor consequence, private counter oracle, or production change is justified by that body |
 | S-ND295-29..32 | bounded-change | owner-port schedule/recovery and finite exit table | paired gate bodies, `netns_density_shared_owner::{lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds,occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port}`, B1 host/sim owner bodies, DNS lifecycle, cgroup/VMM cleanup regressions, and `shared_network_task_owner_acceptance::*` | D8 drives actual Tokio return/error/panic/cancel/channel-close across all 12 snapshot components and DNS live/exited replacement/shutdown matrices; 31A/31B are distinct actual socket-state bodies |
 | S-ND295-33 | bounded-change | direct-handler request ownership and recurring system conformance | `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs` over `tests/conformance/src/lib.rs` | exported server handler + HTTPS API; no product CLI, subprocess SUT, PID oracle, assert_cmd, or trycmd |
 | S-ND295-34 | bounded-change | Tier 3 adapter integration | production DNS bind/wire evidence plus private `DnsServeTaskOwner` lifecycle through the retained supervisor | actual task return/panic/cancel, replacement, intentional shutdown, and invalid-state bodies compile; real shared-gateway wire evidence stays Tier 3 |
@@ -754,7 +754,7 @@ GIVEN a guest command is waiting for release while the node may lose shared-netw
 WHEN recovery, writer acknowledgement, cancellation, and command ownership occur in any accepted order
 THEN a command claimed before detection may finish and a later command remains paused until recovery completes
 AND a fail-stop neither writes nor discards the guest's pending command
-AND cancellation leaves no detached writer or retained claim
+AND cancellation leaves no detached writer, retained sender or claim ownership, or second newline-framed parser-accepted EXEC command
 ```
 
 Technical mapping: the generated core operation-sequence property owns every
@@ -767,6 +767,38 @@ cancellation. Together these schedules are the accepted claim-lifetime/drop
 evidence; they observe owner and writer behavior, not the private
 `active_claims` storage. This evidence does not introduce a seeded simulation
 writer seam and never feeds a supervisor transition back as a cause.
+For the claim-before-detection cancellation schedule, progress already accepted
+by the socket before detection is explicitly allowed. EOF still proves the
+production writer closed instead of detaching, the cancelled release task ends
+its task-owned opaque claim lifetime, and only newline-terminated frames that
+the existing `BeaconMessage` parser accepts as `Exec` count as complete EXEC
+commands. A raw `EXEC ` prefix is neither a framed command nor duplicate-writer
+evidence; the accepted oracle forbids a second complete EXEC command rather
+than forbidding pre-detection bytes.
+
+Bounded S-ND295-28 self-audit after the oracle correction:
+
+- **Outcome and Contract Shape:** every mapped body retains its existing
+  outcome anchor (`DISCUSS Elevator Pitch` or the named S-VLL outcome) and
+  bounded-change declaration; the three reasoned-pending worker bodies now
+  carry the explicit outcome anchor beside the exact declaration.
+- **Port-to-port boundary:** the generated model drives the public opaque core
+  capabilities; the corrected schedule drives the real `VmDriver` and its
+  production-owned beacon writer over the existing Unix beacon port; the
+  action-shim complement drives the existing production dispatch owner. No
+  private state or `active_claims` storage is inspected.
+- **Observable universe and complement:** cancellation-task completion, socket
+  EOF, and typed newline-framed beacon messages are observed. The preserved
+  complement is no detached writer, no retained sender/claim ownership, and no
+  second complete EXEC; a permitted first command or prefix is not relabelled
+  as a defect.
+- **Test budget:** the existing operation-sequence PBT plus the finite real-
+  owner schedules remain one set. No parallel suite, generated real-I/O loop,
+  additional assertion surface, or duplicate protocol parser was added.
+- **No weakening outside the contradiction:** backpressure, recovery start,
+  cancellation join, and EOF assertions are unchanged. Only the zero-raw-
+  prefix predicate was replaced by the accepted at-most-one complete typed
+  command predicate.
 
 ### S-ND295-29 — Every shared owner follows the same bounded recovery contract
 

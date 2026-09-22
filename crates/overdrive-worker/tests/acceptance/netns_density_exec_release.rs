@@ -23,7 +23,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverPayload, Resources, VmPayload,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
+use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfinement, VmRunDir, VmmIdentity,
 };
@@ -153,6 +153,7 @@ async fn assert_no_line(guest: &mut BufReader<UnixStream>) {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 #[ignore = "pending DELIVER step for GH #295 VmDriver recovery-before-release gate"]
 async fn recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_precedes_ack() {
@@ -186,7 +187,15 @@ async fn recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_prec
     release.await.expect("release future remains owned");
 }
 
+/// A claim linearized before detection may transmit bytes or one complete EXEC
+/// before cancellation wins. The observable universe is the structured release
+/// task, the production beacon stream through EOF, and newline-framed messages
+/// accepted by the existing [`BeaconMessage`] parser. Cancellation must end the
+/// task-owned claim lifetime, close the transferred writer, and preserve the
+/// complement of no second complete EXEC command.
+///
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 #[ignore = "pending DELIVER step for GH #295 claim-before-detection/cancellation schedules"]
 async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer() {
@@ -231,14 +240,30 @@ async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_se
     .await
     .expect("writer cancellation closes the beacon")
     .expect("read through EOF");
-    assert_eq!(
-        observed.windows(5).filter(|window| *window == b"EXEC ").count(),
-        0,
-        "cancellation cannot leave a detached or duplicate complete EXEC writer"
+    // The Published Language defines a complete command at its existing
+    // newline-framing plus typed-parser boundary. A pre-detection claim may
+    // have already transmitted any prefix (or the whole first command) before
+    // cancellation; a raw `EXEC ` byte prefix is therefore not a message and
+    // is not evidence of a second writer.
+    let complete_messages: Vec<BeaconMessage> = observed
+        .split_inclusive(|byte| *byte == b'\n')
+        .filter(|frame| frame.ends_with(b"\n"))
+        .filter_map(|frame| std::str::from_utf8(frame).ok())
+        .filter_map(|line| line.parse::<BeaconMessage>().ok())
+        .collect();
+    assert!(
+        complete_messages
+            .iter()
+            .filter(|message| matches!(message, BeaconMessage::Exec { .. }))
+            .count()
+            <= 1,
+        "cancellation cannot leave a detached writer that emits a second complete EXEC command; \
+         parsed complete frames: {complete_messages:?}"
     );
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
 #[ignore = "pending DELIVER step for GH #295 FailStop refusal before pending EXEC take"]
 async fn fail_stop_wakes_the_real_vm_driver_waiter_without_writing_exec() {
