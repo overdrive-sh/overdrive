@@ -526,6 +526,13 @@
       "s": "EXECUTED",
       "d": "REMEDIATION GREEN: isolated native production path fixed. HostSharedGuestNetworkOwner now reclaims exact stale scratch TCX/map pins before a new probe and uses the existing typed pinned-link detach path when adoption is unavailable/incomplete; sweep_stale removes only owned ovd-tp-* bridge members before deleting the owned guard; the shared-IP observer now permits the approved same-name bridge-family overdrive-mtls table; run_server starts the retained MtlsInterceptWorker shared F/C owner and maps failure through the exact MtlsBootError::SharedOwner contract. Evidence: exact 03-03 Lima source-local 7/7, worker 10/10, DNS integration 6/6, run_server integration 7/7, workspace check pass, formatting/diff pass; native metal DNS 6/6 pass. Exact 04-01 topology selector and the post-fix guest-stack selector reached production startup and Running state but timed out in downstream workload-terminal behavior; the full guest_stack_mtls_egress rerun completed 34 tests with 16 passed, 17 failed, and 1 timeout. Remaining failures are independently classified as 04-01/guest-stack workload lifecycle or fixture fault-matrix expectations and shared-state contamination after the first timed-out test, not the fixed startup path. Workspace clippy remains blocked by pre-existing guest_network/reconciler and overdrive-netlink test lints. No mutation testing.",
       "t": "2026-09-22T22:52:54Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: des-commit created 514d2dc120df3e86a269c017ae966dd85b114640 with only 03-03 remediation production files and DES-log events; Marcus author retained and exactly one Co-Authored-By: Codex <codex@openai.com> trailer. Dirty AGENTS.md, .serena/project.yml, and concurrent 04-02 conformance files remained outside scope. No mutation testing.",
+      "t": "2026-09-22T22:53:29Z"
     }
   ]
 }
