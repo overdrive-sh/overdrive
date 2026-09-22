@@ -27,10 +27,8 @@
 )]
 
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
-use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -48,10 +46,7 @@ use overdrive_control_plane::api::{
     RestartBudget, StopOutcome, TransitionRecord, TransitionSource,
 };
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
-use overdrive_control_plane::veth_provisioner::{
-    DEFAULT_CLIENT_IFACE, NetSlot, WORKLOAD_SUBNET_BASE, derive_vm_tap_plan,
-    derive_workload_netns_plan, responder_addr_for_slot,
-};
+use overdrive_control_plane::veth_provisioner::{DEFAULT_CLIENT_IFACE, WORKLOAD_SUBNET_BASE};
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::ObservationStore as _;
@@ -1011,16 +1006,16 @@ struct KernelRealtime(i128);
 #[derive(Debug)]
 struct InterceptReadiness {
     kernel_barrier_at: KernelRealtime,
-    host_veth_ifindex: u32,
-    host_veth: String,
+    tap_ifindex: u32,
+    tap: String,
     accounting: D7Accounting,
 }
 
 #[derive(Debug)]
 struct LiveInterceptReadiness {
     kernel_barrier_at: KernelRealtime,
-    host_veth_ifindex: u32,
-    host_veth: String,
+    tap_ifindex: u32,
+    tap: String,
     before: [nft::RuleSnapshot; 2],
     target_userdata: Vec<u8>,
     observer: nft::NftRuleObserver,
@@ -1044,7 +1039,7 @@ struct GuestBoundarySegment {
 
 #[derive(Debug)]
 struct GuestEgressAudit {
-    /// Complete frame-derived universe on the exact allocation host-veth for
+    /// Complete frame-derived universe on the exact allocation TAP for
     /// guest-source TCP headed to the exact mesh peer address and port.
     segments: Vec<GuestBoundarySegment>,
     /// Diagnostic complement: every parsed TCP segment on that exact
@@ -1073,10 +1068,10 @@ impl WireCapture {
         Self::start_bound(ifindex, port)
     }
 
-    /// Capture every interface from before the allocation veth exists. Binding
+    /// Capture every interface from before the allocation TAP exists. Binding
     /// AF_PACKET with ifindex zero is the kernel's all-interface shape; each
     /// `recvmsg` result retains its actual `sockaddr_ll.sll_ifindex` and kernel
-    /// packet timestamp, allowing the audit to select the exact host-veth
+    /// packet timestamp, allowing the audit to select the exact production interface
     /// after production creates it without relabeling queued packets at
     /// userspace dequeue time.
     fn start_all() -> Self {
@@ -1089,35 +1084,6 @@ impl WireCapture {
         let stop_thread = Arc::clone(&stop);
         let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
         Self { stop, handle: Some(handle), port }
-    }
-
-    fn start_in_netns(netns: &str, iface: &str) -> (Self, u32) {
-        let namespace = File::open(Path::new("/var/run/netns").join(netns))
-            .expect("open allocation network namespace");
-        let iface = std::ffi::CString::new(iface).expect("tap name has no NUL");
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = Arc::clone(&stop);
-        let (ready, readiness) = std::sync::mpsc::sync_channel(1);
-        let handle = std::thread::spawn(move || {
-            // SAFETY: this dedicated capture thread has not opened sockets or
-            // spawned children. `setns` changes only this thread's network
-            // namespace, and the namespace fd remains live for the call.
-            let switched = unsafe { libc::setns(namespace.as_raw_fd(), libc::CLONE_NEWNET) };
-            assert_eq!(
-                switched,
-                0,
-                "enter allocation netns for tap capture: {}",
-                std::io::Error::last_os_error()
-            );
-            // SAFETY: the NUL-terminated name remains live for this lookup.
-            let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
-            assert_ne!(ifindex, 0, "resolve tap ifindex inside allocation netns");
-            let fd = open_bound_packet_socket(ifindex).expect("bind exact tap capture");
-            ready.send(ifindex).expect("report tap capture-ready");
-            capture_fd(fd, &stop_thread)
-        });
-        let ifindex = readiness.recv().expect("tap capture thread reports readiness");
-        (Self { stop, handle: Some(handle), port: 0 }, ifindex)
     }
 
     fn stop(mut self) -> CaptureBatch {
@@ -1437,7 +1403,7 @@ fn scan_frames(
             libc::PACKET_HOST => 0b01,
             libc::PACKET_OUTGOING => 0b10,
             other => panic!(
-                "peer loopback stream has an unexpected AF_PACKET packet_type={other}; frame={frame:?}"
+                "peer shared-bridge stream has an unexpected AF_PACKET packet_type={other}; frame={frame:?}"
             ),
         };
         let capture = captures.entry(segment.tuple).or_default();
@@ -1458,7 +1424,7 @@ fn scan_frames(
     for (tuple, capture) in captures {
         let Some(syn_sequence) = capture.syn_sequence else {
             if capture.pieces.iter().all(|(_, _, payload, _)| payload.is_empty()) {
-                // A bare loopback RST/ACK (typically the kernel rejecting a
+                // A bare RST/ACK (typically the kernel rejecting a
                 // readiness probe) has no application byte stream to scan.
                 continue;
             }
@@ -1494,7 +1460,7 @@ fn scan_frames(
                 if let Some(previous) = bytes_by_offset.insert(offset, byte) {
                     assert_eq!(
                         previous, byte,
-                        "peer stream {tuple:?} has conflicting retransmitted/loopback-copy bytes at offset {offset}"
+                        "peer stream {tuple:?} has conflicting retransmitted/shared-bridge-copy bytes at offset {offset}"
                     );
                 }
             }
@@ -1607,77 +1573,71 @@ fn parse_tcp_segment(
     }))
 }
 
-fn outbound_rule_snapshot(host_veth: &str) -> Result<Option<nft::RuleInfo>, String> {
+fn outbound_rule_snapshot(tap: &str) -> Result<Option<nft::RuleInfo>, String> {
     let rules = nft::list_rules("overdrive-mtls", "prerouting")
         .map_err(|error| format!("strict nft rule observation failed: {error}"))?;
-    outbound_rule_from_rules(&rules, host_veth)
+    outbound_rule_from_rules(&rules, tap)
 }
 
 fn outbound_rule_from_rules(
     rules: &[nft::RuleInfo],
-    host_veth: &str,
+    tap: &str,
 ) -> Result<Option<nft::RuleInfo>, String> {
-    let tagged = d7_allocation_tagged_rules(rules, host_veth);
+    let tagged = d7_allocation_tagged_rules(rules, tap);
     match tagged.as_slice() {
         [] => Ok(None),
-        [_] => exact_d7_target(rules, host_veth).map(Some),
+        [_] => exact_d7_target(rules, tap).map(Some),
         _ => Err(format!(
-            "ambiguous D7 ownership for {host_veth}: {} allocation-tagged rules",
+            "ambiguous D7 ownership for {tap}: {} allocation-tagged rules",
             tagged.len()
         )),
     }
 }
 
-async fn poll_until_outbound_rule_snapshot(host_veth: &str) -> nft::RuleInfo {
+async fn poll_until_outbound_rule_snapshot(tap: &str) -> nft::RuleInfo {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let mut last_error = None;
     loop {
-        match outbound_rule_snapshot(host_veth) {
+        match outbound_rule_snapshot(tap) {
             Ok(Some(rule)) => return rule,
             Ok(None) => {}
             Err(error) => last_error = Some(error),
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the independent sibling's exact intercept rule must become observable; last strict observation error: {last_error:?}"
+            "the independent sibling's exact intercept rule for {tap} must become observable; last strict observation error: {last_error:?}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
-fn d7_allocation_tagged_rules<'a>(
-    rules: &'a [nft::RuleInfo],
-    host_veth: &str,
-) -> Vec<&'a nft::RuleInfo> {
+fn d7_allocation_tagged_rules<'a>(rules: &'a [nft::RuleInfo], tap: &str) -> Vec<&'a nft::RuleInfo> {
     rules
         .iter()
         .filter(|rule| {
             rule.userdata.starts_with(nft::USERDATA_MAGIC)
                 && rule.userdata.get(nft::USERDATA_MAGIC.len()) == Some(&0x03)
-                && rule.userdata.ends_with(host_veth.as_bytes())
+                && rule.userdata.ends_with(tap.as_bytes())
         })
         .collect()
 }
 
-fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::RuleInfo, String> {
+fn exact_d7_target(rules: &[nft::RuleInfo], tap: &str) -> Result<nft::RuleInfo, String> {
     let prefix_len = nft::USERDATA_MAGIC.len() + 1;
-    let expected_len = prefix_len + 2 + host_veth.len();
-    let matching = d7_allocation_tagged_rules(rules, host_veth)
+    let expected_len = prefix_len + 2 + tap.len();
+    let matching = d7_allocation_tagged_rules(rules, tap)
         .into_iter()
         .filter(|rule| {
             rule.userdata.len() == expected_len
-                && rule.userdata[prefix_len + 2..] == *host_veth.as_bytes()
+                && rule.userdata[prefix_len + 2..] == *tap.as_bytes()
         })
         .collect::<Vec<_>>();
     let [rule] = matching.as_slice() else {
-        return Err(format!(
-            "expected exactly one D7 target for {host_veth}, got {}",
-            matching.len()
-        ));
+        return Err(format!("expected exactly one D7 target for {tap}, got {}", matching.len()));
     };
     let agent_port = u16::from_be_bytes([rule.userdata[prefix_len], rule.userdata[prefix_len + 1]]);
     let expected_program = nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
-        host_veth,
+        tap,
         Ipv4Addr::LOCALHOST,
         agent_port,
         0x1,
@@ -1694,14 +1654,14 @@ fn exact_d7_target(rules: &[nft::RuleInfo], host_veth: &str) -> Result<nft::Rule
 
 fn validate_stable_d7_pair(
     pair: &[nft::RuleSnapshot; 2],
-    host_veth: &str,
+    tap: &str,
     expected_userdata: Option<&[u8]>,
 ) -> Result<nft::RuleInfo, String> {
     if pair[0].generation == 0 || pair[0].generation != pair[1].generation {
         return Err("D7 pair generation is zero or changed".to_owned());
     }
-    let first = exact_d7_target(&pair[0].rules, host_veth)?;
-    let second = exact_d7_target(&pair[1].rules, host_veth)?;
+    let first = exact_d7_target(&pair[0].rules, tap)?;
+    let second = exact_d7_target(&pair[1].rules, tap)?;
     if first != second {
         return Err(
             "D7 target handle/program/userdata/counter changed during quiet interval".to_owned()
@@ -1713,15 +1673,12 @@ fn validate_stable_d7_pair(
     Ok(first)
 }
 
-async fn poll_until_outbound_rule_ready(
-    host_veth: String,
-    budget: Duration,
-) -> LiveInterceptReadiness {
+async fn poll_until_outbound_rule_ready(tap: String, budget: Duration) -> LiveInterceptReadiness {
     let deadline = tokio::time::Instant::now() + budget;
     loop {
         let discovery = nft::list_rules("overdrive-mtls", "prerouting")
             .ok()
-            .and_then(|rules| exact_d7_target(&rules, &host_veth).ok());
+            .and_then(|rules| exact_d7_target(&rules, &tap).ok());
         if let Some(discovered) = discovery {
             let mut observer = nft::NftRuleObserver::subscribe()
                 .expect("subscribe to the loss-reporting nftables notification group");
@@ -1735,20 +1692,20 @@ async fn poll_until_outbound_rule_ready(
                 .ensure_no_notifications()
                 .expect("no nft mutation notification during baseline");
             let before = [first, second];
-            let stable = validate_stable_d7_pair(&before, &host_veth, Some(&discovered.userdata))
+            let stable = validate_stable_d7_pair(&before, &tap, Some(&discovered.userdata))
                 .expect("the D7 target is exact and stable before the observation cut");
-            let iface = std::ffi::CString::new(host_veth.as_str()).expect("iface has no NUL");
+            let iface = std::ffi::CString::new(tap.as_str()).expect("TAP has no NUL");
             // SAFETY: libc retains no pointer; `iface` is NUL-terminated.
-            let host_veth_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
-            assert!(host_veth_ifindex != 0, "ready nft rule names a live host-veth");
+            let tap_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
+            assert!(tap_ifindex != 0, "ready nft rule names a live TAP");
             return LiveInterceptReadiness {
                 // Deliberately sampled after both the successful typed nft
                 // query and exact-ifindex resolution. This later barrier is
                 // conservative: every kernel packet timestamp at or before it
                 // is classified pre-ready.
                 kernel_barrier_at: KernelRealtime::now(),
-                host_veth_ifindex,
-                host_veth,
+                tap_ifindex,
+                tap,
                 before,
                 target_userdata: stable.userdata,
                 observer,
@@ -1756,7 +1713,7 @@ async fn poll_until_outbound_rule_ready(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the exact outbound nft rule for {host_veth} must become observable within {budget:?}"
+            "the exact outbound nft rule for {tap} must become observable within {budget:?}"
         );
         tokio::task::yield_now().await;
     }
@@ -1801,10 +1758,9 @@ async fn finish_d7_observation(
     mut readiness: LiveInterceptReadiness,
     budget: Duration,
 ) -> InterceptReadiness {
-    let host_veth = readiness.host_veth.clone();
-    let before =
-        validate_stable_d7_pair(&readiness.before, &host_veth, Some(&readiness.target_userdata))
-            .expect("revalidate exact D7 baseline");
+    let tap = readiness.tap.clone();
+    let before = validate_stable_d7_pair(&readiness.before, &tap, Some(&readiness.target_userdata))
+        .expect("revalidate exact D7 baseline");
     let before_counter = before.counter.expect("validated counter");
     let deadline = tokio::time::Instant::now() + budget;
     loop {
@@ -1812,7 +1768,7 @@ async fn finish_d7_observation(
             .observer
             .snapshot("overdrive-mtls", "prerouting")
             .expect("strict post-flow generation-bracketed GETRULE snapshot");
-        let first_target = exact_d7_target(&first.rules, &host_veth)
+        let first_target = exact_d7_target(&first.rules, &tap)
             .expect("post-flow snapshot retains the exact D7 target");
         let first_counter = first_target.counter.expect("validated post-flow counter");
         if first_counter.packets > before_counter.packets
@@ -1824,9 +1780,7 @@ async fn finish_d7_observation(
                 .snapshot("overdrive-mtls", "prerouting")
                 .expect("strict final generation-bracketed GETRULE snapshot");
             let after = [first, second];
-            if validate_stable_d7_pair(&after, &host_veth, Some(&readiness.target_userdata))
-                .is_err()
-            {
+            if validate_stable_d7_pair(&after, &tap, Some(&readiness.target_userdata)).is_err() {
                 assert!(
                     tokio::time::Instant::now() < deadline,
                     "the advanced D7 target must reach a stable quiet pair within {budget:?}"
@@ -1850,8 +1804,8 @@ async fn finish_d7_observation(
             );
             return InterceptReadiness {
                 kernel_barrier_at: readiness.kernel_barrier_at,
-                host_veth_ifindex: readiness.host_veth_ifindex,
-                host_veth: readiness.host_veth,
+                tap_ifindex: readiness.tap_ifindex,
+                tap: readiness.tap,
                 accounting: D7Accounting {
                     before: readiness.before,
                     after,
@@ -1881,7 +1835,7 @@ fn audit_guest_egress_boundary(
     let mut byte_count = 0_u64;
     let mut exact_tuple = None;
     for frame in frames.iter().filter(|frame| {
-        frame.ifindex == readiness.host_veth_ifindex && frame.packet_type != libc::PACKET_OUTGOING
+        frame.ifindex == readiness.tap_ifindex && frame.packet_type != libc::PACKET_OUTGOING
     }) {
         let Some(parsed) =
             parse_tcp_segment(frame, true).unwrap_or_else(|error| {
@@ -1905,7 +1859,7 @@ fn audit_guest_egress_boundary(
         assert_eq!(
             tuple.source.ip(),
             &guest_addr,
-            "every eligible host-veth ingress TCP packet is guest-authored"
+            "every eligible TAP ingress TCP packet is guest-authored"
         );
         assert_eq!(
             tuple.destination, mesh_destination,
@@ -1941,10 +1895,10 @@ fn audit_guest_egress_boundary(
 
 fn guest_frame_precedes_capture_ready(
     frame: &CapturedFrame,
-    host_veth_ifindex: u32,
+    tap_ifindex: u32,
     barrier: KernelRealtime,
 ) -> bool {
-    frame.ifindex == host_veth_ifindex
+    frame.ifindex == tap_ifindex
         && frame.packet_type != libc::PACKET_OUTGOING
         && frame.kernel_event_at.is_none_or(|event_at| event_at <= barrier)
 }
@@ -1952,16 +1906,16 @@ fn guest_frame_precedes_capture_ready(
 fn validate_exact_d7_accounting(
     readiness: &InterceptReadiness,
     audit: &GuestEgressAudit,
-    host_veth: &str,
+    tap: &str,
 ) -> Result<(), String> {
     let before = validate_stable_d7_pair(
         &readiness.accounting.before,
-        host_veth,
+        tap,
         Some(&readiness.accounting.target_userdata),
     )?;
     let after = validate_stable_d7_pair(
         &readiness.accounting.after,
-        host_veth,
+        tap,
         Some(&readiness.accounting.target_userdata),
     )?;
     let before_counter = before.counter.ok_or_else(|| "baseline counter missing".to_owned())?;
@@ -2171,7 +2125,7 @@ async fn genuine_pre_change_contract(
     assert_eq!(
         raw.workload_addr,
         Some(expected_guest_addr),
-        "the durable production fact must be the VM guest /30 address"
+        "the durable production fact must be the VM guest address"
     );
     assert!(raw.terminal.is_none());
     assert!(raw.stderr_tail.is_none());
@@ -2321,10 +2275,7 @@ async fn poll_until_issued_identity(
 
 struct ArmedFailureCapture {
     alloc: AllocationId,
-    host_veth: String,
-    netns: String,
     tap: String,
-    host_wire: WireCapture,
     tap_wire: WireCapture,
     tap_ifindex: u32,
 }
@@ -2363,14 +2314,9 @@ async fn release_vmm_without_capture(cuts: &VmmCutReceiver) -> VmConfig {
     config
 }
 
-fn host_veth_for_config(config: &VmConfig) -> String {
+fn tap_for_config(config: &VmConfig) -> String {
     let network = config.network.as_ref().expect("VM network attachment");
-    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
-    let slot = NetSlot::new(
-        u16::from_str_radix(slot_hex, 16).expect("production tap carries a hexadecimal slot"),
-    )
-    .expect("observed production slot is in range");
-    derive_workload_netns_plan(slot, responder_addr_for_slot(slot)).host_veth
+    network.tap.clone()
 }
 
 async fn arm_failure_capture(cuts: &VmmCutReceiver) -> ArmedFailureCapture {
@@ -2389,39 +2335,20 @@ fn arm_failure_capture_from_config(config: &VmConfig) -> ArmedFailureCapture {
         .network
         .as_ref()
         .expect("failure VM reaches the VMM with a complete network attachment");
-    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix");
-    let slot = NetSlot::new(
-        u16::from_str_radix(slot_hex, 16).expect("production tap carries a hexadecimal slot"),
-    )
-    .expect("observed production slot is in range");
-    let responder = responder_addr_for_slot(slot);
-    let workload = derive_workload_netns_plan(slot, responder);
-    let guest = derive_vm_tap_plan(slot, responder);
-    assert_eq!(network.netns, workload.netns);
-    assert_eq!(network.tap, guest.tap);
-    let host_wire = WireCapture::start(&workload.host_veth, 0);
-    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
-    ArmedFailureCapture {
-        alloc,
-        host_veth: workload.host_veth,
-        netns: network.netns.as_str().to_owned(),
-        tap: network.tap.clone(),
-        host_wire,
-        tap_wire,
-        tap_ifindex,
-    }
+    let tap_wire = WireCapture::start(&network.tap, 0);
+    let tap_ifindex = {
+        let name = std::ffi::CString::new(network.tap.as_str()).expect("TAP name has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "resolve the production TAP before VMM release");
+        ifindex
+    };
+    ArmedFailureCapture { alloc, tap: network.tap.clone(), tap_wire, tap_ifindex }
 }
 
 fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
-    let host = capture.host_wire.stop();
     let tap = capture.tap_wire.stop();
-    assert_eq!(host.statistics.drops, 0, "host-veth failure capture is lossless");
     assert_eq!(tap.statistics.drops, 0, "tap failure capture is lossless");
-    let host_guest_frames = host
-        .frames
-        .iter()
-        .filter(|frame| frame.packet_type != libc::PACKET_OUTGOING)
-        .collect::<Vec<_>>();
     let tap_guest_frames = tap
         .frames
         .iter()
@@ -2429,10 +2356,6 @@ fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
             frame.ifindex == capture.tap_ifindex && frame.packet_type != libc::PACKET_OUTGOING
         })
         .collect::<Vec<_>>();
-    assert!(
-        host_guest_frames.is_empty(),
-        "the exact target host-veth observes no guest-originated frame before failure: {host_guest_frames:#?}"
-    );
     assert!(
         tap_guest_frames.is_empty(),
         "the exact target tap observes no guest-originated frame before failure: {tap_guest_frames:#?}"
@@ -2499,17 +2422,13 @@ async fn assert_failed_vm_cleanup(
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
     let cgroup = CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup"));
-    let netns = Path::new("/var/run/netns").join(&capture.netns);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        let interfaces_absent = [&capture.host_veth, &capture.tap].iter().all(|interface| {
-            let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
-            // SAFETY: `name` is a live NUL-terminated interface name.
-            unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
-        });
-        let clean = matches!(outbound_rule_snapshot(&capture.host_veth), Ok(None))
+        let tap_name = std::ffi::CString::new(capture.tap.as_str()).expect("TAP has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let interfaces_absent = unsafe { libc::if_nametoindex(tap_name.as_ptr()) == 0 };
+        let clean = matches!(outbound_rule_snapshot(&capture.tap), Ok(None))
             && interfaces_absent
-            && !netns.exists()
             && !run_dir.path().exists()
             && !cgroup.exists()
             && !rootfs_plan.clone_dest().exists()
@@ -2520,7 +2439,7 @@ async fn assert_failed_vm_cleanup(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "failed VM cleanup must remove its VMM/cgroup/clone/index/run-dir/netns/tap/veth/route/nft residue within 30s"
+            "failed VM cleanup must remove its VMM/cgroup/clone/index/run-dir/TAP/route/nft residue within 30s"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2650,9 +2569,6 @@ struct MeshResult {
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
-    // Enclose even composition-root startup: no peer-port socket is allowed to
-    // predate the sequence-space oracle's SYN-complete observation universe.
-    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -2680,9 +2596,26 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // This decorator is also used to capture the later VM dialer. Consume
     // and release the peer service's first capture cut before polling it;
     // leaving that cut held would block its VMM before it can reach Running.
-    let _service_config = release_vmm_without_capture(&vmm_cuts).await;
+    let service_config = release_vmm_without_capture(&vmm_cuts).await;
     let service_state =
         poll_until_running(&cfg, &service_submit.workload_id, Duration::from_secs(30)).await;
+    let service_network = service_config
+        .network
+        .as_ref()
+        .expect("mesh Service reaches VMM with a direct-host TAP attachment");
+    let bridge =
+        std::fs::read_link(Path::new("/sys/class/net").join(&service_network.tap).join("master"))
+            .expect("the production Service TAP is attached to the shared bridge");
+    let bridge_name = bridge
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .expect("shared bridge name is UTF-8")
+        .to_owned();
+    // Capture the shared bridge, the peer-facing wire after TCX admission. The
+    // guest-side TAP capture below remains the plaintext endpoint boundary;
+    // keeping these two surfaces separate prevents the local plaintext from
+    // being mistaken for peer-wire evidence.
+    let peer_wire = WireCapture::start(&bridge_name, SERVICE_PORT);
     // A fresh composition has exactly one declared mesh name (`server`), so
     // the production smallest-free frontend allocator assigns the first usable
     // address in its named block. This is the address DNS returns to the guest;
@@ -2731,24 +2664,17 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .network
         .as_ref()
         .expect("mesh VM reaches VMM with one complete network attachment");
-    let slot_hex = network.tap.rsplit('-').next().expect("slot-derived tap suffix").to_owned();
-    let vm_slot = NetSlot::new(
-        u16::from_str_radix(&slot_hex, 16).expect("production tap carries a hexadecimal slot"),
-    )
-    .expect("observed production slot is in range");
-    let responder = responder_addr_for_slot(vm_slot);
-    let vm_workload = derive_workload_netns_plan(vm_slot, responder);
-    let vm_guest = derive_vm_tap_plan(vm_slot, responder);
-    assert_eq!(network.netns, vm_workload.netns);
-    assert_eq!(network.tap, vm_guest.tap);
-    assert_eq!(network.mac, vm_guest.mac);
-    let guest_wire = WireCapture::start(&vm_workload.host_veth, 0);
-    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
-    assert_ne!(tap_ifindex, 0, "exact in-netns tap capture is armed");
-    let readiness_task = tokio::spawn(poll_until_outbound_rule_ready(
-        vm_workload.host_veth.clone(),
-        Duration::from_secs(60),
-    ));
+    assert_eq!(network.mac[0] & 0x02, 0x02, "the production VM receives a local MAC");
+    let tap_wire = WireCapture::start(&network.tap, 0);
+    let tap_ifindex = {
+        let name = std::ffi::CString::new(network.tap.as_str()).expect("TAP name has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "the production direct-host TAP is live");
+        ifindex
+    };
+    let readiness_task =
+        tokio::spawn(poll_until_outbound_rule_ready(network.tap.clone(), Duration::from_secs(60)));
     let capture_ready_at = KernelRealtime::now();
     spawn_cut
         .release
@@ -2759,7 +2685,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .expect("kernel rule observer remains bounded")
         .expect("kernel rule observer task does not panic");
     assert_eq!(
-        live_readiness.host_veth, vm_workload.host_veth,
+        live_readiness.tap, network.tap,
         "C3 plan identity is derived from the observed production rule"
     );
     let vm_running = poll_until_running(&cfg, &vm_submit.workload_id, Duration::from_secs(60))
@@ -2782,9 +2708,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let readiness = finish_d7_observation(live_readiness, Duration::from_secs(20)).await;
     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
-    assert_eq!(guest_addr, vm_guest.guest_addr, "slot-derived guest source is exact");
     let scan = peer_wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
-    let guest_capture = guest_wire.stop();
     let tap_capture = tap_wire.stop();
     let pre_intercept_tap_frames = tap_capture
         .frames
@@ -2795,32 +2719,12 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .collect::<Vec<_>>();
     assert!(
         pre_intercept_tap_frames.is_empty(),
-        "the exact in-netns tap observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
+        "the exact direct-host TAP observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
         readiness.kernel_barrier_at,
     );
-    let pre_intercept_host_veth_frames = guest_capture
-        .frames
-        .iter()
-        .filter(|frame| {
-            guest_frame_precedes_capture_ready(
-                frame,
-                readiness.host_veth_ifindex,
-                readiness.kernel_barrier_at,
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        pre_intercept_host_veth_frames.is_empty(),
-        "the exact host-veth observes zero guest-originated frames of every EtherType from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_host_veth_frames:#?}",
-        readiness.kernel_barrier_at,
-    );
-    let guest_egress = audit_guest_egress_boundary(
-        &guest_capture.frames,
-        &readiness,
-        guest_addr,
-        mesh_destination,
-    );
-    validate_exact_d7_accounting(&readiness, &guest_egress, &readiness.host_veth)
+    let guest_egress =
+        audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
+    validate_exact_d7_accounting(&readiness, &guest_egress, &readiness.tap)
         .expect("strict D7 counter equals the complete lossless C3 capture");
     // The reply-dependent Job owns its successful terminal transition. Do not
     // manufacture that state through the public stop path: wait for the guest
@@ -2839,14 +2743,11 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // of treating the first terminal row as an instantaneous deletion fence.
     let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        let interfaces_absent = [&vm_workload.host_veth, &vm_guest.tap].iter().all(|interface| {
-            let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
-            // SAFETY: `name` is a live NUL-terminated interface name.
-            unsafe { libc::if_nametoindex(name.as_ptr()) == 0 }
-        });
-        let cleaned = matches!(outbound_rule_snapshot(&vm_workload.host_veth), Ok(None))
+        let tap_name = std::ffi::CString::new(network.tap.as_str()).expect("TAP has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let interfaces_absent = unsafe { libc::if_nametoindex(tap_name.as_ptr()) == 0 };
+        let cleaned = matches!(outbound_rule_snapshot(&network.tap), Ok(None))
             && interfaces_absent
-            && !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists()
             && !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists()
             && !Path::new("/sys/fs/cgroup/overdrive.slice/workloads.slice")
                 .join(format!("{}.scope", vm_running.alloc_id))
@@ -2856,27 +2757,22 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         }
         assert!(
             tokio::time::Instant::now() < cleanup_deadline,
-            "natural Job completion must reclaim rule/interface/netns/VM-dir/cgroup within 30s"
+            "natural Job completion must reclaim rule/TAP/VM-dir/cgroup within 30s"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     assert!(
-        matches!(outbound_rule_snapshot(&vm_workload.host_veth), Ok(None)),
+        matches!(outbound_rule_snapshot(&network.tap), Ok(None)),
         "cleanup deletes the exact D7 target rule"
     );
-    for interface in [&vm_workload.host_veth, &vm_guest.tap] {
-        let name = std::ffi::CString::new(interface.as_str()).expect("interface has no NUL");
-        // SAFETY: `name` is a live NUL-terminated interface name.
-        assert_eq!(
-            unsafe { libc::if_nametoindex(name.as_ptr()) },
-            0,
-            "cleanup deletes {interface}"
-        );
-    }
-    assert!(
-        !Path::new("/var/run/netns").join(vm_workload.netns.as_str()).exists(),
-        "cleanup deletes the allocation netns"
+    let tap_name = std::ffi::CString::new(network.tap.as_str()).expect("TAP has no NUL");
+    // SAFETY: `tap_name` is a live NUL-terminated interface name.
+    assert_eq!(
+        unsafe { libc::if_nametoindex(tap_name.as_ptr()) },
+        0,
+        "cleanup deletes {}",
+        network.tap
     );
     assert!(
         !Path::new("/run/overdrive/vm").join(&vm_running.alloc_id).exists(),
@@ -2920,10 +2816,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     }
 }
 
-/// S-GTI-01 — a real microVM resolves and dials a mesh Service by name through
-/// the production guest network and transparent-mTLS path.
+/// S-ND295-01 / S-GTI-01 — a real microVM resolves and dials a mesh Service by
+/// name through the production shared guest network and transparent-mTLS path.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
@@ -2973,15 +2869,6 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
     let (handle, server_tmp) = spawn_mtls_server().await;
     let cfg = config_path(server_tmp.path());
 
-    let plans = [0_u16, 1_u16].map(|slot| {
-        let slot = NetSlot::new(slot).expect("concurrent slot in range");
-        let responder = responder_addr_for_slot(slot);
-        (derive_workload_netns_plan(slot, responder), derive_vm_tap_plan(slot, responder))
-    });
-    assert_ne!(plans[0].0.host_veth, plans[1].0.host_veth);
-    assert_ne!(plans[0].1.tap, plans[1].1.tap);
-    assert_ne!(plans[0].1.guest_addr, plans[1].1.guest_addr);
-
     let capture = WireCapture::start_all();
     let specs = ["gti-concurrent-a", "gti-concurrent-b"].map(|id| {
         write_toml(
@@ -3017,26 +2904,34 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
         "parallel allocations retain distinct guest identities"
     );
 
+    let taps = observed_addresses
+        .iter()
+        .map(|address| {
+            let octets = address.octets();
+            format!("ovd-tp-{:04x}", u16::from_be_bytes([octets[2], octets[3]]))
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(taps[0], taps[1], "parallel allocations retain distinct TAP identities");
     let rules = nft::list_rules("overdrive-mtls", "prerouting")
         .expect("strict rule dump while both parallel VMs are Running");
-    let targets = plans
+    let targets = taps
         .iter()
-        .map(|(workload, _)| {
-            exact_d7_target(&rules, &workload.host_veth)
-                .expect("one exact D7 rule per concurrent C3 host-veth")
-        })
+        .map(|tap| exact_d7_target(&rules, tap).expect("one exact D7 rule per concurrent TAP"))
         .collect::<Vec<_>>();
     assert_ne!(targets[0].handle, targets[1].handle);
     assert_ne!(targets[0].userdata, targets[1].userdata);
     assert_ne!(targets[0].normalized_program, targets[1].normalized_program);
 
-    let ifindices = plans.map(|(workload, _)| {
-        let name = std::ffi::CString::new(workload.host_veth).expect("host-veth has no NUL");
-        // SAFETY: the NUL-terminated interface name remains live for this call.
-        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
-        assert_ne!(ifindex, 0, "parallel C3 host-veth is live");
-        ifindex
-    });
+    let ifindices = taps
+        .iter()
+        .map(|tap| {
+            let name = std::ffi::CString::new(tap.as_str()).expect("TAP has no NUL");
+            // SAFETY: the NUL-terminated interface name remains live for this call.
+            let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+            assert_ne!(ifindex, 0, "parallel C3 TAP is live");
+            ifindex
+        })
+        .collect::<Vec<_>>();
     assert_ne!(ifindices[0], ifindices[1], "parallel C3 captures have distinct ifindices");
 
     let (first_stop, second_stop) = tokio::join!(
@@ -3061,10 +2956,10 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
     handle.shutdown().await.expect("clean concurrent mTLS serve shutdown");
 }
 
-/// S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on the peer wire,
-/// with kTLS installed in both directions.
+/// S-ND295-01 / S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on
+/// the peer wire, with kTLS installed in both directions.
 ///
-/// Outcome anchor: DISCUSS Elevator Pitch
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
@@ -3204,8 +3099,8 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
     assert_exact_lifecycle_delta(&running, &terminal);
 }
 
-/// S-GTI-07 — workload describe surfaces the VM guest address, never its
-/// transit forwarding hop.
+/// S-GTI-07 — workload describe surfaces the VM's canonical shared-network
+/// address.
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
@@ -3245,20 +3140,12 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
             .await
             .expect("workload describe direct command call");
 
-    let slot = NetSlot::new(0).expect("first allocation owns slot zero");
-    let responder = responder_addr_for_slot(slot);
-    let guest = derive_vm_tap_plan(slot, responder);
-    let transit = derive_workload_netns_plan(slot, responder);
     let row = described.snapshot.rows.first().expect("one Running VM row");
+    let guest_addr = row.workload_addr.expect("Running VM exposes its canonical address");
     assert_eq!(
         row.workload_addr,
-        Some(guest.guest_addr),
-        "describe must project the persisted guest NIC address"
-    );
-    assert_ne!(
-        row.workload_addr,
-        Some(transit.workload_addr),
-        "describe must never substitute the transit-veth forwarding address"
+        Some(guest_addr),
+        "describe must project the persisted shared-network address"
     );
     // Response observable universe: the full command wrapper plus the entire
     // serialized API snapshot. The pre-change contract is independently
@@ -3266,13 +3153,13 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     // never reads or clones this post-change HTTP result. Add exactly the one
     // permitted workload_addr fact, then require whole-response equality.
     let pre_change_contract =
-        genuine_pre_change_contract(server_tmp.path(), &submit, guest.guest_addr).await;
+        genuine_pre_change_contract(server_tmp.path(), &submit, guest_addr).await;
     assert_eq!(described.workload_id, pre_change_contract.workload_id);
     assert_eq!(described.spec_digest, pre_change_contract.spec_digest);
     assert_eq!(described.allocations_total, pre_change_contract.allocations_total);
     assert_eq!(described.empty_state_message, pre_change_contract.empty_state_message);
     let mut expected_post_change = pre_change_contract.clone();
-    expected_post_change.snapshot.rows[0].workload_addr = Some(guest.guest_addr);
+    expected_post_change.snapshot.rows[0].workload_addr = Some(guest_addr);
     let post_change = serde_json::to_value(&described.snapshot).expect("post-change snapshot JSON");
     let expected_post_change = serde_json::to_value(&expected_post_change.snapshot)
         .expect("independent expected post-change snapshot JSON");
@@ -3292,7 +3179,7 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         "the live renderer without the additive address must match the genuine pre-change contract"
     );
     let rendered = overdrive_cli::render::workload_describe(&described);
-    let address_delta = format!("Addresses:\n  {}: {}\n", row.alloc_id, guest.guest_addr);
+    let address_delta = format!("Addresses:\n  {}: {}\n", row.alloc_id, guest_addr);
     assert_eq!(
         rendered.match_indices(&address_delta).count(),
         1,
@@ -3302,10 +3189,6 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         rendered.replacen(&address_delta, "", 1),
         pre_change_render,
         "all rendered output outside the one permitted Addresses section must remain byte-exact"
-    );
-    assert!(
-        !rendered.contains(&format!("{}: {}", row.alloc_id, transit.workload_addr)),
-        "live operator renderer must not show the transit address; got:\n{rendered}"
     );
 
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
@@ -3318,9 +3201,9 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 /// S-GTI-02 — the guest's first mesh connection is born intercepted.
 ///
 /// Observable universe: every AF_PACKET frame captured from before VM deploy
-/// through guest termination on the exact allocation host-veth whose source is
+/// through guest termination on the exact allocation TAP whose source is
 /// the exact guest address and whose destination is the exact mesh peer tuple,
-/// plus every peer-port loopback stream and the typed kernel nft-rule snapshot.
+/// plus every peer-port shared-bridge stream and the typed kernel nft-rule snapshot.
 /// Every exact-tuple packet carries its kernel event timestamp; nft readiness
 /// is a conservative `CLOCK_REALTIME` barrier sampled after the successful
 /// typed query. Missing/equal timestamps count as pre-ready. Assertions
@@ -3340,7 +3223,7 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     let result = run_mesh_guest_scenario("gti-born-captured").await;
     let first_syn = result.guest_egress.first_syn.unwrap_or_else(|| {
         panic!(
-            "the exact guest-to-mesh host-veth universe contains the command's first SYN; \
+            "the exact guest-to-mesh TAP universe contains the command's first SYN; \
              readiness={:?}; all interface TCP={:#?}",
             result.readiness, result.guest_egress.interface_tcp
         )
@@ -3367,7 +3250,7 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     assert_eq!(
         result.guest_egress.interface_tcp.first().copied(),
         Some(first_syn),
-        "the first eligible host-veth ingress TCP packet is the exact initial SYN"
+        "the first eligible TAP ingress TCP packet is the exact initial SYN"
     );
     assert!(
         first_syn.tuple.source.port() != 0,
@@ -3413,7 +3296,7 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     );
     assert!(
         result.guest_egress.plaintext_request_hits > 0,
-        "the exact host-veth capture must independently observe the guest-authored plaintext \
+        "the exact TAP capture must independently observe the guest-authored plaintext \
          request before TPROXY consumes it"
     );
     assert_eq!(
@@ -3448,12 +3331,10 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
 #[serial(cgroup)]
 async fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
     let result = run_mesh_guest_scenario("gti-d7-exact-accounting").await;
-    validate_exact_d7_accounting(
-        &result.readiness,
-        &result.guest_egress,
-        &result.readiness.host_veth,
-    )
-    .expect("the complete production D7 counter delta equals the lossless exact-ifindex capture");
+    validate_exact_d7_accounting(&result.readiness, &result.guest_egress, &result.readiness.tap)
+        .expect(
+            "the complete production D7 counter delta equals the lossless exact-ifindex capture",
+        );
     assert!(
         result.guest_egress.segments.iter().all(|segment| {
             segment
@@ -3468,14 +3349,14 @@ async fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
     );
 }
 
-fn synthetic_d7_rule(host_veth: &str, packets: u64, bytes: u64) -> nft::RuleInfo {
+fn synthetic_d7_rule(tap: &str, packets: u64, bytes: u64) -> nft::RuleInfo {
     let port = 36_533;
     nft::RuleInfo {
         handle: 17,
-        userdata: nft::userdata_egress(host_veth, port),
+        userdata: nft::userdata_egress(tap, port),
         counter: Some(nft::RuleCounterSnapshot { packets, bytes }),
         normalized_program: nft::normalized_rule_program_identity(&nft::egress_tproxy_rule_exprs(
-            host_veth,
+            tap,
             Ipv4Addr::LOCALHOST,
             port,
             0x1,
@@ -3494,26 +3375,26 @@ fn synthetic_d7_pair(rule: nft::RuleInfo) -> [nft::RuleSnapshot; 2] {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn capture_ready_requires_the_real_c3_identity() {
-    let rule = synthetic_d7_rule("ovd-veth-real", 0, 0);
-    assert!(exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-real").is_ok());
-    assert_eq!(outbound_rule_from_rules(&[], "ovd-veth-real"), Ok(None));
+    let rule = synthetic_d7_rule("ovd-tp-real", 0, 0);
+    assert!(exact_d7_target(std::slice::from_ref(&rule), "ovd-tp-real").is_ok());
+    assert_eq!(outbound_rule_from_rules(&[], "ovd-tp-real"), Ok(None));
     assert_eq!(
-        outbound_rule_from_rules(std::slice::from_ref(&rule), "ovd-veth-real"),
+        outbound_rule_from_rules(std::slice::from_ref(&rule), "ovd-tp-real"),
         Ok(Some(rule.clone())),
     );
     assert!(
-        outbound_rule_from_rules(&[rule.clone(), rule.clone()], "ovd-veth-real").is_err(),
+        outbound_rule_from_rules(&[rule.clone(), rule.clone()], "ovd-tp-real").is_err(),
         "duplicate allocation ownership is ambiguity, never absence",
     );
     let mut malformed = rule.clone();
     malformed.userdata.insert(nft::USERDATA_MAGIC.len() + 1, 0xff);
     assert!(
-        outbound_rule_from_rules(&[malformed], "ovd-veth-real").is_err(),
+        outbound_rule_from_rules(&[malformed], "ovd-tp-real").is_err(),
         "malformed allocation-tagged ownership is ambiguity, never absence",
     );
     assert!(
-        exact_d7_target(std::slice::from_ref(&rule), "ovd-veth-other").is_err(),
-        "a guessed or sibling host-veth can never establish capture readiness"
+        exact_d7_target(std::slice::from_ref(&rule), "ovd-tp-other").is_err(),
+        "a guessed or sibling TAP can never establish capture readiness"
     );
 }
 
@@ -3540,22 +3421,22 @@ fn pre_baseline_all_ethertype_guest_frame_always_invalidates_born_captured() {
     );
     assert!(
         !guest_frame_precedes_capture_ready(&missing_timestamp, 42, KernelRealtime(100)),
-        "a sibling ifindex is outside the exact host-veth universe"
+        "a sibling ifindex is outside the exact TAP universe"
     );
     missing_timestamp.packet_type = libc::PACKET_OUTGOING;
     assert!(
         !guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
-        "the opposite host-veth direction is not guest ingress"
+        "the opposite TAP direction is not guest ingress"
     );
 }
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
-    let host_veth = "ovd-veth-real";
-    let original = synthetic_d7_rule(host_veth, 2, 80);
+    let tap = "ovd-tp-real";
+    let original = synthetic_d7_rule(tap, 2, 80);
     let stable = synthetic_d7_pair(original.clone());
-    assert!(validate_stable_d7_pair(&stable, host_veth, Some(&original.userdata)).is_ok());
+    assert!(validate_stable_d7_pair(&stable, tap, Some(&original.userdata)).is_ok());
 
     let mut mutations = Vec::new();
     let mut generation = stable.clone();
@@ -3579,7 +3460,7 @@ fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
 
     for mutation in mutations {
         assert!(
-            validate_stable_d7_pair(&mutation, host_veth, None).is_err(),
+            validate_stable_d7_pair(&mutation, tap, None).is_err(),
             "generation/handle/userdata/program/counter/uniqueness mutation must fail closed"
         );
     }
@@ -3588,17 +3469,17 @@ fn live_intercept_is_invalidated_by_every_guard_mutation_signal() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn synthetic_d7_accounting_rejects_competing_capture_counts() {
-    let host_veth = "ovd-veth-real";
-    let before = synthetic_d7_pair(synthetic_d7_rule(host_veth, 5, 100));
-    let after = synthetic_d7_pair(synthetic_d7_rule(host_veth, 8, 250));
+    let tap = "ovd-tp-real";
+    let before = synthetic_d7_pair(synthetic_d7_rule(tap, 5, 100));
+    let after = synthetic_d7_pair(synthetic_d7_rule(tap, 8, 250));
     let readiness = InterceptReadiness {
         kernel_barrier_at: KernelRealtime(1),
-        host_veth_ifindex: 41,
-        host_veth: host_veth.to_owned(),
+        tap_ifindex: 41,
+        tap: tap.to_owned(),
         accounting: D7Accounting {
             before,
             after,
-            target_userdata: nft::userdata_egress(host_veth, 36_533),
+            target_userdata: nft::userdata_egress(tap, 36_533),
         },
     };
     let audit = GuestEgressAudit {
@@ -3609,12 +3490,12 @@ fn synthetic_d7_accounting_rejects_competing_capture_counts() {
         packet_count: 3,
         byte_count: 150,
     };
-    validate_exact_d7_accounting(&readiness, &audit, host_veth)
+    validate_exact_d7_accounting(&readiness, &audit, tap)
         .expect("checked non-zero packet and byte deltas equal the full capture");
 
     let mut competing = audit;
     competing.packet_count += 1;
-    assert!(validate_exact_d7_accounting(&readiness, &competing, host_veth).is_err());
+    assert!(validate_exact_d7_accounting(&readiness, &competing, tap).is_err());
 }
 
 fn synthetic_guest_tcp_frame() -> CapturedFrame {
@@ -3782,25 +3663,25 @@ proptest! {
         capture_corruption in 0_u8..8,
         drops in 1_u32..=u32::MAX,
     ) {
-        let host_veth = "ovd-veth-real";
+        let tap = "ovd-tp-real";
         let before = synthetic_d7_pair(synthetic_d7_rule(
-            host_veth,
+            tap,
             before_packets,
             before_bytes,
         ));
         let after = synthetic_d7_pair(synthetic_d7_rule(
-            host_veth,
+            tap,
             before_packets + packet_delta,
             before_bytes + byte_delta,
         ));
         let mut readiness = InterceptReadiness {
             kernel_barrier_at: KernelRealtime(1),
-            host_veth_ifindex: 41,
-            host_veth: host_veth.to_owned(),
+            tap_ifindex: 41,
+            tap: tap.to_owned(),
             accounting: D7Accounting {
                 before,
                 after,
-                target_userdata: nft::userdata_egress(host_veth, 36_533),
+                target_userdata: nft::userdata_egress(tap, 36_533),
             },
         };
         let mut audit = GuestEgressAudit {
@@ -3811,7 +3692,7 @@ proptest! {
             packet_count: packet_delta,
             byte_count: byte_delta,
         };
-        prop_assert!(validate_exact_d7_accounting(&readiness, &audit, host_veth).is_ok());
+        prop_assert!(validate_exact_d7_accounting(&readiness, &audit, tap).is_ok());
 
         match oracle_corruption {
             0 => readiness.accounting.before[0].rules.clear(),
@@ -3849,7 +3730,7 @@ proptest! {
             _ => readiness.accounting.target_userdata.push(0),
         }
         prop_assert!(
-            validate_exact_d7_accounting(&readiness, &audit, host_veth).is_err(),
+            validate_exact_d7_accounting(&readiness, &audit, tap).is_err(),
             "zero/duplicate targets and every generation/identity/counter/equality mutation fail closed",
         );
 
@@ -4172,32 +4053,21 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         .network
         .as_ref()
         .ok_or_else(|| "restart has no complete VM network plan".to_owned())?;
-    let slot_hex = network
-        .tap
-        .rsplit('-')
-        .next()
-        .ok_or_else(|| "slot-derived tap suffix is absent".to_owned())?;
-    let slot = NetSlot::new(
-        u16::from_str_radix(slot_hex, 16)
-            .map_err(|error| format!("production tap slot is not hexadecimal: {error}"))?,
-    )
-    .map_err(|error| format!("observed network slot is invalid: {error}"))?;
-    let responder = responder_addr_for_slot(slot);
-    let workload = derive_workload_netns_plan(slot, responder);
-    let guest = derive_vm_tap_plan(slot, responder);
-    if network.netns != workload.netns || network.tap != guest.tap {
-        return Err(format!(
-            "restart network plan drifted: observed={network:?}, workload={workload:?}, guest={guest:?}"
-        ));
-    }
+    let tap = network.tap.clone();
 
     // Reclamation and the stale-rule sweep have completed before this VMM cut.
     // The replacement guard is intentionally absent here: accepted ordering is
     // driver READY → transient Running write → intercept install → EXEC release.
     poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 0).await;
 
-    let guest_wire = WireCapture::start(&workload.host_veth, 0);
-    let (tap_wire, tap_ifindex) = WireCapture::start_in_netns(network.netns.as_str(), &network.tap);
+    let tap_wire = WireCapture::start(&tap, 0);
+    let tap_ifindex = {
+        let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "replacement TAP is live before VMM release");
+        ifindex
+    };
     cut.release
         .send(())
         .map_err(|()| "fresh replacement VMM release receiver disappeared".to_owned())?;
@@ -4218,29 +4088,21 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     // guards are notification-free, so later generation movement is target
     // traffic rather than unrelated peer installation.
     poll_until_nft_rule_observer_is_quiet(Duration::from_secs(30), 2).await;
-    let live =
-        poll_until_outbound_rule_ready(workload.host_veth.clone(), Duration::from_secs(30)).await;
+    let live = poll_until_outbound_rule_ready(tap.clone(), Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
     let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await.ok_or_else(|| {
         "restarted first flow did not install bidirectional TLS 1.3 kTLS".to_owned()
     })?;
     let readiness = finish_d7_observation(live, Duration::from_secs(60)).await;
-    let guest_capture = guest_wire.stop();
     let tap_capture = tap_wire.stop();
-    let pre_ready = [
-        ("tap", &tap_capture.frames, tap_ifindex),
-        ("host-veth", &guest_capture.frames, readiness.host_veth_ifindex),
-    ]
-    .into_iter()
-    .flat_map(|(name, frames, ifindex)| {
-        frames
-            .iter()
-            .filter(move |frame| {
-                guest_frame_precedes_capture_ready(frame, ifindex, readiness.kernel_barrier_at)
-            })
-            .map(move |frame| format!("{name}: {frame:?}"))
-    })
-    .collect::<Vec<_>>();
+    let pre_ready = tap_capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            guest_frame_precedes_capture_ready(frame, tap_ifindex, readiness.kernel_barrier_at)
+        })
+        .map(|frame| format!("tap: {frame:?}"))
+        .collect::<Vec<_>>();
     let mesh_destination = SocketAddrV4::new(
         Ipv4Addr::from(u32::from(WORKLOAD_FRONTEND_BASE.network()).saturating_add(1)),
         SERVICE_PORT,
@@ -4248,19 +4110,9 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let guest_addr = restarted
         .workload_addr
         .ok_or_else(|| "restarted VM omitted its guest address".to_owned())?;
-    if guest_addr != guest.guest_addr {
-        return Err(format!(
-            "restarted guest address drifted: observed={guest_addr}, expected={}",
-            guest.guest_addr
-        ));
-    }
-    let audit = audit_guest_egress_boundary(
-        &guest_capture.frames,
-        &readiness,
-        guest_addr,
-        mesh_destination,
-    );
-    validate_exact_d7_accounting(&readiness, &audit, &readiness.host_veth)
+    let audit =
+        audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
+    validate_exact_d7_accounting(&readiness, &audit, &readiness.tap)
         .map_err(|error| format!("restart D7 accounting mismatch: {error}"))?;
     let scan = peer_wire.stop_and_scan(Some(ktls.tuple));
     if audit.first_syn.is_none()
@@ -4818,8 +4670,8 @@ async fn run_resolver_failure_closure(label: &str) {
             poll_until_running(&observation_cfg, &sibling_submit.workload_id, Duration::from_secs(60))
                 .await;
         let sibling_row_before = sibling_before.snapshot.rows[0].clone();
-        let sibling_host_veth = host_veth_for_config(&sibling_config);
-        let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+        let sibling_tap = tap_for_config(&sibling_config);
+        let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_tap).await;
         let packet_path_before = fault_fixture::PacketPathBaseline::capture();
 
         let target_submit = deploy(DeployArgs {
@@ -4896,7 +4748,7 @@ async fn run_resolver_failure_closure(label: &str) {
         .expect("describe independent sibling after resolver failure");
         assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
         assert_eq!(
-            outbound_rule_snapshot(&sibling_host_veth),
+            outbound_rule_snapshot(&sibling_tap),
             Ok(Some(sibling_rule_before)),
             "resolver failure and cleanup preserve the independent exact rule"
         );
@@ -5086,8 +4938,8 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
     let sibling_before =
         poll_until_running(&cfg, &sibling_submit.workload_id, Duration::from_secs(60)).await;
     let sibling_row_before = sibling_before.snapshot.rows[0].clone();
-    let sibling_host_veth = host_veth_for_config(&sibling_config);
-    let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_host_veth).await;
+    let sibling_tap = tap_for_config(&sibling_config);
+    let sibling_rule_before = poll_until_outbound_rule_snapshot(&sibling_tap).await;
     let packet_path_before = fault_fixture::PacketPathBaseline::capture();
 
     let target_spec = write_toml(
@@ -5147,7 +4999,7 @@ async fn interrupting_the_real_vmm_before_ready_fails_closed_and_cleans_up() {
             .await
             .expect("describe sibling after target interruption");
     assert_eq!(sibling_after.snapshot.rows[0], sibling_row_before);
-    assert_eq!(outbound_rule_snapshot(&sibling_host_veth), Ok(Some(sibling_rule_before)));
+    assert_eq!(outbound_rule_snapshot(&sibling_tap), Ok(Some(sibling_rule_before)));
     stop(StopArgs { id: sibling_submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop interruption sibling");
@@ -5211,12 +5063,12 @@ async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_b
             [0]
         .clone();
 
-    let target_host_veth = host_veth_for_config(&target_config);
-    let sibling_host_veth = host_veth_for_config(&sibling_config);
+    let target_tap = tap_for_config(&target_config);
+    let sibling_tap = tap_for_config(&sibling_config);
     let before = stable_full_rule_snapshot();
-    let target_rule = exact_d7_target(&before.rules, &target_host_veth)
+    let target_rule = exact_d7_target(&before.rules, &target_tap)
         .expect("target has exactly one typed allocation rule");
-    let sibling_rule = exact_d7_target(&before.rules, &sibling_host_veth)
+    let sibling_rule = exact_d7_target(&before.rules, &sibling_tap)
         .expect("sibling has exactly one typed allocation rule");
     assert_ne!(target_rule.handle, sibling_rule.handle);
 
@@ -5244,7 +5096,7 @@ async fn a_stopped_microvm_workloads_egress_mesh_guard_is_torn_down_never_left_b
         "the ordered full after-snapshot equals before filtered only by the exact target handle"
     );
     assert_eq!(
-        outbound_rule_snapshot(&sibling_host_veth),
+        outbound_rule_snapshot(&sibling_tap),
         Ok(Some(sibling_rule)),
         "sibling handle/userdata/program/counter remain byte-for-byte exact"
     );

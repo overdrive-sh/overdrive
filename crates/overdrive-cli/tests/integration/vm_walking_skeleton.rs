@@ -181,8 +181,9 @@
 //! **Historical S-VM-74 is superseded by guest-stack transparent mTLS step
 //! 02-01.** Its former “VM allocation installs no mTLS intercept” contract was
 //! intentionally deleted. S-GTI-01 and S-GTI-03 now prove the opposite current
-//! contract on real metal: VM traffic crosses the TAP-fed host veth, receives
-//! the production intercept, and reaches the peer as authenticated TLS 1.3.
+//! contract on real metal: VM traffic crosses the direct host-TAP/shared-bridge
+//! path, receives the production intercept, and reaches the peer as authenticated
+//! TLS 1.3.
 //!
 //! **S-VM-01 (the walking skeleton itself) — CLOSED (step 01-08 review
 //! remediation, second pass, 2026-08-14).** The guest-side mechanism
@@ -209,9 +210,10 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! Every pre-#295 live scenario is GREEN and carries no `#[ignore]`. The one
-//! reasoned GH #295 DISTILL body at the end is deliberately pending until its
-//! accepted one-cut production path exists. Every blocker this
+//! Every pre-#295 live scenario is GREEN and carries no `#[ignore]`. The
+//! activated GH #295 walking-skeleton body at the end is the continuing
+//! direct-host-TAP/shared-bridge production proof; the separate double-loss
+//! body remains pending until its accepted one-cut audit path exists. Every blocker this
 //! file's history above documents (vsock EAFNOSUPPORT, the terminal-row
 //! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
 //! contamination) is CLOSED.
@@ -2439,8 +2441,10 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
     handle.shutdown().await.expect("clean shutdown");
 }
 
-/// S-ND295-35 — two VM allocations launch directly on host TAPs attached to
-/// one shared bridge, with no per-workload network namespace wrapper.
+/// S-ND295-01 / S-ND295-35 — two VM allocations launch directly on host TAPs
+/// attached to one shared bridge, with no per-workload network namespace
+/// wrapper.
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: bounded-change.
 #[expect(
     clippy::doc_markdown,
@@ -2448,7 +2452,6 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step for GH #295 direct host-TAP production composition"]
 async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2462,6 +2465,16 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
     let mut deployed = Vec::new();
+    let endpoint_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints");
+    let guard = BridgeGuardSpec::new(
+        "overdrive-mtls".to_owned(),
+        "prerouting".to_owned(),
+        "managed_taps".to_owned(),
+        -300,
+        0x295a,
+        0x295b,
+    )
+    .expect("canonical shared bridge guard specification");
     let command_output = |program: &str, args: &[&str]| {
         let output = std::process::Command::new(program)
             .args(args)
@@ -2491,13 +2504,29 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
         let row = running.snapshot.rows.first().expect("one Running allocation row");
         let alloc = AllocationId::new(&row.alloc_id).expect("allocation id parses");
         let addr = row.workload_addr.expect("Running VM publishes its guest address");
-        deployed.push((output.workload_id, alloc, addr));
+        let tap =
+            format!("ovd-tp-{:04x}", u16::from_be_bytes([addr.octets()[2], addr.octets()[3]]));
+        let tap_ifindex = {
+            let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
+            // SAFETY: the NUL-terminated name remains live for this lookup.
+            let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+            assert_ne!(ifindex, 0, "the production TAP is live while the VM is Running");
+            ifindex
+        };
+        let link_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/links")
+            .join(format!("{tap}-ingress"));
+        assert!(link_pin.exists(), "the production TCX link is pinned for {tap}");
+        assert!(
+            endpoint_present(&endpoint_pin, tap_ifindex).expect("observe live endpoint entry"),
+            "the production endpoint map contains the Running allocation {tap_ifindex}"
+        );
+        deployed.push((output.workload_id, alloc, addr, tap, tap_ifindex));
     }
 
     let host_netns = std::fs::read_link("/proc/self/ns/net").expect("read host network namespace");
     let mut masters = std::collections::BTreeSet::new();
     let mut taps = std::collections::BTreeSet::new();
-    for (_, alloc, addr) in &deployed {
+    for (_, alloc, addr, _, _) in &deployed {
         let offset = u16::from_be_bytes([addr.octets()[2], addr.octets()[3]]);
         let tap = format!("ovd-tp-{offset:04x}");
         let tap_dir = PathBuf::from("/sys/class/net").join(&tap);
@@ -2585,7 +2614,7 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
         assert!(!route.contains("/30"), "the shared-prefix cut creates no allocation /30: {route}");
     }
 
-    for (workload_id, _, _) in &deployed {
+    for (workload_id, _, _, _, _) in &deployed {
         stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
             .await
             .expect("stop the exact VM workload");
@@ -2595,13 +2624,13 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
             AllocStateWire::Terminated,
         );
     }
-    for tap in taps {
+    for tap in &taps {
         assert!(
-            !PathBuf::from("/sys/class/net").join(&tap).exists(),
+            !PathBuf::from("/sys/class/net").join(tap).exists(),
             "public stop removes the exact owned TAP {tap}"
         );
     }
-    for (_, alloc, _) in &deployed {
+    for (_, alloc, _, tap, tap_ifindex) in &deployed {
         assert!(
             !VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc).path().exists(),
             "stop removes the allocation-owned run directory"
@@ -2610,7 +2639,44 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
             !CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).exists(),
             "stop removes the allocation-owned cgroup"
         );
+        assert!(
+            !endpoint_present(&endpoint_pin, *tap_ifindex)
+                .expect("observe released endpoint entry"),
+            "stop removes the endpoint map entry for {tap}"
+        );
+        assert!(
+            !PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/links")
+                .join(format!("{tap}-ingress"))
+                .exists(),
+            "stop removes the pinned TCX link for {tap}"
+        );
     }
+    match observe_bridge_guard(&guard, &BTreeSet::new()).expect("observe empty shared guard") {
+        BridgeGuardObservation::Absent { .. } | BridgeGuardObservation::Exact { .. } => {}
+        BridgeGuardObservation::Conflict { inventory } => {
+            panic!("stopped allocations leave a conflicting bridge-guard inventory: {inventory:?}")
+        }
+    }
+    let first_address = deployed[0].2;
+    let reuse_spec = write_toml(
+        server_tmp.path(),
+        "nd295-reuse.toml",
+        &vm_job_toml("nd295-reuse", "/sbin/spin", &[], &fixture.kernel_path, &rootfs),
+    );
+    let reuse_submit = deploy(DeployArgs { spec: reuse_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy after both prior allocations released");
+    let reuse_running =
+        poll_until_running(&cfg, &reuse_submit.workload_id, Duration::from_secs(90)).await;
+    assert_eq!(
+        reuse_running.snapshot.rows.first().expect("one reused allocation row").workload_addr,
+        Some(first_address),
+        "release-last cleanup returns the first leased address to the shared pool"
+    );
+    stop(StopArgs { id: reuse_submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the address-reuse allocation");
+    let _ = poll_until_terminal(&cfg, &reuse_submit.workload_id, Duration::from_secs(30)).await;
     assert!(rootfs.exists(), "cleanup preserves the operator-owned rootfs master");
     assert_eq!(
         command_output("ip", &["-j", "link", "show", "type", "veth"]),

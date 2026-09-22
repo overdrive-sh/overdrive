@@ -470,6 +470,20 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created 03f910739cae8b56ffa6a58c219a45300310b37c with only step-owned production, activation/compiler-fallout, and DES-log paths; Marcus author retained and exactly one Co-Authored-By: Codex <codex@openai.com> trailer. AGENTS.md and .serena/project.yml remained outside the commit. No mutation testing.",
       "t": "2026-09-22T20:54:10Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: activated the authored S-ND295-01 topology body; baseline compilation reaches existing guest_stack_mtls_egress VmNetworkAttachment.netns references, while the native-metal environment must still be checked through cargo xtask metal run --.",
+      "t": "2026-09-22T21:06:59Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS with native-metal evidence pending environment: activated only the S-ND295-01 guest traffic pair and direct-TAP topology body; rewired the authored integration evidence from retired netns/veth assumptions to production TAP/shared-bridge ownership, bridge peer-wire capture, TLS/kTLS/splice oracle, endpoint/TCX/guard/address cleanup complements, and address reuse. Writable-Lima workspace cargo check --workspace --all-targets --features integration-tests,kvm-tests passed; exact authored selectors discover one each; focused pure D7 oracle nextest passed 4/4. Canonical cargo xtask metal run -- guest_stack_mtls_egress and vm topology selectors both fail closed before test execution because selected guest kernel artifact is absent; no native pass claimed. Workspace clippy exact command remains blocked by pre-existing overdrive-control-plane/overdrive-netlink findings; focused overdrive-cli lint has only the pre-existing vm_walking_skeleton build_identifiable_datagram_emitter too-many-lines finding. cargo fmt and diff check pass. No mutation testing.",
+      "t": "2026-09-22T21:26:22Z"
     }
   ]
 }
