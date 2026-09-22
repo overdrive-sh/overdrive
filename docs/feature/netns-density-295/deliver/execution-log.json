@@ -428,6 +428,20 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created 7fa9c94185f315e2863fa13e2254fd5436722d23 with only step-owned acceptance activation plus accumulated 03-02 DES events; original Marcus author retained and exactly one Co-Authored-By: Codex trailer. No production change, no mutation testing, and unrelated AGENTS.md/.serena/project.yml remain outside commit.",
       "t": "2026-09-22T17:53:39Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: final mechanical remediation verification after approved upstream corrections. D1/D2 (DISTILL/roadmap evidence-boundary defects) and I3-D3 (cancellation criterion wording) are closed by approved commits 2179f03c, 8b407cb2, e3881e06, and d976f767; no production/API/test change was needed in this step. Corrected eight-body matrix passed in writable Lima: core generated gate PBT PROPTEST_CASES=1024 1/528 (run 461f33d4-cfe8-4442-8d9e-25c17788b9ea), primary netns_density_exec_release schedules 3/99 (run 522611e7-a473-4cd0-9ed8-9360c3e5cdcb), writer/stop/cancellation schedules 3/99 (run 4775e7ca-7853-4d59-bbda-f03912af04fb), post-#295 action-owner await/cancellation schedule 1/208 (run 2cb26558-9f57-4fda-a2e3-48cbbe2eceac). Workspace check passed with writable /tmp target; cargo fmt/diff-check/roadmap approved-status passed. Focused worker clippy --no-deps passed; workspace clippy and dependency-inclusive focused lint retain pre-existing baseline findings in overdrive-netlink/control-plane and are notes only. User explicitly waived any further DELIVER re-review after upstream findings were closed; do not dispatch or await a reviewer. No mutation testing; prior RED history remains unchanged.",
+      "t": "2026-09-22T19:25:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: final mechanical verification events are ready for scoped log-only des-commit; no reviewer was dispatched per explicit user waiver, no production/API/test changes were made, and unrelated AGENTS.md/.serena/project.yml remain outside scope.",
+      "t": "2026-09-22T19:25:20Z"
     }
   ]
 }
