@@ -398,6 +398,14 @@ pub enum MtlsBootError {
         #[source]
         source: overdrive_core::traits::mtls_resolve::MtlsResolveError,
     },
+
+    /// The retained node-shared F/C listener owner could not start after its
+    /// exact bind, shared-rule convergence, and full read-back sequence.
+    #[error("shared mTLS owner failed to start: {source}")]
+    SharedOwner {
+        #[source]
+        source: overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError,
+    },
 }
 
 /// Top-level control-plane error.

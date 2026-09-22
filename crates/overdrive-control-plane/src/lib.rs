@@ -3991,6 +3991,25 @@ pub async fn run_server_with_obs_and_drivers(
         return Err(error::ControlPlaneError::from(cause));
     }
 
+    // Publish the one node-shared F/C listener owner only after the shared
+    // guest switch has converged. Allocation start_alloc requires this owner;
+    // refusing here preserves the accepted boot boundary instead of allowing
+    // a Running allocation to discover an absent listener owner later.
+    if let Some(worker) = state.mtls_worker.as_ref()
+        && let Err(source) = worker.start_shared_owner().await
+    {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "mtls.shared_owner",
+            cause = %source,
+            "shared mTLS listener owner failed to start"
+        );
+        return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::SharedOwner {
+            source,
+        }));
+    }
+
     // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
     // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a
     // non-mTLS boot (no responder is composed there — the SAME gate the netns

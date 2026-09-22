@@ -1233,6 +1233,22 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
     ) -> std::result::Result<(), GuestTcxError> {
         match action {
             GuestNetworkScratchTcxAction::LoadProgramAndMaps => {
+                // The probe namespace is a fixed, owner-controlled scratch
+                // namespace. A prior process can die after pinning a link or
+                // map but before the reverse cleanup runs; reclaim those
+                // exact pins before loading the next isolated probe. This is
+                // bounded to the scratch paths and never touches the
+                // allocation-owned shared-switch hierarchy.
+                if plan.tcx_link_pin.exists() {
+                    overdrive_dataplane::guest_tcx::detach_pinned_link(&plan.tcx_link_pin)?;
+                }
+                for pin in [&plan.endpoint_map_pin, &plan.counter_map_pin] {
+                    match std::fs::remove_file(pin) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(source) => return Err(GuestTcxError::Io { source }),
+                    }
+                }
                 let capture = GuestTcxInventoryIdentity::capture(
                     plan.endpoint_map_pin.clone(),
                     plan.counter_map_pin.clone(),
@@ -1355,17 +1371,29 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                 )
             }
             GuestNetworkScratchTcxAction::UnpinLink => {
-                self.ensure_adopted_for_cleanup(plan)?;
-                self.adopted
+                let pin = &plan.tcx_link_pin;
+                if !pin.exists() {
+                    return Ok(());
+                }
+                if self.adopted.lock().is_none() {
+                    return overdrive_dataplane::guest_tcx::detach_pinned_link(pin);
+                }
+                let result = self
+                    .adopted
                     .lock()
                     .as_mut()
                     .ok_or_else(|| GuestTcxError::CaptureUnavailable {
                         family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxLink,
                     })?
-                    .unpin_link()
-                    .map(|link| {
-                        *self.pending_link.lock() = link;
-                    })
+                    .unpin_link();
+                match result {
+                    Ok(Some(link)) => {
+                        *self.pending_link.lock() = Some(link);
+                        Ok(())
+                    }
+                    Ok(None) => overdrive_dataplane::guest_tcx::detach_pinned_link(pin),
+                    Err(source) => Err(source),
+                }
             }
             GuestNetworkScratchTcxAction::DetachLink => {
                 let pending = self.pending_link.lock().take();
@@ -3273,6 +3301,10 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
 }
 
 #[async_trait::async_trait]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the approved host-owner port keeps startup, sweep, convergence, audit, and allocation lifecycle on one owner"
+)]
 impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn probe_startup(&self) -> Result<()> {
         let plan = Self::scratch_plan();
@@ -3310,6 +3342,13 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             observed,
         })
     }
+    #[expect(
+        clippy::collapsible_if,
+        clippy::match_same_arms,
+        clippy::too_many_lines,
+        clippy::unnested_or_patterns,
+        reason = "stale shared-guard cleanup keeps the exact owned-member recovery sequence explicit"
+    )]
     async fn sweep_stale(&self) -> Result<()> {
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
@@ -3394,14 +3433,62 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     std::io::Error::other(error.to_string()),
                 )
             })?;
-            if let Err(error) =
-                overdrive_netlink::nft::bridge::delete_owned_guard(&guard, &BTreeSet::new())
-            {
-                if first_error.is_none() {
-                    first_error = Some(overdrive_netlink::NetlinkError::nft(
-                        "stale-guard",
-                        std::io::Error::other(error.to_string()),
-                    ));
+            let expected_members = BTreeSet::new();
+            match overdrive_netlink::nft::bridge::observe(&guard, &expected_members) {
+                Ok(BridgeGuardObservation::Conflict { inventory }) => {
+                    // A prior process can leave owned TAP names in the
+                    // node-global managed set while its allocation owner is
+                    // gone. Remove only the accepted Overdrive TAP-name
+                    // members, then let delete_owned_guard retain any foreign
+                    // rule/child conflict as a typed refusal.
+                    for member in inventory.members {
+                        if let overdrive_netlink::nft::bridge::BridgeGuardMemberIdentity::Ifname(
+                            name,
+                        ) = member.identity
+                            && name.starts_with("ovd-tp-")
+                            && let Err(error) =
+                                overdrive_netlink::nft::bridge::delete_member(&guard, &name)
+                            && first_error.is_none()
+                        {
+                            first_error = Some(overdrive_netlink::NetlinkError::nft(
+                                "stale-guard-member",
+                                std::io::Error::other(error.to_string()),
+                            ));
+                        }
+                    }
+                    if first_error.is_none()
+                        && let Err(error) = overdrive_netlink::nft::bridge::delete_owned_guard(
+                            &guard,
+                            &expected_members,
+                        )
+                    {
+                        first_error = Some(overdrive_netlink::NetlinkError::nft(
+                            "stale-guard",
+                            std::io::Error::other(error.to_string()),
+                        ));
+                    }
+                }
+                Ok(BridgeGuardObservation::Absent { .. })
+                | Ok(BridgeGuardObservation::Exact { .. }) => {
+                    if let Err(error) = overdrive_netlink::nft::bridge::delete_owned_guard(
+                        &guard,
+                        &expected_members,
+                    ) {
+                        if first_error.is_none() {
+                            first_error = Some(overdrive_netlink::NetlinkError::nft(
+                                "stale-guard",
+                                std::io::Error::other(error.to_string()),
+                            ));
+                        }
+                    }
+                }
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(overdrive_netlink::NetlinkError::nft(
+                            "stale-guard",
+                            std::io::Error::other(error.to_string()),
+                        ));
+                    }
                 }
             }
             first_error.map_or(Ok(()), Err)

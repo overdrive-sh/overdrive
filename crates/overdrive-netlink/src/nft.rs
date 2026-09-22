@@ -3375,10 +3375,12 @@ mod shared_ip {
 
     fn collect_once() -> Result<Option<SharedProgram>, NetlinkError> {
         let tables = list_table_names_family(NftFamily::Ipv4)?;
-        if list_table_names_family(NftFamily::Bridge)?.iter().any(|table| table == SHARED_IP_TABLE)
-        {
-            return Err(invalid_shared_ip("shared IP table exists in a foreign nft family"));
-        }
+        // The approved #295 topology intentionally uses the same table name
+        // in the independent IPv4 and bridge nft families: `ip overdrive-mtls`
+        // owns the constant TPROXY rules while `bridge overdrive-mtls` owns
+        // the managed-TAP proof-mark guard. Family identity is part of the
+        // kernel object graph, so a bridge-family table with this name is not
+        // a conflict for the IPv4 observer.
         if !tables.iter().any(|table| table == SHARED_IP_TABLE) {
             return Ok(None);
         }

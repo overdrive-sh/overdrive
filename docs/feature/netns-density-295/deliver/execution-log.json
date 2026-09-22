@@ -512,6 +512,20 @@
       "s": "EXECUTED",
       "d": "SUPERSEDES prior GREEN wording: activated all three reasoned S-ND295-33 conformance bodies (zero remaining #[ignore] markers); writable-Lima terminating selector compiled but all 3 bodies timed out at their bounded fail-stop wait because the SimDataplane composition retains no MtlsInterceptWorker supervisor and production never consumes the injected SimSharedGuestNetworkOwner audit/quiesce outcomes.",
       "t": "2026-09-22T21:45:32Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "REMEDIATION RED: exact native-metal guest_stack_mtls_egress selector reproduced 34 tests with 14 passed/20 failed; the first shared production startup path failed at HostSharedGuestNetworkOwner::probe_startup run_probe\u2192cleanup with primary GuestNetworkError::Tcx(TcxLinkPin) wrapping BPF_OBJ_PIN EEXIST at the exact scratch link pin, then cleanup InventoryAmbiguous(TcxLinkPin) with the link-pin complement Unavailable. A fresh exact topology selector failed at the same startup boundary. Source and native inventory proved stale detached scratch-pin residue on /sys/fs/bpf/overdrive/probe/link. After isolating that residue, the next reachable production owner defect was MtlsSharedOwnerError::Intercept/NftRuleInstallFailed shared-ip-observe rejecting the intentionally same-named bridge-family overdrive-mtls table as foreign; later stale duplicate IPv4 exemption rules were independently classified as test-host residue. No test edits or mutation testing.",
+      "t": "2026-09-22T22:51:44Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "REMEDIATION GREEN: isolated native production path fixed. HostSharedGuestNetworkOwner now reclaims exact stale scratch TCX/map pins before a new probe and uses the existing typed pinned-link detach path when adoption is unavailable/incomplete; sweep_stale removes only owned ovd-tp-* bridge members before deleting the owned guard; the shared-IP observer now permits the approved same-name bridge-family overdrive-mtls table; run_server starts the retained MtlsInterceptWorker shared F/C owner and maps failure through the exact MtlsBootError::SharedOwner contract. Evidence: exact 03-03 Lima source-local 7/7, worker 10/10, DNS integration 6/6, run_server integration 7/7, workspace check pass, formatting/diff pass; native metal DNS 6/6 pass. Exact 04-01 topology selector and the post-fix guest-stack selector reached production startup and Running state but timed out in downstream workload-terminal behavior; the full guest_stack_mtls_egress rerun completed 34 tests with 16 passed, 17 failed, and 1 timeout. Remaining failures are independently classified as 04-01/guest-stack workload lifecycle or fixture fault-matrix expectations and shared-state contamination after the first timed-out test, not the fixed startup path. Workspace clippy remains blocked by pre-existing guest_network/reconciler and overdrive-netlink test lints. No mutation testing.",
+      "t": "2026-09-22T22:52:54Z"
     }
   ]
 }
