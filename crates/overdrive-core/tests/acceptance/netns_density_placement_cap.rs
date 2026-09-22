@@ -36,7 +36,6 @@ fn row(index: usize, node: &NodeId) -> AllocStatusRow {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step for GH #295 fixed pre-pool placement cap"]
 fn fixed_attachment_cap_returns_no_capacity_before_pool_assignment() {
     for (active, admitted) in [(16_383, true), (16_384, false), (16_385, false)] {
         let node_id = NodeId::new("nd295-node").expect("node id");

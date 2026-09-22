@@ -46,6 +46,9 @@ use crate::id::NodeId;
 use crate::traits::driver::Resources;
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
 
+/// Private fixed admission boundary for active guest-network attachments.
+const MAX_GUEST_NETWORK_ATTACHMENTS: usize = 16_384;
+
 /// First-fit placement decision. Pure synchronous function over
 /// deterministic inputs.
 ///
@@ -102,6 +105,14 @@ pub fn schedule(
     // iterator — Ord on NodeId, deterministic across any insertion
     // permutation that yields the same set.
     for (node_id, node) in nodes {
+        let active_allocations = current_allocs
+            .iter()
+            .filter(|alloc| alloc.node_id == *node_id && alloc.state == AllocState::Running)
+            .count();
+        if active_allocations >= MAX_GUEST_NETWORK_ATTACHMENTS {
+            continue;
+        }
+
         let free = free_capacity(node, current_allocs, needed);
 
         if covers(&free, needed) {

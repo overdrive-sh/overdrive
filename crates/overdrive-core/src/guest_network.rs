@@ -320,6 +320,7 @@ impl GuestNetworkExecSupervisor {
 impl Drop for GuestNetworkExecClaim {
     fn drop(&mut self) {
         let mut shared = self.shared.state.lock();
+        debug_assert!(shared.active_claims > 0, "an EXEC claim must be accounted before Drop");
         shared.active_claims = shared.active_claims.saturating_sub(1);
         drop(shared);
         self.shared.notify.notify_waiters();

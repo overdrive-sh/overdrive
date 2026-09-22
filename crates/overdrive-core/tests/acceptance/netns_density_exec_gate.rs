@@ -66,7 +66,6 @@ fn operation_strategy() -> impl Strategy<Value = Operation> {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step for GH #295 BootClosed paired EXEC capability state machine"]
 fn shared_guest_network_admission_starts_closed_until_boot_read_back_completes() {
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
 
@@ -75,7 +74,6 @@ fn shared_guest_network_admission_starts_closed_until_boot_read_back_completes()
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 paired EXEC capability state machine"]
 async fn recovery_closes_new_exec_claims_and_full_read_back_reopens_them() {
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
     let gate = wiring.gate();
@@ -98,7 +96,6 @@ async fn recovery_closes_new_exec_claims_and_full_read_back_reopens_them() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 paired EXEC capability state machine"]
 async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_claim() {
     let clock = SimClock::new();
     let wiring = GuestNetworkExecWiring::new(Arc::new(clock.clone()));
@@ -139,7 +136,6 @@ async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_clai
 proptest! {
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 paired EXEC capability state machine"]
     fn generated_operation_sequences_match_the_gate_model(
         operations in prop::collection::vec(operation_strategy(), 1..64),
     ) {
@@ -278,7 +274,6 @@ proptest! {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 paired EXEC capability state machine"]
 async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
     for cause in CAUSES {
         let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
@@ -295,7 +290,6 @@ async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step for GH #295 paired EXEC capability state machine"]
 fn illegal_event_from_every_gate_state_is_rejected() {
     let boot = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
     assert!(!boot.begin_recovery(SharedGuestNetworkComponent::Bridge));
