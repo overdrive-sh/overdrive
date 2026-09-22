@@ -372,6 +372,13 @@
       "s": "EXECUTED",
       "d": "PASS: activated all six EXEC-gate bodies and placement-cap body; implemented private 16,384 active-allocation placement boundary before resource/pool effects and added EXEC-claim Drop invariant assertion. Exact Lima nextest selectors for exec gate, placement cap, and PROPTEST_CASES=1024 all passed with zero ignored in both files; cargo check --workspace --all-targets --features integration-tests passed. Exact workspace clippy is environment/pre-existing blocked by clippy::print_stderr at overdrive-netlink/src/nft.rs:5121 and unrelated control-plane warnings; cargo fmt --all -- --check passed. No mutation testing ran.",
       "t": "2026-09-22T13:56:42Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: scoped des-commit completed for step-owned core gate/scheduler, acceptance, and execution-log paths; original Git author retained and exactly one Codex co-author trailer supplied. Unrelated AGENTS.md and .serena/project.yml remained outside the commit.",
+      "t": "2026-09-22T13:57:47Z"
     }
   ]
 }
