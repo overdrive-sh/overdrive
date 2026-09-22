@@ -94,6 +94,35 @@ pass does not self-approve it.
 | S-ND295-12 `every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement -- --ignored --exact` | expected first `EndpointDelete` source while a later TAP-delete failure is retained for continuation; current teardown returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; the separate eleven-row table covers every cleanup mutation/read and both TAP-observation occurrences with exact operation/source, complete continuation, and retained state; same-owner retry, held lease, complement, and unrelated facts also compile. |
 | S-ND295-13 `reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm` | `PROPTEST_CASES=1024 cargo test -p overdrive-sim --lib invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm -- --ignored --exact --nocapture` | actual sweep-call snapshot retained seeded run directory/scope; proptest shrank to `seed = 0` | **RED — MISSING_FUNCTIONALITY / reproduced ordering defect**; production helper, same Sim host, real sweep port call, and seed printing all executed. |
 
+## Step 03-03 acceptance-author corrections
+
+The 2026-09-22 exact Lima rerun reconciled the crafter RED event with the
+accepted DES wording. The current S19-B body reached the spawned
+`SharedNetworkSupervisorHandle::run_mtls_owner` future, whose RED-scaffold
+panic left the acceptance task waiting two seconds for the first recovery
+snapshot. That is honest missing-production RED, but the prior harness had a
+separate latent oracle defect: `tokio::spawn` plus one `yield_now` did not prove
+that the production future had first returned `Poll::Pending` and registered
+its `SimClock` wait before the harness advanced 999 ms. The corrected body
+wraps that same spawned production future with a source-local pending-poll
+observer and awaits the task boundary before the first advance, after detection,
+after each of attempts 1..19, and after the terminal request. It adds no
+production hook, API, clock seam, start signal, real sleep, or state polling;
+all 249 ms/1 ms, 4,999/5,000 ms, request, journal, parked-owner, and
+`ServerHandle::shutdown` assertions are unchanged.
+
+The Recovering fixture in
+`actual_tokio_exit_matrix_fail_stops_before_returning_the_exact_snapshot` had
+the opposite boolean oracle from the accepted gate contract. The independent
+core selector
+`recovery_closes_new_exec_claims_and_full_read_back_reopens_them` passed while
+asserting that `complete_attempt` succeeds in Recovering. Both component-
+remaining calls in the twelve-component matrix now assert `true`; the exact
+two-attempt/1,250 ms snapshot and all five actual-Tokio exit classes remain
+unchanged. The matrix itself still reaches the earlier retained-supervisor
+outcome RED scaffold on its first no-recovery row, so no GREEN production claim
+is made.
+
 ## D-295-DISTILL-15 authored evidence
 
 All ten layered D15 bodies compile, exact selectors discover one body each, and
@@ -114,7 +143,7 @@ and sole-terminal-owner assertions; no fixture retry/request is accepted.
 | S19-A `runtime_present_wrong_target_and_observe_error_are_non_mutating` | `cargo nextest run -p overdrive-worker --lib -E 'test(=mtls_intercept_port::shared_program_rollback_acceptance::runtime_present_wrong_target_and_observe_error_are_non_mutating)' --run-ignored ignored-only --no-fail-fast` | Exact body selected and stopped at D15's `SharedIpInterceptIdentity::for_listener_ports` RED scaffold. | **RED — MISSING_FUNCTIONALITY**, step `02-02`; canonical wrong target `Ok(Some(identity))` plus partial/foreign/duplicate/malformed/lower typed-error rows compile with exact one-Observe/no-mutation universes. |
 | S19-A `shared_program_valid_wrong_target_observation_is_non_mutating` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating)' --run-ignored ignored-only --no-fail-fast` | Exact Lima body reached real public-host creation and failed at current `atomic-rule-transaction/ENODATA`. | **RED — MISSING_FUNCTIONALITY / REAL KERNEL**, step `02-02`; exact canonical wrong identity, generation/notification no-mutation, target inventory, and foreign complement compile. |
 | S19 published-worker prerequisite `published_wrong_shared_target_is_observe_only_until_bounded_fail_stop` | `cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::netns_density_shared_owner::published_wrong_shared_target_is_observe_only_until_bounded_fail_stop)' --run-ignored ignored-only --no-fail-fast` | Body selects and stops at `start_shared_owner`; canonical different non-zero target and single observe-only worker conflict compile. | **RED — PREREQUISITE ONLY**, step `02-03`; no cadence/deadline/request credit. |
-| S19-B `published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(=shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop)' --run-ignored ignored-only --no-fail-fast` | Exact body compiled, selected one test, and stopped at the earlier `MtlsInterceptWorker::start_shared_owner` RED scaffold. The later compiled oracle asserts 249 ms elapsed-only subintervals, attempts 1..19 as exact Recovering snapshots, attempt 20 only through the typed `20/5s` request, no attempt 21/second request, exact closed journals, and terminal ownership only through `ServerHandle::shutdown`. | **RED — MISSING_FUNCTIONALITY**, step `03-03`; P02-20/21/22 specification remediation is complete and the current failure is the expected earlier production scaffold. |
+| S19-B `published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR="$PWD/target/netns-density-0303-distill" cargo nextest run -p overdrive-control-plane --lib -E "test(=shared_network_task_owner_acceptance::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop)" --run-ignored ignored-only --no-fail-fast'` | Exact body compiled and selected one test. Its source-local task observer saw the spawned production future end at the existing `run_mtls_owner` RED-scaffold panic before it could register the first logical wait. The later compiled oracle retains 249 ms elapsed-only subintervals, attempts 1..19 as exact Recovering snapshots, attempt 20 only through the typed `20/5s` request, no attempt 21/second request, exact closed journals, and terminal ownership only through `ServerHandle::shutdown`. | **RED — MISSING_FUNCTIONALITY**, step `03-03`; the corrected synchronization no longer permits an early harness tick, and the current failure is the expected production scaffold rather than a clock race. |
 
 Every row requires `/// CONTRACT_SHAPE: bounded-change.` plus the exact
 reasoned marker recorded in `test-scenarios.md`. The source-local complement is
@@ -135,8 +164,21 @@ The 2026-09-21 S19-B rerun encountered the Lima guest root filesystem already
 remounted read-only, so the canonical shared `CARGO_TARGET_DIR` could not create
 `.cargo-lock`. The exact Lima selector was rerun against a disposable writable
 target seeded from the same guest cache; compilation completed and the body
-failed only at the production `start_shared_owner` scaffold above. No
-real-kernel claim depends on this source-local body.
+failed only at the then-current production `start_shared_owner` scaffold. The
+2026-09-22 rerun below supersedes that historical classification after step
+02-03 made the worker prerequisite GREEN. No real-kernel claim depends on this
+source-local body.
+
+The 2026-09-22 corrected step-03-03 rerun used writable
+`target/netns-density-0303-distill` and classified the complete affected set:
+
+| Selector | Result | Classification |
+|---|---|---|
+| exact S19-B cadence body | 0 passed, 1 failed | **RED — MISSING_FUNCTIONALITY** at the `run_mtls_owner` scaffold before the first registered logical wait |
+| all `shared_network_task_owner_acceptance` bodies | 0 passed, 7 failed | **RED — MISSING_FUNCTIONALITY**: retained-supervisor outcome/request (2), mTLS recovery future (1), and DNS exit/replacement/shutdown owners (4) each stop at their named production scaffold |
+| exact worker S-ND295-31A/31B selector pair | 2 passed, 0 failed | **GREEN — EXISTING PREREQUISITE**: exact-port rebind and occupied-port refusal already behave as specified; this does not implement the control-plane supervisor |
+| active `dns_responder_bind` integration selector | 6 passed, 0 failed | **GREEN — EXISTING DNS WIRE/BOOT EVIDENCE**; the pending private DNS lifecycle bodies remain independently RED above |
+| exact core Recovering/reopen selector | 1 passed, 0 failed | **GREEN — ORACLE CONFIRMATION**: `complete_attempt` succeeds from Recovering, confirming the corrected matrix boolean |
 
 ## Step 02-03 D1-D7 review-remediation evidence
 

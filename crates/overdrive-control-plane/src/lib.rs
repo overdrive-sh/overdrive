@@ -1385,6 +1385,7 @@ impl DnsServeTaskOwner {
     reason = "D-295-DISTILL-8 acceptance tables use exact Contract Shape markers and diagnostics"
 )]
 mod shared_network_task_owner_acceptance {
+    use std::future::Future as _;
     use std::net::{SocketAddrV4, TcpListener};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1592,6 +1593,15 @@ mod shared_network_task_owner_acceptance {
         .expect("production mTLS supervisor exposes the exact logical-time recovery snapshot");
     }
 
+    async fn wait_for_s19_supervisor_wait(
+        pending_polls: &mut tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), pending_polls.recv())
+            .await
+            .expect("production mTLS supervisor registers its next logical wait")
+            .expect("production mTLS supervisor remains owned while the cadence is driven");
+    }
+
     #[derive(Default)]
     struct S19SharedOwner {
         calls: Mutex<Vec<guest_network::GuestNetworkOperation>>,
@@ -1767,7 +1777,7 @@ mod shared_network_task_owner_acceptance {
         let task_shutdown = shutdown.clone();
         let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
         let counts_before = intercept.counts();
-        let task = tokio::spawn(SharedNetworkSupervisorHandle::run_mtls_owner(
+        let mut supervisor = Box::pin(SharedNetworkSupervisorHandle::run_mtls_owner(
             shared_port,
             Arc::clone(&worker),
             Arc::clone(&exec),
@@ -1775,11 +1785,21 @@ mod shared_network_task_owner_acceptance {
             request_tx,
             task_shutdown,
         ));
+        let (pending_poll_tx, mut pending_poll_rx) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(std::future::poll_fn(move |context| {
+            let polled = supervisor.as_mut().poll(context);
+            if polled.is_pending() {
+                pending_poll_tx
+                    .send(())
+                    .expect("S19 cadence observer remains live until supervisor shutdown");
+            }
+            polled
+        }));
         let owner =
             SharedNetworkSupervisorHandle::new(request_rx, task, Arc::clone(&exec), shutdown);
         let mut server = s19_server_handle(owner, Arc::clone(&worker));
 
-        tokio::task::yield_now().await;
+        wait_for_s19_supervisor_wait(&mut pending_poll_rx).await;
         clock.tick(Duration::from_millis(999));
         tokio::task::yield_now().await;
         assert!(exec.recovery_progress().is_none(), "detection never fires before one second");
@@ -1796,6 +1816,7 @@ mod shared_network_task_owner_acceptance {
             },
         )
         .await;
+        wait_for_s19_supervisor_wait(&mut pending_poll_rx).await;
         assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, 0);
         assert_s19_request_empty(&mut server);
 
@@ -1820,6 +1841,7 @@ mod shared_network_task_owner_acceptance {
                 },
             )
             .await;
+            wait_for_s19_supervisor_wait(&mut pending_poll_rx).await;
             assert_s19_preterminal_journal(&intercept, counts_before, &shared_owner, attempt);
             assert_s19_request_empty(&mut server);
         }
@@ -1838,6 +1860,7 @@ mod shared_network_task_owner_acceptance {
             elapsed: Duration::from_secs(5),
         });
         assert_eq!(server.shutdown_requested().await, expected);
+        wait_for_s19_supervisor_wait(&mut pending_poll_rx).await;
         assert!(
             exec.fail_stop(SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded).is_none(),
             "the production owner already entered FailStop exactly once"
@@ -1892,9 +1915,9 @@ mod shared_network_task_owner_acceptance {
         if let Some(component) = recovering {
             assert!(exec.begin_recovery(component));
             clock.tick(Duration::from_millis(250));
-            assert!(!exec.complete_attempt(Some(component)));
+            assert!(exec.complete_attempt(Some(component)));
             clock.tick(Duration::from_millis(250));
-            assert!(!exec.complete_attempt(Some(component)));
+            assert!(exec.complete_attempt(Some(component)));
             clock.tick(Duration::from_millis(750));
         }
         let shutdown = CancellationToken::new();
