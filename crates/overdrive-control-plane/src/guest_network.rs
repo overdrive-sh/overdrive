@@ -6324,6 +6324,30 @@ mod pool_acceptance {
         assert_eq!(pool.snapshot(), before);
     }
 
+    /// Outcome anchor: DISCUSS Elevator Pitch
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn below_cap_pool_exhaustion_is_typed_drift_and_preserves_state() {
+        let pool = GuestAddressPool::new(
+            "100.95.0.0/30".parse().expect("small drift prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        );
+        let first = pool
+            .assign(AllocationId::new("nd295-below-cap-first").expect("allocation id"))
+            .expect("the sole non-reserved address is initially free");
+        let before = pool.snapshot();
+        assert!(before.len() < 16_384);
+        assert_eq!(first.assignment().address, Ipv4Addr::new(100, 95, 0, 2));
+
+        let error = pool
+            .assign(AllocationId::new("nd295-below-cap-overflow").expect("allocation id"))
+            .expect_err("the small prefix is exhausted below the fixed admission cap");
+        assert!(matches!(error, GuestNetworkError::PoolExhausted { held: 1, capacity: 1 }));
+        assert_eq!(pool.snapshot(), before, "typed exhaustion does not mutate or reuse state");
+    }
+
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn assignment_uses_the_exact_prefix_bridge_gateway_dns_and_boundary_addresses() {

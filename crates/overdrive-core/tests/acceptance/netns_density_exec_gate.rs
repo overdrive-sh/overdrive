@@ -64,6 +64,7 @@ fn operation_strategy() -> impl Strategy<Value = Operation> {
     ]
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn shared_guest_network_admission_starts_closed_until_boot_read_back_completes() {
@@ -72,6 +73,7 @@ fn shared_guest_network_admission_starts_closed_until_boot_read_back_completes()
     assert!(wiring.supervisor().is_boot_closed());
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn recovery_closes_new_exec_claims_and_full_read_back_reopens_them() {
@@ -94,6 +96,7 @@ async fn recovery_closes_new_exec_claims_and_full_read_back_reopens_them() {
     drop(pre_detection);
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_claim() {
@@ -134,6 +137,7 @@ async fn fail_stop_refuses_waiting_and_future_exec_without_revoking_a_prior_clai
 }
 
 proptest! {
+    /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn generated_operation_sequences_match_the_gate_model(
@@ -272,22 +276,34 @@ proptest! {
     }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
-    for cause in CAUSES {
-        let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
-        let gate = wiring.gate();
-        let supervisor = wiring.supervisor();
-        let first = supervisor.fail_stop(cause).expect("first caller owns the request");
+    for component in COMPONENTS {
+        for cause in CAUSES {
+            let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
+            let gate = wiring.gate();
+            let supervisor = wiring.supervisor();
+            assert!(supervisor.open_after_boot());
+            assert!(supervisor.begin_recovery(component));
+            let first = supervisor.fail_stop(cause).expect("first caller owns the request");
 
-        assert_eq!(first.cause, cause);
-        assert!(supervisor.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_none());
-        assert!(supervisor.recovery_progress().is_none());
-        assert!(gate.claim_release().await.is_none(), "{cause:?} refuses future EXEC claims");
+            assert_eq!(first.component, component);
+            assert_eq!(first.cause, cause);
+            assert!(
+                supervisor.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_none()
+            );
+            assert!(supervisor.recovery_progress().is_none());
+            assert!(
+                gate.claim_release().await.is_none(),
+                "terminal state refuses future EXEC claims"
+            );
+        }
     }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn illegal_event_from_every_gate_state_is_rejected() {

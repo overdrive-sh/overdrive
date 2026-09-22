@@ -379,6 +379,20 @@
       "s": "EXECUTED",
       "d": "PASS: scoped des-commit completed for step-owned core gate/scheduler, acceptance, and execution-log paths; original Git author retained and exactly one Codex co-author trailer supplied. Unrelated AGENTS.md and .serena/project.yml remained outside the commit.",
       "t": "2026-09-22T13:57:47Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: independently reproduced D1-D4 current evidence failures before edits: both changed acceptance files have 0 Outcome anchors; component coverage is randomized-only outside four deterministic cases and causes all start BootClosed; private pool selector passes only full /16 PoolExhausted held=65,533 (>16,384); a bounded spike removing only GuestNetworkExecClaim::Drop's production decrement still passes all six EXEC-gate selectors, proving D2 has no sanctioned observable private active-claim boundary. D2 is recorded as a potential DESIGN/testability blocker; no production behavior change retained.",
+      "t": "2026-09-22T14:41:57Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS with DESIGN blocker: D1 added exact Outcome anchor to all seven transitioned core bodies; D3 now deterministically exercises all 12 components x 6 causes with typed enum assertions; D4 added private below-cap /30 PoolExhausted held=1/capacity=1 state-complement evidence. Core EXEC/placement selectors, PROPTEST_CASES=1024, private pool selector, workspace check, formatting, and diff hygiene pass. D2 cannot be closed: removing only GuestNetworkExecClaim::Drop active-count decrement still passes all existing selectors, and no sanctioned private-state observation boundary exists; adding one would invent testability surface, so this is surfaced as a DESIGN/testability blocker. Workspace clippy remains pre-existing/out-of-scope blocked.",
+      "t": "2026-09-22T14:47:53Z"
     }
   ]
 }

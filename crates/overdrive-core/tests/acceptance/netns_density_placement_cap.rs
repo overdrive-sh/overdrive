@@ -34,6 +34,7 @@ fn row(index: usize, node: &NodeId) -> AllocStatusRow {
     }
 }
 
+/// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn fixed_attachment_cap_returns_no_capacity_before_pool_assignment() {
