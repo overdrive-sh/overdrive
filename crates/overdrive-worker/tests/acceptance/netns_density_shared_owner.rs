@@ -396,7 +396,6 @@ async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_ta
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step for GH #295 exact-port shared-listener recovery"]
 async fn lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let worker = worker(intercept.clone());
@@ -425,7 +424,6 @@ async fn lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds()
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step for GH #295 occupied exact-port fail-stop path"]
 async fn occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let worker = worker(intercept.clone());

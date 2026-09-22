@@ -22,21 +22,15 @@
 //! `MtlsResolve` (DDN-2 single-owner invariant), so the `F` it answers is
 //! byte-identical to the `F` the resolve path's `by_frontend` recognizes.
 //!
-//! # Bind strategy — wildcard first, per-gateway-addr fallback (DDN-5)
+//! # Bind strategy — wildcard first, shared-gateway fallback (DDN-5)
 //!
 //! [`probe`](DnsResponder::probe) binds the wildcard `0.0.0.0:53`
 //! (`SO_REUSEADDR` + `IP_PKTINFO`) FIRST — the spike-validated shape that
 //! coexists with systemd-resolved's specific `127.0.0.53:53` / `127.0.0.54:53`
 //! binds. On `EADDRINUSE` (the appliance-image case where a wildcard `:53`
-//! holder already exists) it FALLS BACK to one `:53` socket per assigned
-//! gateway addr, re-derived from
-//! [`NetSlotAllocator::snapshot`](crate::veth_provisioner::NetSlotAllocator::snapshot)
-//! via [`responder_addr_for_slot`](crate::veth_provisioner::responder_addr_for_slot).
-//! The per-gateway-addr socket set is bound ONCE at probe time, from the slot
-//! snapshot as it exists then; there is NO converge tick in v1. Live slot-churn
-//! tracking (add-if-missing as a slot is assigned / drop-if-absent as it is
-//! released — the reconcilers.md Bar-1 shape) is deferred to
-//! <https://github.com/overdrive-sh/overdrive/issues/247>.
+//! holder already exists) it FALLS BACK to exactly one `:53` socket at the
+//! injected shared bridge gateway. The socket count therefore remains O(1) as
+//! allocations come and go.
 //!
 //! # Source-pin (DDN-5, the spike litmus)
 //!
@@ -77,7 +71,6 @@ use super::answer::answer_for;
 use super::frontend_addr_allocator::FrontendAddrAllocator;
 use super::name_index::NameIndex;
 use super::wire;
-use crate::veth_provisioner::{NetSlotAllocator, responder_addr_for_slot};
 
 /// The well-known DNS port the responder binds.
 const DNS_PORT: u16 = 53;
@@ -106,12 +99,12 @@ fn recv_poll_timeout() -> TimeVal {
 #[derive(Debug, thiserror::Error)]
 pub enum DnsResponderError {
     /// No bindable `:53` socket — the wildcard `0.0.0.0:53` AND every
-    /// per-gateway-addr `:53` candidate are already held. The node refuses to
+    /// shared-gateway `:53` candidate are already held. The node refuses to
     /// start (`health.startup.refused`, reason `dns.responder.bind`).
     #[error("DNS responder bind failed for {addr}: {source}")]
     Bind {
         /// The address the failing bind targeted (the wildcard `0.0.0.0:53` or
-        /// a per-gateway-addr `:53`).
+        /// the shared-gateway `:53`).
         addr: SocketAddr,
         /// The underlying `io::Error` (`EADDRINUSE`, `EACCES`, …).
         #[source]
@@ -176,7 +169,7 @@ impl DnsResponderError {
 pub type Result<T, E = DnsResponderError> = std::result::Result<T, E>;
 
 /// The node-local dial-by-name DNS host adapter (ADR-0072 REV-2). Binds UDP
-/// `:53` (wildcard-first, per-gateway-addr fallback), List-seeds the internal
+/// `:53` (wildcard-first, shared-gateway fallback), List-seeds the internal
 /// [`NameIndex`](super::name_index::NameIndex), and answers
 /// `<workload>.svc.overdrive.local` with the stable frontend `F` the ONE shared
 /// [`FrontendAddrAllocator`] binds. See the module rustdoc for the full
@@ -185,11 +178,10 @@ pub struct DnsResponder {
     /// The injected [`Clock`] — the SOA SERIAL source for
     /// [`wire::encode`](super::wire) replies. Mandatory; never wall-clock.
     clock: Arc<dyn Clock>,
-    /// The per-`AllocationId` [`NetSlotAllocator`] — the DDN-5 per-gateway-addr
-    /// fallback source (`snapshot()` → `responder_addr_for_slot`). DISTINCT
-    /// from [`Self::frontend`]: this is the reply-source-pin / per-addr
-    /// fallback allocator, a DIFFERENT concern.
-    slots: NetSlotAllocator,
+    /// The node-local shared bridge gateway used only when wildcard `:53` is
+    /// already occupied. It is distinct from the frontend allocator and keeps
+    /// fallback socket cardinality independent of guest allocations.
+    gateway: Ipv4Addr,
     /// The internal List-then-Watch resolvability index, built in
     /// [`Self::new`] from `(store, frontend)` and List-seeded by
     /// [`Self::probe`]. It HOLDS the ONE `Arc`-shared
@@ -202,8 +194,8 @@ pub struct DnsResponder {
     name_index: NameIndex,
     /// The bound `:53` sockets, populated by [`Self::probe`] and consumed by
     /// [`Self::serve`]. `recvmsg`-mode `OwnedFd`s (each with `SO_REUSEADDR` +
-    /// `IP_PKTINFO`); the wildcard path holds exactly one, the per-gateway-addr
-    /// fallback holds one per assigned slot. Behind a `Mutex` so the serve loop
+    /// `IP_PKTINFO`); the wildcard path holds exactly one, and the shared-gateway
+    /// fallback holds exactly one. Behind a `Mutex` so the serve loop
     /// can `take()` ownership at start (the loop is `self: Arc<Self>`).
     sockets: Mutex<Vec<OwnedFd>>,
     /// Stop flag for the serve loop. The `SO_RCVTIMEO`-bounded `recvmsg` wakes
@@ -225,7 +217,7 @@ impl DnsResponder {
     pub fn new(
         store: Arc<dyn ObservationStore>,
         clock: Arc<dyn Clock>,
-        slots: NetSlotAllocator,
+        gateway: Ipv4Addr,
         frontend: FrontendAddrAllocator,
     ) -> Self {
         // Build the internal NameIndex from the SAME store + the SHARED
@@ -235,7 +227,7 @@ impl DnsResponder {
         let name_index = NameIndex::new(store, frontend);
         Self {
             clock,
-            slots,
+            gateway,
             name_index,
             sockets: Mutex::new(Vec::new()),
             stop: Arc::new(AtomicBool::new(false)),
@@ -250,14 +242,14 @@ impl DnsResponder {
         self.stop.store(true, Ordering::SeqCst);
     }
 
-    /// Bind UDP `:53` (wildcard-first, per-gateway-addr fallback) and List-seed
+    /// Bind UDP `:53` (wildcard-first, shared-gateway fallback) and List-seed
     /// the internal [`NameIndex`](super::name_index::NameIndex) — the
     /// Earned-Trust "wire → probe → use" gate (DDN-6).
     ///
     /// # Errors
     ///
     /// - [`DnsResponderError::Bind`] when no `:53` socket can be bound (the
-    ///   wildcard AND every per-gateway-addr candidate are held).
+    ///   wildcard AND the shared-gateway candidate are held).
     /// - [`DnsResponderError::ListSeed`] when the `service_backends` surface is
     ///   unreadable at the internal index's List-seed.
     /// - [`DnsResponderError::Socket`] on a setsockopt / socket-config failure.
@@ -266,12 +258,17 @@ impl DnsResponder {
     /// `health.startup.refused` event.
     pub async fn probe(&self) -> Result<()> {
         // (1) Bind the wildcard `0.0.0.0:53` FIRST (SO_REUSEADDR + IP_PKTINFO).
-        // On EADDRINUSE fall back to one socket per assigned gateway addr,
-        // re-derived from the NetSlotAllocator snapshot (DDN-5). The bound
-        // sockets are stashed for `serve`.
+        // On EADDRINUSE fall back to exactly one socket at the shared gateway.
+        // The bound socket is stashed for `serve`.
         let bound = match bind_one(Ipv4Addr::UNSPECIFIED) {
             Ok(fd) => vec![fd],
-            Err(err) if is_addr_in_use(&err) => self.bind_per_gateway_addr()?,
+            Err(err) if is_addr_in_use(&err) => {
+                let gateway = self.gateway;
+                vec![bind_one(gateway).map_err(|source| DnsResponderError::Bind {
+                    addr: SocketAddr::V4(SocketAddrV4::new(gateway, DNS_PORT)),
+                    source,
+                })?]
+            }
             Err(source) => {
                 return Err(DnsResponderError::Bind {
                     addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DNS_PORT)),
@@ -279,23 +276,6 @@ impl DnsResponder {
                 });
             }
         };
-        // Silent-deaf-responder guard (N2): the fallback path with an empty slot
-        // snapshot binds ZERO sockets, so `probe()` returns Ok, `serve` spawns
-        // nothing, and the responder answers nothing — indistinguishable from a
-        // healthy boot in the logs. With no converge tick (deferred to #247) it
-        // stays deaf for the process lifetime. Emit a structured warning so the
-        // degraded boot is observable. (The wildcard path always binds exactly
-        // one socket, so an empty `bound` is unambiguously the fallback branch.)
-        if bound.is_empty() {
-            tracing::warn!(
-                name: "dns.responder.fallback.zero_sockets",
-                "dial-by-name DNS responder fell back to per-gateway-addr binding but the slot \
-                 snapshot was empty — bound ZERO sockets and is currently DEAF (answers no \
-                 queries). With no converge tick (https://github.com/overdrive-sh/overdrive/issues/247) \
-                 this persists for the process lifetime; restart the node once a gateway slot is \
-                 assigned, or land #247."
-            );
-        }
         *self.sockets.lock() = bound;
 
         // (2) List-seed the internal NameIndex (the Earned-Trust List-then-Watch
@@ -307,40 +287,12 @@ impl DnsResponder {
         Ok(())
     }
 
-    /// Bind one `:53` socket per currently-assigned gateway addr, re-derived
-    /// from `self.slots.snapshot()` via `responder_addr_for_slot` (the DDN-5
-    /// per-gateway-addr fallback). Each socket gets `SO_REUSEADDR` + `IP_PKTINFO`.
-    /// The sockets are bound ONCE, from the slot snapshot AS IT EXISTS AT PROBE
-    /// TIME — there is no converge tick in v1, so a slot assigned AFTER probe
-    /// gets no socket until the process is restarted. Live slot-churn tracking
-    /// (add-if-missing / drop-if-absent) is deferred to
-    /// <https://github.com/overdrive-sh/overdrive/issues/247>. An empty snapshot
-    /// binds nothing — a degenerate fallback the caller [`probe`](Self::probe)
-    /// warns on (`dns.responder.fallback.zero_sockets`), because with no
-    /// converge a zero-socket responder is permanently deaf for the process
-    /// lifetime (also tracked by #247).
-    fn bind_per_gateway_addr(&self) -> Result<Vec<OwnedFd>> {
-        let mut bound = Vec::new();
-        for slot in self.slots.snapshot().values().copied() {
-            let gateway = responder_addr_for_slot(slot);
-            let fd = bind_one(gateway).map_err(|source| DnsResponderError::Bind {
-                addr: SocketAddr::V4(SocketAddrV4::new(gateway, DNS_PORT)),
-                source,
-            })?;
-            bound.push(fd);
-        }
-        Ok(bound)
-    }
-
     /// Run the `recvmsg`/`sendmsg` `IP_PKTINFO` serve loop: decode each inbound
     /// query, answer via the internal [`NameIndex`](super::name_index::NameIndex)
     /// (`frontend_for` → [`answer_for`](super::answer::answer_for) →
     /// [`wire::encode`](super::wire)), and `sendmsg` the reply source-pinned to
     /// the queried gateway via `ipi_spec_dst`. `serve` runs the bound socket set
-    /// as captured at probe time (`std::mem::take`) — it does NOT re-derive the
-    /// slot snapshot, so there is no converge of the per-gateway-addr socket set
-    /// to the live slot set in v1 (deferred to
-    /// <https://github.com/overdrive-sh/overdrive/issues/247>).
+    /// as captured at probe time (`std::mem::take`).
     ///
     /// Consumes `self: Arc<Self>` so the composition root can `tokio::spawn` the
     /// loop and hold the `JoinHandle`.
@@ -457,7 +409,7 @@ impl DnsResponder {
 /// # Errors
 ///
 /// Propagates the underlying `io::Error` — the caller maps `EADDRINUSE` to the
-/// per-gateway-addr fallback and any other error to [`DnsResponderError::Bind`].
+/// shared-gateway fallback and any other error to [`DnsResponderError::Bind`].
 fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
     let fd = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), SockProtocol::Udp)
         .map_err(std::io::Error::from)?;
@@ -480,7 +432,7 @@ fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
 }
 
 /// Whether an `io::Error` from `bind` is `EADDRINUSE` (the wildcard-already-held
-/// case that triggers the per-gateway-addr fallback).
+/// case that triggers the shared-gateway fallback).
 fn is_addr_in_use(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(libc::EADDRINUSE)
 }
@@ -529,7 +481,7 @@ mod tests {
     }
 
     /// [`is_addr_in_use`](super::is_addr_in_use) is the PURE `EADDRINUSE`
-    /// predicate that gates the wildcard→per-gateway-addr fallback. In
+    /// predicate that gates the wildcard→shared-gateway fallback. In
     /// production it only ever sees a *real* `bind` error, so the diff-scoped
     /// mutation gate flagged its body as a blind spot (`-> {true,false}`,
     /// `||→&&`, and both `==→!=`) — but the predicate itself is pure and

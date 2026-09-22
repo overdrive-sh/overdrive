@@ -14,9 +14,8 @@
 //!   what `getent` rejects). We assert the reply arrives FROM the queried dst
 //!   addr — the wire-level source-pin proof `getent` accepts.
 //! - **S-DBN-BIND-02** — a stand-in wildcard `0.0.0.0:53` holder forces the
-//!   wildcard path to `EADDRINUSE`; `probe` re-derives the bound socket set
-//!   from `NetSlotAllocator::snapshot()` (one `:53` socket per assigned
-//!   gateway) and answers on each.
+//!   wildcard path to `EADDRINUSE`; `probe` falls back to exactly one socket at
+//!   the configured shared gateway.
 //! - **S-DBN-BIND-03** — the Earned-Trust gate (DDN-6, wire → probe → use):
 //!   Scenario A (`:53` already held) → `probe` returns
 //!   `Err(DnsResponderError::Bind { .. })`; Scenario B
@@ -60,7 +59,6 @@ use hickory_proto::serialize::binary::BinEncodable;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::responder::{DnsResponder, DnsResponderError};
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::IdentityRead;
@@ -139,11 +137,11 @@ fn encode_a_query(job: &str) -> Vec<u8> {
 
 fn responder(
     store: Arc<dyn ObservationStore>,
-    slots: NetSlotAllocator,
+    gateway: Ipv4Addr,
     frontend: FrontendAddrAllocator,
 ) -> Arc<DnsResponder> {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-    Arc::new(DnsResponder::new(store, clock, slots, frontend))
+    Arc::new(DnsResponder::new(store, clock, gateway, frontend))
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +181,7 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
     // WHEN probe binds the wildcard 0.0.0.0:53 and serve runs.
     let dns = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
-        NetSlotAllocator::new(),
+        Ipv4Addr::new(100, 95, 0, 1),
         frontend,
     );
     dns.probe().await.expect("probe binds wildcard 0.0.0.0:53 + List-seeds");
@@ -238,14 +236,12 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
 }
 
 // ---------------------------------------------------------------------------
-// S-DBN-BIND-02 — per-gateway-addr fallback re-derives from NetSlotAllocator
+// S-DBN-BIND-02 — shared-gateway fallback binds one exact socket
 // ---------------------------------------------------------------------------
 
 /// S-DBN-BIND-02 — a stand-in wildcard `0.0.0.0:53` holder forces the wildcard
-/// path to `EADDRINUSE`; `probe` falls back to one `:53` socket per assigned
-/// gateway addr, re-derived from `NetSlotAllocator::snapshot()`. We assert the
-/// fallback path binds (no error) when a wildcard holder is present and ≥1 slot
-/// is assigned.
+/// path to `EADDRINUSE`; `probe` falls back to the exact configured shared
+/// gateway `:53` socket.
 #[tokio::test]
 async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
     if !is_root() {
@@ -262,15 +258,13 @@ async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
         return;
     };
 
-    // ... AND ≥1 alloc assigned a slot in the NetSlotAllocator (each with a
-    // derived gateway addr via responder_addr_for_slot).
-    let slots = NetSlotAllocator::new();
-    slots.assign(AllocationId::new("alloc-a").expect("valid alloc id")).expect("assign slot a");
-    slots.assign(AllocationId::new("alloc-b").expect("valid alloc id")).expect("assign slot b");
-
     let store = fresh_store();
     let frontend = FrontendAddrAllocator::new();
-    let dns = responder(Arc::clone(&store) as Arc<dyn ObservationStore>, slots, frontend);
+    let dns = responder(
+        Arc::clone(&store) as Arc<dyn ObservationStore>,
+        Ipv4Addr::new(100, 95, 0, 1),
+        frontend,
+    );
 
     // WHEN probe attempts the wildcard bind, gets EADDRINUSE, and falls back to
     // per-gateway-addr sockets re-derived from net_slot_allocator.snapshot().
@@ -285,8 +279,8 @@ async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
 // ---------------------------------------------------------------------------
 
 /// S-DBN-BIND-03 Scenario A — no bindable `:53` (the wildcard is held AND the
-/// NetSlotAllocator snapshot is empty, so the per-gateway-addr fallback has
-/// nothing to bind) → `probe` returns `Err(DnsResponderError::Bind { .. })`.
+/// the shared-gateway fallback is also held) → `probe` returns
+/// `Err(DnsResponderError::Bind { .. })`.
 ///
 /// The composition root maps this to `health.startup.refused`
 /// (reason `dns.responder.bind`) and refuses boot — mirroring the
@@ -299,9 +293,8 @@ async fn probe_refuses_when_no_bindable_port() {
     }
     record_kernel();
 
-    // GIVEN the wildcard 0.0.0.0:53 is held AND no slots are assigned (the
-    // fallback would bind nothing) — so the wildcard EADDRINUSE has no fallback
-    // and probe must refuse with Bind.
+    // GIVEN the wildcard 0.0.0.0:53 and the exact shared gateway :53 are held
+    // — so the wildcard EADDRINUSE has no fallback and probe must refuse.
     let Ok(_wildcard_holder) = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53)) else {
         eprintln!("SKIP: could not bind stand-in wildcard :53");
         return;
@@ -311,26 +304,19 @@ async fn probe_refuses_when_no_bindable_port() {
     let frontend = FrontendAddrAllocator::new();
     let dns = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
-        NetSlotAllocator::new(),
+        Ipv4Addr::new(100, 95, 0, 1),
         frontend,
     );
 
-    // The wildcard is held; the empty-snapshot fallback binds nothing, so probe
-    // succeeds with zero sockets — which is NOT a refusal. To force the Bind
-    // refusal we hold the wildcard AND a candidate gateway addr. With no slots,
-    // the contract is: empty fallback is a degenerate-but-valid bind (probe Ok,
-    // no sockets). The genuine "no bindable :53" refusal is exercised by the
-    // per-addr collision below.
-    let slots = NetSlotAllocator::new();
-    let slot = slots.assign(AllocationId::new("alloc-x").expect("valid alloc id")).expect("slot");
-    let gateway = overdrive_control_plane::veth_provisioner::responder_addr_for_slot(slot);
+    // The wildcard is held; also hold the exact shared-gateway fallback.
+    let gateway = Ipv4Addr::new(100, 95, 0, 1);
     let Ok(_gw_holder) = UdpSocket::bind(SocketAddrV4::new(gateway, 53)) else {
         eprintln!("SKIP: could not bind stand-in gateway :53 at {gateway}");
         return;
     };
     let dns_collision = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
-        slots,
+        gateway,
         FrontendAddrAllocator::new(),
     );
     let err = dns_collision
@@ -364,7 +350,7 @@ async fn probe_refuses_when_store_unreadable_at_listseed() {
     let frontend = FrontendAddrAllocator::new();
     let dns = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
-        NetSlotAllocator::new(),
+        Ipv4Addr::new(100, 95, 0, 1),
         frontend,
     );
 
@@ -376,12 +362,7 @@ async fn probe_refuses_when_store_unreadable_at_listseed() {
     );
 }
 
-/// N2 — the silent-deaf-responder guard. When the wildcard `0.0.0.0:53` is held
-/// (forcing the fallback) AND the slot snapshot is EMPTY, `probe` binds ZERO
-/// sockets and returns `Ok(())` (a degenerate-but-valid bind). With no converge
-/// tick (#247) the responder is then permanently deaf — so `probe` MUST emit a
-/// structured `dns.responder.fallback.zero_sockets` warning, making the degraded
-/// boot observable rather than indistinguishable from a healthy one.
+/// The shared-gateway fallback remains live when wildcard `:53` is occupied.
 #[tokio::test]
 async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
     if !is_root() {
@@ -390,35 +371,20 @@ async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
     }
     record_kernel();
 
-    // Hold the wildcard 0.0.0.0:53 so the fallback fires; assign NO slots so the
-    // fallback binds nothing.
+    // Hold the wildcard 0.0.0.0:53 so the exact shared-gateway fallback fires.
     let Ok(_wildcard_holder) = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53)) else {
         eprintln!("SKIP: could not bind stand-in wildcard :53");
         return;
     };
 
-    let collector = EventCollector::default();
-    let subscriber = tracing_subscriber::registry().with(collector.clone());
-    let _guard = tracing::subscriber::set_default(subscriber);
-
     let store = fresh_store();
     let dns = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
-        NetSlotAllocator::new(),
+        Ipv4Addr::new(100, 95, 0, 1),
         FrontendAddrAllocator::new(),
     );
 
-    // The empty fallback is a valid bind of zero sockets — probe returns Ok.
-    dns.probe().await.expect("empty fallback binds zero sockets (degenerate but valid)");
-
-    // ... but it MUST warn that the responder is deaf.
-    let events = collector.snapshot();
-    let warned = events.iter().any(|row| row.name == "dns.responder.fallback.zero_sockets");
-    assert!(
-        warned,
-        "an empty-fallback zero-socket bind MUST emit dns.responder.fallback.zero_sockets \
-         (the responder is deaf and must not look healthy); got: {events:?}",
-    );
+    dns.probe().await.expect("shared-gateway fallback binds one exact socket");
 }
 
 /// An `ObservationStore` whose `all_service_backends_rows` always errors (the

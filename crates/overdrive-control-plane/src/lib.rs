@@ -1198,10 +1198,6 @@ pub struct ServerHandle {
     /// [`Self::interest_router_running`] can report it live (the S-266-01
     /// vertical-slice boot check).
     interest_router_task: tokio::task::JoinHandle<()>,
-    /// `JoinHandle` for the dial-by-name `DnsResponder` serve loop.
-    dns_responder_task: Option<tokio::task::JoinHandle<()>>,
-    /// Responder retained so shutdown can stop its bounded blocking receive.
-    dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>>,
     /// Token observed by the convergence-tick spawn loop. Cancelled
     /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
     /// holding `Arc<dyn Driver>` references stop driving the driver
@@ -1252,7 +1248,6 @@ pub(crate) enum SharedNetworkSupervisorError {
     Dns(#[from] crate::dns_responder::responder::DnsResponderError),
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold is not composed before gate activation")]
 struct SharedNetworkSupervisorHandle {
     request_rx: tokio::sync::mpsc::Receiver<overdrive_core::guest_network::ServeShutdownRequest>,
     task: Option<tokio::task::JoinHandle<std::result::Result<(), SharedNetworkSupervisorError>>>,
@@ -1260,7 +1255,6 @@ struct SharedNetworkSupervisorHandle {
     shutdown: CancellationToken,
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold is not composed before gate activation")]
 impl SharedNetworkSupervisorHandle {
     const fn new(
         request_rx: tokio::sync::mpsc::Receiver<
@@ -1273,30 +1267,211 @@ impl SharedNetworkSupervisorHandle {
         Self { request_rx, task: Some(task), exec, shutdown }
     }
 
-    #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "step 01-01 retains the approved RED supervisor scaffold; step 03-03 implements classification"
-    )]
     async fn shutdown_requested(&mut self) -> overdrive_core::guest_network::ServeShutdownRequest {
-        let _ = (&mut self.request_rx, &self.task, &self.exec);
-        panic!("Not yet implemented -- RED scaffold (GH #295 retained supervisor outcome)")
+        let Some(task) = self.task.as_mut() else {
+            unreachable!("the retained supervisor has one retained task");
+        };
+        tokio::select! {
+            biased;
+            joined = task => {
+                self.task.take();
+                let cause = match joined {
+                    Ok(Ok(())) => overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorReturned,
+                    Ok(Err(source)) => {
+                        tracing::error!(
+                            name: "guest_network.shared_owner_supervisor_failed",
+                            error = %source,
+                            "retained shared-network supervisor returned a typed failure"
+                        );
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorFailed
+                    }
+                    Err(join_error) if join_error.is_panic() => {
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorPanicked
+                    }
+                    Err(join_error) if join_error.is_cancelled() => {
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorCancelled
+                    }
+                    Err(_) => unreachable!("Tokio JoinError has only panic and cancellation states"),
+                };
+                let Some(request) = self.exec.fail_stop(cause) else {
+                    unreachable!("the retained supervisor writes its first fail-stop request");
+                };
+                overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(request)
+            }
+            request = self.request_rx.recv() => {
+                if let Some(request) = request {
+                    request
+                } else {
+                    let Some(request) = self.exec.fail_stop(
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RequestChannelClosed,
+                    ) else {
+                        unreachable!("the retained supervisor writes its first fail-stop request");
+                    };
+                    overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(request)
+                }
+            }
+        }
     }
 
     #[expect(
-        clippy::panic,
-        clippy::unused_async,
-        reason = "D15 exact private RED scaffold; DELIVER implements the production mTLS recovery future"
+        clippy::collapsible_match,
+        clippy::too_many_lines,
+        reason = "RUN-295-B keeps component classification and the cadence/deadline state machine in one exact private owner future"
     )]
     async fn run_mtls_owner(
-        _shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
-        _mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-        _exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
-        _clock: Arc<dyn Clock>,
-        _request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
-        _shutdown: CancellationToken,
+        shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+        mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+        exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+        clock: Arc<dyn Clock>,
+        request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
+        shutdown: CancellationToken,
     ) -> std::result::Result<(), SharedNetworkSupervisorError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 mTLS owner recovery supervisor)")
+        let component_for =
+            |error: &overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError| {
+                match error {
+                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerBind {
+                        leg, ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
+                        leg, ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerPostcondition {
+                        leg, ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskReturned {
+                        leg,
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskFailed {
+                        leg, ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskPanicked {
+                        leg,
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskCancelled {
+                        leg,
+                    } => match leg {
+                        overdrive_worker::mtls_intercept::InterceptLeg::F => {
+                            overdrive_core::guest_network::SharedGuestNetworkComponent::LegF
+                        }
+                        overdrive_worker::mtls_intercept::InterceptLeg::C => {
+                            overdrive_core::guest_network::SharedGuestNetworkComponent::LegC
+                        }
+                    },
+                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::Intercept {
+                        source,
+                    } => match source {
+                        overdrive_worker::mtls_intercept::InterceptError::PostconditionMismatch {
+                            ..
+                        }
+                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplaceFailed {
+                            ..
+                        }
+                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedRollbackFailed {
+                            ..
+                        }
+                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedRollbackPostconditionMismatch {
+                            ..
+                        }
+                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplacementMismatchRolledBack {
+                            ..
+                        }
+                        | overdrive_worker::mtls_intercept::InterceptError::NftSharedReplacementReadFailedRolledBack {
+                            ..
+                        } => overdrive_core::guest_network::SharedGuestNetworkComponent::IpRules,
+                        _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
+                    },
+                    _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
+                }
+            };
+
+        loop {
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => return Ok(()),
+                () = clock.sleep(Duration::from_secs(1)) => {}
+            }
+
+            let component = match mtls_worker.audit_shared_owner().await {
+                Ok(()) => continue,
+                Err(source) => component_for(&source),
+            };
+            if !exec.begin_recovery(component) {
+                return Ok(());
+            }
+            tracing::warn!(
+                name: "guest_network.shared_owner_unhealthy",
+                component = ?component,
+                "shared guest-network owner entered bounded recovery"
+            );
+            shared_guest_network.quiesce_managed_taps().await?;
+
+            loop {
+                tokio::select! {
+                    biased;
+                    () = shutdown.cancelled() => return Ok(()),
+                    () = clock.sleep(Duration::from_millis(250)) => {}
+                }
+
+                let first_remaining = match mtls_worker.converge_shared_owner().await {
+                    Ok(()) => match mtls_worker.audit_shared_owner().await {
+                        Ok(()) => None,
+                        Err(source) => Some(component_for(&source)),
+                    },
+                    Err(source) => Some(component_for(&source)),
+                };
+                if first_remaining.is_none() {
+                    if exec.complete_attempt(None) {
+                        tracing::info!(
+                            name: "guest_network.shared_owner_recovered",
+                            component = ?component,
+                            "shared guest-network owner recovered before the deadline"
+                        );
+                        break;
+                    }
+                    return Ok(());
+                }
+                let Some(component) = first_remaining else {
+                    unreachable!("a failed recovery attempt always has a remaining component");
+                };
+                if !exec.complete_attempt(Some(component)) {
+                    return Ok(());
+                }
+                let Some(progress) = exec.recovery_progress() else {
+                    return Ok(());
+                };
+                tracing::warn!(
+                    name: "guest_network.shared_owner_retry",
+                    component = ?progress.component,
+                    attempt = progress.attempts,
+                    elapsed = ?progress.elapsed,
+                    "shared guest-network owner retry remains unhealthy"
+                );
+                if progress.attempts >= 20 || progress.elapsed >= Duration::from_secs(5) {
+                    tracing::error!(
+                        name: "guest_network.shared_owner_fail_stop",
+                        component = ?progress.component,
+                        attempts = progress.attempts,
+                        elapsed = ?progress.elapsed,
+                        cleanup = "abandoned_to_shutdown",
+                        "shared guest-network owner reached its bounded recovery deadline"
+                    );
+                    let Some(request) = exec.fail_stop(
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                    ) else {
+                        return Ok(());
+                    };
+                    let _ = request_tx
+                        .send(
+                            overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(
+                                request,
+                            ),
+                        )
+                        .await;
+                    shutdown.cancelled().await;
+                    return Ok(());
+                }
+            }
+        }
     }
 
     async fn shutdown(mut self) {
@@ -1308,7 +1483,6 @@ impl SharedNetworkSupervisorHandle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold precedes implementation")]
 enum DnsServeTaskExit {
     Returned,
     Panicked,
@@ -1316,7 +1490,6 @@ enum DnsServeTaskExit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold precedes implementation")]
 enum DnsServeTaskState {
     Running,
     Exited(DnsServeTaskExit),
@@ -1326,24 +1499,20 @@ enum DnsServeTaskState {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold precedes implementation")]
 enum DnsServeTaskOwnerError {
     #[error("DNS task owner cannot replace from state {state:?}")]
     InvalidReplacementState { state: DnsServeTaskState },
 }
 
-#[allow(dead_code, reason = "D-295-DISTILL-8 RED scaffold precedes single-cut ownership")]
 struct DnsServeTaskOwner {
     state: DnsServeTaskState,
     responder: Option<Arc<crate::dns_responder::responder::DnsResponder>>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
-#[allow(
-    dead_code,
-    clippy::needless_pass_by_ref_mut,
-    clippy::unused_async,
-    reason = "D-295-DISTILL-8 exact private async owner signatures precede implementation"
+#[expect(
+    clippy::collapsible_if,
+    reason = "DNS task owner keeps cooperative stop and bounded abort branches explicit"
 )]
 impl DnsServeTaskOwner {
     const fn new(
@@ -1353,26 +1522,70 @@ impl DnsServeTaskOwner {
         Self { state: DnsServeTaskState::Running, responder: Some(responder), task: Some(task) }
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER classifies real task exits")]
     async fn wait_failure(&mut self) -> DnsServeTaskExit {
-        panic!("Not yet implemented -- RED scaffold (GH #295 DNS task exit)")
+        let Some(task) = self.task.take() else {
+            return match self.state {
+                DnsServeTaskState::Exited(exit) => exit,
+                DnsServeTaskState::Stopped => DnsServeTaskExit::Cancelled,
+                DnsServeTaskState::Running
+                | DnsServeTaskState::Replacing
+                | DnsServeTaskState::ShuttingDown => {
+                    unreachable!("a live DNS owner has one task to observe")
+                }
+            };
+        };
+        let exit = match task.await {
+            Ok(()) => DnsServeTaskExit::Returned,
+            Err(error) if error.is_panic() => DnsServeTaskExit::Panicked,
+            Err(error) if error.is_cancelled() => DnsServeTaskExit::Cancelled,
+            Err(_) => unreachable!("Tokio JoinError has only panic and cancellation states"),
+        };
+        self.state = DnsServeTaskState::Exited(exit);
+        exit
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements task replacement")]
     async fn replace(
         &mut self,
-        _replacement: Arc<crate::dns_responder::responder::DnsResponder>,
-        _stop_bound: std::time::Duration,
-        _spawn: impl FnOnce(
+        replacement: Arc<crate::dns_responder::responder::DnsResponder>,
+        stop_bound: std::time::Duration,
+        spawn: impl FnOnce(
             Arc<crate::dns_responder::responder::DnsResponder>,
         ) -> tokio::task::JoinHandle<()>,
     ) -> std::result::Result<(), DnsServeTaskOwnerError> {
-        panic!("Not yet implemented -- RED scaffold (GH #295 DNS task replacement)")
+        if !matches!(self.state, DnsServeTaskState::Running | DnsServeTaskState::Exited(_)) {
+            return Err(DnsServeTaskOwnerError::InvalidReplacementState { state: self.state });
+        }
+        self.state = DnsServeTaskState::Replacing;
+        if let Some(responder) = self.responder.take() {
+            responder.stop();
+        }
+        if let Some(mut task) = self.task.take() {
+            if tokio::time::timeout(stop_bound, &mut task).await.is_err() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        self.responder = Some(Arc::clone(&replacement));
+        self.task = Some(spawn(replacement));
+        self.state = DnsServeTaskState::Running;
+        Ok(())
     }
 
-    #[expect(clippy::panic, reason = "RED scaffold; DELIVER implements task shutdown")]
-    async fn shutdown(&mut self, _stop_bound: std::time::Duration) {
-        panic!("Not yet implemented -- RED scaffold (GH #295 DNS task shutdown)")
+    async fn shutdown(&mut self, stop_bound: std::time::Duration) {
+        if matches!(self.state, DnsServeTaskState::Stopped) {
+            return;
+        }
+        self.state = DnsServeTaskState::ShuttingDown;
+        if let Some(responder) = self.responder.take() {
+            responder.stop();
+        }
+        if let Some(mut task) = self.task.take() {
+            if tokio::time::timeout(stop_bound, &mut task).await.is_err() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        self.state = DnsServeTaskState::Stopped;
     }
 }
 
@@ -1685,8 +1898,6 @@ mod shared_network_task_owner_acceptance {
             exit_observer_tasks: Vec::new(),
             emit_drain_task: s19_inert_task(&emit_drain_shutdown),
             interest_router_task: s19_inert_task(&interest_router_shutdown),
-            dns_responder_task: None,
-            dns_responder: None,
             convergence_shutdown,
             exit_observer_shutdown: CancellationToken::new(),
             emit_drain_shutdown,
@@ -1752,7 +1963,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 03-03 D-295-DISTILL-15 control-plane supervisor evidence"]
     async fn published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop()
      {
         let clock = Arc::new(SimClock::new());
@@ -1972,7 +2182,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 retained supervisor outcome classification"]
     async fn actual_tokio_exit_matrix_fail_stops_before_returning_the_exact_snapshot() {
         let cases = [
             (SupervisorExitCase::Returned, SharedGuestNetworkFailStopCause::SupervisorReturned),
@@ -2007,7 +2216,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 retained supervisor request ownership"]
     async fn explicit_request_is_returned_unchanged_and_intentional_shutdown_is_not_failure() {
         let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
         let exec = wiring.supervisor();
@@ -2050,14 +2258,13 @@ mod shared_network_task_owner_acceptance {
         Arc::new(crate::dns_responder::responder::DnsResponder::new(
             store,
             Arc::new(SimClock::new()),
-            crate::veth_provisioner::NetSlotAllocator::new(),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
         ))
     }
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 DNS serve-task owner"]
     async fn dns_task_owner_classifies_real_exits_and_never_overwrites_a_live_handle() {
         for expected in
             [DnsServeTaskExit::Returned, DnsServeTaskExit::Panicked, DnsServeTaskExit::Cancelled]
@@ -2099,7 +2306,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 DNS replacement ordering"]
     async fn dns_replacement_joins_the_old_task_before_spawning_from_live_and_exited_states() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -2151,7 +2357,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 DNS cooperative/abort shutdown branches"]
     async fn dns_shutdown_prefers_cooperative_stop_and_awaits_the_bounded_abort_backstop() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -2186,7 +2391,6 @@ mod shared_network_task_owner_acceptance {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step for GH #295 DNS task invalid-state matrix"]
     async fn dns_replacement_is_refused_from_every_invalid_state_without_spawning() {
         for state in [
             DnsServeTaskState::Replacing,
@@ -2316,8 +2520,6 @@ impl ServerHandle {
             exit_observer_tasks,
             emit_drain_task,
             interest_router_task,
-            dns_responder_task,
-            dns_responder,
             convergence_shutdown: _,
             exit_observer_shutdown: _,
             emit_drain_shutdown: _,
@@ -2334,21 +2536,12 @@ impl ServerHandle {
         for task in &exit_observer_tasks {
             task.abort();
         }
-        if let Some(responder) = dns_responder {
-            responder.stop();
-        }
-        if let Some(task) = &dns_responder_task {
-            task.abort();
-        }
 
         let _ = server_task.await;
         let _ = convergence_task.await;
         let _ = emit_drain_task.await;
         let _ = interest_router_task.await;
         for task in exit_observer_tasks {
-            let _ = task.await;
-        }
-        if let Some(task) = dns_responder_task {
             let _ = task.await;
         }
 
@@ -2447,16 +2640,7 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        // 5. Stop the dial-by-name responder and release its bound sockets.
-        if let Some(responder) = self.dns_responder {
-            responder.stop();
-        }
-        if let Some(task) = self.dns_responder_task {
-            task.abort();
-            let _ = task.await;
-        }
-
-        // 6. Join the complete worker-owned userspace dataplane. This does
+        // 5. Join the complete worker-owned userspace dataplane. This does
         // not stop workloads or author lifecycle state; it only releases the
         // listeners/connections whose lifetime is this serve owner's lifetime.
         // Active allocation rule guards are relinquished without deletion.
@@ -3071,13 +3255,6 @@ pub async fn run_server_with_obs_and_drivers(
         );
         return Err(error::ControlPlaneError::from(cause));
     }
-    let (_request_tx, request_rx) = tokio::sync::mpsc::channel(1);
-    let shared_network_supervisor = SharedNetworkSupervisorHandle {
-        request_rx,
-        task: None,
-        exec: guest_network_exec.supervisor(),
-        shutdown: CancellationToken::new(),
-    };
     // ADR-0028 preflight, parent-slice delegation, and workloads-slice
     // bootstrap all run in `run_server` (the outer composition
     // boundary). Tests that compose `run_server_with_obs_and_driver`
@@ -3830,13 +4007,12 @@ pub async fn run_server_with_obs_and_drivers(
         reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
                   a let-else-None expression cannot host them"
     )]
-    let mut dns_responder_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut dns_responder_owner: Option<DnsServeTaskOwner> = None;
     #[allow(
         clippy::useless_let_if_seq,
         reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
                   a let-else-None expression cannot host them"
     )]
-    let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
     // Ordinary shared-switch stale cleanup follows the boot-epoch VM
     // reclamation drive.
     // Reclamation has already killed every unsupervised non-terminal VM and
@@ -3950,7 +4126,7 @@ pub async fn run_server_with_obs_and_drivers(
         let responder = Arc::new(crate::dns_responder::responder::DnsResponder::new(
             Arc::clone(&state.obs),
             config.clock.clone(),
-            state.dns_slots.clone(),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
             state.frontend_addr_allocator.clone(),
         ));
         // The test-only `dns_probe_fault` seam forces the DNS responder probe
@@ -3987,8 +4163,8 @@ pub async fn run_server_with_obs_and_drivers(
         // Probe Ok — spawn the source-pinned serve loop and hold both the task
         // handle AND the responder (so shutdown can `stop()` the SO_RCVTIMEO-
         // bounded serve loop before aborting).
-        dns_responder_task = Some(tokio::spawn(Arc::clone(&responder).serve()));
-        dns_responder = Some(responder);
+        dns_responder_owner =
+            Some(DnsServeTaskOwner::new(Arc::clone(&responder), tokio::spawn(responder.serve())));
     }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -4102,6 +4278,118 @@ pub async fn run_server_with_obs_and_drivers(
     // every worker child before returning.
     let mtls_worker_owner = state.mtls_worker.clone();
 
+    let supervisor_shutdown = CancellationToken::new();
+    let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+    let supervisor_exec = guest_network_exec.supervisor();
+    let supervisor_guest_network = Arc::clone(&shared_guest_network);
+    let supervisor_clock = config.clock.clone();
+    let supervisor_worker = mtls_worker_owner.clone();
+    let dns_responder_factory = dns_responder_owner.as_ref().map(|_| {
+        (
+            Arc::clone(&state.obs),
+            config.clock.clone(),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            state.frontend_addr_allocator.clone(),
+        )
+    });
+    let supervisor_task_shutdown = supervisor_shutdown.clone();
+    let supervisor_task = tokio::spawn(async move {
+        let mut dns_owner = dns_responder_owner;
+        let dns_responder_factory = dns_responder_factory;
+        let mtls_shutdown = supervisor_task_shutdown.clone();
+        let no_worker_shutdown = supervisor_task_shutdown.clone();
+        let mut mtls_future = Box::pin(async move {
+            if let Some(worker) = supervisor_worker {
+                SharedNetworkSupervisorHandle::run_mtls_owner(
+                    supervisor_guest_network,
+                    worker,
+                    supervisor_exec,
+                    supervisor_clock,
+                    request_tx,
+                    mtls_shutdown,
+                )
+                .await
+            } else {
+                no_worker_shutdown.cancelled().await;
+                Ok(())
+            }
+        });
+        loop {
+            tokio::select! {
+                biased;
+                () = supervisor_task_shutdown.cancelled() => {
+                    let result = (&mut mtls_future).await;
+                    if let Some(owner) = dns_owner.as_mut() {
+                        owner.shutdown(Duration::from_secs(1)).await;
+                    }
+                    break result;
+                }
+                result = &mut mtls_future => {
+                    if let Some(owner) = dns_owner.as_mut() {
+                        owner.shutdown(Duration::from_secs(1)).await;
+                    }
+                    break result;
+                }
+                exit = async {
+                    match dns_owner.as_mut() {
+                        Some(owner) => Some(owner.wait_failure().await),
+                        None => std::future::pending::<Option<DnsServeTaskExit>>().await,
+                    }
+                } => {
+                    let Some(_exit) = exit else {
+                        break Err(SharedNetworkSupervisorError::Dns(
+                            crate::dns_responder::responder::DnsResponderError::Probe {
+                                reason: "DNS owner exit branch lost its owner".to_owned(),
+                            },
+                        ));
+                    };
+                    let Some((store, clock, gateway, frontend)) = dns_responder_factory.as_ref()
+                    else {
+                        break Err(SharedNetworkSupervisorError::Dns(
+                            crate::dns_responder::responder::DnsResponderError::Probe {
+                                reason: "DNS owner lost its construction dependencies".to_owned(),
+                            },
+                        ));
+                    };
+                    let replacement = Arc::new(crate::dns_responder::responder::DnsResponder::new(
+                        Arc::clone(store),
+                        Arc::clone(clock),
+                        *gateway,
+                        frontend.clone(),
+                    ));
+                    if let Err(source) = replacement.probe().await {
+                        break Err(SharedNetworkSupervisorError::Dns(source));
+                    }
+                    let Some(owner) = dns_owner.as_mut() else {
+                        break Err(SharedNetworkSupervisorError::Dns(
+                            crate::dns_responder::responder::DnsResponderError::Probe {
+                                reason: "DNS owner disappeared during replacement".to_owned(),
+                            },
+                        ));
+                    };
+                    if let Err(source) = owner
+                        .replace(replacement, Duration::from_secs(1), |responder| {
+                            tokio::spawn(responder.serve())
+                        })
+                        .await
+                    {
+                        break Err(SharedNetworkSupervisorError::Dns(
+                            crate::dns_responder::responder::DnsResponderError::Probe {
+                                reason: source.to_string(),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+    });
+    let shared_network_supervisor = SharedNetworkSupervisorHandle::new(
+        request_rx,
+        supervisor_task,
+        guest_network_exec.supervisor(),
+        supervisor_shutdown,
+    );
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -4156,8 +4444,6 @@ pub async fn run_server_with_obs_and_drivers(
         exit_observer_tasks,
         emit_drain_task,
         interest_router_task,
-        dns_responder_task,
-        dns_responder,
         convergence_shutdown,
         exit_observer_shutdown,
         emit_drain_shutdown,
