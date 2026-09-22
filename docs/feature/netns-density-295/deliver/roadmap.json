@@ -341,7 +341,7 @@
     {
       "id": "03",
       "name": "Gate and acceptance activation: EXEC-gate, EXEC-release, and owner-port recovery",
-      "description": "Activate the already-authored reasoned-#[ignore] acceptance bodies against the real production owners phase 02 built: the core EXEC-gate's BootClosed/recovery/fail-stop/PBT model (S-ND295-27), the worker's gate-coupled EXEC-release schedules now unblocked by phase 01's seven-argument constructor (S-ND295-28), and the retained supervisor's owner-port recovery/fail-stop matrix plus shared-gateway DNS lifecycle (S-ND295-29..32, S-ND295-34), completing the D-295-DISTILL-1 run_server composition-root wiring and D-295-DISTILL-8 retained task owners.",
+      "description": "Activate the already-authored reasoned-#[ignore] acceptance bodies against the real production owners phase 02 built: rerun the core EXEC-gate's BootClosed/recovery/fail-stop/PBT model as the accepted S-ND295-27 prerequisite; activate the worker's deterministic real-VmDriver gate-coupled EXEC-release schedules for S-ND295-28; retain its existing writer/stop/cancellation and production action-owner complements; then activate the retained supervisor's owner-port recovery/fail-stop matrix plus shared-gateway DNS lifecycle (S-ND295-29..32, S-ND295-34), completing the D-295-DISTILL-1 run_server composition-root wiring and D-295-DISTILL-8 retained task owners.",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
       "depends_on": [
@@ -387,14 +387,14 @@
         {
           "id": "03-02",
           "name": "Worker EXEC-release acceptance: gate-coupled beacon-writer schedules",
-          "description": "Activate crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs (uncommented in step 01-01) against the real seven-argument VmDriver and gate-coupled release_for_exit_emission: generated_operation_sequences_match_the_gate_model, writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed, backpressured_exec_release_cannot_delay_stop_deadline, cancelling_backpressured_release_cannot_leave_an_exec_sender_running, and start_allocation_awaits_release_and_cancellation_owns_the_future.",
+          "description": "Rerun overdrive-core's authoritative generated_operation_sequences_match_the_gate_model prerequisite, activate crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs against the real seven-argument VmDriver and gate-coupled release_for_exit_emission, and verify the existing writer/stop/cancellation plus post-#295 production action-owner schedules mapped to S-ND295-28.",
           "agent": "nw-software-crafter",
           "deps": [
             "03-01"
           ],
           "estimate_hours": 16,
           "criteria": [
-            "generated_operation_sequences_match_the_gate_model drives seeded schedules of claim/wait/wake/fail-stop operations against the real VmDriver and asserts the observed writer/gate trajectory matches the core gate's own model from step 03-01 -- no seeded-sim writer or injected supervisor consequence stands in for the real beacon-writer path, per red-classification.md's explicit exclusion.",
+            "The authoritative overdrive-core generated_operation_sequences_match_the_gate_model property is rerun with PROPTEST_CASES=1024 as step 03-01's claim/wait/wake/fail-stop model prerequisite. Deterministic overdrive-worker schedules separately drive the real VmDriver and production beacon-writer path; no duplicate worker PBT, seeded-sim writer, or injected supervisor consequence is added.",
             "writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed proves the claim's held duration overlaps the existing single-VMM stop grace window and that every dispatched beacon writer is consumed (no leaked writer task, no double-write) under the real gate.",
             "backpressured_exec_release_cannot_delay_stop_deadline proves a Recovering-waiting release() call never extends the allocation's existing stop-deadline contract -- the stop path's timing invariant is unaffected by EXEC gate backpressure.",
             "cancelling_backpressured_release_cannot_leave_an_exec_sender_running proves that cancelling a task awaiting claim_release while Recovering/BootClosed leaves no dangling EXEC-sender future and no leaked Notify registration.",
@@ -402,7 +402,7 @@
             "Every reasoned-#[ignore] body in netns_density_exec_release.rs is activated with no weakening, replacement, or re-authoring; the file compiles and passes with zero remaining ignore markers."
           ],
           "test_file": "crates/overdrive-worker/tests/acceptance/netns_density_exec_release.rs",
-          "scenario_name": "generated_operation_sequences_match_the_gate_model",
+          "scenario_name": "core generated gate model prerequisite plus deterministic real-VmDriver EXEC-release schedules",
           "scenario_ids": [
             "S-ND295-28"
           ],
@@ -412,11 +412,13 @@
           ],
           "verification": [
             "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(netns_density_exec_release)' --no-fail-fast",
-            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-worker --test acceptance -E 'test(generated_operation_sequences_match_the_gate_model)' --no-fail-fast",
+            "cargo xtask lima run -- env PROPTEST_CASES=1024 cargo nextest run -p overdrive-core --test acceptance -E 'test(=acceptance::netns_density_exec_gate::generated_operation_sequences_match_the_gate_model)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(=acceptance::vm_driver_stop_totality::writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed) or test(=acceptance::vm_driver_stop_totality::backpressured_exec_release_cannot_delay_stop_deadline) or test(=acceptance::vm_driver_stop_totality::cancelling_backpressured_release_cannot_leave_an_exec_sender_running)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(=integration::mtls_install_fail_closed::start_allocation_awaits_release_and_cancellation_owns_the_future)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "Property-based tests (proptest) and state-delta thinking at the declared observable boundary take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: activation, not new design -- generated_operation_sequences_match_the_gate_model IS the PBT/state-machine test this mandate asks for; do not add a second parallel property suite beside it. Per D-295-DELIVER-03-01, this step completes claim-lifetime/drop evidence through the real VmDriver owner, beacon-writer acknowledgement, and cancellation schedules; it does not inspect or expose private active_claims storage. This is the step red-classification.md flags as the sole RED-at-activation surface once the mod line is uncommented -- expect the crafter's first compile to surface any residual seven-argument-constructor fallout inside this specific file that step 01-01's inventory did not need to touch (the file was authored against the post-cut shape already)."
+          "implementation_notes": "Property-based tests (proptest) and state-delta thinking at the declared observable boundary take priority over single-example unit tests where the contract supports it; integration/E2E stays single-example since it verifies wiring, not invariants. STAGE CONTEXT: activation plus evidence-boundary correction, not new design. generated_operation_sequences_match_the_gate_model remains the single authoritative core PBT from step 03-01; do not add a worker duplicate or seeded writer. Per D-295-DELIVER-03-01, this step completes claim-lifetime/drop evidence through the real VmDriver owner, beacon-writer acknowledgement, and cancellation schedules without inspecting private active_claims storage. The existing action-shim body uses the sanctioned post-#295 dispatch_with_guest_network_provisioner_for_test composition with the shared owner at its accepted driven port, reaches release_for_exit_emission, and proves the dispatch future owns cancellation; it must not fall back to historical HostNetworkProvisioner/netns composition or add a new seam."
         },
         {
           "id": "03-03",
@@ -660,8 +662,8 @@
     ]
   },
   "validation": {
-    "status": "approved",
-    "reviewer": "D-295-DELIVER-03-01 approved by independent solution-architecture review iteration 2; S-ND295-27/S-ND295-28 evidence allocation and brief alignment verified.",
-    "approved_at": "2026-09-22T15:29:16Z"
+    "status": "pending",
+    "reviewer": "TODO — second bounded DISTILL/roadmap remediation for step 03-02 awaits independent review",
+    "approved_at": null
   }
 }

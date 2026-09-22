@@ -123,9 +123,12 @@
 //! real `ip netns` shell-outs. WITHOUT root the alloc is driven `Failed` by the
 //! SIBLING netns-provision handler carrying `WorkloadNetnsProvisionFailed`,
 //! `Driver::start` is never called, and `start_alloc` is never reached — the
-//! scenario would silently exercise the wrong handler. Every test here
-//! therefore SKIPs (not fails) off root and prints an explicit EXECUTED marker
-//! past the gate, so a skipped run is never mistaken for a pass.
+//! scenario would silently exercise the wrong handler. The historical S-MIF
+//! scenarios therefore SKIP (not fail) off root and print an explicit EXECUTED
+//! marker past the gate, so a skipped run is never mistaken for a pass. The
+//! later S-ND295-28 action-owner schedule retains this file's root-gated Lima
+//! lane but uses the accepted post-#295 shared-owner composition and makes no
+//! netns-effect claim.
 //!
 //! Each test drives a DISTINCT net slot (and therefore a distinct
 //! `ovd-ns-<slot>`) so its real-kernel names do not overlap another scenario.
@@ -162,7 +165,7 @@ use tokio::sync::broadcast;
 
 use overdrive_control_plane::action_shim::{
     MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner, dispatch,
-    dispatch_with_network_provisioner,
+    dispatch_with_guest_network_provisioner_for_test, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
@@ -190,6 +193,7 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -1097,6 +1101,10 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
 /// while that hook is held must drop the same owned future; it may not proceed
 /// to `on_alloc_running` or leave a detached release behind.
 ///
+/// The body uses the existing post-#295 production-action composition with a
+/// `SimSharedGuestNetworkOwner` at its accepted driven port. It does not enter
+/// the historical `HostNetworkProvisioner`/netns path.
+///
 /// Observable universe: dispatch completion plus every boolean exposed by
 /// `HoldingReleaseDriver`. The permitted cancellation delta is exactly
 /// release-entered=false->true and release-cancelled=false->true; release
@@ -1118,24 +1126,44 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     }
 
     let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs = build_obs();
     let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    worker.start_shared_owner().await.expect("boot-composed shared listener owner is healthy");
     let driver = Arc::new(HoldingReleaseDriver::new());
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
-        Arc::new(registry)
-    };
-    let alloc_drivers = Arc::new(overdrive_control_plane::action_shim::AllocDriverIndex::default());
-    let allocator = Arc::new(NetSlotAllocator::new());
+    let clock = Arc::new(SimClock::new());
+    let mut runtime =
+        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+            tmp.path(),
+        )
+        .expect("runtime");
+    runtime.register(overdrive_control_plane::noop_heartbeat()).await.expect("register heartbeat");
+    let mut state = overdrive_control_plane::AppState::new(
+        Arc::clone(&store),
+        store_path,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+        Arc::new(runtime),
+        Arc::clone(&driver) as Arc<dyn Driver>,
+        clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(295),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+        NodeId::new("node-001").expect("node id"),
+        build_vip_allocator(
+            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+        ),
+        overdrive_control_plane::test_empty_listener_facts(),
+        Ipv4Addr::LOCALHOST,
+    );
+    state.mtls_worker = Some(Arc::clone(&worker));
+    let state = Arc::new(state);
+    let shared_owner = Arc::new(SimSharedGuestNetworkOwner::default());
     let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
     let workload = WorkloadId::new("svc-gti-held-release").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
-    let slot = super::net_slots::MTLS_INSTALL_FAIL_CLOSED.nth(4);
-    allocator.adopt(alloc.clone(), slot).expect("adopt this file's band slot");
-    let _guard = arm_netns_guard(slot);
     let action = Action::StartAllocation {
         alloc_id: alloc.clone(),
         workload_id: workload,
@@ -1145,21 +1173,15 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     };
 
     let task = {
-        let drivers = Arc::clone(&drivers);
-        let alloc_drivers = Arc::clone(&alloc_drivers);
-        let obs = Arc::clone(&obs);
-        let store = Arc::clone(&store);
-        let worker = Arc::clone(&worker);
-        let allocator = Arc::clone(&allocator);
+        let state = Arc::clone(&state);
+        let shared_owner = Arc::clone(&shared_owner);
         tokio::spawn(async move {
-            dispatch_one(
-                action,
-                drivers.as_ref(),
-                alloc_drivers.as_ref(),
-                obs.as_ref(),
-                store,
-                &worker,
-                allocator.as_ref(),
+            let tick = tick_now();
+            dispatch_with_guest_network_provisioner_for_test(
+                vec![action],
+                state.as_ref(),
+                &tick,
+                shared_owner.as_ref(),
             )
             .await
         })
@@ -1185,6 +1207,7 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
 
     worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
+    worker.shutdown_owner().await.expect("shared listener owner shuts down");
     let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
 }
 

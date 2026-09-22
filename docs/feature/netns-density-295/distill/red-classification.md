@@ -36,7 +36,44 @@ weakness only; it did not reproduce a production second writer.
 
 | Scenario / exact body | Exact command | Observed result | Classification |
 |---|---|---|---|
-| S-ND295-28 `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR=/tmp/codex-netns-density-target TMPDIR=/tmp cargo nextest run -p overdrive-worker --test acceptance -E "test(=acceptance::netns_density_exec_release::claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer)" --run-ignored ignored-only --no-fail-fast'` | Writable Lima run `e9bbaf27-f380-4442-81b7-7ecc3ba3f7a9`: **1 passed**, 101 skipped, 0 failed. The release task was cancelled and joined, the production beacon reached EOF, every complete frame parsed as the sole permitted typed EXEC, and no second complete EXEC appeared. Focused production-parser run `1a01cd05-6939-4e4b-9810-ef9d7d323a95` independently passed malformed-EXEC rejection: 1 passed, 528 skipped. | **GREEN — ACCEPTED BEHAVIOR ALREADY PRESENT AFTER FAIL-CLOSED ORACLE CORRECTION.** This body is not a missing-functionality RED and authorizes no production change. The resumed step-`03-02` crafter must activate it without re-authoring; if it remains green, that is valid already-implemented acceptance evidence while the other S-ND295-28 schedules retain their independent gates. |
+| S-ND295-28 `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR=/tmp/codex-netns-density-target TMPDIR=/tmp cargo nextest run -p overdrive-worker --test acceptance -E "test(=acceptance::netns_density_exec_release::claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer)" --run-ignored ignored-only --no-fail-fast'` | Writable Lima run `e9bbaf27-f380-4442-81b7-7ecc3ba3f7a9`: **1 passed**, 101 skipped, 0 failed. The release task was cancelled and joined, the production beacon reached EOF, every complete frame parsed as the sole permitted typed EXEC, and no second complete EXEC appeared. Focused production-parser run `1a01cd05-6939-4e4b-9810-ef9d7d323a95` independently passed malformed-EXEC rejection: 1 passed, 528 skipped. | **GREEN — ACCEPTED BEHAVIOR ALREADY PRESENT AFTER FAIL-CLOSED ORACLE CORRECTION.** This body is not a missing-functionality RED and authorized no production change. Step `03-02` subsequently activated it unchanged; the complete mapped set is recorded below. |
+
+## Step 03-02 evidence-boundary correction
+
+The first DELIVER review exposed two acceptance/roadmap defects rather than a
+production failure:
+
+- **D1 reproduced:** literal writable-Lima run
+  `91765670-b745-444f-9d13-5a1ba75ba202` selected zero tests and exited 4
+  because `generated_operation_sequences_match_the_gate_model` is an
+  `overdrive-core` body, not an `overdrive-worker` body.
+- **D2 reproduced:** writable-Lima run
+  `48d71b7f-9d22-493f-a721-d061cdb79e5e` timed out at `release_entered`
+  because the old fixture called historical `dispatch`, which composed
+  `HostNetworkProvisioner` and never reached the post-#295 release owner.
+
+The corrected roadmap retains the core model as step `03-01`'s PBT prerequisite
+and assigns only deterministic real-`VmDriver`/writer schedules to the worker.
+The existing action-shim body now drives the sanctioned post-#295
+`dispatch_with_guest_network_provisioner_for_test` composition through an
+`AppState` holding the existing `HoldingReleaseDriver` and healthy
+`MtlsInterceptWorker`, with `SimSharedGuestNetworkOwner` at the accepted driven
+port. It reaches `release_for_exit_emission`; aborting the same dispatch task
+drops that held release future, sets `release_cancelled`, and still leaves
+`release_completed` and `on_alloc_running_called` false. No test seam or
+production API was added.
+
+| Complete S-ND295-28 evidence group | Exact selector result |
+|---|---|
+| Core generated model, `PROPTEST_CASES=1024` | Run `0224a89e-37a6-4c30-a922-2b37e5b51719`: 1 passed, 528 skipped. |
+| Three real-`VmDriver` `netns_density_exec_release` schedules | Run `924ca327-f941-4559-99fc-a5ff0c6d039a`: 3 passed, 99 skipped. |
+| Writer lifetime, stop deadline, and cancellation schedules | Run `9f906ad7-b592-4b5c-861e-ecf9e2d6968a`: 3 passed, 99 skipped. |
+| Post-#295 action-owner await/cancellation schedule | Run `ee147208-d028-477d-be3c-57c415b9f673`: 1 passed, 208 skipped. |
+
+All eight mapped bodies are therefore GREEN through their accepted owners. The
+roadmap returns to `validation.status = pending` because this material
+acceptance/verification correction requires independent review; this DISTILL
+pass does not self-approve it.
 
 ## Phase-02 non-waived remediation bodies
 
