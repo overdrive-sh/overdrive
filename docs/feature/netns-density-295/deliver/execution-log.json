@@ -491,6 +491,27 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created 6f639179214b55c91f0cc9303f5e61f9a4e32f67 with only the two step-owned integration files and DES execution log; Marcus author retained and exactly one Co-Authored-By: Codex <codex@openai.com> trailer present, with no Claude/Anthropic attribution. Unrelated AGENTS.md and .serena/project.yml remain dirty and outside scope. No mutation testing.",
       "t": "2026-09-22T21:27:10Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: activated only S-ND295-33; writable-Lima conformance selector compiled and failed semantically at the existing DirectHandlerInstance::shutdown_requested RED panic, proving the public handler delegation is missing while two adjacent reasoned-pending bodies remain ignored.",
+      "t": "2026-09-22T21:35:28Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: the exact public ServerHandle::shutdown_requested delegation compiles, but the terminating writable-Lima conformance run times out waiting for fail-stop because the SimDataplane composition retains no MtlsInterceptWorker supervisor and the injected SimSharedGuestNetworkOwner audit slot is not consumed by production recovery.",
+      "t": "2026-09-22T21:43:55Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "SUPERSEDES prior GREEN wording: activated all three reasoned S-ND295-33 conformance bodies (zero remaining #[ignore] markers); writable-Lima terminating selector compiled but all 3 bodies timed out at their bounded fail-stop wait because the SimDataplane composition retains no MtlsInterceptWorker supervisor and production never consumes the injected SimSharedGuestNetworkOwner audit/quiesce outcomes.",
+      "t": "2026-09-22T21:45:32Z"
     }
   ]
 }
