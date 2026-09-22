@@ -773,3 +773,151 @@ log change is required for I3-D3.
 | Mutation testing | **NOT RUN.** Deferred to the final DELIVER gate. |
 
 # CHANGES_REQUIRED
+
+# Iteration 4 re-review
+
+- **Iteration:** 4
+- **Review date:** 2026-09-22
+- **Remediation commit:** `8b407cb21ec499720f53e7ff75eec0805ae3d0b3`
+- **Remediation parent:** `cd3217701df84509ea0d16715a53479d955e25a8`
+- **Trigger:** iteration-3 finding I3-D3
+- **Reviewer:** same isolated `nw-acceptance-designer-reviewer`
+- **Iteration-4 verdict:** **APPROVED**
+
+This section is additive and preserves iterations 1-3 as the complete review
+history.
+
+## Iteration-4 scope
+
+The remediation commit changes one line in one file:
+
+- `docs/feature/netns-density-295/deliver/roadmap.json` — criterion 4 of step
+  `03-02`.
+
+`git diff --numstat` reports `1` insertion and `1` deletion. No other
+criterion, selector, description, scenario identity, implementation note,
+estimate, validation field, test, DISTILL artifact, design artifact,
+`feature-delta.md`, production/API file, or `execution-log.json` changed.
+
+The roadmap remains intentionally pending until this verdict is mechanically
+applied.
+
+## I3-D3 disposition
+
+**I3-D3 is CLOSED.** Criterion 4 now states exactly the behavior independently
+executed in iteration 3:
+
+> `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`
+> proves that cancelling the structured release future after an Open claim has
+> transferred the command to the production beacon writer synchronously signals
+> writer cancellation, closes the beacon through EOF, completes fail-closed VMM
+> termination before releasing the exit-event gate, and leaves no detached EXEC
+> sender.
+
+This matches the body and production sequence:
+
+1. `build_driver` opens the EXEC gate;
+2. `release_for_exit_emission` acquires the Open claim and transfers the pending
+   command to the production `BeaconWriter`;
+3. the 16 MiB write is observably backpressured;
+4. aborting the structured release synchronously signals the retained writer;
+5. fail-closed VMM termination completes before the exit event becomes
+   observable; and
+6. the guest reads EOF, proving no write half or detached EXEC sender survives.
+
+The former false claims about cancellation while awaiting `claim_release` in
+Recovering/BootClosed and about a leaked `Notify` registration are absent from
+the current roadmap. A repository cross-reference scan finds no such claim in
+the active step-`03-02` contract.
+
+The correction is documentation-only. It does not add a test, expose gate
+storage, widen API, change production, or require a new schedule.
+
+## D1, D2, and complete evidence preservation
+
+D1 remains **CLOSED**: the roadmap still names the one authoritative
+overdrive-core PBT prerequisite and separately names deterministic real-
+`VmDriver`/`BeaconWriter` schedules. The corrected core selector, all worker
+selectors, and the prohibition on duplicate worker PBT/seeded writer remain
+unchanged.
+
+D2 remains **CLOSED**: criterion 5, the action-owner selector, and the
+pre-existing post-#295 `dispatch_with_guest_network_provisioner_for_test`
+composition remain unchanged. No historical `HostNetworkProvisioner` evidence
+claim was reintroduced.
+
+The four test-file blobs are identical before and after commit `8b407cb2`:
+
+- core model: `a017ac897bcd97ae8e5d3d464ff2f119604816d5`;
+- primary real-`VmDriver` schedules:
+  `2648fd680b1b5e63a810739bc2037eb568b9a3f8`;
+- writer/stop/cancellation schedules:
+  `d0b716e9e1b943ba2859d559ea58be98a401db1d`; and
+- action-owner schedule: `688e9bb819f9cb6e04f35ee7c565fe2e8c7605ca`.
+
+Therefore iteration 3's independently executed nonzero selector matrix remains
+applicable without rerun: core `1`, primary worker `3`, writer/stop/cancellation
+`3`, action owner `1`; all eight passed.
+
+The approved fail-closed typed-frame oracle is also unchanged. It continues to
+parse every newline-complete frame through UTF-8 and the production
+`BeaconMessage` parser, accepts exactly zero or one `Exec`, rejects malformed,
+interleaved, unexpected, or duplicate complete frames, ignores only the final
+unterminated suffix, joins cancellation, and reads through EOF.
+
+The DISTILL scenario and RED-classification blobs, `feature-delta.md`, and the
+DES execution log are likewise byte-identical across this remediation. The
+five-group/eight-body test budget and the iteration-3 15/15 completeness result
+remain unchanged.
+
+## Iteration-4 verification
+
+| Check | Result |
+|---|---|
+| Remediation changed-file scope | PASS — only `roadmap.json`. |
+| Remediation diff size | PASS — one criterion line replaced (`1/1`). |
+| Criterion 4 exact body-to-roadmap mapping | PASS. |
+| Recovering/BootClosed waiter claim absent | PASS. |
+| Notify-registration claim absent | PASS. |
+| Other five criteria unchanged | PASS. |
+| Description, selectors, scenario identity, estimate, and notes unchanged | PASS. |
+| Test and SSOT blob identity | PASS — all listed test/DISTILL/design/log blobs unchanged. |
+| `jq -e . roadmap.json` | PASS. |
+| `git diff --check 8b407cb2^..8b407cb2` | PASS. |
+| `des-verify-integrity --roadmap-only` | PASS — roadmap format OK. |
+| Remediation commit attribution | PASS — Marcus remains author; exactly one Codex co-author trailer and no prohibited attribution. |
+| Test rerun | NOT REQUIRED — the remediation is roadmap-only and every executable blob is identical to the independently executed iteration-3 evidence. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+No blocker, high, medium, or low finding remains.
+
+## Final roadmap validation metadata recommendation
+
+The original acceptance designer may now apply this exact metadata
+mechanically:
+
+```json
+{
+  "status": "approved",
+  "reviewer": "S-ND295-28 step 03-02 DISTILL/roadmap remediation approved by independent acceptance-design review iteration 4; D1, D2, and I3-D3 closed, eight-body selector matrix and fail-closed typed-frame oracle verified.",
+  "approved_at": "2026-09-22T19:07:01Z"
+}
+```
+
+This metadata update is the only remaining authorized write. It does not alter
+the roadmap's substantive contract and requires no further production, test,
+DISTILL, feature-delta, design, or execution-log change.
+
+## Iteration-4 final dispositions
+
+| Item | Disposition |
+|---|---|
+| I3-D3 | **CLOSED.** Criterion 4 now matches the Open-claim/post-transfer cancellation body exactly. |
+| D1 | **REMAINS CLOSED.** Core PBT and worker evidence split unchanged. |
+| D2 | **REMAINS CLOSED.** Sanctioned post-#295 action-owner composition unchanged. |
+| Full eight-body evidence | **PRESERVED and GREEN.** Iteration-3 selector evidence remains applicable by blob identity. |
+| Fail-closed typed-frame oracle | **PRESERVED and APPROVED.** |
+| API/production/architecture | **UNCHANGED.** |
+| Mutation testing | **NOT RUN.** |
+
+# APPROVED
