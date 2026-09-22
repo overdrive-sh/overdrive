@@ -220,3 +220,119 @@ If the former is required, the design must approve a sanctioned private evidence
 D1, D3, and D4 are **RESOLVED** with independent source and selector evidence. D2 is a reproduced, non-hypothetical DESIGN/testability contradiction: the accepted feature-delta private-universe wording names an active-claim counter delta, but the accepted opaque capabilities and existing production owner provide no sanctioned observation boundary, and the real gate selectors remain green when only that decrement is removed. This review neither invents a test hook nor treats the unobservable counter as a runtime defect. The exact DESIGN decision described above is still required.
 
 # CHANGES_REQUIRED
+
+---
+
+## Iteration 3 — approved DESIGN re-review
+
+- **Review ID:** `code_rev_20260922_155200_iteration_3`
+- **Iteration:** 3
+- **Reviewed implementation range:** `526e961842d7..8862112537fb66b3f8f6b7a89f75a5a7b8e3c737`
+- **Approved DESIGN input:** `078e00db5cf6fe6df0e1662bcf041878aa9f89b1`
+- **Durable DESIGN review:** `5941c10d1959fd0d5efc67bdf0139e62f3b175e9` — **APPROVED**, zero findings
+- **Prior iteration:** `CHANGES_REQUIRED`; D1, D3, D4 resolved and D2 retained as a DESIGN blocker
+- **Iteration-3 verdict:** **APPROVED**
+
+### Authority and review boundary
+
+This re-review consumes the independently approved `D-295-DELIVER-03-01`
+decision and its revised `feature-delta.md`, `distill/test-scenarios.md`,
+`roadmap.json`, and architecture brief. The approved decision removes
+private `active_claims +1/-1` storage from the step-03-01 acceptance oracle,
+retains the opaque public-capability S-ND295-27 boundary, and assigns real
+`VmDriver` claim-lifetime/acknowledgement/cancellation evidence to S-ND295-28
+in step 03-02. No 03-02 evidence is credited here.
+
+The DESIGN remediation was independently reviewed in
+`docs/feature/netns-density-295/deliver/review-design-remediation-03-01.md`.
+That durable review records zero findings and `# APPROVED`; its conclusion
+was checked against the revised contract and current implementation/tests.
+
+### D1–D4 dispositions
+
+| Finding | Final disposition | Evidence |
+|---|---|---|
+| D1 — Outcome anchors/declarations | **RESOLVED** | All six gate bodies and the placement body carry the exact Outcome anchor and Contract Shape lines; neither core acceptance file has an ignore marker. The new below-cap pool body also has both declarations. |
+| D2 — private active-claim bookkeeping oracle | **RESOLVED by approved DESIGN** | Revised roadmap notes and S-ND295-27 define public returns, projections, blocking/wake/refusal, and terminal behavior as the complete 03-01 boundary; private counter storage is explicitly not an independent outcome. S-ND295-28 remains mandatory for real `VmDriver` lifetime, writer acknowledgement, and cancellation. No accessor, snapshot, hook, or API was added. |
+| D3 — deterministic typed coverage | **RESOLVED** | The nested typed table drives all 12 components × 6 causes through the real public supervisor and asserts enum fields directly. |
+| D4 — below-cap PoolExhausted | **RESOLVED** | The /30 private pool body holds one lease, proves `1 < 16,384`, asserts typed `PoolExhausted { held: 1, capacity: 1 }`, and preserves the snapshot. |
+
+### D2 reassessment against the approved decision
+
+The revised authority resolves the prior contradiction without changing the
+implementation or adding an observation seam:
+
+- Revised `feature-delta.md` describes `GuestNetworkExecClaim` as an opaque
+  lifetime. Its private `active_claims` counter is bookkeeping only; it is not
+  projected or consumed by either capability.
+- Revised S-ND295-27 maps step-03-01 evidence to public returns,
+  `recovery_progress`, blocking, wake, refusal, terminal behavior, and typed
+  component/cause coverage; it explicitly excludes a private counter oracle.
+- Revised S-ND295-28 and step 03-02 retain the real production obligation:
+  `release_for_exit_emission` acquires the claim before pending EXEC
+  ownership and holds the opaque lifetime through writer acknowledgement and
+  cancellation-owned termination.
+- Revised roadmap notes remove the whole-private-state/counter requirement and
+  prohibit inventing an accessor, snapshot, or test seam. Step 03-02 remains
+  dependent on 03-01 with separate real-owner selectors.
+- The current source has exactly the approved opaque surface. No production
+  read, public projection, test-only hook, or alternate owner was introduced.
+
+The prior bounded mutation—removing only the private decrement while keeping
+public gate behavior unchanged—is therefore outside the revised S-ND295-27
+oracle, not a step-03-01 defect. It remains appropriate that step 03-02 proves
+the real opaque lifetime through `VmDriver` schedules; that evidence is not
+claimed here.
+
+### Contract Shape and API re-check
+
+Direct source scan reports:
+
+```text
+netns_density_exec_gate.rs       Outcome anchors: 6  CONTRACT_SHAPE: 6  ignores: 0
+netns_density_placement_cap.rs  Outcome anchors: 1  CONTRACT_SHAPE: 1  ignores: 0
+```
+
+The typed table uses direct enum equality and no Display/Debug oracle. The
+placement body remains a pure scheduler-port call and introduces no partial
+assignment or pre-cut `AllocationSpec` shape. The pool body is source-local
+at the existing private owner boundary and adds no public API. The cumulative
+implementation diff contains no new public method, type, trait, enum variant,
+parameter, persisted field, accessor, hook, or owner.
+
+No test assertion was weakened, deleted, skipped, or re-authored. The
+remediation added required metadata, strengthened the typed table, and added
+the exact missing below-cap error body.
+
+## Iteration-3 verification
+
+| Command / evidence | Result |
+|---|---|
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate) or test(netns_density_placement_cap)' --no-fail-fast` | **PASS**: 7/7 selected tests; 522 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target PROPTEST_CASES=1024 cargo nextest run -p overdrive-core --test acceptance -E 'test(netns_density_exec_gate)' --no-fail-fast` | **PASS**: 6/6 selected tests; 523 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo nextest run -p overdrive-control-plane --lib -E 'test(=guest_network::pool_acceptance::below_cap_pool_exhaustion_is_typed_drift_and_preserves_state)' --no-fail-fast` | **PASS**: 1/1 selected test; 247 unrelated tests skipped. |
+| `cargo xtask lima run -- env CARGO_TARGET_DIR=/tmp/codex-netns-density-target cargo check --workspace --all-targets --features integration-tests` | **PASS**. |
+| `cargo fmt --all -- --check` | **PASS**. |
+| `git diff --check 526e961842d7..5941c10d1959fd0d5efc67bdf0139e62f3b175e9` | **PASS**. |
+| Contract Shape direct scan | **PASS** for transitioned bodies; all required anchors/declarations present and no ignores. The reviewer-definition checker executable is absent, so no checker pass is claimed. |
+| Workspace clippy | **Environment/baseline limitation**: the existing `clippy::print_stderr` at `crates/overdrive-netlink/src/nft.rs:5121` remains outside step changes. |
+| Configured Lima target without override | **Environment limitation**: `/home/marcus.guest/.cargo-target-lima` is read-only; writable `/tmp` target supplied selector evidence. |
+| Mutation testing | **NOT RUN**, as required; reserved for the final DELIVER gate. |
+
+### DES, design, and commit evidence
+
+- The remediation DES cycle is ordered `RED 2026-09-22T14:41:57Z → GREEN 2026-09-22T14:47:53Z → COMMIT 2026-09-22T14:48:19Z`, each `EXECUTED/PASS`.
+- DESIGN commit `078e00db5cf6fe6df0e1662bcf041878aa9f89b1` changes only the five authorized documentation artifacts; durable review commit `5941c10d1959fd0d5efc67bdf0139e62f3b175e9` records `APPROVED` with zero findings. Revised roadmap validation is `approved`.
+- Step implementation/remediation commits through `8862112537fb66b3f8f6b7a89f75a5a7b8e3c737` retain Marcus as author and exactly one Codex trailer, with no Claude/Anthropic/generated-by attribution.
+- This iteration owns only the append to this review artifact. Existing dirty `AGENTS.md` and `.serena/project.yml` remain untouched and uncommitted.
+
+## Iteration-3 verdict
+
+D1, D2, D3, and D4 are **RESOLVED** against the revised independently
+approved contract. The current step proves the complete public opaque-capability
+S-ND295-27 boundary, deterministic typed coverage, fixed-cap boundaries, and
+below-cap typed pool drift without inventing API or test seams. Real
+`VmDriver` claim-lifetime/writer/cancellation evidence remains assigned to
+step 03-02 and is not credited here.
+
+# APPROVED
