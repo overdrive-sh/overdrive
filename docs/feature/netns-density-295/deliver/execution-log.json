@@ -533,6 +533,13 @@
       "s": "EXECUTED",
       "d": "PASS: des-commit created 514d2dc120df3e86a269c017ae966dd85b114640 with only 03-03 remediation production files and DES-log events; Marcus author retained and exactly one Co-Authored-By: Codex <codex@openai.com> trailer. Dirty AGENTS.md, .serena/project.yml, and concurrent 04-02 conformance files remained outside scope. No mutation testing.",
       "t": "2026-09-22T22:53:29Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "SUPERSEDES prior environment wording: with .env selectors loaded by xtask, native metal preflight passed. Independent topology selector reached production startup and both VMs Running, then timed out at vm_walking_skeleton.rs:568 while waiting for alloc-nd295-a-0 terminal state (last row Running, reason Started); its VMM was gone but exact TAP/bridge/nft/bpffs/cgroup/run-dir complements remained because the test panicked before final cleanup. Independent S-ND295-01 guest traffic selectors then failed at production run_with_kek_and_vmm_override startup with MtlsSharedOwnerError::Intercept displayed as shared mTLS rule/set convergence failed. Read-only remote inspection found stale overdrive-mtls IP/bridge tables, endpoint/counter pins, and an unrelated acceptance-0d77 netns_density_shared_owner process (PID 2906893, >1 day, listening on 127.0.0.1:43527/32859); no process was killed or remote state modified. Full approved guest_stack_mtls_egress selector executed 34 bodies: 16 passed, 18 failed, no timeout; 17 failures were startup convergence cascades plus one pre-existing fault-fixture assertion (fault_fixture.rs:1735 left 1330/right 74). No 04-01 production defect is accepted or changed; blocker is shared-metal contamination requiring orchestrator coordination.",
+      "t": "2026-09-22T23:04:33Z"
     }
   ]
 }
