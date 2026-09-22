@@ -385,3 +385,357 @@ production path, the active-capability/listener scenarios and action-shim
 caller are absent, and the remaining active tests do not prove the declared
 cardinality/complement universes. Step 02-03 must remain blocked pending
 remediation and re-review.
+
+## Iteration 2 — remediation commit `0bd52520a9ae15b2c58511fa599113d36c44a183`
+
+- **Reviewer:** fresh isolated DELIVER reviewer replacement
+- **Review ID:** `code_rev_20260922_012821_iteration_2`
+- **Iteration:** 2
+- **Reviewed cumulative range:** approved test checkpoint `4eb8aa34` through
+  `0bd52520a9ae15b2c58511fa599113d36c44a183`
+- **Prior iteration:** `2acfc29d471e0d811af3be62db1face521adc789`,
+  **CHANGES_REQUIRED**
+- **Final verdict:** **APPROVED**
+
+### Iteration-2 summary
+
+The remediation closes all seven iteration-1 blockers within the approved
+02-03 architecture. The private D11 owner now has the exact weak sender,
+observer-owned abort-on-drop listener task, consumed terminal-event slot, and
+live-slot replacement refusal. Shared capability stop retains the same opaque
+failed handle, its drain, and its Retiring reservation until a same-owner
+retry completes; successor admission and release-last cleanup remain behind
+that completion fence. The retirement race now drives the production shared
+dispatch, not a direct test-owned `enforce`/`publish` sequence.
+
+The active source-local owner tests and active worker acceptance bodies use the
+real worker boundary. S-ND295-25 and S-ND295-26 have both source-local
+production-owner evidence and the existing native real-enforcement bodies.
+The action-shim test drives the real `StartAllocation` dispatch and proves the
+`RegistrationRetired` cleanup projection. The exact seven-method public worker
+surface remains unchanged, and no 03-03 clock, retry cadence, deadline,
+request, or fail-stop surface was introduced.
+
+### Updated iteration history
+
+| Iteration | Commit | Verdict | Findings | Disposition |
+|---:|---|---|---:|---|
+| 1 | `2acfc29d471e0d811af3be62db1face521adc789` | **CHANGES_REQUIRED** | 7 blockers | Returned to the original step-02-03 crafter. |
+| 2 | `0bd52520a9ae15b2c58511fa599113d36c44a183` | **APPROVED** | 0 unresolved blockers | All D1-D7 findings resolved; step may advance. |
+
+### Authority and review boundary
+
+This re-review uses the exact accepted C-295-L/F-03, D-295-DISTILL-7,
+D-295-DISTILL-11, D-295-DISTILL-15, GEN-295-A, and RUN-295-B contracts in
+`feature-delta.md`, the 02-03 entry in `deliver/roadmap.json`, the
+S-ND295-20..26 scenario table, and the approved remediation evidence table in
+`distill/test-scenarios.md`. The review distinguishes the 02-03 published
+worker prerequisite for S19 from the 03-03 cadence/deadline/fail-stop closure.
+
+The two still-ignored acceptance bodies are the exact-port recovery and
+occupied-recorded-port recovery bodies. They remain the later recovery lane;
+they do not prevent approval of the current S19 observe-only prerequisite.
+No 03-03 behavior is credited to this step.
+
+No production, test, configuration, or execution-log file was changed by the
+reviewer before this artifact append. Existing dirty `.serena/project.yml` and
+`AGENTS.md` changes were preserved.
+
+### Strengths confirmed in iteration 2
+
+- The seven public worker methods remain exactly
+  `start_shared_owner`, `wait_shared_owner_failure`, `converge_shared_owner`,
+  `audit_shared_owner`, `start_alloc`, `stop_alloc`, and `shutdown_owner`.
+  The remediation diff adds no `pub` declaration, generation setter, task
+  control hook, clock, retry-cadence method, deadline method, request method,
+  or fail-stop method.
+- The D11 owner uses `mpsc::WeakSender` at
+  `crates/overdrive-worker/src/mtls_intercept_worker.rs:351-375`; each
+  observer captures an `AbortOnDropListenerTask` at `:454-468`, and its Drop
+  aborts the underlying listener at `:330-335`.
+- `wait_failure` consumes only the event's leg slot at `:379-406`, while
+  `replace_terminal` refuses an occupied live slot at `:408-425`.
+  `shutdown(self)` remains the exact consumed owner operation at `:428-439`.
+- The private `shutdown_shared` Arc bridge is not public API. It uses the same
+  abort-and-join ownership when the production `SharedOwner` still retains an
+  Arc, and the enclosing owner is then dropped. The source-local consumed
+  shutdown probe still proves that the sole receiver is dropped before the
+  consuming operation returns.
+- `CapabilityRegistry` snapshots include generation, every record's capability
+  and lifecycle/effect/handle/in-flight/pending-owner fields, allocation
+  reservations, and both indexes at `:1412-1472`.
+- The action-shim and native bodies are wired to existing production ports and
+  adapters. No no-op replacement port, unwired fixture, or test-only public
+  dispatch hook was introduced.
+
+## Prior-finding remediation dispositions
+
+### D1 — D11 task-owner shape and detach risk — RESOLVED
+
+The owner field is now exactly a weak sender. `SharedListenerTaskOwner::new`
+creates the bounded channel, gives strong sender clones to the two observers,
+and stores only `event_tx.downgrade()` (`mtls_intercept_worker.rs:365-376`).
+`observe` moves one `AbortOnDropListenerTask` into each observer future
+(`:454-468`); dropping or aborting that observer therefore aborts its listener
+instead of detaching it.
+
+The actual Tokio source-local tests cover the required boundaries:
+
+- `dropping_every_observer_aborts_its_listener_and_closes_the_real_event_channel`
+  (`:639-672`) aborts both observers, observes both child Drop witnesses, and
+  observes `TryRecvError::Disconnected` from the real channel.
+- `one_real_join_event_removes_only_its_terminal_slot_before_replacement_and_consumed_shutdown`
+  (`:674-702`) receives a real leg-F join event, proves only leg-F is removed,
+  proves live leg-C retention, replaces only the consumed slot, and uses the
+  strong sender probe to prove consuming `shutdown(self)` drops the receiver.
+- `replacement_refuses_a_still_live_occupied_slot_without_detaching_either_listener`
+  (`:704-723`) proves a live occupied slot is refused and both original child
+  tasks remain live until the owner consumes shutdown.
+
+The observer-close classifier remains source-honest, and the production
+listener task created at `:1277-1331` remains the owner path that emits the
+real event. The prior strong-sender/borrowed-shutdown/detach finding is closed.
+
+### D2 — shared teardown failure loses retry ownership — RESOLVED
+
+`AllocStop` now retains both `retry_handles` and an optional `retry_drain`
+(`mtls_intercept_worker.rs:1885-1917`). The shared capability stop branch
+waits for claims, takes the handles, clones each failed handle before invoking
+teardown, and retains the drain/elements and Retiring reservation when any
+teardown fails (`:2968-2993`). A subsequent same-owner `stop_alloc` takes the
+retained drain and exact failed handles (`:2917-2942`) and uses
+`start_capability_drain_retry` (`:3673-3705`). The drain completes only after
+all retries succeed; only then can a successor reserve the address.
+
+The real production-path regression
+`shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry`
+(`:4904-5021`) drives `start_shared_owner`, `start_alloc`,
+`handle_shared_outbound`, and `spawn_shared_enforcement`. It proves the first
+typed teardown source, stable `<allocation>#0` identity, failed-handle retry
+ownership, Retiring conflict for a contender, exactly two teardown calls with
+the same identity, successful same-owner retry, completion, and successor
+admission only after completion.
+
+The release-last complement is independently proven by the action-shim
+`RegistrationRetired` body at
+`crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs:1886-1929`:
+the network lease is still held while structural teardown runs, mTLS element
+drops precede network teardown, and successful cleanup releases the address
+only after the accepted cleanup sequence. Owner shutdown remains a sealed
+terminal owner path, not a new retry API; this review does not credit it with
+03-03 recovery behavior.
+
+### D3 — retirement-race test bypasses shared dispatch — RESOLVED
+
+`enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain`
+now starts the shared owner and a networked capability through
+`start_alloc` (`mtls_intercept_worker.rs:4798-4803`). It invokes
+`handle_shared_outbound` from a blocking executor task (`:4804-4809`), which is
+the same production dispatch called by `shared_listener_task` at
+`:1297-1302`. That path claims the immutable capability, resolves it, calls
+`spawn_shared_enforcement` (`:3445-3482`), holds the claim across the awaited
+`enforce` call (`:3521-3543`), and publishes or tears down the returned handle
+according to the retirement fence.
+
+The test parks stop on the in-flight claim, releases enforcement, and proves
+the late returned handle is torn down exactly once and is not published or
+reattributed to a successor (`:4810-4831`). There is no direct test-owned
+`enforcement.enforce` followed by `claim.publish` workflow left.
+
+### D4 — missing S-ND295-25/S-ND295-26 shared-worker evidence — RESOLVED
+
+The source-local acceptance bodies now use two networked allocations and the
+real shared worker:
+
+- `stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner`
+  (`tests/acceptance/netns_density_shared_owner.rs:891-944`) starts two
+  capabilities, drives two shared listener connections, stops only the first,
+  asserts the second handle is byte-identical and live, checks both shared
+  listener addresses/tasks through `audit_shared_owner`, proves the first
+  allocation's three guards are the only guard delta, and completes another
+  second-allocation exchange before shutdown.
+- `owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener`
+  (`:946-998`) starts two capabilities, holds a third real claim in
+  enforcement, closes admissions, proves shutdown remains pending, then
+  releases the claim and asserts all three handles, six allocation elements,
+  both listener sockets, and the node owner lifecycle are drained. The shared
+  guard is privately relinquished with zero Drop.
+
+The native integration bodies are active and exercise the existing
+`HostMtlsEnforcement`, TLS peers, shared listener dispatch, and real kernel
+cleanup at `tests/integration/outbound_enforce_substrate_splice.rs:1936-2001`
+and `:2003-2069`. The crafter's final report records both native S25 and S26
+selectors passing. The previously reported 27 KVM/VMM and 54 passed plus 6
+skipped zero-copy metal suites remain additional non-regression evidence; they
+are not substituted for the S25/S26 assertions.
+
+### D5 — `RegistrationRetired` not driven through action shim — RESOLVED
+
+`registration_retired_from_real_start_alloc_keeps_exec_closed_and_releases_the_address_last`
+is active at
+`crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs:1886-1930`.
+Its helper starts the real shared owner, constructs a networked
+`StartAllocation`, calls the production `dispatch_with_network_provisioner`
+at `:1808-1848`, and races the real worker Pending-to-Retired activation
+barrier with `stop_alloc` (`:1851-1869`). It does not fabricate
+`MtlsInterceptInstallError::RegistrationRetired` for the closed path.
+
+The assertions prove Running-to-Failed replacement, exact
+`registration_retired` stage on the successful-cleanup partition, zero EXEC
+release and zero driver-running hook, driver stop before mTLS element drops,
+mTLS cleanup before network teardown, address release last, and unchanged
+primary-versus-cleanup error precedence on the failing structural-teardown
+partition (`:1893-1929`). The action shim remains the real production caller
+and no second cleanup generation is introduced.
+
+### D6 — S20 lacks exact cardinality/guard evidence — RESOLVED
+
+`shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree`
+(`tests/acceptance/netns_density_shared_owner.rs:55-104`) drives the existing
+recording adapter with real `TcpListener` sockets and a real Drop-counted
+guard. It asserts exactly two binds, one convergence, the exact observation
+cardinality, two distinct non-zero listener addresses, two retained listener
+clones, zero allocation-guard drops, and zero shared-guard drops while
+published (`:63-79`). The production `audit_shared_owner` invoked by the test
+checks both exact socket identities and both live task slots before the
+recorded shared identity is accepted.
+
+The second `start_shared_owner` is asserted byte-equal to the first complete
+recording surface (`:80-88`), so no duplicate bind/converge/task/guard tree
+can be hidden behind an idempotent result. Shutdown closes both exact sockets,
+retains the accepted constant program through private guard relinquishment,
+and again records zero guard Drop (`:90-103`). The prior Sim-only cardinality
+gap is closed without a public counter or hook.
+
+### D7 — Contract Shape declarations and complete universes — RESOLVED
+
+Every new or transitioned body named by the remediation carries both exact
+rustdoc lines:
+
+```text
+/// Outcome anchor: DISCUSS Elevator Pitch
+/// CONTRACT_SHAPE: bounded-change.
+```
+
+Direct source inspection confirms these declarations on the three D11 owner
+bodies, both full-registry bodies, the production retirement race, shared
+teardown retry, S20, source-local S25/S26, native S25/S26, and the action-shim
+body. No transitioned name matches the banned technical-result regex.
+
+The registry's `RegistryUniverseSnapshot` captures the complete declared
+registry surface: `next_generation`, all records and capability fields,
+lifecycle, guard/effect presence, handles, in-flight count, pending-owner
+state, allocation reservations, and source/destination indexes. The conflict
+rows compare byte-equal snapshots; the isolated retirement row compares the
+post-state with `without(&first_key)` while retaining the unrelated capability
+complement (`:1497-1562`, `:1684-1733`). The worker owner and S20 tests
+assert their complete adapter/owner complements rather than only selected
+lookup results.
+
+No assertion was weakened, deleted, skipped, or rewritten to accommodate the
+implementation. The remediation removes only the exact step-02-03 pending
+ignore markers from the bodies it closes; the two later recovery bodies retain
+their explicit ignores.
+
+## Public API and scope re-check
+
+The accepted public worker surface is unchanged. Comparing the remediation
+diff against `4eb8aa34` shows no added `pub` declaration. The existing
+constructor, `leg_c_addr`, and test-only `#[doc(hidden)]` diagnostics remain
+outside the seven-method owner surface; none was added by remediation.
+
+The worker still uses the already-required injected `Clock` field only as
+constructor wiring. The remediation adds no clock reads, retry cadence,
+deadline, attempt counter, request sender, typed fail-stop request, or
+control-plane supervisor call. The only retry code is the accepted
+allocation-stop same-owner teardown retry required by D7; it is not the 03-03
+runtime recovery loop. The active wrong-target body remains the S19
+observe-only prerequisite: it asserts one structured conflict, no port-zero
+rebind, no target rewrite, and no retry/deadline/fail-stop closure.
+
+The published node guard is privately relinquished on owner shutdown with
+`std::mem::forget`, while unpublished startup/refusal paths drop acquired
+guards and sockets. Registry retirement remains remove-before-reassign: active
+indexes are removed at `begin_retire`, reservations remain through claims,
+pending-owner handoff, element/handle teardown, and `complete`, and only then
+can a successor register the address.
+
+## Contract Shape Compliance — iteration 2
+
+**Overall: PASS.**
+
+| Check | Status | Evidence |
+|---|---|---|
+| Declaration present | PASS | All new/transitioned 02-03 bodies carry the exact Outcome anchor and bounded-change declaration. |
+| Banned technical names | PASS | Activated names do not match `returns_*`, `exit_code`, `calls_*_once`, `status_code`, or `http_*` result-name patterns. |
+| D11 unbounded ownership | PASS | Weak sender, observer-owned abort wrapper, consumed shutdown, and exact slot ownership are source-local and production-wired. |
+| Bounded-change declared delta | PASS | Registry, owner, S20, S25/S26, and action-shim bodies assert the named deltas. |
+| Complement equality | PASS | Registry snapshots, owner surfaces, unrelated handles/listeners, guard counts, cleanup journals, and action-shim order cover the named complements. |
+| Driving boundary | PASS | Worker acceptance enters public owner/allocation methods; retirement and action-shim bodies enter production dispatch; native bodies use real enforcement. |
+
+## Mechanical evidence — iteration 2
+
+| Gate | Result |
+|---|---|
+| DES RED/GREEN/COMMIT | PASS — fresh remediation cycle is ordered `RED` `2026-09-22T00:34:01Z`, `GREEN` `2026-09-22T01:12:57Z`, `COMMIT` `2026-09-22T01:14:11Z`; each is `EXECUTED/PASS`. |
+| Commit identity | PASS — `0bd52520a9ae15b2c58511fa599113d36c44a183`; original Marcus author retained. |
+| Commit trailers | PASS — exactly one `Step-Id: 02-03` and exactly one `Co-Authored-By: Codex <codex@openai.com>`; no Claude/Anthropic attribution. |
+| Commit scope | PASS — five tightly related files, 172 insertions and 52 deletions relative to `4eb8aa34`; no unrelated production file. |
+| `git diff --check` | PASS. |
+| `cargo fmt --all -- --check` | PASS. |
+| Crafter workspace check | PASS — reported `cargo check --workspace --all-targets`. |
+| Crafter focused clippy | PASS — reported `overdrive-worker --lib --features integration-tests -D warnings`. |
+| All-target clippy | Baseline-limited only — pre-existing `overdrive-netlink` and unrelated control-plane findings were reported; no changed-code warning was reported. |
+| Worker verification | PASS — crafter report records worker suite 32 passing after remediation. |
+| Active owner acceptance | PASS — eight 02-03 bodies active; two exact-port recovery bodies remain ignored for the later recovery lane. |
+| Action-shim integration | PASS — real `RegistrationRetired` dispatch body passes both cleanup partitions. |
+| Native S25/S26 | PASS — crafter report records both native real-enforcement selectors passing. |
+| Native metal non-regression | PASS — 27 KVM/VMM tests and 54 zero-copy tests passed, with 6 zero-copy tests skipped by their existing environment policy. |
+| Lima | Environment-limited — configured Lima target is read-only; the alternate writable target exhausted `/tmp`. No Lima-only 02-03 gate remains unproved because the source-local and native S25/S26 evidence is the accepted layer for these bodies. |
+| Mutation testing | NOT RUN, correctly deferred to the final DELIVER-wave gate. |
+
+## External validity — iteration 2
+
+**PASS.** The active acceptance file calls the public worker owner/allocation
+surface and real sockets. The retirement race enters the production shared
+listener dispatch method and its production claim/enforcement/publish path.
+The S25/S26 source-local bodies exercise the real worker owner with two active
+capabilities, while their native counterparts exercise `HostMtlsEnforcement`
+and real TLS peers. The action-shim body enters the real `dispatch` caller and
+observes operator-visible lifecycle rows, cleanup effects, and EXEC behavior.
+No expectation runner invokes a Rust test binary or replaces the production
+composition root.
+
+## Quality gates — iteration 2
+
+| Gate | Result | Evidence |
+|---|---|---|
+| G1 — selected acceptance set | PASS | The exact eight 02-03 bodies are active; the two later recovery bodies remain ignored as required. |
+| G2 — valid RED | PASS | The fresh DES RED event is present and PASS; no collection/import failure is reported for the remediation cycle. |
+| G3 — assertions protect production behavior | PASS | D3 uses production shared dispatch, D2 uses real retry ownership, D5 uses real action dispatch, and S20/S25/S26 observe complete owner complements. |
+| G4 — no unsanctioned domain mocks | PASS | Doubles are at the approved `MtlsIntercept`, `MtlsEnforcement`, and network/driver port boundaries; native evidence uses the real enforcement adapter. |
+| G5 — business language and Contract Shape | PASS | Outcome anchors, bounded-change declarations, exact lifecycle vocabulary, and complete universe/complement assertions are present. |
+| G6 — required evidence green | PASS | D1-D7 source/acceptance/action-shim evidence is green; native S25/S26 is reported green; no 03-03 evidence is claimed. |
+| G7 — green before commit | PASS | DES GREEN precedes COMMIT in the fresh remediation cycle. |
+| G8 — test budget | PASS | The mapped 13 observable behaviors retain a 26-test budget; the active bodies remain within it and no duplicated input matrix was added. |
+| G9 — no prohibited test modification | PASS | Remediation only removes named pending ignores and strengthens/activates the accepted bodies; no assertion was weakened or deleted. |
+
+## RPP scan — iteration 2
+
+- **Levels scanned:** L1-L4.
+- **Cascade stopped at:** no RPP blocker; the private `shutdown_shared` Arc
+  bridge is a bounded ownership adapter for the existing owner and not a
+  speculative public abstraction.
+- No unrelated cleanup, generalized lifecycle hardening, or architecture
+  expansion was introduced while remediating D1-D7.
+
+## Iteration-2 verdict
+
+All seven iteration-1 blockers are resolved in the original step-02-03
+architecture. The exact public API remains unchanged; the private D11 and D7
+ownership contracts are now executable; production dispatch, action-shim,
+source-local, and native evidence are all present at their required
+boundaries. The remaining Lima limitation does not invalidate the metal or
+source-local evidence and is not an exact Lima-only gate for this step.
+
+# APPROVED
