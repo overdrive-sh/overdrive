@@ -430,3 +430,346 @@ exact, fail-closed, uses the production parser, preserves the real owner path,
 and does not weaken or waive any remaining step-`03-02` schedule.
 
 # APPROVED
+
+# Iteration 3 re-review
+
+- **Iteration:** 3
+- **Review date:** 2026-09-22
+- **Remediation commit:** `2179f03cbc7eaa15e82cf8543a69cccb4eeb6a79`
+- **Remediation parent:** `a028115a13d4b218f8b70ba4bb2b426786cc48f7`
+- **Trigger:** DELIVER review `review-03-02.md` findings D1 and D2
+- **Reviewer:** same isolated `nw-acceptance-designer-reviewer`
+- **Iteration-3 verdict:** **CHANGES_REQUIRED**
+
+This section preserves iterations 1 and 2 verbatim. It reviews the expanded,
+user-authorized S-ND295-28 DISTILL/roadmap remediation, the complete mapped
+eight-body evidence set, and the two DELIVER findings. The roadmap's
+`validation.status = pending` is the correct pre-review state and is not a
+finding.
+
+## Iteration-3 reviewed scope and authority
+
+The remediation commit changes exactly:
+
+- `crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs`;
+- `docs/feature/netns-density-295/deliver/roadmap.json`;
+- `docs/feature/netns-density-295/distill/red-classification.md`; and
+- `docs/feature/netns-density-295/distill/test-scenarios.md`.
+
+The accepted authority remains the EXEC-close linearization,
+`D-295-DELIVER-03-01`, S-ND295-27 as the opaque gate evidence boundary, and
+S-ND295-28 as the production `VmDriver`/writer/action-owner evidence boundary.
+No production Rust or API changed in this remediation.
+
+## DELIVER finding dispositions
+
+| Finding | Iteration-3 disposition | Evidence |
+|---|---|---|
+| D1 — worker-scoped zero-test model selector and ambiguous real-`VmDriver` wording | **CLOSED** | Roadmap description, criterion 1, scenario name, verification, and notes now name the one authoritative overdrive-core model as a prerequisite and the deterministic worker schedules as the real `VmDriver`/`BeaconWriter` evidence. |
+| D2 — action-shim body used the historical host-netns composition and never reached release ownership | **CLOSED** | The body now uses the pre-existing post-#295 test composition with `SimSharedGuestNetworkOwner`; the exact selector reaches the held release, remains pending there, and proves cancellation ownership. |
+
+No production failure is asserted by either disposition. Both were evidence and
+traceability defects.
+
+## D1 re-review — core-model and real-owner split
+
+The corrected roadmap is exact at the D1 boundary:
+
+- `roadmap.json:390` describes the overdrive-core model prerequisite, the three
+  primary real-`VmDriver` schedules, and the existing complements separately.
+- Criterion 1 at `:397` assigns `PROPTEST_CASES=1024` to the authoritative core
+  property and explicitly forbids a worker duplicate, seeded writer, or
+  injected supervisor consequence.
+- The exact core selector at `:415` selects the real
+  `acceptance::netns_density_exec_gate::generated_operation_sequences_match_the_gate_model`
+  body. The stale worker zero-test selector is absent from the roadmap and
+  current DISTILL SSOT.
+- The three primary schedules remain selected by their module selector at
+  `:414`; the writer/stop/cancellation and action-owner complements have their
+  own exact selectors at `:416-417`.
+- `test-scenarios.md:53` and `red-classification.md:41-76` carry the same split
+  and list all eight bodies without presenting the core property as a worker
+  test.
+
+The independent core run selected one test and executed 1,024 proptest cases.
+No worker PBT, seeded writer, test seam, or production change was added.
+
+## D2 re-review — production action owner and cancellation ownership
+
+### Existing sanctioned composition
+
+`dispatch_with_guest_network_provisioner_for_test` is not surface invented by
+commit `2179f03c`. `git log -S` and blame trace its declaration to commit
+`dd1a18fe8ed3ce4275fb52e31cd8a86b8aceb08c` on 2026-09-20, before this
+remediation. It is doc-hidden and integration-feature/test gated.
+
+The helper preserves the production workflow-intent preflight and calls the
+same private `dispatch_with_network_provisioner_and_guest` owner used by
+production. Production passes its boot-composed `SharedGuestNetworkOwner` as
+`Some(shared_guest_network.as_ref())`; the helper passes the injected
+`GuestNetworkProvisioner` at that same parameter. In either case,
+`provision_and_inject_netns` selects the `Some(guest_provisioner)` branch,
+awaits `GuestNetworkProvisioner::provision`, and returns before the historical
+`HostNetworkProvisioner`/slot/netns/veth branch. The nominal host provisioner
+argument in the helper is therefore not executed for this allocation path.
+
+`SimSharedGuestNetworkOwner` implements both the exact
+`GuestNetworkProvisioner` supertrait and `SharedGuestNetworkOwner`; it is the
+existing socket-free adapter for the accepted production port, not an alternate
+domain mechanism. The test also starts and later shuts down the real
+`MtlsInterceptWorker` shared listener owner, so `start_alloc` follows its
+accepted healthy-owner path.
+
+### Reachable owner sequence
+
+The corrected body constructs the existing `AppState`, installs the existing
+`HoldingReleaseDriver` and healthy `MtlsInterceptWorker`, and invokes the
+pre-existing post-#295 helper with `SimSharedGuestNetworkOwner`. The real action
+owner then executes:
+
+1. workflow-intent preflight;
+2. `GuestNetworkProvisioner::provision` through the accepted port;
+3. driver start and Running observation;
+4. real `MtlsInterceptLifecycle::start_alloc` success; and
+5. the production action-shim call to
+   `driver.release_for_exit_emission(handle).await` before
+   `driver.on_alloc_running(&spec)`.
+
+The `HoldingReleaseDriver` is an external Driver-port test double used only to
+make that await/cancellation boundary observable. The independent selector
+proved `release_entered`, proved the dispatch task stayed unfinished inside the
+held release, and observed both `release_completed` and
+`on_alloc_running_called` false. Aborting and joining that same dispatch task
+dropped the same held release future, set `release_cancelled`, and left both
+later facts false. Because the production action owner directly awaits the
+hook, there is no detached release future for the fixture to miss.
+
+This closes criterion 5 without fixture theater and without claiming a
+production defect. The real production reachability is the ordinary
+`dispatch_with_workflow_intent -> dispatch_with_network_owner ->
+dispatch_with_network_provisioner_and_guest -> dispatch_single ->
+release_for_exit_emission` path over the boot-composed owner. The test replaces
+only driven adapters at already-sanctioned ports.
+
+## Complete S-ND295-28 selector matrix
+
+All authoritative test selectors ran independently in writable Lima target
+space and selected a nonzero intended count:
+
+| Evidence group | Exact intended bodies | Independent result |
+|---|---:|---|
+| Authoritative core model prerequisite with `PROPTEST_CASES=1024` | 1 | PASS — run `3fd7a21b-473c-4747-b90b-0d7dca101c23`; 1 passed, 528 skipped. |
+| `netns_density_exec_release` real-`VmDriver` schedules | 3 | PASS — run `f5f2eb99-ecd5-40b6-ad66-b71414f5915e`; 3 passed, 99 skipped. |
+| `vm_driver_stop_totality` writer lifetime, stop deadline, and cancellation schedules | 3 | PASS — run `13a0c7ff-2d06-49f0-8504-509ea45ee0cd`; 3 passed, 99 skipped. |
+| Post-#295 action-owner await/cancellation schedule | 1 | PASS — run `ad45eec2-60ef-420d-b109-efcc69cf3acb`; 1 passed, 208 skipped. |
+
+The complete mapped total is eight distinct bodies. No selector is empty and no
+body is counted through a different crate or surrogate process.
+
+## Identity, Contract Shape, universes, and non-expansion
+
+All eight scenario identities are unchanged. The authoritative core property,
+three primary worker schedules, two focused backpressure/cancellation schedules,
+and action-owner schedule retain explicit
+`/// CONTRACT_SHAPE: bounded-change.` and Outcome anchors. The existing
+writer-decision-table schedule retains the accepted named `S-VLL-08` outcome
+and its exact bounded-change declaration.
+
+The three primary worker bodies are now active with no ignore marker. The
+approved fail-closed typed-frame oracle is byte-for-byte unchanged from its
+approved form; the only post-approval diff in that file is removal of the three
+step-owned ignore attributes. It still requires valid UTF-8 and the production
+`BeaconMessage` parser for every newline-complete frame, accepts only an empty
+slice or one `Exec`, ignores only a final unterminated suffix, joins the
+cancelled release task, and reads through EOF.
+
+The complete observable set remains layered rather than duplicated:
+
+- the core PBT owns public gate returns, transitions, wait/wake/refusal, and
+  recovery projections;
+- the primary real-`VmDriver` bodies own recovery-before-release,
+  claim-before-detection writer transfer/cancellation, FailStop refusal, EOF,
+  and typed frame cardinality;
+- the three `vm_driver_stop_totality` bodies own writer consumption, the
+  existing stop deadline, fail-closed VMM termination, exit-event ordering,
+  supervision state, and socket closure; and
+- the action-owner body owns the action shim's direct await, same-future
+  cancellation, and the false completion/`on_alloc_running` complement.
+
+No private `active_claims` storage, new parser, API, hook, writer seam,
+production owner, persistence mechanism, recovery mechanism, or later-step
+`03-03` behavior was added. The four changed files are the minimum SSOT/test
+scope needed to correct D1 and D2.
+
+## New blocking finding
+
+### I3-D3 — Roadmap criterion 4 describes a state the named body never enters
+
+- **Severity:** Blocker
+- **Dimension:** acceptance traceability / observable-boundary honesty
+- **Location:** `docs/feature/netns-density-295/deliver/roadmap.json:400`
+
+Criterion 4 says
+`cancelling_backpressured_release_cannot_leave_an_exec_sender_running` proves
+cancellation while awaiting `claim_release` in Recovering/BootClosed and proves
+no leaked Notify registration. The named body does neither.
+
+The independently executed real path is concrete:
+
+1. `build_driver` performs `open_after_boot` before constructing the driver
+   (`vm_driver_stop_totality.rs:167-178`).
+2. The body starts the VM, spawns
+   `VmDriver::release_for_exit_emission`, and forces the 16 MiB EXEC write
+   against a 4 KiB receive buffer (`:1328-1373`).
+3. In production, `release_for_exit_emission` therefore obtains its Open claim,
+   takes the pending EXEC, and transfers it to `BeaconWriter::release_exec`.
+4. The body aborts the release only after the writer is genuinely
+   backpressured (`:1373-1375`), then observes fail-closed VMM termination,
+   exit-gate ordering, EOF, and no complete parsed EXEC (`:1377-1432`).
+
+The body has no supervisor capability and never calls `begin_recovery`; it
+cannot enter Recovering or BootClosed. Because the Open claim returns
+immediately, this schedule also creates no parked `Notify` waiter whose
+registration could be observed. The other seven mapped bodies do not turn this
+named test into the criterion claimed: the recovery waiter is completed rather
+than cancelled, and the core PBT aborts residual waiters without asserting a
+Notify-registration complement. Wait registration is private synchronization
+under the accepted Contract Shape in any case.
+
+This is not a production defect. The selector passed and proves the accepted
+post-claim/writer-transfer cancellation behavior. It is a remaining roadmap
+traceability defect and repeats the class D1 was meant to eliminate.
+
+**Required bounded correction:** replace criterion 4 with wording that matches
+the accepted and executable schedule, for example:
+
+> `cancelling_backpressured_release_cannot_leave_an_exec_sender_running`
+> proves that cancelling the structured release future after an Open claim has
+> transferred the command to the production beacon writer synchronously signals
+> writer cancellation, closes the beacon through EOF, completes fail-closed VMM
+> termination before releasing the exit-event gate, and leaves no detached EXEC
+> sender.
+
+Do not add a new test, expose Notify state, inspect private gate storage, or
+change production. `test-scenarios.md` and `red-classification.md` already state
+the accepted cancellation-after-writer-transfer boundary and need no change for
+this finding. Keep roadmap validation pending until this sentence is corrected
+and independently re-reviewed.
+
+## Iteration-3 acceptance dimensions
+
+| Dimension | Score | Re-check |
+|---|---:|---|
+| Happy-path bias | 10/10 | Recovery, fail-stop, backpressure, cancellation, writer error/EOF/absence, and action-owner cancellation remain the majority. |
+| Given-When-Then form | 10/10 | S-ND295-28 retains one Given, one When, and observable outcome/complement clauses. |
+| Business/domain language | 8/10 | The title and outcome remain stable; EXEC/framing terms are the accepted low-level Published Language. |
+| Coverage completeness | 10/10 | All eight mapped bodies execute and the typed frame classes remain closed. |
+| Walking-skeleton user-centricity | 10/10 | Not applicable to this focused scenario. |
+| Priority validation | 10/10 | The remediation addresses only the reproduced D1/D2 evidence failures. |
+| Observable behavior assertions | 10/10 | Public returns, task completion, socket EOF/frames, VMM/exit ordering, supervision, and action-owner flags are asserted at their accepted layers. |
+| Traceability coverage | 6/10 | D1 and D2 are closed, but criterion 4 still assigns Recovering/BootClosed/Notify evidence to an Open/post-transfer cancellation body. |
+| Walking-skeleton boundary proof | 10/10 | Not applicable; production composition is assessed directly. |
+
+The reviewer score gate fails because traceability remains below 7 and I3-D3
+is a blocker.
+
+## Iteration-3 mandate re-check
+
+| Gate | Result | Evidence |
+|---|---|---|
+| CM-A — hexagonal/port boundary | PASS | Core capabilities, `Driver`, `GuestNetworkProvisioner`, production beacon, VMM, and action-owner paths are entered only through their accepted ports. |
+| CM-B — domain-language abstraction | PASS | Scenario vocabulary remains recovery, command release, fail-stop, cancellation, and ownership. |
+| CM-C — complete journey | PASS | The mapped set closes gate, writer, stop, and action-owner journeys at distinct observable boundaries. |
+| CM-D — pure logic/fixture isolation | PASS | No new business logic or fixture-defined outcome; pre-existing sim adapters implement the production ports. |
+| CM-E — bounded-change universe | PASS | Each schedule declares its allowed delta and complement; the typed-frame universe remains fail-closed. |
+| CM-F — layer-dependent PBT mode | PASS | The sole PBT stays at the core model; real-I/O/integration schedules remain finite examples. |
+| CM-G — two-tier rich journey | PASS / N/A | The core model and production-owner examples remain the accepted evidence split without a parallel suite. |
+| CM-H — real-I/O sad paths | PASS | Recovery, cancellation, backpressure, stop, and FailStop remain explicitly named examples. |
+
+All three pillars pass for the executable scenarios. The blocker is roadmap
+traceability, not a mandate or production-composition failure.
+
+## Iteration-3 completeness audit
+
+| Category | Result | Complete S-ND295-28 evidence |
+|---|---|---|
+| C1 — equivalence and boundary | PASS | Empty/one/second complete EXEC and unterminated frame classes remain distinct. |
+| C2 — state and transition | PASS | The core model exercises legal and illegal events across BootClosed/Open/Recovering/FailStop. |
+| C3 — count cardinality | PASS | Zero/one/many claims and zero/one/two complete commands are represented. |
+| C4 — lifecycle and idempotency | PASS | Repeated/late gate operations, claim Drop, release cancellation, writer consumption, stop, and teardown are covered. |
+| C5 — mode/decision table | PASS / N/A | No new mode flag; existing component/cause and writer-outcome tables remain closed. |
+| C6 — negative and robustness | PASS | Invalid UTF-8, malformed/interleaved frames, unexpected kinds, fail-stop causes, writer errors, and cancellation fail closed. |
+| C7 — environment/interruption/concurrency | PASS | Forced socket backpressure, mid-write cancellation, stop races, gate waiters, writer task, and action dispatch are exercised. |
+
+### Iteration-3 mechanical 15-item checklist
+
+| Item | Result | Evidence |
+|---|---|---|
+| C1a | PASS | Zero complete command and minimum operation-sequence cases are accepted. |
+| C1b | PASS | Zero/one pass, second complete EXEC fails; partial final frame is separate. |
+| C2a | PASS | `ModelState` documents all four gate states. |
+| C2b | PASS | Illegal-event coverage exists for every gate state. |
+| C3 | PASS | PBT and deterministic schedules cover zero/one/many claims and command cardinality. |
+| C4a | PASS | Repeat/late transitions and writer lifecycle outcomes are exercised. |
+| C4b | PASS / N/A | Opaque RAII claim Drop without acquisition is unrepresentable. |
+| C5a | PASS / N/A | No mode flag is introduced. |
+| C5b | PASS / N/A | No flag-orthogonality contract exists. |
+| C6a | PASS | Malformed/invalid/interleaved complete frames fail closed. |
+| C6b | PASS | Every declared recovery/fail-stop/writer/cancellation failure class has a named schedule. |
+| C6c | PASS | Parser/kind/cardinality results are closed; no other complete frame escapes. |
+| C7a | PASS | The 4 KiB receive buffer against 16 MiB EXEC forces degraded backpressure. |
+| C7b | PASS | Stop and cancellation interrupt an in-flight backpressured write. |
+| C7c | PASS | Gate, release, writer, stop, and dispatch actors execute concurrently. |
+
+**Mechanical result: 15/15 — COMPLETE.** Completeness does not override the
+roadmap traceability blocker.
+
+The test budget remains five observable behavior groups, permitting ten bodies.
+Eight bodies are mapped and executed; no extra body or duplicate PBT was added.
+
+## Iteration-3 verification
+
+| Check | Result |
+|---|---|
+| All four corrected test selectors | PASS with intended nonzero counts — 1 + 3 + 3 + 1 = 8 bodies. |
+| Workspace `cargo check --all-targets --features integration-tests` in writable Lima target | PASS. |
+| Workspace clippy roadmap command | NON-BLOCKING BASELINE FAILURE — unchanged `overdrive-netlink/src/nft.rs:5121` `clippy::print_stderr`; no remediation file is implicated. |
+| Focused control-plane integration clippy retry | ENVIRONMENT-LIMITED — the Lima `/tmp` target exhausted space after the full workspace run; executable selector and workspace check had already passed. |
+| `cargo fmt --all -- --check` | PASS. |
+| `git diff --check a028115a..2179f03c` | PASS. |
+| Roadmap JSON parse | PASS. |
+| `des-verify-integrity --roadmap-only` | PASS — format OK; pending validation is intentionally preserved. |
+| Remediation commit scope | PASS — one existing acceptance body plus roadmap and two DISTILL SSOT documents; no production file. |
+| Remediation commit attribution | PASS — Marcus remains author; exactly one Codex co-author trailer and no prohibited attribution. |
+| Mutation testing | NOT RUN — correctly reserved for the final DELIVER gate. |
+
+The current Lima guest's default cargo target was read-only, so authoritative
+test and check executions used the isolated writable target
+`/tmp/codex-netns-density-target`. This changes only build-cache location, not
+the selected binaries or test filters.
+
+## Roadmap validation disposition
+
+No approval-field update is recommended in iteration 3. Leave:
+
+- `validation.status = pending`;
+- the reviewer field as a pending-review marker; and
+- `approved_at = null`.
+
+After the one criterion-4 sentence is aligned and independently approved, the
+original acceptance designer may apply the final reviewer text and timestamp
+mechanically. No production, test, DISTILL, feature-delta, design, or execution
+log change is required for I3-D3.
+
+## Iteration-3 remediation dispositions
+
+| Item | Disposition |
+|---|---|
+| D1 | **CLOSED.** Correct core selector, wording, and evidence split; stale worker zero-test command removed. |
+| D2 | **CLOSED.** Existing sanctioned post-#295 composition reaches and owns release cancellation. |
+| Approved typed-frame oracle | **PRESERVED.** No assertion or parser change after iteration 2. |
+| I3-D3 | **OPEN blocker.** Roadmap criterion 4 must describe the actual Open-claim/post-transfer cancellation evidence. |
+| API/architecture/production | **PASS.** No new surface or behavior. |
+| Mutation testing | **NOT RUN.** Deferred to the final DELIVER gate. |
+
+# CHANGES_REQUIRED
