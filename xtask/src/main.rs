@@ -674,6 +674,10 @@ fn lima(action: LimaAction) -> Result<()> {
 
 /// Process-env / `.env` key naming the bare-metal test host (`user@host`).
 const METAL_TARGET_ENV: &str = "OVERDRIVE_METAL_TARGET";
+/// Process-env / `.env` key naming the guest kernel on the remote metal host.
+const METAL_KERNEL_ENV: &str = "OVERDRIVE_METAL_KERNEL";
+/// Process-env / `.env` key naming the guest rootfs on the remote metal host.
+const METAL_ROOTFS_ENV: &str = "OVERDRIVE_METAL_ROOTFS";
 /// The one rsync definition — reused so metal `sync` and the `lima` VM
 /// path never diverge on excludes.
 const METAL_BOOTSTRAP: &str = "infra/metal/bootstrap.sh";
@@ -692,6 +696,28 @@ fn metal_target() -> Result<String> {
          or add it to `.env` (see .env.example). It is the x86_64 KVM box the \
          Cloud-Hypervisor `kvm-tests` run on — native nonvirtualized x86_64 hardware with KVM.",
     )
+}
+
+/// Resolve the selected guest artifacts from the process environment, falling
+/// back to `.env`, and return the remote paths that `bootstrap.sh` must inject
+/// into native preflight and the test command. The paths are intentionally not
+/// checked on the local machine: they name files on the metal host.
+fn metal_guest_artifacts() -> Result<(String, String)> {
+    let workspace_root = std::env::current_dir()?;
+    let env_file = load_env_file(&workspace_root.join(".env"))?;
+    let kernel = lookup_required(
+        &env_file,
+        &[METAL_KERNEL_ENV],
+        "set the readable guest-kernel path on the remote metal host, e.g. \
+         `OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel`",
+    )?;
+    let rootfs = lookup_required(
+        &env_file,
+        &[METAL_ROOTFS_ENV],
+        "set the readable guest-rootfs path on the remote metal host, e.g. \
+         `OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4`",
+    )?;
+    Ok((kernel, rootfs))
 }
 
 /// rsync the working tree to the metal box via the existing bootstrap
@@ -728,8 +754,10 @@ fn metal(action: MetalAction) -> Result<()> {
                      -p overdrive-cli --features integration-tests,kvm-tests`"
                 );
             }
+            let (kernel, rootfs) = metal_guest_artifacts()?;
             let mut command = Command::new("bash");
             command.args([METAL_BOOTSTRAP, &target, "--run"]);
+            command.env(METAL_KERNEL_ENV, kernel).env(METAL_ROOTFS_ENV, rootfs);
             if no_sync {
                 command.arg("--no-sync");
             }
