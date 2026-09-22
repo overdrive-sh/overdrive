@@ -400,6 +400,27 @@
       "s": "EXECUTED",
       "d": "PASS with DESIGN blocker preserved: scoped remediation commit records D1/D3/D4 changes plus private pool evidence and GREEN event; original Git author retained, exactly one Codex trailer, unrelated AGENTS.md/.serena/project.yml excluded. D2 was not invented past the sanctioned architecture and remains explicitly blocked on a DESIGN/testability decision.",
       "t": "2026-09-22T14:48:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: writable Lima target reproduced the authored semantic failure in claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer: observed one complete EXEC after cancellation (left 1, expected 0); two other netns_density_exec_release bodies passed",
+      "t": "2026-09-22T16:06:33Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "SUPERSEDES prior RED wording that called this a complete EXEC: writable-Lima rerun reproduced the authored assertion failure with one literal EXEC-prefix match only (left 1, expected 0). strace captured READY sendto 22 bytes, then BeaconWriter sendto of 16,777,238 bytes returning 219,264 bytes beginning EXEC [\"/bin/true\",\"xxxxx...; shutdown/EOF followed cancellation. No newline or complete JSON EXEC line was observed; the test counts observed.windows(5)==b\"EXEC \", not parsed complete messages. This is an acceptance/DISTILL oracle contradiction with the accepted pre-detection claim / already-written-command contract, not a production defect.",
+      "t": "2026-09-22T16:20:49Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: accepted behavior already present; activated all 3 reasoned-pending netns_density_exec_release bodies with exact Contract Shape and Outcome anchor, and writable-Lima worker selector passed 3/3 (99 skipped). Corrected fail-closed typed-frame oracle permits only zero or one newline-complete BeaconMessage::Exec, rejects malformed/invalid-UTF8/unexpected/second frames, and passed under current production with no production change. Core generated_operation_sequences_match_the_gate_model passed PROPTEST_CASES=1024 (1/528); existing writer/stop/cancellation schedules passed 3/99. Workspace cargo check --workspace --all-targets --features integration-tests passed. Literal roadmap generated selector under overdrive-worker has no such test (0 tests, nextest exit 4); authoritative body is overdrive-core and its exact selector passed. Workspace clippy remains blocked by pre-existing out-of-scope clippy findings in overdrive-netlink/src/nft.rs and overdrive-control-plane shared guest-network/reconciler code; focused overdrive-worker acceptance clippy passed. Existing action-shim selector reached the legacy HostNetworkProvisioner path but timed out before release_entered because the injected worker shared owner is not started; no step-owned production change is authorized.",
+      "t": "2026-09-22T17:51:23Z"
     }
   ]
 }

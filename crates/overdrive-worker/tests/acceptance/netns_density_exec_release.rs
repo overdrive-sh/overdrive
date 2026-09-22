@@ -155,7 +155,6 @@ async fn assert_no_line(guest: &mut BufReader<UnixStream>) {
 /// CONTRACT_SHAPE: bounded-change.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 VmDriver recovery-before-release gate"]
 async fn recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_precedes_ack() {
     let tmp = TempDir::new().expect("tempdir");
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
@@ -197,7 +196,6 @@ async fn recovering_waiter_keeps_pending_exec_untaken_until_recovered_event_prec
 /// CONTRACT_SHAPE: bounded-change.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 claim-before-detection/cancellation schedules"]
 async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer() {
     let tmp = TempDir::new().expect("tempdir");
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
@@ -274,7 +272,6 @@ async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_se
 /// CONTRACT_SHAPE: bounded-change.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER step for GH #295 FailStop refusal before pending EXEC take"]
 async fn fail_stop_wakes_the_real_vm_driver_waiter_without_writing_exec() {
     let tmp = TempDir::new().expect("tempdir");
     let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
