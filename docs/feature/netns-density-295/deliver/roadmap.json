@@ -662,8 +662,8 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "TODO — second bounded DISTILL/roadmap remediation for step 03-02 awaits independent review",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "S-ND295-28 step 03-02 DISTILL/roadmap remediation approved by independent acceptance-design review iteration 4; D1, D2, and I3-D3 closed, eight-body selector matrix and fail-closed typed-frame oracle verified.",
+    "approved_at": "2026-09-22T19:07:01Z"
   }
 }
