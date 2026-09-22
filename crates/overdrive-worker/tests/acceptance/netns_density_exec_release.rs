@@ -248,17 +248,26 @@ async fn claim_before_detection_backpressure_and_cancellation_do_not_create_a_se
     let complete_messages: Vec<BeaconMessage> = observed
         .split_inclusive(|byte| *byte == b'\n')
         .filter(|frame| frame.ends_with(b"\n"))
-        .filter_map(|frame| std::str::from_utf8(frame).ok())
-        .filter_map(|line| line.parse::<BeaconMessage>().ok())
+        .map(|frame| {
+            let line = std::str::from_utf8(frame).unwrap_or_else(|error| {
+                panic!(
+                    "every newline-complete beacon frame must be valid UTF-8: {error}; \
+                     frame={frame:?}"
+                )
+            });
+            line.parse::<BeaconMessage>().unwrap_or_else(|error| {
+                panic!(
+                    "every newline-complete beacon frame must parse through the Published \
+                     Language: {error}; frame={line:?}"
+                )
+            })
+        })
         .collect();
     assert!(
-        complete_messages
-            .iter()
-            .filter(|message| matches!(message, BeaconMessage::Exec { .. }))
-            .count()
-            <= 1,
-        "cancellation cannot leave a detached writer that emits a second complete EXEC command; \
-         parsed complete frames: {complete_messages:?}"
+        matches!(complete_messages.as_slice(), [] | [BeaconMessage::Exec { .. }]),
+        "cancellation stream must contain zero or one newline-complete typed EXEC and no other \
+         complete frame; observed {} complete frame(s)",
+        complete_messages.len()
     );
 }
 

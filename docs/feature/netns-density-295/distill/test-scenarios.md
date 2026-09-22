@@ -754,7 +754,8 @@ GIVEN a guest command is waiting for release while the node may lose shared-netw
 WHEN recovery, writer acknowledgement, cancellation, and command ownership occur in any accepted order
 THEN a command claimed before detection may finish and a later command remains paused until recovery completes
 AND a fail-stop neither writes nor discards the guest's pending command
-AND cancellation leaves no detached writer, retained sender or claim ownership, or second newline-framed parser-accepted EXEC command
+AND cancellation leaves no detached writer, retained sender or claim ownership, or second complete EXEC command
+AND every newline-complete frame is exactly the one permitted EXEC command or the schedule fails closed
 ```
 
 Technical mapping: the generated core operation-sequence property owns every
@@ -770,11 +771,14 @@ writer seam and never feeds a supervisor transition back as a cause.
 For the claim-before-detection cancellation schedule, progress already accepted
 by the socket before detection is explicitly allowed. EOF still proves the
 production writer closed instead of detaching, the cancelled release task ends
-its task-owned opaque claim lifetime, and only newline-terminated frames that
-the existing `BeaconMessage` parser accepts as `Exec` count as complete EXEC
-commands. A raw `EXEC ` prefix is neither a framed command nor duplicate-writer
-evidence; the accepted oracle forbids a second complete EXEC command rather
-than forbidding pre-detection bytes.
+its task-owned opaque claim lifetime, and every newline-terminated frame is
+decoded and passed through the existing `BeaconMessage` parser. Parser/UTF-8
+rejection, an unexpected typed message kind, or more than one parsed `Exec`
+fails the body; zero or one parsed `Exec` is permitted. Only the final
+unterminated suffix is ignored as allowed pre-detection partial progress. A raw
+`EXEC ` prefix is neither a framed command nor duplicate-writer evidence; the
+accepted oracle forbids a second complete EXEC command without hiding malformed
+or interleaved complete frames.
 
 Bounded S-ND295-28 self-audit after the oracle correction:
 
@@ -788,17 +792,18 @@ Bounded S-ND295-28 self-audit after the oracle correction:
   action-shim complement drives the existing production dispatch owner. No
   private state or `active_claims` storage is inspected.
 - **Observable universe and complement:** cancellation-task completion, socket
-  EOF, and typed newline-framed beacon messages are observed. The preserved
-  complement is no detached writer, no retained sender/claim ownership, and no
-  second complete EXEC; a permitted first command or prefix is not relabelled
-  as a defect.
+  EOF, and the UTF-8/typed result of every newline-complete beacon frame are
+  observed fail-closed. The preserved complement is no malformed/interleaved or
+  unexpected complete frame, no detached writer, no retained sender/claim
+  ownership, and no second complete EXEC; only a final unterminated prefix is
+  excluded as permitted partial progress.
 - **Test budget:** the existing operation-sequence PBT plus the finite real-
   owner schedules remain one set. No parallel suite, generated real-I/O loop,
   additional assertion surface, or duplicate protocol parser was added.
 - **No weakening outside the contradiction:** backpressure, recovery start,
   cancellation join, and EOF assertions are unchanged. Only the zero-raw-
-  prefix predicate was replaced by the accepted at-most-one complete typed
-  command predicate.
+  prefix predicate was replaced by the accepted fail-closed zero-or-one
+  complete typed-command predicate.
 
 ### S-ND295-29 — Every shared owner follows the same bounded recovery contract
 

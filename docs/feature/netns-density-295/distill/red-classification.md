@@ -20,16 +20,23 @@ newline is not a complete command.
 The corrected body preserves the same scenario, production `VmDriver`, real
 beacon socket, forced backpressure, Open-to-Recovering transition, release-task
 cancellation, and EOF ownership evidence. It changes only the command oracle:
-complete commands are newline-terminated frames accepted by the existing
-`BeaconMessage` parser, and cancellation forbids a second parsed `Exec` rather
-than forbidding pre-detection bytes. The cancelled release-task join proves the
-task-owned opaque claim lifetime ended; EOF proves the transferred production
-writer closed instead of detaching. No private `active_claims` inspection or
-new hook is used.
+every newline-terminated frame must be valid UTF-8, parse through the existing
+`BeaconMessage` parser, and be the sole permitted `Exec`. Parser rejection,
+unexpected typed message kinds, and a genuine second `Exec` fail the body;
+zero or one complete `Exec` is accepted. Only the final unterminated suffix is
+ignored as allowed pre-detection partial progress. The cancelled release-task
+join proves the task-owned opaque claim lifetime ended; EOF proves the
+transferred production writer closed instead of detaching. No private
+`active_claims` inspection or new hook is used.
+
+Iteration-1's interleaving falsifier was reproduced before remediation through
+the production parser: the byte stream contained two newline-complete frames,
+while the old fallible `filter_map` chain retained zero. This was an oracle
+weakness only; it did not reproduce a production second writer.
 
 | Scenario / exact body | Exact command | Observed result | Classification |
 |---|---|---|---|
-| S-ND295-28 `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR=/tmp/codex-netns-density-target TMPDIR=/tmp cargo nextest run -p overdrive-worker --test acceptance -E "test(=acceptance::netns_density_exec_release::claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer)" --run-ignored ignored-only --no-fail-fast'` | Writable Lima run `639e3523-d97b-456b-bd88-01c87b074aa8`: **1 passed**, 101 skipped, 0 failed. The release task was cancelled and joined, the production beacon reached EOF, and the typed newline-framed oracle found no second complete EXEC command. | **GREEN — ACCEPTED BEHAVIOR ALREADY PRESENT AFTER ORACLE CORRECTION.** This body is not a missing-functionality RED and authorizes no production change. The resumed step-`03-02` crafter must activate it without re-authoring; if it remains green, that is valid already-implemented acceptance evidence while the other S-ND295-28 schedules retain their independent gates. |
+| S-ND295-28 `claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer` | `cargo xtask lima run -- sh -c 'CARGO_TARGET_DIR=/tmp/codex-netns-density-target TMPDIR=/tmp cargo nextest run -p overdrive-worker --test acceptance -E "test(=acceptance::netns_density_exec_release::claim_before_detection_backpressure_and_cancellation_do_not_create_a_second_writer)" --run-ignored ignored-only --no-fail-fast'` | Writable Lima run `e9bbaf27-f380-4442-81b7-7ecc3ba3f7a9`: **1 passed**, 101 skipped, 0 failed. The release task was cancelled and joined, the production beacon reached EOF, every complete frame parsed as the sole permitted typed EXEC, and no second complete EXEC appeared. Focused production-parser run `1a01cd05-6939-4e4b-9810-ef9d7d323a95` independently passed malformed-EXEC rejection: 1 passed, 528 skipped. | **GREEN — ACCEPTED BEHAVIOR ALREADY PRESENT AFTER FAIL-CLOSED ORACLE CORRECTION.** This body is not a missing-functionality RED and authorizes no production change. The resumed step-`03-02` crafter must activate it without re-authoring; if it remains green, that is valid already-implemented acceptance evidence while the other S-ND295-28 schedules retain their independent gates. |
 
 ## Phase-02 non-waived remediation bodies
 
