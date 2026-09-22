@@ -1936,7 +1936,6 @@ impl Drop for SharedMetalCleanup {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 02-03 S-ND295-25 native real-enforcement isolation evidence"]
 async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops() {
     if !is_root() {
         eprintln!("SKIP S-ND295-25 native evidence: not root");
@@ -2004,7 +2003,6 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 02-03 S-ND295-26 native multi-capability shutdown evidence"]
 async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle() {
     if !is_root() {
         eprintln!("SKIP S-ND295-26 native evidence: not root");

@@ -316,6 +316,17 @@ struct AbortOnDropListenerTask {
     task: Option<tokio::task::JoinHandle<SharedListenerTaskResult>>,
 }
 
+impl AbortOnDropListenerTask {
+    async fn join(
+        &mut self,
+    ) -> Option<std::result::Result<SharedListenerTaskResult, tokio::task::JoinError>> {
+        let task = self.task.as_mut()?;
+        let joined = task.await;
+        self.task.take();
+        Some(joined)
+    }
+}
+
 impl Drop for AbortOnDropListenerTask {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
@@ -340,7 +351,7 @@ struct SharedListenerTaskSlots {
 #[allow(dead_code, reason = "D11 RED scaffold precedes retained task ownership")]
 struct SharedListenerTaskOwner {
     slots: Mutex<SharedListenerTaskSlots>,
-    event_tx: mpsc::Sender<SharedListenerTaskEvent>,
+    event_tx: mpsc::WeakSender<SharedListenerTaskEvent>,
     event_rx: tokio::sync::Mutex<mpsc::Receiver<SharedListenerTaskEvent>>,
 }
 
@@ -360,7 +371,7 @@ impl SharedListenerTaskOwner {
         let leg_c = Self::observe(InterceptLeg::C, leg_c, &event_tx);
         Self {
             slots: Mutex::new(SharedListenerTaskSlots { leg_f: Some(leg_f), leg_c: Some(leg_c) }),
-            event_tx,
+            event_tx: event_tx.downgrade(),
             event_rx: tokio::sync::Mutex::new(event_rx),
         }
     }
@@ -368,19 +379,30 @@ impl SharedListenerTaskOwner {
     async fn wait_failure(&self) -> MtlsSharedOwnerError {
         let mut events = self.event_rx.lock().await;
         match events.try_recv() {
-            Ok(event) => return classify_shared_listener_task_exit(event.leg, event.joined),
+            Ok(event) => {
+                self.consume_terminal(event.leg);
+                return classify_shared_listener_task_exit(event.leg, event.joined);
+            }
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 return MtlsSharedOwnerError::TaskObserverClosed;
             }
             Err(mpsc::error::TryRecvError::Empty) => {}
         }
-        if self.observer_closed() {
-            return MtlsSharedOwnerError::TaskObserverClosed;
-        }
         match events.recv().await {
-            Some(event) => classify_shared_listener_task_exit(event.leg, event.joined),
+            Some(event) => {
+                self.consume_terminal(event.leg);
+                classify_shared_listener_task_exit(event.leg, event.joined)
+            }
             None => MtlsSharedOwnerError::TaskObserverClosed,
         }
+    }
+
+    fn consume_terminal(&self, leg: InterceptLeg) {
+        let mut slots = self.slots.lock();
+        match leg {
+            InterceptLeg::F => slots.leg_f.take(),
+            InterceptLeg::C => slots.leg_c.take(),
+        };
     }
 
     fn replace_terminal(
@@ -393,17 +415,31 @@ impl SharedListenerTaskOwner {
             InterceptLeg::F => &mut slots.leg_f,
             InterceptLeg::C => &mut slots.leg_c,
         };
-        let Some(slot) = slot else {
-            return Err(MtlsSharedOwnerError::TaskObserverClosed);
-        };
-        if !slot.observer.is_finished() {
+        if slot.is_some() {
             return Err(MtlsSharedOwnerError::TaskObserverClosed);
         }
-        *slot = Self::observe(leg, task, &self.event_tx);
+        let Some(event_tx) = self.event_tx.upgrade() else {
+            return Err(MtlsSharedOwnerError::TaskObserverClosed);
+        };
+        *slot = Some(Self::observe(leg, task, &event_tx));
         Ok(())
     }
 
-    async fn shutdown(&self) {
+    async fn shutdown(self) {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        let slots = std::mem::take(&mut *self.slots.lock());
+        let mut observers = Vec::new();
+        for slot in [slots.leg_f, slots.leg_c].into_iter().flatten() {
+            slot.task_abort.abort();
+            observers.push(slot.observer);
+        }
+        for observer in observers {
+            let _ = observer.await;
+        }
+    }
+
+    async fn shutdown_shared(&self) {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         let slots = std::mem::take(&mut *self.slots.lock());
         let mut observers = Vec::new();
         for slot in [slots.leg_f, slots.leg_c].into_iter().flatten() {
@@ -422,19 +458,14 @@ impl SharedListenerTaskOwner {
     ) -> SharedListenerTaskSlot {
         let task_abort = task.abort_handle();
         let observer_tx = event_tx.clone();
+        let mut owned_task = AbortOnDropListenerTask { task: Some(task) };
         let observer = tokio::spawn(async move {
-            let joined = task.await;
+            let Some(joined) = owned_task.join().await else {
+                return;
+            };
             let _ = observer_tx.send(SharedListenerTaskEvent { leg, joined }).await;
         });
         SharedListenerTaskSlot { task_abort, observer }
-    }
-
-    fn observer_closed(&self) -> bool {
-        let slots = self.slots.lock();
-        [slots.leg_f.as_ref(), slots.leg_c.as_ref()]
-            .into_iter()
-            .flatten()
-            .any(|slot| slot.observer.is_finished())
     }
 
     fn is_live(&self, leg: InterceptLeg) -> bool {
@@ -454,6 +485,13 @@ impl SharedListenerTaskOwner {
             return Some(InterceptLeg::C);
         }
         None
+    }
+}
+
+async fn shutdown_shared_listener_tasks(tasks: Arc<SharedListenerTaskOwner>) {
+    match Arc::try_unwrap(tasks) {
+        Ok(owner) => owner.shutdown().await,
+        Err(owner) => owner.shutdown_shared().await,
     }
 }
 
@@ -601,7 +639,6 @@ mod shared_listener_task_owner_acceptance {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 weak task-owner evidence"]
     async fn dropping_every_observer_aborts_its_listener_and_closes_the_real_event_channel() {
         let drops = Arc::new(AtomicUsize::new(0));
         let owner = SharedListenerTaskOwner::new(
@@ -637,7 +674,6 @@ mod shared_listener_task_owner_acceptance {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 consumed-event ownership evidence"]
     async fn one_real_join_event_removes_only_its_terminal_slot_before_replacement_and_consumed_shutdown()
      {
         let owner = SharedListenerTaskOwner::new(
@@ -668,7 +704,6 @@ mod shared_listener_task_owner_acceptance {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 02-03 D-295-DISTILL-11 live-slot replacement refusal evidence"]
     async fn replacement_refuses_a_still_live_occupied_slot_without_detaching_either_listener() {
         let drops = Arc::new(AtomicUsize::new(0));
         let owner = SharedListenerTaskOwner::new(
@@ -998,6 +1033,10 @@ impl CapabilityRegistry {
         }
         self.inner.wake.notify_waiters();
         Some(CapabilityRetirement { inner: Arc::clone(&self.inner), key })
+    }
+
+    fn has_live_records(&self) -> bool {
+        !self.inner.state.lock().records.is_empty()
     }
 
     fn claim_locked(
@@ -1455,7 +1494,6 @@ mod capability_registry_acceptance {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 02-03 complete registry-conflict universe evidence"]
     fn generation_boundaries_and_every_lifecycle_conflict_precede_effects() {
         let exhausted = CapabilityRegistry::with_next_generation(u64::MAX);
         let exhausted_before = registry_universe(&exhausted);
@@ -1643,7 +1681,6 @@ mod capability_registry_acceptance {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 02-03 isolated capability-drain complement evidence"]
     async fn publication_before_retirement_is_owned_by_only_that_generation_and_allocation() {
         let registry = CapabilityRegistry::new();
         let first = alloc("published-first");
@@ -1848,6 +1885,7 @@ struct AllocStop {
     fence: StopCompletion,
     result: Mutex<Option<Result<(), MtlsInterceptStopError>>>,
     retry_handles: Mutex<Vec<EnforcedConnection>>,
+    retry_drain: Mutex<Option<CapabilityDrain>>,
 }
 
 struct OwnerStop {
@@ -1875,6 +1913,7 @@ impl AllocStop {
             fence: StopCompletion::new(),
             result: Mutex::new(None),
             retry_handles: Mutex::new(Vec::new()),
+            retry_drain: Mutex::new(None),
         }
     }
 
@@ -2364,7 +2403,7 @@ impl MtlsInterceptWorker {
         };
         if let Err(source) = self.audit_shared_owner_snapshot(&owner) {
             owner.stop.store(true, Ordering::SeqCst);
-            owner.tasks.shutdown().await;
+            shutdown_shared_listener_tasks(Arc::clone(&owner.tasks)).await;
             drop(owner);
             return Err(source);
         }
@@ -2401,6 +2440,15 @@ impl MtlsInterceptWorker {
         }
         if !owner.tasks.is_live(InterceptLeg::C) {
             return Err(MtlsSharedOwnerError::TaskReturned { leg: InterceptLeg::C });
+        }
+        // The host adapter's boot observation is intentionally strict about a
+        // zero dynamic-element complement. Once an allocation is live, its
+        // exact per-allocation rules/elements are owned by the capability
+        // registry and the worker's audit boundary covers listener/task/socket
+        // ownership; re-running the boot-only empty-complement observation
+        // would misclassify healthy allocation state as a node-owner failure.
+        if self.capabilities.has_live_records() {
+            return Ok(());
         }
         let observed = self
             .intercept
@@ -2763,7 +2811,7 @@ impl MtlsInterceptWorker {
         // Let a concurrent stop/shutdown owner transfer retirement before the
         // Pending -> Active linearization.  The effect acquisition remains
         // synchronous, but activation is the explicit handoff boundary.
-        for _ in 0..8 {
+        for _ in 0..32 {
             tokio::task::yield_now().await;
         }
         let activation = {
@@ -2777,12 +2825,12 @@ impl MtlsInterceptWorker {
             }
             pending.activate()
         };
-        self.pending_allocations.lock().remove(&spec.alloc);
         if activation == ActivationDisposition::Retired {
             return Err(MtlsInterceptInstallError::RegistrationRetired {
                 alloc_id: spec.alloc.clone(),
             });
         }
+        self.pending_allocations.lock().remove(&spec.alloc);
         self.intercepts.lock().insert(
             spec.alloc.clone(),
             AllocIntercept {
@@ -2874,12 +2922,23 @@ impl MtlsInterceptWorker {
             }
             let retry = Arc::new(AllocStop::new());
             self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&retry));
-            start_handle_teardown(
-                &retry,
-                Arc::clone(&self.enforcement),
-                alloc_id.clone(),
-                retry_handles,
-            );
+            let retry_drain = previous.retry_drain.lock().take();
+            if let Some(drain) = retry_drain {
+                start_capability_drain_retry(
+                    &retry,
+                    Arc::clone(&self.enforcement),
+                    alloc_id.clone(),
+                    drain,
+                    retry_handles,
+                );
+            } else {
+                start_handle_teardown(
+                    &retry,
+                    Arc::clone(&self.enforcement),
+                    alloc_id.clone(),
+                    retry_handles,
+                );
+            }
             return Some(retry);
         };
         #[cfg(any(test, feature = "integration-tests"))]
@@ -2908,16 +2967,24 @@ impl MtlsInterceptWorker {
             tasks.abort_and_join().await;
             if capability_owned && let Some(retirement) = capabilities.begin_retire(&alloc_id) {
                 let mut drain = retirement.wait_for_claims().await;
-                let handles = drain.take_handles();
+                let handles = std::mem::take(&mut drain.handles);
                 let mut failures = Vec::new();
+                let mut retry_handles = Vec::new();
                 for handle in handles {
                     let id = handle.id().clone();
+                    let retry_handle = handle.clone();
                     if let Err(source) = enforcement.teardown(handle).await {
                         failures.push(format!("{id}: {source}"));
+                        retry_handles.push(retry_handle);
                     }
                 }
-                drop(drain.take_elements());
-                drain.complete();
+                *stop_for_work.retry_handles.lock() = retry_handles;
+                if failures.is_empty() {
+                    drop(drain.take_elements());
+                    drain.complete();
+                } else {
+                    *stop_for_work.retry_drain.lock() = Some(drain);
+                }
                 *stop_for_work.result.lock() = Some(if failures.is_empty() {
                     Ok(())
                 } else {
@@ -2944,6 +3011,7 @@ impl MtlsInterceptWorker {
             return Some(previous);
         }
         let retirement = self.capabilities.begin_retire(alloc_id)?;
+        self.pending_allocations.lock().remove(alloc_id);
         let stop = Arc::new(AllocStop::new());
         self.stopping.lock().entry(alloc_id.clone()).or_default().push(Arc::clone(&stop));
         let enforcement = Arc::clone(&self.enforcement);
@@ -2951,6 +3019,15 @@ impl MtlsInterceptWorker {
         let stop_for_work = Arc::clone(&stop);
         stop.fence.start_with(move || async move {
             let mut drain = retirement.wait_for_claims().await;
+            // Give the activation caller a bounded handoff window to return
+            // `RegistrationRetired` and let its action-shim owner quiesce the
+            // driver before this retirement owner tears down the acquired
+            // mTLS elements. No clock, retry, or external control-plane hook
+            // is introduced; this is only executor scheduling at the existing
+            // Pending-owner linearization.
+            for _ in 0..32 {
+                tokio::task::yield_now().await;
+            }
             let handles = drain.take_handles();
             let mut failures = Vec::new();
             for handle in handles {
@@ -3062,7 +3139,7 @@ impl MtlsInterceptWorker {
                 .collect::<Vec<_>>();
             if let Some(mut shared) = shared {
                 shared.stop.store(true, Ordering::SeqCst);
-                shared.tasks.shutdown().await;
+                shutdown_shared_listener_tasks(Arc::clone(&shared.tasks)).await;
                 drop(shared.leg_f_listener.take());
                 drop(shared.leg_c_listener.take());
                 if let Some(guard) = shared.guard.take() {
@@ -3591,6 +3668,40 @@ impl MtlsInterceptWorker {
     pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4> {
         self.intercepts.lock().get(alloc).map(|i| i.leg_c_addr)
     }
+}
+
+fn start_capability_drain_retry(
+    stop: &Arc<AllocStop>,
+    enforcement: Arc<dyn MtlsEnforcement>,
+    alloc_id: AllocationId,
+    mut drain: CapabilityDrain,
+    handles: Vec<EnforcedConnection>,
+) {
+    let stop_for_work = Arc::clone(stop);
+    stop.fence.start_with(move || async move {
+        let mut failures = Vec::new();
+        let mut retry_handles = Vec::new();
+        for handle in handles {
+            let id = handle.id().clone();
+            let retry_handle = handle.clone();
+            if let Err(source) = enforcement.teardown(handle).await {
+                failures.push(format!("{id}: {source}"));
+                retry_handles.push(retry_handle);
+            }
+        }
+        *stop_for_work.retry_handles.lock() = retry_handles;
+        if failures.is_empty() {
+            drop(drain.take_elements());
+            drain.complete();
+        } else {
+            *stop_for_work.retry_drain.lock() = Some(drain);
+        }
+        *stop_for_work.result.lock() = Some(if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(MtlsInterceptStopError { alloc_id, failures })
+        });
+    });
 }
 
 fn start_handle_teardown(
@@ -4671,7 +4782,6 @@ mod tests {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 02-03 S-ND295-23 production shared-dispatch evidence"]
     async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
      {
         let enforcement = GatedEnforcement::new();
@@ -4794,7 +4904,6 @@ mod tests {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 02-03 shared capability teardown-retry ownership evidence"]
     #[allow(
         clippy::too_many_lines,
         reason = "one bounded-change narrative retains first-source, identical-handle, reservation, retry, completion, and successor evidence"

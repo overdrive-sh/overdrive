@@ -1886,7 +1886,6 @@ async fn drive_registration_retired_through_action_shim(
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 02-03 RegistrationRetired action-shim cleanup evidence"]
 async fn registration_retired_from_real_start_alloc_keeps_exec_closed_and_releases_the_address_last()
  {
     for fail_teardown in [false, true] {

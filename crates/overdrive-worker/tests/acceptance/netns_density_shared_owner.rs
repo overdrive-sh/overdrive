@@ -55,7 +55,6 @@ fn worker_with_enforcement(
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 02-03 S-ND295-20 exact shared-owner publication evidence"]
 async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let worker = worker(intercept.clone());
@@ -107,7 +106,6 @@ async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 02-03 shared-owner leg-F refusal complement evidence"]
 async fn initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication() {
     for errno in [libc::EADDRINUSE, libc::EPERM, libc::EMFILE] {
         let intercept = Arc::new(RecordingSharedIntercept::failing_bind_with_errno(1, errno));
@@ -351,7 +349,6 @@ impl MtlsIntercept for RecordingSharedIntercept {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 02-03 shared-owner leg-C refusal complement evidence"]
 async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_bind(2));
     let worker = worker(intercept.clone());
@@ -374,7 +371,6 @@ async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owne
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 02-03 shared-program refusal complement evidence"]
 async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_converge());
     let worker = worker(intercept.clone());
@@ -710,7 +706,6 @@ fn allocation_spec(name: &str) -> AllocationSpec {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 02-03 Pending-to-Retired worker-path complement evidence"]
 async fn stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once()
  {
     for owner_shutdown in [false, true] {
@@ -896,7 +891,6 @@ async fn wait_listener_closed(address: SocketAddrV4) {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 02-03 S-ND295-25 isolated shared-allocation stop evidence"]
 async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner()
 {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -952,7 +946,6 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 02-03 S-ND295-26 multi-capability owner-shutdown evidence"]
 async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let enforcement = RecordingSharedEnforcement::new();
