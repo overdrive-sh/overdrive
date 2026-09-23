@@ -5520,10 +5520,21 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     let (submit, alloc_id) =
         first_boot.expect("restart-failure boot-one observation and cleanup must converge");
 
-    let exact_before = fault_fixture::PacketPathBaseline::capture();
-    let malformed = fault_fixture::ProductInputHookFixture::install();
     let (boot_two, cuts, created, boundary, _terminator) =
         spawn_failure_observed_mtls_server_at(&data_dir, &config_dir).await;
+    // Boot two must first audit/adopt the canonical shared program. Its restored
+    // replacement is already parked at the observation-only VMM cut, so the
+    // product-input fault can now be scoped to the intended post-boot,
+    // pre-READY/action interval without poisoning startup convergence.
+    let canonical = poll_until_shared_intercept_is_stable(Duration::from_secs(30), 0).await;
+    assert_shared_intercept_universe(
+        &canonical,
+        canonical.identity(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+    let exact_before = fault_fixture::PacketPathBaseline::capture();
+    let malformed = fault_fixture::ProductInputHookFixture::install();
     // Reclamation runs before ordinary reconciliation. The replacement VM
     // therefore reaches the production VMM boundary, emits READY, and only
     // then encounters the real post-Running intercept-install rejection.
@@ -5549,9 +5560,11 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
         match row.reason.as_ref() {
             Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
                 assert_eq!(stage, "outbound_tproxy_install");
-                assert!(detail.contains("append-egress") && detail.contains("append-rule"));
                 assert!(
-                    detail.contains("Operation not supported") || detail.contains("os error 95")
+                    detail.contains("shared mTLS set element update failed")
+                        && detail.contains("shared-ip-observe")
+                        && detail.contains("partial, duplicate, or foreign chains"),
+                    "post-boot product-input fault retains the exact shared-element semantic cause: {detail}"
                 );
             }
             other => panic!("fresh reinstall preserves the typed INPUT-hook cause: {other:?}"),

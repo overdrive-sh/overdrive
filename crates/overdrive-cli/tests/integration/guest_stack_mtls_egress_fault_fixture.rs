@@ -540,6 +540,7 @@ fn ownership_from_json(value: &Value) -> Option<BTreeMap<String, Vec<nft::RuleIn
 struct NftObjects {
     table: Value,
     chains: BTreeMap<String, Value>,
+    sets: BTreeMap<String, Value>,
     rules: BTreeMap<String, Vec<Value>>,
 }
 
@@ -547,6 +548,7 @@ fn split_nft_objects(document: &Value) -> Option<NftObjects> {
     let entries = document.get("nftables")?.as_array()?;
     let mut table = None;
     let mut chains = BTreeMap::new();
+    let mut sets = BTreeMap::new();
     let mut rules: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for entry in entries {
         if let Some(value) = entry.get("table") {
@@ -558,6 +560,11 @@ fn split_nft_objects(document: &Value) -> Option<NftObjects> {
             if chains.insert(name, value.clone()).is_some() {
                 return None;
             }
+        } else if let Some(value) = entry.get("set") {
+            let name = value.get("name")?.as_str()?.to_owned();
+            if sets.insert(name, value.clone()).is_some() {
+                return None;
+            }
         } else if let Some(value) = entry.get("rule") {
             let chain = value.get("chain")?.as_str()?.to_owned();
             rules.entry(chain).or_default().push(value.clone());
@@ -565,7 +572,7 @@ fn split_nft_objects(document: &Value) -> Option<NftObjects> {
             return None;
         }
     }
-    Some(NftObjects { table: table?, chains, rules })
+    Some(NftObjects { table: table?, chains, sets, rules })
 }
 
 fn normalized_named_object(value: &Value, field: &str, name: &str) -> Option<Value> {
@@ -695,6 +702,7 @@ fn exact_nft_delta(
             delta.created_output = true;
         }
         if !current_objects.chains.is_empty()
+            || !current_objects.sets.is_empty()
             || !current_objects.rules.is_empty()
             || current.ownership.len()
                 != usize::from(delta.created_prerouting) + usize::from(delta.created_output)
@@ -708,6 +716,9 @@ fn exact_nft_delta(
     let baseline_objects = split_nft_objects(baseline_document)?;
     let mut current_objects = split_nft_objects(current_document)?;
     if current_objects.table != baseline_objects.table {
+        return None;
+    }
+    if current_objects.sets != baseline_objects.sets {
         return None;
     }
     if baseline.ownership.len() != baseline_objects.chains.len() {
@@ -1716,7 +1727,8 @@ fn audited_duplicate_handles(
         return Err("the audited table semantic identity differs".to_owned());
     }
     let expected_chains = BTreeSet::from([PREROUTING.to_owned(), OUTPUT.to_owned()]);
-    if objects.chains.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
+    if !objects.sets.is_empty()
+        || objects.chains.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
         || objects.rules.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
         || snapshot.ownership.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
         || !objects
@@ -2087,6 +2099,13 @@ fn run_clean_production_delta_scenarios() {
     );
     let unrelated_fib = PacketPathBaseline::capture_table(TABLE);
     assert_eq!(unrelated_fib.fib_routes.as_array().map(Vec::len), Some(1));
+
+    let immediate_abort = std::panic::catch_unwind(|| {
+        let _fixture = install_clean_fixture(FaultPoint::NONE);
+        panic!("intentional abort immediately after product-input fixture installation");
+    });
+    assert!(immediate_abort.is_err());
+    assert_clean_fixture_baseline(&unrelated_fib, "immediate post-install abort/drop");
 
     for fault in
         ["signal:setup-table-add-after-mutation", "signal:setup-malformed-create-after-mutation"]
