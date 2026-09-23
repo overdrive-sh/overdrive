@@ -220,7 +220,7 @@ pub enum InterceptError {
         #[source]
         replacement_read_source: NetlinkError,
     },
-    #[error("shared mTLS set element update failed")]
+    #[error("shared mTLS set element update failed: {source}")]
     NftElementUpdateFailed {
         set: InterceptSet,
         operation: InterceptElementOperation,
@@ -395,6 +395,25 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
             std::mem::size_of::<libc::c_int>() as libc::socklen_t,
         );
         if ip_freebind != 0 {
+            let e = std::io::Error::last_os_error();
+            libc::close(fd);
+            return Err(err(e));
+        }
+        // Mark agent-owned transparent listener replies with the existing
+        // leg-S exemption mark. The shared output fallback drop otherwise
+        // treats the SYN-ACK to a managed guest source as an unregistered
+        // destination and prevents the node-shared listener from admitting
+        // the connection. The mark is inherited by accepted sockets and is
+        // consumed only by the constant head exemption.
+        let mark: libc::c_uint = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+        let mark_rc = libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_MARK,
+            std::ptr::from_ref(&mark).cast(),
+            std::mem::size_of::<libc::c_uint>() as libc::socklen_t,
+        );
+        if mark_rc != 0 {
             let e = std::io::Error::last_os_error();
             libc::close(fd);
             return Err(err(e));

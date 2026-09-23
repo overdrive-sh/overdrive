@@ -2642,7 +2642,7 @@ impl MtlsInterceptWorker {
         // surfaces as the typed `LegFLocalAddr` rather than defaulting to a
         // broken port-0 redirect target. `leg_f_listener` (the only guard
         // acquired so far) drops on the `?` early return → closes.
-        let leg_f_addr = project_listener_v4(
+        let _leg_f_addr = project_listener_v4(
             leg_f_listener.local_addr(),
             MtlsInterceptInstallError::leg_f_local_addr,
         )?;
@@ -2661,15 +2661,7 @@ impl MtlsInterceptWorker {
         // (no interface to match) but still stands up the leg-F listener +
         // accept loop — a fixture that drives leg-F directly exercises the
         // accept path without the kernel redirect.
-        let outbound_tproxy_guard = match spec.network.as_ref().map(|network| network.tap.as_str())
-        {
-            Some(tap) => Some(
-                self.intercept
-                    .install_outbound(tap, leg_f_addr.port())
-                    .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?,
-            ),
-            None => None,
-        };
+        let outbound_tproxy_guard = None;
 
         // INBOUND install: the agent's leg-C IP_TRANSPARENT listener. The
         // accompanying per-port nft-TPROXY redirect rules that aim real client
@@ -2789,9 +2781,13 @@ impl MtlsInterceptWorker {
             pending
         };
         let effects = (|| {
+            // Shared allocations register source/destination set elements
+            // against the node-scoped constant program. Passing the TAP name
+            // here would re-enter the retired per-interface rule installer
+            // and create one nft rule per allocation.
             let outbound = self
                 .intercept
-                .install_outbound(&network.tap, leg_f_addr.port())
+                .install_outbound(network.address, leg_f_addr.port())
                 .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?;
             pending.retain_outbound(outbound);
             for port in &spec.service_ports {
@@ -4056,7 +4052,7 @@ mod tests {
 
         fn install_outbound(
             &self,
-            _host_veth: &str,
+            _source_addr: Ipv4Addr,
             _agent_leg_f_port: u16,
         ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
             Ok(Box::new(TestSharedGuard))

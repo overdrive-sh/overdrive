@@ -45,9 +45,9 @@
 // Mirrors the module-level allow on the sibling `ethtool` encoder.
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Error, ErrorKind};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use crate::error::{NEG_EEXIST, NetlinkError};
@@ -2922,6 +2922,39 @@ pub struct SharedIpInterceptIdentity {
     output: Vec<Vec<u8>>,
 }
 
+/// Complete semantic state of the node-shared IPv4 intercept program.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedIpInterceptState {
+    identity: SharedIpInterceptIdentity,
+    managed_guest_ips: BTreeSet<Ipv4Addr>,
+    outbound_sources: BTreeSet<Ipv4Addr>,
+    inbound_destinations: BTreeSet<SocketAddrV4>,
+}
+
+#[allow(clippy::missing_const_for_fn)]
+impl SharedIpInterceptState {
+    #[doc(hidden)]
+    pub fn identity(&self) -> &SharedIpInterceptIdentity {
+        &self.identity
+    }
+
+    #[doc(hidden)]
+    pub fn managed_guest_ips(&self) -> &BTreeSet<Ipv4Addr> {
+        &self.managed_guest_ips
+    }
+
+    #[doc(hidden)]
+    pub fn outbound_sources(&self) -> &BTreeSet<Ipv4Addr> {
+        &self.outbound_sources
+    }
+
+    #[doc(hidden)]
+    pub fn inbound_destinations(&self) -> &BTreeSet<SocketAddrV4> {
+        &self.inbound_destinations
+    }
+}
+
 impl SharedIpInterceptIdentity {
     /// Build the canonical identity for exact non-zero listener ports.
     #[doc(hidden)]
@@ -2970,6 +3003,44 @@ pub fn replace_shared_ip_intercept_atomically(
     shared_ip::replace_public(expected_current, desired)
 }
 
+/// Observe complete constant-program identity and all typed dynamic members.
+#[doc(hidden)]
+pub fn observe_shared_ip_intercept_state() -> Result<Option<SharedIpInterceptState>, NetlinkError> {
+    shared_ip::observe_state()
+}
+
+#[doc(hidden)]
+pub fn insert_shared_ip_intercept_outbound_elements_atomically(
+    expected_program: &SharedIpInterceptIdentity,
+    source_addr: Ipv4Addr,
+) -> Result<SharedIpInterceptState, NetlinkError> {
+    shared_ip::insert_outbound(expected_program, source_addr)
+}
+
+#[doc(hidden)]
+pub fn insert_shared_ip_intercept_inbound_element_atomically(
+    expected_program: &SharedIpInterceptIdentity,
+    destination: SocketAddrV4,
+) -> Result<SharedIpInterceptState, NetlinkError> {
+    shared_ip::insert_inbound(expected_program, destination)
+}
+
+#[doc(hidden)]
+pub fn delete_shared_ip_intercept_elements_atomically(
+    expected_program: &SharedIpInterceptIdentity,
+    source_addr: Option<Ipv4Addr>,
+    inbound_destinations: &[SocketAddrV4],
+) -> Result<SharedIpInterceptState, NetlinkError> {
+    shared_ip::delete_elements(expected_program, source_addr, inbound_destinations)
+}
+
+#[doc(hidden)]
+pub fn clear_shared_ip_intercept_elements_atomically(
+    expected_program: &SharedIpInterceptIdentity,
+) -> Result<SharedIpInterceptState, NetlinkError> {
+    shared_ip::clear_elements(expected_program)
+}
+
 /// Private semantic IPv4 shared-intercept adapter used by the worker's
 /// module-private `SharedInterceptProgramIo` seam.
 mod shared_ip {
@@ -2993,6 +3064,27 @@ mod shared_ip {
     const DESTINATION_SET_KEY_LEN: u32 = 8;
     const PREROUTING_RULE_COUNT: usize = 5;
     const OUTPUT_RULE_COUNT: usize = 3;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum ElementSet {
+        ManagedGuestIps,
+        OutboundSources,
+        InboundDestinations,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum ElementKey {
+        ManagedGuest(Ipv4Addr),
+        OutboundSource(Ipv4Addr),
+        Destination(SocketAddrV4),
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    struct ElementMembers {
+        managed_guest_ips: BTreeSet<Ipv4Addr>,
+        outbound_sources: BTreeSet<Ipv4Addr>,
+        inbound_destinations: BTreeSet<SocketAddrV4>,
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Chain {
@@ -3022,6 +3114,7 @@ mod shared_ip {
     pub(super) struct SharedProgram {
         identity: SharedIpInterceptIdentity,
         rules: Vec<Rule>,
+        members: ElementMembers,
     }
 
     impl SharedProgram {
@@ -3066,7 +3159,7 @@ mod shared_ip {
             let output =
                 rules.iter().filter(|rule| rule.chain == Chain::Output).map(encode_rule).collect();
             let program = Self::from_components(table_and_chains, sets, prerouting, output)?;
-            Ok(Self { identity: program.identity, rules })
+            Ok(Self { identity: program.identity, rules, members: ElementMembers::default() })
         }
 
         /// Rebuild an identity received from the worker postcondition carrier.
@@ -3089,6 +3182,7 @@ mod shared_ip {
             Ok(Self {
                 identity: SharedIpInterceptIdentity { table_and_chains, sets, prerouting, output },
                 rules,
+                members: ElementMembers::default(),
             })
         }
 
@@ -3384,6 +3478,22 @@ mod shared_ip {
         if !tables.iter().any(|table| table == SHARED_IP_TABLE) {
             return Ok(None);
         }
+        let bridge_tables = list_table_names_family(NftFamily::Bridge)?;
+        if bridge_tables.iter().any(|name| name == SHARED_IP_TABLE) {
+            let bridge_chains = list_chain_info_family(NftFamily::Bridge, SHARED_IP_TABLE)?;
+            let accepted_companion = bridge_chains.len() == 1
+                && bridge_chains.first().is_some_and(|chain| {
+                    chain.name == "prerouting"
+                        && chain.hook == Some((0, -300))
+                        && chain.chain_type.as_deref() == Some("filter")
+                        && chain.policy == Some(NF_ACCEPT)
+                });
+            if !accepted_companion {
+                return Err(invalid_shared_ip(
+                    "shared IP companion bridge table has an incomplete or foreign identity",
+                ));
+            }
+        }
 
         let chains = list_chain_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
         let names = [Chain::Prerouting.name(), Chain::Output.name()];
@@ -3442,11 +3552,57 @@ mod shared_ip {
                 ),
             ));
         }
+        let mut members = ElementMembers::default();
         for (name, _, _) in expected {
             let set = sets.iter().find(|set| set.name == name).expect("validated set");
-            if !list_set_elements_family(NftFamily::Ipv4, SHARED_IP_TABLE, name, set.id)?.is_empty()
+            for member in list_set_elements_family(NftFamily::Ipv4, SHARED_IP_TABLE, name, set.id)?
             {
-                return Err(invalid_shared_ip("shared IP dynamic set state is non-empty"));
+                let inserted = match name {
+                    SHARED_IP_MANAGED_GUESTS => {
+                        if member.len() != MANAGED_SET_KEY_LEN as usize {
+                            return Err(invalid_shared_ip(
+                                "shared IP address element length is invalid",
+                            ));
+                        }
+                        members
+                            .managed_guest_ips
+                            .insert(Ipv4Addr::new(member[0], member[1], member[2], member[3]))
+                    }
+                    SHARED_IP_OUTBOUND_SOURCES => {
+                        if member.len() != MANAGED_SET_KEY_LEN as usize {
+                            return Err(invalid_shared_ip(
+                                "shared IP address element length is invalid",
+                            ));
+                        }
+                        members
+                            .outbound_sources
+                            .insert(Ipv4Addr::new(member[0], member[1], member[2], member[3]))
+                    }
+                    SHARED_IP_INBOUND_DESTINATIONS => {
+                        if member.len() != DESTINATION_SET_KEY_LEN as usize
+                            || member[6] != 0
+                            || member[7] != 0
+                        {
+                            return Err(invalid_shared_ip(
+                                "shared IP destination element alignment is invalid",
+                            ));
+                        }
+                        let port = u16::from_be_bytes([member[4], member[5]]);
+                        if port == 0 {
+                            return Err(invalid_shared_ip(
+                                "shared IP destination element port is zero",
+                            ));
+                        }
+                        members.inbound_destinations.insert(SocketAddrV4::new(
+                            Ipv4Addr::new(member[0], member[1], member[2], member[3]),
+                            port,
+                        ))
+                    }
+                    _ => unreachable!("validated shared IP set name"),
+                };
+                if !inserted {
+                    return Err(invalid_shared_ip("shared IP dynamic set has duplicate members"));
+                }
             }
         }
         if !list_other_children_family(NftFamily::Ipv4, SHARED_IP_TABLE)?.is_empty() {
@@ -3507,7 +3663,9 @@ mod shared_ip {
             rules.iter().filter(|rule| rule.chain == Chain::Prerouting).map(encode_rule).collect();
         let output =
             rules.iter().filter(|rule| rule.chain == Chain::Output).map(encode_rule).collect();
-        let semantic = SharedProgram::from_components(table_and_chains, sets, prerouting, output)?;
+        let mut semantic =
+            SharedProgram::from_components(table_and_chains, sets, prerouting, output)?;
+        semantic.members = members;
         if semantic.rules.iter().zip(rules.iter()).any(|(expected, observed)| {
             expected.chain != observed.chain
                 || expected.userdata != observed.userdata
@@ -3515,7 +3673,7 @@ mod shared_ip {
         }) {
             return Err(invalid_shared_ip("shared IP rule semantic identity mismatch"));
         }
-        Ok(Some(SharedProgram { identity: semantic.identity, rules }))
+        Ok(Some(SharedProgram { identity: semantic.identity, rules, members: semantic.members }))
     }
 
     fn collect() -> Result<Option<SharedProgram>, NetlinkError> {
@@ -3528,7 +3686,32 @@ mod shared_ip {
                 invalid_data("shared IP observation crossed a ruleset generation"),
             ));
         }
+        if observed.as_ref().is_some_and(|program| {
+            !program.members.managed_guest_ips.is_empty()
+                || !program.members.outbound_sources.is_empty()
+                || !program.members.inbound_destinations.is_empty()
+        }) {
+            return Err(invalid_shared_ip("shared IP dynamic set state is non-empty"));
+        }
         Ok(observed)
+    }
+
+    fn collect_state() -> Result<Option<SharedIpInterceptState>, NetlinkError> {
+        let before = read_nft_generation()?;
+        let observed = collect_once()?;
+        let after = read_nft_generation()?;
+        if before != after {
+            return Err(NetlinkError::nft(
+                "shared-ip-observe-generation",
+                invalid_data("shared IP state observation crossed a ruleset generation"),
+            ));
+        }
+        Ok(observed.map(|program| SharedIpInterceptState {
+            identity: program.identity,
+            managed_guest_ips: program.members.managed_guest_ips,
+            outbound_sources: program.members.outbound_sources,
+            inbound_destinations: program.members.inbound_destinations,
+        }))
     }
 
     #[derive(Clone, Copy)]
@@ -3790,11 +3973,399 @@ mod shared_ip {
         collect().map(|program| program.map(|program| program.identity))
     }
 
+    pub(super) fn observe_state() -> Result<Option<SharedIpInterceptState>, NetlinkError> {
+        collect_state()
+    }
+
     pub(super) fn replace_public(
         expected_current: Option<&SharedIpInterceptIdentity>,
         desired: Option<&SharedIpInterceptIdentity>,
     ) -> Result<(), NetlinkError> {
         replace(expected_current, desired)
+    }
+
+    #[derive(Debug, Clone)]
+    struct ElementMutation {
+        set: ElementSet,
+        set_id: u32,
+        key: Vec<u8>,
+        add: bool,
+    }
+
+    #[derive(Debug)]
+    struct ElementRestoreError {
+        primary: NetlinkError,
+        restore: NetlinkError,
+    }
+
+    impl std::fmt::Display for ElementRestoreError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let _ = &self.restore;
+            write!(formatter, "shared IP element read-back/restoration failed")
+        }
+    }
+
+    impl std::error::Error for ElementRestoreError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.primary)
+        }
+    }
+
+    fn element_restore_error(primary: NetlinkError, restore: NetlinkError) -> NetlinkError {
+        NetlinkError::nft(
+            "shared-ip-element-restore",
+            std::io::Error::other(ElementRestoreError { primary, restore }),
+        )
+    }
+
+    const fn element_set_name(set: ElementSet) -> &'static str {
+        match set {
+            ElementSet::ManagedGuestIps => SHARED_IP_MANAGED_GUESTS,
+            ElementSet::OutboundSources => SHARED_IP_OUTBOUND_SOURCES,
+            ElementSet::InboundDestinations => SHARED_IP_INBOUND_DESTINATIONS,
+        }
+    }
+
+    fn element_key_bytes(key: ElementKey) -> Result<(ElementSet, Vec<u8>), NetlinkError> {
+        match key {
+            ElementKey::ManagedGuest(address) => {
+                Ok((ElementSet::ManagedGuestIps, address.octets().to_vec()))
+            }
+            ElementKey::OutboundSource(address) => {
+                Ok((ElementSet::OutboundSources, address.octets().to_vec()))
+            }
+            ElementKey::Destination(destination) => {
+                if destination.port() == 0 {
+                    return Err(invalid_shared_ip("shared IP destination port is zero"));
+                }
+                let mut bytes = Vec::with_capacity(8);
+                bytes.extend_from_slice(&destination.ip().octets());
+                bytes.extend_from_slice(&destination.port().to_be_bytes());
+                bytes.extend_from_slice(&[0, 0]);
+                Ok((ElementSet::InboundDestinations, bytes))
+            }
+        }
+    }
+
+    fn set_ids() -> Result<BTreeMap<ElementSet, u32>, NetlinkError> {
+        let observed = list_set_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
+        let expected = [
+            (
+                ElementSet::ManagedGuestIps,
+                SHARED_IP_MANAGED_GUESTS,
+                IPV4_ADDR_KEY_TYPE,
+                MANAGED_SET_KEY_LEN,
+            ),
+            (
+                ElementSet::OutboundSources,
+                SHARED_IP_OUTBOUND_SOURCES,
+                IPV4_ADDR_KEY_TYPE,
+                MANAGED_SET_KEY_LEN,
+            ),
+            (
+                ElementSet::InboundDestinations,
+                SHARED_IP_INBOUND_DESTINATIONS,
+                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+                DESTINATION_SET_KEY_LEN,
+            ),
+        ];
+        if observed.len() != expected.len() {
+            return Err(NetlinkError::nft(
+                "shared-ip-element-schema",
+                invalid_data("shared IP element set inventory is incomplete or foreign"),
+            ));
+        }
+        let mut ids = BTreeMap::new();
+        for (semantic, name, key_type, key_len) in expected {
+            let matches = observed.iter().filter(|set| set.name == name).collect::<Vec<_>>();
+            let Some(set) = matches.first().copied() else {
+                return Err(NetlinkError::nft(
+                    "shared-ip-element-schema",
+                    invalid_data("shared IP element set is absent"),
+                ));
+            };
+            if matches.len() != 1
+                || set.key_type != key_type
+                || set.key_len != key_len
+                || set.id == 0
+                || set.userdata.as_deref() != Some(shared_ip_set_userdata(name).as_slice())
+            {
+                return Err(NetlinkError::nft(
+                    "shared-ip-element-schema",
+                    invalid_data("shared IP element set schema conflicts with owned identity"),
+                ));
+            }
+            ids.insert(semantic, set.id);
+        }
+        Ok(ids)
+    }
+
+    fn element_payload(set: &str, set_id: u32, key: &[u8]) -> Vec<u8> {
+        let mut element = Vec::new();
+        let mut key_value = Vec::new();
+        attr(&mut key_value, NFTA_DATA_VALUE, key);
+        let mut key_element = Vec::new();
+        attr(&mut key_element, NFTA_SET_ELEM_KEY | NLA_F_NESTED, &key_value);
+        attr(&mut element, NLA_F_NESTED | 1, &key_element);
+        let mut payload = nfgenmsg(NftFamily::Ipv4.nfproto(), 0);
+        attr(&mut payload, NFTA_SET_ELEM_LIST_TABLE, &cstr(SHARED_IP_TABLE));
+        attr(&mut payload, NFTA_SET_ELEM_LIST_SET, &cstr(set));
+        attr_be32(&mut payload, NFTA_SET_ELEM_LIST_SET_ID, set_id);
+        attr(&mut payload, NFTA_SET_ELEM_LIST_ELEMENTS_NESTED, &element);
+        payload
+    }
+
+    fn send_element_transaction(mutations: &[ElementMutation]) -> Result<(), NetlinkError> {
+        if mutations.is_empty() {
+            return Ok(());
+        }
+        let sock = NfSock::open()
+            .map_err(|source| NetlinkError::nft("shared-ip-element-transaction", source))?;
+        let mut batch = Vec::new();
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_BEGIN,
+            NLM_F_REQUEST,
+            1,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        for (index, mutation) in mutations.iter().enumerate() {
+            let operation = if mutation.add { NFT_MSG_NEWSETELEM } else { NFT_MSG_DELSETELEM };
+            let flags = if mutation.add { NLM_F_CREATE } else { 0 };
+            nlmsg(
+                &mut batch,
+                nft_msg_type(operation),
+                NLM_F_REQUEST | NLM_F_ACK | flags,
+                index as u32 + 2,
+                &element_payload(element_set_name(mutation.set), mutation.set_id, &mutation.key),
+            );
+        }
+        let end = mutations.len() as u32 + 2;
+        nlmsg(
+            &mut batch,
+            NFNL_MSG_BATCH_END,
+            NLM_F_REQUEST,
+            end,
+            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
+        );
+        sock.send(&batch)
+            .map_err(|source| NetlinkError::nft("shared-ip-element-transaction", source))?;
+        let mut pending = (2..end).collect::<BTreeSet<_>>();
+        while !pending.is_empty() {
+            let mut buffer = vec![0_u8; 32_768];
+            let received = sock
+                .recv(&mut buffer)
+                .map_err(|source| NetlinkError::nft("shared-ip-element-transaction", source))?;
+            collect_atomic_rule_acks(&buffer[..received], &mut pending)
+                .map_err(|source| NetlinkError::nft("shared-ip-element-transaction", source))?;
+        }
+        Ok(())
+    }
+
+    fn state_for(
+        expected: &SharedIpInterceptIdentity,
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        let Some(state) = collect_state()? else {
+            return Err(invalid_shared_ip("shared IP constant program is absent"));
+        };
+        if state.identity != *expected {
+            return Err(invalid_shared_ip("shared IP constant program identity mismatch"));
+        }
+        Ok(state)
+    }
+
+    fn mutate_and_readback(
+        expected: &SharedIpInterceptIdentity,
+        before: SharedIpInterceptState,
+        mutations: &[ElementMutation],
+        expected_after: &SharedIpInterceptState,
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        if before.identity != *expected || expected_after.identity != *expected {
+            return Err(invalid_shared_ip(
+                "shared IP element identity is not the expected program",
+            ));
+        }
+        if mutations.is_empty() {
+            return Ok(before);
+        }
+        send_element_transaction(mutations)?;
+        let primary = match collect_state() {
+            Ok(Some(observed)) if observed == *expected_after => return Ok(observed),
+            Ok(Some(_)) => invalid_shared_ip("shared IP element read-back identity mismatch"),
+            Ok(None) => invalid_shared_ip("shared IP program disappeared"),
+            Err(source) => source,
+        };
+        // A committed batch with an unexpected or failed read-back is restored once.
+        let inverse = mutations
+            .iter()
+            .map(|mutation| ElementMutation {
+                set: mutation.set,
+                set_id: mutation.set_id,
+                key: mutation.key.clone(),
+                add: !mutation.add,
+            })
+            .collect::<Vec<_>>();
+        if let Err(restore_source) = send_element_transaction(&inverse) {
+            return Err(element_restore_error(primary, restore_source));
+        }
+        match collect_state() {
+            Ok(Some(restored)) if restored == before => Err(primary),
+            Ok(Some(_)) => Err(element_restore_error(
+                primary,
+                invalid_shared_ip("shared IP element restoration read-back mismatch"),
+            )),
+            Ok(None) => Err(element_restore_error(
+                primary,
+                invalid_shared_ip("shared IP program disappeared during restoration"),
+            )),
+            Err(restore_source) => Err(element_restore_error(primary, restore_source)),
+        }
+    }
+
+    fn member_mutations(
+        ids: &BTreeMap<ElementSet, u32>,
+        additions: impl IntoIterator<Item = ElementKey>,
+        removals: impl IntoIterator<Item = ElementKey>,
+    ) -> Result<Vec<ElementMutation>, NetlinkError> {
+        let mut mutations = Vec::new();
+        for (key, add) in additions
+            .into_iter()
+            .map(|key| (key, true))
+            .chain(removals.into_iter().map(|key| (key, false)))
+        {
+            let (set, bytes) = element_key_bytes(key)?;
+            let set_id =
+                *ids.get(&set).ok_or_else(|| invalid_shared_ip("shared IP set id missing"))?;
+            mutations.push(ElementMutation { set, set_id, key: bytes, add });
+        }
+        Ok(mutations)
+    }
+
+    pub(super) fn insert_outbound(
+        expected: &SharedIpInterceptIdentity,
+        source: Ipv4Addr,
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        let before = state_for(expected)?;
+        if before.managed_guest_ips.contains(&source) || before.outbound_sources.contains(&source) {
+            return Err(invalid_shared_ip("shared IP outbound group is already partially present"));
+        }
+        let ids = set_ids()?;
+        let mutations = member_mutations(
+            &ids,
+            [ElementKey::ManagedGuest(source), ElementKey::OutboundSource(source)],
+            [],
+        )?;
+        let mut expected_after = before.clone();
+        expected_after.managed_guest_ips.insert(source);
+        expected_after.outbound_sources.insert(source);
+        mutate_and_readback(expected, before, &mutations, &expected_after)
+    }
+
+    pub(super) fn insert_inbound(
+        expected: &SharedIpInterceptIdentity,
+        destination: SocketAddrV4,
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        if destination.port() == 0 {
+            return Err(invalid_shared_ip("shared IP destination port is zero"));
+        }
+        let before = state_for(expected)?;
+        if before.inbound_destinations.contains(&destination) {
+            return Err(invalid_shared_ip("shared IP inbound member is already present"));
+        }
+        let ids = set_ids()?;
+        let mutations = member_mutations(&ids, [ElementKey::Destination(destination)], [])?;
+        let mut expected_after = before.clone();
+        expected_after.inbound_destinations.insert(destination);
+        mutate_and_readback(expected, before, &mutations, &expected_after)
+    }
+
+    pub(super) fn delete_elements(
+        expected: &SharedIpInterceptIdentity,
+        source: Option<Ipv4Addr>,
+        inbound: &[SocketAddrV4],
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        if source.is_none() && inbound.is_empty() {
+            return Err(invalid_shared_ip("shared IP delete request is empty"));
+        }
+        let mut seen = BTreeSet::new();
+        for destination in inbound {
+            if destination.port() == 0 || !seen.insert(*destination) {
+                return Err(invalid_shared_ip(
+                    "shared IP delete destination is invalid or duplicated",
+                ));
+            }
+        }
+        let before = state_for(expected)?;
+        if let Some(source) = source
+            && (!before.managed_guest_ips.contains(&source)
+                || !before.outbound_sources.contains(&source))
+        {
+            return Err(invalid_shared_ip("shared IP outbound group is incomplete"));
+        }
+        if inbound.iter().any(|destination| !before.inbound_destinations.contains(destination)) {
+            return Err(invalid_shared_ip("shared IP inbound member is absent"));
+        }
+        let ids = set_ids()?;
+        let mut mutations = Vec::new();
+        if let Some(source) = source {
+            let key = source.octets().to_vec();
+            mutations.push(ElementMutation {
+                set: ElementSet::ManagedGuestIps,
+                set_id: *ids.get(&ElementSet::ManagedGuestIps).expect("managed set id"),
+                key: key.clone(),
+                add: false,
+            });
+            mutations.push(ElementMutation {
+                set: ElementSet::OutboundSources,
+                set_id: *ids.get(&ElementSet::OutboundSources).expect("outbound set id"),
+                key,
+                add: false,
+            });
+        }
+        for destination in inbound {
+            mutations.extend(member_mutations(&ids, [], [ElementKey::Destination(*destination)])?);
+        }
+        let mut expected_after = before.clone();
+        if let Some(source) = source {
+            expected_after.managed_guest_ips.remove(&source);
+            expected_after.outbound_sources.remove(&source);
+        }
+        for destination in inbound {
+            expected_after.inbound_destinations.remove(destination);
+        }
+        mutate_and_readback(expected, before, &mutations, &expected_after)
+    }
+
+    pub(super) fn clear_elements(
+        expected: &SharedIpInterceptIdentity,
+    ) -> Result<SharedIpInterceptState, NetlinkError> {
+        let before = state_for(expected)?;
+        let ids = set_ids()?;
+        let mut mutations = Vec::new();
+        for address in &before.managed_guest_ips {
+            mutations.push(ElementMutation {
+                set: ElementSet::ManagedGuestIps,
+                set_id: *ids.get(&ElementSet::ManagedGuestIps).expect("managed set id"),
+                key: address.octets().to_vec(),
+                add: false,
+            });
+        }
+        for address in &before.outbound_sources {
+            mutations.push(ElementMutation {
+                set: ElementSet::OutboundSources,
+                set_id: *ids.get(&ElementSet::OutboundSources).expect("outbound set id"),
+                key: address.octets().to_vec(),
+                add: false,
+            });
+        }
+        for destination in before.inbound_destinations.iter().copied() {
+            mutations.extend(member_mutations(&ids, [], [ElementKey::Destination(destination)])?);
+        }
+        let mut expected_after = before.clone();
+        expected_after.managed_guest_ips.clear();
+        expected_after.outbound_sources.clear();
+        expected_after.inbound_destinations.clear();
+        mutate_and_readback(expected, before, &mutations, &expected_after)
     }
 }
 

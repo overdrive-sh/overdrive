@@ -1661,10 +1661,10 @@ impl MtlsIntercept for RetirementBarrierIntercept {
 
     fn install_outbound(
         &self,
-        tap: &str,
+        source_addr: Ipv4Addr,
         leg_f_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        self.inner.install_outbound(tap, leg_f_port).map(|guard| self.wrap(guard))
+        self.inner.install_outbound(source_addr, leg_f_port).map(|guard| self.wrap(guard))
     }
 
     fn install_inbound(

@@ -547,6 +547,34 @@
       "s": "EXECUTED",
       "d": "REMEDIATION RED: after verifying and removing only stale test-owned metal state with no active VMM/test process, the exact topology selector passed natively with the production EXEC BootClosed->Open composition and live GuestTcxProgram endpoint read-back fixes; however each exact S-ND295-01 guest body independently reproduced downstream failure (strict observer at guest_stack_mtls_egress.rs:1770 on GETGEN notification mismatch) and the approved full guest_stack_mtls_egress selector completed 34 bodies with 17 passed and 17 failed. The first clean production-boundary startup failures in the full selector were shared mTLS rule/set convergence errors after prior bodies left the pre-cut per-allocation nft rules/duplicate exemptions. Feature-delta C1/PORT-295-C requires install_outbound(source_addr) and install_inbound(virt) to own 2+P shared-set elements against eight constant IP rules, while current MtlsIntercept/start_shared_allocation still installs host-veth/per-virt nft rules and no element operations; this is a proven accepted-production/DISTILL blocker, not a test or fixture cleanup issue. No GREEN or COMMIT claimed; Lima check/clippy were blocked by the read-only Lima target; fmt/diff check passed.",
       "t": "2026-09-22T23:57:51Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "REMEDIATION RED: after removing only owned stale ip/bridge overdrive-mtls tables on the clean native metal lease, the exact topology selector passed; the exact S-ND295-01 guest body then reached production and timed out at guest_stack_mtls_egress.rs:1770 on GETGEN response type/sequence mismatch. Native nft inventory after the run showed the constant eight-rule IPv4 program plus duplicate leg-S exemptions (two prerouting and two output) and empty managed_guest_ips/outbound_sources/inbound_destinations, proving current start_shared_allocation still invokes retired per-interface/per-virt installers through network.tap and does not acquire the accepted 2+P shared-set elements. No test edits or mutation testing.",
+      "t": "2026-09-23T00:22:11Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: production shared-owner path now acquires the accepted 2+P managed/source/destination set elements through the constant eight-rule program; focused worker/netlink suites and all three D15 source-local bodies pass, and a clean native guest run reaches production Running before the old guest D7 oracle fails because no per-allocation outbound nft rule exists. The pre-authored 02-03 source-local S25 and native S25/S26 bodies also time out at their direct shared-client/peer exchange boundary after the accepted per-element cut. No test edits or mutation testing.",
+      "t": "2026-09-23T01:08:26Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: exact DESIGN-02-03 production implementation and neutral compiler fallout are complete. SharedIpInterceptState and exactly four named effects enforce expected-program identity, typed schemas/key encoding, generation-bracketed complete state, grouped outbound/inbound mutations, exact grouped retirement cleanup, refcount/token adoption, read-back restoration, listener mark exemption, and no shared runtime use of retired per-interface/per-virt installers. Intrinsic verification passed: cargo fmt/diff; workspace cargo check --workspace --all-targets; netlink 56/56; worker lib 76/76 (2 skipped); sim lib 117/117 (1 skipped); 02-03 acceptance 102/102; D15 4/4; control-plane S19 acceptance 7/7; DNS integration 6/6; native exact topology; native S25 and S26. The clean guest-stack S-ND295-01/full-suite downstream failure is recorded honestly: after the approved parser-order correction 6f6c5a8e, the exact guest body reaches guest_stack_mtls_egress.rs:2631, where the imported ADR-0088 zero-frame pre-EXEC oracle observes guest-originated ARP/DNS/TCP frames between capture-ready and intercept-live; no 02-03 production/test change was made for that downstream 04-01 ordering defect. No mutation testing or review.",
+      "t": "2026-09-23T03:33:30Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: scoped 02-03 production/compiler-fallout commit follows, with separate exact compiler-fallout commit 23d7473f0b01227ae954257de32c3599f938b046. The scoped production commit contains only overdrive-netlink shared-IP semantic effects, worker shared element ownership/caller changes, sim/compiler fallout, control-plane integration compiler fallout, worker integration compiler fallout, and DES events; unrelated dirty work remains outside scope. Marcus author and exactly one Codex trailer required. No mutation testing or review.",
+      "t": "2026-09-23T03:35:31Z"
     }
   ]
 }

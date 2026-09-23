@@ -303,7 +303,7 @@ impl MtlsIntercept for SimMtlsIntercept {
 
     fn install_outbound(
         &self,
-        _host_veth: &str,
+        _source_addr: std::net::Ipv4Addr,
         _agent_leg_f_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
         if let Some(fault) = armed(&self.outbound_fault) {
@@ -484,7 +484,7 @@ mod tests {
             // contract is its `Drop`), so the `Ok` payload is mapped away
             // before `expect_err`.
             Method::InstallOutbound => sut
-                .install_outbound("veth-alloc0", 4001)
+                .install_outbound(Ipv4Addr::LOCALHOST, 4001)
                 .map(|_guard| ())
                 .expect_err("an armed outbound fault short-circuits"),
             Method::InstallInbound => sut
@@ -640,11 +640,12 @@ mod tests {
         sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
 
         sut.clear_faults();
-        sut.install_outbound("veth-alloc0", 4001).expect("clear_faults disarms the outbound slot");
+        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
+            .expect("clear_faults disarms the outbound slot");
         sut.install_inbound(VIRT, 4002).expect("clear_faults disarms the inbound slot");
 
         sut.clear_faults();
-        sut.install_outbound("veth-alloc0", 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
             .expect("a second clear_faults leaves the outbound slot disarmed");
         sut.install_inbound(VIRT, 4002)
             .expect("a second clear_faults leaves the inbound slot disarmed");
@@ -678,7 +679,7 @@ mod tests {
         // Direction 1 — arming the BIND slot leaks to neither install.
         let sut = SimMtlsIntercept::new();
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
-        sut.install_outbound("veth-alloc0", 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
             .expect("a bind fault does not leak into install_outbound");
         sut.install_inbound(VIRT, 4002).expect("a bind fault does not leak into install_inbound");
 
@@ -699,7 +700,7 @@ mod tests {
         // Direction 3 — arming the INBOUND slot refuses only `install_inbound`.
         let sut = SimMtlsIntercept::new();
         sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
-        sut.install_outbound("veth-alloc0", 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
             .expect("an inbound fault does not leak into install_outbound");
         let got = drive_expecting_err(&sut, Method::InstallInbound);
         assert_err_shape(&got, ExpectedErr::IpRuleAdd { errno: libc::EPERM });

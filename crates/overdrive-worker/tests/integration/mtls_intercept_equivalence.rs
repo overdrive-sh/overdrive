@@ -118,6 +118,9 @@ const VETH_H: &str = "ovd-hv-eq0501";
 /// interface; it never carries traffic in this suite.
 const VETH_PEER: &str = "ovd-wv-eq0501";
 
+/// The canonical guest source address admitted by the shared outbound set.
+const SOURCE_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 5, 2);
+
 /// The canonical per-workload address paired with a DECLARED Service listener
 /// port — the `virt` shape `install_inbound` is called with. A suite-distinct
 /// /32 for the same non-collision reason as the veth names.
@@ -347,7 +350,7 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
         let inbound_port = bound_ipv4_port(&inbound_leg, "S-MIF-11", label);
 
         let outbound_guard = sut
-            .install_outbound(VETH_H, outbound_port)
+            .install_outbound(SOURCE_ADDR, outbound_port)
             .expect("install_outbound against a live veth and a live leg-F must hand back a guard");
         let inbound_guard = sut
             .install_inbound(VIRT, inbound_port)
@@ -358,7 +361,7 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
         drop(inbound_guard);
 
         eprintln!(
-            "[S-MIF-11][{label}] EXECUTED — install_outbound({VETH_H}, {outbound_port}) and \
+            "[S-MIF-11][{label}] EXECUTED — install_outbound({SOURCE_ADDR}, {outbound_port}) and \
              install_inbound({VIRT}, {inbound_port}) both Ok; both guards released cleanly"
         );
     }
@@ -413,9 +416,9 @@ fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
         let leg_f_port = bound_ipv4_port(&leg_f, "S-MIF-12", label);
 
         let first = sut
-            .install_outbound(VETH_H, leg_f_port)
+            .install_outbound(SOURCE_ADDR, leg_f_port)
             .expect("the first install of the outbound capture must hand back a guard");
-        let second = sut.install_outbound(VETH_H, leg_f_port).expect(
+        let second = sut.install_outbound(SOURCE_ADDR, leg_f_port).expect(
             "a re-install of the SAME capture is idempotent-by-convergence and must still hand \
              back a guard",
         );
@@ -426,7 +429,7 @@ fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
         drop(second);
 
         eprintln!(
-            "[S-MIF-12][{label}] EXECUTED — two installs of ({VETH_H}, {leg_f_port}) both Ok; \
+            "[S-MIF-12][{label}] EXECUTED — two installs of ({SOURCE_ADDR}, {leg_f_port}) both Ok; \
              both guards released in turn, the second over already-released state"
         );
     }
