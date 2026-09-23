@@ -39,7 +39,7 @@ owners; fixtures may inject faults only through accepted driven ports.
 | ID | Contract shape | Kind / evidence | Rust or receipt home | Status at DISTILL |
 |---|---|---|---|---|
 | S-ND295-00 | bounded-change | D12 inventory plus D14A projection, private validator, superseding owner order, and tracing-captured ordinary boot | dataplane `guest_tcx::tests::{every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics,wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less,capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source,a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count,every_receipted_family_returns_one_and_clean_families_return_exact_zero,startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi}`; control-plane `guest_network::scratch_probe_packet_acceptance::{every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator,classifier_runs_precede_close_and_each_stage_is_fresh}` plus transitioned `scratch_probe_acceptance` setup/failure tables; integration `guest_tcx_inventory::{clean_and_receipted_inventory_observes_all_eight_exact_families,retained_unpinned_maps_programs_and_links_survive_handle_release_and_remain_observable,wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero}` plus `shared_guest_network_startup::production_startup_exercises_classifier_and_detached_guard_before_admission` | D14A's four exact bodies are reasoned-pending: projection, validator, and owner-order fail on missing production behavior; the executable Lima body captures five ordered production events and remains environment-gated; the earlier three inventory placeholders remain separately user-waived |
-| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, one uniquely `ss`-correlated TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd, same-fd bidirectional splice, loopback-only tuple routing with zero non-loopback leg-B egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples with no direct bypass, direct-host-TAP topology, typed constant eight-rule identity, exact managed/source/destination membership, and total cleanup; same-node AF_PACKET `0x17` parsing is excluded by native falsifier `e72385d6`, and historical E07 is not current proof |
+| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, exactly one caller-allocation `mtls.intercept.install.success` Layer receipt as the realtime intercept-live barrier before EXEC release, zero guest-originated TAP frames at/before that barrier, one uniquely `ss`-correlated TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd, same-fd bidirectional splice, loopback-only tuple routing with zero non-loopback leg-B egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples with no direct bypass, typed full element state, direct-host-TAP topology, and total cleanup; typed-set poll completion has no timing authority, same-node AF_PACKET `0x17` parsing is excluded, and historical E07 is not current proof |
 | S-ND295-02..05 | pure-function / bounded-change | grouped values plus address-pool properties and cap table | control-plane `guest_network::pool_acceptance`, `netns_density_guest_network::scratch_complement_never_fabricates_zero`, and the direct-TAP VMM projection body | complete reasoned-pending bodies |
 | S-ND295-06..09 | bounded-change | action-owner refusal/lease plus classifier partitions | `netns_density_guest_network::{provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause,teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse}` and `guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | pre-existing accepted bodies remain mapped to revised `02-01` |
 | S-ND295-10 | bounded-change | Lima deliberate D6 detach + D9 guard/counter/capture/audit | `shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | reasoned-pending compiled RED scaffold; fixture owns only external typed detach and observations |
@@ -110,6 +110,10 @@ Existing 02-03 owner bodies retain their current reasoned markers.
 | Lima public `HostMtlsIntercept` | Real IP table, two chains, three typed sets/all elements, eight ordered normalized rules, private handles/ruleset generation, unrelated foreign-table sentinel | Semantic identity ignores handles. Target-only replacement preserves every other normalized byte; exact reapply/refusal emits no generation mutation; guard Drop restores absence; foreign sentinel remains byte-equal. No injected rollback fault. |
 | 02-03 published worker prerequisite | Two socket addresses/fds, two task slots, node guard, owner lifecycle/publication, capability registry/elements/handles | Startup failure returns to Absent/BootClosed. One wrong-target `audit_shared_owner` / `converge_shared_owner` result is structured and observe-only; guard stays retained and shutdown relinquishes. No clock, retry, deadline, or request claim. |
 | 03-03 private control-plane supervisor | Existing `SharedNetworkSupervisorHandle`, production-used `run_mtls_owner`, paired EXEC state, same injected clock, real worker, request channel, shutdown token, and source-local real `ServerHandle` terminal fixture | The source-local harness observes the spawned production future return `Poll::Pending` before each next `SimClock` advance, proving its logical wait is registered without a production hook, real sleep, or polling loop. Before each boundary: exact prior attempts/elapsed, empty request, unchanged journal. After 249 ms, elapsed advances by 249 ms while attempts/journal/request stay fixed. Final 1 ms yields Recovering attempt `n` only for 1..19; boundary 20 yields the sole FailStop `20/5s` request, never observable Recovering(20). No later attempt. Terminal ownership remains `ServerHandle`. |
+
+All nft rule/set handles in these layers are private kernel-assigned receipts.
+Acceptance compares semantic identity and relative ownership/preservation, never
+a literal numeric handle such as `74`.
 
 The source-local post-commit table covers, for both `prior = Some(identity)`
 and `prior = None`: desired semantic mismatch and desired lower read failure;
@@ -321,6 +325,7 @@ hook.
 GIVEN the built default-feature node is started on native metal with no live allocation owned by the example
 WHEN the operator deploys the checked-in VM Service and VM client Job through `overdrive deploy`
 THEN the callee reports Running with replicas 1/1 and the reply-dependent caller reports Succeeded after receiving the byte-distinct guest reply by service name
+AND the caller's sole intercept-install success event precedes guest EXEC and every guest-originated TAP frame
 AND one exact leg-B tuple/inode/sole fd is TLS 1.3 kTLS TX/RX and participates in positive kernel splice in both directions
 AND lossless interface capture proves that tuple is loopback-only with zero physical or ordinary-forwarding egress
 AND plaintext markers are confined to the exact guest-local leg-F and leg-S bridge/TAP tuples with no direct guest-to-guest bypass
@@ -336,7 +341,21 @@ be reviewed as a point-in-time built-binary receipt; the stabilized Rust
 walking skeleton remains the continuing regression alarm.
 
 D-295-DELIVER-04-01 removes all evidence-boundary discretion from this
-scenario. Native run `e72385d6` uniquely correlated exact tuple
+scenario. The intercept-live timing authority is the existing synchronous
+`mtls.intercept.install.success` event, not completion of a userspace typed-set
+poll. A tracing Layer installed before deployment accepts exactly one event for
+the exact caller allocation and samples `CLOCK_REALTIME` inside `on_event`.
+Production source order is successful awaited `start_alloc` (with `2 + P`
+elements active/read back), then the event, then
+`release_for_exit_emission`. AF_PACKET `SO_TIMESTAMPNS` uses the same realtime
+domain. Any guest-originated caller-TAP frame with a missing timestamp or
+timestamp `<=` the event barrier fails; only a strictly later timestamp is
+post-live. Event absence, duplication, wrong allocation, or capture loss fails
+closed. Typed state observation still proves the complete constant program and
+dynamic member universe, but its delayed poll-completion timestamp supplies no
+timing credit; changing 20 ms polling to 1 ms is not evidence.
+
+Native run `e72385d6` uniquely correlated exact tuple
 `100.95.0.1:35260 → 100.95.0.2:18951`, its live TLS 1.3 kTLS TX/RX `ss`
 record, inode and sole in-process fd. Its lossless 6,076-packet loopback capture
 contained both directions but zero complete TLS `0x17` records, proving that
@@ -777,7 +796,7 @@ observer supplies only the driven-boundary postcondition.
 
 | Affected evidence | Corrected closed universe | Preserved evidence |
 |---|---|---|
-| S-ND295-01 guest-stack production composition | one canonical constant identity (three schemas, five prerouting rules, three output rules); exact Service + Job `managed_guest_ips`/`outbound_sources`; exact Service destination tuple; Job removal leaves the Service complement; Service removal leaves the same empty constant program | real production serve/deploy composition, Running 1/1, reply-dependent success, first-SYN/TAP timing, exactly one selected-backend `ss` TLS 1.3 kTLS TX/RX tuple/inode/sole fd with same-fd bidirectional splice, loopback-only leg-B and zero non-loopback egress, bridge/TAP plaintext confined to exact leg-F/leg-S tuples with no bypass, direct-host-TAP topology, VMM/TAP/cgroup/run-dir cleanup; no same-node AF_PACKET `0x17` claim |
+| S-ND295-01 guest-stack production composition | one canonical constant identity (three schemas, five prerouting rules, three output rules); exact Service + Job `managed_guest_ips`/`outbound_sources`; exact Service destination tuple; Job removal leaves the Service complement; Service removal leaves the same empty constant program | real production serve/deploy composition, Running 1/1, reply-dependent success, exactly one exact-allocation success-event realtime barrier with every guest TAP frame strictly later, exactly one selected-backend `ss` TLS 1.3 kTLS TX/RX tuple/inode/sole fd with same-fd bidirectional splice, loopback-only leg-B and zero non-loopback egress, bridge/TAP plaintext confined to exact leg-F/leg-S tuples with no bypass, direct-host-TAP topology, VMM/TAP/cgroup/run-dir cleanup; typed poll time and literal kernel handles carry no evidence, and there is no same-node AF_PACKET `0x17` claim |
 | S-ND295-25 source-local + native | two exact allocation element universes; first stop removes only its `2 + P`; second elements, handle, F/C sockets/tasks, and constant identity remain byte-equal | immutable capability/handle ownership, real `HostMtlsEnforcement`, direct client/peer byte-distinct exchange before and after isolated stop, zero node-guard Drop |
 | S-ND295-26 source-local + native | two published `2 + P` universes become exactly empty under one unchanged constant identity | third held claim parks shutdown, admissions close, every handle/task/socket drains/joins, constant empty program is relinquished rather than deleted |
 

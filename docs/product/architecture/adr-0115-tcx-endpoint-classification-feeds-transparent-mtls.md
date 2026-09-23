@@ -179,6 +179,35 @@ physical-wire receipt must still prove TLS records (`0x17`) and no cleartext on
 that real egress interface, but cross-host selection remains GH #298 and is not
 an S-ND295-01 claim.
 
+### S-ND295-01 intercept-live timing receipt
+
+The existing production event `mtls.intercept.install.success` is the sole
+timing authority for the zero-frame-before-intercept assertion. The action shim
+emits it synchronously immediately after awaited
+`mtls_lifecycle.start_alloc(&spec)` succeeds—therefore after allocation
+elements are active and read back—and immediately before
+`driver.release_for_exit_emission(handle)` can release guest EXEC.
+
+The native test installs a tracing Layer before deployment. Its synchronous
+`on_event` callback accepts exactly one event whose `alloc` field equals the
+caller allocation ID and samples `clock_gettime(CLOCK_REALTIME)`. AF_PACKET
+`SO_TIMESTAMPNS` is in the same realtime domain. Every guest-originated frame
+on the caller TAP with a missing timestamp or timestamp less than or equal to
+that barrier fails the zero-frame assertion; only a strictly later timestamp
+is post-live. Event absence, duplication, wrong allocation, or capture loss
+fails closed.
+
+The typed generation-bracketed shared-IP state remains mandatory evidence of
+the complete constant program and exact `2 + P` member universe. Its userspace
+poll-completion timestamp is not an ordering receipt and cannot replace or
+move the event barrier; changing a polling interval cannot strengthen that
+evidence. This uses the existing event and source order without a product hook,
+event-field change, clock injection, or API.
+
+Observed nft rule/set handles remain private kernel-assigned receipts. Tests
+compare semantic identity and relative ownership/preservation only; they never
+require a literal handle number such as `74`.
+
 ### Ownership and order
 
 - The node shared-switch owner owns the program, endpoint/counter maps, bpffs

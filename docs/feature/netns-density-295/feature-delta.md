@@ -131,6 +131,10 @@ bidirectional splice and zero unapproved non-loopback egress. The correction
 adds no product behavior, test hook, public API, owner, route, persistence, or
 cross-host claim. The existing roadmap remains executable with
 `validation.status` remaining `approved`.
+The final S-ND295-01 readiness clarification uses the already-emitted
+`mtls.intercept.install.success` event as the exact intercept-live timing
+receipt; typed-set polling remains semantic state evidence only. No production
+event, field, hook, clock, or API is added.
 **Documentation density:** `lean` (`expansion_prompt=ask-intelligent`,
 `provenance=explicit_override`). Only Tier-1 `[REF]` sections are emitted in
 this feature delta. The Level-3 SSOT diagram is the solution-architect role's
@@ -2592,6 +2596,9 @@ assert semantic identity while treating handles as private receipts; exact
 target-only delta, zero dynamic-element complement, generation-consistent
 idempotence/no-mutation, byte-equal refusal state, outside-table preservation,
 and successful guard-Drop absence. Lima never forces lower rollback faults.
+Kernel rule/set handles are private, kernel-assigned receipts: tests may compare
+semantic identity, presence/absence, and relative same-owner preservation or
+replacement, but never require a literal numeric handle such as `74`.
 The `02-03` worker universe ends at two sockets/addresses, two task slots, node
 guard token, lifecycle/publication state, capability registry/elements/handles,
 one compare-and-return conflict, and sealed relinquishment. It contains no
@@ -4768,6 +4775,21 @@ source-only, pin-exists-only, or mocked probe is not evidence.
   release → terminal commit. The node listeners stay live. A reused address is
   not assigned to its successor before predecessor registration removal and
   release-last cleanup complete.
+- **S-ND295-01 intercept-live timing receipt:** install a test tracing Layer
+  before deployment and accept exactly one event whose metadata name is
+  `mtls.intercept.install.success` and whose `alloc` field equals the exact
+  caller allocation ID. The Layer samples `clock_gettime(CLOCK_REALTIME)`
+  synchronously in `on_event`; that value is the sole intercept-live barrier
+  because the production source emits the event immediately after awaited
+  `mtls_lifecycle.start_alloc(&spec)` returns and immediately before
+  `driver.release_for_exit_emission(handle)`. AF_PACKET `SO_TIMESTAMPNS` uses
+  the same realtime domain. Every guest-originated frame on the caller TAP with
+  a missing timestamp or timestamp `<=` the event barrier fails the zero-frame
+  assertion; only timestamps strictly later than the barrier are post-live.
+  Event absence, duplication, or a wrong allocation ID fails closed. The typed
+  generation-bracketed state observation must still prove the complete constant
+  program and `2 + P` member universe, but its userspace poll-completion time is
+  never a timing authority.
 - **Counterexample:** moving intercept-live before READY would require binding
   listeners for a guest that may never boot and would still not strengthen the
   meaning of Running.
@@ -4900,14 +4922,24 @@ kTLS connection. GH #298 owns any future cross-host physical-wire design.
 The S-ND295-01 native test must join the following existing observations
 without a product hook or API:
 
-1. Journal `ss -H -n -t -i -e` throughout both application exchanges. The one
+1. Install a tracing Layer before deployment. Its synchronous `on_event`
+   callback accepts exactly one `mtls.intercept.install.success` event for the
+   exact caller allocation and samples `CLOCK_REALTIME`. That timestamp is the
+   intercept-live barrier. The production source order is fixed:
+   `start_alloc` successful return (including `2 + P` activation/read-back) →
+   success event → `release_for_exit_emission`. Any guest-originated caller-TAP
+   frame with missing `SO_TIMESTAMPNS` or timestamp `<=` the barrier fails;
+   event absence/duplicate/wrong allocation or capture loss fails closed.
+   Typed set observation separately proves the full semantic universe, but its
+   delayed polling timestamp supplies no ordering credit.
+2. Journal `ss -H -n -t -i -e` throughout both application exchanges. The one
    eligible leg-B record has source IP equal to the node shared-bridge gateway,
    destination equal to the `ServiceBackendsResolve`-selected workload address
    and declared TCP port, and one record containing `tcp-ulp-tls`, TLS 1.3,
    `txconf`, `rxconf`, and a nonzero socket inode. The inode must map through
    `/proc/self/fd` to exactly one in-process fd. Zero or multiple eligible
    tuples, inodes, or fds fail closed.
-2. Attach the existing strace-style thread-group observer before the production
+3. Attach the existing strace-style thread-group observer before the production
    pump threads start. After the first request/reply establishes steady state,
    the second byte-distinct exchange must show completed positive `splice(2)`
    calls with that exact leg-B fd as request destination and response source;
@@ -4915,21 +4947,21 @@ without a product hook or API:
    attribution to another fd, or ambiguous thread/fd ownership fails closed.
    The exact live socket state and same-inode bidirectional data movement are
    the same-node TLS 1.3/kTLS/splice confidentiality proof.
-3. Start one loss-accounted all-interface AF_PACKET capture (`ifindex = 0`)
+4. Start one loss-accounted all-interface AF_PACKET capture (`ifindex = 0`)
    before caller-VM release and retain every frame's actual ifindex through the
    exchange. The exact leg-B tuple and reverse must be observed only on the
    loopback ifindex and zero times on every non-loopback ifindex. This is the
    positive local-divert plus negative physical/ordinary-forwarding egress
    oracle. Loopback payload bytes are not parsed as TLS and cannot add or remove
    kTLS credit.
-4. Partition the same capture by the exact shared-bridge and managed-TAP
+5. Partition the same capture by the exact shared-bridge and managed-TAP
    ifindices. Plaintext is permitted only on the two guest-local boundaries:
    the caller guest-address-to-frontend tuple and reverse toward/from leg F,
    and exactly one non-kTLS leg-S tuple from node gateway address and ephemeral
    port to Service workload address and declared port, plus its reverse. Both
    byte-distinct request/reply pairs must be present there, while a direct
    caller-guest-to-Service-guest tuple is absent.
-5. Across every other observed non-loopback ifindex and tuple, all four
+6. Across every other observed non-loopback ifindex and tuple, all four
    byte-distinct plaintext markers must have zero hits. Packet drops,
    truncation, missing positive guest-local markers, sequence gaps/conflicts,
    the exact leg-B tuple on any non-loopback interface, a marker on an
@@ -7059,7 +7091,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-DISTILL-15 shared-IP boundary/evidence allocation | **Approved layering; P02-20/21/22 assertion correction PROPOSED, independent DISTILL/roadmap re-review pending:** `run_mtls_owner` sends/parks only; `ServerHandle::shutdown` solely owns terminal drain; each 249 ms interval advances elapsed without attempts/effects; attempts 1..19 expose exact Recovering snapshots; attempt 20 is observed only as the exact 5 s FailStop request; closed journal/no attempt 21; no API/owner change | This feature delta § *D-295-DISTILL-15* and § *D-295-DISTILL-8*; C-295-C/PORT-295-C/S2-F01 and ADR-0125 ownership unchanged; no brief/ADR/C4 change |
 | DESIGN-02-03 allocation-element lower boundary | **USER-DIRECTED 2026-09-23:** existing general nft exports are insufficient; add only one opaque typed shared-IP state projection, its generation-bracketed observer, and the four exact group-shaped outbound/inbound/delete/boot-clear effects. Preserve D15 observe/replace, the exact public five-method `MtlsIntercept`, private raw ABI/handles, Host-owned tokens/refcounts, grouped normal deletion/read-back, and Drop fallback. The `&str` to `Ipv4Addr` edit is mandatory conformance, with no compatibility/fallback branch. | This feature delta § *DESIGN-02-03 correction — exact allocation-element netlink boundary* and amended ADR-0125; no brief/C4/component/product expansion and no further review cycle per user direction |
 | D-295-DELIVER-03-01 EXEC-claim evidence allocation | **USER-AUTHORIZED and independently APPROVED by solution-architecture review iteration 2 on 2026-09-22:** S-ND295-27's complete step-`03-01` evidence is public return/projection plus blocking/wake/refusal/terminal behavior through the opaque gate. S-ND295-28 retains the production `VmDriver` claim-lifetime/acknowledgement/cancellation schedules. Private `active_claims +1/-1` bookkeeping is not independently observed | [Step 03-01 design remediation](deliver/design-remediation-03-01.md); brief effect-isolation prose aligned; no public/private API, owner, production, test, persistence, ADR, or C4 change |
-| D-295-DELIVER-04-01 same-node protected-transport evidence boundary | **USER-DIRECTED 2026-09-23; corrected after native falsification `e72385d6`; no review cycle:** one uniquely correlated `ss` TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd plus same-fd positive splice in both directions proves the protected socket. Lossless all-interface capture proves that exact tuple is loopback-only, carries no physical/ordinary-forwarding egress, and exposes plaintext markers only on the exact leg-F/leg-S bridge/TAP tuples with no direct bypass. Same-node AF_PACKET `0x17` parsing is removed as empirically impossible; physical-wire `0x17` remains cross-host/out of #295. Missing, ambiguous, lossy, or unapproved evidence fails closed. | This feature delta § *D-295-DELIVER-04-01*; amended ADR-0115, brief, DISTILL S-ND295-01, and roadmap step `04-01`; no product/API/test-hook/architecture change and roadmap validation stays approved |
+| D-295-DELIVER-04-01 same-node protected-transport and intercept-live evidence boundary | **USER-DIRECTED 2026-09-23; corrected after native falsification `e72385d6`; no review cycle:** the exact allocation's sole synchronous `mtls.intercept.install.success` Layer receipt supplies the `CLOCK_REALTIME` intercept-live barrier between successful `start_alloc` and EXEC release; typed-set polling proves semantics only. One uniquely correlated `ss` TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd plus same-fd positive splice in both directions proves the protected socket. Lossless all-interface capture proves loopback-only leg-B, zero physical/ordinary-forwarding egress, plaintext confined to exact leg-F/leg-S tuples, no pre-live caller-TAP frame, and no bypass. Same-node AF_PACKET `0x17` parsing is excluded. Missing/duplicate/wrong-allocation event, missing frame timestamp, private-handle literal comparison, ambiguous/lossy/unapproved evidence all fail closed. | This feature delta § *D-295-DELIVER-04-01*; amended ADR-0115, DISTILL S-ND295-01, and roadmap step `04-01`; no product event/API/test-hook/architecture change and roadmap validation stays approved |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
@@ -7493,7 +7525,7 @@ independent.
 | Adapter / owner | Real-I/O or production-owner scenario | Coverage disposition |
 |---|---|---|
 | Built CLI `serve` + `deploy` | S-ND295-01 / existing E07 checked-in example | E07 runner exists but retained evidence is historical; the stabilized post-cut Rust traffic body uses the approved shared-owner/intercept seams |
-| Action shim + convergence runtime | S-ND295-06, S-ND295-07, S-ND295-28 | Accepted high-level test seams only; no simulation-owned action sequence |
+| Action shim + convergence runtime | S-ND295-01, S-ND295-06, S-ND295-07, S-ND295-28 | S-ND295-01 captures the existing synchronous `mtls.intercept.install.success` event for the exact allocation between successful `start_alloc` and `release_for_exit_emission`; other scenarios retain accepted high-level test seams only, with no simulation-owned action sequence or new event/hook |
 | `HostSharedGuestNetworkOwner` startup algorithm | S-ND295-00 | Source-local private validator drives every D14 semantic mismatch/lower source; the owner table uses only exercise-before-close and proves cleanup/continuation/all-fifteen inventory; serialized Lima ordinary boot captures production stage/attachment/guard/complement events across `run_server` with no monitor or transient poll |
 | Public `SimSharedGuestNetworkOwner` | S-ND295-00, S-ND295-06..07, S-ND295-13, S-ND295-29..33 | D10/D11 exact non-audit slots, twelve typed component audit slots, one-shot exact probe/audit errors, ordered non-draining calls and typed `test_wiring` prove deterministic port/composition reaction; D13 additionally snapshots the same injected Sim host only at the actual sweep port call; none substitutes for private host cleanup or real worker task-exit classification |
 | `GuestNetworkProvisioner` host adapter | S-ND295-11..13 | D12A source-local tests drive the real owner through typed allocation leaves; Lima/native bodies retain real bridge/TAP/guard/TCX effects and complete complements |
@@ -7629,7 +7661,7 @@ oracles; black-box expectations do not absorb them.
 | Default in-process / explicit Linux runner | Rust production composition with injected Sim ports; the roadmap may wrap exact-name commands in Lima only as a Linux toolchain runner; no host/kernel I/O is inferred | Existing source-local evidence remains. S19-A's Host body and S19-B's control-plane-private supervisor body are authored reasoned-pending under 02-02 and 03-03 respectively. The worker body is prerequisite-only. |
 | Lima root | Linux/cgroup v2/BPF/nft/netlink, `integration-tests`, explicit whole-`overdrive-control-plane` **and whole-`overdrive-worker` integration-binary** assignments to one-thread `host-kernel-shared` verified through nextest `show-config`, named test CIDR leases | Existing D14/D15 real-adapter bodies retain their recorded state. S19-A's authored Lima `shared_program_valid_wrong_target_observation_is_non_mutating` proves only host-adapter no-mutation and is currently real-kernel RED at atomic create. S19-B is source-local control-plane timing evidence, not Lima/kernel evidence. S-ND295-34/37 retain their lanes. |
 | Native x86_64 metal — in-process S13 | canonical lease, no virtualization/nesting, usable KVM, real Cloud Hypervisor and guest artifacts; no built product binary | S-ND295-13 `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance` only |
-| Native x86_64 metal — remaining feature lanes | canonical lease, no virtualization/nesting, usable KVM, built default-feature binary, real Cloud Hypervisor and guest artifacts; S-ND295-01 additionally requires one loss-accounted all-interface AF_PACKET capture retaining actual ifindices, `ss -H -n -t -i -e`, readable `/proc/self/fd`, and the existing strace attach/thread-group observation | S-ND295-01, S-ND295-23, S-ND295-25 `two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops`, S-ND295-26 `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle`, S-ND295-35..37 and both T1 receipts. S-ND295-01 fails rather than skips when its tuple/inode/fd/splice evidence is zero or ambiguous, capture is lossy, leg-B appears on non-loopback, plaintext appears outside exact leg-F/leg-S tuples, or direct bypass appears. Same-node `0x17` AF_PACKET parsing is not evidence. Native run `e72385d6` is the falsifier that established this boundary. |
+| Native x86_64 metal — remaining feature lanes | canonical lease, no virtualization/nesting, usable KVM, built default-feature binary, real Cloud Hypervisor and guest artifacts; S-ND295-01 additionally requires a pre-deploy tracing Layer with realtime `on_event` sampling, one loss-accounted all-interface AF_PACKET capture retaining `SO_TIMESTAMPNS` and actual ifindices, `ss -H -n -t -i -e`, readable `/proc/self/fd`, and the existing strace attach/thread-group observation | S-ND295-01, S-ND295-23, S-ND295-25 `two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops`, S-ND295-26 `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle`, S-ND295-35..37 and both T1 receipts. S-ND295-01 fails rather than skips when the exact-allocation success event is absent/duplicate/wrong, a guest TAP timestamp is missing or not strictly after the event barrier, tuple/inode/fd/splice evidence is zero/ambiguous, capture is lossy, leg-B appears on non-loopback, plaintext appears outside exact leg-F/leg-S tuples, or direct bypass appears. Typed state polling has no timing authority; private handles are never literal-valued assertions. |
 | Fresh-process retained owned rules | BootClosed, zero managed TAPs after VMM/attachment sweep, complete owned identity or empty state | S-ND295-13..18 |
 | Runtime tamper | already-published owner with recorded exact listener ports and append-only diagnostics | S19-A adapter no-mutation in 02-02; published worker prerequisite in 02-03; S19-B cadence/deadline/request closure plus S-ND295-29..33 in 03-03; S-ND295-37 native fault evidence later |
 
