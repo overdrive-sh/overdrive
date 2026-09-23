@@ -39,7 +39,7 @@ owners; fixtures may inject faults only through accepted driven ports.
 | ID | Contract shape | Kind / evidence | Rust or receipt home | Status at DISTILL |
 |---|---|---|---|---|
 | S-ND295-00 | bounded-change | D12 inventory plus D14A projection, private validator, superseding owner order, and tracing-captured ordinary boot | dataplane `guest_tcx::tests::{every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics,wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less,capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source,a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count,every_receipted_family_returns_one_and_clean_families_return_exact_zero,startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi}`; control-plane `guest_network::scratch_probe_packet_acceptance::{every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator,classifier_runs_precede_close_and_each_stage_is_fresh}` plus transitioned `scratch_probe_acceptance` setup/failure tables; integration `guest_tcx_inventory::{clean_and_receipted_inventory_observes_all_eight_exact_families,retained_unpinned_maps_programs_and_links_survive_handle_release_and_remain_observable,wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero}` plus `shared_guest_network_startup::production_startup_exercises_classifier_and_detached_guard_before_admission` | D14A's four exact bodies are reasoned-pending: projection, validator, and owner-order fail on missing production behavior; the executable Lima body captures five ordered production events and remains environment-gated; the earlier three inventory placeholders remain separately user-waived |
-| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, the uniquely `ss`-correlated same-node leg-B tuple/reverse on loopback with TLS 1.3/kTLS/splice/no cleartext, separate plaintext leg-F/leg-S bridge/TAP evidence with no bypass, direct-host-TAP topology, typed constant eight-rule identity, exact managed/source/destination membership, and total cleanup; historical E07 is not current proof |
+| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, one uniquely `ss`-correlated TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd, same-fd bidirectional splice, loopback-only tuple routing with zero non-loopback leg-B egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples with no direct bypass, direct-host-TAP topology, typed constant eight-rule identity, exact managed/source/destination membership, and total cleanup; same-node AF_PACKET `0x17` parsing is excluded by native falsifier `e72385d6`, and historical E07 is not current proof |
 | S-ND295-02..05 | pure-function / bounded-change | grouped values plus address-pool properties and cap table | control-plane `guest_network::pool_acceptance`, `netns_density_guest_network::scratch_complement_never_fabricates_zero`, and the direct-TAP VMM projection body | complete reasoned-pending bodies |
 | S-ND295-06..09 | bounded-change | action-owner refusal/lease plus classifier partitions | `netns_density_guest_network::{provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause,teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse}` and `guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | pre-existing accepted bodies remain mapped to revised `02-01` |
 | S-ND295-10 | bounded-change | Lima deliberate D6 detach + D9 guard/counter/capture/audit | `shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | reasoned-pending compiled RED scaffold; fixture owns only external typed detach and observations |
@@ -228,9 +228,9 @@ AND stopping both workloads leaves no resource owned by that journey
 ```gherkin
 GIVEN two credential-free guests communicating through the platform
 WHEN one guest exchanges a byte-distinct request and reply with the other
-THEN the same-node peer-facing leg-B/leg-C segment on loopback carries TLS 1.3 application data in both directions
-AND that exact kTLS tuple carries no application cleartext
-AND the shared bridge separately carries the expected guest-local plaintext to leg F and from leg S with no direct guest-to-guest bypass
+THEN the exact same-node leg-B socket is TLS 1.3 kTLS TX/RX and its sole inode/fd carries positive splice in both directions
+AND that exact tuple is locally diverted on loopback and never appears on a physical or ordinary-forwarding interface
+AND plaintext appears only on the expected guest-local leg-F and leg-S bridge/TAP tuples with no direct guest-to-guest bypass
 AND stopping one workload cannot transfer its identity or connection to a successor
 ```
 
@@ -321,8 +321,9 @@ hook.
 GIVEN the built default-feature node is started on native metal with no live allocation owned by the example
 WHEN the operator deploys the checked-in VM Service and VM client Job through `overdrive deploy`
 THEN the callee reports Running with replicas 1/1 and the reply-dependent caller reports Succeeded after receiving the byte-distinct guest reply by service name
-AND the same-node peer-facing leg-B/leg-C tuple and its reverse are observed on loopback as TLS 1.3 application data with kTLS TX/RX, correlated kernel splice, and no application cleartext
-AND shared-bridge capture separately proves plaintext guest-local delivery to leg F and from leg S without direct guest-to-guest bypass
+AND one exact leg-B tuple/inode/sole fd is TLS 1.3 kTLS TX/RX and participates in positive kernel splice in both directions
+AND lossless interface capture proves that tuple is loopback-only with zero physical or ordinary-forwarding egress
+AND plaintext markers are confined to the exact guest-local leg-F and leg-S bridge/TAP tuples with no direct guest-to-guest bypass
 AND one unchanged eight-rule program owns exactly two managed/source members per allocation plus one destination member per declared TCP port
 AND the production path owns one shared guest switch, two shared interception listeners, one TAP per live guest, and no per-workload namespace, veth pair, `/30`, `NetSlot`, or `host_veth`
 AND public stop plus owner cleanup leaves the example's VMM, TAP, classifier, nft element, cgroup, run-directory, and preparation complements empty
@@ -335,33 +336,41 @@ be reviewed as a point-in-time built-binary receipt; the stabilized Rust
 walking skeleton remains the continuing regression alarm.
 
 D-295-DELIVER-04-01 removes all evidence-boundary discretion from this
-scenario. The authoritative same-node TLS capture is AF_PACKET bound to the
-exact loopback ifindex from before caller-VMM release through the successful
-exchange. A concurrent `ss -H -n -t -i -e` journal must yield exactly one
-leg-B candidate from the shared-bridge gateway address to the resolver-selected
-Service workload address and declared port, with TLS 1.3, `tcp-ulp-tls`, TX,
-and RX configuration in one record. Its exact tuple is the request direction;
-its reverse is the response direction. Both streams require complete `0x17`
-records and independent zero-hit scans for both plaintext markers.
+scenario. Native run `e72385d6` uniquely correlated exact tuple
+`100.95.0.1:35260 → 100.95.0.2:18951`, its live TLS 1.3 kTLS TX/RX `ss`
+record, inode and sole in-process fd. Its lossless 6,076-packet loopback capture
+contained both directions but zero complete TLS `0x17` records, proving that
+same-node AF_PACKET bytes cannot serve as the ciphertext oracle for the local
+output-divert path.
 
-The same live `ss -e` inode must map through `/proc/self/fd` to one leg-B fd.
-After a first request/reply establishes the pumps, the second byte-distinct
-exchange must show completed positive `splice(2)` calls with that fd as request
-destination and response source, and the guest must receive the second reply
-byte-exact. The existing strace-style thread-group attribution is the permitted
-test mechanism; no production accessor or hook may be added.
+The corrected proof journals `ss -H -n -t -i -e` through both exchanges and
+requires exactly one leg-B candidate from shared-bridge gateway address to the
+resolver-selected Service workload address and declared port. One record must
+contain TLS 1.3, `tcp-ulp-tls`, TX and RX configuration, and a nonzero inode;
+that inode must map through `/proc/self/fd` to exactly one live fd. After the
+first request/reply establishes the pumps, the existing strace-style
+thread-group observer must show completed positive `splice(2)` with that fd as
+the second request's destination and the second response's source, followed by
+the guest's byte-exact second reply. No production accessor or hook is added.
 
-A separate loss-accounted shared-bridge/TAP capture must positively observe
-the caller's plaintext flow toward leg F and both byte-distinct markers on
-exactly one non-kTLS leg-S tuple from node gateway address and ephemeral port
-to Service workload address and declared port, plus its reverse, while
-observing no direct caller-guest-to-Service-guest bypass. The distinct caller
-guest-address-to-frontend tuple is the leg-F positive. Bridge/TAP evidence is
-not peer-wire TLS evidence. Capture drops, truncation, missing SYN anchors,
-sequence gaps/conflicts, wrong-interface exact-tuple frames, a missing
-direction, zero candidates, multiple candidates, or an inode/fd/splice
-mismatch fail closed. All-interface capture may be used for diagnostics only.
-Cross-host physical-wire evidence is outside #295.
+One loss-accounted all-interface AF_PACKET capture (`ifindex = 0`) starts
+before caller-VMM release and retains every actual ifindex. The exact leg-B
+tuple and reverse must appear only on loopback and zero times on every
+non-loopback interface. On the shared bridge and managed TAPs, plaintext is
+permitted only on the caller guest-address-to-frontend tuple and reverse
+toward/from leg F and exactly one non-kTLS leg-S tuple from node gateway address
+and ephemeral port to Service workload address and declared port, plus its
+reverse. Both byte-distinct request/reply pairs must be present there, while a
+direct caller-guest-to-Service-guest tuple is absent. All four plaintext
+markers must have zero hits on every other observed non-loopback
+interface/tuple.
+
+Zero or multiple tuple/inode/fd matches, missing either splice direction,
+capture drops/truncation, missing positive guest-local markers, sequence
+gaps/conflicts, leg-B on a non-loopback interface, plaintext on an unapproved
+interface/tuple, or direct bypass fails closed. Loopback payload is not parsed
+as TLS. TLS `0x17` capture remains a future cross-host physical-wire receipt
+outside #295.
 
 ### S-ND295-02 — A guest network assignment is complete or absent
 
@@ -768,7 +777,7 @@ observer supplies only the driven-boundary postcondition.
 
 | Affected evidence | Corrected closed universe | Preserved evidence |
 |---|---|---|
-| S-ND295-01 guest-stack production composition | one canonical constant identity (three schemas, five prerouting rules, three output rules); exact Service + Job `managed_guest_ips`/`outbound_sources`; exact Service destination tuple; Job removal leaves the Service complement; Service removal leaves the same empty constant program | real production serve/deploy composition, Running 1/1, reply-dependent success, first-SYN/TAP timing, exactly one selected-backend `ss` TLS 1.3 kTLS TX/RX tuple/reverse on loopback with zero cleartext and same-inode/fd bidirectional splice, separate bridge/TAP plaintext leg-F/leg-S and no-bypass evidence, direct-host-TAP topology, VMM/TAP/cgroup/run-dir cleanup |
+| S-ND295-01 guest-stack production composition | one canonical constant identity (three schemas, five prerouting rules, three output rules); exact Service + Job `managed_guest_ips`/`outbound_sources`; exact Service destination tuple; Job removal leaves the Service complement; Service removal leaves the same empty constant program | real production serve/deploy composition, Running 1/1, reply-dependent success, first-SYN/TAP timing, exactly one selected-backend `ss` TLS 1.3 kTLS TX/RX tuple/inode/sole fd with same-fd bidirectional splice, loopback-only leg-B and zero non-loopback egress, bridge/TAP plaintext confined to exact leg-F/leg-S tuples with no bypass, direct-host-TAP topology, VMM/TAP/cgroup/run-dir cleanup; no same-node AF_PACKET `0x17` claim |
 | S-ND295-25 source-local + native | two exact allocation element universes; first stop removes only its `2 + P`; second elements, handle, F/C sockets/tasks, and constant identity remain byte-equal | immutable capability/handle ownership, real `HostMtlsEnforcement`, direct client/peer byte-distinct exchange before and after isolated stop, zero node-guard Drop |
 | S-ND295-26 source-local + native | two published `2 + P` universes become exactly empty under one unchanged constant identity | third held claim parks shutdown, admissions close, every handle/task/socket drains/joins, constant empty program is relinquished rather than deleted |
 

@@ -11511,24 +11511,25 @@ For a selected same-node peer, those arrows name three distinct observation
 boundaries. The source TAP/shared bridge carries guest-local plaintext toward
 leg F. The host-local leg-B socket is then marked in the nft output route hook
 and re-routed by the accepted fwmark/table-100 `local ... dev lo` route into
-shared leg C; that exact tuple and reverse on loopback are the **peer-facing
-encrypted boundary**. After leg C decrypts, marked leg S carries plaintext over
-the shared bridge to the destination TAP. Cross-host physical wire remains out
-of #295.
+shared leg C; that exact socket is the **peer-facing protected-transport
+boundary**. After leg C decrypts, marked leg S carries plaintext over the shared
+bridge to the destination TAP. Cross-host physical wire remains out of #295.
 
-S-ND295-01 therefore binds its authoritative AF_PACKET TLS capture to the exact
-loopback ifindex and correlates exactly one `ss -H -n -t -i -e` leg-B tuple
-from the node gateway address to the selected backend address/port. Both tuple
-directions must reassemble TLS 1.3 application-data records with zero plaintext,
-and the same live socket inode/fd must be the production splice destination and
-source for the post-establishment request/reply. Zero, ambiguous, dropped,
-truncated, gapped, conflicting, wrong-interface, or uncorrelated evidence fails
-closed. A separate shared-bridge/TAP capture must positively observe the
-caller guest-address-to-frontend plaintext flow toward leg F, the unique
-node-gateway-to-selected-backend leg-S tuple and reverse carrying the plaintext
-markers, and no direct guest-to-guest bypass; it is never accepted as TLS wire
-evidence. This corrects the prior bridge-as-peer-wire wording without changing
-the product topology, enforcement core, or any API.
+Native run `e72385d6` falsified the earlier loopback-byte ruling: exact tuple
+`100.95.0.1:35260 → 100.95.0.2:18951`, TLS 1.3 kTLS TX/RX state, inode, and
+sole fd correlated uniquely, and a lossless 6,076-packet loopback capture saw
+both directions but zero complete TLS `0x17` records. S-ND295-01 therefore
+proves same-node confidentiality by joining the unique live `ss` kTLS
+tuple/inode/fd to positive splice with that fd as request destination and
+response source. One lossless all-interface capture independently proves the
+exact leg-B tuple is loopback-only and absent from every non-loopback interface.
+It permits plaintext only on the caller guest-address-to-frontend leg-F tuple
+and the node-gateway-to-selected-backend leg-S tuple (plus their reverses),
+requires the expected markers there, and rejects markers elsewhere or direct
+guest bypass. Missing, ambiguous, lossy, or unapproved evidence fails closed.
+Same-node AF_PACKET payload is not a TLS-record oracle; `0x17` physical-wire
+capture remains a cross-host receipt outside #295. This changes no product
+topology, enforcement core, or API.
 
 `overdrive-netlink` is absent from that runtime packet path. It is only the
 control/read-back adapter by which the shared-switch and intercept owners
@@ -11671,7 +11672,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
-| 2026-09-23 | **netns-density-295 S-ND295-01 same-node evidence-boundary correction (D-295-DELIVER-04-01; user-directed, no review cycle).** The exact leg-B/leg-C tuple and reverse on loopback are the authoritative same-node peer-facing encrypted boundary after output divert/table-100 local routing; one live `ss` TLS 1.3 kTLS TX/RX tuple, lossless bidirectional `0x17`/zero-cleartext capture, and same-inode/fd splice evidence must correlate fail-closed. Shared-bridge/TAP capture separately proves intentional plaintext to leg F/from leg S and no direct bypass. Prior bridge-as-peer-wire wording is corrected; no product/API/test-hook/topology/C4 change, and cross-host remains GH #298. — Morgan. |
+| 2026-09-23 | **netns-density-295 S-ND295-01 same-node evidence-boundary correction, revised after native falsifier `e72385d6` (D-295-DELIVER-04-01; user-directed, no review cycle).** Same-node AF_PACKET `0x17` parsing is removed: a uniquely correlated real TLS 1.3 kTLS TX/RX tuple/inode/fd and lossless bidirectional loopback capture exposed no complete TLS record. Exact kTLS state plus same-inode bidirectional splice now proves the protected transport; lossless all-interface capture proves loopback-only leg-B, zero physical/ordinary-forwarding egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples, and no bypass. Physical-wire `0x17` remains cross-host/out of #295. No product/API/test-hook/topology/C4 change. — Morgan. |
 | 2026-09-17 | **netns-density-295 D-295-DISTILL-10 deterministic simulation contract.** The public shared-network sim retains reusable standing/one-shot port-output scripting, ordered call observation, and shared-owner/EXEC test wiring. D11 extends component-audit scripting separately. This is test infrastructure, not product behavior or compatibility surface. — Morgan. |
 | 2026-09-17 | **netns-density-295 D-295-DISTILL-11 final acceptance reachability (authorized under autonomous DESIGN/DISTILL authority).** One module-private two-slot task owner classifies actual Tokio return, I/O error, panic, cancellation and observer-channel close into the accepted mTLS shared-owner errors; private abort-on-drop ownership prevents detached tasks, and source-local tests drive causes rather than constructing consequences. Shared-network audit now retains the exact closed component plus existing guest-network source. The public sim provides independent standing slots for all twelve components and one exact next component/source result while preserving ordered calls and reusable DST semantics. S37 proves EXEC closure through the existing structured `TcxLink` unhealthy event joined to supervisor begin-before-event ordering and the core Recovering claim block; native metal retains timing/frame/counter/TAP evidence. No public kill method, gate accessor, PID/process oracle, duplicate error family or new product outcome is added. — Morgan. |
 | 2026-09-17 | **netns-density-295 D-295-DISTILL-9 semantic bridge-family nft adapter (user-approved under autonomous DESIGN/DISTILL authorization; independently approved at iteration 12 after F-10-01/F-10-02 and F-11-01/F-11-02 remediation).** The shipped nft implementation gains one private IPv4/bridge family discriminator shared by payloads, atomic transactions, observers, dumps, normalization and decoding. Every existing public IPv4 API and PORT-295-C behavior remains unchanged. `overdrive-netlink::nft::bridge` owns validated guard specification, semantic observations/outcomes, complete set/lookup ABI, generation checks and staged idempotent convergence/cleanup. Read-only classification preserves actual family/table identity; every base, regular or unsupported chain occurrence exactly once without invented fields; kernel rule order, duplicates and ordered unknown expressions through one adapter-owned semantic program; and every owned or foreign target-table child through a disjoint exhaustive inventory. The same semantic rule facts form `GuestNetworkFact::BridgeGuard` expected/observed evidence, so control-plane copies neither raw ABI nor expected byte programs. Aggregate `delete_owned_guard` deletes only one exact exclusive owned identity with exactly the expected members. Identifier/priority/mark and member byte/NUL/IFNAMSIZ failures occur before I/O through typed validation; only transport/malformed-decode/ACK/kernel failures retain `NetlinkError`. `HostSharedGuestNetworkOwner` maps real transport sources to existing netlink errors and source-less validation/conflict to the existing postcondition mismatch; S-ND295-37 uses the same production adapter. No new ADR, guest-network error variant, raw builder, subprocess, public owner fault hook, daemon, HA, persistence, or PID/process acceptance test is added. — Morgan. |

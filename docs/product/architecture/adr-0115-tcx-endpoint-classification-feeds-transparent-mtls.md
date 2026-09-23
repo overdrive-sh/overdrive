@@ -5,7 +5,8 @@
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17.**
 The user-directed D-295-DELIVER-04-01 evidence-boundary correction on
-2026-09-23 requires no further review and changes no product mechanism.
+2026-09-23, revised after native falsifier `e72385d6`, requires no further
+review and changes no product mechanism.
 The approved compound decision is D-295-2: TCX/SCHED_CLS is the primary
 microVM TAP endpoint classifier; nftables remains the IP TPROXY/output socket
 delivery mechanism and supplies only the minimum bridge fail-closed guard for
@@ -132,44 +133,51 @@ surface. `HostMtlsEnforcement` remains unchanged for TLS 1.3, kTLS TX/RX, and
 kernel splice pumps; connection scaling belongs to
 [GH #300](https://github.com/overdrive-sh/overdrive/issues/300), not #295.
 
-### Same-node peer-facing byte boundary
+### Same-node protected-transport evidence boundary
 
 For a same-node `Mesh` peer, the encrypted peer-facing boundary is not the
 shared bridge. Outbound leg B is a host-local TCP socket to the selected
 backend workload address and declared port. The constant `output` route-hook
 divert marks that tuple; the accepted fwmark rule selects table 100's
 `local 0.0.0.0/0 dev lo` route; and shared leg C accepts the connection before
-ordinary bridge egress. The real leg-B/leg-C TCP segment is therefore observed
-on loopback. Leg C then decrypts and the marked leg-S socket delivers plaintext
-over the shared bridge to the destination TAP. The caller's TAP/bridge path to
-leg F is likewise plaintext by design.
+ordinary bridge egress. Leg C then decrypts and the marked leg-S socket delivers
+plaintext over the shared bridge to the destination TAP. The caller's
+TAP/bridge path to leg F is likewise plaintext by design.
 
-S-ND295-01 must bind its authoritative AF_PACKET TLS capture to the exact
-loopback ifindex before the first dial. A live `ss -H -n -t -i -e` journal must
-identify exactly one leg-B tuple from the shared-bridge gateway address to the
-selected backend address and port whose single record reports TLS 1.3,
-`tcp-ulp-tls`, TX configuration, and RX configuration. The tuple and exact
-reverse must each reassemble at least one TLS application-data record (`0x17`)
-with zero occurrence of either byte-distinct plaintext marker. Capture drops,
-truncation, gaps, conflicting bytes, wrong-interface frames, a missing
-direction, or zero/multiple correlating tuples fail closed.
+Native run `e72385d6` executed the prior ruling exactly. It uniquely correlated
+live leg-B tuple `100.95.0.1:35260 → 100.95.0.2:18951`, TLS 1.3 kTLS TX/RX
+state, socket inode, and sole in-process fd. A lossless loopback AF_PACKET
+capture observed both tuple directions across 6,076 packets but reassembled
+zero complete TLS `0x17` records. Loopback AF_PACKET bytes are therefore not an
+authoritative ciphertext layer for this locally diverted production path.
 
-Steady-state splice evidence is correlated to that same socket: the live
-`ss -e` inode maps through `/proc/self/fd` to the in-process leg-B fd, and the
-existing strace-style thread-group observation must show completed positive
-`splice(2)` calls with that fd as request destination and response source for a
-second post-establishment byte-distinct exchange. This is test-only observation
-of the existing production process and kernel; it adds no adapter accessor or
-product hook.
+S-ND295-01 instead joins three independent existing evidence layers:
 
-A separate loss-accounted shared-bridge/TAP capture is a positive plaintext
-delivery oracle, not TLS evidence. It proves the guest-local flow toward leg F,
-the unique non-kTLS leg-S tuple from node gateway address and ephemeral port to
-selected backend address and declared port (plus its reverse) carrying the
-request/reply markers, and the absence of a direct caller-guest-to-Service-
-guest bypass. The caller guest-address-to-frontend tuple is the distinct leg-F
-positive. Cross-host physical wire selection remains outside #295 and belongs
-to GH #298.
+- A live `ss -H -n -t -i -e` journal identifies exactly one leg-B tuple from
+  the shared-bridge gateway address to the selected backend address and port.
+  One record must report `tcp-ulp-tls`, TLS 1.3, TX configuration, RX
+  configuration, and a nonzero inode; `/proc/self/fd` must map it to exactly one
+  live in-process fd.
+- The existing strace-style thread-group observer must show completed positive
+  `splice(2)` calls with that exact fd as destination for the post-establishment
+  request and source for its response, followed by the byte-exact guest reply.
+  This ties kTLS state and bidirectional steady-state data movement to the same
+  production socket without an adapter accessor or product hook.
+- One loss-accounted all-interface AF_PACKET capture starts before caller-VMM
+  release and retains actual ifindices. The exact leg-B tuple and reverse must
+  appear only on loopback and never on a non-loopback interface. On the shared
+  bridge and managed TAPs, plaintext markers are permitted only on the caller
+  guest-address-to-frontend leg-F tuple/reverse and the unique non-kTLS leg-S
+  node-gateway-to-selected-backend tuple/reverse. Every other observed
+  non-loopback interface/tuple must contain zero markers, and direct caller-
+  guest-to-Service-guest bypass must be absent.
+
+Missing or ambiguous tuple/inode/fd ownership, a missing splice direction,
+capture loss/truncation, leg-B on a non-loopback interface, plaintext on an
+unapproved interface/tuple, or direct bypass fails closed. A future cross-host
+physical-wire receipt must still prove TLS records (`0x17`) and no cleartext on
+that real egress interface, but cross-host selection remains GH #298 and is not
+an S-ND295-01 claim.
 
 ### Ownership and order
 
@@ -263,13 +271,21 @@ leg-B socket to leg C before ordinary bridge egress, so absence of that exact
 kTLS tuple from the bridge is expected rather than evidence of a product
 failure.
 
-### Let an unqualified all-interface capture choose the evidence boundary
+### Require TLS `0x17` bytes from loopback AF_PACKET
 
-Rejected as the authority. It is useful diagnostic evidence and may retain the
-actual ifindex for every frame, but accepting whichever interface happens to
-contain a same-port TLS-looking stream would leave the security boundary
-ambiguous. The accepted local route pins loopback; exact tuple, direction,
-kTLS, and splice correlation then select one socket fail-closed.
+Rejected by native falsifier `e72385d6`. The exact live TLS 1.3 kTLS TX/RX
+socket was uniquely correlated and loopback capture was lossless in both
+directions, yet it exposed no complete TLS record. Retaining the requirement
+would reject the accepted real-kTLS mechanism because the chosen observation
+layer cannot expose its ciphertext.
+
+### Accept socket state without an interface escape audit
+
+Rejected. `ss` plus same-fd splice proves the protected socket and its data
+owner, but does not independently prove the output divert kept leg B off the
+shared bridge or a physical uplink. The lossless all-interface capture is
+required as a separate positive-loopback/negative-non-loopback oracle and must
+confine plaintext to the two named guest-local tuple families.
 
 ## Consequences
 
@@ -283,5 +299,8 @@ classifier. Part C's 296 verified instructions, 4,096-byte program memlock,
 4,208-byte bounded-probe map memlock, ~7.6–7.9 ms attach/pin, and ~50.8 ms
 load/verifier are point measurements, not the pinned-kernel baseline or 16k
 capacity proof. The S-ND295-01 clarification changes only evidence attribution:
-loopback proves the same-node encrypted leg-B/leg-C segment, while bridge/TAP
-capture proves the intentional plaintext leg-F/leg-S boundary and no bypass.
+exact kTLS socket state plus same-inode bidirectional splice proves the
+same-node protected transport; lossless interface capture proves local
+diversion, zero physical/ordinary-forwarding leg-B egress, intentional
+plaintext confinement to leg F/leg S, and no bypass. Same-node AF_PACKET makes
+no TLS-record byte claim.
