@@ -2513,6 +2513,12 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
             assert_ne!(ifindex, 0, "the production TAP is live while the VM is Running");
             ifindex
         };
+        let client = overdrive_netlink::Client::new().expect("open typed host-netlink client");
+        assert_eq!(
+            client.observe_link(&tap).await.expect("observe activated production TAP"),
+            Some(true),
+            "the same TAP becomes administratively up only through the awaited post-intercept activation"
+        );
         let link_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/links")
             .join(format!("{tap}-ingress"));
         assert!(link_pin.exists(), "the production TCX link is pinned for {tap}");

@@ -1840,6 +1840,14 @@ mod shared_network_task_owner_acceptance {
             Ok(())
         }
 
+        async fn activate(
+            &self,
+            _plan: &guest_network::GuestNetworkPlan,
+        ) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::TapSetUp);
+            Ok(())
+        }
+
         async fn teardown(
             &self,
             _plan: &guest_network::GuestNetworkPlan,

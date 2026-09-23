@@ -262,4 +262,18 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
     assert_eq!(successor.address, predecessor.address);
     assert_eq!(successor.tap, predecessor.tap);
     assert_eq!(successor.mac, predecessor.mac);
+    assert_eq!(
+        owner.calls(),
+        [
+            GuestNetworkOperation::TapCreate,
+            GuestNetworkOperation::TapSetUp,
+            GuestNetworkOperation::TapDelete,
+            GuestNetworkOperation::TapCreate,
+            GuestNetworkOperation::TapSetUp,
+            GuestNetworkOperation::TapDelete,
+            GuestNetworkOperation::TapCreate,
+            GuestNetworkOperation::TapSetUp,
+        ],
+        "each successful start activates exactly once before release; teardown/retry remains effect-first"
+    );
 }

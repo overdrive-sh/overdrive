@@ -162,10 +162,15 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use tokio::sync::broadcast;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use overdrive_control_plane::action_shim::{
     MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner, dispatch,
     dispatch_with_guest_network_provisioner_for_test, dispatch_with_network_provisioner,
+};
+use overdrive_control_plane::guest_network::{
+    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
@@ -193,7 +198,6 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
-use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -347,6 +351,7 @@ fn allocator_pinned_to_slot(alloc: &AllocationId, slot: NetSlot) -> NetSlotAlloc
 struct RecordingDriver {
     inner: SimDriver,
     starts: parking_lot::Mutex<Vec<AllocationId>>,
+    stops: parking_lot::Mutex<Vec<AllocationId>>,
     releases: parking_lot::Mutex<Vec<AllocationId>>,
     on_alloc_running_calls: parking_lot::Mutex<Vec<AllocationId>>,
 }
@@ -356,6 +361,7 @@ impl RecordingDriver {
         Self {
             inner: SimDriver::new(DriverType::Vm),
             starts: parking_lot::Mutex::new(Vec::new()),
+            stops: parking_lot::Mutex::new(Vec::new()),
             releases: parking_lot::Mutex::new(Vec::new()),
             on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
         }
@@ -374,6 +380,7 @@ impl Driver for RecordingDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.stops.lock().push(handle.alloc.clone());
         self.inner.stop(handle).await
     }
 
@@ -410,6 +417,80 @@ struct HoldingReleaseDriver {
     release_cancelled: AtomicBool,
     release_completed: AtomicBool,
     on_alloc_running_called: AtomicBool,
+}
+
+#[derive(Clone)]
+struct InstallSuccessLayer(Arc<AtomicBool>);
+
+impl<S> Layer<S> for InstallSuccessLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        if event.metadata().name() == "mtls.intercept.install.success" {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+struct EventOrderedProvisioner {
+    install_seen: Arc<AtomicBool>,
+    calls: parking_lot::Mutex<Vec<GuestNetworkOperation>>,
+    activation_error: bool,
+    cleanup_observers: Option<(Arc<RecordingDriver>, Arc<MtlsInterceptWorker>)>,
+}
+
+#[async_trait::async_trait]
+impl GuestNetworkProvisioner for EventOrderedProvisioner {
+    async fn provision(
+        &self,
+        _plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        self.calls.lock().push(GuestNetworkOperation::TapCreate);
+        Ok(())
+    }
+
+    async fn activate(
+        &self,
+        _plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        assert!(
+            self.install_seen.load(Ordering::SeqCst),
+            "the exact mTLS success event must be emitted before TAP activation"
+        );
+        self.calls.lock().push(GuestNetworkOperation::TapSetUp);
+        if self.activation_error {
+            Err(overdrive_control_plane::guest_network::GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapSetUp,
+                expected: overdrive_control_plane::guest_network::GuestNetworkFact::LinkUp {
+                    ifindex: 295,
+                    up: true,
+                },
+                observed: Some(overdrive_control_plane::guest_network::GuestNetworkFact::LinkUp {
+                    ifindex: 295,
+                    up: false,
+                }),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn teardown(
+        &self,
+        _plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        if let Some((driver, worker)) = &self.cleanup_observers {
+            assert_eq!(driver.stops.lock().len(), 1, "driver quiescence precedes network teardown");
+            assert_eq!(
+                worker.stop_alloc_calls_for_test(),
+                1,
+                "mTLS teardown precedes structural network teardown"
+            );
+        }
+        self.calls.lock().push(GuestNetworkOperation::TapDelete);
+        Ok(())
+    }
 }
 
 impl HoldingReleaseDriver {
@@ -1096,14 +1177,15 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     assert_supersession_observable("S-MIF-05", &outcome);
 }
 
-/// The production StartAllocation arm must await the existing async Driver
-/// release hook after a successful intercept install. Cancelling dispatch
-/// while that hook is held must drop the same owned future; it may not proceed
-/// to `on_alloc_running` or leave a detached release behind.
+/// The production StartAllocation arm emits intercept success, awaits exact TAP
+/// activation, then awaits the existing async Driver release hook. Cancelling
+/// dispatch while that hook is held must drop the same owned future; it may not
+/// proceed to `on_alloc_running` or leave a detached release behind.
 ///
 /// The body uses the existing post-#295 production-action composition with a
-/// `SimSharedGuestNetworkOwner` at its accepted driven port. It does not enter
-/// the historical `HostNetworkProvisioner`/netns path.
+/// a private recording implementation of the accepted driven port. It does not
+/// enter the historical `HostNetworkProvisioner`/netns path or add a product
+/// failure setter.
 ///
 /// Observable universe: dispatch completion plus every boolean exposed by
 /// `HoldingReleaseDriver`. The permitted cancellation delta is exactly
@@ -1117,10 +1199,10 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
+async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
     if !is_root() {
         eprintln!(
-            "SKIP start_allocation_awaits_release_and_cancellation_owns_the_future: not root"
+            "SKIP tap_activation_occurs_after_intercept_success_and_before_exec_release: not root"
         );
         return;
     }
@@ -1160,7 +1242,16 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     );
     state.mtls_worker = Some(Arc::clone(&worker));
     let state = Arc::new(state);
-    let shared_owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let install_seen = Arc::new(AtomicBool::new(false));
+    let subscriber =
+        tracing_subscriber::registry().with(InstallSuccessLayer(Arc::clone(&install_seen)));
+    let _trace_guard = tracing::subscriber::set_default(subscriber);
+    let shared_owner = Arc::new(EventOrderedProvisioner {
+        install_seen: Arc::clone(&install_seen),
+        calls: parking_lot::Mutex::new(Vec::new()),
+        activation_error: false,
+        cleanup_observers: None,
+    });
     let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
     let workload = WorkloadId::new("svc-gti-held-release").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
@@ -1193,6 +1284,12 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
         .expect("release-entered semaphore remains open")
         .forget();
     assert!(!task.is_finished(), "dispatch must remain pending inside the held release future");
+    assert!(install_seen.load(Ordering::SeqCst));
+    assert_eq!(
+        shared_owner.calls.lock().as_slice(),
+        [GuestNetworkOperation::TapCreate, GuestNetworkOperation::TapSetUp],
+        "provision-down and event-ordered activation both complete before EXEC release begins"
+    );
     assert!(!driver.release_completed.load(Ordering::SeqCst));
     assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
 
@@ -1209,6 +1306,112 @@ async fn start_allocation_awaits_release_and_cancellation_owns_the_future() {
     worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     worker.shutdown_owner().await.expect("shared listener owner shuts down");
     let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
+}
+
+/// S-ND295-01 / S-ND295-11 — a post-Running activation refusal withholds EXEC,
+/// stops the VMM, removes the allocation mTLS owner, tears down the attachment,
+/// and leaves one dominating typed Failed row.
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running() {
+    if !is_root() {
+        eprintln!(
+            "SKIP tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running: not root"
+        );
+        return;
+    }
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
+    worker.start_shared_owner().await.expect("shared listener owner is healthy");
+    let driver = Arc::new(RecordingDriver::new());
+    let mut runtime =
+        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+            tmp.path(),
+        )
+        .expect("runtime");
+    runtime.register(overdrive_control_plane::noop_heartbeat()).await.expect("register heartbeat");
+    let mut state = overdrive_control_plane::AppState::new(
+        Arc::clone(&store),
+        store_path,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+        Arc::new(runtime),
+        Arc::clone(&driver) as Arc<dyn Driver>,
+        Arc::new(SimClock::new()),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(296),
+        ))),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+        NodeId::new("node-001").expect("node id"),
+        build_vip_allocator(
+            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+        ),
+        overdrive_control_plane::test_empty_listener_facts(),
+        Ipv4Addr::LOCALHOST,
+    );
+    state.mtls_worker = Some(Arc::clone(&worker));
+    let state = Arc::new(state);
+    let install_seen = Arc::new(AtomicBool::new(false));
+    let subscriber =
+        tracing_subscriber::registry().with(InstallSuccessLayer(Arc::clone(&install_seen)));
+    let _trace_guard = tracing::subscriber::set_default(subscriber);
+    let owner = EventOrderedProvisioner {
+        install_seen: Arc::clone(&install_seen),
+        calls: parking_lot::Mutex::new(Vec::new()),
+        activation_error: true,
+        cleanup_observers: Some((Arc::clone(&driver), Arc::clone(&worker))),
+    };
+    let alloc = AllocationId::new("gti-activation-refused").expect("valid alloc id");
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: WorkloadId::new("svc-gti-activation-refused").expect("workload id"),
+        node_id: NodeId::new("node-001").expect("node id"),
+        spec: build_spec(&alloc),
+        kind: WorkloadKind::Service,
+    };
+
+    dispatch_with_guest_network_provisioner_for_test(
+        vec![action],
+        state.as_ref(),
+        &tick_now(),
+        &owner,
+    )
+    .await
+    .expect("activation refusal is durably projected as Failed");
+
+    assert!(install_seen.load(Ordering::SeqCst));
+    assert_eq!(
+        owner.calls.lock().as_slice(),
+        [
+            GuestNetworkOperation::TapCreate,
+            GuestNetworkOperation::TapSetUp,
+            GuestNetworkOperation::TapDelete,
+        ],
+        "activation refusal cleanup is provision -> activate -> structural teardown"
+    );
+    assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&alloc));
+    assert_eq!(driver.stops.lock().as_slice(), std::slice::from_ref(&alloc));
+    assert!(driver.releases.lock().is_empty(), "EXEC is never released");
+    assert!(driver.on_alloc_running_calls.lock().is_empty());
+    assert_eq!(worker.stop_alloc_calls_for_test(), 1);
+    let row = state
+        .obs
+        .alloc_status_row(&alloc)
+        .await
+        .expect("activation-failure row read succeeds")
+        .expect("activation-failure row is retained");
+    assert_eq!(row.state, AllocState::Failed);
+    assert!(matches!(
+        row.reason,
+        Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+            if stage == "guest_network_activate"
+    ));
+    worker.shutdown_owner().await.expect("shared listener owner shuts down");
 }
 
 // ---------------------------------------------------------------------------

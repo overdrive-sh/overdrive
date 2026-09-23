@@ -4936,7 +4936,9 @@ mod scratch_probe_packet_acceptance {
 #[allow(dead_code, clippy::doc_markdown, clippy::expect_used, clippy::too_many_lines)]
 mod allocation_owner_acceptance {
     //! Allocation-owner model exercised here:
-    //! `Unpublished -> Provisioning -> Published -> TeardownPending -> Absent`.
+    //! `Unpublished -> Provisioning -> ProvisionedDown -> Activating -> Active
+    //! -> TeardownPending -> Absent`, with `QuiescedActive` private to runtime
+    //! recovery.
     //! Any setup/read-back failure returns to `Unpublished`; any teardown
     //! failure remains `TeardownPending` with the lease and publication held;
     //! retry on that same owner reaches `Absent`. Teardown from `Unpublished`
@@ -5006,12 +5008,48 @@ mod allocation_owner_acceptance {
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
                         ifindex: 295,
+                        up: false,
+                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        master_ifindex: Some(29),
+                    },
+                    GuestNetworkAllocationTapObservation::Persistent {
+                        name: "ovd-tp-0002".to_owned(),
+                        ifindex: 295,
+                        up: false,
+                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        master_ifindex: Some(29),
+                    },
+                    GuestNetworkAllocationTapObservation::Persistent {
+                        name: "ovd-tp-0002".to_owned(),
+                        ifindex: 295,
+                        up: true,
+                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        master_ifindex: Some(29),
+                    },
+                    GuestNetworkAllocationTapObservation::Persistent {
+                        name: "ovd-tp-0002".to_owned(),
+                        ifindex: 295,
                         up: true,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
                     },
                 ])),
                 bridge_observations: parking_lot::Mutex::new(VecDeque::from([
+                    GuestNetworkAllocationBridgeObservation::Present {
+                        name: "ovd-gbr0".to_owned(),
+                        ifindex: 29,
+                        kind: GuestLinkKind::Bridge,
+                    },
+                    GuestNetworkAllocationBridgeObservation::Present {
+                        name: "ovd-gbr0".to_owned(),
+                        ifindex: 29,
+                        kind: GuestLinkKind::Bridge,
+                    },
+                    GuestNetworkAllocationBridgeObservation::Present {
+                        name: "ovd-gbr0".to_owned(),
+                        ifindex: 29,
+                        kind: GuestLinkKind::Bridge,
+                    },
                     GuestNetworkAllocationBridgeObservation::Present {
                         name: "ovd-gbr0".to_owned(),
                         ifindex: 29,
@@ -5416,12 +5454,13 @@ mod allocation_owner_acceptance {
         plan: &GuestNetworkPlan,
         state: HostGuestNetworkAllocationState,
     ) -> Vec<GuestNetworkFact> {
+        let up = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
         vec![
             tap_fact(
                 &plan.assignment().tap,
                 Some(state.ifindex),
                 GuestLinkKind::Tap,
-                true,
+                up,
                 true,
                 Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
             ),
@@ -5508,7 +5547,8 @@ mod allocation_owner_acceptance {
         }
     }
 
-    /// S-ND295-11 — verified attachment precedes admission.
+    /// S-ND295-11 — provision publishes the fully protected attachment down.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn provision_reads_every_attachment_fact_before_reporting_success() {
@@ -5535,28 +5575,139 @@ mod allocation_owner_acceptance {
                 AllocationCall::PinLink,
                 AllocationCall::QueryAttachment,
                 AllocationCall::LinkPinPresent,
-                AllocationCall::SetTapUp,
                 AllocationCall::ObserveBridge,
                 AllocationCall::ObserveTap,
             ]
         );
         assert_eq!(
             io.publication_trace(),
-            vec![false; 16],
-            "the allocation remains unpublished through the final TAP-up read-back call"
+            vec![false; 15],
+            "the allocation remains unpublished through the final TAP-down read-back call"
         );
+        assert!(!io.calls().contains(&AllocationCall::SetTapUp));
         assert_eq!(
             owner.allocations.lock().get(plan.alloc()).cloned(),
             Some(HostGuestNetworkAllocationState {
                 tap: "ovd-tp-0002".to_owned(),
                 ifindex: 295,
                 program_id: 2_950,
+                phase: HostGuestNetworkAllocationPhase::ProvisionedDown,
             }),
-            "publication occurs only after the final bridge refresh and TAP-up read-back"
+            "publication occurs only after the final bridge refresh and TAP-down read-back"
         );
     }
 
+    /// S-ND295-11 — activation revalidates protection, performs the sole TAP-up,
+    /// and publishes Active only after final up/master read-back.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn activation_reads_every_protection_fact_before_reporting_success() {
+        let io = ScriptedAllocationIo::healthy();
+        let owner = Arc::new(HostSharedGuestNetworkOwner::with_allocation_io(io.clone()));
+        let active_plan = plan("nd295-s11-activate", Ipv4Addr::new(100, 95, 0, 2));
+        io.track_publication(&owner, active_plan.alloc().clone());
+        owner.provision(&active_plan).await.expect("provisioned-down attachment is complete");
+        let activation_start = io.calls().len();
+
+        owner.activate(&active_plan).await.expect("all protection and final up read-backs succeed");
+        assert_eq!(
+            &io.calls()[activation_start..],
+            [
+                AllocationCall::ObserveBridge,
+                AllocationCall::ObserveTap,
+                AllocationCall::ObserveGuard,
+                AllocationCall::ReadEndpoint,
+                AllocationCall::QueryAttachment,
+                AllocationCall::LinkPinPresent,
+                AllocationCall::SetTapUp,
+                AllocationCall::ObserveBridge,
+                AllocationCall::ObserveTap,
+            ]
+        );
+        assert_eq!(
+            owner.allocations.lock().get(active_plan.alloc()).cloned(),
+            Some(HostGuestNetworkAllocationState {
+                tap: "ovd-tp-0002".to_owned(),
+                ifindex: 295,
+                program_id: 2_950,
+                phase: HostGuestNetworkAllocationPhase::Active,
+            })
+        );
+
+        owner.activate(&active_plan).await.expect("same-plan active replay is idempotent");
+        assert_eq!(
+            io.calls().iter().filter(|call| **call == AllocationCall::SetTapUp).count(),
+            1,
+            "an already-active exact attachment is read back without a second TAP-up mutation"
+        );
+
+        for quiescence_fails in [false, true] {
+            let io = ScriptedAllocationIo::healthy();
+            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
+            let plan = plan(
+                if quiescence_fails {
+                    "nd295-s11-activation-quiesce-fails"
+                } else {
+                    "nd295-s11-activation-readback-fails"
+                },
+                Ipv4Addr::new(100, 95, 0, if quiescence_fails { 4 } else { 3 }),
+            );
+            owner.provision(&plan).await.expect("failure fixture provisions down first");
+            let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
+            *io.tap_observations.lock() = VecDeque::from([
+                GuestNetworkAllocationTapObservation::Persistent {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: 295,
+                    up: false,
+                    owner_uid: Some(uid),
+                    master_ifindex: Some(29),
+                },
+                GuestNetworkAllocationTapObservation::Persistent {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: 295,
+                    up: false,
+                    owner_uid: Some(uid),
+                    master_ifindex: Some(29),
+                },
+            ]);
+            io.failures.lock().insert((AllocationCall::ObserveBridge, 4));
+            if quiescence_fails {
+                io.failures.lock().insert((AllocationCall::SetTapDown, 1));
+            }
+
+            let activation_start = io.calls().len();
+            let error = owner
+                .activate(&plan)
+                .await
+                .expect_err("post-TAP-up read-back failure remains fail-closed");
+            let calls = &io.calls()[activation_start..];
+            assert!(calls.contains(&AllocationCall::SetTapUp));
+            assert!(calls.contains(&AllocationCall::SetTapDown));
+            if quiescence_fails {
+                assert!(matches!(
+                    error,
+                    GuestNetworkError::Netlink { operation: GuestNetworkOperation::TapSetDown, .. }
+                ));
+            } else {
+                assert!(matches!(
+                    error,
+                    GuestNetworkError::Netlink {
+                        operation: GuestNetworkOperation::BridgeObserve,
+                        ..
+                    }
+                ));
+                assert_eq!(
+                    owner.allocations.lock().get(plan.alloc()).map(|state| state.phase),
+                    Some(HostGuestNetworkAllocationPhase::ProvisionedDown),
+                    "successful quiescence returns the attachment to its published down phase"
+                );
+            }
+        }
+    }
+
     /// S-ND295-11 — incompatible TAP/bridge identity refuses publication.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn every_incompatible_tap_or_bridge_identity_refuses_owner_publication() {
@@ -5573,14 +5724,6 @@ mod allocation_owner_acceptance {
             owner_uid: Some(uid),
             master_ifindex: Some(29),
         };
-        let valid_up = GuestNetworkAllocationTapObservation::Persistent {
-            name: "ovd-tp-0002".to_owned(),
-            ifindex: 295,
-            up: true,
-            owner_uid: Some(uid),
-            master_ifindex: Some(29),
-        };
-
         let first_tap_cases = [
             (
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
@@ -5745,12 +5888,12 @@ mod allocation_owner_acceptance {
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 None,
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Absent { name: "ovd-gbr0".to_owned() },
-                valid_up.clone(),
+                valid_down.clone(),
                 GuestNetworkOperation::BridgeObserve,
                 bridge_fact("ovd-gbr0", None, GuestLinkKind::Bridge),
                 None,
@@ -5761,7 +5904,7 @@ mod allocation_owner_acceptance {
                     ifindex: 29,
                     kind: GuestLinkKind::Other,
                 },
-                valid_up.clone(),
+                valid_down.clone(),
                 GuestNetworkOperation::BridgeObserve,
                 bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Bridge),
                 Some(bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Other)),
@@ -5772,7 +5915,7 @@ mod allocation_owner_acceptance {
                     ifindex: 30,
                     kind: GuestLinkKind::Bridge,
                 },
-                valid_up.clone(),
+                valid_down.clone(),
                 GuestNetworkOperation::TapObserve,
                 master_fact(295, Some(30)),
                 Some(master_fact(295, Some(29))),
@@ -5782,7 +5925,7 @@ mod allocation_owner_acceptance {
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
-                    up: true,
+                    up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(30),
                 },
@@ -5797,13 +5940,20 @@ mod allocation_owner_acceptance {
                     ifindex: 295,
                     kind: GuestLinkKind::Tun,
                     persistent: Some(true),
-                    up: true,
+                    up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tun, true, true, Some(uid))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact(
+                    "ovd-tp-0002",
+                    Some(295),
+                    GuestLinkKind::Tun,
+                    true,
+                    false,
+                    Some(uid),
+                )),
             ),
             (
                 bridge_29.clone(),
@@ -5812,44 +5962,51 @@ mod allocation_owner_acceptance {
                     ifindex: 295,
                     kind: GuestLinkKind::Other,
                     persistent: None,
-                    up: true,
+                    up: false,
                     owner_uid: None,
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, true, None)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, false, None)),
             ),
             (
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 296,
-                    up: true,
+                    up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, true, Some(uid))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact(
+                    "ovd-tp-0002",
+                    Some(296),
+                    GuestLinkKind::Tap,
+                    true,
+                    false,
+                    Some(uid),
+                )),
             ),
             (
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
-                    up: true,
+                    up: false,
                     owner_uid: Some(uid + 1),
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
                     GuestLinkKind::Tap,
                     true,
-                    true,
+                    false,
                     Some(uid + 1),
                 )),
             ),
@@ -5860,18 +6017,18 @@ mod allocation_owner_acceptance {
                     ifindex: 295,
                     kind: GuestLinkKind::Tap,
                     persistent: Some(false),
-                    up: true,
+                    up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
                     GuestLinkKind::Tap,
                     false,
-                    true,
+                    false,
                     Some(uid),
                 )),
             ),
@@ -5880,20 +6037,13 @@ mod allocation_owner_acceptance {
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
-                    up: false,
+                    up: true,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(295),
-                    GuestLinkKind::Tap,
-                    true,
-                    false,
-                    Some(uid),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
             ),
         ];
         for (index, (final_bridge, final_tap, operation, expected, observed)) in
@@ -5917,9 +6067,9 @@ mod allocation_owner_acceptance {
                     final_bridge,
                 ],
             );
-            // The final checkpoint mismatch is the primary failure.  Seed
-            // the exact rollback read-backs after the successful setup
-            // observations so cleanup does not replace that source.
+            // The final provision-down checkpoint mismatch is the primary
+            // failure. Seed exact rollback read-backs so cleanup does not
+            // replace that source.
             io.attachment_reads
                 .lock()
                 .push_back(GuestTcxAttachment { revision: 1, program_ids: Vec::new() });
@@ -5931,9 +6081,8 @@ mod allocation_owner_acceptance {
                 .await
                 .expect_err("final checkpoint mismatch refuses publication");
             let calls = io.calls();
-            assert_eq!(
-                &calls[..15],
-                [
+            assert!(
+                calls.starts_with(&[
                     AllocationCall::CreateTap,
                     AllocationCall::ObserveTap,
                     AllocationCall::AttachTap,
@@ -5947,16 +6096,16 @@ mod allocation_owner_acceptance {
                     AllocationCall::PinLink,
                     AllocationCall::QueryAttachment,
                     AllocationCall::LinkPinPresent,
-                    AllocationCall::SetTapUp,
                     AllocationCall::ObserveBridge,
-                ],
-                "final case {index} reaches the final bridge checkpoint only after both valid down-TAP observations"
+                ]),
+                "final case {index} reaches the final down-state bridge checkpoint without TAP-up"
             );
+            assert!(!calls.contains(&AllocationCall::SetTapUp));
             if operation == GuestNetworkOperation::TapObserve {
                 assert_eq!(
-                    calls.get(15),
+                    calls.get(14),
                     Some(&AllocationCall::ObserveTap),
-                    "final case {index} reaches the final TAP/master checkpoint"
+                    "final case {index} reaches the final down TAP/master checkpoint"
                 );
             }
             assert_mismatch(error, operation, expected, observed);
@@ -6049,6 +6198,7 @@ mod allocation_owner_acceptance {
     }
 
     /// S-ND295-12 — teardown continues, returns the first source, and retries empty.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement()
@@ -6076,11 +6226,13 @@ mod allocation_owner_acceptance {
             tap: "ovd-tp-0002".to_owned(),
             ifindex: 295,
             program_id: 2_950,
+            phase: HostGuestNetworkAllocationPhase::Active,
         };
         let unrelated_state = HostGuestNetworkAllocationState {
             tap: "ovd-tp-0003".to_owned(),
             ifindex: 296,
             program_id: 2_950,
+            phase: HostGuestNetworkAllocationPhase::Active,
         };
         owner.allocations.lock().insert(named.alloc().clone(), named_state.clone());
         owner.allocations.lock().insert(unrelated.alloc().clone(), unrelated_state.clone());
@@ -6204,6 +6356,34 @@ mod allocation_owner_acceptance {
             Some(unrelated_state.clone())
         );
 
+        for phase in [
+            HostGuestNetworkAllocationPhase::ProvisionedDown,
+            HostGuestNetworkAllocationPhase::Active,
+            HostGuestNetworkAllocationPhase::QuiescedActive,
+        ] {
+            let io = ScriptedAllocationIo::for_teardown(std::iter::empty::<AllocationCall>());
+            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
+            let phase_plan = plan(
+                &format!("nd295-s12-phase-{phase:?}"),
+                Ipv4Addr::new(100, 95, 2, phase as u8 + 2),
+            );
+            owner.allocations.lock().insert(
+                phase_plan.alloc().clone(),
+                HostGuestNetworkAllocationState {
+                    tap: phase_plan.assignment().tap.clone(),
+                    ifindex: 295,
+                    program_id: 2_950,
+                    phase,
+                },
+            );
+            owner
+                .teardown(&phase_plan)
+                .await
+                .expect("teardown converges from every retained allocation phase");
+            assert_eq!(io.calls(), teardown_calls());
+            assert!(!owner.allocations.lock().contains_key(phase_plan.alloc()));
+        }
+
         // Exhaustive single-failure table: each accepted cleanup leaf retains
         // its exact operation/source while all later cleanup calls still run.
         let failure_rows = [
@@ -6287,6 +6467,7 @@ mod allocation_owner_acceptance {
                 tap: failing_plan.assignment().tap.clone(),
                 ifindex: 295,
                 program_id: 2_950,
+                phase: HostGuestNetworkAllocationPhase::Active,
             };
             owner.allocations.lock().insert(failing_plan.alloc().clone(), state.clone());
 

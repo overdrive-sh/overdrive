@@ -532,22 +532,24 @@ fn deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_caus
     panic!("Not yet implemented -- RED scaffold (S-ND295-10 deliberate link-loss barrier)");
 }
 
-/// S-ND295-11 — ordinary production composition admits the VMM only after
-/// complete shared-network attachment read-back.
+/// S-ND295-11 — ordinary production composition admits the VMM only after the
+/// complete shared-network attachment is read back with its TAP down.
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[ignore = "pending DELIVER step 02-01: S-ND295-11 production provision read-back"]
-fn ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start() {
+fn ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start() {
     // Activation contract (Lima root): drive serve/deploy -> reconciler ->
     // action shim -> inherited GuestNetworkProvisioner::provision on the one
     // run_server-composed owner, with an injected recording VMM. Assert the
     // recording VMM has not observed start until the real kernel reports:
-    // persistent exact-owner TAP, Bridge-kind current master, requested link
-    // state, endpoint source IPv4/MAC/fixed bridge MAC, classifier program ID,
+    // persistent exact-owner TAP, Bridge-kind current master, administratively-
+    // down link state, endpoint source IPv4/MAC/fixed bridge MAC, classifier program ID,
     // TCX ingress/ifindex, exact link pin, and the D9 managed member. The test
     // fixture installs none of those effects and the unrelated inventory is
-    // byte-equal.
-    panic!("Not yet implemented -- RED scaffold (S-ND295-11 production provision/read-back)");
+    // byte-equal. TapSetUp is absent; the same ifindex remains down through the
+    // injected VMM's READY/Driver::start boundary.
+    panic!("Not yet implemented -- RED scaffold (S-ND295-11 provision-down/VMM read-back)");
 }
 
 /// S-ND295-12 — normal production teardown is effect-first, retryable, and

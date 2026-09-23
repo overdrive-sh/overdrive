@@ -1170,6 +1170,14 @@ fn interface_index(iface: &str) -> u32 {
     ifindex
 }
 
+fn interface_is_administratively_up(iface: &str) -> bool {
+    let flags = std::fs::read_to_string(Path::new("/sys/class/net").join(iface).join("flags"))
+        .unwrap_or_else(|error| panic!("read {iface} administrative flags: {error}"));
+    let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)
+        .unwrap_or_else(|error| panic!("decode {iface} administrative flags {flags:?}: {error}"));
+    flags & u32::try_from(libc::IFF_UP).expect("IFF_UP is non-negative") != 0
+}
+
 impl WireCapture {
     fn start(iface: &str, port: u16) -> Self {
         Self::start_bound(interface_index(iface), port)
@@ -2864,6 +2872,10 @@ fn arm_failure_capture_from_config(config: &VmConfig) -> ArmedFailureCapture {
         assert_ne!(ifindex, 0, "resolve the production TAP before VMM release");
         ifindex
     };
+    assert!(
+        !interface_is_administratively_up(&network.tap),
+        "provision must publish the fully protected caller TAP down before Cloud Hypervisor attachment"
+    );
     ArmedFailureCapture {
         alloc,
         tap: network.tap.clone(),
@@ -3232,6 +3244,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         assert_ne!(ifindex, 0, "the production direct-host TAP is live");
         ifindex
     };
+    assert!(
+        !interface_is_administratively_up(&network.tap),
+        "provision must publish the fully protected caller TAP down before Cloud Hypervisor attachment"
+    );
     let readiness_task = tokio::spawn(poll_until_outbound_elements_ready(
         network.tap.clone(),
         guest_address,
@@ -5045,6 +5061,10 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         assert_ne!(ifindex, 0, "replacement TAP is live before VMM release");
         ifindex
     };
+    assert!(
+        !interface_is_administratively_up(&tap),
+        "restart provision must leave the protected replacement TAP down before VMM release"
+    );
     let intercept_events = InterceptInstallTrace::install_global();
     cut.release
         .send(())
