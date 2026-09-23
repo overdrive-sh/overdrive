@@ -1599,7 +1599,7 @@ impl DnsServeTaskOwner {
 )]
 mod shared_network_task_owner_acceptance {
     use std::future::Future as _;
-    use std::net::{SocketAddrV4, TcpListener};
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -1762,7 +1762,7 @@ mod shared_network_task_owner_acceptance {
 
         fn install_outbound(
             &self,
-            _host_veth: &str,
+            _source_addr: Ipv4Addr,
             _agent_leg_f_port: u16,
         ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
             self.outbound_install_calls.fetch_add(1, Ordering::SeqCst);
