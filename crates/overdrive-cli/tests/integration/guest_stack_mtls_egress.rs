@@ -947,8 +947,9 @@ struct WireScan {
     exact_tuple: Option<FlowTuple>,
     exact_records_to_peer: u64,
     exact_records_from_peer: u64,
-    plaintext_hits_on_any_peer_stream: u64,
-    peer_streams_observed: usize,
+    plaintext_hits_on_exact_peer_tuple: u64,
+    plaintext_hits_on_other_same_port_streams: u64,
+    same_port_streams_observed: usize,
     capture_packets: u32,
     capture_drops: u32,
 }
@@ -1471,20 +1472,31 @@ fn scan_frames(
     }
 
     let mut scan =
-        WireScan { exact_tuple, peer_streams_observed: streams.len(), ..WireScan::default() };
-    for bytes in streams.values() {
-        // Confidentiality is checked across every byte stream touching the
-        // peer port. It is intentionally independent of whether the stream can
-        // first be parsed as TLS, so a clear or malformed escape cannot hide
-        // outside the positive TLS classifier.
-        scan.plaintext_hits_on_any_peer_stream += count_subslices(bytes, REQUEST);
-        scan.plaintext_hits_on_any_peer_stream += count_subslices(bytes, RESPONSE);
-    }
+        WireScan { exact_tuple, same_port_streams_observed: streams.len(), ..WireScan::default() };
     if let Some(tuple) = exact_tuple {
+        let reverse = tuple.reverse();
+        for (observed, bytes) in &streams {
+            let plaintext_hits = count_subslices(bytes, REQUEST) + count_subslices(bytes, RESPONSE);
+            if *observed == tuple || *observed == reverse {
+                // Confidentiality is scoped to the exact production kTLS
+                // socket and its reverse. It remains independent of positive
+                // TLS parsing so malformed cleartext cannot hide there.
+                scan.plaintext_hits_on_exact_peer_tuple += plaintext_hits;
+            } else {
+                // Same-port guest-local streams are intentionally plaintext.
+                // Retain them as a diagnostic complement, never as peer wire.
+                scan.plaintext_hits_on_other_same_port_streams += plaintext_hits;
+            }
+        }
         scan.exact_records_to_peer =
             streams.get(&tuple).map_or(0, |bytes| count_tls_application_records(bytes));
         scan.exact_records_from_peer =
-            streams.get(&tuple.reverse()).map_or(0, |bytes| count_tls_application_records(bytes));
+            streams.get(&reverse).map_or(0, |bytes| count_tls_application_records(bytes));
+    } else {
+        scan.plaintext_hits_on_other_same_port_streams = streams
+            .values()
+            .map(|bytes| count_subslices(bytes, REQUEST) + count_subslices(bytes, RESPONSE))
+            .sum();
     }
     scan
 }
@@ -2932,13 +2944,13 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
         result.scan
     );
     assert_eq!(
-        result.scan.plaintext_hits_on_any_peer_stream, 0,
-        "neither plaintext litmus may occur on any stream touching the peer port; got {:?}",
+        result.scan.plaintext_hits_on_exact_peer_tuple, 0,
+        "neither plaintext litmus may occur on the exact production kTLS tuple or its reverse; got {:?}",
         result.scan
     );
     assert!(
-        result.scan.peer_streams_observed > 0,
-        "the unfiltered peer-port stream universe must not be empty"
+        result.scan.same_port_streams_observed >= 2,
+        "the same-port capture must include both directions of the exact peer tuple"
     );
     assert!(
         record_has_bidirectional_tls13_ktls(&ktls.record),
@@ -3145,7 +3157,8 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 /// Observable universe: every AF_PACKET frame captured from before VM deploy
 /// through guest termination on the exact allocation TAP whose source is
 /// the exact guest address and whose destination is the exact mesh peer tuple,
-/// plus every peer-port shared-bridge stream and the typed constant-program/set snapshot.
+/// plus the exact production kTLS tuple/reverse selected from the complete
+/// same-port shared-bridge stream complement and the typed constant-program/set snapshot.
 /// Every exact-tuple packet carries its kernel event timestamp; nft readiness
 /// is a conservative `CLOCK_REALTIME` barrier sampled after the successful
 /// typed query. Missing/equal timestamps count as pre-ready. Assertions
@@ -3236,8 +3249,8 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
          request before TPROXY consumes it"
     );
     assert_eq!(
-        result.scan.plaintext_hits_on_any_peer_stream, 0,
-        "the first captured mesh connection must not expose either plaintext litmus; got {:?}",
+        result.scan.plaintext_hits_on_exact_peer_tuple, 0,
+        "the exact peer tuple and reverse must not expose either plaintext litmus; got {:?}",
         result.scan
     );
     assert!(
@@ -3519,37 +3532,83 @@ fn synthetic_peer_tcp_frame(
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
-    let tuple = FlowTuple {
-        source: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_001),
-        destination: SocketAddrV4::new(Ipv4Addr::LOCALHOST, SERVICE_PORT),
+    let exact_peer = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 40_001),
+        destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 2), SERVICE_PORT),
+    };
+    let guest_local = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 3), 40_002),
+        destination: SocketAddrV4::new(Ipv4Addr::new(10, 98, 0, 1), SERVICE_PORT),
     };
     let split = REQUEST.len() / 2;
     let second_sequence = 1_001_u32 + u32::try_from(split).expect("marker split fits u32");
+    let tls_record = [TLS_APPLICATION_DATA, 0x03, 0x03, 0, 3, b't', b'l', b's'];
     let frames = vec![
-        synthetic_peer_tcp_frame(tuple, 1_000, 0x02, &[], libc::PACKET_OUTGOING),
-        synthetic_peer_tcp_frame(tuple, 1_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(guest_local, 1_000, 0x02, &[], libc::PACKET_OUTGOING),
+        synthetic_peer_tcp_frame(guest_local, 1_000, 0x02, &[], libc::PACKET_HOST),
         synthetic_peer_tcp_frame(
-            tuple,
+            guest_local,
             second_sequence,
             0x18,
             &REQUEST[split..],
             libc::PACKET_OUTGOING,
         ),
-        synthetic_peer_tcp_frame(tuple, 1_001, 0x18, &REQUEST[..split], libc::PACKET_HOST),
-        synthetic_peer_tcp_frame(tuple, 1_001, 0x18, &REQUEST[..split], libc::PACKET_OUTGOING),
+        synthetic_peer_tcp_frame(guest_local, 1_001, 0x18, &REQUEST[..split], libc::PACKET_HOST),
         synthetic_peer_tcp_frame(
-            tuple,
+            guest_local,
+            1_001,
+            0x18,
+            &REQUEST[..split],
+            libc::PACKET_OUTGOING,
+        ),
+        synthetic_peer_tcp_frame(
+            guest_local,
             second_sequence,
             0x18,
             &REQUEST[split..],
             libc::PACKET_HOST,
         ),
+        synthetic_peer_tcp_frame(exact_peer, 5_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer, 5_001, 0x18, &tls_record, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer.reverse(), 6_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer.reverse(), 6_001, 0x18, &tls_record, libc::PACKET_HOST),
     ];
-    let scan = scan_frames(&frames, SERVICE_PORT, Some(tuple));
-    assert_eq!(scan.peer_streams_observed, 1);
+    let scan = scan_frames(&frames, SERVICE_PORT, Some(exact_peer));
+    assert_eq!(scan.same_port_streams_observed, 3);
+    assert_eq!(scan.exact_records_to_peer, 1);
+    assert_eq!(scan.exact_records_from_peer, 1);
     assert_eq!(
-        scan.plaintext_hits_on_any_peer_stream, 1,
-        "dequeue reordering and the two loopback packet types reconstruct one byte stream"
+        scan.plaintext_hits_on_exact_peer_tuple, 0,
+        "guest-local plaintext must not be attributed to the exact peer tuple"
+    );
+    assert_eq!(
+        scan.plaintext_hits_on_other_same_port_streams, 1,
+        "dequeue reordering and duplicate copies reconstruct the intentional guest-local plaintext once"
+    );
+
+    let unknown = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 9), 40_009),
+        destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 10), SERVICE_PORT),
+    };
+    let unknown_scan = scan_frames(&frames, SERVICE_PORT, Some(unknown));
+    assert_eq!(unknown_scan.exact_records_to_peer, 0);
+    assert_eq!(unknown_scan.exact_records_from_peer, 0);
+    assert_eq!(unknown_scan.plaintext_hits_on_exact_peer_tuple, 0);
+    assert_eq!(
+        unknown_scan.plaintext_hits_on_other_same_port_streams, 1,
+        "an unknown tuple never adopts an unrelated same-port stream as peer evidence"
+    );
+
+    let clear_peer = vec![
+        synthetic_peer_tcp_frame(exact_peer, 7_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer, 7_001, 0x18, REQUEST, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer.reverse(), 8_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer.reverse(), 8_001, 0x18, RESPONSE, libc::PACKET_HOST),
+    ];
+    let clear_scan = scan_frames(&clear_peer, SERVICE_PORT, Some(exact_peer));
+    assert_eq!(
+        clear_scan.plaintext_hits_on_exact_peer_tuple, 2,
+        "request and response cleartext on the exact peer tuple remain a fail-closed confidentiality witness"
     );
 }
 
@@ -3983,7 +4042,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let scan = peer_wire.stop_and_scan(Some(ktls.tuple));
     if audit.first_syn.is_none()
         || audit.plaintext_request_hits == 0
-        || scan.plaintext_hits_on_any_peer_stream != 0
+        || scan.plaintext_hits_on_exact_peer_tuple != 0
         || scan.exact_records_to_peer == 0
         || scan.exact_records_from_peer == 0
     {
