@@ -1138,10 +1138,22 @@ struct GuestEgressAudit {
     /// interface, retained so a tuple-correlation failure reports what the
     /// independent boundary actually observed.
     interface_tcp: Vec<GuestBoundarySegment>,
+    attempts: Vec<GuestTcpAttempt>,
+    successful_tuple: FlowTuple,
     first_syn: Option<GuestBoundarySegment>,
     plaintext_request_hits: u64,
     packet_count: u64,
     byte_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuestTcpAttempt {
+    tuple: FlowTuple,
+    request: Vec<u8>,
+    response: Vec<u8>,
+    segments: Vec<GuestBoundarySegment>,
+    saw_reset: bool,
+    saw_fin: bool,
 }
 
 struct WireCapture {
@@ -1966,16 +1978,73 @@ fn audit_guest_egress_boundary(
     guest_addr: Ipv4Addr,
     mesh_destination: SocketAddrV4,
 ) -> GuestEgressAudit {
+    audit_guest_tcp_attempts(frames, readiness.tap_ifindex, guest_addr, mesh_destination)
+}
+
+fn audit_guest_tcp_attempts(
+    frames: &[CapturedFrame],
+    tap_ifindex: u32,
+    guest_addr: Ipv4Addr,
+    mesh_destination: SocketAddrV4,
+) -> GuestEgressAudit {
+    #[derive(Default)]
+    struct DirectionCapture {
+        syn_sequence: Option<u32>,
+        pieces: Vec<(u32, Vec<u8>)>,
+        segments: Vec<GuestBoundarySegment>,
+    }
+
+    #[derive(Default)]
+    struct AttemptCapture {
+        request: DirectionCapture,
+        response: DirectionCapture,
+        saw_reset: bool,
+        saw_fin: bool,
+    }
+
+    fn reassemble(tuple: FlowTuple, direction: &str, capture: &DirectionCapture) -> Vec<u8> {
+        if capture.pieces.is_empty() {
+            return Vec::new();
+        }
+        let syn = capture.syn_sequence.unwrap_or_else(|| {
+            panic!("guest attempt {tuple:?} {direction} payload has no captured SYN")
+        });
+        let mut bytes_by_offset = BTreeMap::new();
+        for (sequence, payload) in &capture.pieces {
+            let start = sequence.wrapping_sub(syn).wrapping_sub(1);
+            assert!(
+                start < (1 << 31),
+                "guest attempt {tuple:?} {direction} payload precedes its SYN sequence"
+            );
+            for (index, byte) in payload.iter().copied().enumerate() {
+                let offset = start
+                    .checked_add(u32::try_from(index).expect("captured guest payload fits u32"))
+                    .expect("guest attempt sequence offset does not overflow");
+                if let Some(previous) = bytes_by_offset.insert(offset, byte) {
+                    assert_eq!(
+                        previous, byte,
+                        "guest attempt {tuple:?} {direction} has conflicting bytes at TCP offset {offset}"
+                    );
+                }
+            }
+        }
+        let mut stream = Vec::with_capacity(bytes_by_offset.len());
+        for (expected, (observed, byte)) in (0_u32..).zip(bytes_by_offset) {
+            assert_eq!(
+                observed, expected,
+                "guest attempt {tuple:?} {direction} has a reassembly gap before TCP offset {observed}"
+            );
+            stream.push(byte);
+        }
+        stream
+    }
+
     let mut segments = Vec::new();
     let mut interface_tcp = Vec::new();
-    let mut first_syn = None;
-    let mut plaintext_request_hits = 0;
     let mut packet_count = 0_u64;
     let mut byte_count = 0_u64;
-    let mut exact_tuple = None;
-    for frame in frames.iter().filter(|frame| {
-        frame.ifindex == readiness.tap_ifindex && frame.packet_type != libc::PACKET_OUTGOING
-    }) {
+    let mut captures: BTreeMap<FlowTuple, AttemptCapture> = BTreeMap::new();
+    for frame in frames.iter().filter(|frame| frame.ifindex == tap_ifindex) {
         let Some(parsed) =
             parse_tcp_segment(frame, true).unwrap_or_else(|error| {
                 panic!("guest C3 capture is malformed/truncated/fragmented/offload-ambiguous: {error}; frame={frame:?}")
@@ -1987,6 +2056,30 @@ fn audit_guest_egress_boundary(
         let flags = parsed.flags;
         let payload = parsed.payload;
         let ipv4_total_len = parsed.total_len;
+        let (attempt_tuple, response_direction) = if tuple.source.ip() == &guest_addr
+            && tuple.destination == mesh_destination
+        {
+            (tuple, false)
+        } else if tuple.source == mesh_destination && tuple.destination.ip() == &guest_addr {
+            (tuple.reverse(), true)
+        } else {
+            panic!(
+                "every eligible caller-TAP TCP packet belongs to a guest/frontend attempt or its exact reverse: {tuple:?}"
+            );
+        };
+        if response_direction {
+            assert_eq!(
+                frame.packet_type,
+                libc::PACKET_OUTGOING,
+                "reverse response tuple must be host-to-guest on the caller TAP: {tuple:?}"
+            );
+        } else {
+            assert!(
+                matches!(frame.packet_type, libc::PACKET_HOST | libc::PACKET_OTHERHOST),
+                "request tuple must be guest-originated on the caller TAP: packet_type={} tuple={tuple:?}",
+                frame.packet_type
+            );
+        }
         let segment = GuestBoundarySegment {
             kernel_event_at: frame.kernel_event_at,
             tuple,
@@ -1995,37 +2088,93 @@ fn audit_guest_egress_boundary(
             ipv4_total_len,
         };
         interface_tcp.push(segment);
-        assert_eq!(
-            tuple.source.ip(),
-            &guest_addr,
-            "every eligible TAP ingress TCP packet is guest-authored"
-        );
-        assert_eq!(
-            tuple.destination, mesh_destination,
-            "every eligible packet belongs to the expected mesh destination"
-        );
-        if first_syn.is_none() && flags & 0x02 != 0 && flags & 0x10 == 0 {
-            first_syn = Some(segment);
-            exact_tuple = Some(tuple);
+        let capture = captures.entry(attempt_tuple).or_default();
+        capture.saw_reset |= flags & 0x04 != 0;
+        capture.saw_fin |= flags & 0x01 != 0;
+        let direction = if response_direction {
+            &mut capture.response
+        } else {
+            packet_count =
+                packet_count.checked_add(1).expect("captured packet count does not overflow");
+            byte_count = byte_count
+                .checked_add(u64::try_from(ipv4_total_len).expect("IPv4 tot_len fits u64"))
+                .expect("captured IPv4 byte count does not overflow");
+            segments.push(segment);
+            &mut capture.request
+        };
+        if flags & 0x02 != 0 {
+            match direction.syn_sequence {
+                Some(previous) => assert_eq!(
+                    previous, parsed.sequence,
+                    "guest attempt {attempt_tuple:?} changes its {response_direction:?} SYN sequence"
+                ),
+                None => direction.syn_sequence = Some(parsed.sequence),
+            }
         }
-        if let Some(expected) = exact_tuple {
-            assert_eq!(
-                tuple, expected,
-                "every eligible captured packet has the first SYN's exact directional tuple"
+        if !payload.is_empty() {
+            direction.pieces.push((parsed.sequence, payload.to_vec()));
+        }
+        direction.segments.push(segment);
+    }
+
+    let expected_request = [REQUEST, REQUEST2].concat();
+    let expected_response = [RESPONSE, RESPONSE2].concat();
+    let mut attempts = Vec::new();
+    let mut successful = Vec::new();
+    let mut plaintext_request_hits = 0;
+    for (tuple, capture) in captures {
+        let first_syn = capture
+            .request
+            .segments
+            .iter()
+            .copied()
+            .find(|segment| segment.flags & 0x02 != 0 && segment.flags & 0x10 == 0)
+            .unwrap_or_else(|| panic!("guest attempt {tuple:?} has no initial request SYN"));
+        let request = reassemble(tuple, "request", &capture.request);
+        let response = reassemble(tuple, "response", &capture.response);
+        let has_request = count_subslices(&request, REQUEST) == 1;
+        let has_response = count_subslices(&response, RESPONSE) == 1;
+        assert!(
+            !has_response || has_request,
+            "guest attempt {tuple:?} contains the exact response without the exact request"
+        );
+        plaintext_request_hits += count_subslices(&request, REQUEST);
+        plaintext_request_hits += count_subslices(&request, REQUEST2);
+        let is_success = request == expected_request && response == expected_response;
+        if is_success {
+            successful.push((tuple, first_syn));
+        } else {
+            assert!(
+                !has_response && count_subslices(&response, RESPONSE2) == 0,
+                "failed guest attempt {tuple:?} carries an exact reply and could masquerade as success"
+            );
+            assert!(
+                capture.saw_reset || capture.saw_fin,
+                "failed guest attempt {tuple:?} has neither RST nor FIN closure"
             );
         }
-        plaintext_request_hits += count_subslices(payload, REQUEST);
-        packet_count =
-            packet_count.checked_add(1).expect("captured packet count does not overflow");
-        byte_count = byte_count
-            .checked_add(u64::try_from(ipv4_total_len).expect("IPv4 tot_len fits u64"))
-            .expect("captured IPv4 byte count does not overflow");
-        segments.push(segment);
+        let mut attempt_segments = capture.request.segments;
+        attempt_segments.extend(capture.response.segments);
+        attempts.push(GuestTcpAttempt {
+            tuple,
+            request,
+            response,
+            segments: attempt_segments,
+            saw_reset: capture.saw_reset,
+            saw_fin: capture.saw_fin,
+        });
     }
+    let [(successful_tuple, first_syn)] = successful.as_slice() else {
+        panic!(
+            "exactly one guest attempt must carry the complete byte-exact request/reply exchanges; successes={successful:?} attempts={attempts:#?}"
+        )
+    };
     GuestEgressAudit {
         segments,
         interface_tcp,
-        first_syn,
+        attempts,
+        successful_tuple: *successful_tuple,
+        first_syn: Some(*first_syn),
         plaintext_request_hits,
         packet_count,
         byte_count,
@@ -3697,9 +3846,19 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     );
     assert_eq!(first_syn.payload_len, 0, "an initial SYN has no application payload");
     assert_eq!(
-        result.guest_egress.interface_tcp.first().copied(),
-        Some(first_syn),
-        "the first eligible TAP ingress TCP packet is the exact initial SYN"
+        first_syn.tuple, result.guest_egress.successful_tuple,
+        "the selected initial SYN belongs to the unique complete guest attempt"
+    );
+    assert_eq!(
+        result
+            .guest_egress
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.request == [REQUEST, REQUEST2].concat()
+                && attempt.response == [RESPONSE, RESPONSE2].concat())
+            .count(),
+        1,
+        "failed retries cannot masquerade as the one complete natural-success attempt"
     );
     assert!(
         first_syn.tuple.source.port() != 0,
@@ -3845,7 +4004,7 @@ fn typed_state_and_exact_event_receipt_remain_independent_and_fail_closed() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn missing_or_pre_event_all_ethertype_guest_frame_invalidates_born_captured() {
+fn guest_attempt_retry_and_event_boundary_matrix_fails_closed() {
     let mut frame = CapturedFrame {
         kernel_event_at: Some(KernelRealtime(99)),
         ifindex: 41,
@@ -3894,6 +4053,142 @@ fn missing_or_pre_event_all_ethertype_guest_frame_invalidates_born_captured() {
             KernelRealtime(100)
         ),
         "the opposite TAP direction is not guest ingress"
+    );
+
+    let guest = Ipv4Addr::new(100, 95, 0, 3);
+    let frontend = SocketAddrV4::new(Ipv4Addr::new(10, 98, 0, 1), SERVICE_PORT);
+    let failed_tuple =
+        FlowTuple { source: SocketAddrV4::new(guest, 45_002), destination: frontend };
+    let successful_tuple =
+        FlowTuple { source: SocketAddrV4::new(guest, 39_496), destination: frontend };
+    let request = [REQUEST, REQUEST2].concat();
+    let response = [RESPONSE, RESPONSE2].concat();
+    let successful_frames = |tuple: FlowTuple, sequence: u32| {
+        vec![
+            synthetic_peer_tcp_frame_on(41, tuple, sequence, 0x02, &[], libc::PACKET_HOST),
+            synthetic_peer_tcp_frame_on(
+                41,
+                tuple.reverse(),
+                sequence + 10_000,
+                0x12,
+                &[],
+                libc::PACKET_OUTGOING,
+            ),
+            synthetic_peer_tcp_frame_on(41, tuple, sequence + 1, 0x18, &request, libc::PACKET_HOST),
+            synthetic_peer_tcp_frame_on(
+                41,
+                tuple.reverse(),
+                sequence + 10_001,
+                0x18,
+                &response,
+                libc::PACKET_OUTGOING,
+            ),
+        ]
+    };
+    let failed_frames = |tuple: FlowTuple, sequence: u32| {
+        vec![
+            synthetic_peer_tcp_frame_on(41, tuple, sequence, 0x02, &[], libc::PACKET_HOST),
+            synthetic_peer_tcp_frame_on(41, tuple, sequence + 1, 0x18, REQUEST, libc::PACKET_HOST),
+            synthetic_peer_tcp_frame_on(
+                41,
+                tuple.reverse(),
+                sequence + 5_000,
+                0x14,
+                &[],
+                libc::PACKET_OUTGOING,
+            ),
+        ]
+    };
+
+    let successful_only = successful_frames(successful_tuple, 2_000);
+    let audit = audit_guest_tcp_attempts(&successful_only, 41, guest, frontend);
+    assert_eq!(audit.successful_tuple, successful_tuple, "the first attempt may succeed");
+
+    let mut retry_then_success = failed_frames(failed_tuple, 1_000);
+    retry_then_success.extend(successful_frames(successful_tuple, 2_000));
+    let audit = audit_guest_tcp_attempts(&retry_then_success, 41, guest, frontend);
+    assert_eq!(audit.successful_tuple, successful_tuple);
+    assert_eq!(audit.attempts.len(), 2, "the failed retry remains in the closed universe");
+    assert!(
+        audit
+            .attempts
+            .iter()
+            .find(|attempt| attempt.tuple == failed_tuple)
+            .is_some_and(|attempt| attempt.saw_reset && attempt.response.is_empty()),
+        "the failed-first attempt retains its request/reset evidence without success credit"
+    );
+
+    let mut two_successes = successful_frames(failed_tuple, 1_000);
+    two_successes.extend(successful_frames(successful_tuple, 2_000));
+    assert!(
+        std::panic::catch_unwind(|| {
+            audit_guest_tcp_attempts(&two_successes, 41, guest, frontend);
+        })
+        .is_err(),
+        "two complete guest tuples fail closed as ambiguous"
+    );
+
+    let response_only = vec![
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 3_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(
+            41,
+            failed_tuple.reverse(),
+            13_000,
+            0x12,
+            &[],
+            libc::PACKET_OUTGOING,
+        ),
+        synthetic_peer_tcp_frame_on(
+            41,
+            failed_tuple.reverse(),
+            13_001,
+            0x18,
+            &response,
+            libc::PACKET_OUTGOING,
+        ),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| {
+            audit_guest_tcp_attempts(&response_only, 41, guest, frontend);
+        })
+        .is_err(),
+        "an exact response without its request fails closed"
+    );
+
+    let gap = vec![
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 4_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 4_002, 0x18, b"gap", libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(
+            41,
+            failed_tuple.reverse(),
+            14_000,
+            0x14,
+            &[],
+            libc::PACKET_OUTGOING,
+        ),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| audit_guest_tcp_attempts(&gap, 41, guest, frontend)).is_err(),
+        "a retry stream gap fails closed"
+    );
+
+    let conflict = vec![
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 5_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 5_001, 0x18, b"a", libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(41, failed_tuple, 5_001, 0x18, b"b", libc::PACKET_OTHERHOST),
+        synthetic_peer_tcp_frame_on(
+            41,
+            failed_tuple.reverse(),
+            15_000,
+            0x14,
+            &[],
+            libc::PACKET_OUTGOING,
+        ),
+    ];
+    assert!(
+        std::panic::catch_unwind(|| audit_guest_tcp_attempts(&conflict, 41, guest, frontend))
+            .is_err(),
+        "conflicting retry bytes fail closed"
     );
 }
 
