@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -75,6 +75,9 @@ const REQUEST: &[u8] =
     b"GTI_REQUEST_guest_plaintext_dial_by_name_must_be_encrypted_on_peer_wire_0201";
 const RESPONSE: &[u8] =
     b"GTI_RESPONSE_peer_authored_distinct_reply_returns_to_guest_byte_exact_0201";
+const REQUEST2: &[u8] = b"GTI_REQUEST2_post_establishment_must_use_the_same_ktls_splice_owner_0201";
+const RESPONSE2: &[u8] =
+    b"GTI_RESPONSE2_same_owner_returns_post_establishment_reply_byte_exact_0201";
 const NON_MESH_REQUEST: &[u8] =
     b"GTI_NON_MESH_REQUEST_plaintext_passthrough_outside_workload_subnet_0201";
 const NON_MESH_RESPONSE: &[u8] =
@@ -787,13 +790,17 @@ fn main() {{
         let (mut stream, _) = listener.accept().unwrap();
         std::thread::spawn(move || {{
             stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-            let mut buf = [0_u8; 4096];
-            let Ok(n) = stream.read(&mut buf) else {{ return }};
-            if &buf[..n] != {REQUEST:?} {{
-                return;
+            for (expected, response) in [
+                (&{REQUEST:?}[..], &{RESPONSE:?}[..]),
+                (&{REQUEST2:?}[..], &{RESPONSE2:?}[..]),
+            ] {{
+                let mut got = vec![0_u8; expected.len()];
+                if stream.read_exact(&mut got).is_err() || got != expected {{
+                    return;
+                }}
+                stream.write_all(response).unwrap();
+                stream.flush().unwrap();
             }}
-            stream.write_all(&{RESPONSE:?}).unwrap();
-            stream.flush().unwrap();
             std::thread::sleep(Duration::from_secs(20));
         }});
     }}
@@ -818,6 +825,7 @@ fn build_mesh_guest_with_timing(
     authenticated_hold_secs: u64,
 ) -> PathBuf {
     let response_len = RESPONSE.len();
+    let response2_len = RESPONSE2.len();
     let source = format!(
         r#"
 use std::io::{{Read, Write}};
@@ -837,10 +845,17 @@ fn main() {{
                     {{
                         let mut got = vec![0_u8; {response_len}];
                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
-                            // Keep the authenticated data socket alive long enough for the
-                            // host-side exact-tuple kTLS oracle to inspect both directions.
-                            std::thread::sleep(Duration::from_secs({authenticated_hold_secs}));
-                            return;
+                            if stream.write_all(&{REQUEST2:?}).is_ok()
+                                && stream.flush().is_ok()
+                            {{
+                                let mut got2 = vec![0_u8; {response2_len}];
+                                if stream.read_exact(&mut got2).is_ok() && got2 == {RESPONSE2:?} {{
+                                    // Keep the authenticated data socket alive long enough for the
+                                    // host-side exact-tuple kTLS/inode/fd oracle to inspect both directions.
+                                    std::thread::sleep(Duration::from_secs({authenticated_hold_secs}));
+                                    return;
+                                }}
+                            }}
                         }}
                     }}
                 }}
@@ -950,6 +965,7 @@ struct WireScan {
     plaintext_hits_on_exact_peer_tuple: u64,
     plaintext_hits_on_other_same_port_streams: u64,
     same_port_streams_observed: usize,
+    plaintext_markers_by_tuple: BTreeMap<FlowTuple, u64>,
     capture_packets: u32,
     capture_drops: u32,
 }
@@ -957,6 +973,8 @@ struct WireScan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct KtlsSocketEvidence {
     tuple: FlowTuple,
+    inode: u64,
+    fds: BTreeSet<i32>,
     record: String,
 }
 
@@ -1047,6 +1065,7 @@ struct WireCapture {
     stop: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<CaptureBatch>>,
     port: u16,
+    ifindex: u32,
 }
 
 impl WireCapture {
@@ -1074,7 +1093,7 @@ impl WireCapture {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
         let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
-        Self { stop, handle: Some(handle), port }
+        Self { stop, handle: Some(handle), port, ifindex }
     }
 
     fn stop(mut self) -> CaptureBatch {
@@ -1094,8 +1113,17 @@ impl WireCapture {
         ktls_candidates: &[KtlsSocketEvidence],
     ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
         let port = self.port;
+        let ifindex = self.ifindex;
         let capture = self.stop();
-        let (mut scan, exact) = correlate_ktls_candidates(&capture.frames, port, ktls_candidates);
+        let (mut scan, mut exact) =
+            correlate_ktls_candidates(&capture.frames, port, ktls_candidates);
+        if let Ok(candidate) = &exact
+            && exact_tuple_appears_on_wrong_interface(&capture.frames, candidate.tuple, ifindex)
+        {
+            exact = Err(format!(
+                "exact kTLS tuple appeared outside the bound interface ifindex {ifindex}"
+            ));
+        }
         scan.capture_packets = capture.statistics.packets;
         scan.capture_drops = capture.statistics.drops;
         (scan, exact)
@@ -1476,10 +1504,12 @@ fn scan_frames(
 
     let mut scan =
         WireScan { exact_tuple, same_port_streams_observed: streams.len(), ..WireScan::default() };
+    scan.plaintext_markers_by_tuple =
+        streams.iter().map(|(tuple, bytes)| (*tuple, plaintext_marker_hits(bytes))).collect();
     if let Some(tuple) = exact_tuple {
         let reverse = tuple.reverse();
         for (observed, bytes) in &streams {
-            let plaintext_hits = count_subslices(bytes, REQUEST) + count_subslices(bytes, RESPONSE);
+            let plaintext_hits = plaintext_marker_hits(bytes);
             if *observed == tuple || *observed == reverse {
                 // Confidentiality is scoped to the exact production kTLS
                 // socket and its reverse. It remains independent of positive
@@ -1496,10 +1526,8 @@ fn scan_frames(
         scan.exact_records_from_peer =
             streams.get(&reverse).map_or(0, |bytes| count_tls_application_records(bytes));
     } else {
-        scan.plaintext_hits_on_other_same_port_streams = streams
-            .values()
-            .map(|bytes| count_subslices(bytes, REQUEST) + count_subslices(bytes, RESPONSE))
-            .sum();
+        scan.plaintext_hits_on_other_same_port_streams =
+            streams.values().map(|bytes| plaintext_marker_hits(bytes)).sum();
     }
     scan
 }
@@ -1511,7 +1539,11 @@ fn correlate_ktls_candidates(
 ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
     let mut matches = candidates
         .iter()
-        .filter(|candidate| record_has_bidirectional_tls13_ktls(&candidate.record))
+        .filter(|candidate| {
+            record_has_bidirectional_tls13_ktls(&candidate.record)
+                && candidate.inode != 0
+                && candidate.fds.len() == 1
+        })
         .map(|candidate| (scan_frames(frames, peer_port, Some(candidate.tuple)), candidate.clone()))
         .filter(|(scan, _)| scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0)
         .collect::<Vec<_>>();
@@ -1535,6 +1567,67 @@ fn correlate_ktls_candidates(
             )),
         ),
     }
+}
+
+fn exact_tuple_appears_on_wrong_interface(
+    frames: &[CapturedFrame],
+    tuple: FlowTuple,
+    expected_ifindex: u32,
+) -> bool {
+    frames.iter().any(|frame| {
+        parse_tcp_segment(frame, false).is_ok_and(|segment| {
+            segment.is_some_and(|segment| {
+                (segment.tuple == tuple || segment.tuple == tuple.reverse())
+                    && frame.ifindex != expected_ifindex
+            })
+        })
+    })
+}
+
+fn assert_shared_bridge_plaintext_boundaries(
+    scan: &WireScan,
+    caller: Ipv4Addr,
+    frontend: SocketAddrV4,
+    gateway: Ipv4Addr,
+    service: Ipv4Addr,
+) {
+    let caller_tuple = scan
+        .plaintext_markers_by_tuple
+        .iter()
+        .find(|(tuple, hits)| {
+            tuple.source.ip() == &caller && tuple.destination == frontend && **hits >= 2
+        })
+        .map(|(tuple, _)| *tuple)
+        .expect("caller TAP/shared bridge carries both plaintext requests toward leg F");
+    let leg_s = scan
+        .plaintext_markers_by_tuple
+        .iter()
+        .filter(|(tuple, hits)| {
+            tuple.source.ip() == &gateway
+                && tuple.destination.ip() == &service
+                && tuple.destination.port() == SERVICE_PORT
+                && **hits >= 2
+        })
+        .map(|(tuple, _)| *tuple)
+        .collect::<Vec<_>>();
+    let [leg_s] = leg_s.as_slice() else {
+        panic!(
+            "exactly one plaintext leg-S tuple must carry both requests: {leg_s:?} scan={scan:?}"
+        )
+    };
+    assert_eq!(
+        scan.plaintext_markers_by_tuple.get(&leg_s.reverse()).copied(),
+        Some(2),
+        "the exact reverse leg-S tuple carries both plaintext responses"
+    );
+    assert!(
+        scan.plaintext_markers_by_tuple.keys().all(|tuple| {
+            !(tuple.source.ip() == &caller
+                && tuple.destination.ip() == &service
+                && tuple.destination.port() == SERVICE_PORT)
+        }),
+        "caller-to-Service direct guest bypass is absent; caller leg-F tuple is {caller_tuple:?}"
+    );
 }
 
 fn parse_tcp_segment(
@@ -1888,22 +1981,56 @@ fn count_subslices(haystack: &[u8], needle: &[u8]) -> u64 {
     haystack.windows(needle.len()).filter(|window| *window == needle).count() as u64
 }
 
+fn plaintext_marker_hits(bytes: &[u8]) -> u64 {
+    [REQUEST, RESPONSE, REQUEST2, RESPONSE2]
+        .into_iter()
+        .map(|marker| count_subslices(bytes, marker))
+        .sum()
+}
+
+fn socket_inode(record: &str) -> Option<u64> {
+    record
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("ino:").and_then(|inode| inode.parse().ok()))
+}
+
+fn process_fds_for_socket_inode(inode: u64) -> BTreeSet<i32> {
+    let expected = format!("socket:[{inode}]");
+    std::fs::read_dir("/proc/self/fd")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let fd = entry.file_name().to_str()?.parse::<i32>().ok()?;
+            let target = std::fs::read_link(entry.path()).ok()?;
+            (target.to_string_lossy() == expected).then_some(fd)
+        })
+        .collect()
+}
+
+fn complete_ktls_evidence(tuple: FlowTuple, record: String) -> Option<KtlsSocketEvidence> {
+    let inode = socket_inode(&record)?;
+    Some(KtlsSocketEvidence { tuple, inode, fds: process_fds_for_socket_inode(inode), record })
+}
+
 fn ktls_socket_records() -> Vec<KtlsSocketEvidence> {
     let output = Command::new("ss").args(["-H", "-n", "-t", "-i", "-e"]).output().expect("run ss");
     assert!(output.status.success(), "ss failed: {}", String::from_utf8_lossy(&output.stderr));
     let text = String::from_utf8_lossy(&output.stdout);
     let mut records = Vec::new();
-    let mut current: Option<KtlsSocketEvidence> = None;
+    let mut current: Option<(FlowTuple, String)> = None;
     for line in text.lines() {
         if line.starts_with(char::is_whitespace) {
-            if let Some(record) = current.as_mut() {
-                record.record.push_str(line);
-                record.record.push('\n');
+            if let Some((_, record)) = current.as_mut() {
+                record.push_str(line);
+                record.push('\n');
             }
             continue;
         }
-        if let Some(record) = current.take() {
-            records.push(record);
+        if let Some((tuple, record)) = current.take()
+            && let Some(evidence) = complete_ktls_evidence(tuple, record)
+        {
+            records.push(evidence);
         }
         let columns = line.split_whitespace().collect::<Vec<_>>();
         let Some((source, destination)) =
@@ -1920,13 +2047,12 @@ fn ktls_socket_records() -> Vec<KtlsSocketEvidence> {
         else {
             continue;
         };
-        current = Some(KtlsSocketEvidence {
-            tuple: FlowTuple { source, destination },
-            record: format!("{line}\n"),
-        });
+        current = Some((FlowTuple { source, destination }, format!("{line}\n")));
     }
-    if let Some(record) = current {
-        records.push(record);
+    if let Some((tuple, record)) = current
+        && let Some(evidence) = complete_ktls_evidence(tuple, record)
+    {
+        records.push(evidence);
     }
     records
 }
@@ -1991,6 +2117,206 @@ impl Drop for KtlsCandidateJournal {
             let _ = handle.join();
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SpliceEvidence {
+    source_fds: BTreeSet<i32>,
+    destination_fds: BTreeSet<i32>,
+}
+
+impl SpliceEvidence {
+    fn proves_bidirectional_splice(&self, fd: i32) -> bool {
+        self.source_fds.contains(&fd) && self.destination_fds.contains(&fd)
+    }
+}
+
+fn require_same_socket_splice(
+    ktls: &KtlsSocketEvidence,
+    splice: &SpliceEvidence,
+) -> Result<i32, String> {
+    let mut fds = ktls.fds.iter().copied();
+    let Some(fd) = fds.next() else {
+        return Err(format!(
+            "selected ss inode must map to exactly one in-process leg-B fd: inode={} fds={:?}",
+            ktls.inode, ktls.fds
+        ));
+    };
+    if fds.next().is_some() {
+        return Err(format!(
+            "selected ss inode must map to exactly one in-process leg-B fd: inode={} fds={:?}",
+            ktls.inode, ktls.fds
+        ));
+    }
+    if !splice.proves_bidirectional_splice(fd) {
+        return Err(format!(
+            "selected leg-B fd is not both a positive splice destination and source: fd={fd} evidence={splice:?}"
+        ));
+    }
+    Ok(fd)
+}
+
+struct SpliceProbe {
+    child: Option<Child>,
+    path: PathBuf,
+    seed_tids: BTreeSet<i32>,
+}
+
+impl SpliceProbe {
+    fn attach_self() -> Self {
+        assert!(
+            Command::new("strace").arg("-V").output().is_ok_and(|output| output.status.success()),
+            "strace is required for same-inode/fd splice evidence"
+        );
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!("nd295-s01-splice-{pid}.log"));
+        let _ = std::fs::remove_file(&path);
+        let child = Command::new("strace")
+            .args(["-f", "-q", "-qq", "-e", "trace=clone,clone3,splice"])
+            .args(["-o", path.to_str().expect("UTF-8 strace path")])
+            .args(["-p", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("attach strace to the in-process production composition");
+        std::thread::sleep(Duration::from_millis(400));
+        Self { child: Some(child), path, seed_tids: snapshot_thread_group() }
+    }
+
+    fn finish(mut self) -> SpliceEvidence {
+        self.detach();
+        let raw = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let group = thread_group_closure(&raw, &self.seed_tids);
+        parse_positive_splices(&raw, &group)
+    }
+
+    fn detach(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for SpliceProbe {
+    fn drop(&mut self) {
+        self.detach();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn snapshot_thread_group() -> BTreeSet<i32> {
+    std::fs::read_dir("/proc/self/task")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
+        .collect()
+}
+
+fn split_trace_tid(line: &str) -> (Option<i32>, &str) {
+    let line = line.trim_start();
+    let end = line.find(|character: char| !character.is_ascii_digit()).unwrap_or(line.len());
+    if end == 0 {
+        return (None, line);
+    }
+    (line[..end].parse().ok(), line[end..].trim_start())
+}
+
+fn completed_positive_return(body: &str) -> bool {
+    let Some((_, returned)) = body.rsplit_once('=') else { return false };
+    let returned = returned.trim_start();
+    let end =
+        returned.find(|character: char| !character.is_ascii_digit()).unwrap_or(returned.len());
+    end > 0 && returned[..end].parse::<u64>().is_ok_and(|value| value > 0)
+}
+
+fn completed_clone_child(body: &str) -> Option<i32> {
+    let (_, returned) = body.rsplit_once('=')?;
+    let returned = returned.trim_start();
+    let end =
+        returned.find(|character: char| !character.is_ascii_digit()).unwrap_or(returned.len());
+    (end > 0).then(|| returned[..end].parse().ok()).flatten()
+}
+
+fn clone_thread_edges(raw: &str) -> Vec<(i32, i32)> {
+    let mut pending = BTreeMap::new();
+    let mut edges = Vec::new();
+    for line in raw.lines() {
+        let (Some(parent), body) = split_trace_tid(line) else { continue };
+        let start = body.starts_with("clone(") || body.starts_with("clone3(");
+        let resumed = body.starts_with("<...")
+            && (body.contains("clone resumed") || body.contains("clone3 resumed"));
+        if !start && !resumed {
+            continue;
+        }
+        if body.contains("<unfinished ...>") {
+            pending.insert(parent, body.contains("CLONE_THREAD"));
+            continue;
+        }
+        let is_thread = if resumed {
+            pending.remove(&parent).unwrap_or(false)
+        } else {
+            body.contains("CLONE_THREAD")
+        };
+        if is_thread && let Some(child) = completed_clone_child(body) {
+            edges.push((parent, child));
+        }
+    }
+    edges
+}
+
+fn thread_group_closure(raw: &str, seed: &BTreeSet<i32>) -> BTreeSet<i32> {
+    let edges = clone_thread_edges(raw);
+    let mut group = seed.clone();
+    loop {
+        let mut changed = false;
+        for (parent, child) in &edges {
+            if group.contains(parent) && group.insert(*child) {
+                changed = true;
+            }
+        }
+        if !changed {
+            return group;
+        }
+    }
+}
+
+fn splice_fd(body: &str, index: usize) -> Option<i32> {
+    let start = body.find("splice(")? + "splice(".len();
+    let argument = body[start..].split(',').nth(index)?.trim();
+    let end =
+        argument.find(|character: char| !character.is_ascii_digit()).unwrap_or(argument.len());
+    (end > 0).then(|| argument[..end].parse().ok()).flatten()
+}
+
+fn parse_positive_splices(raw: &str, group: &BTreeSet<i32>) -> SpliceEvidence {
+    let mut pending = BTreeMap::new();
+    let mut evidence =
+        SpliceEvidence { source_fds: BTreeSet::new(), destination_fds: BTreeSet::new() };
+    for line in raw.lines() {
+        let (Some(tid), body) = split_trace_tid(line) else { continue };
+        if !group.contains(&tid) {
+            continue;
+        }
+        if body.starts_with("splice(") {
+            let Some(pair) = splice_fd(body, 0).zip(splice_fd(body, 2)) else { continue };
+            if body.contains("<unfinished ...>") {
+                pending.insert(tid, pair);
+            } else if completed_positive_return(body) {
+                evidence.source_fds.insert(pair.0);
+                evidence.destination_fds.insert(pair.1);
+            }
+        } else if body.starts_with("<...")
+            && body.contains("splice resumed")
+            && completed_positive_return(body)
+            && let Some(pair) = pending.remove(&tid)
+        {
+            evidence.source_fds.insert(pair.0);
+            evidence.destination_fds.insert(pair.1);
+        }
+    }
+    evidence
 }
 
 fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRowBody {
@@ -2277,6 +2603,18 @@ fn guest_address_for_config(config: &VmConfig) -> Ipv4Addr {
         .expect("guest-network token carries a validated IPv4 address")
 }
 
+fn guest_gateway_for_config(config: &VmConfig) -> Ipv4Addr {
+    config
+        .cmdline
+        .as_str()
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("overdrive.net="))
+        .and_then(|token| token.split(',').find_map(|part| part.strip_prefix("gw=")))
+        .expect("production VmConfig carries one validated guest gateway")
+        .parse()
+        .expect("guest gateway is a validated IPv4 address")
+}
+
 async fn arm_failure_capture(cuts: &VmmCutReceiver) -> ArmedFailureCapture {
     arm_failure_capture_from_cut(receive_vmm_cut(cuts).await)
 }
@@ -2540,6 +2878,7 @@ struct MeshResult {
     readiness: InterceptReadiness,
     guest_egress: GuestEgressAudit,
     ktls: Result<KtlsSocketEvidence, String>,
+    splice: SpliceEvidence,
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
@@ -2589,8 +2928,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // guest-side TAP capture below remains the plaintext endpoint boundary;
     // keeping these two surfaces separate prevents the local plaintext from
     // being mistaken for peer-wire evidence.
-    let peer_wire = WireCapture::start(&bridge_name, SERVICE_PORT);
+    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let bridge_wire = WireCapture::start(&bridge_name, SERVICE_PORT);
     let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
+    let splice_probe = SpliceProbe::attach_self();
     // A fresh composition has exactly one declared mesh name (`server`), so
     // the production smallest-free frontend allocator assigns the first usable
     // address in its named block. This is the address DNS returns to the guest;
@@ -2652,6 +2993,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .as_ref()
         .expect("mesh VM reaches VMM with one complete network attachment");
     let guest_address = guest_address_for_config(&spawn_cut.config);
+    let guest_gateway = guest_gateway_for_config(&spawn_cut.config);
     assert_eq!(network.mac[0] & 0x02, 0x02, "the production VM receives a local MAC");
     let tap_wire = WireCapture::start(&network.tap, 0);
     let tap_ifindex = {
@@ -2716,7 +3058,17 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     )
     .await;
     let ktls_candidates = ktls_journal.finish();
+    let splice = splice_probe.finish();
     let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
+    let bridge_capture = bridge_wire.stop();
+    let bridge_scan = scan_frames(&bridge_capture.frames, SERVICE_PORT, None);
+    assert_shared_bridge_plaintext_boundaries(
+        &bridge_scan,
+        guest_address,
+        mesh_destination,
+        guest_gateway,
+        service_address,
+    );
     let tap_capture = tap_wire.stop();
     let pre_intercept_tap_frames = tap_capture
         .frames
@@ -2834,6 +3186,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         readiness,
         guest_egress,
         ktls,
+        splice,
     }
 }
 
@@ -3028,6 +3381,8 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
         "one ss record must itself contain tcp-ulp-tls, TLS 1.3, rxconf, and txconf; got:\n{}",
         ktls.record
     );
+    require_same_socket_splice(ktls, &result.splice)
+        .expect("the selected live ss inode/fd owns both production splice directions");
 }
 
 /// S-GTI-04 — a destination outside the workload mesh block is classified
@@ -3650,16 +4005,29 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
             source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 40_000),
             destination: exact_peer.destination,
         },
+        inode: 40_000,
+        fds: BTreeSet::from([70]),
         record: ktls_record.to_owned(),
     };
-    let exact_candidate = KtlsSocketEvidence { tuple: exact_peer, record: ktls_record.to_owned() };
-    let exact_latest =
-        KtlsSocketEvidence { tuple: exact_peer, record: format!("{ktls_record} bytes_acked:77") };
+    let exact_candidate = KtlsSocketEvidence {
+        tuple: exact_peer,
+        inode: 40_001,
+        fds: BTreeSet::from([71]),
+        record: ktls_record.to_owned(),
+    };
+    let exact_latest = KtlsSocketEvidence {
+        tuple: exact_peer,
+        inode: 40_001,
+        fds: BTreeSet::from([71]),
+        record: format!("{ktls_record} bytes_acked:77"),
+    };
     let ineligible = KtlsSocketEvidence {
         tuple: FlowTuple {
             source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 39_999),
             destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 2), SERVICE_PORT + 1),
         },
+        inode: 39_999,
+        fds: BTreeSet::from([72]),
         record: ktls_record.to_owned(),
     };
     let mut journal = BTreeMap::new();
@@ -3679,11 +4047,28 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         journal[1], exact_latest,
         "deduplication retains the latest complete ss evidence for the exact tuple"
     );
+    assert_eq!(socket_inode("ESTAB ... ino:40001 sk:1"), Some(40_001));
+    let seed = BTreeSet::from([100]);
+    let trace = "100 clone(child_stack=NULL, flags=CLONE_VM|CLONE_THREAD) = 101\n\
+                 101 splice(5, NULL, 71, NULL, 73, SPLICE_F_MOVE) = 73\n\
+                 101 splice(71, NULL, 6, NULL, 71, SPLICE_F_MOVE) = 71\n\
+                 999 splice(8, NULL, 71, NULL, 99, SPLICE_F_MOVE) = 99\n";
+    let group = thread_group_closure(trace, &seed);
+    assert_eq!(group, BTreeSet::from([100, 101]));
+    let splice = parse_positive_splices(trace, &group);
+    assert_eq!(
+        require_same_socket_splice(&exact_latest, &splice)
+            .expect("same-inode/fd evidence correlates"),
+        71,
+        "only the selected in-process fd is both a positive splice destination and source"
+    );
     let (scan, selected) = correlate_ktls_candidates(&frames, SERVICE_PORT, &journal);
     assert_eq!(
         selected.expect("the second same-port candidate is the exact captured TLS connection"),
         exact_latest
     );
+    assert!(!exact_tuple_appears_on_wrong_interface(&frames, exact_peer, 1));
+    assert!(exact_tuple_appears_on_wrong_interface(&frames, exact_peer, 2));
     assert_eq!(scan.same_port_streams_observed, 3);
     assert_eq!(scan.exact_records_to_peer, 1);
     assert_eq!(scan.exact_records_from_peer, 1);
@@ -4100,6 +4485,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
 
     let tap_wire = WireCapture::start(&tap, 0);
     let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
+    let splice_probe = SpliceProbe::attach_self();
     let tap_ifindex = {
         let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
         // SAFETY: the NUL-terminated name remains live for this lookup.
@@ -4140,6 +4526,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     )
     .await?;
     let ktls_candidates = ktls_journal.finish();
+    let splice = splice_probe.finish();
     let tap_capture = tap_wire.stop();
     let pre_ready = tap_capture
         .frames
@@ -4160,6 +4547,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
     let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
     let ktls = ktls?;
+    require_same_socket_splice(&ktls, &splice)?;
     if audit.first_syn.is_none()
         || audit.plaintext_request_hits == 0
         || scan.plaintext_hits_on_exact_peer_tuple != 0
