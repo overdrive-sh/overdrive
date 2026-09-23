@@ -7,10 +7,11 @@
 //! resolver entry; those effects come exclusively from the production boot and
 //! allocation paths.
 //!
-//! The workload speaks plaintext by design. Encryption is proven on the
-//! inter-agent leg-B/leg-C wire: an AF_PACKET capture observes TLS application
-//! records in both directions with neither byte-distinct plaintext marker, and
-//! `ss -tie` observes the kernel TLS ULP on the live connection.
+//! The workload speaks plaintext by design. Same-node protected transport is
+//! proven by one exact `ss -e` TLS 1.3 kTLS TX/RX inode/fd whose fd is a positive
+//! splice destination and source. Lossless all-interface capture separately
+//! proves that tuple is loopback-only and confines plaintext to the accepted
+//! guest-local leg-F/leg-S tuples with no direct bypass.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(
@@ -928,8 +929,6 @@ fn service_toml(peer: &Path, kernel: &Path, rootfs: &Path) -> String {
     )
 }
 
-const TLS_APPLICATION_DATA: u8 = 0x17;
-const TLS_RECORD_HEADER_LEN: usize = 5;
 const IPV4_HEADER_LEN: usize = 20;
 const ETH_P_ALL: std::os::raw::c_int = 0x0003;
 const ETH_P_IP: u16 = 0x0800;
@@ -960,12 +959,12 @@ impl FlowTuple {
 #[derive(Debug, Clone, Default)]
 struct WireScan {
     exact_tuple: Option<FlowTuple>,
-    exact_records_to_peer: u64,
-    exact_records_from_peer: u64,
     plaintext_hits_on_exact_peer_tuple: u64,
     plaintext_hits_on_other_same_port_streams: u64,
     same_port_streams_observed: usize,
     plaintext_markers_by_tuple: BTreeMap<FlowTuple, u64>,
+    plaintext_markers_by_interface_tuple: BTreeMap<(u32, FlowTuple), u64>,
+    interfaces_by_tuple: BTreeMap<FlowTuple, BTreeSet<u32>>,
     capture_packets: u32,
     capture_drops: u32,
 }
@@ -1065,17 +1064,19 @@ struct WireCapture {
     stop: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<CaptureBatch>>,
     port: u16,
-    ifindex: u32,
+}
+
+fn interface_index(iface: &str) -> u32 {
+    let iface = std::ffi::CString::new(iface).expect("iface has no NUL");
+    // SAFETY: libc retains no pointer.
+    let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
+    assert_ne!(ifindex, 0, "resolve AF_PACKET interface index for {iface:?}");
+    ifindex
 }
 
 impl WireCapture {
     fn start(iface: &str, port: u16) -> Self {
-        let iface = std::ffi::CString::new(iface).expect("iface has no NUL");
-        // SAFETY: libc retains neither pointer and the returned fd is owned here.
-        let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
-        assert!(ifindex != 0, "resolve AF_PACKET interface index");
-
-        Self::start_bound(ifindex, port)
+        Self::start_bound(interface_index(iface), port)
     }
 
     /// Capture every interface from before the allocation TAP exists. Binding
@@ -1088,12 +1089,16 @@ impl WireCapture {
         Self::start_bound(0, 0)
     }
 
+    fn start_all_for_port(port: u16) -> Self {
+        Self::start_bound(0, port)
+    }
+
     fn start_bound(ifindex: u32, port: u16) -> Self {
         let fd = open_bound_packet_socket(ifindex).expect("open bound AF_PACKET capture");
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
         let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
-        Self { stop, handle: Some(handle), port, ifindex }
+        Self { stop, handle: Some(handle), port }
     }
 
     fn stop(mut self) -> CaptureBatch {
@@ -1111,19 +1116,12 @@ impl WireCapture {
     fn stop_and_scan(
         self,
         ktls_candidates: &[KtlsSocketEvidence],
+        loopback_ifindex: u32,
     ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
         let port = self.port;
-        let ifindex = self.ifindex;
         let capture = self.stop();
-        let (mut scan, mut exact) =
-            correlate_ktls_candidates(&capture.frames, port, ktls_candidates);
-        if let Ok(candidate) = &exact
-            && exact_tuple_appears_on_wrong_interface(&capture.frames, candidate.tuple, ifindex)
-        {
-            exact = Err(format!(
-                "exact kTLS tuple appeared outside the bound interface ifindex {ifindex}"
-            ));
-        }
+        let (mut scan, exact) =
+            correlate_ktls_candidates(&capture.frames, port, loopback_ifindex, ktls_candidates);
         scan.capture_packets = capture.statistics.packets;
         scan.capture_drops = capture.statistics.drops;
         (scan, exact)
@@ -1408,7 +1406,7 @@ fn scan_frames(
         pieces: Vec<(u32, bool, Vec<u8>, u8)>,
     }
 
-    let mut captures: BTreeMap<FlowTuple, DirectionCapture> = BTreeMap::new();
+    let mut captures: BTreeMap<(u32, FlowTuple), DirectionCapture> = BTreeMap::new();
     for frame in frames {
         let Some(segment) =
             parse_tcp_segment(frame, false).unwrap_or_else(|error| {
@@ -1424,11 +1422,12 @@ fn scan_frames(
         let packet_type_bit = match frame.packet_type {
             libc::PACKET_HOST => 0b01,
             libc::PACKET_OUTGOING => 0b10,
+            libc::PACKET_OTHERHOST => 0b100,
             other => panic!(
-                "peer shared-bridge stream has an unexpected AF_PACKET packet_type={other}; frame={frame:?}"
+                "same-port stream has an unclassified AF_PACKET packet_type={other}; frame={frame:?}"
             ),
         };
-        let capture = captures.entry(segment.tuple).or_default();
+        let capture = captures.entry((frame.ifindex, segment.tuple)).or_default();
         let syn = segment.flags & 0x02 != 0;
         if syn {
             match capture.syn_sequence {
@@ -1443,7 +1442,7 @@ fn scan_frames(
     }
 
     let mut streams = BTreeMap::new();
-    for (tuple, capture) in captures {
+    for ((ifindex, tuple), capture) in captures {
         let Some(syn_sequence) = capture.syn_sequence else {
             if capture.pieces.iter().all(|(_, _, payload, _)| payload.is_empty()) {
                 // A bare RST/ACK (typically the kernel rejecting a
@@ -1488,7 +1487,7 @@ fn scan_frames(
             }
         }
         assert!(
-            logical_copies.values().all(|copy_types| *copy_types & !0b11 == 0),
+            logical_copies.values().all(|copy_types| *copy_types & !0b111 == 0),
             "peer stream {tuple:?} retained an unclassified AF_PACKET copy"
         );
         let mut stream = Vec::with_capacity(bytes_by_offset.len());
@@ -1499,16 +1498,20 @@ fn scan_frames(
             );
             stream.push(byte);
         }
-        streams.insert(tuple, stream);
+        streams.insert((ifindex, tuple), stream);
     }
 
     let mut scan =
         WireScan { exact_tuple, same_port_streams_observed: streams.len(), ..WireScan::default() };
-    scan.plaintext_markers_by_tuple =
-        streams.iter().map(|(tuple, bytes)| (*tuple, plaintext_marker_hits(bytes))).collect();
+    scan.plaintext_markers_by_interface_tuple =
+        streams.iter().map(|(key, bytes)| (*key, plaintext_marker_hits(bytes))).collect();
+    for ((ifindex, tuple), hits) in &scan.plaintext_markers_by_interface_tuple {
+        *scan.plaintext_markers_by_tuple.entry(*tuple).or_default() += hits;
+        scan.interfaces_by_tuple.entry(*tuple).or_default().insert(*ifindex);
+    }
     if let Some(tuple) = exact_tuple {
         let reverse = tuple.reverse();
-        for (observed, bytes) in &streams {
+        for ((_, observed), bytes) in &streams {
             let plaintext_hits = plaintext_marker_hits(bytes);
             if *observed == tuple || *observed == reverse {
                 // Confidentiality is scoped to the exact production kTLS
@@ -1521,10 +1524,6 @@ fn scan_frames(
                 scan.plaintext_hits_on_other_same_port_streams += plaintext_hits;
             }
         }
-        scan.exact_records_to_peer =
-            streams.get(&tuple).map_or(0, |bytes| count_tls_application_records(bytes));
-        scan.exact_records_from_peer =
-            streams.get(&reverse).map_or(0, |bytes| count_tls_application_records(bytes));
     } else {
         scan.plaintext_hits_on_other_same_port_streams =
             streams.values().map(|bytes| plaintext_marker_hits(bytes)).sum();
@@ -1535,6 +1534,7 @@ fn scan_frames(
 fn correlate_ktls_candidates(
     frames: &[CapturedFrame],
     peer_port: u16,
+    loopback_ifindex: u32,
     candidates: &[KtlsSocketEvidence],
 ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
     let mut matches = candidates
@@ -1545,7 +1545,11 @@ fn correlate_ktls_candidates(
                 && candidate.fds.len() == 1
         })
         .map(|candidate| (scan_frames(frames, peer_port, Some(candidate.tuple)), candidate.clone()))
-        .filter(|(scan, _)| scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0)
+        .filter(|(scan, candidate)| {
+            let expected = BTreeSet::from([loopback_ifindex]);
+            scan.interfaces_by_tuple.get(&candidate.tuple) == Some(&expected)
+                && scan.interfaces_by_tuple.get(&candidate.tuple.reverse()) == Some(&expected)
+        })
         .collect::<Vec<_>>();
     match matches.len() {
         1 => {
@@ -1555,15 +1559,14 @@ fn correlate_ktls_candidates(
         0 => (
             scan_frames(frames, peer_port, None),
             Err(format!(
-                "no eligible kTLS TX/RX candidate carried bidirectional captured TLS application data; candidates={:?}",
-                candidates.iter().map(|candidate| candidate.tuple).collect::<Vec<_>>()
+                "no eligible kTLS TX/RX inode/fd candidate appeared bidirectionally and only on loopback; candidates={candidates:?}"
             )),
         ),
         count => (
             scan_frames(frames, peer_port, None),
             Err(format!(
-                "{count} eligible kTLS TX/RX candidates ambiguously carried bidirectional captured TLS application data: {:?}",
-                matches.iter().map(|(_, candidate)| candidate.tuple).collect::<Vec<_>>()
+                "{count} eligible kTLS TX/RX inode/fd candidates ambiguously appeared bidirectionally and only on loopback: {:?}",
+                matches.iter().map(|(_, candidate)| candidate).collect::<Vec<_>>()
             )),
         ),
     }
@@ -1584,12 +1587,13 @@ fn exact_tuple_appears_on_wrong_interface(
     })
 }
 
-fn assert_shared_bridge_plaintext_boundaries(
+fn assert_all_interface_plaintext_boundaries(
     scan: &WireScan,
     caller: Ipv4Addr,
     frontend: SocketAddrV4,
     gateway: Ipv4Addr,
     service: Ipv4Addr,
+    approved_ifindices: &BTreeSet<u32>,
 ) {
     let caller_tuple = scan
         .plaintext_markers_by_tuple
@@ -1615,19 +1619,29 @@ fn assert_shared_bridge_plaintext_boundaries(
             "exactly one plaintext leg-S tuple must carry both requests: {leg_s:?} scan={scan:?}"
         )
     };
-    assert_eq!(
-        scan.plaintext_markers_by_tuple.get(&leg_s.reverse()).copied(),
-        Some(2),
+    assert!(
+        scan.plaintext_markers_by_tuple.get(&leg_s.reverse()).is_some_and(|hits| *hits >= 2),
         "the exact reverse leg-S tuple carries both plaintext responses"
     );
     assert!(
-        scan.plaintext_markers_by_tuple.keys().all(|tuple| {
+        scan.interfaces_by_tuple.keys().all(|tuple| {
             !(tuple.source.ip() == &caller
                 && tuple.destination.ip() == &service
                 && tuple.destination.port() == SERVICE_PORT)
         }),
         "caller-to-Service direct guest bypass is absent; caller leg-F tuple is {caller_tuple:?}"
     );
+    let allowed_tuples =
+        BTreeSet::from([caller_tuple, caller_tuple.reverse(), *leg_s, leg_s.reverse()]);
+    for ((ifindex, tuple), hits) in &scan.plaintext_markers_by_interface_tuple {
+        if *hits == 0 {
+            continue;
+        }
+        assert!(
+            approved_ifindices.contains(ifindex) && allowed_tuples.contains(tuple),
+            "plaintext marker escaped the approved bridge/TAP leg-F/leg-S partition: ifindex={ifindex} tuple={tuple:?} hits={hits}"
+        );
+    }
 }
 
 fn parse_tcp_segment(
@@ -1657,9 +1671,13 @@ fn parse_tcp_segment(
         return Err("invalid IPv4 version or IHL".to_owned());
     }
     let total_len = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
-    if total_len != bytes.len() || total_len != frame.wire_len || total_len < ihl {
+    if total_len > bytes.len()
+        || total_len > frame.wire_len
+        || total_len < ihl
+        || (reject_offload_ambiguity && (total_len != bytes.len() || total_len != frame.wire_len))
+    {
         return Err(format!(
-            "IPv4 tot_len must equal the complete skb length: tot_len={total_len} wire_len={} copied={}",
+            "IPv4 tot_len exceeds or ambiguously differs from the captured skb: tot_len={total_len} wire_len={} copied={}",
             frame.wire_len,
             bytes.len()
         ));
@@ -1953,27 +1971,6 @@ fn guest_frame_precedes_capture_ready(
         && frame.kernel_event_at.is_none_or(|event_at| event_at <= barrier)
 }
 
-fn count_tls_application_records(stream: &[u8]) -> u64 {
-    let mut count = 0_u64;
-    let mut cursor = 0_usize;
-    while cursor + TLS_RECORD_HEADER_LEN <= stream.len() {
-        let version = [stream[cursor + 1], stream[cursor + 2]];
-        if version != [0x03, 0x03] && version != [0x03, 0x01] {
-            break;
-        }
-        let len = usize::from(u16::from_be_bytes([stream[cursor + 3], stream[cursor + 4]]));
-        if stream[cursor] == TLS_APPLICATION_DATA {
-            count += 1;
-        }
-        let next = cursor + TLS_RECORD_HEADER_LEN + len;
-        if next <= cursor || next > stream.len() {
-            break;
-        }
-        cursor = next;
-    }
-    count
-}
-
 fn count_subslices(haystack: &[u8], needle: &[u8]) -> u64 {
     if needle.is_empty() || haystack.len() < needle.len() {
         return 0;
@@ -2065,22 +2062,30 @@ fn record_has_bidirectional_tls13_ktls(record: &str) -> bool {
 }
 
 fn retain_eligible_ktls_candidates(
-    journal: &mut BTreeMap<FlowTuple, KtlsSocketEvidence>,
+    journal: &mut BTreeMap<(FlowTuple, u64), KtlsSocketEvidence>,
     port: u16,
     records: impl IntoIterator<Item = KtlsSocketEvidence>,
 ) {
-    for record in records {
+    for mut record in records {
         if record.tuple.destination.port() == port
             && record_has_bidirectional_tls13_ktls(&record.record)
         {
-            journal.insert(record.tuple, record);
+            let key = (record.tuple, record.inode);
+            if let Some(previous) = journal.get(&key) {
+                // `ss` can retain a closing socket after the owner has closed
+                // its last fd. Preserve the live ownership observation while
+                // refreshing the full diagnostic record. Multiple observed
+                // aliases remain multiple, so the sole-fd oracle fails closed.
+                record.fds.extend(previous.fds.iter().copied());
+            }
+            journal.insert(key, record);
         }
     }
 }
 
 struct KtlsCandidateJournal {
     stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<BTreeMap<FlowTuple, KtlsSocketEvidence>>>,
+    handle: Option<std::thread::JoinHandle<BTreeMap<(FlowTuple, u64), KtlsSocketEvidence>>>,
 }
 
 impl KtlsCandidateJournal {
@@ -2924,12 +2929,12 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .and_then(std::ffi::OsStr::to_str)
         .expect("shared bridge name is UTF-8")
         .to_owned();
-    // Capture the shared bridge, the peer-facing wire after TCX admission. The
-    // guest-side TAP capture below remains the plaintext endpoint boundary;
-    // keeping these two surfaces separate prevents the local plaintext from
-    // being mistaken for peer-wire evidence.
-    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
-    let bridge_wire = WireCapture::start(&bridge_name, SERVICE_PORT);
+    // One loss-accounted all-interface capture retains the actual ifindex for
+    // loopback-only leg-B routing and the separate bridge/TAP plaintext partition.
+    let peer_wire = WireCapture::start_all_for_port(SERVICE_PORT);
+    let loopback_ifindex = interface_index(LOOPBACK_IFACE);
+    let bridge_ifindex = interface_index(&bridge_name);
+    let service_tap_ifindex = interface_index(&service_network.tap);
     let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
     let splice_probe = SpliceProbe::attach_self();
     // A fresh composition has exactly one declared mesh name (`server`), so
@@ -3059,15 +3064,14 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     .await;
     let ktls_candidates = ktls_journal.finish();
     let splice = splice_probe.finish();
-    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
-    let bridge_capture = bridge_wire.stop();
-    let bridge_scan = scan_frames(&bridge_capture.frames, SERVICE_PORT, None);
-    assert_shared_bridge_plaintext_boundaries(
-        &bridge_scan,
+    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates, loopback_ifindex);
+    assert_all_interface_plaintext_boundaries(
+        &scan,
         guest_address,
         mesh_destination,
         guest_gateway,
         service_address,
+        &BTreeSet::from([bridge_ifindex, service_tap_ifindex, tap_ifindex]),
     );
     let tap_capture = tap_wire.stop();
     let pre_intercept_tap_frames = tap_capture
@@ -3336,8 +3340,8 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
     assert_eq!(empty.identity(), &identity);
 }
 
-/// S-ND295-01 / S-GTI-03 — the guest's plaintext request/reply is TLS 1.3 on
-/// the peer wire, with kTLS installed in both directions.
+/// S-ND295-01 / S-GTI-03 — the guest's plaintext request/reply uses one exact
+/// same-node TLS 1.3 kTLS/splice owner whose tuple is loopback-only.
 ///
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: bounded-change.
@@ -3355,17 +3359,7 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
     assert_eq!(
         result.scan.exact_tuple,
         Some(ktls.tuple),
-        "wire evidence must be correlated to the exact socket tuple observed by ss"
-    );
-    assert!(
-        result.scan.exact_records_to_peer > 0,
-        "the exact kTLS socket's request direction must carry TLS application_data; got {:?}",
-        result.scan
-    );
-    assert!(
-        result.scan.exact_records_from_peer > 0,
-        "the exact kTLS socket's response direction must carry TLS application_data; got {:?}",
-        result.scan
+        "protected-transport evidence must be correlated to the exact socket tuple observed by ss"
     );
     assert_eq!(
         result.scan.plaintext_hits_on_exact_peer_tuple, 0,
@@ -3376,6 +3370,9 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
         result.scan.same_port_streams_observed >= 2,
         "the same-port capture must include both directions of the exact peer tuple"
     );
+    let loopback = BTreeSet::from([interface_index(LOOPBACK_IFACE)]);
+    assert_eq!(result.scan.interfaces_by_tuple.get(&ktls.tuple), Some(&loopback));
+    assert_eq!(result.scan.interfaces_by_tuple.get(&ktls.tuple.reverse()), Some(&loopback));
     assert!(
         record_has_bidirectional_tls13_ktls(&ktls.record),
         "one ss record must itself contain tcp-ulp-tls, TLS 1.3, rxconf, and txconf; got:\n{}",
@@ -3679,18 +3676,13 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         "the exact peer tuple and reverse must not expose either plaintext litmus; got {:?}",
         result.scan
     );
-    assert!(
-        result.scan.exact_records_to_peer > 0 && result.scan.exact_records_from_peer > 0,
-        "the born-captured connection must carry TLS application_data in both directions; got {:?}",
-        result.scan
-    );
-    assert!(
-        result
-            .ktls
-            .as_ref()
-            .is_ok_and(|evidence| { record_has_bidirectional_tls13_ktls(&evidence.record) }),
-        "the born-captured connection must install bidirectional TLS 1.3 kTLS"
-    );
+    let ktls = result
+        .ktls
+        .as_ref()
+        .unwrap_or_else(|error| panic!("born-captured kTLS correlation failed: {error}"));
+    assert!(record_has_bidirectional_tls13_ktls(&ktls.record));
+    require_same_socket_splice(ktls, &result.splice)
+        .expect("the born-captured connection uses one bidirectionally spliced kTLS fd");
 }
 
 /// The mapped shared-element supporting contract over the complete typed
@@ -3909,9 +3901,35 @@ fn tcp_offload_ambiguity_is_scoped_to_eligible_ipv4_tcp_frames() {
         parse_tcp_segment(&length_mismatch_udp, true).is_err(),
         "AUXDATA length mismatch remains invalid before protocol eligibility"
     );
+
+    let mut padded = synthetic_guest_tcp_frame();
+    padded.bytes.extend_from_slice(&[0; 6]);
+    padded.wire_len += 6;
+    let aux = padded.aux.as_mut().expect("synthetic AUXDATA");
+    aux.len += 6;
+    aux.snaplen += 6;
+    assert!(
+        matches!(parse_tcp_segment(&padded, false), Ok(Some(_))),
+        "all-interface classification accepts validated Ethernet padding outside IPv4 tot_len"
+    );
+    assert!(
+        parse_tcp_segment(&padded, true).is_err(),
+        "the guest/TAP offload oracle retains strict complete-skb equality"
+    );
 }
 
 fn synthetic_peer_tcp_frame(
+    tuple: FlowTuple,
+    sequence: u32,
+    flags: u8,
+    payload: &[u8],
+    packet_type: u8,
+) -> CapturedFrame {
+    synthetic_peer_tcp_frame_on(1, tuple, sequence, flags, payload, packet_type)
+}
+
+fn synthetic_peer_tcp_frame_on(
+    ifindex: u32,
     tuple: FlowTuple,
     sequence: u32,
     flags: u8,
@@ -3936,7 +3954,7 @@ fn synthetic_peer_tcp_frame(
     bytes[40..].copy_from_slice(payload);
     CapturedFrame {
         kernel_event_at: Some(KernelRealtime(1)),
-        ifindex: 1,
+        ifindex,
         protocol: ETH_P_IP,
         packet_type,
         wire_len: total_len,
@@ -3968,7 +3986,7 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     };
     let split = REQUEST.len() / 2;
     let second_sequence = 1_001_u32 + u32::try_from(split).expect("marker split fits u32");
-    let tls_record = [TLS_APPLICATION_DATA, 0x03, 0x03, 0, 3, b't', b'l', b's'];
+    let opaque_loopback = b"same-node-loopback-payload-is-not-a-TLS-record-oracle";
     let frames = vec![
         synthetic_peer_tcp_frame(guest_local, 1_000, 0x02, &[], libc::PACKET_OUTGOING),
         synthetic_peer_tcp_frame(guest_local, 1_000, 0x02, &[], libc::PACKET_HOST),
@@ -3995,9 +4013,15 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
             libc::PACKET_HOST,
         ),
         synthetic_peer_tcp_frame(exact_peer, 5_000, 0x02, &[], libc::PACKET_HOST),
-        synthetic_peer_tcp_frame(exact_peer, 5_001, 0x18, &tls_record, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(exact_peer, 5_001, 0x18, opaque_loopback, libc::PACKET_HOST),
         synthetic_peer_tcp_frame(exact_peer.reverse(), 6_000, 0x02, &[], libc::PACKET_HOST),
-        synthetic_peer_tcp_frame(exact_peer.reverse(), 6_001, 0x18, &tls_record, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(
+            exact_peer.reverse(),
+            6_001,
+            0x18,
+            opaque_loopback,
+            libc::PACKET_HOST,
+        ),
     ];
     let ktls_record = "tcp-ulp-tls version:1.3 rxconf:sw txconf:sw";
     let unrelated_candidate = KtlsSocketEvidence {
@@ -4015,12 +4039,14 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         fds: BTreeSet::from([71]),
         record: ktls_record.to_owned(),
     };
-    let exact_latest = KtlsSocketEvidence {
+    let exact_after_close = KtlsSocketEvidence {
         tuple: exact_peer,
         inode: 40_001,
-        fds: BTreeSet::from([71]),
+        fds: BTreeSet::new(),
         record: format!("{ktls_record} bytes_acked:77"),
     };
+    let exact_latest =
+        KtlsSocketEvidence { fds: BTreeSet::from([71]), ..exact_after_close.clone() };
     let ineligible = KtlsSocketEvidence {
         tuple: FlowTuple {
             source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 39_999),
@@ -4036,16 +4062,38 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         SERVICE_PORT,
         [exact_candidate, unrelated_candidate.clone()],
     );
-    retain_eligible_ktls_candidates(&mut journal, SERVICE_PORT, [exact_latest.clone(), ineligible]);
+    retain_eligible_ktls_candidates(&mut journal, SERVICE_PORT, [exact_after_close, ineligible]);
     let journal = journal.into_values().collect::<Vec<_>>();
     assert_eq!(
         journal.iter().map(|candidate| candidate.tuple).collect::<Vec<_>>(),
         vec![unrelated_candidate.tuple, exact_peer],
-        "the journal is tuple-deduplicated and deterministically ordered"
+        "the journal is tuple/inode-deduplicated and deterministically ordered"
     );
     assert_eq!(
         journal[1], exact_latest,
-        "deduplication retains the latest complete ss evidence for the exact tuple"
+        "a later closing-state ss record retains the earlier live sole-fd ownership evidence"
+    );
+    let reused_tuple = KtlsSocketEvidence {
+        tuple: exact_peer,
+        inode: 40_002,
+        fds: BTreeSet::from([72]),
+        record: ktls_record.to_owned(),
+    };
+    let mut reuse_journal = BTreeMap::new();
+    retain_eligible_ktls_candidates(
+        &mut reuse_journal,
+        SERVICE_PORT,
+        [exact_latest.clone(), reused_tuple],
+    );
+    let reused_candidates = reuse_journal.into_values().collect::<Vec<_>>();
+    assert_eq!(
+        reused_candidates.len(),
+        2,
+        "tuple reuse by another inode remains two candidates instead of erasing ambiguity"
+    );
+    assert!(
+        correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &reused_candidates).1.is_err(),
+        "two owned inodes for one captured tuple fail closed"
     );
     assert_eq!(socket_inode("ESTAB ... ino:40001 sk:1"), Some(40_001));
     let seed = BTreeSet::from([100]);
@@ -4062,7 +4110,27 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         71,
         "only the selected in-process fd is both a positive splice destination and source"
     );
-    let (scan, selected) = correlate_ktls_candidates(&frames, SERVICE_PORT, &journal);
+    assert!(
+        require_same_socket_splice(
+            &exact_latest,
+            &SpliceEvidence { source_fds: BTreeSet::from([71]), destination_fds: BTreeSet::new() },
+        )
+        .is_err(),
+        "one missing splice direction fails closed"
+    );
+    let mut no_owner = exact_latest.clone();
+    no_owner.fds.clear();
+    assert!(
+        correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &[no_owner]).1.is_err(),
+        "a captured kTLS tuple without a live fd owner receives no credit"
+    );
+    let mut ambiguous_owner = exact_latest.clone();
+    ambiguous_owner.fds.insert(72);
+    assert!(
+        correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &[ambiguous_owner]).1.is_err(),
+        "a captured kTLS inode with multiple in-process fds receives no credit"
+    );
+    let (scan, selected) = correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &journal);
     assert_eq!(
         selected.expect("the second same-port candidate is the exact captured TLS connection"),
         exact_latest
@@ -4070,8 +4138,6 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     assert!(!exact_tuple_appears_on_wrong_interface(&frames, exact_peer, 1));
     assert!(exact_tuple_appears_on_wrong_interface(&frames, exact_peer, 2));
     assert_eq!(scan.same_port_streams_observed, 3);
-    assert_eq!(scan.exact_records_to_peer, 1);
-    assert_eq!(scan.exact_records_from_peer, 1);
     assert_eq!(
         scan.plaintext_hits_on_exact_peer_tuple, 0,
         "guest-local plaintext must not be attributed to the exact peer tuple"
@@ -4082,10 +4148,8 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     );
 
     let (unknown_scan, unknown_match) =
-        correlate_ktls_candidates(&frames, SERVICE_PORT, &[unrelated_candidate]);
+        correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &[unrelated_candidate]);
     assert!(unknown_match.is_err(), "an unrelated first candidate fails closed");
-    assert_eq!(unknown_scan.exact_records_to_peer, 0);
-    assert_eq!(unknown_scan.exact_records_from_peer, 0);
     assert_eq!(unknown_scan.plaintext_hits_on_exact_peer_tuple, 0);
     assert_eq!(
         unknown_scan.plaintext_hits_on_other_same_port_streams, 1,
@@ -4093,7 +4157,7 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     );
 
     let (_, ambiguous) =
-        correlate_ktls_candidates(&frames, SERVICE_PORT, &[exact_latest.clone(), exact_latest]);
+        correlate_ktls_candidates(&frames, SERVICE_PORT, 1, &[exact_latest.clone(), exact_latest]);
     assert!(ambiguous.is_err(), "multiple matching candidates fail closed as ambiguous");
 
     let clear_peer = vec![
@@ -4106,6 +4170,50 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     assert_eq!(
         clear_scan.plaintext_hits_on_exact_peer_tuple, 2,
         "request and response cleartext on the exact peer tuple remain a fail-closed confidentiality witness"
+    );
+
+    let requests = [REQUEST, REQUEST2].concat();
+    let responses = [RESPONSE, RESPONSE2].concat();
+    let leg_s = FlowTuple {
+        source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 40_003),
+        destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 2), SERVICE_PORT),
+    };
+    let mut approved_plaintext = vec![
+        synthetic_peer_tcp_frame(guest_local, 9_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(guest_local, 9_001, 0x18, &requests, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(leg_s, 10_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(leg_s, 10_001, 0x18, &requests, libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(leg_s.reverse(), 11_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame(leg_s.reverse(), 11_001, 0x18, &responses, libc::PACKET_HOST),
+    ];
+    let approved_scan = scan_frames(&approved_plaintext, SERVICE_PORT, None);
+    assert_all_interface_plaintext_boundaries(
+        &approved_scan,
+        *guest_local.source.ip(),
+        guest_local.destination,
+        *leg_s.source.ip(),
+        *leg_s.destination.ip(),
+        &BTreeSet::from([1]),
+    );
+
+    approved_plaintext.extend([
+        synthetic_peer_tcp_frame_on(2, leg_s, 12_000, 0x02, &[], libc::PACKET_HOST),
+        synthetic_peer_tcp_frame_on(2, leg_s, 12_001, 0x18, REQUEST, libc::PACKET_HOST),
+    ]);
+    let escaped_scan = scan_frames(&approved_plaintext, SERVICE_PORT, None);
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_all_interface_plaintext_boundaries(
+                &escaped_scan,
+                *guest_local.source.ip(),
+                guest_local.destination,
+                *leg_s.source.ip(),
+                *leg_s.destination.ip(),
+                &BTreeSet::from([1]),
+            );
+        })
+        .is_err(),
+        "plaintext on an unapproved non-loopback interface fails closed"
     );
 }
 
@@ -4447,6 +4555,7 @@ async fn poll_until_fresh_natural_job_completion(
 
 async fn observe_fresh_replacement_mesh_flow_unchecked(
     cut: VmmSpawnCut,
+    peer_config: &VmConfig,
     cfg: &Path,
     workload_id: &str,
     predecessor_id: &str,
@@ -4507,7 +4616,27 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let _replacement_identity =
         poll_until_issued_identity(cfg, workload_id, &replacement_id, Duration::from_secs(30))
             .await;
-    let _ = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
+    let peer_running = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
+    let service_address = peer_running
+        .snapshot
+        .rows
+        .first()
+        .and_then(|row| row.workload_addr)
+        .ok_or_else(|| "restarted flow peer omitted its guest address".to_owned())?;
+    let peer_network = peer_config
+        .network
+        .as_ref()
+        .ok_or_else(|| "restarted flow peer omitted its direct-host TAP".to_owned())?;
+    let service_tap_ifindex = interface_index(&peer_network.tap);
+    let bridge =
+        std::fs::read_link(Path::new("/sys/class/net").join(&peer_network.tap).join("master"))
+            .map_err(|error| format!("read restarted flow peer bridge: {error}"))?;
+    let bridge_ifindex = interface_index(
+        bridge
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .ok_or_else(|| "restarted flow peer bridge name is not UTF-8".to_owned())?,
+    );
     // The target guest's immutable startup delay keeps its first flow parked
     // while the fresh peer reaches Running. Arm the typed element witness only after both production
     // memberships are stable, so the readiness cut cannot be confused with
@@ -4545,14 +4674,20 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         .ok_or_else(|| "restarted VM omitted its guest address".to_owned())?;
     let audit =
         audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
-    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
+    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates, interface_index(LOOPBACK_IFACE));
+    assert_all_interface_plaintext_boundaries(
+        &scan,
+        source,
+        mesh_destination,
+        guest_gateway_for_config(&cut.config),
+        service_address,
+        &BTreeSet::from([bridge_ifindex, service_tap_ifindex, tap_ifindex]),
+    );
     let ktls = ktls?;
     require_same_socket_splice(&ktls, &splice)?;
     if audit.first_syn.is_none()
         || audit.plaintext_request_hits == 0
         || scan.plaintext_hits_on_exact_peer_tuple != 0
-        || scan.exact_records_to_peer == 0
-        || scan.exact_records_from_peer == 0
     {
         return Err(format!(
             "restart first-flow oracle failed: audit={audit:?}, peer_scan={scan:?}"
@@ -4575,6 +4710,7 @@ fn panic_evidence(payload: &(dyn std::any::Any + Send)) -> String {
 
 async fn observe_fresh_replacement_mesh_flow(
     cut: VmmSpawnCut,
+    peer_config: &VmConfig,
     cfg: &Path,
     workload_id: &str,
     predecessor_id: &str,
@@ -4593,6 +4729,7 @@ async fn observe_fresh_replacement_mesh_flow(
 > {
     std::panic::AssertUnwindSafe(observe_fresh_replacement_mesh_flow_unchecked(
         cut,
+        peer_config,
         cfg,
         workload_id,
         predecessor_id,
@@ -4792,7 +4929,7 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     let (vm, alloc_id) =
         first_boot.expect("first-boot observation and abrupt owner cleanup must converge");
 
-    let peer_wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let peer_wire = WireCapture::start_all_for_port(SERVICE_PORT);
     let (boot_two, boot_two_cuts) =
         spawn_capture_observed_mtls_server_at(&data_dir, &config_dir).await;
     let observation = catch_live_owner_observation(async {
@@ -4809,9 +4946,10 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
         // this boot. Release the independent peer's capture cut as soon as
         // its deploy is accepted; otherwise its VMM remains paused and the
         // peer can never publish Running.
-        let _peer_config = release_vmm_without_capture(&boot_two_cuts).await;
+        let peer_config = release_vmm_without_capture(&boot_two_cuts).await;
         let flow = observe_fresh_replacement_mesh_flow(
             restart_cut,
+            &peer_config,
             &cfg,
             &vm.workload_id,
             &alloc_id,
