@@ -540,6 +540,13 @@
       "s": "EXECUTED",
       "d": "SUPERSEDES prior environment wording: with .env selectors loaded by xtask, native metal preflight passed. Independent topology selector reached production startup and both VMs Running, then timed out at vm_walking_skeleton.rs:568 while waiting for alloc-nd295-a-0 terminal state (last row Running, reason Started); its VMM was gone but exact TAP/bridge/nft/bpffs/cgroup/run-dir complements remained because the test panicked before final cleanup. Independent S-ND295-01 guest traffic selectors then failed at production run_with_kek_and_vmm_override startup with MtlsSharedOwnerError::Intercept displayed as shared mTLS rule/set convergence failed. Read-only remote inspection found stale overdrive-mtls IP/bridge tables, endpoint/counter pins, and an unrelated acceptance-0d77 netns_density_shared_owner process (PID 2906893, >1 day, listening on 127.0.0.1:43527/32859); no process was killed or remote state modified. Full approved guest_stack_mtls_egress selector executed 34 bodies: 16 passed, 18 failed, no timeout; 17 failures were startup convergence cascades plus one pre-existing fault-fixture assertion (fault_fixture.rs:1735 left 1330/right 74). No 04-01 production defect is accepted or changed; blocker is shared-metal contamination requiring orchestrator coordination.",
       "t": "2026-09-22T23:04:33Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "REMEDIATION RED: after verifying and removing only stale test-owned metal state with no active VMM/test process, the exact topology selector passed natively with the production EXEC BootClosed->Open composition and live GuestTcxProgram endpoint read-back fixes; however each exact S-ND295-01 guest body independently reproduced downstream failure (strict observer at guest_stack_mtls_egress.rs:1770 on GETGEN notification mismatch) and the approved full guest_stack_mtls_egress selector completed 34 bodies with 17 passed and 17 failed. The first clean production-boundary startup failures in the full selector were shared mTLS rule/set convergence errors after prior bodies left the pre-cut per-allocation nft rules/duplicate exemptions. Feature-delta C1/PORT-295-C requires install_outbound(source_addr) and install_inbound(virt) to own 2+P shared-set elements against eight constant IP rules, while current MtlsIntercept/start_shared_allocation still installs host-veth/per-virt nft rules and no element operations; this is a proven accepted-production/DISTILL blocker, not a test or fixture cleanup issue. No GREEN or COMMIT claimed; Lima check/clippy were blocked by the read-only Lima target; fmt/diff check passed.",
+      "t": "2026-09-22T23:57:51Z"
     }
   ]
 }
