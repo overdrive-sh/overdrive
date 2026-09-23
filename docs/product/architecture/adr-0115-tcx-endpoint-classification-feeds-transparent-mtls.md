@@ -4,6 +4,8 @@
 
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17.**
+The user-directed D-295-DELIVER-04-01 evidence-boundary correction on
+2026-09-23 requires no further review and changes no product mechanism.
 The approved compound decision is D-295-2: TCX/SCHED_CLS is the primary
 microVM TAP endpoint classifier; nftables remains the IP TPROXY/output socket
 delivery mechanism and supplies only the minimum bridge fail-closed guard for
@@ -130,6 +132,45 @@ surface. `HostMtlsEnforcement` remains unchanged for TLS 1.3, kTLS TX/RX, and
 kernel splice pumps; connection scaling belongs to
 [GH #300](https://github.com/overdrive-sh/overdrive/issues/300), not #295.
 
+### Same-node peer-facing byte boundary
+
+For a same-node `Mesh` peer, the encrypted peer-facing boundary is not the
+shared bridge. Outbound leg B is a host-local TCP socket to the selected
+backend workload address and declared port. The constant `output` route-hook
+divert marks that tuple; the accepted fwmark rule selects table 100's
+`local 0.0.0.0/0 dev lo` route; and shared leg C accepts the connection before
+ordinary bridge egress. The real leg-B/leg-C TCP segment is therefore observed
+on loopback. Leg C then decrypts and the marked leg-S socket delivers plaintext
+over the shared bridge to the destination TAP. The caller's TAP/bridge path to
+leg F is likewise plaintext by design.
+
+S-ND295-01 must bind its authoritative AF_PACKET TLS capture to the exact
+loopback ifindex before the first dial. A live `ss -H -n -t -i -e` journal must
+identify exactly one leg-B tuple from the shared-bridge gateway address to the
+selected backend address and port whose single record reports TLS 1.3,
+`tcp-ulp-tls`, TX configuration, and RX configuration. The tuple and exact
+reverse must each reassemble at least one TLS application-data record (`0x17`)
+with zero occurrence of either byte-distinct plaintext marker. Capture drops,
+truncation, gaps, conflicting bytes, wrong-interface frames, a missing
+direction, or zero/multiple correlating tuples fail closed.
+
+Steady-state splice evidence is correlated to that same socket: the live
+`ss -e` inode maps through `/proc/self/fd` to the in-process leg-B fd, and the
+existing strace-style thread-group observation must show completed positive
+`splice(2)` calls with that fd as request destination and response source for a
+second post-establishment byte-distinct exchange. This is test-only observation
+of the existing production process and kernel; it adds no adapter accessor or
+product hook.
+
+A separate loss-accounted shared-bridge/TAP capture is a positive plaintext
+delivery oracle, not TLS evidence. It proves the guest-local flow toward leg F,
+the unique non-kTLS leg-S tuple from node gateway address and ephemeral port to
+selected backend address and declared port (plus its reverse) carrying the
+request/reply markers, and the absence of a direct caller-guest-to-Service-
+guest bypass. The caller guest-address-to-frontend tuple is the distinct leg-F
+positive. Cross-host physical wire selection remains outside #295 and belongs
+to GH #298.
+
 ### Ownership and order
 
 - The node shared-switch owner owns the program, endpoint/counter maps, bpffs
@@ -214,6 +255,22 @@ Rejected for current requirements. It puts guest packets through a userspace
 switch, adds a daemon/shared-memory/reconnect lifecycle, and still needs kernel
 socket injection to reuse kTLS/splice.
 
+### Treat the shared bridge as the same-node peer-facing encrypted wire
+
+Rejected. The bridge legitimately carries guest-local plaintext before leg F
+and after leg S. The output divert and local policy route deliver the selected
+leg-B socket to leg C before ordinary bridge egress, so absence of that exact
+kTLS tuple from the bridge is expected rather than evidence of a product
+failure.
+
+### Let an unqualified all-interface capture choose the evidence boundary
+
+Rejected as the authority. It is useful diagnostic evidence and may retain the
+actual ifindex for every frame, but accepting whichever interface happens to
+contain a same-port TLS-looking stream would leave the security boundary
+ambiguous. The accepted local route pins loopback; exact tuple, direction,
+kTLS, and splice correlation then select one socket fail-closed.
+
 ## Consequences
 
 Positive: the primary classifier now has real-metal verifier, memory, attach,
@@ -225,4 +282,6 @@ and a small bridge nft guard becomes a second dependency—but not a second
 classifier. Part C's 296 verified instructions, 4,096-byte program memlock,
 4,208-byte bounded-probe map memlock, ~7.6–7.9 ms attach/pin, and ~50.8 ms
 load/verifier are point measurements, not the pinned-kernel baseline or 16k
-capacity proof.
+capacity proof. The S-ND295-01 clarification changes only evidence attribution:
+loopback proves the same-node encrypted leg-B/leg-C segment, while bridge/TAP
+capture proves the intentional plaintext leg-F/leg-S boundary and no bypass.
