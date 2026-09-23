@@ -7,7 +7,7 @@
 //! structural state on normal, panic, watchdog-signal, parent-death, and
 //! partial-construction exits.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::File;
 use std::io::Write as _;
@@ -27,9 +27,6 @@ use tempfile::TempDir;
 const TABLE: &str = "overdrive-mtls";
 const PREROUTING: &str = "prerouting";
 const OUTPUT: &str = "output";
-const CONTAMINATED_TABLE_HANDLE: u64 = 74;
-const CONTAMINATED_PREROUTING_HANDLES: &[u64] = &[25, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
-const CONTAMINATED_OUTPUT_HANDLES: &[u64] = &[26, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
 const CLEAN_NETNS_BASELINE_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::a_clean_network_namespace_captures_an_absent_table_100_route_baseline";
 const CLEAN_NETNS_MODE: &str = "OVERDRIVE_GTI_CLEAN_NETNS_MODE";
 const CLEAN_NETNS_PRODUCTION_TEST: &str = "integration::guest_stack_mtls_egress::fault_fixture::clean_network_namespace_real_installer_delta_is_exactly_reconciled";
@@ -172,17 +169,6 @@ fn rule_programs(table: &Value) -> BTreeMap<(String, u64), Value> {
             ((chain, handle), rule["expr"].clone())
         })
         .collect()
-}
-
-fn table_handle(table: &Value) -> u64 {
-    table["nftables"]
-        .as_array()
-        .expect("nftables array")
-        .iter()
-        .find_map(|entry| entry.get("table"))
-        .and_then(|table| table.get("handle"))
-        .and_then(Value::as_u64)
-        .expect("table handle")
 }
 
 fn chain_handle(table: &Value, chain_name: &str) -> Option<u64> {
@@ -1696,6 +1682,106 @@ fn canonical_exemption_program() -> Value {
     ])
 }
 
+fn exact_intercept_chain(chain: &Value, table_name: &str, chain_name: &str) -> bool {
+    let (chain_type, hook) = match chain_name {
+        PREROUTING => ("filter", "prerouting"),
+        OUTPUT => ("route", "output"),
+        _ => return false,
+    };
+    without_handle(chain)
+        == Some(json!({
+            "family": "ip",
+            "table": table_name,
+            "name": chain_name,
+            "type": chain_type,
+            "hook": hook,
+            "prio": -150,
+            "policy": "accept",
+        }))
+}
+
+fn audited_duplicate_handles(
+    snapshot: &PacketPathBaseline,
+    table_name: &str,
+) -> Result<BTreeMap<String, Vec<u64>>, String> {
+    const DUPLICATES_PER_CHAIN: usize = 12;
+
+    let document = snapshot
+        .nft_table
+        .as_ref()
+        .ok_or_else(|| "the audited duplicate table is absent".to_owned())?;
+    let objects = split_nft_objects(document)
+        .ok_or_else(|| "the audited object contains an unknown nft object family".to_owned())?;
+    if without_handle(&objects.table) != Some(json!({"family": "ip", "name": table_name})) {
+        return Err("the audited table semantic identity differs".to_owned());
+    }
+    let expected_chains = BTreeSet::from([PREROUTING.to_owned(), OUTPUT.to_owned()]);
+    if objects.chains.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
+        || objects.rules.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
+        || snapshot.ownership.keys().cloned().collect::<BTreeSet<_>>() != expected_chains
+        || !objects
+            .chains
+            .iter()
+            .all(|(name, chain)| exact_intercept_chain(chain, table_name, name))
+    {
+        return Err("the audited table has a foreign or missing chain/rule object".to_owned());
+    }
+
+    let expected_program = canonical_exemption_program();
+    let expected_tag = nft::userdata_exemption();
+    let programs = rule_programs(document);
+    if programs.len() != DUPLICATES_PER_CHAIN * expected_chains.len() {
+        return Err("the audited rule program universe has the wrong cardinality".to_owned());
+    }
+
+    let mut all_handles = BTreeSet::new();
+    let mut handles_by_chain = BTreeMap::new();
+    for chain in [PREROUTING, OUTPUT] {
+        let infos = snapshot
+            .ownership
+            .get(chain)
+            .ok_or_else(|| format!("missing GETRULE ownership for {chain}"))?;
+        let rules =
+            objects.rules.get(chain).ok_or_else(|| format!("missing JSON rules for {chain}"))?;
+        if infos.len() != DUPLICATES_PER_CHAIN || rules.len() != DUPLICATES_PER_CHAIN {
+            return Err(format!(
+                "{chain} must contain exactly {DUPLICATES_PER_CHAIN} audited duplicates"
+            ));
+        }
+        let info_handles = infos.iter().map(|rule| rule.handle).collect::<Vec<_>>();
+        let json_handles = rules
+            .iter()
+            .map(|rule| {
+                rule.get("handle")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| format!("{chain} JSON rule omitted its kernel handle"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if info_handles.iter().copied().collect::<BTreeSet<_>>()
+            != json_handles.iter().copied().collect::<BTreeSet<_>>()
+        {
+            return Err(format!("{chain} JSON and GETRULE handles do not identify the same rules"));
+        }
+        let tagged = infos.iter().filter(|rule| rule.userdata == expected_tag).count();
+        let untagged = infos.iter().filter(|rule| rule.userdata.is_empty()).count();
+        if !((tagged == DUPLICATES_PER_CHAIN && untagged == 0)
+            || (tagged == 1 && untagged == DUPLICATES_PER_CHAIN - 1))
+        {
+            return Err(format!("{chain} contains foreign ownership userdata"));
+        }
+        for handle in &info_handles {
+            if *handle == 0 || !all_handles.insert(*handle) {
+                return Err(format!("kernel handle {handle} is zero or reused by a foreign rule"));
+            }
+            if programs.get(&(chain.to_owned(), *handle)) != Some(&expected_program) {
+                return Err(format!("{chain}/{handle} is not the audited exemption program"));
+            }
+        }
+        handles_by_chain.insert(chain.to_owned(), info_handles);
+    }
+    Ok(handles_by_chain)
+}
+
 fn assert_canonical_clean_state(snapshot: &PacketPathBaseline) {
     let table = snapshot.nft_table.as_ref().expect("production nft table exists");
     let programs = rule_programs(table);
@@ -1715,13 +1801,30 @@ fn assert_canonical_clean_state(snapshot: &PacketPathBaseline) {
 }
 
 /// One-time, audit-pinned repair for contamination authored by the removed
-/// whole-table replay fixture. Deletion is fail-closed on the reviewed table
-/// handle, exact chain+rule handles, exact expression program, and exemption
-/// userdata shape; any unrelated or changed host state aborts before mutation.
+/// whole-table replay fixture. Deletion is fail-closed on the reviewed semantic
+/// table/chain shape, exact observed rule identities, expression program, and
+/// exemption userdata shape; any unrelated or changed host state aborts before
+/// mutation. Kernel-assigned handle values are never pinned.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
 fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
     let before = PacketPathBaseline::capture();
+    if before.nft_table.is_none() {
+        assert!(before.ownership.is_empty(), "an absent table has no GETRULE ownership residue");
+        return;
+    }
+    if let Ok(Some(state)) = nft::observe_shared_ip_intercept_state() {
+        let (_, sets, prerouting, output) = state.identity().normalized_parts();
+        assert_eq!((sets.len(), prerouting.len(), output.len()), (3, 5, 3));
+        assert!(
+            state.managed_guest_ips().is_empty()
+                && state.outbound_sources().is_empty()
+                && state.inbound_destinations().is_empty(),
+            "a valid constant shared program must not be repaired while it still owns dynamic members: {state:?}"
+        );
+        return;
+    }
     if before
         .ownership
         .values()
@@ -1731,23 +1834,16 @@ fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
         return;
     }
 
-    let table = before.nft_table.as_ref().expect("reviewed contaminated table exists");
-    assert_eq!(
-        table_handle(table),
-        CONTAMINATED_TABLE_HANDLE,
-        "refuse to repair a table other than the exact reviewer-audited object"
-    );
-    let programs = rule_programs(table);
-    let expected_program = canonical_exemption_program();
+    let observed_handles = audited_duplicate_handles(&before, TABLE).unwrap_or_else(|error| {
+        panic!("refuse to repair a semantically different nft object: {error}")
+    });
     let expected_tag = nft::userdata_exemption();
-    for (chain, handles) in
-        [(PREROUTING, CONTAMINATED_PREROUTING_HANDLES), (OUTPUT, CONTAMINATED_OUTPUT_HANDLES)]
-    {
+    for chain in [PREROUTING, OUTPUT] {
         let ownership = before.ownership.get(chain).expect("reviewed chain exists");
         assert_eq!(
             ownership.iter().map(|rule| rule.handle).collect::<Vec<_>>(),
-            handles,
-            "refuse mutation unless the complete ordered handle set is the reviewer-audited contamination"
+            observed_handles[chain],
+            "the repair transaction uses the complete observed same-object handle identity"
         );
         for rule in ownership {
             assert!(
@@ -1755,20 +1851,14 @@ fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
                 "refuse to delete unrelated userdata at {chain}/{}",
                 rule.handle
             );
-            assert_eq!(
-                programs.get(&(chain.to_owned(), rule.handle)),
-                Some(&expected_program),
-                "refuse to delete a rule whose normalized program is not the audited exemption"
-            );
         }
     }
 
     let fib_before = (before.fib_rules.clone(), before.fib_routes.clone());
     let expected_exprs = nft::mark_accept_exemption_exprs(MTLS_LEG_S_DIAL_MARK);
     let mut transaction = Vec::with_capacity(26);
-    for (chain, handles) in
-        [(PREROUTING, CONTAMINATED_PREROUTING_HANDLES), (OUTPUT, CONTAMINATED_OUTPUT_HANDLES)]
-    {
+    for chain in [PREROUTING, OUTPUT] {
+        let handles = &observed_handles[chain];
         for handle in handles {
             transaction.push(nft::AtomicRuleMutation::Delete {
                 table: TABLE,
@@ -1795,17 +1885,31 @@ fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
 /// owned disposable table. A NACK injected before, between, or after every
 /// operation rolls the complete kernel transaction back to the exact audited
 /// start; the valid transaction then reaches the exact canonical state.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
 fn audited_duplicate_repair_is_atomic_at_every_operation_boundary() {
     let table = format!("ovd-gti-repair-{}", std::process::id());
     let owned = OwnedDisposableTable(table.clone());
     run_nft(&["add", "table", "ip", &table]);
-    run_nft(&["add", "chain", "ip", &table, PREROUTING]);
-    run_nft(&["add", "chain", "ip", &table, OUTPUT]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        &table,
+        PREROUTING,
+        "{ type filter hook prerouting priority mangle; policy accept; }",
+    ]);
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        &table,
+        OUTPUT,
+        "{ type route hook output priority mangle; policy accept; }",
+    ]);
 
     let expected_exprs = nft::mark_accept_exemption_exprs(MTLS_LEG_S_DIAL_MARK);
-    let expected_program = canonical_exemption_program();
     let expected_tag = nft::userdata_exemption();
     for chain in [PREROUTING, OUTPUT] {
         for _ in 0..12 {
@@ -1815,24 +1919,26 @@ fn audited_duplicate_repair_is_atomic_at_every_operation_boundary() {
     }
 
     let audited_start = PacketPathBaseline::capture_table(&table);
-    let programs = rule_programs(audited_start.nft_table.as_ref().expect("disposable table"));
+    let audited_handles = audited_duplicate_handles(&audited_start, &table)
+        .expect("dynamic kernel handles belong to the exact audited duplicate object");
+    let mut reused = audited_start.clone();
+    reused.ownership.get_mut(PREROUTING).expect("prerouting ownership")[0].handle =
+        audited_handles[OUTPUT][0];
+    assert!(
+        audited_duplicate_handles(&reused, &table).is_err(),
+        "a handle reused by a different semantic rule fails closed"
+    );
+    let mut foreign_owner = audited_start.clone();
+    foreign_owner.ownership.get_mut(PREROUTING).expect("prerouting ownership")[0].userdata =
+        vec![0xff];
+    assert!(
+        audited_duplicate_handles(&foreign_owner, &table).is_err(),
+        "foreign ownership userdata fails closed"
+    );
     let mut valid = Vec::with_capacity(26);
     for chain in [PREROUTING, OUTPUT] {
-        let ownership = audited_start.ownership.get(chain).expect("disposable chain ownership");
-        assert_eq!(ownership.len(), 12, "audit exact owned duplicate count in {chain}");
-        for rule in ownership {
-            assert_eq!(rule.userdata, expected_tag, "audit exact userdata in {chain}");
-            assert_eq!(
-                programs.get(&(chain.to_owned(), rule.handle)),
-                Some(&expected_program),
-                "audit exact expression program at {chain}/{}",
-                rule.handle
-            );
-            valid.push(nft::AtomicRuleMutation::Delete {
-                table: &table,
-                chain,
-                handle: rule.handle,
-            });
+        for handle in &audited_handles[chain] {
+            valid.push(nft::AtomicRuleMutation::Delete { table: &table, chain, handle: *handle });
         }
         valid.push(nft::AtomicRuleMutation::Insert {
             table: &table,

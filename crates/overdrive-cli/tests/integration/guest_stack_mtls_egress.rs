@@ -32,9 +32,9 @@ use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -64,6 +64,9 @@ use overdrive_testing::vm_fixture::VmFixture;
 use proptest::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use super::vm_walking_skeleton::{
     build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
@@ -84,6 +87,7 @@ const NON_MESH_REQUEST: &[u8] =
 const NON_MESH_RESPONSE: &[u8] =
     b"GTI_NON_MESH_RESPONSE_distinct_clear_reply_reaches_guest_unchanged_0201";
 const LOOPBACK_IFACE: &str = "lo";
+const INTERCEPT_INSTALL_SUCCESS: &str = "mtls.intercept.install.success";
 const OPERATOR_MARKER: &str = "/gti-operator-action-ran";
 const OPERATOR_CONSOLE_MARKER: &str = "GTI_OPERATOR_ACTION_RAN";
 
@@ -1023,17 +1027,97 @@ struct KernelRealtime(i128);
 
 #[derive(Debug)]
 struct InterceptReadiness {
-    kernel_barrier_at: KernelRealtime,
     tap_ifindex: u32,
     state: SharedIpInterceptState,
 }
 
 #[derive(Debug)]
 struct LiveInterceptReadiness {
-    kernel_barrier_at: KernelRealtime,
     tap_ifindex: u32,
     tap: String,
     state: SharedIpInterceptState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InterceptInstallEvent {
+    alloc: Option<String>,
+    at: KernelRealtime,
+}
+
+#[derive(Default)]
+struct InterceptInstallFieldVisitor {
+    alloc: Option<String>,
+}
+
+impl Visit for InterceptInstallFieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "alloc" {
+            self.alloc = Some(format!("{value:?}").trim_matches('"').to_owned());
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "alloc" {
+            self.alloc = Some(value.to_owned());
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct InterceptInstallTrace {
+    events: Arc<Mutex<Vec<InterceptInstallEvent>>>,
+}
+
+impl InterceptInstallTrace {
+    fn install_global() -> Self {
+        let trace = Self::default();
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(trace.clone()))
+            .expect("S-ND295-01 owns this nextest process's tracing subscriber");
+        trace
+    }
+
+    fn exact_barrier_for(&self, alloc: &AllocationId) -> Result<KernelRealtime, String> {
+        exact_intercept_install_barrier(
+            &self.events.lock().expect("intercept event collector lock").clone(),
+            alloc.as_str(),
+        )
+    }
+}
+
+impl<S> Layer<S> for InterceptInstallTrace
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        if event.metadata().name() != INTERCEPT_INSTALL_SUCCESS {
+            return;
+        }
+        let at = KernelRealtime::now();
+        let mut visitor = InterceptInstallFieldVisitor::default();
+        event.record(&mut visitor);
+        self.events
+            .lock()
+            .expect("intercept event collector lock")
+            .push(InterceptInstallEvent { alloc: visitor.alloc, at });
+    }
+}
+
+fn exact_intercept_install_barrier(
+    events: &[InterceptInstallEvent],
+    alloc: &str,
+) -> Result<KernelRealtime, String> {
+    let [event] = events else {
+        return Err(format!(
+            "expected exactly one {INTERCEPT_INSTALL_SUCCESS} event for {alloc}, got {events:?}"
+        ));
+    };
+    if event.alloc.as_deref() != Some(alloc) {
+        return Err(format!(
+            "the sole {INTERCEPT_INSTALL_SUCCESS} event belongs to {:?}, not {alloc}",
+            event.alloc
+        ));
+    }
+    Ok(event.at)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1816,16 +1900,7 @@ async fn poll_until_outbound_elements_ready(
                 // SAFETY: libc retains no pointer; `iface` is NUL-terminated.
                 let tap_ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
                 assert!(tap_ifindex != 0, "ready source membership belongs to one live TAP");
-                return LiveInterceptReadiness {
-                    // Deliberately sampled after the generation-bracketed typed
-                    // program/set observation and exact-ifindex resolution. This barrier is
-                    // conservative: every kernel packet timestamp at or before it
-                    // is classified pre-ready.
-                    kernel_barrier_at: KernelRealtime::now(),
-                    tap_ifindex,
-                    tap,
-                    state,
-                };
+                return LiveInterceptReadiness { tap_ifindex, tap, state };
             }
             Ok(Some(state)) => {
                 assert!(
@@ -1875,11 +1950,7 @@ async fn finish_shared_element_observation(
         if let Ok(Some(after)) = observe_shared_intercept_state()
             && after == readiness.state
         {
-            return InterceptReadiness {
-                kernel_barrier_at: readiness.kernel_barrier_at,
-                tap_ifindex: readiness.tap_ifindex,
-                state: after,
-            };
+            return InterceptReadiness { tap_ifindex: readiness.tap_ifindex, state: after };
         }
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -1961,14 +2032,14 @@ fn audit_guest_egress_boundary(
     }
 }
 
-fn guest_frame_precedes_capture_ready(
+fn guest_frame_is_not_strictly_after_intercept_live(
     frame: &CapturedFrame,
     tap_ifindex: u32,
-    barrier: KernelRealtime,
+    intercept_live_at: KernelRealtime,
 ) -> bool {
     frame.ifindex == tap_ifindex
         && frame.packet_type != libc::PACKET_OUTGOING
-        && frame.kernel_event_at.is_none_or(|event_at| event_at <= barrier)
+        && frame.kernel_event_at.is_none_or(|event_at| event_at <= intercept_live_at)
 }
 
 fn count_subslices(haystack: &[u8], needle: &[u8]) -> u64 {
@@ -2881,6 +2952,7 @@ struct MeshResult {
     vm_identity: IssuedCertSummary,
     scan: WireScan,
     readiness: InterceptReadiness,
+    intercept_live_at: KernelRealtime,
     guest_egress: GuestEgressAudit,
     ktls: Result<KtlsSocketEvidence, String>,
     splice: SpliceEvidence,
@@ -2968,11 +3040,13 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         &service_managed,
         &service_inbound,
     );
+    tokio::task::yield_now().await;
 
     // The peer wire is armed before deploy. The observation-only VMM
     // decorator below reports the exact C3 attachment and blocks the real CH
     // spawn until both guest-boundary captures and the exact-rule poller are
     // ready.
+    let intercept_events = InterceptInstallTrace::install_global();
     let vm_spec = write_toml(
         server_tmp.path(),
         &format!("{id}.toml"),
@@ -2999,6 +3073,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .expect("mesh VM reaches VMM with one complete network attachment");
     let guest_address = guest_address_for_config(&spawn_cut.config);
     let guest_gateway = guest_gateway_for_config(&spawn_cut.config);
+    let caller_alloc = spawn_cut.config.alloc.clone();
     assert_eq!(network.mac[0] & 0x02, 0x02, "the production VM receives a local MAC");
     let tap_wire = WireCapture::start(&network.tap, 0);
     let tap_ifindex = {
@@ -3013,7 +3088,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         guest_address,
         Duration::from_secs(60),
     ));
-    let capture_ready_at = KernelRealtime::now();
     spawn_cut
         .release
         .send(())
@@ -3062,6 +3136,9 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         Duration::from_secs(60),
     )
     .await;
+    let intercept_live_at = intercept_events
+        .exact_barrier_for(&caller_alloc)
+        .unwrap_or_else(|error| panic!("caller intercept-live event proof failed: {error}"));
     let ktls_candidates = ktls_journal.finish();
     let splice = splice_probe.finish();
     let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates, loopback_ifindex);
@@ -3078,13 +3155,12 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         .frames
         .iter()
         .filter(|frame| {
-            guest_frame_precedes_capture_ready(frame, tap_ifindex, readiness.kernel_barrier_at)
+            guest_frame_is_not_strictly_after_intercept_live(frame, tap_ifindex, intercept_live_at)
         })
         .collect::<Vec<_>>();
     assert!(
         pre_intercept_tap_frames.is_empty(),
-        "the exact direct-host TAP observes zero guest-originated frames from capture-ready={capture_ready_at:?} through intercept-live={:?}: {pre_intercept_tap_frames:#?}",
-        readiness.kernel_barrier_at,
+        "the exact direct-host TAP observes zero guest-originated frames with missing SO_TIMESTAMPNS or time <= the caller's sole intercept-install event at {intercept_live_at:?}: {pre_intercept_tap_frames:#?}",
     );
     let guest_egress =
         audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
@@ -3188,6 +3264,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         vm_identity,
         scan,
         readiness,
+        intercept_live_at,
         guest_egress,
         ktls,
         splice,
@@ -3647,24 +3724,20 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         .segments
         .iter()
         .filter(|segment| {
-            segment
-                .kernel_event_at
-                .is_none_or(|event_at| event_at <= result.readiness.kernel_barrier_at)
+            segment.kernel_event_at.is_none_or(|event_at| event_at <= result.intercept_live_at)
         })
         .collect::<Vec<_>>();
     assert!(
         pre_ready.is_empty(),
-        "actual constant-program/set readiness must precede every captured TCP segment on the exact guest \
-         -> mesh tuple, including the causally-first SYN after EXEC; pre-ready={pre_ready:#?}, \
-         readiness={:?}",
-        result.readiness
+        "the caller's sole intercept-install success event must precede every captured TCP segment on the exact guest \
+         -> mesh tuple, including the causally-first SYN after EXEC; not-after-live={pre_ready:#?}, \
+         intercept_live_at={:?}",
+        result.intercept_live_at
     );
     assert!(
-        first_syn
-            .kernel_event_at
-            .is_some_and(|event_at| event_at > result.readiness.kernel_barrier_at),
+        first_syn.kernel_event_at.is_some_and(|event_at| event_at > result.intercept_live_at),
         "a kernel timestamp must prove the first exact guest SYN occurred strictly after the \
-         conservative typed-state readiness barrier"
+         exact-allocation intercept-install success event"
     );
     assert!(
         result.guest_egress.plaintext_request_hits > 0,
@@ -3710,11 +3783,9 @@ async fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
     );
     assert!(
         result.guest_egress.segments.iter().all(|segment| {
-            segment
-                .kernel_event_at
-                .is_some_and(|event_at| event_at > result.readiness.kernel_barrier_at)
+            segment.kernel_event_at.is_some_and(|event_at| event_at > result.intercept_live_at)
         }),
-        "every member of the complete captured universe follows the conservative readiness cut"
+        "every member of the complete captured universe follows the exact-allocation intercept-install event"
     );
     assert!(
         result.guest_egress.packet_count > 0 && result.guest_egress.byte_count > 0,
@@ -3723,9 +3794,9 @@ async fn d7_exact_rule_hit_witness_is_loss_and_mutation_conservative() {
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// CONTRACT_SHAPE: pure-function.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn capture_ready_requires_the_real_c3_identity() {
+fn typed_state_and_exact_event_receipt_remain_independent_and_fail_closed() {
     let source = Ipv4Addr::new(100, 95, 0, 17);
     let sibling = Ipv4Addr::new(100, 95, 0, 18);
     let empty = BTreeSet::new();
@@ -3738,12 +3809,44 @@ fn capture_ready_requires_the_real_c3_identity() {
         source_membership_is_paired(&BTreeSet::from([sibling]), &BTreeSet::from([sibling]), source),
         "a sibling remains outside the exact source membership without creating a partial pair"
     );
+
+    let alloc = "gti-caller-alloc";
+    let trace = InterceptInstallTrace::default();
+    let before = KernelRealtime::now();
+    tracing::subscriber::with_default(tracing_subscriber::registry().with(trace.clone()), || {
+        tracing::info!(
+            name: INTERCEPT_INSTALL_SUCCESS,
+            alloc = %alloc,
+            "focused install-success event"
+        );
+    });
+    let after = KernelRealtime::now();
+    let event_at = trace
+        .exact_barrier_for(&AllocationId::new(alloc).expect("valid focused allocation id"))
+        .expect("Layer captures the exact allocation event");
+    assert!(
+        before <= event_at && event_at <= after,
+        "on_event samples CLOCK_REALTIME synchronously inside the emission interval"
+    );
+    let event = InterceptInstallEvent { alloc: Some(alloc.to_owned()), at: event_at };
+    assert_eq!(exact_intercept_install_barrier(std::slice::from_ref(&event), alloc), Ok(event.at));
+    for invalid in [
+        Vec::new(),
+        vec![event.clone(), event.clone()],
+        vec![InterceptInstallEvent { alloc: Some("wrong-generation".to_owned()), at: event.at }],
+        vec![InterceptInstallEvent { alloc: None, at: event.at }],
+    ] {
+        assert!(
+            exact_intercept_install_barrier(&invalid, alloc).is_err(),
+            "absent, duplicate, wrong-allocation, and missing-allocation event evidence fails closed: {invalid:?}"
+        );
+    }
 }
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn pre_baseline_all_ethertype_guest_frame_always_invalidates_born_captured() {
-    let frame = CapturedFrame {
+fn missing_or_pre_event_all_ethertype_guest_frame_invalidates_born_captured() {
+    let mut frame = CapturedFrame {
         kernel_event_at: Some(KernelRealtime(99)),
         ifindex: 41,
         protocol: 0x0806,
@@ -3754,20 +3857,42 @@ fn pre_baseline_all_ethertype_guest_frame_always_invalidates_born_captured() {
         aux: None,
         bytes: Vec::new(),
     };
-    assert!(guest_frame_precedes_capture_ready(&frame, 41, KernelRealtime(100)));
+    assert!(guest_frame_is_not_strictly_after_intercept_live(&frame, 41, KernelRealtime(100)));
+    frame.kernel_event_at = Some(KernelRealtime(100));
+    assert!(
+        guest_frame_is_not_strictly_after_intercept_live(&frame, 41, KernelRealtime(100)),
+        "a frame equal to the event barrier fails closed"
+    );
+    frame.kernel_event_at = Some(KernelRealtime(101));
+    assert!(
+        !guest_frame_is_not_strictly_after_intercept_live(&frame, 41, KernelRealtime(100)),
+        "only a strictly later frame is post-live"
+    );
     let mut missing_timestamp = frame;
     missing_timestamp.kernel_event_at = None;
     assert!(
-        guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
-        "a non-IP frame with a missing timestamp is conservatively pre-baseline"
+        guest_frame_is_not_strictly_after_intercept_live(
+            &missing_timestamp,
+            41,
+            KernelRealtime(100)
+        ),
+        "a non-IP frame with a missing timestamp fails the exact event boundary"
     );
     assert!(
-        !guest_frame_precedes_capture_ready(&missing_timestamp, 42, KernelRealtime(100)),
+        !guest_frame_is_not_strictly_after_intercept_live(
+            &missing_timestamp,
+            42,
+            KernelRealtime(100)
+        ),
         "a sibling ifindex is outside the exact TAP universe"
     );
     missing_timestamp.packet_type = libc::PACKET_OUTGOING;
     assert!(
-        !guest_frame_precedes_capture_ready(&missing_timestamp, 41, KernelRealtime(100)),
+        !guest_frame_is_not_strictly_after_intercept_live(
+            &missing_timestamp,
+            41,
+            KernelRealtime(100)
+        ),
         "the opposite TAP direction is not guest ingress"
     );
 }
@@ -4588,34 +4713,9 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let source = guest_address_for_config(&cut.config);
 
     // Reclamation and the stale-element sweep have completed before this VMM cut.
-    // The replacement guard is intentionally absent here: accepted ordering is
-    // driver READY → transient Running write → intercept install → EXEC release.
-    let _ = poll_until_shared_intercept_is_stable(Duration::from_secs(30), 0).await;
-
-    let tap_wire = WireCapture::start(&tap, 0);
-    let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
-    let splice_probe = SpliceProbe::attach_self();
-    let tap_ifindex = {
-        let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
-        // SAFETY: the NUL-terminated name remains live for this lookup.
-        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
-        assert_ne!(ifindex, 0, "replacement TAP is live before VMM release");
-        ifindex
-    };
-    cut.release
-        .send(())
-        .map_err(|()| "fresh replacement VMM release receiver disappeared".to_owned())?;
-    let restarted = poll_until_fresh_allocation_running(
-        cfg,
-        workload_id,
-        predecessor_id,
-        &replacement_id,
-        Duration::from_secs(90),
-    )
-    .await;
-    let _replacement_identity =
-        poll_until_issued_identity(cfg, workload_id, &replacement_id, Duration::from_secs(30))
-            .await;
+    // Keep the replacement parked while the independent peer reaches its
+    // complete one-allocation state. The collector installed below therefore
+    // has one possible install-success author: this exact replacement.
     let peer_running = poll_until_running(cfg, peer_workload_id, Duration::from_secs(30)).await;
     let service_address = peer_running
         .snapshot
@@ -4637,6 +4737,34 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
             .and_then(std::ffi::OsStr::to_str)
             .ok_or_else(|| "restarted flow peer bridge name is not UTF-8".to_owned())?,
     );
+    let _ = poll_until_shared_intercept_is_stable(Duration::from_secs(30), 1).await;
+    tokio::task::yield_now().await;
+
+    let tap_wire = WireCapture::start(&tap, 0);
+    let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
+    let splice_probe = SpliceProbe::attach_self();
+    let tap_ifindex = {
+        let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(ifindex, 0, "replacement TAP is live before VMM release");
+        ifindex
+    };
+    let intercept_events = InterceptInstallTrace::install_global();
+    cut.release
+        .send(())
+        .map_err(|()| "fresh replacement VMM release receiver disappeared".to_owned())?;
+    let restarted = poll_until_fresh_allocation_running(
+        cfg,
+        workload_id,
+        predecessor_id,
+        &replacement_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let _replacement_identity =
+        poll_until_issued_identity(cfg, workload_id, &replacement_id, Duration::from_secs(30))
+            .await;
     // The target guest's immutable startup delay keeps its first flow parked
     // while the fresh peer reaches Running. Arm the typed element witness only after both production
     // memberships are stable, so the readiness cut cannot be confused with
@@ -4654,6 +4782,9 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         Duration::from_secs(120),
     )
     .await?;
+    let intercept_live_at = intercept_events
+        .exact_barrier_for(&cut.config.alloc)
+        .map_err(|error| format!("replacement intercept-live event proof failed: {error}"))?;
     let ktls_candidates = ktls_journal.finish();
     let splice = splice_probe.finish();
     let tap_capture = tap_wire.stop();
@@ -4661,7 +4792,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         .frames
         .iter()
         .filter(|frame| {
-            guest_frame_precedes_capture_ready(frame, tap_ifindex, readiness.kernel_barrier_at)
+            guest_frame_is_not_strictly_after_intercept_live(frame, tap_ifindex, intercept_live_at)
         })
         .map(|frame| format!("tap: {frame:?}"))
         .collect::<Vec<_>>();
