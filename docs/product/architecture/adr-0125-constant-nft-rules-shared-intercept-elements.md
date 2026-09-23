@@ -92,6 +92,37 @@ reclamation clears stale elements while retaining and verifying constant rules.
 Exact set names, keys, error variants, method signatures, and ordering live in
 the feature delta.
 
+The existing general nft exports cannot implement that element ownership: they
+operate on rules and expose neither typed dynamic-set observation nor a
+semantic multi-set transaction. The accepted lower correction is therefore
+one doc-hidden, IP-intercept-specific extension in `overdrive-netlink::nft`.
+It adds one opaque semantic `SharedIpInterceptState` (the unchanged
+handle-free `SharedIpInterceptIdentity` plus sorted typed members), one
+generation-bracketed state observer, and exactly four named effects: atomic
+outbound two-element insert, atomic inbound one-element insert, grouped
+allocation delete, and boot clear. Every effect requires the expected constant
+program identity, returns its mandatory semantic read-back, preserves the
+untouched-member/constant-program/foreign complement, and retains exact typed
+netlink sources. Exact signatures are authoritative only in the feature delta.
+
+No set/key/mutation enum or generic additions/removals function crosses the
+crate boundary. Family and runtime-mode selectors, set IDs, rule handles,
+ruleset generations, raw keys/attributes, and raw builders remain private.
+IPv4 keys are four octets; the destination key is IPv4 plus big-endian TCP port
+plus two zero ABI-alignment bytes (`key_len = 8`). `HostMtlsIntercept`, not the
+netlink adapter, owns clone-shared process refcounts and group tokens:
+identical installs adopt a token without a second write, first/final ownership
+performs the semantic insert/delete, normal stop deletes all `2 + P` elements
+in one batch before disarming guards, and guard Drop is only the best-effort
+fallback. Restart adopts no tokens; post-reclamation boot clears and reads back
+all three sets empty before listener-target convergence.
+
+The accepted public port remains exactly the feature delta's five methods.
+In particular `install_outbound(Ipv4Addr, u16)` replaces the live pre-cut
+`&str` signature as required compiler fallout. A textual overload, parse/fallback
+branch, compatibility method, or return to the per-interface rule installer is
+not permitted.
+
 Listener recovery never rewrites constant-rule targets. It must rebind the
 exact previously recorded port; failure to do so reaches ADR-0124 fail-stop.
 
@@ -106,6 +137,13 @@ input unbounded.
 
 Rejected. It changes valid product semantics to accommodate an implementation
 cardinality problem.
+
+### Expose a generic set/key additions-and-removals API
+
+Rejected. It lets callers compose invalid set/key pairs and unrelated member
+mutations, cannot make the outbound two-set group structural, and leaks nft
+policy below the sole `HostMtlsIntercept` consumer. Named group effects plus an
+opaque semantic state projection are smaller and keep raw ABI private.
 
 ## Consequences
 
