@@ -1089,13 +1089,16 @@ impl WireCapture {
         capture
     }
 
-    fn stop_and_scan(self, exact_tuple: Option<FlowTuple>) -> WireScan {
+    fn stop_and_scan(
+        self,
+        ktls_candidates: &[KtlsSocketEvidence],
+    ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
         let port = self.port;
         let capture = self.stop();
-        let mut scan = scan_frames(&capture.frames, port, exact_tuple);
+        let (mut scan, exact) = correlate_ktls_candidates(&capture.frames, port, ktls_candidates);
         scan.capture_packets = capture.statistics.packets;
         scan.capture_drops = capture.statistics.drops;
-        scan
+        (scan, exact)
     }
 }
 
@@ -1501,6 +1504,39 @@ fn scan_frames(
     scan
 }
 
+fn correlate_ktls_candidates(
+    frames: &[CapturedFrame],
+    peer_port: u16,
+    candidates: &[KtlsSocketEvidence],
+) -> (WireScan, Result<KtlsSocketEvidence, String>) {
+    let mut matches = candidates
+        .iter()
+        .filter(|candidate| record_has_bidirectional_tls13_ktls(&candidate.record))
+        .map(|candidate| (scan_frames(frames, peer_port, Some(candidate.tuple)), candidate.clone()))
+        .filter(|(scan, _)| scan.exact_records_to_peer > 0 && scan.exact_records_from_peer > 0)
+        .collect::<Vec<_>>();
+    match matches.len() {
+        1 => {
+            let (scan, candidate) = matches.pop().expect("one exact candidate");
+            (scan, Ok(candidate))
+        }
+        0 => (
+            scan_frames(frames, peer_port, None),
+            Err(format!(
+                "no eligible kTLS TX/RX candidate carried bidirectional captured TLS application data; candidates={:?}",
+                candidates.iter().map(|candidate| candidate.tuple).collect::<Vec<_>>()
+            )),
+        ),
+        count => (
+            scan_frames(frames, peer_port, None),
+            Err(format!(
+                "{count} eligible kTLS TX/RX candidates ambiguously carried bidirectional captured TLS application data: {:?}",
+                matches.iter().map(|(_, candidate)| candidate.tuple).collect::<Vec<_>>()
+            )),
+        ),
+    }
+}
+
 fn parse_tcp_segment(
     frame: &CapturedFrame,
     reject_offload_ambiguity: bool,
@@ -1902,17 +1938,21 @@ fn record_has_bidirectional_tls13_ktls(record: &str) -> bool {
         && (record.contains("txconf: sw") || record.contains("txconf:sw"))
 }
 
-async fn poll_until_ktls(port: u16, budget: Duration) -> Option<KtlsSocketEvidence> {
+async fn poll_until_ktls(port: u16, budget: Duration) -> Vec<KtlsSocketEvidence> {
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        if let Some(record) = ktls_socket_records().into_iter().find(|record| {
-            record.tuple.destination.port() == port
-                && record_has_bidirectional_tls13_ktls(&record.record)
-        }) {
-            return Some(record);
+        let records = ktls_socket_records()
+            .into_iter()
+            .filter(|record| {
+                record.tuple.destination.port() == port
+                    && record_has_bidirectional_tls13_ktls(&record.record)
+            })
+            .collect::<Vec<_>>();
+        if !records.is_empty() {
+            return records;
         }
         if tokio::time::Instant::now() >= deadline {
-            return None;
+            return Vec::new();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2464,7 +2504,7 @@ struct MeshResult {
     scan: WireScan,
     readiness: InterceptReadiness,
     guest_egress: GuestEgressAudit,
-    ktls: Option<KtlsSocketEvidence>,
+    ktls: Result<KtlsSocketEvidence, String>,
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
@@ -2620,7 +2660,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // Preserve cleanup even when the expected kTLS state never appears. RED
     // must fail as a normal assertion, not strand a VM/service until nextest's
     // process timeout kills the whole test binary.
-    let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
+    let ktls_candidates = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let readiness =
         finish_shared_element_observation(live_readiness, Duration::from_secs(20)).await;
     let active_managed = BTreeSet::from([service_address, guest_address]);
@@ -2631,7 +2671,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         &service_inbound,
     );
     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
-    let scan = peer_wire.stop_and_scan(ktls.as_ref().map(|evidence| evidence.tuple));
+    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
     let tap_capture = tap_wire.stop();
     let pre_intercept_tap_frames = tap_capture
         .frames
@@ -2924,10 +2964,8 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
         AllocStateWire::Terminated,
         "wire proof is coupled to a successful guest round-trip"
     );
-    let ktls = result
-        .ktls
-        .as_ref()
-        .expect("one live outbound socket record must carry TLS 1.3 ULP plus RX and TX kTLS state");
+    let ktls =
+        result.ktls.as_ref().unwrap_or_else(|error| panic!("{error}; scan={:?}", result.scan));
     assert_eq!(
         result.scan.exact_tuple,
         Some(ktls.tuple),
@@ -3262,7 +3300,7 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
         result
             .ktls
             .as_ref()
-            .is_some_and(|evidence| { record_has_bidirectional_tls13_ktls(&evidence.record) }),
+            .is_ok_and(|evidence| { record_has_bidirectional_tls13_ktls(&evidence.record) }),
         "the born-captured connection must install bidirectional TLS 1.3 kTLS"
     );
 }
@@ -3573,7 +3611,24 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         synthetic_peer_tcp_frame(exact_peer.reverse(), 6_000, 0x02, &[], libc::PACKET_HOST),
         synthetic_peer_tcp_frame(exact_peer.reverse(), 6_001, 0x18, &tls_record, libc::PACKET_HOST),
     ];
-    let scan = scan_frames(&frames, SERVICE_PORT, Some(exact_peer));
+    let ktls_record = "tcp-ulp-tls version:1.3 rxconf:sw txconf:sw";
+    let unrelated_candidate = KtlsSocketEvidence {
+        tuple: FlowTuple {
+            source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 40_000),
+            destination: exact_peer.destination,
+        },
+        record: ktls_record.to_owned(),
+    };
+    let exact_candidate = KtlsSocketEvidence { tuple: exact_peer, record: ktls_record.to_owned() };
+    let (scan, selected) = correlate_ktls_candidates(
+        &frames,
+        SERVICE_PORT,
+        &[unrelated_candidate.clone(), exact_candidate.clone()],
+    );
+    assert_eq!(
+        selected.expect("the second same-port candidate is the exact captured TLS connection"),
+        exact_candidate
+    );
     assert_eq!(scan.same_port_streams_observed, 3);
     assert_eq!(scan.exact_records_to_peer, 1);
     assert_eq!(scan.exact_records_from_peer, 1);
@@ -3586,11 +3641,9 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         "dequeue reordering and duplicate copies reconstruct the intentional guest-local plaintext once"
     );
 
-    let unknown = FlowTuple {
-        source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 9), 40_009),
-        destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 10), SERVICE_PORT),
-    };
-    let unknown_scan = scan_frames(&frames, SERVICE_PORT, Some(unknown));
+    let (unknown_scan, unknown_match) =
+        correlate_ktls_candidates(&frames, SERVICE_PORT, &[unrelated_candidate]);
+    assert!(unknown_match.is_err(), "an unrelated first candidate fails closed");
     assert_eq!(unknown_scan.exact_records_to_peer, 0);
     assert_eq!(unknown_scan.exact_records_from_peer, 0);
     assert_eq!(unknown_scan.plaintext_hits_on_exact_peer_tuple, 0);
@@ -3598,6 +3651,13 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         unknown_scan.plaintext_hits_on_other_same_port_streams, 1,
         "an unknown tuple never adopts an unrelated same-port stream as peer evidence"
     );
+
+    let (_, ambiguous) = correlate_ktls_candidates(
+        &frames,
+        SERVICE_PORT,
+        &[exact_candidate.clone(), exact_candidate],
+    );
+    assert!(ambiguous.is_err(), "multiple matching candidates fail closed as ambiguous");
 
     let clear_peer = vec![
         synthetic_peer_tcp_frame(exact_peer, 7_000, 0x02, &[], libc::PACKET_HOST),
@@ -4017,9 +4077,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let live =
         poll_until_outbound_elements_ready(tap.clone(), source, Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
-    let ktls = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await.ok_or_else(|| {
-        "restarted first flow did not install bidirectional TLS 1.3 kTLS".to_owned()
-    })?;
+    let ktls_candidates = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let readiness = finish_shared_element_observation(live, Duration::from_secs(60)).await;
     let tap_capture = tap_wire.stop();
     let pre_ready = tap_capture
@@ -4039,7 +4097,8 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         .ok_or_else(|| "restarted VM omitted its guest address".to_owned())?;
     let audit =
         audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
-    let scan = peer_wire.stop_and_scan(Some(ktls.tuple));
+    let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
+    let ktls = ktls?;
     if audit.first_syn.is_none()
         || audit.plaintext_request_hits == 0
         || scan.plaintext_hits_on_exact_peer_tuple != 0
