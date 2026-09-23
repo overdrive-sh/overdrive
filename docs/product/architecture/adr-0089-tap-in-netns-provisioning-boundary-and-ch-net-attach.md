@@ -11,7 +11,10 @@ TPROXY for dead-listener fail-closure and to make provision/restart teardown
 total at the existing C3 boundary, and **amended** (2026-09-01) to name the
 action shim's existing mTLS allocation-lifecycle dependency as an injectable
 async port so the same-ID replacement protocol has a pure Tier-1 simulation
-boundary. Companion
+boundary, and **amended** (2026-09-23, user-directed with no review cycle) to
+make the post-#295 host-TAP attachment remain administratively down through
+Cloud Hypervisor READY/Running and move the sole TAP-up after the existing mTLS
+success receipt. Companion
 to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
@@ -141,6 +144,32 @@ solicitation, and `arp_notify=0` suppresses gratuitous ARP. The static path has
 no DHCP, DNS lookup, probe, neighbor warm-up, socket connect, or workload send.
 On install `Err`, EXEC is never sent (D-MTLS-18).
 
+**2026-09-23 post-#295 correction — the host TAP, not only EXEC, is gated.**
+Native shared-bridge capture proved that an already-up TAP lets the configured
+guest kernel answer ambient neighbor traffic: guest-source ARP replies and TCP
+RST frames preceded the exact `mtls.intercept.install.success` receipt. IPv6
+and `arp_notify` suppression do not prevent replies to received traffic. The
+zero-frame contract therefore supersedes the prior provision-time TAP-up order.
+
+The post-#295 `GuestNetworkProvisioner::provision` builds and reads back the
+complete guard/endpoint/TCX/pin/master identity but returns with the persistent
+host TAP down. `CloudHypervisorVmm` receives the unchanged selected TAP/MAC
+attachment, opens it by name, and must not change its administrative state.
+The guest virtio NIC may still configure and reach READY; READY reports guest
+platform initialization, not host bridge forwarding. Native equivalence must
+read the same host TAP ifindex as down immediately before VMM start and after
+READY/`Driver::start`.
+
+After the durable Running write, the action shim awaits `start_alloc` and its
+`2 + P` element read-back, emits the unchanged synchronous success event,
+awaits the same provisioner's exact TAP activation/read-back, and then calls
+the existing EXEC-release hook. The event remains an mTLS-install receipt, so
+its name is exact; placing it before TAP activation ensures every possible
+guest-originated frame is strictly post-barrier. This adds no `Vmm`, `Driver`,
+beacon, event, gate, task, or second-owner surface. The only added public method
+is the awaited `GuestNetworkProvisioner::activate(&GuestNetworkPlan)` pinned by
+the #295 feature delta.
+
 The Tier-3 witness is an observation-only decorator over the real `Vmm` port.
 After C3 provisions the alloc netns/tap/host-veth and before delegating to real
 CH, it binds all-EtherType capture to the exact tap ifindex inside that netns
@@ -165,9 +194,11 @@ count and validated IPv4 `tot_len` (the nft `skb->len` domain). Any reset,
 replacement/delete/reinsert, generation change/wrap, partial/interrupted dump,
 notification loss, or ambiguity fails before the original destination arrives
 at leg-F. No cleartext copy appears on the external peer path and TLS records
-appear on the inter-agent path. The full order is `capture-ready ≺ VMM-spawn
-≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
-operator-first-connect`.
+appear on the inter-agent path. The post-#295 full order is `capture-ready ≺
+provisioned-TAP-down ≺ VMM-spawn-with-TAP-down ≺ network-ready ≺ READY
+≺ Running ≺ mTLS-2+P-read-back ≺
+mtls.intercept.install.success/intercept-live ≺ TAP-activation-read-back ≺
+EXEC-release ≺ operator-first-connect`.
 
 `install_outbound_tproxy` remains the sole install/adopt/delete-by-handle
 owner, but is now correctly classified EXTEND: its egress expression order is
@@ -786,8 +817,10 @@ Accepted through ADR-0104 after independent DESIGN review iteration 2
 APPROVED; approved design commit
 `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
-This ADR's network provisioning, selected-TAP attachment, mTLS install gates,
-teardown order and slot ownership are unchanged. The prior text's VM-specific
+At the time of the 2026-09-12 identity amendment, this ADR's network
+provisioning, selected-TAP attachment, mTLS install gates, teardown order and
+slot ownership were unchanged. The later 2026-09-23 amendment above changes
+only the post-#295 provision-down/activate order. The prior text's VM-specific
 same-allocation recovery route is superseded only in identity shape: automatic
 VM Workload Failure and Platform-Reclamation replacement is amended to use the existing
 `Action::StartAllocation` with a fresh `AllocationId`, as specified by

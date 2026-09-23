@@ -70,10 +70,12 @@ production API was added.
 | Writer lifetime, stop deadline, and cancellation schedules | Run `9f906ad7-b592-4b5c-861e-ecf9e2d6968a`: 3 passed, 99 skipped. |
 | Post-#295 action-owner await/cancellation schedule | Run `ee147208-d028-477d-be3c-57c415b9f673`: 1 passed, 208 skipped. |
 
-All eight mapped bodies are therefore GREEN through their accepted owners. The
-roadmap returns to `validation.status = pending` because this material
-acceptance/verification correction requires independent review; this DISTILL
-pass does not self-approve it.
+All eight mapped bodies are therefore GREEN through their accepted owners. At
+that checkpoint the roadmap returned to `validation.status = pending`; the
+independent acceptance-design review subsequently approved it on 2026-09-22.
+The bounded 2026-09-23 TAP-activation correction is separately authorized by
+the user's explicit no-review override, so current roadmap validation remains
+approved.
 
 ## Phase-02 non-waived remediation bodies
 
@@ -93,6 +95,27 @@ pass does not self-approve it.
 | S-ND295-11 `every_incompatible_tap_or_bridge_identity_refuses_owner_publication` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_incompatible_tap_or_bridge_identity_refuses_owner_publication -- --ignored --exact` | first finite-table case expected an owner-authored `TapObserve` mismatch; current provision returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; both checkpoints' exact Tap/BridgeLinkIdentity/LinkMaster facts and publication refusal assertions compile. |
 | S-ND295-12 `every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement -- --ignored --exact` | expected first `EndpointDelete` source while a later TAP-delete failure is retained for continuation; current teardown returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; the separate eleven-row table covers every cleanup mutation/read and both TAP-observation occurrences with exact operation/source, complete continuation, and retained state; same-owner retry, held lease, complement, and unrelated facts also compile. |
 | S-ND295-13 `reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm` | `PROPTEST_CASES=1024 cargo test -p overdrive-sim --lib invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm -- --ignored --exact --nocapture` | actual sweep-call snapshot retained seeded run directory/scope; proptest shrank to `seed = 0` | **RED — MISSING_FUNCTIONALITY / reproduced ordering defect**; production helper, same Sim host, real sweep port call, and seed printing all executed. |
+
+### 2026-09-23 deferred-TAP-activation amendment
+
+The historical S-ND295-11 RED above targeted the then-accepted final-TAP-up
+provision sequence. Native S-ND295-01 subsequently proved that sequence
+contradicts the zero-frame barrier by capturing guest-source ARP replies and
+TCP RST frames before `mtls.intercept.install.success`. Under the user's
+explicit no-review override, the current RED/GREEN target is now:
+
+- transition `provision_reads_every_attachment_fact_before_reporting_success`
+  to exact final TAP-down and no `TapSetUp`;
+- add `activation_reads_every_protection_fact_before_reporting_success` for
+  the same real owner and D12A leaf boundary;
+- add the action-shim order/failure bodies named in `test-scenarios.md`;
+- extend native production composition with same-ifindex/down-through-READY,
+  event-before-up, up-read-back-before-EXEC, and zero frame at/before the event.
+
+These are `MISSING_FUNCTIONALITY` against the current provision-time TAP-up
+path. The prior observed RED facts remain historical evidence; they are not
+relabelled as executions of the new bodies. No public Sim activation-failure
+setter or fixture-owned product effect is authorized.
 
 ## Step 03-03 acceptance-author corrections
 
@@ -228,6 +251,7 @@ neither RED classifications nor approval conditions here:
 - `wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero`
 - `deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause`
 - `ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start`
+  (historical name; current DISTILL target ends `_down_before_injected_vmm_start`)
 - `two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal`
 - `production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts`
 - `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`

@@ -5,7 +5,9 @@
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-8 at review iteration 9 on 2026-09-17;
 D-295-DISTILL-11 component/task/S37 evidence is autonomously authorized and
-pending the trusted-checkpoint review.** This
+pending the trusted-checkpoint review; amended 2026-09-23 by explicit user
+direction with no review cycle for deferred TAP activation/quiescence
+serialization.** This
 records RUN-295-B.
 
 ## Context
@@ -80,9 +82,22 @@ Admission reopens only after all invariants pass and quiesced TAPs are restored.
 Existing enforced handles remain owned during this bounded interval; new
 connects or DNS queries fail while their socket owner is absent.
 
+Allocation activation and runtime quiescence are serialized inside this same
+owner. Quiescence latches before its first down mutation. An activation that
+linearizes first may complete but is then included in the quiesce/read-back;
+an activation that observes the latch returns without raising the TAP. Recovery
+restores only attachments whose activation completed before quiescence;
+provisioned-down attachments awaiting post-Running intercept installation stay
+down. `converge_shared` performs those restores and full read-back before the
+latch clears and before the EXEC supervisor reopens. This is private
+allocation/owner state, not a new gate method, persisted phase, or recovery
+owner. The same private awaited sequencer makes runtime audit phase-aware:
+ProvisionedDown and QuiescedActive expect down; Active expects up. The
+intentional pre-activation interval is therefore not reported as drift.
+
 For bridge/TAP/TCX/map/pin/bridge-guard ownership, “the same production path”
 means the same `SharedGuestNetworkOwner` object used at boot and inherited by
-allocation provision/teardown. Its audit is non-repairing; convergence and TAP
+allocation provision/activation/teardown. Its audit is non-repairing; convergence and TAP
 quiescence are separate awaited effects. The sim adapter may return the same
 typed outcomes for ordering/convergence evidence but cannot pretend to create
 kernel state, which remains Tier-3 evidence.

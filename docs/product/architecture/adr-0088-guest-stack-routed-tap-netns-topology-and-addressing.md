@@ -7,7 +7,11 @@ post-network-initialization barrier after the step 02-03 metal counterexample,
 and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable
 and mutation-aware and to pin its native-metal trust boundary, and **amended**
 (2026-08-31) to keep listener-loss fail-closed by ordering the existing fwmark
-before TPROXY.
+before TPROXY, and **amended** (2026-09-23, user-directed with no review cycle)
+after native #295 evidence proved that guest sysctls cannot enforce the
+zero-frame barrier once the host TAP is administratively up. The post-#295
+owner now leaves the TAP down through READY/Running and activates it only after
+the mTLS install-success receipt.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -166,6 +170,36 @@ A closed control-frame allowlist is rejected: no such frame is required, and
 an allowance creates a hiding place for unexpected destinations or payload-
 bearing TCP/UDP.
 
+**2026-09-23 reachable counterexample and superseding barrier.** On the
+post-#295 shared bridge, native capture observed guest-source ARP replies and
+TCP RST frames before the exact caller allocation's
+`mtls.intercept.install.success` event. The guest generated them in response
+to ambient neighbor traffic before operator EXEC. Disabling IPv6 and
+`arp_notify` prevents selected autonomous announcements; it does not prevent
+the configured guest kernel from answering received traffic. Therefore
+provision-time host TAP-up and this zero-frame contract cannot coexist.
+
+The selected correction preserves the guest protocol and every lifecycle
+meaning. The one shared guest-network owner provisions the complete guarded
+TAP/endpoint/TCX attachment but reads it back administratively down. Cloud
+Hypervisor attaches that persistent TAP without changing its administrative
+state; the guest still applies its address, route, resolver, and suppression
+settings and reaches READY. After the accepted Running row, the action shim
+awaits the existing allocation mTLS `2 + P` element installation/read-back,
+emits the existing success event, awaits exact TAP activation/read-back through
+the same owner, and only then releases EXEC. READY still means guest platform
+initialization complete and blocked; Running still means READY plus durable row
+write. Neither newly promises host forwarding or command execution.
+
+The event name remains truthful and unchanged: it records successful mTLS
+intercept installation, not TAP activation or allocation completion. Its
+synchronous timestamp is deliberately before the only host-TAP up transition,
+so every guest-originated frame must be strictly later. Moving the event after
+activation would allow the first enabled frame to precede the claimed barrier.
+Allowing ARP/control frames, installing allocation capability state before a
+guest reaches READY, or adding a second VMM/action-shim TAP owner are rejected
+as respectively contradictory, wasteful/owner-reordering, and duplicative.
+
 The metal witness starts after C3 has provisioned the allocation netns, tap,
 and host-veth, but before `Vmm::create` delegates to real CH. An observation-
 only decorator binds an all-EtherType capture to the exact tap ifindex inside
@@ -202,9 +236,10 @@ capture's matching-packet count and validated IPv4 `tot_len` (the nft
 change/wrap, partial/interrupted dump, loss, or ambiguity fails before leg-F
 recovers the same original destination, while no cleartext copy reaches the
 external peer path and the inter-agent path carries TLS records. Thus the
-complete order is `capture-ready ≺ VMM-spawn ≺
-network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
-operator-first-connect`.
+post-#295 complete order is `capture-ready ≺ provisioned-TAP-down ≺
+VMM-spawn-with-TAP-down ≺ network-ready ≺ READY ≺ Running ≺
+mTLS-2+P-read-back ≺ mtls.intercept.install.success/intercept-live ≺
+TAP-activation-read-back ≺ EXEC-release ≺ operator-first-connect`.
 
 ### 5. Exact outbound-rule hit and dead-listener closure
 

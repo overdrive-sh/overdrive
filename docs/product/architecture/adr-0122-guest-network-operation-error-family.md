@@ -5,7 +5,9 @@
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17;
 D-295-DISTILL-11's sourced component audit wrapper is autonomously authorized
-and pending the trusted-checkpoint review.**
+and pending the trusted-checkpoint review. Amended 2026-09-23 by explicit user
+direction with no review cycle to carry deferred TAP activation through this
+same error family.**
 
 ## Context
 
@@ -61,6 +63,23 @@ node health, never an allocation failure.
 
 Exact Rust variants, fields, visibility, and conversions live exclusively in
 the #295 feature delta.
+
+Deferred TAP activation adds no error, fact, or operation variant. The existing
+`TapSetUp`, `TapSetDown`, `TapObserve`, `BridgeObserve`,
+`GuardMemberInsert`, `EndpointMapObserve`, `TcxQuery`, and `TcxLinkPin`
+discriminators plus `Tap`/`LinkMaster`/existing protection facts already cover
+every mutation and read-back. The sole new public method is the awaited
+`GuestNetworkProvisioner::activate(&GuestNetworkPlan) -> Result<()>`; the same
+concrete `SharedGuestNetworkOwner` implements it. A lower set-up failure keeps
+its canonical source, while a successful operation followed by wrong read-back
+remains source-less `PostconditionMismatch`.
+
+The durable action-shim failure reuses the already-shipped
+`WorkloadNetnsProvisionFailed { stage, detail }` payload with closed stage
+`guest_network_activate`. The legacy variant name is not ideal, but adding a
+second public `TransitionReason` or flattening `GuestNetworkError` would be a
+larger contract change. The obsolete `NetSlotExhausted` mapping stays deleted;
+pool exhaustion remains non-terminal drift.
 
 Startup probe failures preserve the existing typed lower-level source through
 the applicable canonical TCX/netlink/I/O variant. Semantic classifier,
@@ -171,7 +190,7 @@ the real host owner produce those values instead.
 ## Consequences
 
 Positive: one cause-preserving error path covers assignment, async provision,
-teardown, runtime convergence, and cleanup without compatibility branches.
+activation, teardown, runtime convergence, and cleanup without compatibility branches.
 Negative: the public error and operation enums become a contract that must
 remain exhaustive and source-honest as shared-network effects evolve; semantic
 postcondition facts add a second, source-less error class that adapters must

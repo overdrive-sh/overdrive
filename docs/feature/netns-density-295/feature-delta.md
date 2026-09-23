@@ -90,8 +90,8 @@ review iteration 6.** Ownership remains one real control-plane owner; no public
 product hook or second adapter owner is added. The required S-ND295-00/10/11/
 12/13 RED bodies for that pre-D14 scope are authored, have completed bounded
 iteration-2 review corrections, and completed independent DISTILL iteration-3
-re-review. DELIVER remains unauthorized while later wave validation is
-pending.
+re-review. DELIVER was unauthorized at that checkpoint; later wave validation
+was approved on 2026-09-22.
 **D-295-DISTILL-14 is APPROVED by phase-02 DESIGN review iteration 7 on
 2026-09-21.** It adds one doc-hidden semantic TCP
 classifier probe method on the existing opaque `GuestTcxProgram`, keeps its raw
@@ -99,9 +99,8 @@ packet/SKB/BPF syscall/FD/numeric ABI private to dataplane, and assigns the
 unlike detached-link guard proof to the existing private real D5 host adapter
 over D9 observation plus the scratch TAP. D12/D12A/D13 ownership, existing
 methods, source taxonomy, and dependency direction remain unchanged. The
-matching DELIVER roadmap remains `validation.status = pending`; step `02-01`
-may not resume until the revised DISTILL evidence and roadmap are independently
-approved.
+matching DELIVER roadmap was `validation.status = pending` at that checkpoint
+and was independently approved on 2026-09-22.
 **D-295-DISTILL-14A is APPROVED by phase-02 DESIGN review iteration 9 on
 2026-09-21.** It keeps
 D14's approved cross-crate API byte-for-byte, adds one production-used
@@ -110,7 +109,7 @@ monitor with non-persisted structured completion events captured across
 ordinary `run_server`, and requires the existing cross-process
 `host-kernel-shared` nextest group. It adds no public constructor, port, hook,
 state accessor, timing seam, persistence, or second owner. Roadmap validation
-remains pending.
+was subsequently approved on 2026-09-22.
 **D-295-DELIVER-03-01 is USER-AUTHORIZED and independently APPROVED by
 solution-architecture review iteration 2 on 2026-09-22.** It resolves only the
 step-`03-01` EXEC-gate evidence
@@ -128,13 +127,20 @@ yet exposed zero complete TLS `0x17` records. The corrected same-node contract
 therefore treats AF_PACKET as routing/escape evidence, not ciphertext evidence;
 confidentiality is proved by exact kTLS socket state plus same-inode
 bidirectional splice and zero unapproved non-loopback egress. The correction
-adds no product behavior, test hook, public API, owner, route, persistence, or
-cross-host claim. The existing roadmap remains executable with
-`validation.status` remaining `approved`.
-The final S-ND295-01 readiness clarification uses the already-emitted
+initially added no product behavior, test hook, public API, owner, route,
+persistence, or cross-host claim. Subsequent native capture then proved a
+separate product-ordering contradiction: guest-source ARP replies and TCP RST
+preceded the event while provision had already raised the host TAP. The
+user-directed final amendment adds exactly
+`GuestNetworkProvisioner::activate(&GuestNetworkPlan)`, makes provision end
+TAP-down, and orders event → activation/read-back → EXEC. It adds no second
+owner, error/fact/operation variant, event/hook, task, persistence, or route.
+The existing roadmap remains executable with `validation.status` remaining
+`approved`.
+The final S-ND295-01 readiness contract uses the already-emitted
 `mtls.intercept.install.success` event as the exact intercept-live timing
 receipt; typed-set polling remains semantic state evidence only. No production
-event, field, hook, clock, or API is added.
+event, event field, hook, or clock is added.
 **Documentation density:** `lean` (`expansion_prompt=ask-intelligent`,
 `provenance=explicit_override`). Only Tier-1 `[REF]` sections are emitted in
 this feature delta. The Level-3 SSOT diagram is the solution-architect role's
@@ -208,6 +214,7 @@ concurrent-flow capacity claim.
 | **Spike-proven feasibility** | Parts A/B prove the shared bridge, shared DNS, production identity/resolver/`HostMtlsEnforcement`/cgroups, TLS 1.3 kTLS TX/RX, 14 splice calls, and no final-path netns/veth/slot dependency. Part C proves real aya-rs SCHED_CLS through TCX ingress on both TAPs, endpoint source validation, map-miss/spoof/direct-bypass drops, bridge-local delivery, pin survival/adoption/removal, and the same production zero-copy/cgroup path. Part D proves one node-shared leg-F listener plus one node-shared leg-C listener across two real microVM allocations, immutable pre-enforcement capability capture, exact-membership claim, successor selection, unknown/stale/post-removal rejection, and allocation-scoped drain of already-published handles while unrelated handles/listeners remain live. | Part D did **not** hold a real enforcement call across retirement and then execute the publish/teardown branch; its reuse self-test removed membership after claim but never called enforcement/publish with that held claim. No 16k/32k/100k end-to-end scale, connection-flood behavior, long-run listener performance, pinned-6.18 verifier baseline, deliberate TCX-detach guard, or production implementation is proved. Cross-host is outside #295. |
 | **Reproduced S-ND295-01 production fact (2026-09-23; corrected by native run `e72385d6`)** | Same-node Service resolution selected `Mesh` to `100.95.0.2:18951`. `HostMtlsEnforcement` created exact leg-B socket `100.95.0.1:35260 → 100.95.0.2:18951`; one live `ss` record uniquely correlated its inode and sole in-process fd with TLS 1.3, `tcp-ulp-tls`, TX configuration, and RX configuration. The constant output route-hook marked that host-local tuple, `fwmark 0x1` selected table 100's `local 0.0.0.0/0 dev lo` route, and shared leg C accepted it before ordinary bridge egress. A lossless loopback AF_PACKET capture observed both directions across 6,076 packets but no complete TLS `0x17` record. | Same-node loopback AF_PACKET is not authoritative ciphertext evidence in this composition; requiring `0x17` there is impossible despite real kTLS. The exact tuple's loopback presence and non-loopback absence prove local diversion, while exact kTLS state plus same-inode/fd bidirectional splice prove the protected transport. Bridge/TAP plaintext remains intentional only on leg F/leg S. No cross-host physical-wire behavior is inferred. |
 | **Accepted by system design review iteration 5 on 2026-09-16** | D-295-1 through D-295-6, A2, B1, C1 as amended by PORT-295-C, C-295-E, F1, ERR-295-A, GEN-295-A, CAP-295-A, and RUN-295-B. | System-design acceptance is not DELIVER authority. |
+| **User-directed DESIGN correction on 2026-09-23; no review cycle** | Native S-ND295-01 proved the provision-time TAP-up order emits guest-source ARP/TCP frames before the exact intercept-success event. D-295-DELIVER-04-01 amends B1/D12A/G-295-2 to defer the sole TAP activation until after that event and before EXEC release. | This is a proven ordering contradiction, not optional hardening. The roadmap remains approved under the user's explicit no-review override. |
 | **Unchanged accepted-contract constraints** | D-295-7 preserves cgroup, identity, resolver, enforcement, lifecycle, and recovery owners. D-295-9 preserves Service selection, atomic membership, and selected-`BackendId` identity receipt. | These are non-regression constraints, not fresh #295 decisions or new ADRs. |
 
 ## Wave: DESIGN / [REF] Requirements, Quality Attributes, and Capacity
@@ -227,8 +234,11 @@ concurrent-flow capacity claim.
 3. One in-agent DNS responder answers on the shared bridge gateway. The guest
    kernel token continues to carry address, prefix, gateway, and DNS; no host
    `/etc/netns/*/resolv.conf` exists.
-4. One owner provisions and tears down the address lease, TAP, bridge
-   membership, classifier membership, and host route effects around the VMM.
+4. One owner provisions, activates, and tears down the address lease, TAP,
+   bridge membership, classifier membership, and host route effects around the VMM.
+   Provision leaves the host TAP administratively down through VMM READY and
+   accepted Running; activation occurs only after allocation intercept
+   elements are live/read back and before guest EXEC release.
    Per-VM cgroup v2 ownership, CPU weight, reserve-padded `memory.max`, VMM PID,
    OOM attribution, total teardown, and boot reclamation remain unchanged.
 5. The existing Service dataplane continues to own backend selection and
@@ -251,7 +261,7 @@ prescribes either contract.
 
 | Rank | Attribute | Required response |
 |---:|---|---|
-| 1 | Security / confidentiality | Healthy operation and any single owned classifier/guard/listener/map/route loss catch or drop TCP. Accepted downside: arbitrary near-simultaneous external deletion of both a TAP's TCX entrypoint and the independent bridge guard can expose ordinary forwarding for at most the one-second audit window before TAP quiescence. |
+| 1 | Security / confidentiality | Healthy operation and any single owned classifier/guard/listener/map/route loss catch or drop TCP. Before intercept-live, the exact host TAP remains administratively down, so autonomous guest-kernel traffic cannot enter the bridge. Accepted downside after activation: arbitrary near-simultaneous external deletion of both a TAP's TCX entrypoint and the independent bridge guard can expose ordinary forwarding for at most the one-second audit window before TAP quiescence. |
 | 2 | Performance efficiency | O(1)-expected ifindex endpoint-map lookup at TCX ingress; no per-packet userspace proxy, AF_XDP, or ring-buffer forwarding; existing kTLS/splice core remains the steady-state path. |
 | 3 | Capacity | Initial measured contract is 16,384 simultaneous guest network attachments under the exact T1 profiles below, not a VMM/resource or connection-capacity claim. |
 | 4 | Reliability / recoverability | Teardown is effect-first and lease-release-last; boot reclaims VMMs before sweeping old TAP/rule state. |
@@ -666,9 +676,9 @@ pre-existing accepted-contract constraints and require no fresh decision.
 
 | Component / owner | Home | Proposed change | Responsibility |
 |---|---|---|---|
-| Node shared guest switch | `overdrive-control-plane` + `overdrive-netlink` + existing BPF crates | **CREATE NEW internal production owner with doc-hidden cross-crate owner port; EXTEND existing crates — D-295-DISTILL-1/D-295-DISTILL-5 USER-APPROVED** | One private host implementation supplies the same inherited allocation provisioner plus startup probe, stale sweep, shared converge/audit, TAP quiescence, runtime repair, and boot ownership. A module-private typed scratch-I/O boundary keeps the startup algorithm in this owner while making every setup, probe, reverse-cleanup, and inventory branch source-locally deterministic. The public owner port remains the composition/sim boundary. |
+| Node shared guest switch | `overdrive-control-plane` + `overdrive-netlink` + existing BPF crates | **CREATE NEW internal production owner with doc-hidden cross-crate owner port; EXTEND existing crates — D-295-DISTILL-1/D-295-DISTILL-5 USER-APPROVED; activation amended 2026-09-23** | One private host implementation supplies the same inherited allocation provisioner/activator/teardown plus startup probe, stale sweep, shared converge/audit, TAP quiescence, runtime repair, and boot ownership. A module-private typed scratch-I/O boundary keeps the startup algorithm in this owner while making every setup, probe, reverse-cleanup, and inventory branch source-locally deterministic. The public owner port remains the composition/sim boundary. |
 | Guest address pool | `overdrive-control-plane` | **CREATE NEW internal value/owner — ERR-295-A approved** | One internal allocation-keyed pool owns the guest IP/TAP/MAC lease over the node prefix through exactly `assign`, `release`, and `snapshot`; typed exhaustion is `GuestNetworkError::PoolExhausted`. |
-| `GuestNetworkProvisioner` + `SharedGuestNetworkOwner` | `overdrive-control-plane::guest_network` | **EXTEND and rename — ERR-295-A + F-02 + D-295-DISTILL-4 approved** | B1 replaces the old sync/netns seam with one async doc-hidden provisioner; the shared-owner super-port adds the five node operations. The same module owns the opaque/read-only plan and one source-bearing orchestration error. Host construction/implementation stays private; cross-crate visibility exists only for the sibling sim adapter and accepted production-owner seams. |
+| `GuestNetworkProvisioner` + `SharedGuestNetworkOwner` | `overdrive-control-plane::guest_network` | **EXTEND and rename — ERR-295-A + F-02 + D-295-DISTILL-4 approved; deferred activation amended 2026-09-23** | B1 replaces the old sync/netns seam with one async doc-hidden provisioner whose exact allocation operations are provision-down, activate-after-intercept, and teardown; the shared-owner super-port adds the five node operations. The same module owns the opaque/read-only plan and one source-bearing orchestration error. Host construction/implementation stays private; cross-crate visibility exists only for the sibling sim adapter and accepted production-owner seams. |
 | `AllocationSpec` network handoff | `overdrive-core::traits::driver` | **DELETE + CREATE approved value type** | Delete `netns`, `host_veth`, and the six separate optional guest-network fields. Add exactly `network: Option<GuestNetworkAssignment>`; the grouped value contains only `address`, `tap`, `mac`, `gateway`, `prefix`, and `dns`. |
 | `VmNetworkAttachment` / VMM launch | `overdrive-core::vm`, `overdrive-host::vmm` | **EXTEND** | Attachment becomes host TAP + MAC; delete `ip netns exec` wrapper and selected-TAP sysfs lookup through a netns. |
 | mTLS intercept install | `overdrive-worker::MtlsIntercept` | **EXTEND — C1/PORT-295-C/F-03 approved** | Retain bind and both allocation-element installs; outbound keys guest source IPv4. Add node-global converge/audit for eight constant IP rules/three sets. Node guard and allocation guards own disjoint universes; TAP/TCX/bridge-guard lifecycle remains separate. |
@@ -817,10 +827,12 @@ consumers without duplicating them:
 pub use overdrive_dataplane::guest_tcx::{GuestTcxError, TcxAttachPoint};
 ```
 
-This correction is **USER-APPROVED 2026-09-16**. It changes only type and
-source ownership. B1 methods, shared-owner methods, plan visibility,
-composition-helper argument order, cleanup aggregation, lifecycle gates, and
-all kernel behavior remain unchanged.
+This correction is **USER-APPROVED 2026-09-16**. It changed only type and
+source ownership at that time. The later user-directed 2026-09-23 amendment
+adds only B1's exact `activate` method and corresponding TAP-order behavior;
+shared-owner node methods, plan visibility, composition-helper argument order,
+cleanup aggregation, crate ownership, and dependency direction remain
+unchanged.
 
 ### D-295-DISTILL-6 — approved typed TCX mutation/query adapter boundary
 
@@ -1469,12 +1481,20 @@ mapping is:
 | Port invocation | Recorded / refused operation |
 |---|---|
 | `provision` | `TapCreate` |
+| `activate` | `TapSetUp` (recorded success; no public failure slot) |
 | `teardown` | `TapDelete` |
 | `probe_startup` | `StartupProbe` |
 | `sweep_stale` | `CleanupComplement` |
 | `converge_shared` | `BridgeConverge` |
 | `audit_shared` | `BridgeObserve`; D11 supplies its typed component/cause result |
 | `quiesce_managed_taps` | `TapSetDown` |
+
+The inherited `activate` method is the sole D-295-DELIVER-04-01 amendment to
+the implemented port. The Sim records `TapSetUp` and returns `Ok(())`; it adds
+no atomic slot or public script method. Host-leaf tests own activation effect
+failures, and an action-shim-local private port implementation owns composed
+activation-failure cleanup. Thus the reusable public method list above and its
+six non-audit failure slots remain unchanged.
 
 `script_next_probe_error` stores the exact supplied `GuestNetworkError` for
 one `probe_startup` call. A later script before consumption replaces the
@@ -1850,7 +1870,7 @@ no generation or listener-port field.
 
 | Alternative | Exact shape | Trade-off |
 |---|---|---|
-| **B1 — replace obsolete plan vocabulary (ERR-295-A APPROVED 2026-09-16; visibility amended by F-02 under user authorization)** | Replace the sync `WorkloadNetworkProvisioner` two-plan surface with one async `GuestNetworkProvisioner::{provision(&GuestNetworkPlan),teardown(&GuestNetworkPlan)}` returning public `GuestNetworkError`. The trait and plan type are `#[doc(hidden)] pub` solely because the sibling `overdrive-sim` adapter must implement the port across a crate boundary; the host implementation, plan construction, and production dispatch remain control-plane-private. | Precise owner/object language, one atomic plan, awaited effect completion, one typed cause chain, and a sanctioned production-owner simulation seam without a parallel fake action owner. |
+| **B1 — replace obsolete plan vocabulary (ERR-295-A APPROVED 2026-09-16; visibility amended by F-02; deferred-activation amendment USER-DIRECTED 2026-09-23)** | Replace the sync `WorkloadNetworkProvisioner` two-plan surface with one async `GuestNetworkProvisioner::{provision(&GuestNetworkPlan),activate(&GuestNetworkPlan),teardown(&GuestNetworkPlan)}` returning public `GuestNetworkError`. The trait and plan type are `#[doc(hidden)] pub` solely because the sibling `overdrive-sim` adapter must implement the port across a crate boundary; the host implementation, plan construction, and production dispatch remain control-plane-private. | Precise owner/object language, one atomic plan, awaited effect completion, one typed cause chain, and a sanctioned production-owner simulation seam without a parallel fake action owner. `provision` establishes the protected attachment while its TAP is down; `activate` is the sole transition to an administratively-up TAP after intercept-live. |
 | B2 — keep the old trait name and change parameter meaning | Keep `WorkloadNetworkProvisioner` but pass a shared-bridge plan. | **Rejected.** It has less rename fallout but permanently assigns netns-era meaning to a shared-switch boundary. |
 
 The B1 plan itself is fully pinned. Its type is public only for the established
@@ -1880,18 +1900,59 @@ impl GuestNetworkPlan {
 
 `assignment` carries the approved TAP/address/MAC/gateway/prefix/DNS facts once;
 the plan adds only allocation, bridge, and node-prefix ownership context. The
-port is async because convergence performs awaitable netlink/BPF effects; no
-runtime discovery, detached task, or second sync method is permitted. The
-trait is exactly:
+port is async because convergence and activation perform awaitable netlink/BPF
+effects; no runtime discovery, detached task, second owner, or sync
+compatibility method is permitted. The trait is exactly:
 
 ```rust
 #[doc(hidden)]
 #[async_trait::async_trait]
 pub trait GuestNetworkProvisioner: Send + Sync {
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()>;
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<()>;
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()>;
 }
 ```
+
+`provision` returns `Ok(())` only after the exact persistent TAP identity,
+bridge master, guard membership, endpoint entry, first-ingress TCX program,
+link pin, and attachment identity are read back with the TAP administratively
+down. A same-plan repeat while that attachment remains provisioned-down is
+idempotent. Re-entering `provision` after activation is outside the action
+owner's lifecycle precondition and returns the existing source-less
+`PostconditionMismatch` rather than downing a live allocation.
+
+`activate` is the sole allocation operation permitted to set that TAP up. It
+first requires the provisioned allocation record and re-reads the exact current
+bridge identity/master, persistent TAP/VMM owner/ifindex, complete guard
+membership, endpoint value, TCX program/attach point, and link pin while the
+TAP is still down. It then performs `TapSetUp` and repeats the exact TAP and
+bridge-master read-back before returning. An already-up exact attachment is an
+idempotent success only for an allocation whose activation previously
+completed; absence, a different plan/TAP/ifindex/owner/master, or missing guard,
+endpoint, attachment, or pin is the existing operation-tagged lower error or
+source-less `PostconditionMismatch`. No new operation, fact, or error variant is
+added: `TapSetUp`, `TapObserve`, `BridgeObserve`, `GuardMemberInsert`,
+`EndpointMapObserve`, `TcxQuery`, and `TcxLinkPin` retain their current exact
+meanings.
+
+The source-less state refusals are exact. A missing/nonmatching published
+allocation record is `PostconditionMismatch { operation: TapObserve, expected:
+Tap { name: plan.assignment().tap, ifindex: None, link_kind: Tap, persistent:
+true, up: false, owner_uid: Some(OVERDRIVE_VMM_UID) }, observed }`, using the
+actual TAP fact when one exists and `None` otherwise. If runtime quiescence has
+latched, activation does not mutate and returns `PostconditionMismatch {
+operation: TapSetUp, expected: LinkUp { ifindex, up: true }, observed:
+Some(LinkUp { ifindex, up: false }) }`. Protection and final-link mismatches
+use their already-pinned facts and operation tags.
+
+If the set-up mutation succeeds but a mandatory final observation fails,
+`activate` attempts `TapSetDown` and down-state read-back before returning. A
+typed quiescence failure takes return precedence because an unconfirmed-up TAP
+is the unsafe residue; the original activation failure remains in the existing
+`guest_network.allocation_provision_failed` structured diagnostic event (no new
+event name or field). The action shim still owns the complete
+driver/mTLS/attachment unwind and durable allocation disposition.
 
 The production `HostGuestNetworkProvisioner` and every plan constructor remain
 private to `overdrive-control-plane`; `overdrive-sim` may implement only the
@@ -1967,9 +2028,10 @@ retains that exact error as the `#[source]` of
 retained supervisor; it does not duplicate or flatten the operation taxonomy.
 
 One concrete owner implements both this port and the inherited
-`GuestNetworkProvisioner` allocation operations. Production and simulation
+`GuestNetworkProvisioner` allocation operations (`provision`, `activate`, and
+`teardown`). Production and simulation
 therefore cannot supply one object for boot/runtime ownership and a parallel
-object for allocation provision/teardown. `probe_startup` owns only isolated
+object for allocation provision/activation/teardown. `probe_startup` owns only isolated
 scratch resources and always attempts their cleanup; `sweep_stale` runs only
 after existing VMM reclamation; `converge_shared` applies the one production
 bridge/map/guard identity; `audit_shared` is non-repairing over the complete
@@ -1982,9 +2044,13 @@ immediately before the paired EXEC wiring. Their complete signatures remain
 single-sourced under *EXEC-close linearization*. The ordinary public
 `run_server` surface is unchanged: it privately constructs the
 `HostSharedGuestNetworkOwner` and supplies that one instance to the same
-production composition. The sim adapter may script only the five named owner
-method results and the inherited allocation operations; it does not expose a
-generic fault language or manufacture kernel state.
+production composition. The sim adapter implements activation as the inherited
+allocation operation and records the existing
+`GuestNetworkOperation::TapSetUp`. It adds no public fault-language method:
+action-shim activation-failure ordering is driven by a private test
+implementation of the accepted port, while host activation leaf failures
+remain source-local beneath the real owner. The sim does not manufacture
+kernel state.
 
 That scripting/call-observation/test-wiring surface is intentionally public in
 the `adapter-sim` crate so deterministic simulations and composed tests in
@@ -3360,6 +3426,18 @@ so the chain is `GuestNetworkError::Tcx { operation }` →
 `GuestTcxError::{Map|Program|Pin|Link|Io}` → exact lower source. Neither control-plane nor
 sim names a raw aya type, and no second TCX error taxonomy exists.
 
+Deferred activation reuses this family without widening it. A `set_link_up`
+transport/ACK/kernel failure is `Netlink { operation: TapSetUp, source }`; a
+successful mutation with wrong TAP or master read-back is the existing
+`PostconditionMismatch` over `Tap` or `LinkMaster`; a missing endpoint,
+attachment, pin, or guard retains its existing operation/fact. The action shim
+wraps the returned value only as `ShimError::GuestNetwork`. For the durable
+post-Running failure projection it reuses the already-shipped
+`TransitionReason::WorkloadNetnsProvisionFailed` payload with the exact closed
+stage `guest_network_activate`; the obsolete `NetSlotExhausted` mapping remains
+deleted. No `GuestNetworkActivationError`, new `TransitionReason`, or string
+classification of a lower source is authorized.
+
 D-295-DISTILL-5 removes the ambiguous `LinkPin`, `LinkAdopt`, and
 `LinkUnpin` discriminators before implementation. Map pins and the TCX link
 have distinct pin/adopt/unpin operations; bridge and every bridge-guard object
@@ -3962,6 +4040,18 @@ potentially forwarding guest alive merely because repair was selected. A pure
 listener/DNS task exit does not require TAP-down because missing local socket
 ownership already refuses new intercepted/DNS traffic; published enforcement
 handles remain owned until the selected policy drains or preserves them.
+
+Deferred activation does not create a quiesce race. The one shared owner
+serializes `activate` with `quiesce_managed_taps` and latches quiescence before
+the first down mutation. Activation that linearized first may finish, after
+which quiescence must down/read back that TAP; activation that observes the
+latch must return without raising the TAP. During successful repair,
+`converge_shared` restores and reads back only attachments whose activation had
+completed before quiescence, never an attachment still in its pre-activation
+VMM/READY interval. The latch clears only after the full shared-owner audit and
+those restores succeed, before the existing EXEC supervisor changes
+Recovering to Open. This is private state in the existing owner, not a new
+port, persisted phase, or recovery protocol.
 
 At initial bind the listener owner records the concrete F/C `SocketAddrV4` that
 the constant rules target. Listener recovery may only recreate the transparent
@@ -4683,7 +4773,7 @@ source-only, pin-exists-only, or mocked probe is not evidence.
 |---|---|---|---|---|
 | guest `READY` | `overdrive-init` + `VmDriver` beacon session | Guest platform initialization, including static network application, completed; guest is blocked awaiting EXEC | Valid shared address/prefix/gateway/DNS token and successful guest apply/read-back | Service `Stable`; mTLS handshake success for a future connection |
 | allocation `Running` | action shim after `Driver::start` and accepted observation write | Guest reached READY and the allocation Running row is durable | Existing driver start/READY result and row write only | Intercept-live, Service readiness/liveness, DNS backend health |
-| guest command release | `VmDriver::release_for_exit_emission` called by action shim | The operator command may begin and emit network traffic | Existing accepted Running row, allocation intercept-live, and node shared-owner health gate | Meaning of Running or READY |
+| guest command release | `VmDriver::release_for_exit_emission` called by action shim | The operator command may begin and emit network traffic | Existing accepted Running row, allocation intercept-live receipt, awaited exact TAP activation/read-back, and node shared-owner health gate | Meaning of Running or READY |
 | Service `Stable` / backend eligibility | `ServiceLifecycle` / authoritative backend projection | Declared probes establish Service health and membership | Existing probe observations | VM boot readiness or node startup |
 
 ### Gate G-295-0 — fixed T1 network admission
@@ -4742,8 +4832,11 @@ source-only, pin-exists-only, or mocked probe is not evidence.
 ### Gate G-295-2 — existing guest command release, narrowed to the new switch
 
 - **Existing evidence:** current production writes Running, installs mTLS, then
-  releases EXEC; ADR-0088's zero-frame pre-EXEC contract prevents a guest from
-  racing traffic before the intercept.
+  releases EXEC. Native S-ND295-01 work proved that raising the host TAP during
+  provision lets the guest kernel emit ARP replies and TCP RST frames before
+  the exact `mtls.intercept.install.success` receipt even while the guest is
+  blocked before EXEC. ADR-0088's zero-frame contract therefore requires an
+  administrative-down host-TAP barrier; guest sysctls alone are insufficient.
 - **Owner:** action shim, consuming the existing `MtlsInterceptLifecycle`
   result and the already-provisioned guest-network plan.
 - **Promise:** the two node-shared listeners are live; this allocation's TAP is
@@ -4759,15 +4852,30 @@ source-only, pin-exists-only, or mocked probe is not evidence.
   its mutex; no check-then-send atomic-bool window exists.
 - **Affected result:** only guest EXEC release.
 - **Failure projection:** existing typed network provision failure before
-  start, or existing `MtlsInterceptInstallFailed` dominating Failed after
-  Running; driver/mTLS/network cleanup is awaited and EXEC is withheld.
+  start, existing `MtlsInterceptInstallFailed` after Running, or an activation
+  `GuestNetworkError` after the success receipt. Activation failure with proven
+  driver quiescence dominates the transient Running row with the existing
+  `WorkloadNetnsProvisionFailed { stage: "guest_network_activate", detail }`
+  wire shape; its historical variant name is retained to avoid a second public
+  lifecycle-reason API, while the closed stage names the exact current effect.
+  Driver stop, mTLS stop, attachment teardown, and release-last cleanup are
+  awaited and EXEC is withheld. If driver stop itself cannot prove quiescence,
+  structural cleanup and the replacement row are withheld and the typed driver
+  error remains primary, matching the existing mTLS-install cleanup boundary.
+  If later mTLS/network cleanup is incomplete, the existing
+  `DriverInternalError` Failed disposition carries primary plus cleanup detail;
+  no cleanup failure is reported as successful activation.
 - **Explicitly unaffected:** READY and Running keep their present meanings;
   Service Stable/readiness/liveness stay probe-owned.
 - **Ordering:** node owner binds one leg F and one leg C before allocation use;
   allocation flow is lease → down TAP/bridge → managed guard membership →
-  endpoint map → TCX attach/pin/query → VMM READY → accepted Running →
-  exact-generation capability registration + leg-F/leg-C IP entries → EXEC
-  release. Teardown is driver quiescence → atomically remove capability
+  endpoint map → TCX attach/pin/query → provision returns with exact TAP
+  still down → Cloud Hypervisor attaches that down TAP without raising it →
+  guest network initialization/READY → accepted Running → exact-generation
+  capability registration + leg-F/leg-C `2 + P` IP entries with read-back →
+  synchronous `mtls.intercept.install.success` receipt → awaited exact TAP
+  activation/read-back → EXEC release. Teardown is driver quiescence →
+  atomically remove capability
   indexes and mark the exact generation Retiring → await its in-flight-claim
   count reaching zero while every late returned handle is torn down → drain
   only its published enforcement handles → mTLS IP maps → endpoint-map delete
@@ -4781,18 +4889,24 @@ source-only, pin-exists-only, or mocked probe is not evidence.
   caller allocation ID. The Layer samples `clock_gettime(CLOCK_REALTIME)`
   synchronously in `on_event`; that value is the sole intercept-live barrier
   because the production source emits the event immediately after awaited
-  `mtls_lifecycle.start_alloc(&spec)` returns and immediately before
-  `driver.release_for_exit_emission(handle)`. AF_PACKET `SO_TIMESTAMPNS` uses
-  the same realtime domain. Every guest-originated frame on the caller TAP with
+  `mtls_lifecycle.start_alloc(&spec)` returns, before awaited
+  `guest_provisioner.activate(&plan)`, and before
+  `driver.release_for_exit_emission(handle)`. The event name remains exact: it
+  says the mTLS intercept and its `2 + P` elements installed/read back
+  successfully; it does not claim the TAP or workload is live. AF_PACKET
+  `SO_TIMESTAMPNS` uses the same realtime domain. Every guest-originated frame on the caller TAP with
   a missing timestamp or timestamp `<=` the event barrier fails the zero-frame
   assertion; only timestamps strictly later than the barrier are post-live.
   Event absence, duplication, or a wrong allocation ID fails closed. The typed
   generation-bracketed state observation must still prove the complete constant
   program and `2 + P` member universe, but its userspace poll-completion time is
   never a timing authority.
-- **Counterexample:** moving intercept-live before READY would require binding
-  listeners for a guest that may never boot and would still not strengthen the
-  meaning of Running.
+- **Counterexample:** moving allocation element installation before READY would
+  reserve capability/elements for a guest that may never boot. Leaving the TAP
+  up during VMM boot is also rejected: the guest kernel, not only the operator
+  command, can emit L2 frames before READY/EXEC. Moving the success event after
+  TAP activation is rejected because the first newly-enabled frame could then
+  precede the supposed intercept-live timestamp.
 - **Evidence lane:** seeded simulation for owner/order plus Tier-3 native-metal
   production-path proof for actual bridge/TAP/TCX/nft/kTLS effects and
   deliberate TCX detach.
@@ -4857,7 +4971,7 @@ create two sources of truth.
 | `AppState::net_slot_allocator` plus action-shim C3 parameters | **REPLACE in the single cut** | Hold the internal guest-address pool through the one shared-network owner; route every start/restart/stop through its inherited async `overdrive_control_plane::guest_network::GuestNetworkProvisioner`. The control-plane-owned doc-hidden plan/provisioner/owner traits exist only so `overdrive-sim` can substitute that same driven owner through the accepted high-level seams. There is no core error mirror, slot/adopt compatibility path, split provisioner/shared owner, or simulation-owned action owner. |
 | `action_shim::dispatch*` start/restart/stop arms | **EXTEND existing orchestration owner** | Enforce cap-before-assignment; sequence lease/provision → VMM READY → accepted Running → exact-generation intercept registration → EXEC; reverse owned effects and release the lease last. Existing lifecycle actions and rows remain unchanged. |
 | `AllocationSpec` / `VmNetworkAttachment` in `overdrive-core` | **USE accepted replacement values** | Carry one all-or-none assignment into `VmDriver`; pass only TAP+MAC into the VMM configuration. No bridge, generation, listener, TCX, nft, or capability state crosses this handoff. |
-| `CloudHypervisorVmm` in `overdrive-host` | **EXTEND adapter, narrow prerequisites** | Render the existing TAP/MAC `--net` attachment directly in the host namespace; remove `ip netns exec` and the `ip` launch-tool prerequisite. Existing confinement, cgroup, clone, reaper, and VMM probe ownership remains. |
+| `CloudHypervisorVmm` in `overdrive-host` | **EXTEND adapter, narrow prerequisites** | Render the existing TAP/MAC `--net` attachment directly in the host namespace; remove `ip netns exec` and the `ip` launch-tool prerequisite. Opening/attaching the supplied persistent TAP must not raise it; native equivalence proves the same ifindex stays administratively down through READY. Existing confinement, cgroup, clone, reaper, and VMM probe ownership remains. |
 | `veth_provisioner` host-effect seam plus `overdrive-netlink` | **REPLACE topology; EXTEND adapter mechanisms — D-295-DISTILL-9 approved** | The control-plane owner plans and orders one bridge/TAP attachment. `overdrive-netlink` performs typed bridge/TAP/MAC/master/address/up/down effects; its unchanged IPv4 nft APIs and new semantic bridge-guard module share one private family-aware codec. It gains no workload policy, raw builder, port trait, or subprocess path. |
 | `overdrive-bpf` and `overdrive-dataplane::guest_tcx` | **EXTEND existing BPF homes — D-295-DISTILL-6/12** | Add the SCHED_CLS classifier/maps, D12's exact opaque stateful production lifecycle, and D6's exact typed query/detach/endpoint/counter functions used by the shared-switch owner and S-ND295-37 external actor. Dataplane owns loader/link/adopted handles, semantic projection, private ABI, sorted query results, and every raw aya source; control-plane sees neither raw type nor layout. The existing XDP/cgroup-BPF Service dataplane remains separate. |
 | `MtlsIntercept` + `MtlsInterceptWorker` in `overdrive-worker` | **EXTEND existing intercept owner — F-03/D-295-DISTILL-7 approved** | Keep the four mandatory constructor dependencies and public methods. The module-private `CapabilityRegistry` owns checked generation, Pending reservations, atomic activation, RAII claims, publication fence, Retiring wait/drain/complete, and address-reuse exclusion. Continue calling unchanged `MtlsEnforcement`, `MtlsResolve`, `IdentityRead`, and intercept ports. |
@@ -4881,8 +4995,8 @@ missing production call site.
 | Driving | guest READY / deferred EXEC | `VmDriver` and action shim | Existing vsock beacon session | READY and Running meanings stay fixed; only EXEC consumes the new gate. |
 | Driving | accepted leg-F/leg-C TCP | Node-shared intercept owner | Two boot-owned transparent host listeners | `start_shared_owner` establishes the two tasks once; source/destination facts select one immutable accepted capability before enforcement. |
 | Driving | guest UDP DNS on the bridge gateway | `DnsResponder` | Existing hickory-based codec/index | Constructor dependency changes; query semantics do not. |
-| Driven | `overdrive_control_plane::guest_network::GuestNetworkProvisioner` | Action shim | Private host implementation over `overdrive-netlink` and `overdrive-dataplane::guest_tcx`; sibling `overdrive-sim` implementation through test-gated owner seams | Exact two-method async contract and visibility remain in C-295-B/ERR-295-A; production and simulation return the same control-plane `Result` through the real action-shim/runtime owner path. |
-| Driven | `overdrive_control_plane::guest_network::SharedGuestNetworkOwner` | Serve composition and retained shared-owner supervisor | Same private host object that implements `GuestNetworkProvisioner`; sibling `overdrive-sim` owner through the injected-driver composition | Exact five node-owner methods in C-295-G; one object owns allocation provision/teardown plus startup probe, sweep, converge/audit, and quiescence. No second owner, core error mirror, or low-level kernel fault port. |
+| Driven | `overdrive_control_plane::guest_network::GuestNetworkProvisioner` | Action shim | Private host implementation over `overdrive-netlink` and `overdrive-dataplane::guest_tcx`; sibling `overdrive-sim` implementation through test-gated owner seams | Exact three-method async contract and visibility remain in C-295-B/ERR-295-A; production and simulation return the same control-plane `Result` through the real action-shim/runtime owner path. |
+| Driven | `overdrive_control_plane::guest_network::SharedGuestNetworkOwner` | Serve composition and retained shared-owner supervisor | Same private host object that implements `GuestNetworkProvisioner`; sibling `overdrive-sim` owner through the injected-driver composition | Exact five node-owner methods in C-295-G; one object owns allocation provision/activation/teardown plus startup probe, sweep, converge/audit, and quiescence. No second owner, core error mirror, or low-level kernel fault port. |
 | Driven adapter | D12 opaque `GuestTcxProgram` / `GuestTcxLink` / `GuestTcxAdoptedState` | Private `HostSharedGuestNetworkOwner` and its private real D5 I/O | `overdrive-dataplane::guest_tcx` over raw aya and the private endpoint/counter ABI | Exact state-advancing methods only; state types are doc-hidden, private-field, non-`Clone`, and never implemented by Sim. D6's five free operations remain unchanged for audit, teardown, and external mutation. |
 | Driven | `MtlsIntercept` | Node-shared listener owner | Existing host intercept adapter over `overdrive-netlink::nft` | Exact five-method surface in C-295-C; one node guard owns rules/sets, allocation guards own only elements. |
 | Driven | `MtlsEnforcement` | Node-shared listener owner | `HostMtlsEnforcement` | Reused unchanged for TLS 1.3, kTLS TX/RX, splice, limits, and handle teardown. |
@@ -4903,12 +5017,76 @@ production-composition tests.
 | Sequence | Required application order | Ownership invariant |
 |---|---|---|
 | Boot and admission open | Construct BootClosed EXEC wiring → existing substrate probes → isolated shared-switch scratch probe and empty complement → VM reclamation → stale shared-attachment sweep + zero-managed-TAP read-back → production bridge fixed-MAC/gateway/maps/guard convergence → adopt/read owned constant IP rule identity without mutation → fresh F/C port-zero bind → atomic owned target replacement with rollback-on-mismatch → full listener/rule/set/zero-element read-back → DNS probe → start retained supervisor → `open_after_boot` → convergence/admission | Port zero and target replacement exist only in this fresh-process branch. No allocation/listener is adopted; foreign rules never mutate; no admission opens on partial read-back. |
-| Fresh start / restart successor | Existing placement including private T1 cap → pool assignment → down TAP attached to bridge → guard membership → endpoint entry → TCX attach/pin/query → TAP ready → VMM start/READY → accepted Running row → Pending capability + `2 + P` shared IP-set elements → atomic Active publication → action shim invokes existing release hook → `VmDriver` claims EXEC gate before taking pending state → deferred EXEC acknowledgement | Running remains pre-intercept. Guest traffic cannot start before the exact capability and all capture/drop effects are live. |
+| Fresh start / restart successor | Existing placement including private T1 cap → pool assignment → down TAP attached to bridge → guard membership → endpoint entry → TCX attach/pin/query → provision read-backs exact TAP-down state → VMM attaches the still-down TAP and reaches READY → accepted Running row → Pending capability + `2 + P` shared IP-set elements → atomic Active publication/read-back → synchronous `mtls.intercept.install.success` event → awaited exact TAP activation/read-back → action shim invokes existing release hook → `VmDriver` claims EXEC gate before taking pending state → deferred EXEC acknowledgement | READY and Running keep their existing meanings and remain pre-intercept/pre-activation. The administrative-down TAP, not guest sysctl intent, prevents autonomous guest-kernel frames before the event barrier; after activation, all capture/drop effects are already live. |
 | Guest-to-guest TCP | Source TAP TCX validation/mark/rewrite → bridge proof-mark guard → IP TPROXY leg F → immutable source capability claim + original-destination resolution → outbound TLS/kTLS/splice → output divert leg C → destination capability/allowed-port claim → inbound TLS/kTLS/splice → marked leg S → destination TAP | The shared switch never selects a Service backend; each accepted connection is attributed once and never re-resolved to an address-reuse successor. |
 | Allocation teardown | Driver quiescence → remove capability indexes and mark exact generation Retiring → wait its in-flight claims → tear down late returned handles and drain its published handles → remove shared IP elements with read-back → endpoint delete → TCX unpin/detach → delete TAP while still guarded → remove guard membership → release address → existing terminal commit | Shared listeners and unrelated capabilities/handles remain; release-last prevents predecessor/successor aliasing. |
-| Runtime owner loss | Immediate task-join signal or one-second audit → locked Open→Recovering before unhealthy event → kernel mismatch quiesces managed TAPs → exact-owner converge+full read-back every 250 ms → one locked Recovering→Open only after complete success, otherwise typed request at five seconds → CLI-bound shutdown/status 1 within ten further seconds | Recovery snapshot and EXEC admission share one lock. Partial or late success cannot reopen after FailStop. |
+| Runtime owner loss | Immediate task-join signal or one-second audit → locked Open→Recovering before unhealthy event → kernel mismatch latches owner quiescence and downs managed TAPs → exact-owner converge+full read-back every 250 ms → restore/read back only attachments whose activation had completed before quiescence → clear the private quiescence latch → one locked Recovering→Open only after complete success, otherwise typed request at five seconds → CLI-bound shutdown/status 1 within ten further seconds | Activation and quiescence serialize inside the one owner: activation linearized first is subsequently downed; quiescence linearized first makes activation refuse without raising the TAP. Provisioned-but-never-activated attachments are never restored by recovery. Partial or late success cannot reopen after FailStop. |
 
-#### D-295-DELIVER-04-01 — exact same-node protected-transport evidence boundary
+#### D-295-DELIVER-04-01 — deferred TAP activation and exact same-node protected-transport evidence boundary
+
+**Status: USER-DIRECTED 2026-09-23; no review cycle.** Native S-ND295-01
+captured guest-source ARP replies and TCP RST frames from the caller TAP before
+the exact `mtls.intercept.install.success` event. Those frames came from the
+guest kernel before operator EXEC and prove that ADR-0088's guest sysctl/read-
+back sequence does not suppress replies to ambient shared-bridge neighbor
+traffic once the host TAP is up. The prior order and the zero-frame contract
+cannot both remain accepted.
+
+The selected correction is the smallest owner-preserving mechanism: the one
+existing `GuestNetworkProvisioner` gains exactly the awaited `activate` method
+pinned under C-295-B. Provision constructs and publishes a fully guarded,
+classified attachment with the TAP down. Cloud Hypervisor attaches that exact
+persistent TAP while it remains down and must leave its administrative state
+unchanged through guest READY and accepted Running. The action shim retains the
+same `GuestNetworkPlan` in the start/restart call frame, awaits
+`mtls_lifecycle.start_alloc`, emits the existing success event synchronously,
+awaits `guest_provisioner.activate(plan)` and its read-back, and only then calls
+the existing `driver.release_for_exit_emission(handle)`. No method is added to
+`Driver`, `Vmm`, `MtlsInterceptLifecycle`, the EXEC gate, or a second owner.
+The activation call sits outside the action shim's optional-mTLS branch: a
+test-only composition with no `MtlsInterceptLifecycle` still activates before
+release but makes no intercept-live/event claim. The ordinary production
+composition supplies mTLS and follows the full event-before-activation order.
+
+`READY` remains guest platform initialization complete and blocked awaiting
+EXEC; a down host TAP does not undo the guest's configured address, route,
+resolver, IPv6 suppression, or `arp_notify=0` read-backs. `Running` remains
+accepted READY plus durable row write. Neither state promises host TAP
+forwarding, intercept installation, or command release. The only new externally
+observable interval is the already-existing post-Running/pre-EXEC interval in
+which the exact TAP is intentionally still down.
+
+Activation failure is fail-closed and uses no new public lifecycle reason. If
+driver quiescence succeeds, the action shim awaits mTLS stop and the same
+owner's teardown, retains the lease until the empty complement, and writes a
+dominating Failed row with the existing
+`WorkloadNetnsProvisionFailed { stage: "guest_network_activate", detail }`
+shape. If driver stop cannot prove quiescence, it returns that typed driver
+failure without tearing down underneath a possibly-live VMM or falsely writing
+the replacement row. Later cleanup failure uses the existing unclassified
+Failed disposition with primary-plus-cleanup detail, exactly as the current
+mTLS-install failure path. The initial Running occurrence is not emitted after
+activation failure; only the dominating Failed occurrence is emitted.
+
+The one host owner serializes activation with `quiesce_managed_taps` through
+private allocation/owner state. If activation linearizes first, quiescence
+must subsequently observe that TAP down before repair. If quiescence latches
+first, activation returns an existing typed/postcondition error without setting
+the TAP up. Recovery restores only previously activation-complete attachments,
+never provisioned-down ones, and reads them back before the EXEC supervisor
+reopens. Boot/restart adopts no activation state: existing VMM reclamation and
+stale sweep delete prior-epoch attachments before the empty pool admits work.
+Teardown is identical for provisioned-down, active, and recovery-quiesced
+attachments and still removes endpoint/link/pin/TAP/guard effects before lease
+release.
+
+Rejected smaller-looking alternatives are: retain TAP-up provision and allow
+ARP/control frames (contradicts the closed zero-frame contract); install
+allocation mTLS elements before VMM start (reserves capability and listener
+state for a guest that may never reach READY and changes the accepted owner
+order); move the event after activation (permits a newly enabled frame before
+the purported intercept-live timestamp); or add a second action-shim/VMM
+activation API (duplicates the existing guest-network owner).
 
 For S-ND295-01 only, **peer-facing protected transport** means the exact
 outbound leg-B socket joined to inbound leg C after `HostMtlsEnforcement` dials
@@ -4920,14 +5098,15 @@ physical wire in this case, and native run `e72385d6` proves that AF_PACKET on
 kTLS connection. GH #298 owns any future cross-host physical-wire design.
 
 The S-ND295-01 native test must join the following existing observations
-without a product hook or API:
+without an observation hook or test API:
 
 1. Install a tracing Layer before deployment. Its synchronous `on_event`
    callback accepts exactly one `mtls.intercept.install.success` event for the
    exact caller allocation and samples `CLOCK_REALTIME`. That timestamp is the
    intercept-live barrier. The production source order is fixed:
-   `start_alloc` successful return (including `2 + P` activation/read-back) →
-   success event → `release_for_exit_emission`. Any guest-originated caller-TAP
+   `start_alloc` successful return (including `2 + P` element activation/read-back) →
+   success event → awaited exact TAP activation/read-back →
+   `release_for_exit_emission`. Any guest-originated caller-TAP
    frame with missing `SO_TIMESTAMPNS` or timestamp `<=` the barrier fails;
    event absence/duplicate/wrong allocation or capture loss fails closed.
    Typed set observation separately proves the full semantic universe, but its
@@ -4975,7 +5154,9 @@ evidence are all mandatory. TLS `0x17` capture remains appropriate only for a
 future cross-host receipt on an actual physical wire and is outside #295.
 The product topology, TLS 1.3/kTLS TX/RX/splice requirement, guest-local
 plaintext requirement, production composition root, and fail-closed
-confidentiality outcome remain unchanged.
+confidentiality outcome remain unchanged. The only product-contract change is
+the exact `GuestNetworkProvisioner::activate` method and the provision-down →
+event → activate → EXEC order pinned above.
 
 ### Effect isolation and Contract Shape classification
 
@@ -4988,9 +5169,9 @@ to infer its mutation universe.
 | Address/MAC/TAP derivation and TCP-listener projection | **pure-function** | Return value only; no store, kernel, registry, or observation mutation | Source-local properties over `/16` boundaries, reserved addresses, uniqueness, TCP filter/dedup/order, and bridge/guest MAC disjointness. |
 | Guest address-pool assign/release/snapshot | **bounded-change** | Only the allocation-keyed held map; assign adds one binding or returns byte-equal existing, release removes only the named binding, snapshot mutates nothing | One mutex makes check-and-act atomic; complete before/after map delta and complement equality for all other allocations. |
 | Grouped `AllocationSpec` / `VmNetworkAttachment` projection | **pure-function** | Returned transient values only; every non-network field remains equal | Rust types make partial guest assignment and netns-bearing VMM attachment unrepresentable; compile and property checks cover exact projection. D10's detached transition overlay applies the destructive shape plus acceptance patch, proves every final-shape body compiles/REDs, and persists reviewed hashes while the committed pre-cut tree keeps only the old sole shape and stays GREEN. |
-| `GuestNetworkProvisioner::provision/teardown` | **bounded-change** | Named allocation's TAP/master/up state, endpoint entry, TCX link/pin, bridge-guard membership, and lease-correlated facts; shared bridge/maps/rules may change only toward their one desired identity | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary; typed operation/error family, full postcondition read-back, allocation-scoped state-delta universe, and real-kernel complement. |
+| `GuestNetworkProvisioner::provision/activate/teardown` | **bounded-change** | Named allocation's TAP/master/up state, endpoint entry, TCX link/pin, bridge-guard membership, private provisioned-down/activation-complete fact, and lease-correlated facts; shared bridge/maps/rules may change only toward their one desired identity | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary. Provision's postcondition is the complete protected attachment with exact TAP down; activation alone performs and reads back down→up after the intercept-success event; teardown accepts down/up/quiesced state and proves the empty complement. Typed existing operation/error facts, allocation-scoped state-delta universes, action-shim fail-closed cleanup, and real-kernel complement remain independent evidence. |
 | `SharedGuestNetworkOwner` startup/sweep/converge/audit/quiesce | **bounded-change** | Platform bpffs hierarchy, one bridge/gateway, managed TAP set, endpoint/counter maps, three guard rules, scratch-probe resources, and registered allocation inventory; unrelated host objects preserved | One mandatory owner is also the provisioner. D14A's production-used private validator covers every semantic mismatch/lower source; D5/D12A source-local tables cover owner algorithms. Non-persisted stage/attachment/guard/complement events expose only completed real-boot effects to the tracing subscriber. Public Sim remains composition-only; Lima/native retains kernel authority. |
-| Public `SimSharedGuestNetworkOwner` | **bounded-change** | Adapter-sim universe only: six independent non-audit refusal bits, twelve component audit bits, replaceable/consumable next-probe and next-audit errors, one append-only ordered `GuestNetworkOperation` call log, and optional D13 sweep-call observations over the same injected `SimVmHostState`. No kernel/listener/cleanup implementation exists | Existing method/call-log table remains unchanged. D13's exact constructor stores one clone of the existing Sim host; each real owner-port sweep atomically records call index plus `VmHostObservation`. Default/test_wiring has no host observation. Composition tests prove application ordering only; D5/D12A source-local and Lima/native tests exclusively prove host effects/cleanup. |
+| Public `SimSharedGuestNetworkOwner` | **bounded-change** | Adapter-sim universe only: existing non-audit refusal bits, twelve component audit bits, replaceable/consumable next-probe and next-audit errors, one append-only ordered `GuestNetworkOperation` call log, and optional D13 sweep-call observations over the same injected `SimVmHostState`. Activation records the existing `TapSetUp`; no new public scripting control is added. No kernel/listener/cleanup implementation exists | D13's exact constructor stores one clone of the existing Sim host; each real owner-port sweep atomically records call index plus `VmHostObservation`. Default/test_wiring has no host observation. Composition tests prove application ordering only; a private port implementation drives action-shim activation failure; D5/D12A source-local and Lima/native tests exclusively prove host effects/cleanup. |
 | TCX classifier packet evaluation | **bounded-change** | One input skb's sanctioned MAC/type/mark fields plus exactly one counter class; D14 permits only one scratch counter increment per semantic run and no retained userspace packet/FD/payload | BPF/Tier-2 plus Tier-3 partitions remain. D14 raw projection and D14A private validation tables are separate; the real boot calls the opaque program and emits completion only after validation. D9/TAP owns detached guard proof; tracing observes but never coordinates or persists effects. |
 | `guest_tcx` query/detach/endpoint/counter operations | **bounded-change** | Exact owned TCX attachment, one link pin, one ifindex endpoint entry, or one of eight counters; bridge guard, TAP state, other endpoints/counters, and unrelated pins remain complement-equal | Dataplane-source-local typed adapter tests plus S-ND295-37 real-kernel external mutation: query baseline, detach exact pin, typed guard deletion, query absence, frame/counter/capture oracle, structured `TcxLink` unhealthy event, one-second TAP quiescence, and post-quiescence no-forwarding. Supervisor call-order plus core gate tests join on that event/component to prove EXEC closure; no raw aya, subprocess control, or gate accessor crosses into the test. |
 | `overdrive-netlink::nft::bridge` guard operations | **bounded-change** | Exact bridge-family table, one base/regular/unsupported occurrence for every candidate-table chain, ifname set, ordered semantic rule facts/programs with duplicates and unknown expressions, semantic member occurrences, a disjoint exhaustive partition of every owned/foreign target-table child, ruleset generation and outside-table complement; raw nfnetlink ABI remains private and existing IP-family objects remain byte-equal | Family-aware codec and validation properties cover identifier/member byte/NUL/IFNAMSIZ boundaries with no I/O on rejection; malformed decode; base/regular/unsupported chains without fabricated fields or dropped/duplicated children; wrong observed family/table; wrong semantic rule value/order, duplicate owned occurrence and ordered unknown expressions; adapter-derived expected rule facts mapped unchanged into `GuestNetworkFact`; foreign-child conflict; expected-member classification; generation-bracketed observation; absent/exact/conflict no-mutation; staged granular convergence; reverse cleanup; and S-ND295-37 exact exclusive `delete_owned_guard`. Only transport/decode/ACK/kernel failures wrap `NetlinkError`. |
@@ -5004,7 +5185,7 @@ to infer its mutation universe.
 | `GuestNetworkExecGate::claim_release` + claim Drop | **bounded-change** | Observable read-capability universe: Open returns one opaque claim lifetime; BootClosed/Recovering remains pending; FailStop returns `None`; state transitions and recovery projections remain supervisor-owned. Wait registration/wake is private synchronization. Recovery receipts, request ownership, pending EXEC values, rows, and unrelated claims are complement-equal | S-ND295-27 compares every public return and `recovery_progress` projection and observes pending/wake/refusal through the opaque capability. S-ND295-28 separately proves the real `VmDriver` holds and releases the claim lifetime across acknowledgement and cancellation. The private `active_claims` field is neither projected nor an independent acceptance oracle; no accessor or test seam is added. |
 | `GuestNetworkExecSupervisor` methods | **bounded-change** | Gate write-capability universe: BootClosed/Open/Recovering/FailStop, one recovery snapshot, monotonic timestamps, completed attempts, and waiter notifications. Existing opaque claim lifetimes and their owning futures remain unaffected; pending EXEC values, driver state, rows, kernel objects, and request channel contents remain equal except the one returned fail-stop value | Exhaustive state-transition property: only boot-open, begin, complete, reopen, and first fail-stop deltas; late attempt after FailStop is byte-equal; injected-clock elapsed; first-request-wins; capability-separation compile/architecture checks. S-ND295-28 owns the production overlap with an already-issued claim. |
 | `VmDriver` EXEC release | **bounded-change** | One allocation's pending EXEC sender/gate sender plus one opaque gate-claim lifetime; gate synchronization is delegated to the read capability. Running row, recovery snapshot, other allocations, and already-written guest commands unchanged | Generated gate operation sequences plus deterministic real-beacon writer schedules for acknowledgement, recovery, cancellation, claim lifetime end, and FailStop refusal; no seeded simulation writer. Evidence observes the production owner and writer trajectory, not private counter storage. |
-| `CloudHypervisorVmm` direct TAP launch | **bounded-change** (existing VMM contract) | One allocation's VMM process/run dir/cgroup/TAP reference; no bridge/classifier ownership | Existing `Vmm` probe/equivalence/native lifecycle evidence; exact argv/config projection verifies no `ip netns exec`. |
+| `CloudHypervisorVmm` direct TAP launch | **bounded-change** (existing VMM contract) | One allocation's VMM process/run dir/cgroup/TAP reference; no bridge/classifier ownership and no TAP administrative-state mutation | Existing `Vmm` probe/equivalence/native lifecycle evidence; exact argv/config projection verifies no `ip netns exec`, and native read-back proves the supplied persistent TAP retains the same ifindex and remains down through READY. |
 | Shared-owner recovery supervisor orchestration | **bounded-change** | Pre-terminal S19 universe: one supervisor future, paired EXEC recovery snapshot, injected clock, one request channel, one worker/adapter observe journal, one shared-owner operation journal, retained node guard. Terminal worker/listener/capability/guard state is a disjoint `ServerHandle::shutdown` phase. | Each 249 ms subinterval advances elapsed while attempts/journal/request stay fixed; the final 1 ms triggers one attempt. Recovering equality is asserted only for attempts 0..19. The twentieth boundary is observed solely as FailStop request `20/5s`; no Recovering(20), attempt 21, or second request is required/permitted. Closed journal and terminal-owner sequence remain exact. |
 | `ServerHandle` fail-stop request/wait/drain | **bounded-change** | Exactly one private retained supervisor owner, one request/join result, and the existing exported-handler task tree; no process result, automatic replacement owner, or persistent recovery state | Public `shutdown_requested` delegates to the private owner; every abnormal join/channel class writes FailStop before returning. Intentional shutdown is token-owned and unclassified. S-ND295-33 proves handler/API drain and fresh harness construction only. |
 | CLI fail-stop exit mapping and external deployment replacement | **bounded-change** (separate operational owner) | Existing CLI selection, process exit result, and external deployment-supervisor boundary; no handler-internal restart daemon, HA owner, or new persistence | Biased selection, hard ten-second outer timeout, status 1, and the external-supervisor new-process deployment context remain accepted. DISTILL assigns no S-ND295 process/PID/exit test to this row; S-ND295-33 stops at the exported-handler boundary. |
@@ -5108,7 +5289,7 @@ No implementation roadmap is produced in DESIGN. `/nw-roadmap` or
 ### 2026-09-20 DESIGN/DISTILL remediation — phase-02 dependency closure
 
 **Status: APPROVED by phase-02 DESIGN review iteration 6; the revised DELIVER
-roadmap remains `validation.status = pending` for DISTILL/roadmap review.** This is a bounded correction to the
+roadmap was pending at this checkpoint and was approved on 2026-09-22.** This is a bounded correction to the
 already-existing phase-02 delivery decomposition. It does not reopen the
 accepted component architecture, port ownership, public API, kernel policy,
 single-cut migration, or lifecycle order above.
@@ -6586,14 +6767,15 @@ expected and observed retain the same actual name/ifindex but expected kind is
 `observed=None`. Only `Present { kind: Bridge, ifindex, .. }` supplies the
 expected master ifindex.
 
-The bridge observation is refreshed immediately before each of the two master
-checks—after attach while the TAP is down, and after TAP-up before provision
-success. The returned ifindex is stack-local to the following comparison and
-is never cached as a second bridge owner. If the bridge is replaced between
-checks, the second refresh changes the expected ifindex and the still-enslaved
-TAP fails `LinkMaster` comparison. Lookup failure maps to the existing sourced
-`Netlink { operation: BridgeObserve, ... }`; semantic absence/incompatibility
-maps only to `PostconditionMismatch`.
+The bridge observation is refreshed immediately before each owner transition
+that relies on master identity: after attach while the TAP is down, at the end
+of provision while it remains down, immediately before activation, and after
+TAP-up before activation success. The returned ifindex is stack-local to the
+following comparison and is never cached as a second bridge owner. If the
+bridge is replaced between checks, the refresh changes the expected ifindex
+and the still-enslaved TAP fails `LinkMaster` comparison. Lookup failure maps
+to the existing sourced `Netlink { operation: BridgeObserve, ... }`; semantic
+absence/incompatibility maps only to `PostconditionMismatch`.
 
 `HostGuestNetworkAllocationIo` is the sole real implementation. It delegates
 tap effects to the existing typed netlink client, guard effects to D9, and TCX
@@ -6608,9 +6790,24 @@ Construction and test injection are exact:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostGuestNetworkAllocationPhase {
+    ProvisionedDown,
+    Active,
+    QuiescedActive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct HostGuestNetworkAllocationState {
+    tap: String,
     ifindex: u32,
     program_id: u32,
+    phase: HostGuestNetworkAllocationPhase,
+}
+
+#[derive(Debug, Default)]
+struct HostGuestNetworkLifecycle {
+    quiescing: bool,
+    allocations: BTreeMap<AllocationId, HostGuestNetworkAllocationState>,
 }
 
 struct HostGuestNetworkAllocationIo {
@@ -6628,9 +6825,7 @@ struct HostSharedGuestNetworkOwner {
     scratch_io: Arc<dyn SharedGuestNetworkScratchIo>,
     allocation_io: Arc<dyn GuestNetworkAllocationIo>,
     tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
-    allocations: parking_lot::Mutex<
-        BTreeMap<AllocationId, HostGuestNetworkAllocationState>,
-    >,
+    allocation_lifecycle: tokio::sync::Mutex<HostGuestNetworkLifecycle>,
 }
 
 impl HostSharedGuestNetworkOwner {
@@ -6648,6 +6843,20 @@ impl HostSharedGuestNetworkOwner {
 }
 ```
 
+`allocation_lifecycle` is the one private awaited sequencer for
+`provision`/`activate`/`teardown`, phase-aware `audit_shared`,
+`quiesce_managed_taps`, and runtime `converge_shared` restoration. It may be held across those owner-level awaited
+effect sequences because serialization is its purpose; no `parking_lot` guard,
+TCX handle guard, leaf-adapter lock, or other mutex is held when an adapter
+future is awaited. The leaf I/O stays unaware of lifecycle phase. Boot begins
+with `quiescing=false` and an empty map. Quiescence changes `Active` to
+`QuiescedActive` only after down read-back; recovery changes it back to `Active`
+only after up/protection read-back, then clears `quiescing`. `ProvisionedDown`
+is never raised by recovery. Audit treats `ProvisionedDown` and
+`QuiescedActive` as healthy-down only in their exact owner phases and `Active`
+as healthy-up; it never diagnoses the intentional pre-activation interval as
+drift.
+
 `new` creates one TCX state, injects it into the real allocation I/O, and keeps
 the already-approved real scratch I/O isolated. It supplies the same validated
 production `BridgeGuardSpec` used by shared convergence; no caller selects
@@ -6655,11 +6864,15 @@ names, marks, priority, or family. `with_allocation_io` is
 module-private/source-local, creates no public hook, and is never available to
 integration crates or `overdrive-sim`. A scripted source-local implementation
 returns leaf results and records method calls; tests always call the real
-owner's `provision`/`teardown` algorithm and never author an action sequence or
-completed owner result. The private allocation map is published only after the
-final TAP-up observation and retains the ifindex/program identity needed for
-exact teardown when a TAP or pin is externally missing; partial provision uses
-the same values only as stack-local rollback state.
+owner's `provision`/`activate`/`teardown` algorithms and never author an action
+sequence or completed owner result. The private allocation map is published
+only after the final provision observation proves the complete attachment and
+TAP-down postcondition. It retains the ifindex/program identity and a private
+provisioned-down versus activation-complete lifecycle fact needed for exact
+activation, recovery, and teardown when a TAP or pin is externally missing;
+none of that private state is added to `GuestNetworkPlan`, `AllocationSpec`, a
+row, or a public accessor. Partial provision uses the same values only as
+stack-local rollback state.
 
 The successful provision order is exact:
 
@@ -6671,13 +6884,39 @@ The successful provision order is exact:
 4. insert endpoint; read back the exact source IPv4/MAC/fixed bridge MAC;
 5. attach first-ingress TCX, pin the link, query exactly the returned program
    id at ingress, and prove the exact link pin present;
-6. set TAP up; refresh the exact Bridge-kind identity/ifindex, then observe
-   persistent/exact-owner/exact-master/up; return success only after both facts
-   match.
+6. refresh the exact Bridge-kind identity/ifindex, then observe
+   persistent/exact-owner/exact-master/**down**; publish the allocation as
+   provisioned-down and return success only after both facts match.
 
-No VMM start can occur before step 6 returns. A semantic mismatch is mapped by
-the owner to the existing `GuestNetworkError::PostconditionMismatch`; a real
-netlink/guard/TCX failure maps to the existing exact operation/source variant.
+No VMM start can occur before step 6 returns, and provisioning never performs
+`TapSetUp`. Cloud Hypervisor may open/attach the exact persistent TAP while it
+is down but must not change its administrative state; the guest may configure
+its virtio NIC and reach READY because device presence and guest configuration
+do not require host bridge forwarding. The native VMM contract must prove the
+same TAP ifindex remains down across create/start/READY. A semantic mismatch is
+mapped by the owner to the existing
+`GuestNetworkError::PostconditionMismatch`; a real netlink/guard/TCX failure
+maps to the existing exact operation/source variant.
+
+The separate activation order is exact:
+
+1. require the same published allocation record and byte-equal plan identity;
+2. re-read the current Bridge-kind ifindex, persistent TAP/VMM owner/stable
+   ifindex/exact master/down state, complete guard membership, exact endpoint,
+   first-ingress program identity, and link pin;
+3. only after the action shim has emitted the exact-allocation
+   `mtls.intercept.install.success` receipt, set the TAP up;
+4. refresh the bridge and read back persistent/exact-owner/stable-ifindex/
+   exact-master/up; only then return `Ok(())` to the action shim;
+5. the action shim may then call the existing
+   `Driver::release_for_exit_emission` hook.
+
+The method is awaited to completion. It discovers no Tokio runtime, spawns no
+task, and adds no second public activation path. A same-plan repeated
+activation after completed activation is an exact-read-back idempotent success.
+Every other error is fail-closed: EXEC remains withheld, the driver is stopped,
+the mTLS allocation owner is stopped, structural teardown runs through this
+same owner, and address release remains last.
 
 On a provision primary failure the owner records which effects completed and
 attempts every applicable reverse action in this order: remove endpoint;
@@ -6705,11 +6944,14 @@ the address early. Unrelated attachment and full guard observations are
 compared before/after by the owner.
 
 Source-local S11 tables drive every successful leaf and every wrong read-back
-through `with_allocation_io`, asserting the exact call sequence and that
-success occurs only after final TAP-up observation. They enumerate TAP absent,
+through `with_allocation_io`, asserting the exact provision call sequence and
+that provision succeeds only after the final TAP-**down** observation. A
+separate activation table drives pre-activation protection read-back,
+`TapSetUp`, final up/master read-back, idempotent repeat, and post-mutation
+quiescence on failure. The tables enumerate TAP absent,
 TUN/dummy/veth/non-persistent/wrong-owner/persistent states and bridge
-absent/wrong-kind/replaced-ifindex/master mismatch at both checkpoints; tests
-return observations, never a boolean verdict. S06 tables fail each setup
+absent/wrong-kind/replaced-ifindex/master mismatch at every applicable
+checkpoint; tests return observations, never a boolean verdict. S06 tables fail each setup
 leaf once and assert owner-authored rollback. S12 tables fail each cleanup leaf
 once, assert continuation/first-source/no-release, then retry to an empty named
 complement while an unrelated attachment remains byte-equal. Lima real-kernel
@@ -6861,7 +7103,7 @@ events without installing effects or polling transient resources.
 |---|---|---|---|
 | S-ND295-00 | Existing D5 owner-algorithm/inventory bodies do not prove D14's production packet decisions. | Retain D12 capture/inventory. Add the private production validator table for every mismatch/lower error and transition D5 tables exclusively to exercise-before-close. Ordinary Lima boot must capture the five ordered D14A production events across `run_server`: both TCP stages, exact post-close same-id attachment, real detached D9/TAP result, and all-fifteen complement. It asserts counter continuity without polling pins/nft state. | Projection/validator/owner tables are necessary but never kernel proof. The serialized Lima body is mandatory and may not substitute the test-only BPF runner, public Sim, an ignored placeholder, fabricated outcome, private-runner call, monitor thread, or timing poll. Existing D12 evidence and independent S08/09/S10 remain required. |
 | S-ND295-10 | No authored active deliberate-link-loss body. | Drive the ordinary `run_server`-composed `HostSharedGuestNetworkOwner` through the real provision path; use D6 `query_attachment` then `detach_pinned_link` as the external mutation; observe the still-exact D9 guard, its `DefaultDrop` counter, peer/host no-escape capture, and the production audit's exact `TcxLink` failure. The fixture creates no production attachment effect. | Author as a Lima-root real-kernel integration body. Native metal is unnecessary unless DISTILL deliberately composes a real microVM. |
-| S-ND295-11 | No authored active production provision/read-back body. | Drive `HostSharedGuestNetworkOwner::provision` through D12A. Assert exact TAP-down/create/attach/guard/endpoint/TCX/TAP-up order. Table every TAP observation state (absent, TUN/dummy/veth/non-persistent, wrong UID, persistent exact), both bridge lookups (absent, wrong kind, replaced ifindex), and both exact-master comparisons. The scripted leaf returns typed actual observations; the owner alone builds `Tap`, `BridgeLinkIdentity`, and `LinkMaster` facts/mismatches. Pair with ordinary production-composition Lima read-back before injected VMM start. | Source-local tests inject only leaf results through `with_allocation_io`; no boolean verdict or completed action sequence. Netlink source-local tests prove raw-to-semantic TAP/link projection; Lima retains real netlink/D9/D12 effect authority. |
+| S-ND295-11 | The existing production provision/read-back body expected TAP-up before VMM start, which contradicts the proven zero-frame barrier. | Drive `HostSharedGuestNetworkOwner::provision` and `activate` through D12A. Provision asserts exact create/down/attach/guard/endpoint/TCX/final-down order with no `TapSetUp`. Activation separately asserts full protection re-read, `TapSetUp`, final up/master read-back, idempotent repeat, and down/read-back on post-mutation failure. Table every TAP observation state (absent, TUN/dummy/veth/non-persistent, wrong UID, persistent exact), bridge absence/wrong kind/replaced ifindex, and exact-master comparisons. Pair with ordinary production-composition Lima/native read-back proving the same TAP remains down across VMM READY, then becomes up only after the mTLS event. | Source-local tests inject only leaf results through `with_allocation_io`; no boolean verdict or completed action sequence. Netlink source-local tests prove raw-to-semantic TAP/link projection; Lima/native retains real netlink/D9/D12/VMM effect authority. |
 | S-ND295-12 | No authored active effect-first teardown/complement body. | Drive the same real owner's teardown through D12A with two attachments. Fail every cleanup leaf once; assert later cleanup calls continue, the first typed cleanup error returns, the address remains held, and retry reaches an empty named complement in exact endpoint → link → TAP-down → guarded TAP-delete → member-delete order while the unrelated attachment remains byte-equal. | Pair source-local algorithm/fault/continuation tables with Lima real-kernel production-composition evidence. No public fault hook, second owner, simulated action owner, or replacement workflow is permitted. |
 | S-ND295-13 | Existing stale-TAP body is insufficient. | Author D13's named seeded invariant through the same injected `SimVmHostState` and `SimSharedGuestNetworkOwner::with_sweep_host_state`. The first RED asserts the actual `sweep_stale` call's host snapshot is empty and therefore fails on current sweep-before-reclamation order without depending on telemetry. After GREEN, separately assert the approved phase-event order. Then drive fresh ordinary `run_server` on native metal with a real prior VMM plus TAP/entry/link/pin/guard/dynamic-element residue and first lease acceptance. | Seeded production-composed port observation is mandatory first; structured telemetry is a separate GREEN obligation; native metal remains the independent actual-effect layer. No new boot owner, product hook, or alternate evidence contract is permitted. |
 
@@ -6944,7 +7186,7 @@ would duplicate unchanged architecture.
 | `IdentityMgr` / `RcgenCa` | SVID hold/issue | **REUSE AS-IS** | Part B proved topology-neutral; guests still hold nothing. |
 | `DnsResponder`, `NameIndex`, `FrontendAddrAllocator` | dial-by-name | **EXTEND responder only** | Index/wire/source-pin logic remains; only the gateway source changes. |
 | `CgroupManager`, `VmReclamation`, `VmHostState` | per-VM resource/recovery | **REUSE AS-IS** | Explicit locked requirement and Part-B evidence. Switch sweep follows reclamation; it does not move cgroup ownership. |
-| Shared guest switch | Node-level bridge/TCX/guard ownership | **CREATE NEW internal production component with control-plane-owned doc-hidden port — D-295-1/RUN-295-B/D-295-DISTILL-1/D-295-DISTILL-4/D-295-DISTILL-5/D12A approved** | One control-plane coordinator for bridge, per-TAP link/map, proof-mark guard, runtime audit, quiescence, recovery, boot sweep, and inherited allocation provision/teardown. Its private scratch I/O proves isolated startup; its separate module-private production allocation I/O exposes only leaf effects/read-backs so source-local tests drive the same owner algorithm. Neither is another owner or public hook. The public sibling sim adapter remains only the cross-crate high-level composition adapter. |
+| Shared guest switch | Node-level bridge/TCX/guard ownership | **CREATE NEW internal production component with control-plane-owned doc-hidden port — D-295-1/RUN-295-B/D-295-DISTILL-1/D-295-DISTILL-4/D-295-DISTILL-5/D12A approved; deferred activation amended 2026-09-23** | One control-plane coordinator for bridge, per-TAP link/map, proof-mark guard, runtime audit, quiescence, recovery, boot sweep, and inherited allocation provision/activation/teardown. Its private scratch I/O proves isolated startup; its separate module-private production allocation I/O exposes only leaf effects/read-backs so source-local tests drive the same owner algorithm. Neither is another owner or public hook. The public sibling sim adapter remains only the cross-crate high-level composition adapter. |
 | `GUEST_BRIDGE_MAC` | Bridge/classifier destination identity | **CREATE NEW public constant — I4-F01 approved** | One cross-crate source for bridge convergence and endpoint values; `02:01` namespace is structurally disjoint from every `02:00:<IPv4>` guest MAC. |
 | Guest address pool | Per-allocation address/MAC/TAP lease within the node prefix | **CREATE NEW internal owner — ERR-295-A approved** | Exactly `assign`, `release`, and `snapshot`; below-cap exhaustion preserves its typed cause through one `ShimError::GuestNetwork` wrapper. |
 | Shared-owner runtime supervisor | Listener/DNS task exits and bridge/TCX/map/pin/nft drift | **CREATE NEW internal owner — RUN-295-B approved** | One-second audits + task joins close EXEC, retry every 250 ms for 5 s, then fail-stop. It reuses production convergence, health, TAP netlink, cgroup kill, and server shutdown; no daemon/persistence/HA. External restart is a deployment precondition, not this component. |
@@ -7059,7 +7301,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-7 | **UNCHANGED/UNAFFECTED accepted-contract constraint; no fresh decision:** existing cgroup, identity, resolver, enforcement, and lifecycle owners remain | Existing accepted ADRs; no new ADR. |
 | D-295-9 | **UNCHANGED/UNAFFECTED accepted-contract constraint; no fresh decision:** cgroup-BPF Service selection, atomic membership, and selected-`BackendId` identity receipt remain authoritative | Existing accepted ADRs and ADR-0115 compatibility consequence; no new ADR. |
 | A2 | **ACCEPTED 2026-09-16:** one grouped `network: Option<GuestNetworkAssignment>` with exactly `address`, `tap`, `mac`, `gateway`, `prefix`, and `dns`; `VmNetworkAttachment` remains `{tap, mac}` | Exact implementation-facing contract in this feature delta; no separate system ADR. |
-| B1 | **USER-APPROVED 2026-09-16 with ERR-295-A; F-02 amended visibility:** async doc-hidden public provisioner, public opaque/read-only plan, private host construction/implementation, one public typed error; B2 rejected | Exact feature-delta contract, [ADR-0122](../../product/architecture/adr-0122-guest-network-operation-error-family.md) |
+| B1 | **USER-APPROVED 2026-09-16 with ERR-295-A; F-02 amended visibility; USER-DIRECTED 2026-09-23 deferred activation:** async doc-hidden public provisioner with exactly `provision`/`activate`/`teardown`, public opaque/read-only plan, private host construction/implementation, one public typed error; B2 rejected | Exact feature-delta contract, [ADR-0114](../../product/architecture/adr-0114-node-local-shared-bridge-guest-network.md), [ADR-0122](../../product/architecture/adr-0122-guest-network-operation-error-family.md) |
 | C1 + PORT-295-C + F-03 | **USER-APPROVED 2026-09-16:** retain allocation install methods, add node-global converge/audit on the same port, split node-rule versus allocation-element guards, and replace linear rules with eight constant IP rules | Exact feature-delta contract, amended [ADR-0076](../../product/architecture/adr-0076-mtls-intercept-port-fault-injectable-privileged-install-surface.md), and current [ADR-0125](../../product/architecture/adr-0125-constant-nft-rules-shared-intercept-elements.md) |
 | F1 | **USER-APPROVED 2026-09-16 with ERR-295-A:** private fixed cap; existing `NoCapacity`; typed below-cap drift | [ADR-0121](../../product/architecture/adr-0121-fixed-guest-network-admission-cap.md), [ADR-0122](../../product/architecture/adr-0122-guest-network-operation-error-family.md) |
 | F2 | **REJECTED / OUT OF #295:** heterogeneous schedulable guest-network capacity | [GH #299](https://github.com/overdrive-sh/overdrive/issues/299) |
@@ -7071,7 +7313,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | RUN-295-B | **USER-APPROVED 2026-09-16:** 250 ms retry for 5 s, then fail-stop serve | [ADR-0124](../../product/architecture/adr-0124-bounded-shared-network-owner-recovery.md) |
 | I4-F01 bridge MAC | **USER-APPROVED 2026-09-16:** fixed `02:01:00:00:00:01`, boot/runtime convergence and endpoint equality | [ADR-0126](../../product/architecture/adr-0126-fixed-node-guest-bridge-mac.md) |
 | F-01 solution remediation | **USER-APPROVED 2026-09-16:** dependency-neutral `overdrive_core::guest_network` paired EXEC capabilities; complete seven-argument `VmDriver` constructor and server-helper fallout; `Driver` unchanged | This feature delta § *EXEC-close linearization*; amended [ADR-0090](../../product/architecture/adr-0090-vm-service-network-probe-target-projection.md) |
-| F-02 solution remediation / B1 amendment | **USER-APPROVED 2026-09-16:** `#[doc(hidden)] pub` async provisioner and opaque/read-only plan for the sibling sim adapter; exactly two test-gated production-owner dispatch/tick seams | This feature delta § *C-295-B* |
+| F-02 solution remediation / B1 amendment | **USER-APPROVED 2026-09-16; deferred-activation method USER-DIRECTED 2026-09-23:** `#[doc(hidden)] pub` async provisioner and opaque/read-only plan for the sibling sim adapter; exactly two test-gated production-owner dispatch/tick seams; the sole added public method is awaited `activate(&GuestNetworkPlan)` | This feature delta § *C-295-B* |
 | F-03 solution remediation | **USER-APPROVED 2026-09-16:** worker-owned shared-listener start/failure/converge/audit/shutdown; per-allocation lifecycle owns only capabilities/elements/handles | This feature delta § *C-295-L*; amended [ADR-0076](../../product/architecture/adr-0076-mtls-intercept-port-fault-injectable-privileged-install-surface.md) |
 | F-04 solution remediation | **CLOSED 2026-09-16:** L3 runtime edge is TCX → Linux bridge/guard+nft IP TPROXY → shared listeners; `overdrive-netlink` is control/read-back only | `c4-diagrams.md` § *C4 Level 3 — Component* |
 | D-295-DISTILL-1 shared-owner testability | **USER-APPROVED 2026-09-16; review F-02 complete shape explicitly approved the same date:** one doc-hidden `SharedGuestNetworkOwner` super-port over B1 with five exact node-owner methods; private host implementation/construction; sibling sim implementation; one owner argument before EXEC wiring in both injected-driver server helpers; complete per-resource scratch observation with unavailable distinct from zero; primary + direct cleanup source + observed complement retained together | This feature delta § *C-295-G* and § *ERR-295-A*; current intent in ADR-0114/0115/0122/0124 |
@@ -7082,16 +7324,16 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-DISTILL-7 registration-capability lifecycle | **USER-APPROVED 2026-09-17; F-07-01 and F-08-01 closed:** complete module-private worker registry, Pending/Active/Retiring reservations, checked generation before effects, typed conflict, RAII Pending/claim/retirement/drain, Pending-owner retirement handshake, activation-after-retire typed `RegistrationRetired { alloc_id: AllocationId }` projection and `registration_retired` stage, cancellation/owner-shutdown wake, atomic publish fence, scoped drain/complete, and address-reuse exclusion; no public setter/hook | This feature delta § *D-295-DISTILL-7* and § *GEN-295-A*; current ADR-0120/0123 intent; no new ADR |
 | D-295-DISTILL-8 retained supervisor/DNS task ownership | **USER-APPROVED 2026-09-17; F-07-02 closed:** one private supervisor handle retained by `ServerHandle`, one stateful private DNS task owner retained by that supervisor, actual Tokio join/channel classification, fail-stop-before-return, cooperative stop/join with bounded abort backstop, old-terminal-before-spawn replacement, intentional shutdown, and no live-handle overwrite; public wait surface unchanged and no kill hooks/parallel observer | This feature delta § *D-295-DISTILL-8* and § *RUN-295-B*; current ADR-0116/0124 intent; no new ADR |
 | D-295-DISTILL-9 bridge-family nft adapter | **USER-APPROVED and independently APPROVED at review iteration 12 on 2026-09-17; F-10-01/F-10-02 and F-11-01/F-11-02 closed:** one private family-aware nft codec; unchanged public IPv4 APIs; typed validation/error algebra; read-only Absent/Exact/Conflict classification over actual family/table identity; faithful base/regular/unsupported chain occurrences; ordered duplicate-preserving semantic rule programs including unknown expressions; a disjoint exhaustive target-table child inventory; adapter-derived structured guest-network expected/observed rule facts; exact-exclusive `delete_owned_guard`; full set/lookup ABI, normalization, generation, idempotence and foreign-object semantics; existing guest-network errors unchanged | This feature delta § *D-295-DISTILL-9*; current ADR-0115/0122, historical ADR-0085 extension, brief and C4; no new ADR |
-| D-295-DISTILL-10 deterministic simulation contract | **AUTHORIZED 2026-09-17; D13 RED-observation amendment APPROVED at phase-02 DESIGN iteration 5:** existing standing/one-shot scripting, calls(), Default, and test wiring remain unchanged; one exact optional SimVmHostState constructor plus indexed sweep snapshot observes the real owner-port call for S13 ordering and proves no kernel effect | This feature delta § *D-295-DISTILL-10/13* and Contract Shape handoff; no ADR/C4/product behavior |
+| D-295-DISTILL-10 deterministic simulation contract | **AUTHORIZED 2026-09-17; D13 RED-observation amendment APPROVED at phase-02 DESIGN iteration 5; activation call mapping amended 2026-09-23:** standing/one-shot scripting, `Default`, and public helper methods remain unchanged; inherited activation records `TapSetUp` and succeeds without a new public failure slot. One exact optional SimVmHostState constructor plus indexed sweep snapshot observes the real owner-port call for S13 ordering and proves no kernel effect | This feature delta § *D-295-DISTILL-10/13* and Contract Shape handoff; no ADR/C4/product behavior |
 | D-295-DISTILL-11 final reachability contracts | **AUTHORIZED 2026-09-17 under autonomous DESIGN/DISTILL authority:** module-private two-slot worker task owner and actual Tokio join/channel classifier for the full `MtlsSharedOwnerError` task family; source-bearing component-tagged owner audit result; public sim twelve-component standing and exact next-audit scripting; S37 structured `TcxLink` unhealthy event joined to supervisor begin-before-event and core Recovering-claim evidence; no public kill/gate accessor or fabricated consequence | This feature delta § *D-295-DISTILL-11*, F-03/RUN-295-B Contract Shape and test handoff; focused current ADR-0120/0122/0124 and brief prose only; same trusted-validator review/checkpoint, no new ADR/C4/product outcome |
-| D-295-DISTILL-12/12A lifecycle and allocation-effect boundaries | **APPROVED through phase-02 DESIGN review iteration 6:** D12 retains opaque lifecycle/inventory/schema contracts and private production-used projection. D12A adds one module-private allocation leaf I/O with exact owner ordering/injection; its TAP observation preserves persistent/owner/master identity and its refreshed bridge fact supplies exact master ifindex without moving comparison from the owner. No public hook, second owner, or alternate workflow | This feature delta § *D-295-DISTILL-12* and § *D-295-DISTILL-12A*; ownership/dependencies unchanged; no brief/ADR/C4 change |
+| D-295-DISTILL-12/12A lifecycle and allocation-effect boundaries | **APPROVED through phase-02 DESIGN review iteration 6; TAP terminal state amended USER-DIRECTED 2026-09-23:** D12 retains opaque lifecycle/inventory/schema contracts and private production-used projection. D12A's same module-private allocation leaf I/O now ends provision at exact down-state and supplies the same owner's awaited activation read-backs; TAP observations preserve persistent/owner/master identity and refreshed bridge facts supply exact master ifindex. No public hook, second owner, or alternate workflow | This feature delta § *D-295-DISTILL-12* and § *D-295-DISTILL-12A*; amended ADR-0114/0115/0122 and brief; C4 components unchanged |
 | D-295-DISTILL-13 production-composed S13 boundary | **API/order/telemetry contract APPROVED by phase-02 DESIGN review iteration 2; RED-oracle refinement APPROVED at iteration 5:** mandatory existing `VmHostState` argument remains; the same Sim host is observed at the real Sim owner `sweep_stale` call so current order fails before telemetry exists; approved structured phase events remain separate GREEN evidence; native metal remains independent | This feature delta § *D-295-DISTILL-13* and cumulative EXEC-close helper signatures; no new boot owner/product hook/brief/ADR/C4 change |
 | D-295-DISTILL-14 startup packet-probe boundary | **APPROVED by phase-02 DESIGN review iteration 7 on 2026-09-21; revised DISTILL review pending:** one doc-hidden semantic `GuestTcxProgram::probe_tcp_intercept` with closed inputs/outcomes keeps raw test-run ABI/FDs/packets inside dataplane; D5 exercises peer/gateway stages before close and separately proves detached-link D9 drop through the existing private host adapter, TAP write, exact counter delta, and no host delivery | This feature delta § *D-295-DISTILL-14*; D12/D12A/D13 ownership/dependencies unchanged; no brief/ADR/C4 change |
 | D-295-DISTILL-14A translation testability | **APPROVED by phase-02 DESIGN review iteration 9 on 2026-09-21; revised DISTILL review pending:** one production-used control-plane-private semantic validator makes every D14 mismatch and lower error source-locally reachable; four non-persisted structured event names deterministically expose five ordered real-boot completions; the existing whole control-plane integration binary remains in `host-kernel-shared` | This feature delta § *D-295-DISTILL-14A*; approved D14 API and D12/D12A/D13 remain unchanged; no brief/ADR/C4 change |
 | D-295-DISTILL-15 shared-IP boundary/evidence allocation | **Approved layering; P02-20/21/22 assertion correction PROPOSED, independent DISTILL/roadmap re-review pending:** `run_mtls_owner` sends/parks only; `ServerHandle::shutdown` solely owns terminal drain; each 249 ms interval advances elapsed without attempts/effects; attempts 1..19 expose exact Recovering snapshots; attempt 20 is observed only as the exact 5 s FailStop request; closed journal/no attempt 21; no API/owner change | This feature delta § *D-295-DISTILL-15* and § *D-295-DISTILL-8*; C-295-C/PORT-295-C/S2-F01 and ADR-0125 ownership unchanged; no brief/ADR/C4 change |
 | DESIGN-02-03 allocation-element lower boundary | **USER-DIRECTED 2026-09-23:** existing general nft exports are insufficient; add only one opaque typed shared-IP state projection, its generation-bracketed observer, and the four exact group-shaped outbound/inbound/delete/boot-clear effects. Preserve D15 observe/replace, the exact public five-method `MtlsIntercept`, private raw ABI/handles, Host-owned tokens/refcounts, grouped normal deletion/read-back, and Drop fallback. The `&str` to `Ipv4Addr` edit is mandatory conformance, with no compatibility/fallback branch. | This feature delta § *DESIGN-02-03 correction — exact allocation-element netlink boundary* and amended ADR-0125; no brief/C4/component/product expansion and no further review cycle per user direction |
 | D-295-DELIVER-03-01 EXEC-claim evidence allocation | **USER-AUTHORIZED and independently APPROVED by solution-architecture review iteration 2 on 2026-09-22:** S-ND295-27's complete step-`03-01` evidence is public return/projection plus blocking/wake/refusal/terminal behavior through the opaque gate. S-ND295-28 retains the production `VmDriver` claim-lifetime/acknowledgement/cancellation schedules. Private `active_claims +1/-1` bookkeeping is not independently observed | [Step 03-01 design remediation](deliver/design-remediation-03-01.md); brief effect-isolation prose aligned; no public/private API, owner, production, test, persistence, ADR, or C4 change |
-| D-295-DELIVER-04-01 same-node protected-transport and intercept-live evidence boundary | **USER-DIRECTED 2026-09-23; corrected after native falsification `e72385d6`; no review cycle:** the exact allocation's sole synchronous `mtls.intercept.install.success` Layer receipt supplies the `CLOCK_REALTIME` intercept-live barrier between successful `start_alloc` and EXEC release; typed-set polling proves semantics only. One uniquely correlated `ss` TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd plus same-fd positive splice in both directions proves the protected socket. Lossless all-interface capture proves loopback-only leg-B, zero physical/ordinary-forwarding egress, plaintext confined to exact leg-F/leg-S tuples, no pre-live caller-TAP frame, and no bypass. Same-node AF_PACKET `0x17` parsing is excluded. Missing/duplicate/wrong-allocation event, missing frame timestamp, private-handle literal comparison, ambiguous/lossy/unapproved evidence all fail closed. | This feature delta § *D-295-DELIVER-04-01*; amended ADR-0115, DISTILL S-ND295-01, and roadmap step `04-01`; no product event/API/test-hook/architecture change and roadmap validation stays approved |
+| D-295-DELIVER-04-01 deferred TAP activation plus same-node evidence boundary | **USER-DIRECTED 2026-09-23 after native contradiction; no review cycle:** provision leaves the fully protected allocation TAP down through VMM attach, READY, and Running. Successful awaited `start_alloc` (`2 + P` element read-back) precedes the exact allocation's sole synchronous `mtls.intercept.install.success` Layer receipt; awaited exact TAP activation/read-back follows that receipt and precedes EXEC release. The one existing owner/plan/error family is extended by exactly `GuestNetworkProvisioner::activate`; no new operation/fact/error/Driver/VMM/event hook exists. The prior kTLS/splice/interface evidence correction remains: exact socket/inode/fd plus same-fd splice proves protected transport; lossless capture proves loopback-only leg B, plaintext confinement, zero pre-barrier TAP frames, and no bypass; same-node AF_PACKET `0x17` parsing stays excluded. | This feature delta § *D-295-DELIVER-04-01*; amended ADR-0088/0089/0114/0115/0118/0122/0124, brief, DISTILL S-ND295-01/S11, and roadmap steps `02-01`/`04-01`; user explicitly waived another review and roadmap validation stays approved |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
@@ -7153,12 +7395,32 @@ iterations 1–3 are closed by the user's explicit recommended-decisions
 authorization and need no further user gate or new ADR; existing ADRs are
 amended only where intent/evidence or older exact contracts became stale.
 Independent solution-architecture review iteration 4 approved the preceding
-stage-3 baseline on 2026-09-16 with zero critical/high/medium findings. There
-is no DELIVER authority until S19-B's P02-20/21/22 assertions are remediated and
-reviewed and the revised roadmap is reapproved.
+stage-3 baseline on 2026-09-16 with zero critical/high/medium findings. The
+subsequent DISTILL/roadmap remediation was approved on 2026-09-22. On
+2026-09-23 the user explicitly authorized this bounded TAP-activation DESIGN,
+DISTILL, and roadmap correction without another review cycle and directed that
+roadmap validation remain approved. That override applies only to the exact
+D-295-DELIVER-04-01 correction; it does not reopen or self-approve unrelated
+pending design.
 
 ## Wave: DESIGN / [REF] Author Validation
 
+- The 2026-09-23 production-path revalidation followed the exact current
+  `HostGuestNetworkProvisioner::provision` TAP-up mutation, Cloud Hypervisor
+  direct-TAP argv/start/READY path, action-shim start and restart arms,
+  synchronous `mtls.intercept.install.success` emission, and awaited
+  `release_for_exit_emission`. Native capture supplied the reachable
+  counterexample: guest-source ARP replies and TCP RST frames occurred before
+  the event. The accepted remedy changes only the existing guest-network
+  owner's allocation port and the action-shim order; no second owner, VMM
+  method, EXEC method, task, persistence, or event is introduced.
+- The exact API audit found that `GuestNetworkOperation::TapSetUp`,
+  `TapSetDown`, `TapObserve`, `GuestNetworkFact::{Tap,LinkMaster}`, and the
+  source-bearing `GuestNetworkError` already express activation and every
+  failure/read-back outcome. Therefore only
+  `GuestNetworkProvisioner::activate(&GuestNetworkPlan) -> Result<()>` is new
+  public surface. `SharedGuestNetworkOwner` inherits it and remains the single
+  concrete production/simulation owner.
 - Production-path revalidation covered the live `run_server` / `AppState` /
   `ServerHandle` composition, action-shim C3 start/restart/stop and post-Running
   intercept gate, current `AllocationSpec`/`VmNetworkAttachment`, netns/veth/
@@ -7212,7 +7474,7 @@ reviewed and the revised roadmap is reapproved.
   non-operative. The live decision table, consequences, and evidence contain
   only VM cases.
 - D-295-DISTILL-1 revalidated the real owner split: B1 exposes only
-  per-allocation provision/teardown, while `run_server` must also drive the
+  per-allocation provision/activation/teardown, while `run_server` must also drive the
   isolated startup probe, post-VMM sweep, production converge/audit, and TAP
   quiescence. Making the node owner a super-port over B1 keeps one object and
   one error family instead of adding a second owner or low-level fault API.
@@ -7525,11 +7787,11 @@ independent.
 | Adapter / owner | Real-I/O or production-owner scenario | Coverage disposition |
 |---|---|---|
 | Built CLI `serve` + `deploy` | S-ND295-01 / existing E07 checked-in example | E07 runner exists but retained evidence is historical; the stabilized post-cut Rust traffic body uses the approved shared-owner/intercept seams |
-| Action shim + convergence runtime | S-ND295-01, S-ND295-06, S-ND295-07, S-ND295-28 | S-ND295-01 captures the existing synchronous `mtls.intercept.install.success` event for the exact allocation between successful `start_alloc` and `release_for_exit_emission`; other scenarios retain accepted high-level test seams only, with no simulation-owned action sequence or new event/hook |
+| Action shim + convergence runtime | S-ND295-01, S-ND295-06, S-ND295-07, S-ND295-28 | S-ND295-01 captures the existing synchronous `mtls.intercept.install.success` event for the exact allocation between successful `start_alloc` and awaited exact TAP activation, with activation completing before `release_for_exit_emission`; other scenarios retain accepted high-level test seams only, with no simulation-owned action sequence or new event/hook |
 | `HostSharedGuestNetworkOwner` startup algorithm | S-ND295-00 | Source-local private validator drives every D14 semantic mismatch/lower source; the owner table uses only exercise-before-close and proves cleanup/continuation/all-fifteen inventory; serialized Lima ordinary boot captures production stage/attachment/guard/complement events across `run_server` with no monitor or transient poll |
 | Public `SimSharedGuestNetworkOwner` | S-ND295-00, S-ND295-06..07, S-ND295-13, S-ND295-29..33 | D10/D11 exact non-audit slots, twelve typed component audit slots, one-shot exact probe/audit errors, ordered non-draining calls and typed `test_wiring` prove deterministic port/composition reaction; D13 additionally snapshots the same injected Sim host only at the actual sweep port call; none substitutes for private host cleanup or real worker task-exit classification |
-| `GuestNetworkProvisioner` host adapter | S-ND295-11..13 | D12A source-local tests drive the real owner through typed allocation leaves; Lima/native bodies retain real bridge/TAP/guard/TCX effects and complete complements |
-| `GuestNetworkProvisioner` sim adapter | S-ND295-06..07 | Production-owner-path fault injection and state-delta oracles |
+| `GuestNetworkProvisioner` host adapter | S-ND295-01, S-ND295-11..13 | D12A source-local tests drive the real owner through typed provision-down, activation, failure-quiescence, and teardown leaves; Lima/native bodies retain real bridge/TAP/guard/TCX effects, down-through-READY, event-before-up, and complete complements |
+| `GuestNetworkProvisioner` sim adapter | S-ND295-06..07 and composed S-ND295-01 ordering | Existing production-owner-path fault/state-delta oracles plus ordered `TapCreate … TapSetUp`; no public activation-failure setter |
 | `overdrive-netlink` bridge/TAP/nft adapter | S-ND295-10..19, S-ND295-25..26, S-ND295-37 | Real kernel mutation plus normalized family-correct read-back; D9 bridge guard observation/convergence/member/reverse deletion and exact `delete_owned_guard`; D15 keeps its doc-hidden identity/observe/replace surface while DESIGN-02-03 adds only the exact typed shared-IP state observation and group-shaped outbound/inbound/delete/boot-clear functions. Handles, set IDs, generations, raw keys, and ABI stay private; no generic family/runtime-mode parameter, raw builder, caller-composed set/key mutation, or `AtomicRuleMutation` expansion. |
 | TCX/BPF loader, endpoint/counter maps, bpffs links | S-ND295-00, S-ND295-08..13, S-ND295-37 | D12 private projection/capture and eight-family inventory tables; D14 private raw-result projection plus the production-used opaque-program TCP probe; D6 typed semantic query, exact pinned-link detach, endpoint presence/removal, and counter read; Tier-2 full parser/verdict partitions plus real boot/Tier-3 frame/capture/quiesce and retained-unpinned-object oracles |
 | Bridge proof-mark guard | S-ND295-00, S-ND295-10..13, S-ND295-37 | D14 boot uses D9 exact counter observation, real scratch-TAP injection, and host UDP no-delivery after deliberate detach; S10/S37 retain ordinary-production no-escape/audit and double-loss authority |
@@ -7539,7 +7801,7 @@ independent.
 | `HostMtlsEnforcement` | S-ND295-01, S-ND295-23, S-ND295-25..26 | Real TLS 1.3, kTLS TX/RX, splice, late-handle teardown; S-ND295-01 uniquely correlates one selected-backend `ss` socket/inode/sole fd to bidirectional production splice, while all-interface capture proves loopback-only local diversion, zero non-loopback leg-B egress, and plaintext confined to the separate leg-F/leg-S guest-local tuples; no same-node `0x17` byte claim, pump redesign, or test hook |
 | `ServiceBackendsResolve` + `IdentityRead` | S-ND295-01, S-ND295-24, S-ND295-36 | Existing selection/identity owners remain authoritative |
 | `DnsResponder` | S-ND295-01, S-ND295-34 | Real shared-gateway UDP socket/fallback/source pin plus D8 private DNS task-owner return/panic/cancel, intentional shutdown, and exact recovered-task replacement |
-| `CloudHypervisorVmm` | S-ND295-01, S-ND295-35 | Native-metal direct host-TAP launch and existing VMM contracts |
+| `CloudHypervisorVmm` | S-ND295-01, S-ND295-35 | Native-metal direct host-TAP launch, same-ifindex/down-through-READY read-back, and existing VMM contracts |
 | cgroup/VMM reclamation | S-ND295-13, S-ND295-30, S-ND295-35..36 | seeded same-`SimVmHostState` production-helper ordering first; separate GREEN phase telemetry; real cgroup/process/native complement second |
 | EXEC gate/control-plane supervisor | S-ND295-19 and S-ND295-27..32 | S19-B uses D8's sole private control-plane owner and production-used `run_mtls_owner` future for cadence/deadline/request closure; existing gate sequences, beacon schedules, and Tokio join/channel matrix remain unchanged. No public hook or second supervisor. |
 | Exported handler + public HTTPS API | S-ND295-33 | Handler fail-stop/drain and harness-owned fresh construction over retained roots; no process or CLI assertion |
@@ -7636,7 +7898,8 @@ reasoned `02-03` ignore. Current execution is honest: D1, D2, and the
 action-shim ordering scenario are semantic RED; registry/D3/S20/S25/S26 are
 GREEN evidence corrections over behavior already present; native S25/S26 are
 environment-pending because metal bootstrap lacks the selected guest kernel.
-Roadmap validation is pending independent DISTILL/roadmap review.
+Independent DISTILL/roadmap review approved this material on 2026-09-22;
+current roadmap validation remains approved.
 
 ## Wave: DISTILL / [REF] Driving Adapter Coverage
 
@@ -7695,8 +7958,8 @@ extension is opted in.
 | C7b interruption | PASS | retirement during enforcement, task panic/cancel/return, channel close, late retry after FailStop |
 | C7c concurrent actors | PASS | detection-versus-release, duplicate registration, predecessor/successor reuse, two allocations and in-flight shutdown |
 
-**Pre-D14A prose verdict: COMPLETE — 15/15. Current D14A verdict: COMPLETE,
-pending independent DISTILL review.** D-295-DISTILL-5 remains reconciled for
+**Pre-D14A prose verdict: COMPLETE — 15/15. D14A verdict: COMPLETE and later
+independently approved.** D-295-DISTILL-5 remains reconciled for
 setup, unconditional reverse cleanup, count failures, residue families,
 ordering, and optional-primary aggregation. D14 now requires the amended
 pre-close classifier/post-close-adoption order and real detached-guard oracle;
@@ -7705,9 +7968,9 @@ obligations. D14A pins the missing production validator and deterministic
 event oracle.
 
 **Pre-D14 non-waived executable-body audit: COMPLETE — 12 PASS + 3 justified
-N/A = 15/15 dispositions. Current D14A audit: COMPLETE — the four exact S00
-bodies are transitioned reasoned-pending and await independent review; roadmap
-validation remains pending.** The
+N/A = 15/15 dispositions. D14A audit: COMPLETE — the four exact S00
+bodies were transitioned reasoned-pending and subsequently approved; current
+roadmap validation remains approved.** The
 pre-D14 scored population is exactly ten reasoned-pending bodies: five D12 private
 map/schema/capture/receipt bodies, one D12A private netlink projection body,
 two S11 real-owner order/identity bodies, one S12 retained-owner

@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
+**Accepted — user-approved and approved by system design review iteration 5 on
+2026-09-16; clarified by the user-directed no-review TAP-activation amendment
+on 2026-09-23.**
 GH #295 DESIGN stage 1. This records D-295-4 and C-295-E; ADR-0122 owns the
 typed exhaustion/error family.
 
@@ -33,10 +35,14 @@ then sweeps prior-epoch TAP/map residue before initializing the new held set.
 It does not adopt a surviving VMM or reconstruct a slot map.
 
 The removed `NetSlotExhausted -> WorkloadNetnsProvisionFailed` disposition is
-therefore deleted, not translated. Node admission caps active guests below the
-address-pool limit (ADR-0117); an allocator exhaustion inside that admitted
-envelope is a typed, non-terminal infrastructure-drift refusal, not a permanent
-allocation failure that consumes restart budget.
+therefore deleted, not translated. The already-shipped reason payload itself
+remains the existing action-shim failure shape for current guest-network
+effects: post-Running TAP activation uses the closed stage
+`guest_network_activate` rather than adding a new public lifecycle-reason
+variant. Node admission caps active guests below the address-pool limit
+(ADR-0117); allocator exhaustion inside that admitted envelope remains a typed,
+non-terminal infrastructure-drift refusal and never uses that allocation
+failure reason or consumes restart budget.
 
 ## Alternatives considered
 

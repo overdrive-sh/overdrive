@@ -39,11 +39,11 @@ owners; fixtures may inject faults only through accepted driven ports.
 | ID | Contract shape | Kind / evidence | Rust or receipt home | Status at DISTILL |
 |---|---|---|---|---|
 | S-ND295-00 | bounded-change | D12 inventory plus D14A projection, private validator, superseding owner order, and tracing-captured ordinary boot | dataplane `guest_tcx::tests::{every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics,wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less,capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source,a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count,every_receipted_family_returns_one_and_clean_families_return_exact_zero,startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi}`; control-plane `guest_network::scratch_probe_packet_acceptance::{every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator,classifier_runs_precede_close_and_each_stage_is_fresh}` plus transitioned `scratch_probe_acceptance` setup/failure tables; integration `guest_tcx_inventory::{clean_and_receipted_inventory_observes_all_eight_exact_families,retained_unpinned_maps_programs_and_links_survive_handle_release_and_remain_observable,wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero}` plus `shared_guest_network_startup::production_startup_exercises_classifier_and_detached_guard_before_admission` | D14A's four exact bodies are reasoned-pending: projection, validator, and owner-order fail on missing production behavior; the executable Lima body captures five ordered production events and remains environment-gated; the earlier three inventory placeholders remain separately user-waived |
-| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, exactly one caller-allocation `mtls.intercept.install.success` Layer receipt as the realtime intercept-live barrier before EXEC release, zero guest-originated TAP frames at/before that barrier, one uniquely `ss`-correlated TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd, same-fd bidirectional splice, loopback-only tuple routing with zero non-loopback leg-B egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples with no direct bypass, typed full element state, direct-host-TAP topology, and total cleanup; typed-set poll completion has no timing authority, same-node AF_PACKET `0x17` parsing is excluded, and historical E07 is not current proof |
+| S-ND295-01 | bounded-change | native-metal production traffic composition | `guest_stack_mtls_egress::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply,the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear,the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` paired with the post-cut topology/cleanup body and control-plane action-shim activation-order bodies | continuing Rust proof maps the exact callee Running 1/1, reply-dependent caller success, the same TAP down through VMM READY/Running, exactly one caller-allocation `mtls.intercept.install.success` Layer receipt after `2 + P` read-back, awaited exact TAP activation/read-back after that receipt and before EXEC release, zero guest-originated TAP frames at/before the barrier, one uniquely `ss`-correlated TLS 1.3 kTLS TX/RX leg-B tuple/inode/sole fd, same-fd bidirectional splice, loopback-only tuple routing with zero non-loopback leg-B egress, plaintext confined to exact leg-F/leg-S bridge/TAP tuples with no direct bypass, typed full element state, direct-host-TAP topology, and total cleanup; typed-set poll completion has no timing authority, same-node AF_PACKET `0x17` parsing is excluded, and historical E07 is not current proof |
 | S-ND295-02..05 | pure-function / bounded-change | grouped values plus address-pool properties and cap table | control-plane `guest_network::pool_acceptance`, `netns_density_guest_network::scratch_complement_never_fabricates_zero`, and the direct-TAP VMM projection body | complete reasoned-pending bodies |
 | S-ND295-06..09 | bounded-change | action-owner refusal/lease plus classifier partitions | `netns_density_guest_network::{provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause,teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse}` and `guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | pre-existing accepted bodies remain mapped to revised `02-01` |
 | S-ND295-10 | bounded-change | Lima deliberate D6 detach + D9 guard/counter/capture/audit | `shared_guest_network_startup::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | reasoned-pending compiled RED scaffold; fixture owns only external typed detach and observations |
-| S-ND295-11 | bounded-change | D12A source-local netlink projection and real-owner order/identity tables plus Lima production read-back | `overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`; `guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`; and `shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start` | reasoned-pending; three non-waived source-local bodies fail at the exact parser/projection or owner behavior gap, while the user-waived Lima placeholder remains a separate production-composition layer |
+| S-ND295-11 | bounded-change | D12A source-local netlink projection plus real-owner provision-down/activation tables and Lima/native production read-back | `overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`; `guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,activation_reads_every_protection_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`; action-shim `tap_activation_occurs_after_intercept_success_and_before_exec_release` and `tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running`; and `shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start` paired with native VMM down-through-READY evidence | amendment-pending: the provision body must replace its former final TAP-up expectation with exact final down/no-`TapSetUp`; the new activation/failure/order bodies prove the separated transition. No new fixture-owned product effect or public fault setter is authorized. |
 | S-ND295-12 | bounded-change | D12A source-local failure/continuation plus Lima two-attachment complement | `guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` and `shared_guest_network_startup::two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal` | reasoned-pending; source-local RED is current no-op teardown and its finite table compiles every exact cleanup-leaf operation/source/continuation row; the Lima body remains a waived production-composition scaffold |
 | S-ND295-13 | bounded-change | seeded production-helper ordering, separate GREEN telemetry, native VMM/kernel complement | `overdrive_sim::invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm`; `shared_guest_network_startup::{production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts,native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance}` | the non-waived seeded invariant fails reproducibly on the actual sweep snapshot with shrunk seed `0`; the telemetry and native reasoned-pending placeholders are user-waived from this remediation gate, and workspace `.env` supplies the native-metal target when that separate body is executed |
 | S-ND295-14..18 | bounded-change | paired private state machine + Lima real shared-IP adapter + 02-03 unpublished-owner refusal | source-local `mtls_intercept_port::shared_program_rollback_acceptance::{shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior,shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta,shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement}`; Lima `mtls_intercept_install::{shared_program_absence_create_readback_idempotence_and_guard_drop,shared_program_replaces_only_listener_targets_and_preserves_foreign_complement,shared_program_refuses_ambiguous_owned_state_without_mutation}`; existing 02-03 start/refusal bodies | All six D15 bodies are authored reasoned-pending with exact closed universes and RED: source-local now includes zero-port and `Error::source()` contracts; Lima includes exact requested identities, foreign-family coexistence, and an isolated conflicting-set-schema fixture. S14..18 close only after 02-02's source-local/Lima layers and 02-03's owner layer all pass. |
@@ -68,7 +68,7 @@ outcome → scenario reverse-trace is total:
 
 - **OUT-ND295-SHARED-SWITCH** — S-ND295-00, 02, 03, 04, 05, 06, 07, 11, 12, 13,
   27, 28, 29, 30, 31A, 31B, 32, 33, 34, 35 (grouped network assignment,
-  lease/admission, provision/teardown, boot reclamation, gate admission,
+  lease/admission, provision/activation/teardown, boot reclamation, gate admission,
   bounded recovery/fail-stop, shared-gateway DNS, direct-TAP VMM).
 - **OUT-ND295-BORN-CAPTURED** — S-ND295-01, 08, 09, 10, 14–26, 37 (TCX
   classification/guard, shared nft replacement/rollback, node-shared
@@ -325,7 +325,9 @@ hook.
 GIVEN the built default-feature node is started on native metal with no live allocation owned by the example
 WHEN the operator deploys the checked-in VM Service and VM client Job through `overdrive deploy`
 THEN the callee reports Running with replicas 1/1 and the reply-dependent caller reports Succeeded after receiving the byte-distinct guest reply by service name
-AND the caller's sole intercept-install success event precedes guest EXEC and every guest-originated TAP frame
+AND the caller's exact TAP remains administratively down through VMM READY and accepted Running
+AND the caller's sole intercept-install success event follows exact `2 + P` element read-back and precedes awaited TAP activation
+AND exact TAP-up/master/protection read-back completes before guest EXEC and every guest-originated TAP frame is strictly later than the success event
 AND one exact leg-B tuple/inode/sole fd is TLS 1.3 kTLS TX/RX and participates in positive kernel splice in both directions
 AND lossless interface capture proves that tuple is loopback-only with zero physical or ordinary-forwarding egress
 AND plaintext markers are confined to the exact guest-local leg-F and leg-S bridge/TAP tuples with no direct guest-to-guest bypass
@@ -346,7 +348,8 @@ scenario. The intercept-live timing authority is the existing synchronous
 poll. A tracing Layer installed before deployment accepts exactly one event for
 the exact caller allocation and samples `CLOCK_REALTIME` inside `on_event`.
 Production source order is successful awaited `start_alloc` (with `2 + P`
-elements active/read back), then the event, then
+elements active/read back), then the event, then awaited exact
+`GuestNetworkProvisioner::activate` and its up/master/protection read-back, then
 `release_for_exit_emission`. AF_PACKET `SO_TIMESTAMPNS` uses the same realtime
 domain. Any guest-originated caller-TAP frame with a missing timestamp or
 timestamp `<=` the event barrier fails; only a strictly later timestamp is
@@ -354,6 +357,12 @@ post-live. Event absence, duplication, wrong allocation, or capture loss fails
 closed. Typed state observation still proves the complete constant program and
 dynamic member universe, but its delayed poll-completion timestamp supplies no
 timing credit; changing 20 ms polling to 1 ms is not evidence.
+
+The event name remains accurate: it receipts mTLS intercept installation and
+element read-back, not TAP state or allocation completion. Activation is a
+separate awaited guest-network effect immediately afterward. The existing
+native capture fixture remains the DISTILL-owned observation boundary; DESIGN
+adds no fixture API, packet injector, monitor, clock hook, or product event.
 
 Native run `e72385d6` uniquely correlated exact tuple
 `100.95.0.1:35260 → 100.95.0.2:18951`, its live TLS 1.3 kTLS TX/RX `ss`
@@ -516,24 +525,34 @@ and D9 guard entirely to production.
 GIVEN the production shared-switch owner and one unused lease
 WHEN it provisions the attachment
 THEN guard membership precedes endpoint insertion and TCX attach/pin/query while the TAP is down
-AND success returns only after bridge master, link state, endpoint value, program, attach type, ifindex, pin, and fixed bridge MAC read back exactly
+AND provision success returns only after bridge master, down link state, endpoint value, program, attach type, ifindex, pin, and fixed bridge MAC read back exactly
+AND provisioning performs no TAP-up mutation
+WHEN Cloud Hypervisor attaches the exact persistent TAP and the guest reaches READY
+THEN the host TAP has the same ifindex and remains administratively down
+WHEN the exact-allocation mTLS success event has been emitted and the action owner activates the same plan
+THEN activation re-reads guard, endpoint, TCX link/pin, TAP owner/ifindex/master/down state, performs the sole TAP-up mutation, and reads back exact up/master state before EXEC release
 AND no production effect is installed by the test fixture
 ```
 
 Paired executable bodies:
 `overdrive_netlink::client::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field`,
-`guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`
+`guest_network::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success,activation_reads_every_protection_fact_before_reporting_success,every_incompatible_tap_or_bridge_identity_refuses_owner_publication}`
 and
-`shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start`.
+`shared_guest_network_startup::ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start`, plus the existing native direct-TAP VMM
+composition extended to assert same-ifindex/down-through-READY.
 The private netlink projection table covers absent, persistent TAP with exact
 or missing owner UID, non-persistent TAP, TUN, dummy, veth, other, and correct
 or same-name wrong-kind bridge messages with exact ifindex, up/master, MAC,
 persistence, and bridge identity. The D12A scripted
 leaf returns those actual TAP/bridge observations only; it never returns a
 completed workflow or boolean verdict. The owner must refresh bridge identity
-before both master comparisons, reject every first/final checkpoint partition
-without publication, and publish the exact allocation record only after the
-final checkpoint succeeds.
+before each master comparison, reject every provision/activation checkpoint
+partition without false success, publish the exact allocation record only
+after the final down checkpoint succeeds, and mark activation complete only
+after final up read-back. An activation error after `TapSetUp` must attempt
+down/read-back; the action-shim failure body proves EXEC stays withheld,
+driver stop precedes mTLS/network teardown, lease release remains last, and the
+dominating Failed row uses stage `guest_network_activate`.
 
 ### S-ND295-12 — A stopped workload leaves none of its network attachment behind
 
@@ -1205,6 +1224,12 @@ raise it.
   test-helper / ubiquitous-language nouns (feature-delta § Ubiquitous language),
   used to name domain facts in step helpers only. DELIVER must NOT materialize
   them as public types, variants, or parameters.
+- **Deferred TAP activation amendment** — transition every provision-success
+  expectation from final TAP-up to final TAP-down/no-`TapSetUp`; add the
+  separate owner activation/read-back, action-shim ordering/failure cleanup,
+  and native same-ifindex/down-through-READY layers named by S-ND295-01/S11.
+  `SimSharedGuestNetworkOwner` implements and records the inherited activation
+  operation but gains no public activation-failure scripting method.
 
 ## Executable completeness status
 
@@ -1217,11 +1242,18 @@ The eight unconditional real-I/O panic placeholders are explicitly
 user-waived: they were not rerun, do not contribute points, and are not
 approval conditions for this gate.
 
+The user-directed 2026-09-23 D-295-DELIVER-04-01 amendment supersedes only the
+S-ND295-01/S11 TAP-order assertions: provision-down, down-through-READY,
+event-before-activation, activation-before-EXEC, and activation-failure cleanup
+are now required. Roadmap approval is retained under the explicit no-review
+override; “reasoned-pending” here describes implementation state, not a new
+review gate.
+
 | Check | Executable disposition including the four D14A bodies |
 |---|---|
 | C1a empty/minimum | PASS — all eight clean inventory families return exact zero; absent TAP/link projections are explicit. |
 | C1b boundaries | PASS — D14A adds all short and complete-length malformed projection boundaries, exact counters, every wrong delta, and each decrease/wrap; prior endpoint/S11 boundaries remain. |
-| C2a state machine documented | PASS — the retained owner model is `Unpublished -> Provisioning -> Published -> TeardownPending -> Absent`. |
+| C2a state machine documented | PASS — the retained owner model is `Unpublished -> Provisioning -> ProvisionedDown -> Activating -> Active -> TeardownPending -> Absent`, with `QuiescedActive` private to runtime recovery. |
 | C2b illegal event per state | PASS — D14A refuses every private semantic mismatch/lower failure, preserves exercise-before-close cleanup, and emits no completion claim for an incomplete state. |
 | C3 zero/one/many | PASS — zero and one receipts, unique and multiple unreceipted candidates, and two attachments are explicit. |
 | C4a apply twice | PASS — S12 retries the same retained owner/allocation, then repeats teardown in `Absent`. |
@@ -1268,8 +1300,8 @@ The D15 executable audit is **COMPLETE — 15/15 executable**. S19-A and the
 non-closing worker prerequisite retain their reviewed evidence; S19-B compiles,
 exact-selects, and carries the completed P02-20/21/22 cadence, journal, receipt,
 and terminal-ownership oracle. It remains RED at the earlier production owner
-scaffold. Roadmap validation remains pending independent acceptance and roadmap
-review.
+scaffold. Independent acceptance/roadmap review subsequently approved this
+material on 2026-09-22; the 2026-09-23 user override retains approved status.
 
 ### Step 02-03 D1-D7 executable audit
 
