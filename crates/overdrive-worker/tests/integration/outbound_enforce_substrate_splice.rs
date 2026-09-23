@@ -136,9 +136,9 @@
     reason = "Tier-3 outbound-substrate test body; the bidirectional-splice narrative in the module docstring is prose; skip messages + strace diagnostics go to stderr; failures must panic with informative messages; the libc FFI casts are width conversions on compile-time constants (ETH_P_ALL.to_be() as i32 mirrors traffic.rs); leg F/B are the ADR-0069 contract vocabulary; the single composed Tier-3 scenario drives the round-trip under one strace attach; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit; the per-byte \\xNN python-literal fold reads clearer than a write! accumulator in a test fixture; const-fn-ability on test constructors is not load-bearing"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
-use std::net::{SocketAddrV4, TcpListener};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -152,6 +152,7 @@ use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
+use overdrive_netlink::nft::{SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
@@ -1737,11 +1738,11 @@ impl MtlsIntercept for MetalSharedIntercept {
 
     fn install_outbound(
         &self,
-        tap: &str,
+        source_addr: Ipv4Addr,
         leg_f_port: u16,
     ) -> InterceptResult<Box<dyn InterceptGuard>> {
         self.inner
-            .install_outbound(tap, leg_f_port)
+            .install_outbound(source_addr, leg_f_port)
             .map(|guard| Self::wrap(guard, &self.allocation_guard_drops))
     }
 
@@ -1836,6 +1837,7 @@ fn shared_peer_connection(mut tcp: std::net::TcpStream, config: Arc<rustls::Serv
 
 struct SharedPeerOwner {
     join: Option<std::thread::JoinHandle<bool>>,
+    ready: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     third_entered: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     third_release: std::sync::mpsc::Sender<()>,
 }
@@ -1844,11 +1846,13 @@ impl SharedPeerOwner {
     fn spawn(pki: &TestPki, connections: usize, block_third: bool) -> Self {
         let bind = SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT);
         let config = shared_peer_server_config(pki);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let join = std::thread::spawn(move || {
             let listener = TcpListener::bind(bind).expect("bind shared mesh peer");
             listener.set_nonblocking(true).expect("nonblocking shared mesh peer");
+            ready_tx.send(()).expect("publish shared peer readiness");
             let mut children = Vec::new();
             for index in 0..connections {
                 let (tcp, _) = accept_with_timeout(&listener, Duration::from_secs(15))
@@ -1864,9 +1868,26 @@ impl SharedPeerOwner {
         });
         Self {
             join: Some(join),
+            ready: std::sync::Mutex::new(ready_rx),
             third_entered: std::sync::Mutex::new(entered_rx),
             third_release: release_tx,
         }
+    }
+
+    async fn wait_ready(&self) {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                match self.ready.lock().expect("peer ready lock").try_recv() {
+                    Ok(()) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        panic!("shared peer ended before publishing readiness")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("shared peer binds before direct production exchange");
     }
 
     async fn wait_third(&self) {
@@ -1924,6 +1945,45 @@ fn setup_shared_peer_address() {
     ip(&["addr", "add", &format!("{MESH_BACKEND_IP}/32"), "dev", "lo"]);
 }
 
+fn observe_shared_intercept_state() -> SharedIpInterceptState {
+    overdrive_netlink::nft::observe_shared_ip_intercept_state()
+        .expect("typed shared-IP observation succeeds")
+        .expect("the node-owned constant shared-IP program is present")
+}
+
+fn assert_shared_intercept_state(
+    state: &SharedIpInterceptState,
+    identity: &SharedIpInterceptIdentity,
+    specs: &[&AllocationSpec],
+) {
+    let managed = specs
+        .iter()
+        .map(|spec| spec.network.as_ref().expect("shared allocation network").address)
+        .collect::<BTreeSet<_>>();
+    let inbound = specs
+        .iter()
+        .flat_map(|spec| {
+            let address = spec.network.as_ref().expect("shared allocation network").address;
+            spec.service_ports.iter().map(move |port| SocketAddrV4::new(address, port.get()))
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        state.identity(),
+        identity,
+        "allocation changes preserve the exact constant program"
+    );
+    assert_eq!(state.managed_guest_ips(), &managed, "managed membership is exact");
+    assert_eq!(state.outbound_sources(), &managed, "outbound source membership is exact");
+    assert_eq!(state.inbound_destinations(), &inbound, "destination membership is exact");
+    assert_eq!(
+        state.managed_guest_ips().len()
+            + state.outbound_sources().len()
+            + state.inbound_destinations().len(),
+        specs.iter().map(|spec| 2 + spec.service_ports.len()).sum::<usize>(),
+        "the complete dynamic universe contains exactly 2 + P elements per allocation"
+    );
+}
+
 struct SharedMetalCleanup;
 
 impl Drop for SharedMetalCleanup {
@@ -1955,6 +2015,7 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     enforcement.probe().await.expect("real enforcement probe");
     let intercept = MetalSharedIntercept::new();
     let peer = SharedPeerOwner::spawn(&pki, 2, false);
+    peer.wait_ready().await;
     let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
         peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
     });
@@ -1967,18 +2028,34 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     worker.start_shared_owner().await.expect("publish real shared owner");
     let owner_before = intercept.surface();
     let leg_f = owner_before.addresses[0];
+    let constant_identity = SharedIpInterceptIdentity::for_listener_ports(
+        owner_before.addresses[0].port(),
+        owner_before.addresses[1].port(),
+    )
+    .expect("non-zero shared listener ports form the exact constant program");
+    assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     let first_spec =
         shared_metal_spec(&pki, first.clone(), "127.0.0.2".parse().unwrap(), "m25tap-a");
     let second_spec =
         shared_metal_spec(&pki, second.clone(), "127.0.0.3".parse().unwrap(), "m25tap-b");
     worker.start_alloc(&first_spec).await.expect("publish first real capability");
     worker.start_alloc(&second_spec).await.expect("publish second real capability");
+    assert_shared_intercept_state(
+        &observe_shared_intercept_state(),
+        &constant_identity,
+        &[&first_spec, &second_spec],
+    );
     let mut first_client = shared_client("127.0.0.2".parse().unwrap(), leg_f).await;
     let mut second_client = shared_client("127.0.0.3".parse().unwrap(), leg_f).await;
     assert_shared_exchange(&mut first_client, b"metal-shared-first-before-stop").await;
     assert_shared_exchange(&mut second_client, b"metal-shared-second-before-stop").await;
 
     worker.stop_alloc(&first).await.expect("first real handle drains");
+    assert_shared_intercept_state(
+        &observe_shared_intercept_state(),
+        &constant_identity,
+        &[&second_spec],
+    );
     assert_shared_exchange(&mut second_client, b"metal-shared-second-after-first-stop").await;
     worker.audit_shared_owner().await.expect("both shared listener tasks remain live");
     let owner_after = intercept.surface();
@@ -1991,10 +2068,11 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     drop(first_client);
     drop(second_client);
     worker.stop_alloc(&second).await.expect("second real handle drains");
+    assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     worker.shutdown_owner().await.expect("real shared owner joins");
     assert_eq!(intercept.surface().allocation_guard_drops, 4);
     assert_eq!(intercept.surface().node_guard_drops, 0);
-    assert!(!nft_dump_table().is_empty(), "sealed node guard relinquishes the constant program");
+    assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     peer.finish();
     clean_shared_infra();
     teardown_topology();
@@ -2022,6 +2100,7 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
     enforcement.probe().await.expect("real enforcement probe");
     let intercept = MetalSharedIntercept::new();
     let peer = SharedPeerOwner::spawn(&pki, 3, true);
+    peer.wait_ready().await;
     let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
         peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
     });
@@ -2033,10 +2112,19 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
     ));
     worker.start_shared_owner().await.expect("publish real shared owner");
     let addresses = intercept.surface().addresses;
+    let constant_identity =
+        SharedIpInterceptIdentity::for_listener_ports(addresses[0].port(), addresses[1].port())
+            .expect("non-zero shared listener ports form the exact constant program");
+    assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     let first_spec = shared_metal_spec(&pki, first, "127.0.0.4".parse().unwrap(), "m26tap-a");
     let second_spec = shared_metal_spec(&pki, second, "127.0.0.5".parse().unwrap(), "m26tap-b");
     worker.start_alloc(&first_spec).await.expect("publish first capability");
     worker.start_alloc(&second_spec).await.expect("publish second capability");
+    assert_shared_intercept_state(
+        &observe_shared_intercept_state(),
+        &constant_identity,
+        &[&first_spec, &second_spec],
+    );
     let mut first_client = shared_client("127.0.0.4".parse().unwrap(), addresses[0]).await;
     let mut second_client = shared_client("127.0.0.5".parse().unwrap(), addresses[0]).await;
     assert_shared_exchange(&mut first_client, b"metal-shutdown-first-live").await;
@@ -2062,7 +2150,7 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
     }
     assert_eq!(intercept.surface().allocation_guard_drops, 4);
     assert_eq!(intercept.surface().node_guard_drops, 0);
-    assert!(!nft_dump_table().is_empty(), "sealed node guard relinquishes the constant program");
+    assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     peer.finish();
     clean_shared_infra();
     teardown_topology();

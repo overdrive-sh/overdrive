@@ -137,6 +137,7 @@ struct RecordingSharedIntercept {
     shared_observation: Mutex<Option<InterceptPostcondition>>,
     shared_guard_drops: Arc<AtomicUsize>,
     allocation_guard_drops: Arc<AtomicUsize>,
+    allocation_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
     occupy_exact_rebind: AtomicBool,
     blockers: Mutex<Vec<TcpListener>>,
 }
@@ -156,6 +157,7 @@ impl RecordingSharedIntercept {
             shared_observation: Mutex::new(None),
             shared_guard_drops: Arc::new(AtomicUsize::new(0)),
             allocation_guard_drops: Arc::new(AtomicUsize::new(0)),
+            allocation_elements: Arc::new(Mutex::new(BTreeSet::new())),
             occupy_exact_rebind: AtomicBool::new(false),
             blockers: Mutex::new(Vec::new()),
         }
@@ -202,6 +204,7 @@ impl RecordingSharedIntercept {
             observation: self.shared_observation(),
             shared_guard_drops: self.shared_guard_drops(),
             allocation_guard_drops: self.allocation_guard_drops(),
+            allocation_elements: self.allocation_elements.lock().clone(),
         }
     }
 
@@ -254,6 +257,46 @@ struct SharedOwnerSurface {
     observation: Option<InterceptPostcondition>,
     shared_guard_drops: usize,
     allocation_guard_drops: usize,
+    allocation_elements: BTreeSet<SharedElement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SharedElement {
+    ManagedGuest(Ipv4Addr),
+    OutboundSource(Ipv4Addr),
+    InboundDestination(SocketAddrV4),
+}
+
+fn allocation_elements(spec: &AllocationSpec) -> BTreeSet<SharedElement> {
+    let address = spec.network.as_ref().expect("shared allocation has a network").address;
+    let mut elements = BTreeSet::from([
+        SharedElement::ManagedGuest(address),
+        SharedElement::OutboundSource(address),
+    ]);
+    elements.extend(
+        spec.service_ports
+            .iter()
+            .map(|port| SharedElement::InboundDestination(SocketAddrV4::new(address, port.get()))),
+    );
+    elements
+}
+
+struct RecordingElementGuard {
+    active: Arc<Mutex<BTreeSet<SharedElement>>>,
+    owned: BTreeSet<SharedElement>,
+    drops: Arc<AtomicUsize>,
+}
+
+impl InterceptGuard for RecordingElementGuard {}
+
+impl Drop for RecordingElementGuard {
+    fn drop(&mut self) {
+        let mut active = self.active.lock();
+        for element in &self.owned {
+            assert!(active.remove(element), "the exact allocation element remains singly owned");
+        }
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 impl MtlsIntercept for RecordingSharedIntercept {
@@ -331,18 +374,33 @@ impl MtlsIntercept for RecordingSharedIntercept {
 
     fn install_outbound(
         &self,
-        _host_veth: &str,
+        source_addr: Ipv4Addr,
         _leg_f_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(DropCountGuard(Arc::clone(&self.allocation_guard_drops))))
+        let owned = BTreeSet::from([
+            SharedElement::ManagedGuest(source_addr),
+            SharedElement::OutboundSource(source_addr),
+        ]);
+        self.allocation_elements.lock().extend(owned.iter().copied());
+        Ok(Box::new(RecordingElementGuard {
+            active: Arc::clone(&self.allocation_elements),
+            owned,
+            drops: Arc::clone(&self.allocation_guard_drops),
+        }))
     }
 
     fn install_inbound(
         &self,
-        _virt: SocketAddrV4,
+        virt: SocketAddrV4,
         _leg_c_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(DropCountGuard(Arc::clone(&self.allocation_guard_drops))))
+        let owned = BTreeSet::from([SharedElement::InboundDestination(virt)]);
+        self.allocation_elements.lock().extend(owned.iter().copied());
+        Ok(Box::new(RecordingElementGuard {
+            active: Arc::clone(&self.allocation_elements),
+            owned,
+            drops: Arc::clone(&self.allocation_guard_drops),
+        }))
     }
 }
 
@@ -587,6 +645,7 @@ struct ActivationBarrierIntercept {
     release: (StdMutex<bool>, Condvar),
     block_once: AtomicBool,
     guard_drops: Arc<AtomicUsize>,
+    allocation_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
 }
 
 impl ActivationBarrierIntercept {
@@ -597,6 +656,7 @@ impl ActivationBarrierIntercept {
             release: (StdMutex::new(false), Condvar::new()),
             block_once: AtomicBool::new(true),
             guard_drops: Arc::new(AtomicUsize::new(0)),
+            allocation_elements: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -642,15 +702,24 @@ impl MtlsIntercept for ActivationBarrierIntercept {
 
     fn install_outbound(
         &self,
-        _host_veth: &str,
+        source_addr: Ipv4Addr,
         _leg_f_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(DropCountGuard(Arc::clone(&self.guard_drops))))
+        let owned = BTreeSet::from([
+            SharedElement::ManagedGuest(source_addr),
+            SharedElement::OutboundSource(source_addr),
+        ]);
+        self.allocation_elements.lock().extend(owned.iter().copied());
+        Ok(Box::new(RecordingElementGuard {
+            active: Arc::clone(&self.allocation_elements),
+            owned,
+            drops: Arc::clone(&self.guard_drops),
+        }))
     }
 
     fn install_inbound(
         &self,
-        _virt: SocketAddrV4,
+        virt: SocketAddrV4,
         _leg_c_port: u16,
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
         if self.block_once.swap(false, Ordering::SeqCst) {
@@ -662,7 +731,13 @@ impl MtlsIntercept for ActivationBarrierIntercept {
             }
             drop(released);
         }
-        Ok(Box::new(DropCountGuard(Arc::clone(&self.guard_drops))))
+        let owned = BTreeSet::from([SharedElement::InboundDestination(virt)]);
+        self.allocation_elements.lock().extend(owned.iter().copied());
+        Ok(Box::new(RecordingElementGuard {
+            active: Arc::clone(&self.allocation_elements),
+            owned,
+            drops: Arc::clone(&self.guard_drops),
+        }))
     }
 }
 
@@ -751,7 +826,11 @@ async fn stop_and_owner_shutdown_during_pending_registration_return_registration
         assert_eq!(
             intercept.guard_drops.load(Ordering::SeqCst),
             3,
-            "one outbound and two distinct inbound elements drop exactly once"
+            "one outbound group and two inbound tokens drop exactly once"
+        );
+        assert!(
+            intercept.allocation_elements.lock().is_empty(),
+            "all exact 2 + P set elements leave with the retired Pending registration"
         );
         let owner_after = intercept.shared.surface();
         assert_eq!(owner_after.call_counts, owner_before.call_counts);
@@ -922,7 +1001,13 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
     let enforcement_after = enforcement.surface();
     let mut expected_owner = owner_before.clone();
     expected_owner.allocation_guard_drops += 3;
+    expected_owner.allocation_elements = allocation_elements(&second);
     assert_eq!(owner_after, expected_owner, "only the first allocation elements change");
+    assert_eq!(
+        owner_before.allocation_elements,
+        allocation_elements(&first).union(&allocation_elements(&second)).copied().collect(),
+        "two active allocations own exactly their managed/source/destination elements"
+    );
     assert_eq!(
         enforcement_after.active,
         BTreeSet::from([unrelated_before.clone()]),
@@ -993,4 +1078,5 @@ async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capabili
     assert_eq!(owner_after.listener_addresses, owner_before.listener_addresses);
     assert_eq!(owner_after.observation, owner_before.observation);
     assert_eq!(owner_after.listener_clones, 0);
+    assert!(owner_after.allocation_elements.is_empty());
 }
