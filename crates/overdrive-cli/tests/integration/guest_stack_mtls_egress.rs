@@ -1938,23 +1938,58 @@ fn record_has_bidirectional_tls13_ktls(record: &str) -> bool {
         && (record.contains("txconf: sw") || record.contains("txconf:sw"))
 }
 
-async fn poll_until_ktls(port: u16, budget: Duration) -> Vec<KtlsSocketEvidence> {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        let records = ktls_socket_records()
-            .into_iter()
-            .filter(|record| {
-                record.tuple.destination.port() == port
-                    && record_has_bidirectional_tls13_ktls(&record.record)
-            })
-            .collect::<Vec<_>>();
-        if !records.is_empty() {
-            return records;
+fn retain_eligible_ktls_candidates(
+    journal: &mut BTreeMap<FlowTuple, KtlsSocketEvidence>,
+    port: u16,
+    records: impl IntoIterator<Item = KtlsSocketEvidence>,
+) {
+    for record in records {
+        if record.tuple.destination.port() == port
+            && record_has_bidirectional_tls13_ktls(&record.record)
+        {
+            journal.insert(record.tuple, record);
         }
-        if tokio::time::Instant::now() >= deadline {
-            return Vec::new();
+    }
+}
+
+struct KtlsCandidateJournal {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<BTreeMap<FlowTuple, KtlsSocketEvidence>>>,
+}
+
+impl KtlsCandidateJournal {
+    fn start(port: u16) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || {
+            let mut journal = BTreeMap::new();
+            while !thread_stop.load(Ordering::SeqCst) {
+                retain_eligible_ktls_candidates(&mut journal, port, ktls_socket_records());
+                std::thread::yield_now();
+            }
+            journal
+        });
+        Self { stop, handle: Some(handle) }
+    }
+
+    fn finish(mut self) -> Vec<KtlsSocketEvidence> {
+        self.stop.store(true, Ordering::SeqCst);
+        self.handle
+            .take()
+            .expect("kTLS candidate sampler exists")
+            .join()
+            .expect("kTLS candidate sampler joins")
+            .into_values()
+            .collect()
+    }
+}
+
+impl Drop for KtlsCandidateJournal {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -2555,6 +2590,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // keeping these two surfaces separate prevents the local plaintext from
     // being mistaken for peer-wire evidence.
     let peer_wire = WireCapture::start(&bridge_name, SERVICE_PORT);
+    let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
     // A fresh composition has exactly one declared mesh name (`server`), so
     // the production smallest-free frontend allocator assigns the first usable
     // address in its named block. This is the address DNS returns to the guest;
@@ -2657,10 +2693,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         Duration::from_secs(10),
     )
     .await;
-    // Preserve cleanup even when the expected kTLS state never appears. RED
-    // must fail as a normal assertion, not strand a VM/service until nextest's
-    // process timeout kills the whole test binary.
-    let ktls_candidates = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let readiness =
         finish_shared_element_observation(live_readiness, Duration::from_secs(20)).await;
     let active_managed = BTreeSet::from([service_address, guest_address]);
@@ -2671,6 +2703,19 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         &service_inbound,
     );
     let guest_addr = vm_running.workload_addr.expect("Running VM carries its guest address");
+    // The reply-dependent Job owns its successful terminal transition. Do not
+    // manufacture that state through the public stop path: wait for the guest
+    // process to return zero and for production lifecycle observation to emit
+    // the real exit result. Cleanup of the independent Service is bounded and
+    // remains a separate operation below.
+    let terminal = poll_until_natural_job_completion(
+        &cfg,
+        &vm_submit.workload_id,
+        &vm_running.alloc_id,
+        Duration::from_secs(60),
+    )
+    .await;
+    let ktls_candidates = ktls_journal.finish();
     let (scan, ktls) = peer_wire.stop_and_scan(&ktls_candidates);
     let tap_capture = tap_wire.stop();
     let pre_intercept_tap_frames = tap_capture
@@ -2687,18 +2732,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     );
     let guest_egress =
         audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
-    // The reply-dependent Job owns its successful terminal transition. Do not
-    // manufacture that state through the public stop path: wait for the guest
-    // process to return zero and for production lifecycle observation to emit
-    // the real exit result. Cleanup of the independent Service is bounded and
-    // remains a separate operation below.
-    let terminal = poll_until_natural_job_completion(
-        &cfg,
-        &vm_submit.workload_id,
-        &vm_running.alloc_id,
-        Duration::from_secs(60),
-    )
-    .await;
     // Terminal publication and host-resource reclamation are separate
     // production events. Bound the cleanup observation independently instead
     // of treating the first terminal row as an instantaneous deletion fence.
@@ -3620,14 +3653,36 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         record: ktls_record.to_owned(),
     };
     let exact_candidate = KtlsSocketEvidence { tuple: exact_peer, record: ktls_record.to_owned() };
-    let (scan, selected) = correlate_ktls_candidates(
-        &frames,
+    let exact_latest =
+        KtlsSocketEvidence { tuple: exact_peer, record: format!("{ktls_record} bytes_acked:77") };
+    let ineligible = KtlsSocketEvidence {
+        tuple: FlowTuple {
+            source: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 1), 39_999),
+            destination: SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 2), SERVICE_PORT + 1),
+        },
+        record: ktls_record.to_owned(),
+    };
+    let mut journal = BTreeMap::new();
+    retain_eligible_ktls_candidates(
+        &mut journal,
         SERVICE_PORT,
-        &[unrelated_candidate.clone(), exact_candidate.clone()],
+        [exact_candidate, unrelated_candidate.clone()],
+    );
+    retain_eligible_ktls_candidates(&mut journal, SERVICE_PORT, [exact_latest.clone(), ineligible]);
+    let journal = journal.into_values().collect::<Vec<_>>();
+    assert_eq!(
+        journal.iter().map(|candidate| candidate.tuple).collect::<Vec<_>>(),
+        vec![unrelated_candidate.tuple, exact_peer],
+        "the journal is tuple-deduplicated and deterministically ordered"
     );
     assert_eq!(
+        journal[1], exact_latest,
+        "deduplication retains the latest complete ss evidence for the exact tuple"
+    );
+    let (scan, selected) = correlate_ktls_candidates(&frames, SERVICE_PORT, &journal);
+    assert_eq!(
         selected.expect("the second same-port candidate is the exact captured TLS connection"),
-        exact_candidate
+        exact_latest
     );
     assert_eq!(scan.same_port_streams_observed, 3);
     assert_eq!(scan.exact_records_to_peer, 1);
@@ -3652,11 +3707,8 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
         "an unknown tuple never adopts an unrelated same-port stream as peer evidence"
     );
 
-    let (_, ambiguous) = correlate_ktls_candidates(
-        &frames,
-        SERVICE_PORT,
-        &[exact_candidate.clone(), exact_candidate],
-    );
+    let (_, ambiguous) =
+        correlate_ktls_candidates(&frames, SERVICE_PORT, &[exact_latest.clone(), exact_latest]);
     assert!(ambiguous.is_err(), "multiple matching candidates fail closed as ambiguous");
 
     let clear_peer = vec![
@@ -4047,6 +4099,7 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let _ = poll_until_shared_intercept_is_stable(Duration::from_secs(30), 0).await;
 
     let tap_wire = WireCapture::start(&tap, 0);
+    let ktls_journal = KtlsCandidateJournal::start(SERVICE_PORT);
     let tap_ifindex = {
         let name = std::ffi::CString::new(tap.as_str()).expect("TAP name has no NUL");
         // SAFETY: the NUL-terminated name remains live for this lookup.
@@ -4077,8 +4130,16 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
     let live =
         poll_until_outbound_elements_ready(tap.clone(), source, Duration::from_secs(30)).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
-    let ktls_candidates = poll_until_ktls(SERVICE_PORT, Duration::from_secs(25)).await;
     let readiness = finish_shared_element_observation(live, Duration::from_secs(60)).await;
+    let _ = poll_until_fresh_natural_job_completion(
+        cfg,
+        workload_id,
+        predecessor_id,
+        &replacement_id,
+        Duration::from_secs(120),
+    )
+    .await?;
+    let ktls_candidates = ktls_journal.finish();
     let tap_capture = tap_wire.stop();
     let pre_ready = tap_capture
         .frames
