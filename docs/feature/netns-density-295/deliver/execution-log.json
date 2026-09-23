@@ -575,6 +575,20 @@
       "s": "EXECUTED",
       "d": "PASS: scoped 02-03 production/compiler-fallout commit follows, with separate exact compiler-fallout commit 23d7473f0b01227ae954257de32c3599f938b046. The scoped production commit contains only overdrive-netlink shared-IP semantic effects, worker shared element ownership/caller changes, sim/compiler fallout, control-plane integration compiler fallout, worker integration compiler fallout, and DES events; unrelated dirty work remains outside scope. Marcus author and exactly one Codex trailer required. No mutation testing or review.",
       "t": "2026-09-23T03:35:31Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "REMEDIATION RED: upstream constant-rule/2+P element path is live. Clean native metal exact topology selector passed (nextest run id 2296aa44-8d70-4eeb-9eb3-9a5e34739866), and the exact S-ND295-01 caller body passed (nextest run id 774475f9-20a1-4908-a32d-12b4520cc28e) after restoring the retained EXEC gate, live endpoint read-back, fixed bridge MAC after TAP attachment, shared fwmark/table-100 route convergence, and direct-host-TAP/Cloud Hypervisor checksum-offload disablement. The exact wire body reached Mesh resolution and shared enforcement, then failed the accepted peer-wire oracle because the bridge capture contains both local guest plaintext streams (100.95.0.3 -> 10.98.0.1:18951 and reverse) and host mTLS streams (100.95.0.1 -> 100.95.0.2:18951); the current no-cleartext assertion counts every stream touching the peer port. This is a DISTILL boundary contradiction: accepted direct-TAP/shared-bridge topology necessarily carries guest plaintext to the bridge before host TPROXY, while the authored capture treats that local stream as peer wire. Full approved guest_stack_mtls_egress selector ran 35 bodies (21 passed, 14 failed), with remaining failures independently including concurrent shared-state/fault-fixture contamination. No GREEN or COMMIT claimed; native metal final inventory cleaned; no mutation testing.",
+      "t": "2026-09-23T05:01:26Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "REMEDIATION RED: clean native topology passed (nextest ID 2296aa44-8d70-4eeb-9eb3-9a5e34739866) and the exact caller body passed (nextest ID 774475f9-20a1-4908-a32d-12b4520cc28e). The exact wire body reproduced the remaining selector failure after production route/bridge/TAP/offload fixes: production shared resolution returned Mesh and shared enforcement completed, but poll_until_ktls selected an ss tuple by destination port alone (for example 100.95.0.1:41408 -> 100.95.0.2:18951) while the bridge capture contained the corresponding production stream on a different source tuple (100.95.0.1:41420 -> 100.95.0.2:18951), alongside its reverse. The strict exact-tuple kTLS/splice oracle then observed zero TLS application records and failed. This is a precise DISTILL blocker in the authored ss/capture correlation selector; no production kTLS defect is proven and the acceptance oracle must not be edited in DELIVER. The approved full selector ran 35 bodies: 21 passed and 14 failed, with remaining failures including concurrent shared-state/fault-fixture contamination. No GREEN or COMMIT claimed; Lima target remained read-only; no mutation testing.",
+      "t": "2026-09-23T05:35:31Z"
     }
   ]
 }
