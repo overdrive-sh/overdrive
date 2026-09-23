@@ -1007,7 +1007,6 @@ struct KernelRealtime(i128);
 struct InterceptReadiness {
     kernel_barrier_at: KernelRealtime,
     tap_ifindex: u32,
-    tap: String,
     state: SharedIpInterceptState,
 }
 
@@ -1505,9 +1504,6 @@ fn parse_tcp_segment(
     {
         return Err(format!("PACKET_AUXDATA length mismatch: {aux:?}"));
     }
-    if reject_offload_ambiguity && aux.status & TP_STATUS_CSUMNOTREADY != 0 {
-        return Err(format!("checksum/offload state is not finalized: {aux:?}"));
-    }
     if frame.protocol != ETH_P_IP {
         return Ok(None);
     }
@@ -1533,6 +1529,9 @@ fn parse_tcp_segment(
     }
     if bytes[9] != 0x06 {
         return Ok(None);
+    }
+    if reject_offload_ambiguity && aux.status & TP_STATUS_CSUMNOTREADY != 0 {
+        return Err(format!("checksum/offload state is not finalized: {aux:?}"));
     }
     let tcp = ihl;
     if bytes.len() < tcp + 20 {
@@ -1720,7 +1719,6 @@ async fn finish_shared_element_observation(
             return InterceptReadiness {
                 kernel_barrier_at: readiness.kernel_barrier_at,
                 tap_ifindex: readiness.tap_ifindex,
-                tap: readiness.tap,
                 state: after,
             };
         }
@@ -3429,6 +3427,49 @@ fn synthetic_guest_tcp_frame() -> CapturedFrame {
         }),
         bytes,
     }
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn tcp_offload_ambiguity_is_scoped_to_eligible_ipv4_tcp_frames() {
+    let mut reported_dns = synthetic_guest_tcp_frame();
+    reported_dns.bytes[9] = 17;
+    reported_dns.aux.as_mut().expect("synthetic AUXDATA").status |= TP_STATUS_CSUMNOTREADY;
+    assert!(
+        matches!(parse_tcp_segment(&reported_dns, true), Ok(None)),
+        "the reported IPv4/UDP DNS frame is ineligible for the TCP universe before checksum-offload classification"
+    );
+
+    let mut non_ipv4 = synthetic_guest_tcp_frame();
+    non_ipv4.protocol = 0x0806;
+    non_ipv4.aux.as_mut().expect("synthetic AUXDATA").status |= TP_STATUS_CSUMNOTREADY;
+    assert!(
+        matches!(parse_tcp_segment(&non_ipv4, true), Ok(None)),
+        "a non-IPv4 Ethernet frame is outside the TCP universe even when AUXDATA carries CSUMNOTREADY"
+    );
+
+    let mut eligible_tcp = synthetic_guest_tcp_frame();
+    eligible_tcp.aux.as_mut().expect("synthetic AUXDATA").status |= TP_STATUS_CSUMNOTREADY;
+    let Err(error) = parse_tcp_segment(&eligible_tcp, true) else {
+        panic!("an eligible IPv4/TCP frame with unfinished checksum state fails closed")
+    };
+    assert!(error.contains("checksum/offload state is not finalized"));
+
+    let mut truncated_udp = synthetic_guest_tcp_frame();
+    truncated_udp.bytes[9] = 17;
+    truncated_udp.aux.as_mut().expect("synthetic AUXDATA").status |= TP_STATUS_CSUMNOTREADY;
+    truncated_udp.truncated = true;
+    assert!(
+        parse_tcp_segment(&truncated_udp, true).is_err(),
+        "truncation remains invalid before protocol eligibility"
+    );
+    let mut length_mismatch_udp = reported_dns;
+    length_mismatch_udp.aux.as_mut().expect("synthetic AUXDATA").snaplen -= 1;
+    assert!(
+        parse_tcp_segment(&length_mismatch_udp, true).is_err(),
+        "AUXDATA length mismatch remains invalid before protocol eligibility"
+    );
 }
 
 fn synthetic_peer_tcp_frame(
