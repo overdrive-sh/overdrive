@@ -25,6 +25,11 @@ artifacts separate:
 | **Stress / soak test** | “Does the system preserve a contract through a repeated cohort or fault/load matrix?” | Bounded repeated trials with a deterministic oracle, failure accounting, and cleanup. | Rerunnable test infrastructure; never an expectation capture. |
 | **Benchmark** | “How fast, how much, or how variable is this system under a declared profile?” | Repeated samples on a controlled substrate, with warm/cold state, workload/concurrency profile, raw measurements, and statistical method. | Benchmark report/baseline; distinct from correctness tests and never an expectation. |
 
+**Tests never spawn the `overdrive` binary.** The only artifact that runs the
+built CLI directly is a verification expectation whose purpose is to verify
+the CLI's own output. Every test tier drives the production composition
+in-process through its entry points and ports.
+
 Launching hundreds or thousands of microVMs is never an EDD expectation. If
 the purpose is to prove every run satisfies a contract, it is an E2E,
 conformance, stress, or soak test. If the purpose is latency, throughput,
@@ -59,8 +64,8 @@ ownership and observable boundary, not by perceived importance or test size.
 Put a test in `tests/conformance` only when all of the following hold:
 
 - the contract crosses two or more production owners or crates;
-- the behavior is observed through a public system boundary, normally the
-  exported server handler plus its public API;
+- the behavior is observed through the exported server handler, started
+  in-process, and its public API;
 - assigning the test to one crate's integration suite would make that crate
   pretend to own another component's lifecycle or outcome; and
 - the test is a recurring regression/conformance contract, not point-in-time
@@ -73,7 +78,8 @@ Do not put these in `tests/conformance`:
 - pure functions, state machines, and input-space properties — keep them in
   unit/proptest or seeded simulation lanes;
 - kernel-program-level and hook-attachment proofs — keep them in Tier 2/Tier 3;
-- CLI parsing/rendering unless the CLI protocol itself is the contract;
+- anything that spawns the `overdrive` binary or drives the CLI (see
+  § "Classify external execution before writing it");
 - EDD expectations — retain those under `verification/expectations/`; or
 - stress/capacity measurements and benchmarks — retain those in their declared
   benchmark lane.
@@ -1479,10 +1485,52 @@ signal as a green check inside Lima. See
 applied to `cargo check` specifically.
 
 **Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
-the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,
-KVM, full eBPF + BPF LSM toolchain, `cargo-nextest`, `cargo-mutants`).
-The repo is virtiofs-mounted into the guest at the same path; no rsync,
-no `git clone` inside the VM.
+the project's standard dev VM (the Ubuntu image and kernel it pins,
+cgroup v2, KVM, full eBPF + BPF LSM toolchain, `cargo-nextest`,
+`cargo-mutants`). The repo is virtiofs-mounted into the guest at the
+same path; no rsync, no `git clone` inside the VM.
+
+**An unusable VM is recreated, never waited on.** The VM is disposable.
+It holds no state worth preserving: the repo lives on the host through
+virtiofs, and the guest `CARGO_TARGET_DIR` (`~/.cargo-target-lima`) is
+only a build cache. When the VM is unusable **for any reason**, delete
+it and recreate it from the template immediately:
+
+```bash
+cargo xtask lima delete && cargo xtask lima up
+# equivalent: limactl delete --force overdrive &&
+#   limactl start --name overdrive --tty=false infra/lima/overdrive-dev.yaml
+```
+
+A recreate takes a few minutes. Waiting costs more and may never end:
+a VM in a broken state does not repair itself.
+
+- **Do not wait for it to recover.** Do not poll it, sleep and retry,
+  reboot it and hope, run `fsck`, or ask the user whether it has been
+  fixed. A read-only root filesystem is the common case. ext4 hit an
+  error and remounted `/` read-only (`errors=remount-ro`). It stays
+  read-only until the disk is recreated.
+- **Treat these as unusable:** `Read-only file system` on a guest
+  write; `emergency_ro` in the root mount options (`mount | grep " / "`);
+  `limactl shell overdrive` hanging or failing; the instance `Broken`
+  or refusing to start in `limactl list`; a guest disk too full to build;
+  a toolchain that no longer resolves.
+- **Leaked test state is not a broken VM.** Leaked cgroup scopes, XDP
+  attachments, netns, or nft tables have their own documented cleanups
+  (§ "Leaked workload cgroups across runs" above; `debugging.md`
+  § "Leftover XDP attachments across runs"). Run those first. If they do
+  not restore a working VM, recreate it.
+- **All Conductor workspaces share the one `overdrive` instance.** An
+  unusable VM is unusable for every workspace, so recreating it takes
+  nothing away from them. Say in your report that you recreated it,
+  because a run in progress in another workspace dies with it.
+- **The first build after a recreate is cold.** The target cache is
+  gone, so rebuild the BPF object (`cargo xtask bpf-build`) before
+  anything that compiles `overdrive-dataplane`.
+
+**Symptom during review:** an agent that reports "the Lima VM is
+read-only / unavailable, waiting for it to come back" or stops to ask
+the user to fix the VM, instead of recreating it.
 
 **Default invocation:**
 

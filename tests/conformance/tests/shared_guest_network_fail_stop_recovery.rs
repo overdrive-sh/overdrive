@@ -57,7 +57,6 @@ fn events_named<'a>(events: &'a [TraceEvent], name: &str) -> Vec<&'a TraceEvent>
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step for retained shared-owner supervisor and direct-handler replacement"]
 #[allow(
     clippy::too_many_lines,
     reason = "one conformance body preserves the complete fail-stop, drain, fresh-handler, event, API, and cleanup narrative"
@@ -209,7 +208,6 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step for retained shared-owner supervisor forced-timeout diagnostics"]
 async fn forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain() {
     let trace = TraceHistory::install_global();
     let harness = DirectHandlerHarness::new();
@@ -247,7 +245,6 @@ async fn forced_shutdown_timeout_records_abandoned_at_exit_separately_from_grace
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step for shared-owner quiesce failure cgroup-kill/fail-stop"]
 async fn unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop() {
     let _trace = TraceHistory::install_global();
     let harness = DirectHandlerHarness::new();

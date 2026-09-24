@@ -887,6 +887,8 @@ impl MtlsIntercept for HostMtlsIntercept {
             });
         }
         let guard = self.replace_observed_shared_program(observed, requested)?;
+        crate::mtls_intercept::ensure_fwmark_rule()?;
+        crate::mtls_intercept::ensure_local_route()?;
         *self.targets.lock() = Some((leg_f.port(), leg_c.port()));
         *self.program.lock() = Some(requested_identity);
         Ok(guard)

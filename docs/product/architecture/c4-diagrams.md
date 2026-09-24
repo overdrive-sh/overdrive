@@ -1574,6 +1574,156 @@ postconditions, complete ordered/all-child observation, exact-exclusive
 deletion and typed pre-I/O validation, and is independently approved at review
 iteration 12 before DISTILL executable reconciliation.
 
+**Superseded in part (2026-09-24).** The #295 correctness-recovery replacement,
+accepted by the user on 2026-09-24, replaces parts of this view; its diagrams
+are in the next subsection. Where the earlier diagrams below conflict with it,
+the replacement governs:
+
+- `VmDriver + CloudHypervisorVmm` "attaches the host TAP directly" (ADR-0127 to
+  ADR-0129; the launch confinement also gains ADR-0143's filter);
+- the action shim's `require active-count < 16,384` step (ADR-0132 to
+  ADR-0134; 16,384 is a fixed placeholder, and Retiring leases count);
+- the supervisor's audit scope, DNS replacement, and unconditional quiescence
+  (#295 D-295-R13 to R15);
+- the start sequence's missing activation step (ADR-0131);
+- the ingress-only TCX classifier, which does not cover host→guest delivery: a
+  TAP egress guest-MAC classifier is added (ADR-0142 / D-295-R21) so a
+  host-side-MAC change cannot redirect another guest's host-to-guest
+  plaintext;
+- Cloud Hypervisor's confinement: a launch seccomp filter loaded in the
+  launcher child before its first exec denies every Cloud Hypervisor thread
+  the TAP-mutating ioctls (ADR-0143 / D-295-R22).
+
+### Correctness-recovery replacement — accepted 2026-09-24
+
+**Status: ACCEPTED by the user on 2026-09-24 (D-295-R1 to R22; R18 and R19
+conditional on their native REDs).** D-295-R7 (held counting, no slot
+reservation), D-295-R9, the D-295-R11 retry-forever reclaim, the D-295-R14 kill
+scope (unconfirmed TAPs and damaged per-VM parts), the D-295-R20
+cleanup-pending status, and the D-295-R22 launch seccomp filter are user
+rulings of 2026-09-24. The launch filter exists for x86_64 only, so the
+Cloud Hypervisor launches shown below happen only on x86_64. On any other
+architecture, aarch64 included, the node composes no microVM driver
+([GH #302](https://github.com/overdrive-sh/overdrive/issues/302)). Normative contracts are
+in the #295 feature delta, § *Correctness-Recovery Replacement DESIGN*. The
+decisions add no deployable unit and no new owner. As in the
+accepted view, the Level 2 diagram shows in-process owners as containers. The
+TAP queue helper, the in-child launch hook (close-on-exec, then the launch
+seccomp filter), the admission read-port, the
+reclaim action, the DNS port, the TAP restore, the policy-route audit, the
+intercept-mark guard table, the kill-only capability, and the cleanup-pending
+projection all sit inside existing owners.
+
+#### C4 Level 1 — System Context (correctness recovery, accepted)
+
+```mermaid
+C4Context
+  title Shared-bridge microVM network — system context (correctness recovery, accepted 2026-09-24)
+
+  Person(operator, "Platform operator", "Deploys and observes microVM workloads")
+  System(overdrive, "Overdrive node", "Admits guest attachments node-wide, owns the TAP queue handoff, transparent mTLS, and bounded shared-owner recovery")
+  System_Ext(guest, "Identity-unaware microVM guests", "Dial plaintext; hold no certificate or key; no L2 frame before intercept-live")
+  System_Ext(ch, "Cloud Hypervisor v53+", "Inherits only descriptors 0-3, fd 3 being one TAP queue, and the launch seccomp filter on every thread; never raises or mutates the TAP")
+  System_Ext(kernel, "Linux/KVM", "Bridge, persistent TAP, TCX, nftables, policy routing, cgroup v2, kTLS, splice")
+  System_Ext(proc_supervisor, "External process supervisor", "Restarts serve after exit status 1; deployment precondition, not #295")
+
+  Rel(operator, overdrive, "Runs overdrive serve and overdrive deploy")
+  Rel(overdrive, ch, "Spawns under the launch seccomp filter, with the TAP queue mapped to fd 3")
+  Rel(ch, guest, "Boots and connects the guest NIC to")
+  Rel(overdrive, kernel, "Creates the TAP down, raises it after intercept-live, and converges intercept state through")
+  Rel(proc_supervisor, overdrive, "Starts a new serve process after fail-stop")
+```
+
+#### C4 Level 2 — Container (correctness recovery, accepted)
+
+```mermaid
+C4Container
+  title Containers — TAP queue handoff, node-wide admission, full supervision (accepted 2026-09-24)
+
+  Container_Boundary(node, "overdrive serve process") {
+    Container(cli, "CLI serve owner", "overdrive-cli", "Selects typed fail-stop ahead of SIGINT and SIGTERM; bounds shutdown; exits 1")
+    Container(compose, "Serve composition root", "overdrive-control-plane", "Requires intercept and guest-DNS ports in ServerConfig; always composes worker, DNS, and supervisor")
+    Container(pool, "Guest address pool", "overdrive-control-plane", "One per server; sole admission linearization point; Admitted and Retiring leases both count against the placeholder cap until cleanup finishes")
+    Container(wl, "WorkloadLifecycle + scheduler", "overdrive-reconcilers", "Reads held and retiring counts through a read-port; gates restart with its predecessor counted; at the cap reclaims the predecessor first; emits row-neutral reclaim on every path")
+    Container(shim, "Action shim", "overdrive-control-plane", "Assigns, provisions down, starts VM, writes Running, installs intercept, waits on the EXEC gate while recovering, activates, releases EXEC; retires before cleanup")
+    Container(sw, "Shared guest-network owner", "overdrive-control-plane", "Creates persistent TAPs down, owned by uid 0, and records each TAP's host-side MAC; activates after intercept-live; per-TAP TCX ingress + egress guest-MAC classifiers (egress delivers unicast only to the registered guest MAC and drops it on a map miss, ADR-0142) over the shared endpoint map; reports per-TAP quiescence and per-allocation damage including a host-side-MAC or debug-mask change; excludes condemned allocations; restores quiesced TAPs only when asked after a clean audit")
+    Container(vmm, "VmDriver + CloudHypervisorVmm", "overdrive-worker + overdrive-host", "Attaches one TAP queue, verifies flags and down-state, maps it to fd 3; in one child hook marks every other descriptor close-on-exec, then loads the launch seccomp filter (TAP-mutating ioctls never reach the tun ioctl handler on any CH thread: EPERM, or CH's own stricter action; a foreign syscall ABI is killed); drops the queue before any await")
+    Container(mtls, "Node-shared intercept owner", "overdrive-worker", "Awaited convergent element removal; boot member clear; TPROXY-before-mark rules (ADR-0140, conditional on native RED); audits and repairs program, policy route, guard table, and members with live allocations")
+    Container(dns, "Guest DNS owner", "overdrive-control-plane", "Built through the required GuestDns port; replacement only after EXEC is closed")
+    Container(sup, "Shared-network supervisor", "overdrive-control-plane", "Audits all three owners every second; converges failing owners, re-audits, kills audited damage, then restores TAPs; through a kill-only capability kills only VMs whose TAP could not be confirmed down or whose parts are damaged, or the whole slice if that set is undetermined or a kill fails")
+    Container(api, "Allocation status handler", "overdrive-control-plane", "Serves GET /v1/allocs; derives CleanupPending from the live lease and row state")
+  }
+  Person(operator, "Platform operator", "Runs overdrive workload describe")
+  System_Ext(ch, "Cloud Hypervisor", "One queue holder per TAP")
+  System_Ext(kernel, "Linux kernel", "TAP, bridge, TCX, nftables, FIB, cgroup v2")
+
+  Rel(cli, compose, "Starts, then waits on the fail-stop request from")
+  Rel(wl, pool, "Reads held and retiring counts and leases through")
+  Rel(shim, pool, "Assigns, retires, and releases leases through")
+  Rel(shim, sw, "Provisions, activates, and tears down through")
+  Rel(shim, vmm, "Starts and stops the VM through")
+  Rel(shim, mtls, "Installs and removes allocation elements through")
+  Rel(vmm, ch, "Spawns under the launch seccomp filter with fd 3 = TAP queue")
+  Rel(sw, kernel, "Mutates and reads back TAP, bridge, TCX, and guard state in")
+  Rel(mtls, kernel, "Converges nft program, policy route, members, and intercept-mark guard table in")
+  Rel(sup, sw, "Audits and converges")
+  Rel(sup, mtls, "Audits and converges")
+  Rel(sup, dns, "Audits and replaces")
+  Rel(sup, kernel, "Kills VMMs whose TAP stayed unconfirmed or whose parts are damaged (per-VM cgroup.kill), or the whole workloads slice when undetermined, through")
+  Rel(sup, cli, "Sends typed fail-stop request to")
+  Rel(operator, api, "Reads allocation status, including CleanupPending, from")
+  Rel(api, pool, "Reads the leases of the listed allocations from")
+```
+
+#### Dynamic sequence — allocation start and teardown (correctness recovery, accepted)
+
+```mermaid
+sequenceDiagram
+  participant SH as Action shim
+  participant POOL as Guest address pool
+  participant SW as Shared guest-network owner
+  participant VM as CloudHypervisorVmm
+  participant CH as Cloud Hypervisor
+  participant OBS as ObservationStore
+  participant ML as Intercept owner
+  participant G as Guest
+
+  SH->>POOL: assign(alloc) (a restart assigns its successor the same way)
+  POOL-->>SH: plan, or AdmissionCapReached(held, retiring) / LeaseRetiring / PoolExhausted (no effect, no row)
+  SH->>SW: provision(plan)
+  SW-->>SH: persistent TAP down (owner uid 0, debug mask 0), guard, endpoint, TCX ingress and egress read back; host-side MAC recorded
+  SH->>VM: create(config)
+  VM->>VM: build the launch seccomp program; attach_tap_queue checks flags 0x5802 and TAP down
+  VM->>CH: spawn with --net fd=[3]; child hook marks every other fd close-on-exec, then loads the launch seccomp filter before exec; parent copy dropped
+  CH-->>SH: guest READY (TAP still down, zero frames)
+  SH->>OBS: write Running
+  SH->>ML: start_alloc (2 + P elements read back)
+  ML-->>SH: mtls.intercept.install.success
+  SH->>SH: wait on the EXEC gate while recovering (FailStop: withhold, no row)
+  SH->>SW: activate(plan)
+  SW-->>SH: Raised (TAP up, read back), or QuiescenceLatched (wait again)
+  SH->>G: release EXEC
+  Note over SH,ML: teardown
+  SH->>VM: stop (quiescence proven)
+  SH->>POOL: retire(alloc)
+  SH->>ML: stop_alloc: drain, then remove_allocation_elements
+  ML-->>SH: Ok, or ElementRemoval (record and lease retained for retry)
+  SH->>SW: teardown: endpoint, TCX ingress and egress links, TAP down, delete, complement read back (absent parts count as removed)
+  SH->>POOL: release(alloc) last
+```
+
+Until `release`, `overdrive workload describe` shows the allocation as
+`CleanupPending` (D-295-R20); after a failed stop the row stays `Running`, but
+the status never does.
+
+A leased Failed or Terminated allocation whose cleanup no other action owns (a
+superseded restart predecessor whose cleanup failed, a leftover allocation of a
+stopped or deleted workload, or, at the cap, a replacement's predecessor) is
+cleaned up by the row-neutral `ReclaimAllocationNetwork` action (ADR-0136),
+with persisted-input backoff. It writes no row. At the cap the restart is
+emitted only after that reclaim releases the predecessor's lease (user ruling
+D-295-R7).
+
 ### C4 Level 1 — System Context
 
 ```mermaid

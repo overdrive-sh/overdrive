@@ -293,7 +293,7 @@ fn network_launch_prefix(
 
 fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
     format!(
-        "tap={},mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        "tap={},mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x},offload_tso=off,offload_ufo=off,offload_csum=off",
         attachment.tap,
         attachment.mac[0],
         attachment.mac[1],
@@ -1061,7 +1061,7 @@ mod tests {
         let net_flag = args.iter().position(|arg| arg == "--net").unwrap();
         assert_eq!(
             args[net_flag + 1],
-            "tap=ovd-tap-002a,mac=02:00:00:00:00:2a",
+            "tap=ovd-tap-002a,mac=02:00:00:00:00:2a,offload_tso=off,offload_ufo=off,offload_csum=off",
             "Cloud Hypervisor must attach the persistent TAP with its slot-derived MAC",
         );
         assert!(

@@ -7,11 +7,11 @@ post-network-initialization barrier after the step 02-03 metal counterexample,
 and **amended** (2026-08-29) to make the Q9 exact-rule hit kernel-observable
 and mutation-aware and to pin its native-metal trust boundary, and **amended**
 (2026-08-31) to keep listener-loss fail-closed by ordering the existing fwmark
-before TPROXY, and **amended** (2026-09-23, user-directed with no review cycle)
-after native #295 evidence proved that guest sysctls cannot enforce the
-zero-frame barrier once the host TAP is administratively up. The post-#295
-owner now leaves the TAP down through READY/Running and activates it only after
-the mTLS install-success receipt.
+before TPROXY, and **amended** (2026-09-24) twice by the accepted #295
+correctness-recovery replacement (see § *Accepted amendment 2026-09-24* at the
+end). This ADR is operative on `main`: the per-workload netns and routed `/30`
+TAP wire are live there, and `workload_addr` carries its guest address on the
+operator API.
 Extends ADR-0071 (Path A per-workload netns +
 nft-TPROXY both directions) to VM-kind (guest-stack) workloads; realises the
 guest-stack intercept adapter ADR-0069 STAGED to GH #222. Companion:
@@ -170,35 +170,15 @@ A closed control-frame allowlist is rejected: no such frame is required, and
 an allowance creates a hiding place for unexpected destinations or payload-
 bearing TCP/UDP.
 
-**2026-09-23 reachable counterexample and superseding barrier.** On the
-post-#295 shared bridge, native capture observed guest-source ARP replies and
-TCP RST frames before the exact caller allocation's
-`mtls.intercept.install.success` event. The guest generated them in response
-to ambient neighbor traffic before operator EXEC. Disabling IPv6 and
-`arp_notify` prevents selected autonomous announcements; it does not prevent
-the configured guest kernel from answering received traffic. Therefore
-provision-time host TAP-up and this zero-frame contract cannot coexist.
-
-The selected correction preserves the guest protocol and every lifecycle
-meaning. The one shared guest-network owner provisions the complete guarded
-TAP/endpoint/TCX attachment but reads it back administratively down. Cloud
-Hypervisor attaches that persistent TAP without changing its administrative
-state; the guest still applies its address, route, resolver, and suppression
-settings and reaches READY. After the accepted Running row, the action shim
-awaits the existing allocation mTLS `2 + P` element installation/read-back,
-emits the existing success event, awaits exact TAP activation/read-back through
-the same owner, and only then releases EXEC. READY still means guest platform
-initialization complete and blocked; Running still means READY plus durable row
-write. Neither newly promises host forwarding or command execution.
-
-The event name remains truthful and unchanged: it records successful mTLS
-intercept installation, not TAP activation or allocation completion. Its
-synchronous timestamp is deliberately before the only host-TAP up transition,
-so every guest-originated frame must be strictly later. Moving the event after
-activation would allow the first enabled frame to precede the claimed barrier.
-Allowing ARP/control frames, installing allocation capability state before a
-guest reaches READY, or adding a second VMM/action-shim TAP owner are rejected
-as respectively contradictory, wasteful/owner-reordering, and duplicative.
+**#295 shared-bridge realization (amended 2026-09-24; see § *Accepted amendment
+2026-09-24*).** On the post-#295 shared bridge, a configured guest answers
+traffic it receives whenever its host TAP is up (native run `c4d36190`). Guest
+sysctls therefore cannot supply this contract there, and Cloud Hypervisor v53's
+named-TAP path always raises the TAP (native run `f1a15668`). The zero-frame
+contract is unchanged. Cloud Hypervisor inherits one TAP queue descriptor, so
+the host TAP stays down through READY and Running, and the shared guest-network
+owner raises it only after the mTLS install-success event and before EXEC
+(ADR-0127, ADR-0128 and ADR-0131).
 
 The metal witness starts after C3 has provisioned the allocation netns, tap,
 and host-veth, but before `Vmm::create` delegates to real CH. An observation-
@@ -236,10 +216,8 @@ capture's matching-packet count and validated IPv4 `tot_len` (the nft
 change/wrap, partial/interrupted dump, loss, or ambiguity fails before leg-F
 recovers the same original destination, while no cleartext copy reaches the
 external peer path and the inter-agent path carries TLS records. Thus the
-post-#295 complete order is `capture-ready ≺ provisioned-TAP-down ≺
-VMM-spawn-with-TAP-down ≺ network-ready ≺ READY ≺ Running ≺
-mTLS-2+P-read-back ≺ mtls.intercept.install.success/intercept-live ≺
-TAP-activation-read-back ≺ EXEC-release ≺ operator-first-connect`.
+complete order is `capture-ready ≺ VMM-spawn ≺
+network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺ operator-first-connect`.
 
 ### 5. Exact outbound-rule hit and dead-listener closure
 
@@ -413,3 +391,35 @@ closed zero-frame oracle.
 - [nftables statements and counter statement](https://netfilter.org/projects/nftables/manpage.html#COUNTER-STATEMENT)
   — counter records packets+bytes; a non-terminal statement is passive for
   rule evaluation, and its placement after the matches scopes what it counts.
+
+## Accepted amendment 2026-09-24 — #295 correctness-recovery replacement
+
+Accepted by the user on 2026-09-24 with the GH #295 correctness-recovery
+replacement DESIGN (`docs/feature/netns-density-295/feature-delta.md`). This ADR
+is operative on `main`, so its text above is retained as the contract it
+recorded; the two changes below are stated here rather than rewritten into it.
+
+1. **Zero-frame realization on the shared bridge (D-295-R1, R2, R5).** The
+   closed zero-frame contract above is unchanged. On the post-#295 shared
+   bridge it is realized by
+   [ADR-0127](adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md)
+   (Cloud Hypervisor inherits one TAP queue descriptor, so the TAP stays down
+   through READY and Running),
+   [ADR-0128](adr-0128-vmm-adapter-owns-per-launch-tap-queue-descriptor.md), and
+   [ADR-0131](adr-0131-activate-allocation-tap-after-intercept-live.md) (the
+   shared guest-network owner raises the TAP only after the mTLS
+   install-success event and before EXEC). The guest-sysctl realization above
+   remains the one for this ADR's per-workload netns topology.
+2. **The 2026-08-31 listener-loss claim is corrected (D-295-R19).** The
+   ordering section above says the mark-before-TPROXY order keeps the packet
+   "on the host local stack instead of allowing the original route to reach a VM
+   or external peer". That is true, but it is not fail-closed: with no
+   transparent listener the mark survives `NFT_BREAK`, the `fwmark 1 lookup 100`
+   route selects the `local` route, and socket lookup delivers guest TCP to any
+   host listener bound to the wildcard address. For the #295 constant program's
+   outbound rule,
+   [ADR-0140](adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md)
+   orders TPROXY, then the mark, then accept, so a failed outbound TPROXY falls
+   through to the unhandled-intercept drop; it is accepted conditional on its
+   native RED. This ADR's per-allocation rules leave with the #295 single cut;
+   until then they keep the order recorded above.

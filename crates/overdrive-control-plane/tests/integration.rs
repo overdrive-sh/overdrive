@@ -163,6 +163,9 @@ mod integration {
     /// GH #295 S-ND295-00 — composed production-startup ordering and
     /// scratch-probe refusal through the accepted shared-owner port.
     mod shared_guest_network_startup;
+    /// netns-density-295 recovery proof §3.4 — lower element deletion /
+    /// read-back failure through the real `StopAllocation` owner path.
+    mod shared_element_cleanup_failure;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of
     /// `reconciler-memory-redb`. Action shim threads `Action.terminal`

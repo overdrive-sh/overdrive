@@ -68,6 +68,7 @@ use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
+use super::serve_lifetime_support::kill_serve_owner;
 use super::vm_walking_skeleton::{
     build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
     stage_rootfs_with_extra_binaries, stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
@@ -5364,10 +5365,8 @@ async fn a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_
     .await;
     drop(boot_one_cuts);
     let first_boot = finish_after_authoritative_cleanup(first_boot, async { Ok(()) }, async {
-        boot_one
-            .abort_for_test()
+        kill_serve_owner(boot_one)
             .await
-            .map(|_| ())
             .map_err(|error| format!("abruptly revoke boot-one owner: {error}"))
     })
     .await;
@@ -5529,10 +5528,8 @@ async fn failed_re_enrolment_after_platform_reclamation_stays_closed() {
     .await;
     drop(boot_one_cuts);
     let first_boot = finish_after_authoritative_cleanup(first_boot, async { Ok(()) }, async {
-        boot_one
-            .abort_for_test()
+        kill_serve_owner(boot_one)
             .await
-            .map(|_| ())
             .map_err(|error| format!("abruptly revoke restart-failure boot one: {error}"))
     })
     .await;

@@ -103,6 +103,8 @@ impl GuestNetworkPlan {
 pub trait GuestNetworkProvisioner: Send + Sync {
     /// Provision the named attachment to its full read-back postcondition.
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()>;
+    /// Activate the protected attachment after the allocation intercept is live.
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<()>;
     /// Tear down the named attachment to its empty complement.
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()>;
 }
@@ -1806,10 +1808,16 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
         plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), NetlinkError> {
         let client = overdrive_netlink::Client::new()?;
-        client.set_link_master(&plan.assignment().tap, plan.bridge()).await
+        client.set_link_master(&plan.assignment().tap, plan.bridge()).await?;
+        // Linux may adopt the first attached port's address as a bridge's
+        // operational MAC. Reassert the accepted fixed classifier identity
+        // after every membership mutation and before TAP-up/read-back.
+        client.set_link_mac(plan.bridge(), overdrive_core::dataplane::GUEST_BRIDGE_MAC).await
     }
     async fn set_tap_up(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
-        overdrive_netlink::Client::new()?.set_link_up(&plan.assignment().tap).await
+        overdrive_netlink::ethtool::disable_tx_offload(&plan.assignment().tap).await?;
+        let result = overdrive_netlink::Client::new()?.set_link_up(&plan.assignment().tap).await;
+        result
     }
     async fn set_tap_down(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
         overdrive_netlink::Client::new()?.set_link_down(&plan.assignment().tap).await
@@ -1982,11 +1990,25 @@ fn link_kind(kind: overdrive_netlink::ObservedLinkKind) -> GuestLinkKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostGuestNetworkAllocationPhase {
+    ProvisionedDown,
+    Active,
+    QuiescedActive,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HostGuestNetworkAllocationState {
     tap: String,
     ifindex: u32,
     program_id: u32,
+    phase: HostGuestNetworkAllocationPhase,
+}
+
+#[derive(Debug, Default)]
+struct HostGuestNetworkLifecycle {
+    quiescing: bool,
+    allocations: BTreeMap<AllocationId, HostGuestNetworkAllocationState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2012,6 +2034,7 @@ pub(super) struct HostSharedGuestNetworkOwner {
     allocation_io: Arc<dyn GuestNetworkAllocationIo>,
     tcx: Arc<parking_lot::Mutex<Option<HostGuestTcxState>>>,
     allocations: parking_lot::Mutex<BTreeMap<AllocationId, HostGuestNetworkAllocationState>>,
+    allocation_lifecycle: tokio::sync::Mutex<HostGuestNetworkLifecycle>,
     // Failed partial provisions stay private and lease-correlated until the
     // existing teardown boundary proves the same empty complement; this is
     // process-local retry state, never a published allocation or persistence.
@@ -2039,6 +2062,7 @@ impl HostSharedGuestNetworkOwner {
             allocation_io,
             tcx,
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
+            allocation_lifecycle: tokio::sync::Mutex::new(HostGuestNetworkLifecycle::default()),
             rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
     }
@@ -2057,6 +2081,7 @@ impl HostSharedGuestNetworkOwner {
             allocation_io,
             tcx: Arc::new(parking_lot::Mutex::new(None)),
             allocations: parking_lot::Mutex::new(BTreeMap::new()),
+            allocation_lifecycle: tokio::sync::Mutex::new(HostGuestNetworkLifecycle::default()),
             rollback_pending: parking_lot::Mutex::new(BTreeMap::new()),
         }
     }
@@ -2839,7 +2864,21 @@ impl HostSharedGuestNetworkOwner {
 #[async_trait::async_trait]
 impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()> {
-        if self.allocations.lock().contains_key(plan.alloc()) {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
+        if lifecycle.quiescing {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapCreate,
+                expected: GuestNetworkFact::SharedComponent {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    healthy: true,
+                },
+                observed: Some(GuestNetworkFact::SharedComponent {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    healthy: false,
+                }),
+            });
+        }
+        if lifecycle.allocations.contains_key(plan.alloc()) {
             return Ok(());
         }
         let mut ifindex = None;
@@ -3015,16 +3054,12 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 });
             }
 
-            self.allocation_io
-                .set_tap_up(plan)
-                .await
-                .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapSetUp, source))?;
             let final_bridge = self.observe_bridge(plan).await?;
             let final_tap =
                 self.allocation_io.observe_tap(plan).await.map_err(|source| {
                     Self::netlink_error(GuestNetworkOperation::TapObserve, source)
                 })?;
-            let (mut expected, observed) = Self::tap_fact(plan, &final_tap, true);
+            let (mut expected, observed) = Self::tap_fact(plan, &final_tap, false);
             if let GuestNetworkFact::Tap { ifindex, .. } = &mut expected {
                 *ifindex = Some(tap_ifindex);
             }
@@ -3086,7 +3121,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                     ifindex: None,
                     link_kind: GuestLinkKind::Tap,
                     persistent: true,
-                    up: true,
+                    up: false,
                     owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                 },
                 observed: None,
@@ -3109,11 +3144,227 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 tap: plan.assignment().tap.clone(),
                 ifindex,
                 program_id,
+                phase: HostGuestNetworkAllocationPhase::ProvisionedDown,
+            },
+        );
+        lifecycle.allocations.insert(
+            plan.alloc().clone(),
+            HostGuestNetworkAllocationState {
+                tap: plan.assignment().tap.clone(),
+                ifindex,
+                program_id,
+                phase: HostGuestNetworkAllocationPhase::ProvisionedDown,
             },
         );
         Ok(())
     }
+
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
+        if lifecycle.quiescing {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapSetUp,
+                expected: GuestNetworkFact::Tap {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: None,
+                    link_kind: GuestLinkKind::Tap,
+                    persistent: true,
+                    up: true,
+                    owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                },
+                observed: Some(GuestNetworkFact::Tap {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: None,
+                    link_kind: GuestLinkKind::Tap,
+                    persistent: true,
+                    up: false,
+                    owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                }),
+            });
+        }
+        let state = lifecycle.allocations.get(plan.alloc()).cloned().ok_or_else(|| {
+            GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapSetUp,
+                expected: GuestNetworkFact::Tap {
+                    name: plan.assignment().tap.clone(),
+                    ifindex: None,
+                    link_kind: GuestLinkKind::Tap,
+                    persistent: true,
+                    up: true,
+                    owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                },
+                observed: None,
+            }
+        })?;
+        if matches!(state.phase, HostGuestNetworkAllocationPhase::Active) {
+            return Ok(());
+        }
+
+        let bridge_ifindex = self.observe_bridge(plan).await?;
+        let tap = self
+            .allocation_io
+            .observe_tap(plan)
+            .await
+            .map_err(|source| Self::netlink_error(GuestNetworkOperation::TapObserve, source))?;
+        let (expected_tap, observed_tap) = Self::tap_fact(plan, &tap, false);
+        if expected_tap != observed_tap.clone().unwrap_or_else(|| expected_tap.clone()) {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapObserve,
+                expected: expected_tap,
+                observed: observed_tap,
+            });
+        }
+        let tap_ifindex = match tap {
+            GuestNetworkAllocationTapObservation::Persistent {
+                ifindex, master_ifindex, ..
+            } => {
+                Self::ensure_master(ifindex, bridge_ifindex, master_ifindex)?;
+                ifindex
+            }
+            GuestNetworkAllocationTapObservation::Incompatible { .. }
+            | GuestNetworkAllocationTapObservation::Absent { .. } => {
+                let (expected, observed) = Self::tap_fact(plan, &tap, false);
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected,
+                    observed,
+                });
+            }
+        };
+        let expected_members = self.expected_guard_members(None, None);
+        let guard = self
+            .allocation_io
+            .observe_guard(&expected_members)
+            .map_err(|error| Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error))?;
+        self.guard_postcondition(&expected_members, guard)?;
+        let endpoint = self
+            .allocation_io
+            .read_endpoint(plan, tap_ifindex)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::EndpointMapObserve, source))?;
+        let expected_endpoint = GuestTcxEndpoint {
+            source_ipv4: plan.assignment().address,
+            source_mac: plan.assignment().mac,
+            bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+        };
+        if endpoint != Some(expected_endpoint) {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::EndpointMapObserve,
+                expected: GuestNetworkFact::EndpointMapEntry {
+                    ifindex: tap_ifindex,
+                    value: Some(GuestEndpointFact {
+                        source_ip: expected_endpoint.source_ipv4,
+                        source_mac: expected_endpoint.source_mac,
+                        bridge_mac: expected_endpoint.bridge_mac,
+                    }),
+                },
+                observed: Some(GuestNetworkFact::EndpointMapEntry {
+                    ifindex: tap_ifindex,
+                    value: endpoint.map(|value| GuestEndpointFact {
+                        source_ip: value.source_ipv4,
+                        source_mac: value.source_mac,
+                        bridge_mac: value.bridge_mac,
+                    }),
+                }),
+            });
+        }
+        let attachment = self
+            .allocation_io
+            .query_attachment(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxQuery, source))?;
+        if attachment.program_ids != vec![state.program_id] {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TcxQuery,
+                expected: GuestNetworkFact::TcxAttachment {
+                    ifindex: tap_ifindex,
+                    program_id: Some(state.program_id),
+                    attach_point: Some(TcxAttachPoint::Ingress),
+                },
+                observed: Some(GuestNetworkFact::TcxAttachment {
+                    ifindex: tap_ifindex,
+                    program_id: attachment.program_ids.first().copied(),
+                    attach_point: Some(TcxAttachPoint::Ingress),
+                }),
+            });
+        }
+        if !self
+            .allocation_io
+            .link_pin_present(plan)
+            .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxLinkPin, source))?
+        {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TcxLinkPin,
+                expected: GuestNetworkFact::BpfLinkPin { path: PathBuf::new(), link_id: None },
+                observed: Some(GuestNetworkFact::BpfLinkPin {
+                    path: PathBuf::new(),
+                    link_id: None,
+                }),
+            });
+        }
+
+        if let Err(source) = self.allocation_io.set_tap_up(plan).await {
+            self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
+                state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown;
+            });
+            lifecycle
+                .allocations
+                .entry(plan.alloc().clone())
+                .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown);
+            return Err(Self::netlink_error(GuestNetworkOperation::TapSetUp, source));
+        }
+        let result = async {
+            let final_bridge = self.observe_bridge(plan).await?;
+            let final_tap =
+                self.allocation_io.observe_tap(plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapObserve, source)
+                })?;
+            let (expected, observed) = Self::tap_fact(plan, &final_tap, true);
+            if expected != observed.clone().unwrap_or_else(|| expected.clone()) {
+                return Err(GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected,
+                    observed,
+                });
+            }
+            if let GuestNetworkAllocationTapObservation::Persistent {
+                ifindex,
+                master_ifindex,
+                ..
+            } = final_tap
+            {
+                Self::ensure_master(ifindex, final_bridge, master_ifindex)?;
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = result {
+            let down =
+                self.allocation_io.set_tap_down(plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapSetDown, source)
+                });
+            self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
+                state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown;
+            });
+            lifecycle
+                .allocations
+                .entry(plan.alloc().clone())
+                .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::ProvisionedDown);
+            return match down {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(cleanup),
+            };
+        }
+        self.allocations.lock().entry(plan.alloc().clone()).and_modify(|state| {
+            state.phase = HostGuestNetworkAllocationPhase::Active;
+        });
+        lifecycle
+            .allocations
+            .entry(plan.alloc().clone())
+            .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::Active);
+        Ok(())
+    }
+
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
         let pending_rollback = { self.rollback_pending.lock().get(plan.alloc()).cloned() };
         if let Some(pending) = pending_rollback {
             let (error, tap_removed) = self
@@ -3134,7 +3385,12 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             self.rollback_pending.lock().remove(plan.alloc());
             return Ok(());
         }
-        let Some(state) = self.allocations.lock().get(plan.alloc()).cloned() else {
+        let Some(state) = lifecycle
+            .allocations
+            .get(plan.alloc())
+            .cloned()
+            .or_else(|| self.allocations.lock().get(plan.alloc()).cloned())
+        else {
             return Ok(());
         };
         let mut first = None;
@@ -3296,6 +3552,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             return Err(error);
         }
         self.allocations.lock().remove(plan.alloc());
+        lifecycle.allocations.remove(plan.alloc());
         Ok(())
     }
 }
@@ -3499,6 +3756,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         })
     }
     async fn converge_shared(&self) -> Result<()> {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
         const BRIDGE: &str = "ovd-gbr0";
         const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
         overdrive_netlink::block_on_host_netlink(|| async {
@@ -3658,9 +3916,66 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             .pin_counter_map(&counter_pin)
             .map_err(|source| Self::tcx_error(GuestNetworkOperation::CounterMapPin, source))?;
         *self.tcx.lock() = Some(HostGuestTcxState { program, inventory: identity });
+        if lifecycle.quiescing {
+            let quiesced = lifecycle
+                .allocations
+                .iter()
+                .filter(|(_, state)| {
+                    matches!(state.phase, HostGuestNetworkAllocationPhase::QuiescedActive)
+                })
+                .map(|(alloc, state)| (alloc.clone(), state.clone()))
+                .collect::<Vec<_>>();
+            for (alloc, state) in quiesced {
+                let Some(plan) = action_plan(&alloc) else {
+                    return Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapSetUp,
+                        expected: GuestNetworkFact::Tap {
+                            name: state.tap,
+                            ifindex: Some(state.ifindex),
+                            link_kind: GuestLinkKind::Tap,
+                            persistent: true,
+                            up: true,
+                            owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        },
+                        observed: None,
+                    });
+                };
+                self.allocation_io.set_tap_up(&plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapSetUp, source)
+                })?;
+                let observed = self.allocation_io.observe_tap(&plan).await.map_err(|source| {
+                    Self::netlink_error(GuestNetworkOperation::TapObserve, source)
+                })?;
+                let (expected, actual) = Self::tap_fact(&plan, &observed, true);
+                if expected != actual.clone().unwrap_or_else(|| expected.clone()) {
+                    return Err(GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapObserve,
+                        expected,
+                        observed: actual,
+                    });
+                }
+                if let GuestNetworkAllocationTapObservation::Persistent {
+                    ifindex,
+                    master_ifindex,
+                    ..
+                } = observed
+                {
+                    let bridge_ifindex = self.observe_bridge(&plan).await?;
+                    Self::ensure_master(ifindex, bridge_ifindex, master_ifindex)?;
+                }
+                if let Some(state) = lifecycle.allocations.get_mut(&alloc) {
+                    state.phase = HostGuestNetworkAllocationPhase::Active;
+                }
+                self.allocations.lock().entry(alloc).and_modify(|state| {
+                    state.phase = HostGuestNetworkAllocationPhase::Active;
+                });
+            }
+            lifecycle.quiescing = false;
+        }
         Ok(())
     }
     async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
+        let lifecycle = self.allocation_lifecycle.lock().await;
         let bridge = overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
             client.observe_link_identity("ovd-gbr0").await
@@ -3735,29 +4050,69 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 });
             }
         }
-        let tcx = self.tcx.lock();
-        let Some(tcx) = tcx.as_ref() else {
-            return Err(SharedGuestNetworkAuditError {
-                component: SharedGuestNetworkComponent::TcxLink,
-                source: GuestNetworkError::Tcx {
-                    operation: GuestNetworkOperation::TcxLoad,
-                    source: GuestTcxError::CaptureUnavailable {
-                        family: overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxProgram,
-                    },
-                },
-            });
-        };
-        for (component, observed) in [
-            (SharedGuestNetworkComponent::EndpointMap, tcx.inventory.observe_endpoint_maps()),
-            (SharedGuestNetworkComponent::CounterMap, tcx.inventory.observe_counter_maps()),
-            (SharedGuestNetworkComponent::TcxLink, tcx.inventory.observe_tcx_links()),
-        ] {
-            if let Err(source) = observed {
+        {
+            let tcx = self.tcx.lock();
+            let Some(tcx) = tcx.as_ref() else {
                 return Err(SharedGuestNetworkAuditError {
-                    component,
+                    component: SharedGuestNetworkComponent::TcxLink,
                     source: GuestNetworkError::Tcx {
-                        operation: GuestNetworkOperation::CleanupComplement,
-                        source,
+                        operation: GuestNetworkOperation::TcxLoad,
+                        source: GuestTcxError::CaptureUnavailable {
+                            family:
+                                overdrive_dataplane::guest_tcx::GuestTcxInventoryFamily::TcxProgram,
+                        },
+                    },
+                });
+            };
+            for (component, observed) in [
+                (SharedGuestNetworkComponent::EndpointMap, tcx.inventory.observe_endpoint_maps()),
+                (SharedGuestNetworkComponent::CounterMap, tcx.inventory.observe_counter_maps()),
+                (SharedGuestNetworkComponent::TcxLink, tcx.inventory.observe_tcx_links()),
+            ] {
+                if let Err(source) = observed {
+                    return Err(SharedGuestNetworkAuditError {
+                        component,
+                        source: GuestNetworkError::Tcx {
+                            operation: GuestNetworkOperation::CleanupComplement,
+                            source,
+                        },
+                    });
+                }
+            }
+        }
+        for (alloc, state) in &lifecycle.allocations {
+            let Some(plan) = action_plan(alloc) else {
+                return Err(SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    source: GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapObserve,
+                        expected: GuestNetworkFact::Tap {
+                            name: state.tap.clone(),
+                            ifindex: Some(state.ifindex),
+                            link_kind: GuestLinkKind::Tap,
+                            persistent: true,
+                            up: matches!(state.phase, HostGuestNetworkAllocationPhase::Active),
+                            owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                        },
+                        observed: None,
+                    },
+                });
+            };
+            let observed = self.allocation_io.observe_tap(&plan).await.map_err(|source| {
+                SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    source: Self::netlink_error(GuestNetworkOperation::TapObserve, source),
+                }
+            })?;
+            let expected_up = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
+            let (expected, actual) = Self::tap_fact(&plan, &observed, expected_up);
+            if expected != actual.clone().unwrap_or_else(|| expected.clone()) {
+                return Err(SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Bridge,
+                    source: GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::TapObserve,
+                        expected,
+                        observed: actual,
                     },
                 });
             }
@@ -3765,9 +4120,18 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         Ok(())
     }
     async fn quiesce_managed_taps(&self) -> Result<()> {
-        let taps: Vec<String> =
-            self.allocations.lock().values().map(|state| state.tap.clone()).collect();
-        for tap in taps {
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
+        if lifecycle.quiescing {
+            return Ok(());
+        }
+        lifecycle.quiescing = true;
+        let active = lifecycle
+            .allocations
+            .iter()
+            .filter(|(_, state)| matches!(state.phase, HostGuestNetworkAllocationPhase::Active))
+            .map(|(alloc, state)| (alloc.clone(), state.tap.clone()))
+            .collect::<Vec<_>>();
+        for (alloc, tap) in active {
             let down = overdrive_netlink::block_on_host_netlink(|| async {
                 let client = overdrive_netlink::Client::new()?;
                 client.set_link_down(&tap).await?;
@@ -3784,6 +4148,12 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     observed: Some(GuestNetworkFact::LinkUp { ifindex: 0, up: true }),
                 });
             }
+            if let Some(state) = lifecycle.allocations.get_mut(&alloc) {
+                state.phase = HostGuestNetworkAllocationPhase::QuiescedActive;
+            }
+            self.allocations.lock().entry(alloc).and_modify(|state| {
+                state.phase = HostGuestNetworkAllocationPhase::QuiescedActive;
+            });
         }
         Ok(())
     }

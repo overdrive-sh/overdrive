@@ -71,11 +71,10 @@ production API was added.
 | Post-#295 action-owner await/cancellation schedule | Run `ee147208-d028-477d-be3c-57c415b9f673`: 1 passed, 208 skipped. |
 
 All eight mapped bodies are therefore GREEN through their accepted owners. At
-that checkpoint the roadmap returned to `validation.status = pending`; the
-independent acceptance-design review subsequently approved it on 2026-09-22.
-The bounded 2026-09-23 TAP-activation correction is separately authorized by
-the user's explicit no-review override, so current roadmap validation remains
-approved.
+that checkpoint the roadmap returned to pending; independent acceptance-design
+review approved it on 2026-09-22. The bounded 2026-09-23 frame-oracle
+supersession is user-directed with no review cycle, so current validation
+remains approved.
 
 ## Phase-02 non-waived remediation bodies
 
@@ -95,27 +94,6 @@ approved.
 | S-ND295-11 `every_incompatible_tap_or_bridge_identity_refuses_owner_publication` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_incompatible_tap_or_bridge_identity_refuses_owner_publication -- --ignored --exact` | first finite-table case expected an owner-authored `TapObserve` mismatch; current provision returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; both checkpoints' exact Tap/BridgeLinkIdentity/LinkMaster facts and publication refusal assertions compile. |
 | S-ND295-12 `every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` | `cargo test -p overdrive-control-plane --lib guest_network::allocation_owner_acceptance::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement -- --ignored --exact` | expected first `EndpointDelete` source while a later TAP-delete failure is retained for continuation; current teardown returned `Ok(())` | **RED — MISSING_FUNCTIONALITY**; the separate eleven-row table covers every cleanup mutation/read and both TAP-observation occurrences with exact operation/source, complete continuation, and retained state; same-owner retry, held lease, complement, and unrelated facts also compile. |
 | S-ND295-13 `reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm` | `PROPTEST_CASES=1024 cargo test -p overdrive-sim --lib invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm -- --ignored --exact --nocapture` | actual sweep-call snapshot retained seeded run directory/scope; proptest shrank to `seed = 0` | **RED — MISSING_FUNCTIONALITY / reproduced ordering defect**; production helper, same Sim host, real sweep port call, and seed printing all executed. |
-
-### 2026-09-23 deferred-TAP-activation amendment
-
-The historical S-ND295-11 RED above targeted the then-accepted final-TAP-up
-provision sequence. Native S-ND295-01 subsequently proved that sequence
-contradicts the zero-frame barrier by capturing guest-source ARP replies and
-TCP RST frames before `mtls.intercept.install.success`. Under the user's
-explicit no-review override, the current RED/GREEN target is now:
-
-- transition `provision_reads_every_attachment_fact_before_reporting_success`
-  to exact final TAP-down and no `TapSetUp`;
-- add `activation_reads_every_protection_fact_before_reporting_success` for
-  the same real owner and D12A leaf boundary;
-- add the action-shim order/failure bodies named in `test-scenarios.md`;
-- extend native production composition with same-ifindex/down-through-READY,
-  event-before-up, up-read-back-before-EXEC, and zero frame at/before the event.
-
-These are `MISSING_FUNCTIONALITY` against the current provision-time TAP-up
-path. The prior observed RED facts remain historical evidence; they are not
-relabelled as executions of the new bodies. No public Sim activation-failure
-setter or fixture-owned product effect is authorized.
 
 ## Step 03-03 acceptance-author corrections
 
@@ -233,6 +211,14 @@ ordering body reproduce current defects semantically.
 | S26 native `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle` | `cargo xtask metal run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(=integration::outbound_enforce_substrate_splice::real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle)' --no-fail-fast` | Canonical metal run `9e43b474-e0fd-4edd-aca1-6a2e47a845e8` reached the selected body and failed at the same stale direct peer-accept setup before the third-claim shutdown partition could execute. | **STALE COMPOSITION / EXPECTATION, NOT MISSING SHUTDOWN BEHAVIOR**. The corrected body preserves two real handles, the third enforcement-held claim, admission/socket/task drain, and zero node-guard Drop, while observing exact non-empty then empty typed member sets under one unchanged constant identity. |
 | S-ND295-01 guest-stack selector (pre-correction) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(guest_stack_mtls_egress)' --no-fail-fast` | Canonical metal run `65aec786-f661-4f08-b369-d6f53fdabd1b` selected 34 bodies: 16 passed, 3 timed out at retired per-TAP rule oracles (`1606`, `2919`, `5070`, plus the shared readiness helper at `1714/1770`), and 15 failed; failures after the first rule-oracle panics were dominated by fault-fixture/shared-table collateral. | **STALE TEST ORACLE / COMPOSITION**. Production had the constant shared program and dynamic elements; the tests demanded allocation-tagged rule handles/userdata/program/counters. Existing bodies are corrected in place to `SharedIpInterceptState`: exact constant identity, managed/source pairing, destination tuples, `2 + P`, stable full-set complement, and typed cleanup. Real guest traffic, TLS/no-cleartext, kTLS, TAP capture/timing, lifecycle, topology, sibling preservation, and cleanup remain asserted. |
 
+## D-295-DELIVER-04-01 native contradiction closure
+
+| Evidence | Observed result | Classification / current target |
+|---|---|---|
+| Native predecessor+restart+D7 run `c4d36190` | Before the exact event on caller TAP ifindex 58748: three ARP replies (`0x0806`, packet_type 3, opcode 2, guest SHA/source `02:01:00:00:00:03`, SPA `100.95.0.3`, target gateway `100.95.0.1`) and one guest-source IPv4 TCP reset. | **ZERO-ALL-L2 ORACLE FALSIFIED.** Guest IPv6/`arp_notify` suppression is present but cannot prevent replies to received host/bridge probes. Current target is the exact correlated two-shape contract in `test-scenarios.md`, not filtering these frames away. |
+| Native down-TAP run `f1a15668` | CH v53 named attachment failed before READY: `Cannot create virtio-net device` / `Failed to open taps` / `SIOCSIFFLAGS (35092)` / `EPERM`. | **DEFERRED TAP ACTIVATION DESIGN FALSIFIED.** Up-before-named-attach is restored. No `GuestNetworkProvisioner::activate`, phase, error, fd handoff, capability grant, or confinement change is permitted. |
+| Primary-source audit | CH v53 named `tap=` selects `Net::new` → `open_tap` → unconditional `tap.enable`; Linux v6.18 requires `CAP_NET_ADMIN` for `SIOCSIFFLAGS`. CH's distinct supported `fd=` branch imports descriptors without the named enable call. | **CONTROL-FRAME ORACLE SELECTED.** fd handoff is technically real but out of accepted scope and unnecessary. The RED is now the stale zero-frame assertion; GREEN requires exact ARP/reset parsing, counter/mark equality, zero other counters/default-drop/markers/peer+physical forwarding, and unchanged post-event proof. No current execution is relabelled as that GREEN. |
+
 The prior bounded gate scored ten non-waived bodies. D14A transitions S00 to
 the four exact bodies above: all three source-local filters are invoked
 independently and fail on missing production behavior; the ordinary-boot body is compile/list verified and
@@ -251,7 +237,6 @@ neither RED classifications nor approval conditions here:
 - `wrong_exact_path_owner_or_valid_map_schema_is_typed_and_never_fabricates_zero`
 - `deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause`
 - `ordinary_provision_reads_back_the_complete_attachment_before_injected_vmm_start`
-  (historical name; current DISTILL target ends `_down_before_injected_vmm_start`)
 - `two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal`
 - `production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts`
 - `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`

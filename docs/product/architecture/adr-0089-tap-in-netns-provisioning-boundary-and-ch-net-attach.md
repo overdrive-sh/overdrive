@@ -11,11 +11,12 @@ TPROXY for dead-listener fail-closure and to make provision/restart teardown
 total at the existing C3 boundary, and **amended** (2026-09-01) to name the
 action shim's existing mTLS allocation-lifecycle dependency as an injectable
 async port so the same-ID replacement protocol has a pure Tier-1 simulation
-boundary, and **amended** (2026-09-23, user-directed with no review cycle) to
-make the post-#295 host-TAP attachment remain administratively down through
-Cloud Hypervisor READY/Running and move the sole TAP-up after the existing mTLS
-success receipt. Companion
-to ADR-0088 (topology + addressing).
+boundary, and **amended** (2026-09-24) by the accepted #295
+correctness-recovery replacement (see § *Accepted amendment 2026-09-24* at the
+end): for the shared bridge, the named-TAP attachment and §A2's rejection of fd
+passing are superseded, and §1's listener-loss claim is corrected. This ADR is
+operative on `main`, where Cloud Hypervisor launches through `ip netns exec`
+with `--net tap=`. Companion to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
 and the `Vmm`/`VmConfig` boundary (ADR-0082/0083). GH #222.
@@ -144,31 +145,21 @@ solicitation, and `arp_notify=0` suppresses gratuitous ARP. The static path has
 no DHCP, DNS lookup, probe, neighbor warm-up, socket connect, or workload send.
 On install `Err`, EXEC is never sent (D-MTLS-18).
 
-**2026-09-23 post-#295 correction — the host TAP, not only EXEC, is gated.**
-Native shared-bridge capture proved that an already-up TAP lets the configured
-guest kernel answer ambient neighbor traffic: guest-source ARP replies and TCP
-RST frames preceded the exact `mtls.intercept.install.success` receipt. IPv6
-and `arp_notify` suppression do not prevent replies to received traffic. The
-zero-frame contract therefore supersedes the prior provision-time TAP-up order.
+**#295 shared-bridge realization (amended 2026-09-24; see § *Accepted amendment
+2026-09-24*).** On the #295 shared bridge, an up TAP lets the configured guest
+answer ambient traffic (native run `c4d36190`), and Cloud Hypervisor v53's
+named `tap=` path always raises the TAP (native run `f1a15668`). The zero-frame
+contract above is preserved. Cloud Hypervisor inherits one TAP queue descriptor
+through `--net fd=` and the TAP stays down through READY. The shared
+guest-network owner raises it only after the mTLS install-success event and
+before EXEC (ADR-0127, ADR-0128, ADR-0129 and ADR-0131). Section A2 below
+rejected fd-passing for the per-workload netns topology, for reasons that do not
+carry over to #295:
 
-The post-#295 `GuestNetworkProvisioner::provision` builds and reads back the
-complete guard/endpoint/TCX/pin/master identity but returns with the persistent
-host TAP down. `CloudHypervisorVmm` receives the unchanged selected TAP/MAC
-attachment, opens it by name, and must not change its administrative state.
-The guest virtio NIC may still configure and reach READY; READY reports guest
-platform initialization, not host bridge forwarding. Native equivalence must
-read the same host TAP ifindex as down immediately before VMM start and after
-READY/`Driver::start`.
-
-After the durable Running write, the action shim awaits `start_alloc` and its
-`2 + P` element read-back, emits the unchanged synchronous success event,
-awaits the same provisioner's exact TAP activation/read-back, and then calls
-the existing EXEC-release hook. The event remains an mTLS-install receipt, so
-its name is exact; placing it before TAP activation ensures every possible
-guest-originated frame is strictly post-barrier. This adds no `Vmm`, `Driver`,
-beacon, event, gate, task, or second-owner surface. The only added public method
-is the awaited `GuestNetworkProvisioner::activate(&GuestNetworkPlan)` pinned by
-the #295 feature delta.
+- #295 already runs the VMM in the host network namespace.
+- No cross-namespace `setns` helper is needed.
+- Cloud Hypervisor v53 duplicates the inherited descriptor, so it survives
+  guest reboot.
 
 The Tier-3 witness is an observation-only decorator over the real `Vmm` port.
 After C3 provisions the alloc netns/tap/host-veth and before delegating to real
@@ -194,11 +185,9 @@ count and validated IPv4 `tot_len` (the nft `skb->len` domain). Any reset,
 replacement/delete/reinsert, generation change/wrap, partial/interrupted dump,
 notification loss, or ambiguity fails before the original destination arrives
 at leg-F. No cleartext copy appears on the external peer path and TLS records
-appear on the inter-agent path. The post-#295 full order is `capture-ready ≺
-provisioned-TAP-down ≺ VMM-spawn-with-TAP-down ≺ network-ready ≺ READY
-≺ Running ≺ mTLS-2+P-read-back ≺
-mtls.intercept.install.success/intercept-live ≺ TAP-activation-read-back ≺
-EXEC-release ≺ operator-first-connect`.
+appear on the inter-agent path. The full order is `capture-ready ≺ VMM-spawn
+≺ network-ready ≺ READY ≺ intercept-live ≺ EXEC-release ≺
+operator-first-connect`.
 
 `install_outbound_tproxy` remains the sole install/adopt/delete-by-handle
 owner, but is now correctly classified EXTEND: its egress expression order is
@@ -662,6 +651,10 @@ put privileged netdev mutation inside the spawn adapter.
 
 ### A2. Tap fd-passing (`--net fd=`) with CH staying in the host netns
 
+*(Superseded for the #295 shared bridge on 2026-09-24 by ADR-0127 and ADR-0128;
+see § *Accepted amendment 2026-09-24*. The rejection below stands for this
+ADR's per-workload netns topology.)*
+
 Avoids the `ip netns exec` wrapper by opening the tap fd in the workload netns
 from a `setns`'d helper and passing it (`--net fd=<N>`) to a CH that stays in
 the HOST netns. **Rejected — and the evidence confirms the wrapper on the
@@ -819,8 +812,7 @@ APPROVED; approved design commit
 
 At the time of the 2026-09-12 identity amendment, this ADR's network
 provisioning, selected-TAP attachment, mTLS install gates, teardown order and
-slot ownership were unchanged. The later 2026-09-23 amendment above changes
-only the post-#295 provision-down/activate order. The prior text's VM-specific
+slot ownership were unchanged. The prior text's VM-specific
 same-allocation recovery route is superseded only in identity shape: automatic
 VM Workload Failure and Platform-Reclamation replacement is amended to use the existing
 `Action::StartAllocation` with a fresh `AllocationId`, as specified by
@@ -837,3 +829,38 @@ No TAP/netns ownership generalization is made here. #284 reproduced VM
 run-directory, beacon, cgroup and clone/index aliasing; it did not reproduce a
 TAP mutation. `NetSlotAllocator` and teardown-before-release therefore remain
 the sole network ownership contract.
+
+## Accepted amendment 2026-09-24 — #295 correctness-recovery replacement
+
+Accepted by the user on 2026-09-24 with the GH #295 correctness-recovery
+replacement DESIGN (`docs/feature/netns-density-295/feature-delta.md`). This ADR
+is operative on `main`, so the contract above is retained and the changes are
+stated here.
+
+1. **Named-TAP attachment superseded on the shared bridge (D-295-R1, R2, R3,
+   R5).** §4's `ip netns exec` launch with `--net tap=<name>` belongs to the
+   per-workload netns topology the #295 single cut removes. On the shared
+   bridge, Cloud Hypervisor receives the guest NIC as one inherited TAP queue
+   descriptor (`--net fd=`), attached, verified, mapped, and closed by the VMM
+   adapter for each launch; the child inherits only descriptors 0–3; and the TAP
+   stays down until the shared guest-network owner raises it after
+   intercept-live
+   ([ADR-0127](adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md),
+   [ADR-0128](adr-0128-vmm-adapter-owns-per-launch-tap-queue-descriptor.md),
+   [ADR-0129](adr-0129-safe-descriptor-mapping-for-vmm-launch.md),
+   [ADR-0131](adr-0131-activate-allocation-tap-after-intercept-live.md)). §A2's
+   rejection of fd passing rested on the per-workload netns (VMM placement in
+   the tenant namespace, a cross-namespace `setns` helper, reboot-fragile fd
+   state); none of those reasons applies to a host-netns bridge, and Cloud
+   Hypervisor v53 duplicates the inherited descriptor.
+2. **The 2026-08-31 listener-loss claim is corrected (D-295-R19).** §1's
+   mark-before-TPROXY paragraph says a missing listener keeps the flow "on the
+   host instead of restoring its original cleartext route". That is true but not
+   fail-closed: the surviving mark selects the table-100 local route, and socket
+   lookup then delivers guest TCP to any host listener bound to the wildcard
+   address. For the #295 constant program,
+   [ADR-0140](adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md)
+   orders TPROXY, then the mark, then accept, so a failed outbound TPROXY falls
+   through to the drop; it is accepted conditional on its native RED. This ADR's
+   per-allocation rules leave with the #295 single cut and keep their recorded
+   order until then.

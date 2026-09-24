@@ -1,0 +1,394 @@
+SOURCE_AUDIT BEGIN
+Hypothesis: CH v53.0's --net fd= path issues TUNGETIFF, TUNSETIFF, TUNSETVNETHDRSZ, SIOCGIFMTU, optional SIOCSIFMTU, and TUNSETOFFLOAD; none is deny-listed.
+Predicted outcome: from_tap_fds selects Tap::from_tap_fd; construction contains the first four unconditional ioctls plus optional SIOCSIFMTU; activation contains TUNSETOFFLOAD; named-path host-MAC/IP/link-enable setters are not called.
+Falsification: any fd-path call reaches a deny-listed request, host_mac/IP/link enable, or another ioctl not named above.
+tag=v53.0 commit=9ed824d6d08df3e96f7d5f50795d9449ac99f431
+SOURCE_EXCERPT vmm/src/device_manager.rs:2988-3020
+ 2988                         net_cfg.rate_limiter_config,
+ 2989                         self.exit_evt
+ 2990                             .try_clone()
+ 2991                             .map_err(DeviceManagerError::EventFd)?,
+ 2992                         state,
+ 2993                         net_cfg.offload_tso,
+ 2994                         net_cfg.offload_ufo,
+ 2995                         net_cfg.offload_csum,
+ 2996                     )
+ 2997                     .map_err(DeviceManagerError::CreateVirtioNet)?,
+ 2998                 ))
+ 2999             } else if let Some(fds) = &net_cfg.fds {
+ 3000                 let net = virtio_devices::Net::from_tap_fds(
+ 3001                     id.clone(),
+ 3002                     fds,
+ 3003                     Some(net_cfg.mac),
+ 3004                     net_cfg.mtu,
+ 3005                     self.force_access_platform | net_cfg.pci_common.iommu,
+ 3006                     net_cfg.queue_size,
+ 3007                     self.seccomp_action.clone(),
+ 3008                     net_cfg.rate_limiter_config,
+ 3009                     self.exit_evt
+ 3010                         .try_clone()
+ 3011                         .map_err(DeviceManagerError::EventFd)?,
+ 3012                     state,
+ 3013                     net_cfg.offload_tso,
+ 3014                     net_cfg.offload_ufo,
+ 3015                     net_cfg.offload_csum,
+ 3016                 )
+ 3017                 .map_err(DeviceManagerError::CreateVirtioNet)?;
+ 3018 
+ 3019                 // SAFETY: 'fds' are valid because TAP devices are created successfully
+ 3020                 unsafe {
+SOURCE_EXCERPT net_util/src/tap.rs:235-289
+  235     pub fn from_tap_fd(fd: RawFd, num_queue_pairs: usize) -> Result<Tap> {
+  236         // Ensure that the file is opened non-blocking, this is particularly
+  237         // needed when opened via the shell for macvtap.
+  238         // SAFETY: FFI call
+  239         let ret = unsafe {
+  240             let mut flags = libc::fcntl(fd, libc::F_GETFL);
+  241             flags |= libc::O_NONBLOCK;
+  242             libc::fcntl(fd, libc::F_SETFL, flags)
+  243         };
+  244         if ret < 0 {
+  245             return Err(Error::ConfigureTap(IoError::last_os_error()));
+  246         }
+  247 
+  248         // SAFETY: fd is a tap fd
+  249         let tap_file = unsafe { File::from_raw_fd(fd) };
+  250         let mut ifreq: libc::ifreq = ifreq {
+  251             ifr_name: [0; IFNAMSIZ],
+  252             ifr_ifru: __c_anonymous_ifr_ifru { ifru_flags: 0 },
+  253         };
+  254 
+  255         // Get current config including name
+  256         // SAFETY: IOCTL with correct arguments
+  257         unsafe { Self::ioctl_with_mut_ref(&tap_file, libc::TUNGETIFF as c_ulong, &mut ifreq)? };
+  258 
+  259         let if_name = {
+  260             let ifr_ptr = ifreq.ifr_name.as_ptr();
+  261             // SAFETY: The `ifr_name` field of the union is a valid, nul-terminated C string since it
+  262             // was just set by the ioctl call, and we checked for errors.
+  263             // We immediately convert the `CStr` to the owned `CString, so the memory of the union field
+  264             // is not accessed or mutated during the lifetime of the `Cstr`.
+  265             unsafe { CStr::from_ptr(ifr_ptr).to_owned() }
+  266         };
+  267 
+  268         // Try and update flags. Depending on how the tap was created (macvtap
+  269         // or via open_named()) this might return -EEXIST so we just ignore that.
+  270         // SAFETY: access union fields
+  271         unsafe {
+  272             ifreq.ifr_ifru.ifru_flags =
+  273                 (libc::IFF_TAP | libc::IFF_NO_PI | libc::IFF_VNET_HDR) as c_short;
+  274             if num_queue_pairs > 1 {
+  275                 ifreq.ifr_ifru.ifru_flags |= libc::IFF_MULTI_QUEUE as c_short;
+  276             }
+  277         }
+  278         // SAFETY: IOCTL with correct arguments
+  279         let ret = unsafe { ioctl_with_mut_ref(&tap_file, libc::TUNSETIFF as c_ulong, &mut ifreq) };
+  280         if ret < 0 && IoError::last_os_error().raw_os_error().unwrap() != libc::EEXIST {
+  281             return Err(Error::ConfigureTap(IoError::last_os_error()));
+  282         }
+  283 
+  284         let tap = Tap { tap_file, if_name };
+  285         let vnet_hdr_size = vnet_hdr_len() as i32;
+  286         tap.set_vnet_hdr_size(vnet_hdr_size)?;
+  287 
+  288         Ok(tap)
+  289     }
+SOURCE_EXCERPT net_util/src/tap.rs:413-482
+  413     #[cfg(not(fuzzing))]
+  414     pub fn mtu(&self) -> Result<i32> {
+  415         let sock = create_unix_socket().map_err(Error::NetUtil)?;
+  416 
+  417         let ifreq = self.get_ifreq();
+  418 
+  419         // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+  420         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCGIFMTU as c_ulong, &ifreq)? };
+  421 
+  422         // SAFETY: access a union field
+  423         let mtu = unsafe { ifreq.ifr_ifru.ifru_mtu };
+  424 
+  425         Ok(mtu)
+  426     }
+  427 
+  428     #[cfg(fuzzing)]
+  429     pub fn mtu(&self) -> Result<i32> {
+  430         // Consistent with the `virtio_devices::net::MIN_MTU`
+  431         Ok(1280)
+  432     }
+  433 
+  434     pub fn set_mtu(&self, mtu: i32) -> Result<()> {
+  435         let sock = create_unix_socket().map_err(Error::NetUtil)?;
+  436 
+  437         let mut ifreq = self.get_ifreq();
+  438         ifreq.ifr_ifru.ifru_mtu = mtu;
+  439 
+  440         // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+  441         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCSIFMTU as c_ulong, &ifreq) }
+  442     }
+  443 
+  444     /// Set the offload flags for the tap interface.
+  445     pub fn set_offload(&self, flags: c_uint) -> Result<()> {
+  446         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+  447         unsafe {
+  448             Self::ioctl_with_val(
+  449                 &self.tap_file,
+  450                 libc::TUNSETOFFLOAD as c_ulong,
+  451                 flags as c_ulong,
+  452             )
+  453         }
+  454     }
+  455 
+  456     /// Enable the tap interface.
+  457     pub fn enable(&self) -> Result<()> {
+  458         let sock = create_unix_socket().map_err(Error::NetUtil)?;
+  459 
+  460         let mut ifreq = self.get_ifreq();
+  461 
+  462         // SAFETY: IOCTL with correct arguments
+  463         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCGIFFLAGS as c_ulong, &ifreq)? };
+  464 
+  465         // If TAP device is already up don't try and enable it
+  466         // SAFETY: access a union field
+  467         let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags };
+  468         if ifru_flags & libc::IFF_UP as i16 == libc::IFF_UP as i16 {
+  469             return Ok(());
+  470         }
+  471 
+  472         ifreq.ifr_ifru.ifru_flags = libc::IFF_UP as i16;
+  473 
+  474         // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+  475         unsafe { Self::ioctl_with_ref(&sock, libc::SIOCSIFFLAGS as c_ulong, &ifreq) }
+  476     }
+  477 
+  478     /// Set the size of the vnet hdr.
+  479     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
+  480         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+  481         unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETVNETHDRSZ as c_ulong, &size) }
+  482     }
+SOURCE_EXCERPT virtio-devices/src/net.rs:529-553
+  529     pub fn new_with_tap(
+  530         id: String,
+  531         taps: Vec<Tap>,
+  532         guest_mac: Option<MacAddr>,
+  533         access_platform_enabled: bool,
+  534         num_queues: usize,
+  535         queue_size: u16,
+  536         seccomp_action: SeccompAction,
+  537         rate_limiter_config: Option<RateLimiterConfig>,
+  538         exit_evt: EventFd,
+  539         state: Option<NetState>,
+  540         offload_tso: bool,
+  541         offload_ufo: bool,
+  542         offload_csum: bool,
+  543     ) -> Result<Self> {
+  544         assert!(!taps.is_empty());
+  545 
+  546         // Skip advertising VIRTIO_NET_F_MTU and let the guest fall back to the Ethernet default if querying failed
+  547         let mtu = match taps[0].mtu() {
+  548             Ok(m) => Some(m as u16),
+  549             Err(e) => {
+  550                 warn!("Failed to query tap MTU; not advertising VIRTIO_NET_F_MTU: {e}");
+  551                 None
+  552             }
+  553         };
+SOURCE_EXCERPT virtio-devices/src/net.rs:700-751
+  700     #[expect(clippy::too_many_arguments)]
+  701     pub fn from_tap_fds(
+  702         id: String,
+  703         fds: &[RawFd],
+  704         guest_mac: Option<MacAddr>,
+  705         mtu: Option<u16>,
+  706         access_platform_enabled: bool,
+  707         queue_size: u16,
+  708         seccomp_action: SeccompAction,
+  709         rate_limiter_config: Option<RateLimiterConfig>,
+  710         exit_evt: EventFd,
+  711         state: Option<NetState>,
+  712         offload_tso: bool,
+  713         offload_ufo: bool,
+  714         offload_csum: bool,
+  715     ) -> Result<Self> {
+  716         let mut taps: Vec<Tap> = Vec::new();
+  717         let num_queue_pairs = fds.len();
+  718 
+  719         for fd in fds.iter() {
+  720             // Duplicate so that it can survive reboots
+  721             // SAFETY: FFI call to dup. Trivially safe.
+  722             let fd = unsafe { libc::dup(*fd) };
+  723             if fd < 0 {
+  724                 return Err(Error::DuplicateTapFd(io::Error::last_os_error()));
+  725             }
+  726             let tap = Tap::from_tap_fd(fd, num_queue_pairs).map_err(Error::TapError)?;
+  727             taps.push(tap);
+  728         }
+  729 
+  730         assert!(!taps.is_empty());
+  731 
+  732         if let Some(mtu) = mtu {
+  733             taps[0].set_mtu(mtu as i32).map_err(Error::TapError)?;
+  734         }
+  735 
+  736         Self::new_with_tap(
+  737             id,
+  738             taps,
+  739             guest_mac,
+  740             access_platform_enabled,
+  741             num_queue_pairs * 2,
+  742             queue_size,
+  743             seccomp_action,
+  744             rate_limiter_config,
+  745             exit_evt,
+  746             state,
+  747             offload_tso,
+  748             offload_ufo,
+  749             offload_csum,
+  750         )
+  751     }
+SOURCE_EXCERPT virtio-devices/src/net.rs:849-965
+  849     fn activate(&mut self, context: ActivationContext) -> ActivateResult {
+  850         let ActivationContext {
+  851             mem,
+  852             interrupt_cb,
+  853             mut queues,
+  854             device_status,
+  855         } = context;
+  856         self.device_status = device_status;
+  857         self.common.activate(&queues, interrupt_cb.clone())?;
+  858 
+  859         let num_queues = queues.len();
+  860         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
+  861 
+  862         // Recompute the barrier size from the queues that are actually activated.
+  863         let has_ctrl_queue =
+  864             self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2);
+  865         let ctrl_threads = if has_ctrl_queue { 1 } else { 0 };
+  866         let qp_threads = (num_queues - ctrl_threads) / 2;
+  867         self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
+  868 
+  869         if has_ctrl_queue {
+  870             let ctrl_queue_index = num_queues - 1;
+  871             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
+  872 
+  873             ctrl_queue.set_event_idx(event_idx);
+  874 
+  875             let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
+  876 
+  877             let guest_announce_ops = VirtioNetGuestAnnounceOps::new(
+  878                 interrupt_cb.clone(),
+  879                 self.common
+  880                     .feature_acked(VIRTIO_NET_F_GUEST_ANNOUNCE.into()),
+  881                 &self.announce,
+  882             );
+  883 
+  884             let host_announce_ops = VirtioNetHostAnnounceOps::new(
+  885                 self.build_rarp_announce(),
+  886                 self.taps.clone().into_boxed_slice(),
+  887             );
+  888 
+  889             let announcer = Announcer::new(
+  890                 &self.announce,
+  891                 vec![
+  892                     Box::new(guest_announce_ops) as Box<dyn AnnounceOps>,
+  893                     Box::new(host_announce_ops) as Box<dyn AnnounceOps>,
+  894                 ]
+  895                 .into_boxed_slice(),
+  896             );
+  897 
+  898             let mut ctrl_handler = NetCtrlEpollHandler {
+  899                 mem: mem.clone(),
+  900                 kill_evt,
+  901                 pause_evt,
+  902                 ctrl_q: CtrlQueue::new(self.taps.clone(), self.announce.pending.clone()),
+  903                 queue: ctrl_queue,
+  904                 queue_evt: ctrl_queue_evt,
+  905                 access_platform: self.common.access_platform(),
+  906                 queue_index: ctrl_queue_index as u16,
+  907                 interrupt_cb: interrupt_cb.clone(),
+  908                 announce_evt: self
+  909                     .announce
+  910                     .evt
+  911                     .try_clone()
+  912                     .map_err(ActivateError::CloneEventFd)?,
+  913                 announce_retry_timer: TimerFd::new().map_err(ActivateError::CreateTimerFd)?,
+  914                 announcer,
+  915             };
+  916 
+  917             let paused = self.common.paused.clone();
+  918             let paused_sync = self.common.paused_sync.clone();
+  919 
+  920             self.common.spawn_worker(
+  921                 &format!("{}_ctrl", self.id),
+  922                 &self.seccomp_action,
+  923                 Thread::VirtioNetCtl,
+  924                 &self.exit_evt,
+  925                 self.device_status.clone(),
+  926                 interrupt_cb.clone(),
+  927                 move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
+  928             )?;
+  929         }
+  930 
+  931         let mut taps = self.taps.clone();
+  932         for i in 0..queues.len() / 2 {
+  933             let rx = RxVirtio::new();
+  934             let tx = TxVirtio::new();
+  935             let rx_tap_listening = false;
+  936 
+  937             let (_, queue_0, queue_evt_0) = queues.remove(0);
+  938             let (_, queue_1, queue_evt_1) = queues.remove(0);
+  939             let mut queue_pair = (queue_0, queue_1);
+  940             queue_pair.0.set_event_idx(event_idx);
+  941             queue_pair.1.set_event_idx(event_idx);
+  942 
+  943             let queue_evt_pair = (queue_evt_0, queue_evt_1);
+  944 
+  945             let (kill_evt, pause_evt) = self.common.dup_eventfds()?;
+  946 
+  947             let rx_rate_limiter: Option<rate_limiter::RateLimiter> = self
+  948                 .rate_limiter_config
+  949                 .map(RateLimiterConfig::try_into)
+  950                 .transpose()
+  951                 .map_err(ActivateError::CreateRateLimiter)?;
+  952 
+  953             let tx_rate_limiter: Option<rate_limiter::RateLimiter> = self
+  954                 .rate_limiter_config
+  955                 .map(RateLimiterConfig::try_into)
+  956                 .transpose()
+  957                 .map_err(ActivateError::CreateRateLimiter)?;
+  958 
+  959             let tap = taps.remove(0);
+  960             #[cfg(not(fuzzing))]
+  961             tap.set_offload(virtio_features_to_tap_offload(self.common.acked_features))
+  962                 .map_err(|e| {
+  963                     error!("Error programming tap offload: {e:?}");
+  964                     ActivateError::BadActivate
+  965                 })?;
+SOURCE_EXCERPT vmm/src/seccomp_filters.rs:337-365
+  337         and![Cond::new(1, ArgLen::Dword, Eq, BLKDISCARD as _)?],
+  338         and![Cond::new(1, ArgLen::Dword, Eq, BLKZEROOUT as _)?],
+  339         and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX as _)?],
+  340         and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?],
+  341         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
+  342         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFHWADDR)?],
+  343         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFMTU)?],
+  344         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFINDEX)?],
+  345         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFADDR)?],
+  346         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFFLAGS)?],
+  347         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFHWADDR)?],
+  348         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFMTU)?],
+  349         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
+  350         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS as _)?],
+  351         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS2 as _)?],
+  352         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS as _)?],
+  353         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS2 as _)?],
+  354         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP as _)?],
+  355         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPTPEER as _)?],
+  356         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ as _)?],
+  357         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY as _)?],
+  358         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP as _)?],
+  359         and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPTLCK as _)?],
+  360         and![Cond::new(1, ArgLen::Dword, Eq, TUNGETFEATURES as _)?],
+  361         and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF as _)?],
+  362         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETIFF as _)?],
+  363         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD as _)?],
+  364         and![Cond::new(1, ArgLen::Dword, Eq, TUNSETVNETHDRSZ as _)?],
+  365         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GET_API_VERSION)?],
+SOURCE_AUDIT_RESULT=PASS exact_fd_path_ioctl_set=libc::TUNGETIFF,libc::TUNSETIFF,libc::TUNSETVNETHDRSZ,libc::SIOCGIFMTU,libc::SIOCSIFMTU,libc::TUNSETOFFLOAD

@@ -8,6 +8,34 @@ ownership decision. Node-owner converge/audit creates and reads back shared
 rules/sets; allocation install methods remain unchanged. Exact signatures live
 only in the #295 feature delta.
 
+**Amended 2026-09-24** by the accepted #295 correctness-recovery replacement
+DESIGN. This decision is operative in code committed at HEAD `db3af700` on the
+#295 feature branch (`nft.rs:3065-3066`, eight constant rules; `nft.rs:679-690`,
+the TPROXY rules set the mark before TPROXY; `mtls_intercept_port.rs:786`; not
+merged to `main`). Its element-cleanup and boot-clear intent is not expressible
+through that five-method port: the erased guards have no fallible release, and
+boot clear has no caller (proof-findings §3.4, §3.5). The Decision text below is
+retained; these accepted decisions amend it:
+
+- ADR-0135: grouped, awaited, convergent removal that keeps retirement
+  ownership on failure, replacing "removes all owned elements in one batch with
+  read-back, then drops guards" with a fallible, retry-retaining port removal.
+- ADR-0137: the intercept owner converges members to empty at fresh boot; this
+  is the owner and caller of the boot clear described below.
+- #295 D-295-R15: runtime audit and repair of the program, the policy route,
+  the guard table, and the members, with live allocations.
+- ADR-0139 (accepted conditional on its native RED): one independent
+  intercept-owned guard table, so intercept-marked TCP fails closed without this
+  program. It adds one IP rule, in its own table, to the constant cardinality
+  below (nine IP rules and twelve #295 rules in total).
+- ADR-0140 (accepted conditional on its native RED): both TPROXY rules order
+  TPROXY, then the policy-route mark, then accept. It changes no rule count,
+  set, port, or ownership recorded here.
+
+When #295 lands, this program, its boot convergence, and its one-second audit
+supersede [GH #234](https://github.com/overdrive-sh/overdrive/issues/234), the
+shared inbound-TPROXY routing reconciler.
+
 ## Context
 
 Valid Services carry an unbounded listener vector. The current intercept appends

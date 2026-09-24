@@ -969,7 +969,7 @@ fn recover_rule_handle(chain: &str, tag: &[u8], context: impl FnOnce() -> String
 /// `.claude/rules/development.md` § "Check-and-act must be atomic (no TOCTOU)").
 /// A dump OR add failure surfaces as [`InterceptError::IpRuleAddFailed`]
 /// carrying the op-specific [`NetlinkError`].
-fn ensure_fwmark_rule() -> Result<()> {
+pub(crate) fn ensure_fwmark_rule() -> Result<()> {
     block_on_host_netlink(|| async {
         let client = Client::new()?;
         if !client.fib_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE).await? {
@@ -985,7 +985,7 @@ fn ensure_fwmark_rule() -> Result<()> {
 /// (already converged — the node-global route persists) is idempotent-swallowed
 /// via the TYPED errno (ADR-0085 D6), never a "File exists" stderr substring;
 /// any other failure surfaces as [`InterceptError::IpRouteLocalAddFailed`].
-fn ensure_local_route() -> Result<()> {
+pub(crate) fn ensure_local_route() -> Result<()> {
     match block_on_host_netlink(|| async {
         Client::new()?.add_local_route(TPROXY_RT_TABLE, "lo").await
     }) {

@@ -5,9 +5,26 @@
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17;
 D-295-DISTILL-11's sourced component audit wrapper is autonomously authorized
-and pending the trusted-checkpoint review. Amended 2026-09-23 by explicit user
-direction with no review cycle to carry deferred TAP activation through this
-same error family.**
+and pending the trusted-checkpoint review.** **Amended 2026-09-24** by the
+accepted #295 correctness-recovery replacement DESIGN (D-295-R5, R6, R7, R21,
+R22).
+The family is operative in code committed at HEAD `db3af700` on the #295
+feature branch (`guest_network.rs:364`; not merged to `main`), so the additions
+are stated explicitly here and the Decision below is otherwise unchanged:
+
+- two typed, source-less, non-terminal refusals: an admission-cap refusal
+  carrying the held and retiring counts, and a retiring-lease refusal (R6, R7);
+- TAP activation reuses the existing operations and facts, and per-TAP
+  quiescence failures use the existing variants (R5);
+- four TCX egress operation discriminators, so the egress guest-MAC
+  classifier's attach, link-pin, query, and detach failures stay unambiguous
+  beside their ingress counterparts, and one TAP host-side-MAC fact for a
+  host-MAC mismatch (R21, ADR-0142, ADR-0130);
+- one TAP debug-message-mask fact for a non-zero mask read back at provision,
+  activation, or audit (R22, ADR-0143, ADR-0130). It adds no operation: a
+  failed read keeps the existing TAP-observe operation.
+
+The exact shapes live only in the #295 feature delta.
 
 ## Context
 
@@ -50,8 +67,9 @@ orchestration error/facts nor any adapter type.
 
 Operation discriminators distinguish bridge deletion; guard table, chain, set,
 and rule creation/deletion; TCX load; and endpoint-map, counter-map, and TCX-
-link pin/adopt/unpin effects. There is no ambiguous generic link-pin operation
-or compatibility variant. Complete scratch-count query failure remains the
+link pin/adopt/unpin effects *(and, since the 2026-09-24 amendment, TCX egress
+attach, link pin, query, and detach)*. There is no ambiguous generic link-pin
+operation or compatibility variant. Complete scratch-count query failure remains the
 cleanup-complement operation because the corresponding unavailable field names
 the exact resource family.
 
@@ -63,23 +81,6 @@ node health, never an allocation failure.
 
 Exact Rust variants, fields, visibility, and conversions live exclusively in
 the #295 feature delta.
-
-Deferred TAP activation adds no error, fact, or operation variant. The existing
-`TapSetUp`, `TapSetDown`, `TapObserve`, `BridgeObserve`,
-`GuardMemberInsert`, `EndpointMapObserve`, `TcxQuery`, and `TcxLinkPin`
-discriminators plus `Tap`/`LinkMaster`/existing protection facts already cover
-every mutation and read-back. The sole new public method is the awaited
-`GuestNetworkProvisioner::activate(&GuestNetworkPlan) -> Result<()>`; the same
-concrete `SharedGuestNetworkOwner` implements it. A lower set-up failure keeps
-its canonical source, while a successful operation followed by wrong read-back
-remains source-less `PostconditionMismatch`.
-
-The durable action-shim failure reuses the already-shipped
-`WorkloadNetnsProvisionFailed { stage, detail }` payload with closed stage
-`guest_network_activate`. The legacy variant name is not ideal, but adding a
-second public `TransitionReason` or flattening `GuestNetworkError` would be a
-larger contract change. The obsolete `NetSlotExhausted` mapping stays deleted;
-pool exhaustion remains non-terminal drift.
 
 Startup probe failures preserve the existing typed lower-level source through
 the applicable canonical TCX/netlink/I/O variant. Semantic classifier,
@@ -190,7 +191,7 @@ the real host owner produce those values instead.
 ## Consequences
 
 Positive: one cause-preserving error path covers assignment, async provision,
-activation, teardown, runtime convergence, and cleanup without compatibility branches.
+teardown, runtime convergence, and cleanup without compatibility branches.
 Negative: the public error and operation enums become a contract that must
 remain exhaustive and source-honest as shared-network effects evolve; semantic
 postcondition facts add a second, source-less error class that adapters must

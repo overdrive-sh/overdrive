@@ -1509,6 +1509,25 @@ impl Driver for VmDriver {
         match outcome {
             BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
                 tracing::info!(name: "vm.lifecycle.ready", alloc = %spec.alloc, "VM READY accepted");
+                if let Some(network) = spec.network.as_ref()
+                    && let Err(error) =
+                        overdrive_netlink::ethtool::disable_tx_offload(&network.tap).await
+                {
+                    let primary = start_rejected_unclassified(format!(
+                        "disable direct-host TAP TX checksum offload on {}: {error}",
+                        network.tap
+                    ));
+                    return Err(self
+                        .cleanup_after_start_failure(
+                            &spec.alloc,
+                            &run_dir,
+                            Some(&scope),
+                            Some(&control),
+                            Some(&rootfs),
+                            primary,
+                        )
+                        .await);
+                }
                 // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
                 // guest-initiated session, but do NOT write it here. `start`
                 // returns once READY is accepted; the action shim installs

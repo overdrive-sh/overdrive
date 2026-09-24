@@ -17,8 +17,10 @@ directory, **self-contained** (its own `Cargo.toml` / workspace), and **never
 touches production source**:
 
 - **NEVER** create or modify a file under `crates/`. No new modules, no `mod.rs`
-  wiring, no `[[bin]]` in any workspace member's `Cargo.toml`, no new dep on a
-  workspace crate. The probe is a standalone build under `spike-scratch/`.
+  wiring, no `[[bin]]` in any workspace member's `Cargo.toml`. The probe is a
+  standalone build under `spike-scratch/`; its own `Cargo.toml` MAY depend on
+  workspace crates by path (`overdrive-core = { path = "../../crates/overdrive-core" }`)
+  so it can exercise real production components.
 - **Probe sources, scripts and captured evidence ARE committed** and live until the
   implementation supersedes them (user ruling 2026-08-11, reversing the prior
   never-commit rule). Build output is not: `.gitignore` carries
@@ -32,9 +34,9 @@ touches production source**:
   builds or gates on it, and it is deleted when the implementation it validated lands.
 - One increment per probe attempt: `increment-a`, `increment-b`, … Preserve prior
   increments as evidence; don't overwrite.
-- If a probe needs a helper that lives in `crates/` (a syscall wrapper, a const),
-  **copy it into the spike** — never add a dependency edge that drags the
-  workspace build, never edit the original.
+- If a probe needs a helper or component that lives in `crates/`, **link the
+  crate by path** from the probe's own `Cargo.toml` — never edit the original,
+  and never make the probe a member or dependency of any workspace crate.
 
 **Why:** a spike is a *disposable validation of one assumption*, not a feature
 increment. Code written into `crates/` (even reverted later) pollutes production,

@@ -1,0 +1,61 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/spike.py --mode control`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=71f1b3c6931a3527dbf8d955 pid=67089
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 3,114,622 bytes  received 88,910 bytes  1,281,412.80 bytes/sec
+total size is 267,109,963  speedup is 83.38
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[+ 0.000071] PREFLIGHT BEGIN
+[+ 0.000098] PREFLIGHT hypothesis=the selected runner is native x86_64 metal with CH v53.0 and clean exact probe names
+[+ 0.000103] PREFLIGHT prediction=root, systemd-detect-virt=none, uname recorded, CH reports v53.0, and no exact resource exists
+[+ 0.000106] PREFLIGHT falsification=any virtualization, version mismatch, missing artifact, or pre-existing exact resource
+[+ 0.054922] ENV mode=control
+[+ 0.057910] ENV uname_r=7.0.0-29-generic
+[+ 0.060900] ENV uname_full=Linux 7.0.0-29-generic x86_64 GNU/Linux
+[+ 0.060914] ENV systemd_detect_virt=none
+[+ 0.060919] ENV cloud_hypervisor=/usr/local/bin/cloud-hypervisor version=cloud-hypervisor v53.0
+[+ 0.060923] ENV ch_v53_source_commit=9ed824d6d08df3e96f7d5f50795d9449ac99f431
+[+ 0.060953] ENV fd_path_ioctls=[["TUNGETIFF", 2147767506, "net_util/src/tap.rs:255-257"], ["TUNSETIFF", 1074025674, "net_util/src/tap.rs:268-281; EEXIST accepted"], ["TUNSETVNETHDRSZ", 1074025688, "net_util/src/tap.rs:284-286,478-482"], ["SIOCGIFMTU", 35105, "virtio-devices/src/net.rs:546-553 -> net_util/src/tap.rs:413-425"], ["TUNSETOFFLOAD", 1074025680, "virtio-devices/src/net.rs:959-965"]]
+[+ 0.060973] ENV deny_list=[["SIOCSIFHWADDR", 35108], ["TUNSETOWNER", 1074025676], ["TUNSETGROUP", 1074025678], ["TUNSETPERSIST", 1074025675], ["TUNSETCARRIER", 1074025698], ["TUNSETDEBUG", 1074025673], ["TUNSETLINK", 1074025677], ["TUNSETTXFILTER", 1074025681], ["TUNATTACHFILTER", 1074812117], ["TUNDETACHFILTER", 1074812118], ["TUNSETSTEERINGEBPF", 2147767520], ["TUNSETFILTEREBPF", 2147767521], ["TUNSETQUEUE", 1074025689]]
+[+ 0.060977] PREFLIGHT RESULT=PASS native metal and exact resource complement clean
+[+ 0.060981] IOCTL_ARM BEGIN
+[+ 0.060984] IOCTL_ARM hypothesis=the launcher filter returns EPERM for every deny-listed TAP mutation on every descendant thread; without it the kernel decides each request
+[+ 0.060987] IOCTL_ARM prediction=filtered: four inherited-filter threads report EPERM for all 13 requests; control: one unfiltered thread reports no EPERM
+[+ 0.060991] IOCTL_ARM falsification=any filtered request reaches the kernel, any filtered thread lacks seccomp mode 2, or any control request is preempted by EPERM
+[+ 0.061473] IOCTL_ARM helper_cli=setpriv --reuid=4200 --regid=4200 --clear-groups --no-new-privs -- /usr/bin/python3 /home/ubuntu/overdrive/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/spike.py --ioctl-child --mode control --fd 50 --tap aascr0772
+[+ 0.075902] IOCTL_ARM helper_rc=2
+[+ 0.075918] IOCTL_ARM helper_stdout_begin
+[+ 0.075923] IOCTL_ARM helper_stdout_end
+[+ 0.075928] IOCTL_ARM helper_stderr="/usr/bin/python3: can't open file '/home/ubuntu/overdrive/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/spike.py': [Errno 13] Permission denied\n"
+[+ 0.075940] FAILURE step=IOCTL_ARM error=ProbeFailure: IOCTL_ARM: ioctl helper failed
+[+ 0.075946] SUMMARY PREFLIGHT: PASS native metal and exact resource complement clean
+VERDICT=DOESNT_WORK_OR_INCOMPLETE mode=control
+CLEANUP_FALLBACK ["tun_fd=50", "link=aascr0772"]
+CLEANUP_FINAL {"bridge": false, "cgroup": false, "new_ch_pids": [], "nft": false, "run_dir": false, "scratch": false, "tap": false, "tap_holders": [], "work": false}
+cleanup_complete=True
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/spike.py", line 574, in <module>
+    check(helper.returncode == 0, "ioctl helper failed")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/overdrive/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/spike.py", line 278, in check
+    raise ProbeFailure(f"{current_step}: {message}")
+ProbeFailure: IOCTL_ARM: ioctl helper failed
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1289[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

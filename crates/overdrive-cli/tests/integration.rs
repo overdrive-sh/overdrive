@@ -150,4 +150,13 @@ mod integration {
     // `workload {describe,restart,stop}` and joins the module to
     // `host-kernel-shared`. See the module doc + `distill/test-scenarios.md`.
     mod guest_stack_mtls_egress;
+
+    // netns-density-295 correctness-recovery proofs over the `serve` lifetime
+    // port (`commands::serve_lifetime`), in-process, native metal only:
+    //   * §3.6 — the lifetime owner consumes the typed shared-network
+    //     fail-stop request (selection, ten-second outer bound, status 1);
+    //   * §3.5 — boot clear after the owner is abandoned through killed mode.
+    mod serve_killed_restart_boot_clear;
+    mod serve_lifetime_fail_stop;
+    mod serve_lifetime_support;
 }

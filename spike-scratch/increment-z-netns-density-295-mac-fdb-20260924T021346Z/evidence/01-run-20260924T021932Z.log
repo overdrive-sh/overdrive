@@ -1,0 +1,30 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run --no-sync -- python3 spike-scratch/increment-z-netns-density-295-mac-fdb-20260924T021346Z/spike.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e851718455b79ea2676c4343 pid=60634
+
+########## [bootstrap] no-sync source identity check
+FATAL: --no-sync refused stale or mismatched metal source
+expected:
+  commit=db3af70068fc14d87595f6f70ff1e1daf5ecc1e8
+  workspace=/Users/marcus/conductor/workspaces/helios/wellington-v2
+  source_digest=949ad2b8bedd47e10d121af8a34554ee9031e110e06c3b9345e38ce0a9070b3b
+actual:
+  commit=db3af70068fc14d87595f6f70ff1e1daf5ecc1e8
+  workspace=/Users/marcus/conductor/workspaces/helios/wellington-v2
+  source_digest=9ac38764ff96638657ce2e300f60e346fcefb9cdb117d328f6a8ae993ea2d915
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1289[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

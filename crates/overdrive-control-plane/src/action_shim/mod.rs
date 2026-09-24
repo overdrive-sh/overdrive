@@ -725,6 +725,90 @@ async fn fail_closed_on_mtls_install_with_guest(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn fail_closed_on_guest_network_activation(
+    driver: &dyn Driver,
+    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_provisioner: &dyn GuestNetworkProvisioner,
+    obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    running_row: &AllocStatusRow,
+    handle: Option<&AllocationHandle>,
+    cause: &ShimError,
+) -> Result<(), ShimError> {
+    if let Some(handle) = handle {
+        match driver.stop(handle).await {
+            Ok(()) | Err(DriverError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let mtls_cleanup = if let Some(lifecycle) = mtls_lifecycle {
+        lifecycle.stop_alloc(&running_row.alloc_id).await.err()
+    } else {
+        None
+    };
+    let network_cleanup = teardown_for_dispatch(
+        &running_row.alloc_id,
+        None,
+        net_slot_allocator,
+        network_provisioner,
+        Some(guest_provisioner),
+    )
+    .await
+    .err();
+    let (reason, detail) = if mtls_cleanup.is_none() && network_cleanup.is_none() {
+        (
+            TransitionReason::WorkloadNetnsProvisionFailed {
+                stage: "guest_network_activate".to_owned(),
+                detail: cause.to_string(),
+            },
+            cause.to_string(),
+        )
+    } else {
+        let mut detail = format!("primary activation refusal: {cause}");
+        if let Some(error) = mtls_cleanup {
+            detail.push_str("; mTLS partial teardown: ");
+            detail.push_str(&error.to_string());
+        }
+        if let Some(error) = network_cleanup {
+            detail.push_str("; structural network teardown: ");
+            detail.push_str(&error.to_string());
+        }
+        let failure = DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver: driver.r#type() },
+            detail,
+        };
+        (TransitionReason::from(&failure), failure.detail)
+    };
+    let failed_row = build_alloc_status_row(
+        running_row.alloc_id.clone(),
+        running_row.workload_id.clone(),
+        running_row.node_id.clone(),
+        AllocState::Failed,
+        LogicalTimestamp::dominating(
+            tick.tick,
+            running_row.node_id.clone(),
+            Some(&running_row.updated_at),
+        ),
+        Some(reason),
+        Some(detail),
+        None,
+        None,
+        running_row.kind,
+        running_row.started_at,
+        None,
+        Some(running_row),
+    );
+    let write = obs.write_alloc_lifecycle(failed_row, TransitionSource::Reconciler).await;
+    driver.release_supervision(&running_row.alloc_id);
+    let occurrence = write?;
+    emit_lifecycle_occurrence(bus, occurrence.as_ref());
+    Ok(())
+}
+
 #[cfg(any(test, feature = "integration-tests"))]
 #[allow(dead_code, clippy::too_many_arguments)]
 async fn fail_closed_on_mtls_install(
@@ -1393,12 +1477,12 @@ async fn provision_and_inject_netns(
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
-) -> Result<(), ShimError> {
+) -> Result<Option<crate::guest_network::GuestNetworkPlan>, ShimError> {
     if let Some(guest_provisioner) = guest_provisioner {
         let plan = crate::guest_network::assign_action_plan(spec.alloc.clone())?;
         guest_provisioner.provision(&plan).await?;
         spec.network = Some(plan.assignment().clone());
-        return Ok(());
+        return Ok(Some(plan));
     }
     #[cfg(not(any(test, feature = "integration-tests")))]
     {
@@ -1431,7 +1515,7 @@ async fn provision_and_inject_netns(
         let vm_tap = derive_vm_tap_plan(slot, plan.responder_addr);
         network_provisioner.provision(&plan, &vm_tap)?;
         inject_workload_network(spec, &plan, &vm_tap);
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -1593,6 +1677,13 @@ async fn teardown_guest_network(
     guest_provisioner.teardown(&plan).await?;
     crate::guest_network::release_action_plan(alloc_id);
     Ok(())
+}
+
+async fn activate_guest_network(
+    plan: &crate::guest_network::GuestNetworkPlan,
+    guest_provisioner: &dyn GuestNetworkProvisioner,
+) -> Result<(), ShimError> {
+    guest_provisioner.activate(plan).await.map_err(ShimError::from)
 }
 
 async fn teardown_for_dispatch(
@@ -2134,7 +2225,7 @@ async fn dispatch_single(
             // alloc is Pending → Failed, never Running). A non-provision
             // `ShimError` (unreachable here, but kept exhaustive) propagates
             // unchanged.
-            if let Err(err) = provision_and_inject_netns(
+            let guest_plan = match provision_and_inject_netns(
                 &mut spec,
                 net_slot_allocator,
                 network_provisioner,
@@ -2142,53 +2233,56 @@ async fn dispatch_single(
             )
             .await
             {
-                let Some(cause) = netns_provision_cause(&err) else {
-                    return Err(err);
-                };
-                // Assignment succeeded before the provision error, so unwind
-                // its structural ownership BEFORE making the Failed
-                // disposition durable. `raw` deliberately keeps the typed
-                // teardown error separate until the row write has had its
-                // existing precedence; it releases the slot only on teardown
-                // success.
-                let network_cleanup = teardown_for_dispatch(
-                    &alloc_id,
-                    None,
-                    net_slot_allocator,
-                    network_provisioner,
-                    guest_provisioner,
-                )
-                .await
-                .err();
-                let failure_record = fail_closed_on_netns_provision(
-                    obs,
-                    bus,
-                    tick,
-                    alloc_id.clone(),
-                    workload_id,
-                    node_id,
-                    kind,
-                    prior_state,
-                    cause,
-                    prior_row.as_ref(),
-                )
-                .await;
-                return match (failure_record, network_cleanup) {
-                    (Err(record_error), Some(cleanup_error)) => {
-                        tracing::error!(
-                            name: "start.provision.abort.cleanup.failed",
-                            alloc = %alloc_id,
-                            primary = %err,
-                            cleanup = %cleanup_error,
-                            "post-assignment provision failure could not record its disposition and structural cleanup also failed"
-                        );
-                        Err(record_error)
-                    }
-                    (Err(record_error), None) => Err(record_error),
-                    (Ok(()), Some(cleanup_error)) => Err(cleanup_error),
-                    (Ok(()), None) => Ok(()),
-                };
-            }
+                Ok(plan) => plan,
+                Err(err) => {
+                    let Some(cause) = netns_provision_cause(&err) else {
+                        return Err(err);
+                    };
+                    // Assignment succeeded before the provision error, so unwind
+                    // its structural ownership BEFORE making the Failed
+                    // disposition durable. `raw` deliberately keeps the typed
+                    // teardown error separate until the row write has had its
+                    // existing precedence; it releases the slot only on teardown
+                    // success.
+                    let network_cleanup = teardown_for_dispatch(
+                        &alloc_id,
+                        None,
+                        net_slot_allocator,
+                        network_provisioner,
+                        guest_provisioner,
+                    )
+                    .await
+                    .err();
+                    let failure_record = fail_closed_on_netns_provision(
+                        obs,
+                        bus,
+                        tick,
+                        alloc_id.clone(),
+                        workload_id,
+                        node_id,
+                        kind,
+                        prior_state,
+                        cause,
+                        prior_row.as_ref(),
+                    )
+                    .await;
+                    return match (failure_record, network_cleanup) {
+                        (Err(record_error), Some(cleanup_error)) => {
+                            tracing::error!(
+                                name: "start.provision.abort.cleanup.failed",
+                                alloc = %alloc_id,
+                                primary = %err,
+                                cleanup = %cleanup_error,
+                                "post-assignment provision failure could not record its disposition and structural cleanup also failed"
+                            );
+                            Err(record_error)
+                        }
+                        (Err(record_error), None) => Err(record_error),
+                        (Ok(()), Some(cleanup_error)) => Err(cleanup_error),
+                        (Ok(()), None) => Ok(()),
+                    };
+                }
+            };
 
             // Registry lookup (ADR-0083 §D1/§D2a, GH #42): the routing
             // key is the payload's own driver kind — the driver names
@@ -2517,6 +2611,28 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
+                if let (Some(plan), Some(guest_provisioner)) =
+                    (guest_plan.as_ref(), guest_provisioner)
+                {
+                    if let Err(activation_error) =
+                        activate_guest_network(plan, guest_provisioner).await
+                    {
+                        return fail_closed_on_guest_network_activation(
+                            driver.as_ref(),
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            handle_opt.as_ref(),
+                            &activation_error,
+                        )
+                        .await;
+                    }
+                }
                 if guest_command_release_permitted(
                     true,
                     intercept_required,
@@ -2576,15 +2692,16 @@ async fn dispatch_single(
             // The successor path is complete before the predecessor cleanup
             // attempt. A failed provision is represented at the successor key
             // and its structural ownership is unwound before old cleanup.
-            let successor_outcome = if let Err(error) = provision_and_inject_netns(
+            let provision_result = provision_and_inject_netns(
                 &mut spec,
                 net_slot_allocator,
                 network_provisioner,
                 guest_provisioner,
             )
-            .await
-            {
-                let Some(cause) = netns_provision_cause(&error) else {
+            .await;
+            let successor_outcome = match provision_result {
+                Err(error) => {
+                    let Some(cause) = netns_provision_cause(&error) else {
                     return finish_restart(
                         Err(error),
                         &prior_drivers,
@@ -2597,17 +2714,17 @@ async fn dispatch_single(
                         guest_provisioner,
                     )
                     .await;
-                };
-                let successor_network_cleanup = teardown_for_dispatch(
+                    };
+                    let successor_network_cleanup = teardown_for_dispatch(
                     &successor_alloc_id,
                     None,
                     net_slot_allocator,
                     network_provisioner,
                     guest_provisioner,
-                )
-                .await
-                .err();
-                let successor_record = fail_closed_on_netns_provision(
+                    )
+                    .await
+                    .err();
+                    let successor_record = fail_closed_on_netns_provision(
                     obs,
                     bus,
                     tick,
@@ -2618,9 +2735,9 @@ async fn dispatch_single(
                     prior_state,
                     cause,
                     None,
-                )
-                .await;
-                match (successor_record, successor_network_cleanup) {
+                    )
+                    .await;
+                    match (successor_record, successor_network_cleanup) {
                     (Err(record_error), Some(cleanup_error)) => {
                         tracing::error!(
                             name: "restart.provision.abort.cleanup.failed",
@@ -2634,9 +2751,10 @@ async fn dispatch_single(
                     (Err(record_error), None) => Err(record_error),
                     (Ok(()), Some(cleanup_error)) => Err(cleanup_error),
                     (Ok(()), None) => Ok(()),
+                    }
                 }
-            } else {
-                if intercept_required
+                Ok(plan) => {
+                    if intercept_required
                     && let Err(issue_error) = ensure_intercept_identity(
                         &successor_alloc_id,
                         &prior_row.workload_id,
@@ -2987,10 +3105,45 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
+                    if let (Some(plan), Some(guest_provisioner)) =
+                        (plan.as_ref(), guest_provisioner)
+                {
+                    if let Err(activation_error) =
+                        activate_guest_network(plan, guest_provisioner).await
+                    {
+                        let successor_outcome = fail_closed_on_guest_network_activation(
+                            driver.as_ref(),
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            Some(handle),
+                            &activation_error,
+                        )
+                        .await;
+                        return finish_restart(
+                            successor_outcome,
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            Some(guest_provisioner),
+                        )
+                        .await;
+                    }
+                }
                 driver.release_for_exit_emission(handle).await;
                 driver.on_alloc_running(&spec);
                 emit_lifecycle_occurrence(bus, occurrence.as_ref());
                 Ok(())
+                }
             };
 
             finish_restart(

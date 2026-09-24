@@ -1,0 +1,140 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/increment-z-netns-density-295-mac-fdb-20260924T021346Z/spike.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=c704fe5110203e59dc620507 pid=61768
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 172,772 bytes  received 4,347 bytes  118,079.33 bytes/sec
+total size is 266,079,144  speedup is 1,502.26
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[+ 0.015192] PREFLIGHT hypothesis=native root x86_64 metal, no pre-existing exact resources for this tag
+SWEEP removed=[]
+[+ 0.034289] ENV uname=Linux 7.0.0-29-generic x86_64 GNU/Linux
+[+ 0.036975] ENV kernel_release=7.0.0-29-generic
+[+ 0.036991] ENV systemd_detect_virt=none
+[+ 0.036997] ENV python=3.14.4
+[+ 0.041158] ENV parent_identity=uid=0(root) gid=0(root) groups=0(root)
+[+ 0.041181] ENV names bridge=spikebrf2a8 tap_a=spiketapaf2a8 tap_b=spiketapbf2a8 nft=spikeguardf2a8
+[+ 0.041198] ENV bridge_mac=02:01:00:00:00:01 guestA_mac=02:00:64:5f:00:02 guestB_mac=02:00:64:5f:00:03 guestC_mac=02:00:64:5f:00:04
+[+ 0.041203] ENV pre_run_sweep=[]
+[+ 0.041207] PREFLIGHT RESULT=PASS
+[+ 0.041211] STEP1 hypothesis=a bridge with an explicit MAC + two persistent owner-4200 TAPs, enslaved and up, model two guest microVM TAPs
+[+ 0.041214] STEP1 prediction=bridge MAC=02:01:00:00:00:01; both TAPs persistent owner=4200 master=bridge; forwarding once a queue attaches (carrier on)
+[+ 0.041216] STEP1 falsification=explicit bridge MAC not honored, TAP not persistent/owned, or not enslaved
+[+ 0.045891] STEP1 bridge_mac_at_create=52:73:c6:c3:fb:92 addr_assign_type=3
+[+ 0.049068] STEP1 bridge_mac_after_explicit_set=02:01:00:00:00:01 addr_assign_type=3
+[+ 0.060803] STEP1 bridge_mac_after_enslave=02:01:00:00:00:01 addr_assign_type=3
+[+ 0.064055] STEP1 bridge_mac_final=02:01:00:00:00:01 addr_assign_type=3
+[+ 0.067265] STEP1 spiketapaf2a8: address=aa:9a:28:dd:2b:ca tun_flags=0x1802 owner=4200 master=spikebrf2a8 flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP']
+[+ 0.069682] STEP1 spiketapbf2a8: address=9a:dd:6c:db:71:ad tun_flags=0x1802 owner=4200 master=spikebrf2a8 flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP']
+[+ 0.069695] STEP1 RESULT=PASS setup complete (bridge_mac_explicit_ok=True)
+[+ 0.372160] ATTACKER child_init={"attach_iff": "name=spiketapaf2a8 flags=0x1802", "caps": {"CapBnd": "000001ffffffffff", "CapEff": "0000000000000000", "CapInh": "0000000000000000", "CapPrm": "0000000000000000", "Gid": "4200\t4200\t4200\t4200", "Groups": "", "NoNewPrivs": "1", "Uid": "4200\t4200\t4200\t4200"}, "fd": 5, "ok": true}
+[+ 0.372342] ATTACKER parent_victim_b_fd=4 victim_b_TUNGETIFF=name=spiketapbf2a8 flags=0x1802
+[+ 0.375622] ATTACKER spiketapaf2a8: carrier=1 operstate=up bridge_state=58907: spiketapaf2a8: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master spikebrf2a8 state forwarding priority 32 cost 2 
+    hairpin off guard off root_block off fastleave off learning on flood on mcast_flood on bcast_flood on mcast_router 1 mcast_to_unicast off neigh_suppress off neigh_vlan_suppress off vlan_tunnel off isolated off locked off mab off mcast_n_groups 0 mcast_max_groups 0
+[+ 0.378484] ATTACKER spiketapbf2a8: carrier=1 operstate=up bridge_state=58908: spiketapbf2a8: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master spikebrf2a8 state forwarding priority 32 cost 2 
+    hairpin off guard off root_block off fastleave off learning on flood on mcast_flood on bcast_flood on mcast_router 1 mcast_to_unicast off neigh_suppress off neigh_vlan_suppress off vlan_tunnel off isolated off locked off mab off mcast_n_groups 0 mcast_max_groups 0
+[+ 0.403202] STEP2 hypothesis=injecting a guest-sourced frame from each TAP fd makes the bridge learn each guest MAC as a dynamic (non-local) FDB entry on its own port
+[+ 0.403226] STEP2 prediction=GUEST_A_MAC learned on spiketapa, GUEST_B_MAC learned on spiketapb; both non-permanent
+[+ 0.403239] STEP2 falsification=either MAC absent from the FDB or learned on the wrong port
+[+ 0.403560] STEP2 child_learn_a={"ok": true, "wrote": 55}
+[+ 0.658499] STEP2 fdb_guestA=['02:00:64:5f:00:02 dev spiketapaf2a8 master spikebrf2a8']
+[+ 0.658532] STEP2 fdb_guestB=['02:00:64:5f:00:03 dev spiketapbf2a8 master spikebrf2a8']
+[+ 0.661287] STEP2 full_fdb=['33:33:00:00:00:01 dev spikebrf2a8 self permanent', '01:00:5e:00:00:6a dev spikebrf2a8 self permanent', '33:33:00:00:00:6a dev spikebrf2a8 self permanent', '01:00:5e:00:00:01 dev spikebrf2a8 self permanent', '33:33:ff:00:00:01 dev spikebrf2a8 self permanent', '02:01:00:00:00:01 dev spikebrf2a8 vlan 1 master spikebrf2a8 permanent', '02:01:00:00:00:01 dev spikebrf2a8 master spikebrf2a8 permanent', '02:00:64:5f:00:02 dev spiketapaf2a8 master spikebrf2a8', 'aa:9a:28:dd:2b:ca dev spiketapaf2a8 vlan 1 master spikebrf2a8 permanent', 'aa:9a:28:dd:2b:ca dev spiketapaf2a8 master spikebrf2a8 permanent', '33:33:00:00:00:01 dev spiketapaf2a8 self permanent', '01:00:5e:00:00:01 dev spiketapaf2a8 self permanent', '33:33:ff:dd:2b:ca dev spiketapaf2a8 self permanent', '02:00:64:5f:00:03 dev spiketapbf2a8 master spikebrf2a8', '9a:dd:6c:db:71:ad dev spiketapbf2a8 vlan 1 master spikebrf2a8 permanent', '9a:dd:6c:db:71:ad dev spiketapbf2a8 master spikebrf2a8 permanent', '33:33:00:00:00:01 dev spiketapbf2a8 self permanent', '01:00:5e:00:00:01 dev spiketapbf2a8 self permanent', '33:33:ff:db:71:ad dev spiketapbf2a8 self permanent']
+[+ 0.661349] STEP2 RESULT=PASS learned_ok=True
+[+ 0.661360] STEP3 hypothesis=host->guestB is delivered to spiketapb (victim) and NOT to spiketapa (attacker); this is the litmus that a steal would be observable
+[+ 0.661374] STEP3 prediction=B receives host->guestB (victim_fd/cap hits>0); A receives none for guestB; host->guestA is received by A only
+[+ 0.661385] STEP3 falsification=A receives host->guestB even before any attack
+[+ 0.912982] DELIVER {"A_cap": 3, "A_cap_hits": 0, "A_child_fd": 3, "A_child_hits": 0, "A_frames": [{"dst": "33:33:ff:00:00:01", "etype": "0x86dd", "len": 86, "marker": null, "src": "02:01:00:00:00:01"}, {"dst": "33:33:ff:dd:2b:ca", "etype": "0x86dd", "len": 86, "marker": null, "src": "aa:9a:28:dd:2b:ca"}, {"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 110, "marker": null, "src": "02:01:00:00:00:01"}], "B_cap": 7, "B_cap_hits": 3, "B_frames": [{"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseB|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseB|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseB|2", "src": "02:01:00:00:00:01"}, {"dst": "33:33:ff:00:00:01", "etype": "0x86dd", "len": 86, "marker": null, "src": "02:01:00:00:00:01"}], "B_victim_fd": 7, "B_victim_hits": 3, "dst_mac": "02:00:64:5f:00:03", "label": "baseB"}
+[+ 1.163836] DELIVER {"A_cap": 3, "A_cap_hits": 3, "A_child_fd": 3, "A_child_hits": 3, "A_frames": [{"dst": "02:00:64:5f:00:02", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseA|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:02", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseA|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:02", "etype": "0x0800", "len": 54, "marker": "SPKZ|baseA|2", "src": "02:01:00:00:00:01"}], "B_cap": 0, "B_cap_hits": 0, "B_frames": [], "B_victim_fd": 0, "B_victim_hits": 0, "dst_mac": "02:00:64:5f:00:02", "label": "baseA"}
+[+ 1.163866] STEP3 RESULT=PASS baseline_ok=True
+[+ 1.163875] STEP4 hypothesis=uid-4200 no-CAP_NET_ADMIN holder of spiketapa's queue fd sets its host-side MAC to GUEST_B_MAC via SIOCSIFHWADDR; the bridge moves GUEST_B_MAC to spiketapa as LOCAL|STATIC
+[+ 1.163881] STEP4 prediction=ioctl rc=0 (no EPERM) with CapEff=0; fdb GUEST_B_MAC now on spiketapa permanent; bridge device MAC unchanged (set explicitly => NET_ADDR_SET)
+[+ 1.163886] STEP4 falsification=ioctl returns EPERM, or the FDB entry does not move to spiketapa
+[+ 1.170892] STEP4 child_steal={"caps_at_ioctl": {"CapBnd": "000001ffffffffff", "CapEff": "0000000000000000", "CapInh": "0000000000000000", "CapPrm": "0000000000000000", "Gid": "4200\t4200\t4200\t4200", "Groups": "", "NoNewPrivs": "1", "Uid": "4200\t4200\t4200\t4200"}, "ioctl_errname": "0", "ioctl_errno": 0, "ioctl_rc": 0, "mac_readback": "02:00:64:5f:00:03", "ok": true}
+[+ 1.425545] STEP4 fdb_guestB_before_attack=['02:00:64:5f:00:03 dev spiketapbf2a8 master spikebrf2a8']
+[+ 1.425576] STEP4 fdb_guestB_after_attack=['02:00:64:5f:00:03 dev spiketapaf2a8 vlan 1 master spikebrf2a8 permanent', '02:00:64:5f:00:03 dev spiketapaf2a8 master spikebrf2a8 permanent']
+[+ 1.433709] STEP4 tap_a_mac_after=02:00:64:5f:00:03 tap_b_mac_after=9a:dd:6c:db:71:ad
+[+ 1.433743] STEP4 bridge_mac before=02:01:00:00:00:01 after=02:01:00:00:00:01 (explicit-set protects per ADR-0126 / br_stp_recalculate_bridge_id NET_ADDR_SET)
+[+ 1.435910] STEP4 full_fdb_after_attack=['33:33:00:00:00:01 dev spikebrf2a8 self permanent', '01:00:5e:00:00:6a dev spikebrf2a8 self permanent', '33:33:00:00:00:6a dev spikebrf2a8 self permanent', '01:00:5e:00:00:01 dev spikebrf2a8 self permanent', '33:33:ff:00:00:01 dev spikebrf2a8 self permanent', '02:01:00:00:00:01 dev spikebrf2a8 vlan 1 master spikebrf2a8 permanent', '02:01:00:00:00:01 dev spikebrf2a8 master spikebrf2a8 permanent', '02:00:64:5f:00:03 dev spiketapaf2a8 vlan 1 master spikebrf2a8 permanent', '02:00:64:5f:00:03 dev spiketapaf2a8 master spikebrf2a8 permanent', '02:00:64:5f:00:02 dev spiketapaf2a8 master spikebrf2a8', '33:33:00:00:00:01 dev spiketapaf2a8 self permanent', '01:00:5e:00:00:01 dev spiketapaf2a8 self permanent', '33:33:ff:dd:2b:ca dev spiketapaf2a8 self permanent', '9a:dd:6c:db:71:ad dev spiketapbf2a8 vlan 1 master spikebrf2a8 permanent', '9a:dd:6c:db:71:ad dev spiketapbf2a8 master spikebrf2a8 permanent', '33:33:00:00:00:01 dev spiketapbf2a8 self permanent', '01:00:5e:00:00:01 dev spiketapbf2a8 self permanent', '33:33:ff:db:71:ad dev spiketapbf2a8 self permanent']
+[+ 1.435976] STEP4 RESULT ioctl_ok=True caps_zero_at_ioctl=True fdb_moved=True
+[+ 1.435997] STEP5 hypothesis=after the MAC change, host->guestB is forwarded to spiketapa (attacker) instead of spiketapb (victim); the attacker reads the victim's host-to-guest plaintext from its own fd
+[+ 1.436003] STEP5 prediction=A_child_fd hits>0 for host->guestB; B_victim hits==0
+[+ 1.436008] STEP5 falsification=A receives nothing / B still receives it (no steal)
+[+ 1.687094] DELIVER {"A_cap": 5, "A_cap_hits": 3, "A_child_fd": 5, "A_child_hits": 3, "A_frames": [{"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 55, "marker": "SPKZ|stealB|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 55, "marker": "SPKZ|stealB|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:03", "etype": "0x0800", "len": 55, "marker": "SPKZ|stealB|2", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0806", "len": 42, "marker": null, "src": "02:01:00:00:00:01"}], "B_cap": 2, "B_cap_hits": 0, "B_frames": [{"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0806", "len": 42, "marker": null, "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0806", "len": 42, "marker": null, "src": "02:01:00:00:00:01"}], "B_victim_fd": 2, "B_victim_hits": 0, "dst_mac": "02:00:64:5f:00:03", "label": "stealB"}
+[+ 1.687137] STEP5 RESULT=STEAL REPRODUCED A_child_hits=3 B_victim_hits=0
+[+ 1.687153] STEP6 hypothesis=host->guestC (a MAC never learned) is flooded to every flood-enabled port, so the attacker receives it with NO MAC change at all (br_forward.c 216-218)
+[+ 1.687159] STEP6 prediction=A_child_fd hits>0 AND B_victim hits>0 for host->guestC (flooded to both)
+[+ 1.687182] STEP6 falsification=the unknown-unicast frame reaches neither or only the intended port
+[+ 1.938617] DELIVER {"A_cap": 7, "A_cap_hits": 3, "A_child_fd": 7, "A_child_hits": 3, "A_frames": [{"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|2", "src": "02:01:00:00:00:01"}, {"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 110, "marker": null, "src": "02:01:00:00:00:01"}], "B_cap": 8, "B_cap_hits": 3, "B_frames": [{"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 55, "marker": "SPKZ|floodC|2", "src": "02:01:00:00:00:01"}, {"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 110, "marker": null, "src": "02:01:00:00:00:01"}], "B_victim_fd": 8, "B_victim_hits": 3, "dst_mac": "02:00:64:5f:00:04", "label": "floodC"}
+[+ 1.938654] STEP6 RESULT=FLOOD LEAK REPRODUCED A_child_hits=3 B_victim_hits=3
+[+ 1.938676] STEP7 hypothesis=an ADR-0142-shaped egress dest-MAC gate (nft bridge output/postrouting keyed on oifname + ether daddr, delivering only the registered guest MAC, mcast/bcast exempt) drops the stolen and flooded host->guest frames before they reach the attacker; production form is TCX egress
+[+ 1.938682] STEP7 prediction=with the gate active, A_child hits==0 and A_cap==0 for host->guestB (stolen) AND host->guestC (flood); a drop counter increments; broadcast still passes
+[+ 1.938688] STEP7 falsification=the attacker still receives host->guestB or host->guestC with the gate active
+[+ 1.960348] STEP7 nft_ruleset:
+[+ 1.962939] STEP7   table bridge spikeguardf2a8 { # handle 2810
+[+ 1.962971] STEP7   	chain out { # handle 1
+[+ 1.962979] STEP7   		type filter hook output priority -300; policy accept;
+[+ 1.962985] STEP7   		oifname "spiketapaf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:02 counter packets 0 bytes 0 drop # handle 3
+[+ 1.962990] STEP7   		oifname "spiketapbf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:03 counter packets 0 bytes 0 drop # handle 4
+[+ 1.962995] STEP7   	}
+[+ 1.963000] STEP7   
+[+ 1.963005] STEP7   	chain post { # handle 2
+[+ 1.963010] STEP7   		type filter hook postrouting priority -300; policy accept;
+[+ 1.963015] STEP7   		oifname "spiketapaf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:02 counter packets 0 bytes 0 drop # handle 5
+[+ 1.963020] STEP7   		oifname "spiketapbf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:03 counter packets 0 bytes 0 drop # handle 6
+[+ 1.963024] STEP7   	}
+[+ 1.963029] STEP7   }
+[+ 2.213912] DELIVER {"A_cap": 1, "A_cap_hits": 0, "A_child_fd": 1, "A_child_hits": 0, "A_frames": [{"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 90, "marker": null, "src": "02:00:64:5f:00:03"}], "B_cap": 0, "B_cap_hits": 0, "B_frames": [], "B_victim_fd": 0, "B_victim_hits": 0, "dst_mac": "02:00:64:5f:00:03", "label": "ctrlStealB"}
+[+ 2.464783] DELIVER {"A_cap": 1, "A_cap_hits": 0, "A_child_fd": 1, "A_child_hits": 0, "A_frames": [{"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 110, "marker": null, "src": "02:01:00:00:00:01"}], "B_cap": 1, "B_cap_hits": 0, "B_frames": [{"dst": "33:33:00:00:00:16", "etype": "0x86dd", "len": 110, "marker": null, "src": "02:01:00:00:00:01"}], "B_victim_fd": 1, "B_victim_hits": 0, "dst_mac": "02:00:64:5f:00:04", "label": "ctrlFloodC"}
+[+ 2.715798] DELIVER {"A_cap": 5, "A_cap_hits": 3, "A_child_fd": 5, "A_child_hits": 3, "A_frames": [{"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|0", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|1", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|2", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0806", "len": 42, "marker": null, "src": "02:01:00:00:00:01"}], "B_cap": 5, "B_cap_hits": 3, "B_frames": [{"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|0", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|1", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 58, "marker": "SPKZ|ctrlBcast|2", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0806", "len": 42, "marker": null, "src": "02:01:00:00:00:01"}], "B_victim_fd": 5, "B_victim_hits": 3, "dst_mac": "ff:ff:ff:ff:ff:ff", "label": "ctrlBcast"}
+[+ 2.720800] STEP7 nft_counters:
+[+ 2.720852] STEP7   oifname "spiketapaf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:02 counter packets 6 bytes 270 drop
+[+ 2.720865] STEP7   oifname "spiketapbf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:03 counter packets 3 bytes 135 drop
+[+ 2.720873] STEP7   oifname "spiketapaf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:02 counter packets 0 bytes 0 drop
+[+ 2.720878] STEP7   oifname "spiketapbf2a8" ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether daddr != 02:00:64:5f:00:03 counter packets 0 bytes 0 drop
+[+ 2.720898] STEP7 RESULT steal_blocked=True flood_blocked_nft=True broadcast_still_delivered=True
+[+ 2.720910] STEP8 hypothesis=independently of nft, disabling bridge unicast flooding on the attacker port stops the unknown-unicast flood leak while leaving broadcast/multicast delivery intact
+[+ 2.720923] STEP8 prediction=with the nft table removed and `bridge link set spiketapa flood off`, host->guestC no longer reaches A; broadcast still reaches A
+[+ 2.720934] STEP8 falsification=flood off does not stop the unknown-unicast leak, or it also blocks broadcast
+[+ 2.984783] DELIVER {"A_cap": 3, "A_cap_hits": 3, "A_child_fd": 3, "A_child_hits": 3, "A_frames": [{"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|2", "src": "02:01:00:00:00:01"}], "B_cap": 3, "B_cap_hits": 3, "B_frames": [{"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|0", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|1", "src": "02:01:00:00:00:01"}, {"dst": "02:00:64:5f:00:04", "etype": "0x0800", "len": 62, "marker": "SPKZ|regressFloodC|2", "src": "02:01:00:00:00:01"}], "B_victim_fd": 3, "B_victim_hits": 3, "dst_mac": "02:00:64:5f:00:04", "label": "regressFloodC"}
+[+ 2.984851] STEP8 flood_leak_without_nft_again=True A_child_hits=3
+[+ 2.990370] STEP8 bridge_link_a=58907: spiketapaf2a8: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master spikebrf2a8 state forwarding priority 32 cost 2 
+    hairpin off guard off root_block off fastleave off learning on flood off mcast_flood on bcast_flood on mcast_router 1 mcast_to_unicast off neigh_suppress off neigh_vlan_suppress off vlan_tunnel off isolated off locked off mab off mcast_n_groups 0 mcast_max_groups 0
+[+ 3.241248] DELIVER {"A_cap": 0, "A_cap_hits": 0, "A_child_fd": 0, "A_child_hits": 0, "A_frames": [], "B_cap": 0, "B_cap_hits": 0, "B_frames": [], "B_victim_fd": 0, "B_victim_hits": 0, "dst_mac": "02:00:64:5f:00:04", "label": "floodOffC"}
+[+ 3.492253] DELIVER {"A_cap": 3, "A_cap_hits": 3, "A_child_fd": 3, "A_child_hits": 3, "A_frames": [{"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|0", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|1", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|2", "src": "02:01:00:00:00:01"}], "B_cap": 3, "B_cap_hits": 3, "B_frames": [{"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|0", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|1", "src": "02:01:00:00:00:01"}, {"dst": "ff:ff:ff:ff:ff:ff", "etype": "0x0800", "len": 62, "marker": "SPKZ|floodOffBcast|2", "src": "02:01:00:00:00:01"}], "B_victim_fd": 3, "B_victim_hits": 3, "dst_mac": "ff:ff:ff:ff:ff:ff", "label": "floodOffBcast"}
+[+ 3.492281] STEP8 RESULT flood_off_blocks_flood=True broadcast_still_delivered=True
+[+ 3.492300] STEP9 hypothesis=every resource removes to an exact empty complement
+[+ 3.644937] STEP9 final_residue={"bridge_exists": false, "nft_exists": false, "tap_a_exists": false, "tap_a_holders": [], "tap_b_exists": false, "tap_b_holders": []}
+[+ 3.644964] STEP9 RESULT teardown_clean=True
+[+ 3.644973] SUMMARY attacker_uid_4200_no_CAP_NET_ADMIN=True
+[+ 3.644978] SUMMARY bridge_mac_explicit_ok=True
+[+ 3.644981] SUMMARY attacker_uid_4200_no_caps=True
+[+ 3.644984] SUMMARY baseline_isolated=True
+[+ 3.644987] SUMMARY ioctl_no_cap_net_admin=True
+[+ 3.644989] SUMMARY fdb_stolen_to_attacker=True
+[+ 3.644992] SUMMARY bridge_mac_unmoved_by_attack=True
+[+ 3.644994] SUMMARY bridge_mac_not_stolen_gateway=True
+[+ 3.644997] SUMMARY steal_reproduced=True
+[+ 3.645000] SUMMARY flood_leak_reproduced=True
+[+ 3.645002] SUMMARY control_nft_blocks_steal=True
+[+ 3.645005] SUMMARY control_nft_blocks_flood=True
+[+ 3.645007] SUMMARY control_nft_allows_broadcast=True
+[+ 3.645010] SUMMARY control_floodoff_blocks_flood=True
+[+ 3.645012] SUMMARY control_floodoff_allows_broadcast=True
+[+ 3.645015] SUMMARY teardown_clean=True
+[+ 3.645018] SUMMARY VERDICT_STEAL_REPRODUCED=True
+[+ 3.645021] SUMMARY VERDICT_CONTROL_BLOCKS=True
+VERDICT STEAL_REPRODUCED=True CONTROL_BLOCKS=True
+CLEANUP residue_found_by_fallback=[]
+CLEANUP {"bridge_exists": false, "nft_exists": false, "tap_a_exists": false, "tap_b_exists": false}
+cleanup_complete=True

@@ -1,0 +1,24 @@
+SOURCE_AUDIT BEGIN
+Hypothesis: CH v53.0's --net fd= path issues only TUNGETIFF, TUNSETIFF, TUNSETVNETHDRSZ, SIOCGIFMTU, and TUNSETOFFLOAD; none is deny-listed.
+Predicted outcome: from_tap_fds selects Tap::from_tap_fd; construction contains the first four ioctls; activation contains TUNSETOFFLOAD; named-path setters are not called.
+Falsification: any fd-path call reaches a deny-listed request, host_mac/IP/link enable, or another ioctl not named above.
+tag=v53.0 commit=9ed824d6d08df3e96f7d5f50795d9449ac99f431
+FROM_TAP_FDS_OCCURRENCES_BEGIN
+Traceback (most recent call last):
+  File "/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/source_audit.py", line 44, in <module>
+    print(git("grep", "-n", "from_tap_fds", TAG), end="")
+          ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/marcus/conductor/workspaces/helios/wellington-v2/spike-scratch/increment-aa-netns-density-295-tap-ioctl-seccomp-20260924T120003Z/source_audit.py", line 14, in git
+    return subprocess.run(
+           ~~~~~~~~~~~~~~^
+        ["git", "-C", str(CHECKOUT), *args],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        capture_output=True,
+        ^^^^^^^^^^^^^^^^^^^^
+    ).stdout
+    ^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['git', '-C', '/Users/marcus/git/cloud-hypervisor/cloud-hypervisor', 'grep', '-n', 'from_tap_fds', 'v53.0']' returned non-zero exit status 1.

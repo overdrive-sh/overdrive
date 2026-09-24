@@ -5,11 +5,13 @@
 **Accepted — the current #295 contract is user-approved and independently
 approved through D-295-DISTILL-9 at review iteration 12 on 2026-09-17.**
 The user-directed D-295-DELIVER-04-01 evidence-boundary correction on
-2026-09-23 was revised again after native capture proved a product-ordering
-contradiction: guest-source ARP replies and TCP RST frames occurred before the
-intercept-success receipt while the host TAP was already up. Under the user's
-explicit no-review direction, the same D-295-DELIVER-04-01 amendment now also
-defers the sole TAP activation until after that receipt and before EXEC release.
+2026-09-23, revised after native falsifier `e72385d6`, requires no further
+review and changes no product mechanism. **Amended 2026-09-24** by the
+accepted #295 correctness-recovery replacement (see § *Accepted amendment
+2026-09-24* at the end): the allocation TAP's activation timing and the VMM
+attachment mechanism are decided by ADR-0127 through ADR-0131, and each managed
+TAP also carries an egress guest-MAC classifier over this endpoint map
+(ADR-0142). The zero-frame receipt below stands.
 The approved compound decision is D-295-2: TCX/SCHED_CLS is the primary
 microVM TAP endpoint classifier; nftables remains the IP TPROXY/output socket
 delivery mechanism and supplies only the minimum bridge fail-closed guard for
@@ -185,28 +187,22 @@ an S-ND295-01 claim.
 ### S-ND295-01 intercept-live timing receipt
 
 The existing production event `mtls.intercept.install.success` is the sole
-timing authority for the zero-frame-before-intercept assertion. The action shim
+timing authority for allocation intercept-live and operator-workload traffic. The action shim
 emits it synchronously immediately after awaited
 `mtls_lifecycle.start_alloc(&spec)` succeeds—therefore after allocation
-elements are active and read back—then awaits the same guest-network owner's
-exact TAP activation/read-back, and only afterward calls
-`driver.release_for_exit_emission(handle)` to release guest EXEC.
+elements are active and read back—and immediately before
+`driver.release_for_exit_emission(handle)` can release guest EXEC.
 
 The native test installs a tracing Layer before deployment. Its synchronous
 `on_event` callback accepts exactly one event whose `alloc` field equals the
 caller allocation ID and samples `clock_gettime(CLOCK_REALTIME)`. AF_PACKET
 `SO_TIMESTAMPNS` is in the same realtime domain. Every guest-originated frame
-on the caller TAP with a missing timestamp or timestamp less than or equal to
-that barrier fails the zero-frame assertion; only a strictly later timestamp
-is post-live. Event absence, duplication, wrong allocation, or capture loss
-fails closed.
-
-The event remains correctly named because it reports only that the mTLS
-intercept installation and its `2 + P` elements succeeded. It does not report
-TAP activation, EXEC release, or allocation completion. Keeping it before the
-only host-TAP up transition is load-bearing: any newly enabled frame is then
-strictly post-event. Moving the event after activation would create an
-unobservable interval in which the first guest frame could precede the event.
+on the caller TAP with a missing timestamp, or with a timestamp less than or
+equal to that barrier, fails the zero-frame assertion. Only a strictly later
+timestamp is post-live. Event absence, duplication, wrong allocation, or
+capture loss fails closed. Under ADR-0131 the event precedes the TAP's only
+administrative up-transition, so every possible guest frame is strictly
+post-barrier.
 
 The typed generation-bracketed shared-IP state remains mandatory evidence of
 the complete constant program and exact `2 + P` member universe. Its userspace
@@ -225,8 +221,7 @@ require a literal handle number such as `74`.
   hierarchy, managed-TAP nft set, and the three-rule bridge guard.
 - Its private host implementation and sibling sim implementation satisfy the
   same application-owner contract for startup probe, stale sweep, shared
-  converge/audit, TAP quiescence, and inherited allocation
-  provision/activation/teardown.
+  converge/audit, TAP quiescence, and inherited allocation provision/teardown.
   This is one owner boundary, not a second classifier or a low-level kernel
   fault abstraction.
 - The application owner and its source-bearing orchestration error live in
@@ -234,13 +229,10 @@ require a literal handle number such as `74`.
   retains its existing canonical error. Core contains none of those adapter
   types.
 - Per-allocation network provisioning first adds a down TAP to the managed set,
-  then writes its endpoint-map value, attaches/pins TCX, queries the exact
-  ifindex/program identity, and returns only after the exact TAP is read back
-  still down. Cloud Hypervisor may then attach the persistent TAP but must not
-  raise it through READY/Running. After the action shim's intercept-success
-  event, the same owner re-reads guard/endpoint/link/pin/master identity, raises
-  the TAP, and reads back exact up/master identity before EXEC release. Every
-  partial state is fail-closed by the guard or administrative-down barrier.
+  then writes its endpoint-map value, attaches/pins TCX, and queries the exact
+  ifindex/program identity before any VMM attachment. Every partial state is
+  fail-closed by the guard. When the TAP goes up relative to VMM attachment and
+  intercept-live is decided separately in ADR-0127 through ADR-0131.
 - Links and maps are pinned. Closing the loader does not detach them. Within one
   boot, the owner reopens/adopts pins for inspection, update, and teardown.
 - On process boot, existing VM reclamation runs first. Prior-epoch pins are
@@ -254,7 +246,8 @@ require a literal handle number such as `74`.
 The production bpffs hierarchy is
 `/sys/fs/bpf/overdrive/mtls-endpoints/`: maps at
 `maps/endpoints` and `maps/counters`, and per-TAP ingress links at
-`links/<tap>-ingress`. This is ownership inventory, not operator API. A pin
+`links/<tap>-ingress` (and, per the 2026-09-24 amendment, egress links at
+`links/<tap>-egress`). This is ownership inventory, not operator API. A pin
 outside this hierarchy is never adopted as an Overdrive endpoint link.
 
 Cilium validates the lifecycle shape but is not copied as a complete answer.
@@ -332,20 +325,6 @@ shared bridge or a physical uplink. The lossless all-interface capture is
 required as a separate positive-loopback/negative-non-loopback oracle and must
 confine plaintext to the two named guest-local tuple families.
 
-### Keep provision-time TAP activation and allow pre-intercept control frames
-
-Rejected by the native counterexample and ADR-0088's closed zero-frame
-contract. The observed ARP replies and TCP RST were guest-originated before
-EXEC; categorizing them as harmless would make the security barrier depend on
-packet-type exceptions rather than exact ordering.
-
-### Timestamp intercept-live after TAP activation
-
-Rejected. TAP activation is the first operation that can admit a guest frame to
-the bridge, so an event emitted afterward cannot prove that no frame preceded
-intercept-live. The existing event correctly timestamps completed mTLS
-installation; activation follows it and remains separately awaited/read back.
-
 ## Consequences
 
 Positive: the primary classifier now has real-metal verifier, memory, attach,
@@ -357,11 +336,42 @@ and a small bridge nft guard becomes a second dependency—but not a second
 classifier. Part C's 296 verified instructions, 4,096-byte program memlock,
 4,208-byte bounded-probe map memlock, ~7.6–7.9 ms attach/pin, and ~50.8 ms
 load/verifier are point measurements, not the pinned-kernel baseline or 16k
-capacity proof. The original S-ND295-01 clarification changed evidence
-attribution: exact kTLS socket state plus same-inode bidirectional splice proves
-the same-node protected transport; lossless interface capture proves local
+capacity proof. The S-ND295-01 clarification changes only evidence attribution:
+exact kTLS socket state plus same-inode bidirectional splice proves the
+same-node protected transport; lossless interface capture proves local
 diversion, zero physical/ordinary-forwarding leg-B egress, intentional
 plaintext confinement to leg F/leg S, and no bypass. Same-node AF_PACKET makes
-no TLS-record byte claim. The later native frame-order counterexample changes
-one product order: provision ends with TAP down and the same owner activates it
-after the unchanged mTLS success receipt and before EXEC release.
+no TLS-record byte claim.
+
+## Accepted amendment 2026-09-24 — #295 correctness-recovery replacement
+
+Accepted by the user on 2026-09-24 with the GH #295 correctness-recovery
+replacement DESIGN (`docs/feature/netns-density-295/feature-delta.md`).
+
+**Why this is stated as an amendment.** The classifier contract above is
+operative in code committed at HEAD `db3af700` on the #295 feature branch
+(`gh295c_endpoint` is the only classifier there; not merged to `main`; no
+persisted or wire state).
+
+**What changes.**
+
+1. **TAP timing and VMM attachment** are decided by
+   [ADR-0127](adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md)
+   through [ADR-0131](adr-0131-activate-allocation-tap-after-intercept-live.md).
+   Provisioning reads the protected attachment back with the TAP down.
+   Activation after intercept-live re-reads it and raises the TAP.
+2. **Egress delivery is added.** The ingress-only classifier above never sees
+   host-to-guest frames, and a queue holder can redirect another guest's
+   host-to-guest frames by changing its own TAP's host-side MAC.
+   [ADR-0142](adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md)
+   therefore adds a TCX egress classifier on every managed TAP. It reads this
+   same endpoint map by its own ifindex, delivers unicast only to the
+   registered guest MAC, fails closed on a map miss, and always delivers
+   broadcast and multicast.
+3. **Counters and pins.** The shared counter map gains one class for that
+   program's drops, so it holds the eight ingress classes above plus one egress
+   class. Its per-TAP links pin at `links/<tap>-egress` beside
+   `links/<tap>-ingress`.
+
+The ingress classifier, its eight counter classes, the proof marks, and the
+bridge guard are unchanged.

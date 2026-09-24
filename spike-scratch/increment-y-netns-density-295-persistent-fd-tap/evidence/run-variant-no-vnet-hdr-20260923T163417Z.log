@@ -1,0 +1,151 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/increment-y-netns-density-295-persistent-fd-tap/spike.py --variant no-vnet-hdr`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=7d631d12236b034dc04c8b54 pid=21494
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 164,317 bytes  received 8,174 bytes  114,994.00 bytes/sec
+total size is 263,226,832  speedup is 1,526.03
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[+ 0.000067] PREFLIGHT BEGIN
+[+ 0.059515] ENV variant=no-vnet-hdr launcher_flags=0x1002
+[+ 0.062169] ENV uname=Linux 7.0.0-29-generic x86_64 GNU/Linux
+[+ 0.062179] ENV systemd_detect_virt=none
+[+ 0.062184] ENV cloud_hypervisor_path=/usr/local/bin/cloud-hypervisor
+[+ 0.063612] ENV cloud_hypervisor_version=cloud-hypervisor v53.0
+[+ 0.064748] ENV ethtool_version=ethtool version 6.19
+[+ 0.064787] ENV kernel=/srv/vm/overdrive-testing/kernel rootfs=/srv/vm/overdrive-testing/rootfs.ext4
+[+ 0.069148] ENV parent_identity=uid=0(root) gid=0(root) groups=0(root)
+[+ 0.069164] ENV names tap=pftap5554 scratch=pfx5554 bridge=pfbr5554 nft=pfguard5554 run_dir=/run/overdrive/vm/pf-tap-5554 cgroup=/sys/fs/cgroup/overdrive.slice/workloads.slice/pf-tap-5554.scope work=/srv/vm/overdrive-testing/pf-tap-5554
+[+ 0.069171] ENV before_cloud_hypervisor_pids=[]
+[+ 0.069175] PREFLIGHT RESULT=PASS native root x86_64 metal, no pre-existing exact resources
+[+ 0.069180] STAGING BEGIN
+[+ 0.095627] STAGING RESULT=PASS rootfs/kernel/run-dir/beacon/cgroup staged
+[+ 0.095645] STEP1 BEGIN
+[+ 0.095649] STEP1 hypothesis=the production creator sequence yields a persistent, down, owner-4200 TAP with zero queue holders after its fd closes
+[+ 0.095653] STEP1 prediction=tun_flags=0x1802 (TAP|NO_PI|PERSIST, no VNET_HDR) owner=4200 flags lack UP holders=[] master=bridge after attach
+[+ 0.095655] STEP1 falsification=TAP absent after creator close, UP, holders non-empty, or persistence/owner differ
+[+ 0.121590] STEP1 after_creator_close_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 663, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": null, "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 0.143112] STEP1 after_bridge_attach_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 712, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 0.153544] STEP1 RESULT=PASS tap=pftap5554 ifindex=58842 tun_flags=0x1802 owner=4200 flags=['BROADCAST', 'MULTICAST'] master=pfbr5554 holders=[]
+[+ 0.164798] CAPTURE capture_started_before_launch=AF_PACKET ifindex=58842 all_ethertypes=true
+[+ 0.164808] STEP2 BEGIN
+[+ 0.164814] STEP2 hypothesis=a separate launcher open+TUNSETIFF(0x1002) attaches to the existing persistent TAP without the creator fd
+[+ 0.164817] STEP2 prediction=attach ok; fdinfo iff names the TAP; TUNSETIFF updates TUN_FEATURES (tun_flags gains 0x4000 iff requested); TAP stays down
+[+ 0.164819] STEP2 falsification=attach errors, tun_flags does not track the request, or the TAP changes admin state
+[+ 0.164932] STEP2 launcher_fd=50 inode=137 device=7 TUNGETIFF=name=pftap5554 flags=0x1802
+[+ 0.164937] STEP2 launcher_fdinfo=pos:	0; flags:	02104002; mnt_id:	30; ino:	137; iff:	pftap5554
+[+ 0.184564] STEP2 after_launcher_attach_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 714, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [[21844, 50, "python3"]], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 0.184605] STEP2 diff_vs_step1={}
+[+ 0.204101] STEP2 RESULT=PASS launcher_fd=50 TUNGETIFF=name=pftap5554 flags=0x1802 tun_flags=0x1802
+[+ 0.204122] STEP3 BEGIN
+[+ 0.204131] STEP3 hypothesis=CH v53 consumes the inherited queue fd without raising the persistent TAP; guest READY with zero frames
+[+ 0.204137] STEP3 prediction=READY pid=1 port=1234; TAP flags lack UP; capture=0; all six counters=0; TAP state identical to post-attach
+[+ 0.204141] STEP3 falsification=TAP UP at READY, any frame/counter (incl. rx_dropped) non-zero, or CH altered tun_flags/owner/offload
+[+ 0.204312] STEP3 fd_flags_before=0x1 fd_flags_after=0x0 parent_non_cloexec_fds=[0, 1, 2, 50]
+[+ 0.223703] STEP3 main_cli=prlimit --fsize=268435456 --nofile=256 -- setpriv --reuid=4200 --regid=4200 --groups=991 --no-new-privs -- /usr/local/bin/cloud-hypervisor --cpus boot=1 --memory size=268435456 --kernel /run/overdrive/vm/pf-tap-5554/kernel --cmdline 'console=ttyS0 panic=1 root=/dev/vda rw overdrive.net=10.77.239.2/24,gw=10.77.239.1,dns=10.77.239.1' --disk path=/srv/vm/overdrive-testing/pf-tap-5554/rootfs.ext4,image_type=raw --serial file=/run/overdrive/vm/pf-tap-5554/console.log --console off --vsock cid=3,socket=/run/overdrive/vm/pf-tap-5554/vsock --api-socket /run/overdrive/vm/pf-tap-5554/api --seccomp true --landlock --net 'fd=[50],mac=02:00:00:95:55:54,offload_tso=off,offload_ufo=off,offload_csum=off' --landlock-rules path=/sys/class/net/pftap5554,access=r --landlock-rules path=/run/overdrive/vm/pf-tap-5554,access=rw
+[+ 0.237048] STEP3 exec_elapsed_seconds=0.013327 child_pid=21902
+[+ 0.237096] STEP3 child_cmdline=/usr/local/bin/cloud-hypervisor --cpus boot=1 --memory size=268435456 --kernel /run/overdrive/vm/pf-tap-5554/kernel --cmdline console=ttyS0 panic=1 root=/dev/vda rw overdrive.net=10.77.239.2/24,gw=10.77.239.1,dns=10.77.239.1 --disk path=/srv/vm/overdrive-testing/pf-tap-5554/rootfs.ext4,image_type=raw --serial file=/run/overdrive/vm/pf-tap-5554/console.log --console off --vsock cid=3,socket=/run/overdrive/vm/pf-tap-5554/vsock --api-socket /run/overdrive/vm/pf-tap-5554/api --seccomp true --landlock --net fd=[50],mac=02:00:00:95:55:54,offload_tso=off,offload_ufo=off,offload_csum=off --landlock-rules path=/sys/class/net/pftap5554,access=r --landlock-rules path=/run/overdrive/vm/pf-tap-5554,access=rw 
+[+ 0.237120] STEP3 child_status={"Gid": "4200\t4200\t4200\t4200", "Groups": "991", "NoNewPrivs": "1", "Seccomp": "0", "Seccomp_filters": "0", "Uid": "4200\t4200\t4200\t4200"}
+[+ 0.237175] STEP3 cgroup=/sys/fs/cgroup/overdrive.slice/workloads.slice/pf-tap-5554.scope cgroup_procs=21902
+[+ 1.379441] STEP3 ready_line=READY pid=1 port=1234 ready_elapsed_seconds=1.125789
+[+ 1.379526] STEP3 at_ready_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 864, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [[21844, 50, "python3"], [21902, 50, "cloud-hyperviso"], [21902, 68, "cloud-hyperviso"], [21902, 120, "cloud-hyperviso"], [21902, 121, "cloud-hyperviso"], [21902, 125, "cloud-hyperviso"], [21902, 128, "cloud-hyperviso"]], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 1.379600] STEP3 diff_vs_pre_launch={} offload_digest_pre=2cecc1d2bb6fd690 offload_digest_ready=2cecc1d2bb6fd690
+[+ 1.379632] STEP3 ch_tun_fds_at_ready=[{"fd": 50, "fdinfo_flags": "0104002", "iff": "pftap5554", "inode": 137}, {"fd": 68, "fdinfo_flags": "0104002", "iff": "pftap5554", "inode": 137}, {"fd": 120, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 121, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 125, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 128, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}]
+[+ 1.379673] STEP3 thread_security_at_ready=[{"Name": "cloud-hyperviso", "NoNewPrivs": "1", "Seccomp": "0", "Seccomp_filters": "0", "tid": 21902}, {"Name": "vmm", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "1", "tid": 21903}, {"Name": "http-server", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "1", "tid": 21904}, {"Name": "vmm_signal_hand", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21905}, {"Name": "vcpu0", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21907}, {"Name": "kvm-nx-lpage-re", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21908}, {"Name": "_disk0_q0", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21909}, {"Name": "_net1_ctrl", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21910}, {"Name": "_net1_qp0", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21911}, {"Name": "iou-wrk-21909", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21912}, {"Name": "_vsock2", "NoNewPrivs": "1", "Seccomp": "2", "Seccomp_filters": "2", "tid": 21913}]
+[+ 1.379684] STEP3 pre_activation_capture_packets=0 bytes=0
+[+ 1.386845] STEP3 RESULT=PASS 'READY pid=1 port=1234' at 1.126s flags=['BROADCAST', 'MULTICAST'] capture=0 stats=all-zero tap_state_unchanged=true ch_tun_fds=[50, 68, 120, 121, 125, 128]
+[+ 1.386860] STEP4 BEGIN
+[+ 1.386866] STEP4 hypothesis=CH's inherited fd (and its dup) are the only remaining queue holders once the launcher closes
+[+ 1.386870] STEP4 prediction=holders == CH pid only; CH fdinfo iff still names the TAP; TAP exists, down, state unchanged
+[+ 1.386874] STEP4 falsification=TAP disappears/changes, CH loses the iff association, or another holder remains
+[+ 1.422836] STEP4 after_launcher_close_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 862, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [[21902, 50, "cloud-hyperviso"], [21902, 68, "cloud-hyperviso"], [21902, 120, "cloud-hyperviso"], [21902, 121, "cloud-hyperviso"], [21902, 125, "cloud-hyperviso"], [21902, 128, "cloud-hyperviso"]], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 1.422864] STEP4 ch_tun_fds_after_launcher_close=[{"fd": 50, "fdinfo_flags": "0104002", "iff": "pftap5554", "inode": 137}, {"fd": 68, "fdinfo_flags": "0104002", "iff": "pftap5554", "inode": 137}, {"fd": 120, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 121, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 125, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}, {"fd": 128, "fdinfo_flags": "02104002", "iff": "pftap5554", "inode": 137}]
+[+ 1.422902] STEP4 RESULT=PASS holders=[[21902, 50, 'cloud-hyperviso'], [21902, 68, 'cloud-hyperviso'], [21902, 120, 'cloud-hyperviso'], [21902, 121, 'cloud-hyperviso'], [21902, 125, 'cloud-hyperviso'], [21902, 128, 'cloud-hyperviso']] tap_exists=true flags=['BROADCAST', 'MULTICAST']
+[+ 1.422907] STEP5 BEGIN
+[+ 1.422910] STEP5 hypothesis=after guard read-back, owner-side offload disable + UP yields UP/LOWER_UP and bidirectional traffic entirely after the barrier
+[+ 1.422913] STEP5 prediction=nft read-back exact; UP,LOWER_UP master=bridge forwarding; ARP+ICMP both directions; every timestamp > barrier
+[+ 1.422916] STEP5 falsification=read-back mismatch, no bidirectional progress, or any capture timestamp <= barrier
+[+ 1.425457] STEP5 protection_readback_begin
+[+ 1.425487] STEP5   table bridge pfguard5554 { # handle 2760
+[+ 1.425495] STEP5   	chain input { # handle 1
+[+ 1.425500] STEP5   		type filter hook input priority -300; policy drop;
+[+ 1.425505] STEP5   		iifname "pftap5554" ether type arp counter packets 0 bytes 0 accept # handle 2
+[+ 1.425510] STEP5   		iifname "pftap5554" ip protocol icmp counter packets 0 bytes 0 accept # handle 3
+[+ 1.425515] STEP5   	}
+[+ 1.425519] STEP5   
+[+ 1.425524] STEP5   	chain forward { # handle 4
+[+ 1.425528] STEP5   		type filter hook forward priority -300; policy drop;
+[+ 1.425533] STEP5   	}
+[+ 1.425537] STEP5   }
+[+ 1.425542] STEP5 protection_readback_end
+[+ 1.426598] STEP5 owner_disable_tx_offload rc=0 stdout='' stderr=''
+[+ 1.453402] STEP5 pre_up_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "errno=22(EINVAL) Invalid argument", "exists": true, "fdinfo_scanned": 862, "flags": ["BROADCAST", "MULTICAST"], "group": "-1", "holders": [[21902, 50, "cloud-hyperviso"], [21902, 68, "cloud-hyperviso"], [21902, 120, "cloud-hyperviso"], [21902, 121, "cloud-hyperviso"], [21902, 125, "cloud-hyperviso"], [21902, 128, "cloud-hyperviso"]], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 0, "tx_dropped": 0, "tx_packets": 0}, "tun_flags": "0x1802"}
+[+ 1.493406] STEP5 activation_wall_ns=1790181267325209514 activation_elapsed_seconds=0.001522
+[+ 1.493478] STEP5 active_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "1", "exists": true, "fdinfo_scanned": 863, "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "group": "-1", "holders": [[21902, 50, "cloud-hyperviso"], [21902, 68, "cloud-hyperviso"], [21902, 120, "cloud-hyperviso"], [21902, 121, "cloud-hyperviso"], [21902, 125, "cloud-hyperviso"], [21902, 128, "cloud-hyperviso"]], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "UP", "owner": "4200", "stats": {"rx_bytes": 0, "rx_dropped": 0, "rx_packets": 0, "tx_bytes": 200, "tx_dropped": 0, "tx_packets": 2}, "tun_flags": "0x1802"}
+[+ 1.493485] STEP5 bridge_readback=58842: pftap5554: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master pfbr5554 state forwarding priority 32 cost 2 
+    hairpin off guard off root_block off fastleave off learning on flood on mcast_flood on bcast_flood on mcast_router 1 mcast_to_unicast off neigh_suppress off neigh_vlan_suppress off vlan_tunnel off isolated off locked off mab off mcast_n_groups 0 mcast_max_groups 0
+[+ 7.600508] STEP5 traffic_elapsed_seconds=6.006324 tap_stats={"rx_bytes": 162, "rx_dropped": 0, "rx_packets": 3, "tx_bytes": 1182, "tx_dropped": 0, "tx_packets": 13}
+[+ 7.600546] STEP5 post_activation_capture_packets=14 bytes=1144 records_at_or_before_barrier=0 guest_originated=0 well_formed_guest=0 to_guest=0 icmp_reply_to_guest=False
+[+ 7.600564] STEP5 first_frame_after_barrier_ms=44.181
+[+ 7.600595] STEP5 post_activation_frame ts=1790181267369390654 pkttype=3 len=54 src=00:00:00:00:00:00 dst=00:00:00:00:00:00 kind=ethertype-0xffff head=000000000000000000000000ffffffffffff020000955554
+[+ 7.600618] STEP5 post_activation_frame ts=1790181267589674099 pkttype=4 len=86 src=22:41:c0:d5:c2:25 dst=33:33:ff:d5:c2:25 kind=ipv6 head=3333ffd5c2252241c0d5c22586dd6000000000203aff0000
+[+ 7.600635] STEP5 post_activation_frame ts=1790181267677679983 pkttype=4 len=110 src=aa:2d:f6:9f:23:90 dst=33:33:00:00:00:16 kind=ipv6 head=333300000016aa2df69f239086dd60000000003800010000
+[+ 7.600649] STEP5 post_activation_frame ts=1790181268261661799 pkttype=4 len=90 src=22:41:c0:d5:c2:25 dst=33:33:00:00:00:16 kind=ipv6 head=3333000000162241c0d5c22586dd60000000002400010000
+[+ 7.600662] STEP5 post_activation_frame ts=1790181268261694168 pkttype=4 len=86 src=aa:2d:f6:9f:23:90 dst=33:33:ff:9f:23:90 kind=ipv6 head=3333ff9f2390aa2df69f239086dd6000000000203aff0000
+[+ 7.600719] STEP5 post_activation_frame ts=1790181268403603689 pkttype=3 len=54 src=00:00:00:00:00:00 dst=00:00:00:00:00:00 kind=ethertype-0xffff head=000000000000000000000000ffffffffffff020000955554
+[+ 7.600733] STEP5 post_activation_frame ts=1790181268645721013 pkttype=4 len=90 src=22:41:c0:d5:c2:25 dst=33:33:00:00:00:16 kind=ipv6 head=3333000000162241c0d5c22586dd6000000000240001fe80
+[+ 7.600746] STEP5 post_activation_frame ts=1790181268645740642 pkttype=4 len=70 src=22:41:c0:d5:c2:25 dst=33:33:00:00:00:02 kind=ipv6 head=3333000000022241c0d5c22586dd6000000000103afffe80
+[+ 7.600759] STEP5 post_activation_frame ts=1790181269285668038 pkttype=4 len=110 src=aa:2d:f6:9f:23:90 dst=33:33:00:00:00:16 kind=ipv6 head=333300000016aa2df69f239086dd6000000000380001fe80
+[+ 7.600791] STEP5 post_activation_frame ts=1790181269285689270 pkttype=4 len=70 src=aa:2d:f6:9f:23:90 dst=33:33:00:00:00:02 kind=ipv6 head=333300000002aa2df69f239086dd6000000000103afffe80
+[+ 7.600804] STEP5 post_activation_frame ts=1790181269427488456 pkttype=3 len=54 src=00:00:00:00:00:00 dst=00:00:00:00:00:00 kind=ethertype-0xffff head=000000000000000000000000ffffffffffff020000955554
+[+ 7.600817] STEP5 post_activation_frame ts=1790181269541595880 pkttype=4 len=90 src=22:41:c0:d5:c2:25 dst=33:33:00:00:00:16 kind=ipv6 head=3333000000162241c0d5c22586dd6000000000240001fe80
+[+ 7.600829] STEP5 post_activation_frame ts=1790181269925697588 pkttype=4 len=110 src=aa:2d:f6:9f:23:90 dst=33:33:00:00:00:16 kind=ipv6 head=333300000016aa2df69f239086dd6000000000380001fe80
+[+ 7.600841] STEP5 post_activation_frame ts=1790181272549570834 pkttype=4 len=70 src=22:41:c0:d5:c2:25 dst=33:33:00:00:00:02 kind=ipv6 head=3333000000022241c0d5c22586dd6000000000103afffe80
+[+ 7.600858] STEP5 RESULT=OBSERVED OBSERVED bidirectional_icmp=False well_formed_guest_frames=0 guest_frames=0 stats={'rx_packets': 3, 'tx_packets': 13, 'rx_bytes': 162, 'tx_bytes': 1182, 'rx_dropped': 0, 'tx_dropped': 0}
+[+ 7.600866] STEP6 BEGIN
+[+ 7.600871] STEP6 hypothesis=CH exit closes its queue; the persistent TAP remains with no holder anywhere
+[+ 7.600886] STEP6 prediction=TAP exists, admin UP retained, NO-CARRIER/operstate DOWN, master=bridge, tun_flags persist bit set, owner=4200, holders=[]
+[+ 7.600891] STEP6 falsification=TAP disappears, a holder remains, or persistence/owner changed
+[+ 8.206571] STEP6 main_exit=0 cancellation_elapsed_seconds=0.031782 ch_pid_alive=False
+[+ 8.206659] STEP6 main_stderr_tail=
+[+ 8.206744] STEP6 after_ch_exit_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "0", "exists": true, "fdinfo_scanned": 658, "flags": ["NO-CARRIER", "BROADCAST", "MULTICAST", "UP"], "group": "-1", "holders": [], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 162, "rx_dropped": 0, "rx_packets": 3, "tx_bytes": 1182, "tx_dropped": 1, "tx_packets": 13}, "tun_flags": "0x1802"}
+[+ 8.206838] STEP6 after_ch_exit_settled_snapshot={"address": "22:41:c0:d5:c2:25", "carrier": "0", "exists": true, "fdinfo_scanned": 658, "flags": ["NO-CARRIER", "BROADCAST", "MULTICAST", "UP"], "group": "-1", "holders": [], "ifindex": 58842, "info_data": {"multi_queue": false, "persist": true, "pi": false, "type": "tap", "user": 4200, "vnet_hdr": false}, "master": "pfbr5554", "mtu": 1500, "offload": {"generic-receive-offload": "on", "generic-segmentation-offload": "on", "rx-checksumming": "off [fixed]", "scatter-gather": "on", "tcp-segmentation-offload": "off", "tx-checksum-ip-generic": "off", "tx-checksumming": "off", "tx-udp-segmentation": "off", "udp-fragmentation-offload": "?"}, "offload_digest": "2cecc1d2bb6fd690", "operstate": "DOWN", "owner": "4200", "stats": {"rx_bytes": 162, "rx_dropped": 0, "rx_packets": 3, "tx_bytes": 1182, "tx_dropped": 2, "tx_packets": 13}, "tun_flags": "0x1802"}
+[+ 8.206911] STEP6 diff_active_vs_exit={"carrier": ["1", "0"], "flags": [["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], ["NO-CARRIER", "BROADCAST", "MULTICAST", "UP"]], "operstate": ["UP", "DOWN"]}
+[+ 8.210636] STEP6 tap_ip_detail=58842: pftap5554: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel master pfbr5554 state DOWN mode DEFAULT group default qlen 1000 |     link/ether 22:41:c0:d5:c2:25 brd ff:ff:ff:ff:ff:ff promiscuity 1 allmulti 1 minmtu 68 maxmtu 65521  |     tun type tap pi off vnet_hdr off persist on user 4200  |     bridge_slave state disabled priority 32 cost 2 hairpin off guard off root_block off fastleave off learning on flood on port_id 0x8001 port_no 0x1 designated_port 32769 designated_cost 0 designated_bridge 8000.aa:2d:f6:9f:23:90 designated_root 8000.aa:2d:f6:9f:23:90 hold_timer    0.00 message_age_timer    0.00 forward_delay_timer    0.00 topology_change_ack 0 config_pending 0 proxy_arp off proxy_arp_wifi off mcast_router 1 mcast_fast_leave off mcast_flood on bcast_flood on mcast_to_unicast off neigh_suppress off neigh_vlan_suppress off group_fwd_mask 0 group_fwd_mask_str 0x0 vlan_tunnel off isolated off locked off mab off addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 65536 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536
+[+ 8.210688] STEP6 RESULT=PASS exists=true flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP'] operstate=DOWN carrier=0 master=pfbr5554 tun_flags=0x1802 owner=4200 holders=[] (fdinfo scanned=658)
+[+ 8.210699] STEP7 BEGIN
+[+ 8.210705] STEP7 hypothesis=set-down + RTM_DELLINK removes the persistent TAP; the spike's remaining resources remove to an exact empty complement
+[+ 8.210711] STEP7 prediction=down read-back; delete rc=0; TAP absent (ip link show ENODEV); holders=[]; no bridge/nft/cgroup/run-dir/staging/CH residue
+[+ 8.210716] STEP7 falsification=TAP survives delete or any residue remains
+[+ 8.234590] STEP7 after_set_down flags=['BROADCAST', 'MULTICAST'] operstate=DOWN holders=[]
+[+ 8.274459] STEP7 rtm_dellink rc=0 stderr=''
+[+ 8.274515] STEP7 ip_link_show_after rc=1 stderr='Device "pftap5554" does not exist.' sysfs_exists=False
+[+ 8.274521] STEP7 holders_after_delete=[] fdinfo_scanned=683
+[+ 8.347287] STEP7 final_readback={"bridge_exists": false, "cgroup_exists": false, "new_cloud_hypervisor_pids": [], "nft_table_exists": false, "probe_open_tun_fds": [], "run_dir_exists": false, "scratch_exists": false, "scratch_queue_holders": [], "staging_exists": false, "tap_exists": false, "tap_queue_holders": []}
+[+ 8.347319] STEP7 RESULT=PASS tap deleted, exact empty complement
+[+ 8.347324] SUMMARY QUEUE_IMPLICATIONS queue_fds=1 virtio_num_queues=2 IFF_MULTI_QUEUE=false
+[+ 8.347335] SUMMARY PREFLIGHT: PASS native root x86_64 metal, no pre-existing exact resources
+[+ 8.347338] SUMMARY STAGING: PASS rootfs/kernel/run-dir/beacon/cgroup staged
+[+ 8.347342] SUMMARY STEP1: PASS tap=pftap5554 ifindex=58842 tun_flags=0x1802 owner=4200 flags=['BROADCAST', 'MULTICAST'] master=pfbr5554 holders=[]
+[+ 8.347345] SUMMARY STEP2: PASS launcher_fd=50 TUNGETIFF=name=pftap5554 flags=0x1802 tun_flags=0x1802
+[+ 8.347348] SUMMARY STEP3: PASS 'READY pid=1 port=1234' at 1.126s flags=['BROADCAST', 'MULTICAST'] capture=0 stats=all-zero tap_state_unchanged=true ch_tun_fds=[50, 68, 120, 121, 125, 128]
+[+ 8.347351] SUMMARY STEP4: PASS holders=[[21902, 50, 'cloud-hyperviso'], [21902, 68, 'cloud-hyperviso'], [21902, 120, 'cloud-hyperviso'], [21902, 121, 'cloud-hyperviso'], [21902, 125, 'cloud-hyperviso'], [21902, 128, 'cloud-hyperviso']] tap_exists=true flags=['BROADCAST', 'MULTICAST']
+[+ 8.347354] SUMMARY STEP5: OBSERVED bidirectional_icmp=False well_formed_guest_frames=0 guest_frames=0 stats={'rx_packets': 3, 'tx_packets': 13, 'rx_bytes': 162, 'tx_bytes': 1182, 'rx_dropped': 0, 'tx_dropped': 0}
+[+ 8.347358] SUMMARY STEP6: PASS exists=true flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP'] operstate=DOWN carrier=0 master=pfbr5554 tun_flags=0x1802 owner=4200 holders=[] (fdinfo scanned=658)
+[+ 8.347361] SUMMARY STEP7: PASS tap deleted, exact empty complement
+[+ 8.347366] SUMMARY TOTAL_ELAPSED_SECONDS=8.347364
+VARIANT_COMPLETE=no-vnet-hdr
+CLEANUP residue_found_by_fallback=[]
+CLEANUP {"bridge_exists": false, "cgroup_exists": false, "new_cloud_hypervisor_pids": [], "nft_table_exists": false, "run_dir_exists": false, "scratch_exists": false, "staging_exists": false, "tap_exists": false, "tap_queue_holders": []}
+cleanup_complete=True
+exit=0

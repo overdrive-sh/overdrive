@@ -167,7 +167,14 @@ fn nla(buf: &mut Vec<u8>, ty: u16, val: &[u8]) {
 /// with offload still ON corrupts every NAT'd packet (commit 62fa6be2).
 pub async fn disable_tx_offload(iface: &str) -> Result<(), NetlinkError> {
     let (_active, changeable) = feature_snapshot(iface).await?;
-    let targets = changeable_tx_checksum_targets(&changeable);
+    let mut targets = changeable_tx_checksum_targets(&changeable);
+    // Cloud Hypervisor reopens direct-host TAPs and may advertise the generic
+    // checksum feature without returning its bit in FEATURES_GET's changeable
+    // mask.  The accepted `ovd-tp-<4hex>` TAP identity guarantees this feature
+    // exists; retain the existing no-op behavior for unrelated interfaces.
+    if targets.is_empty() && iface.starts_with("ovd-tp-") {
+        targets.push("tx-checksum-ip-generic".to_owned());
+    }
     if targets.is_empty() {
         // No changeable tx-checksum-* feature on this iface — it already
         // delivers a full checksum; nothing to disable.

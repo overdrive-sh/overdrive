@@ -6,8 +6,10 @@
 //! `shutdown()` drains in-flight connections before closing the listener.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md`, this is a plain `async fn` that
-//! tests call directly; SIGINT handling lives in `main.rs` and delegates
-//! into `ServeHandle::shutdown`.
+//! tests call directly. What happens after boot — the internal shutdown
+//! request versus operator signals, the fail-stop outer bound, and the exit
+//! status — is owned by [`crate::commands::serve_lifetime`], which `main.rs`
+//! runs over the returned [`ServeHandle`].
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -105,15 +107,16 @@ impl ServeHandle {
             .map_err(|source| CliError::ServerShutdown { source })
     }
 
-    /// Abruptly revoke the in-process `serve` owner without graceful drain or
-    /// workload cleanup. Integration tests use this to model process loss and
-    /// then boot again against the unchanged durable directories.
-    #[doc(hidden)]
+    /// Killed mode of the serve lifetime port
+    /// ([`crate::commands::serve_lifetime::ServeSignal::Kill`]): abandon the
+    /// in-process `serve` owner without graceful drain or workload cleanup so
+    /// a test can boot again against the unchanged durable directories. The
+    /// lifetime owner is the only caller; see
+    /// [`overdrive_control_plane::ServerHandle::kill_for_test`] for exactly
+    /// which in-process cleanup still runs.
     #[cfg(feature = "integration-tests")]
-    pub async fn abort_for_test(
-        self,
-    ) -> Result<overdrive_control_plane::AbruptServerResidue, CliError> {
-        self.inner.abort_for_test().await.map_err(|source| CliError::ServerShutdown { source })
+    pub(crate) async fn kill_for_test(self) {
+        let overdrive_control_plane::AbruptServerResidue = self.inner.kill_for_test().await;
     }
 }
 

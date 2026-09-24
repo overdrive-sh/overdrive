@@ -43,6 +43,7 @@ path = "src/bin/openapi.rs"
 integration-tests = [
     "overdrive-dataplane/integration-tests",
     "overdrive-worker/integration-tests",
+    "dep:rustix",
 ]
 
 [dependencies]
@@ -183,8 +184,13 @@ tracing.workspace            = true
 tracing-subscriber.workspace = true
 
 libc.workspace = true
+# Killed mode (`ServerHandle::kill_for_test`, test-gated) drops the mTLS worker
+# on a thread that has relinquished its Linux capabilities. Optional so the
+# production build never links it; the dev-dependency below covers `cfg(test)`.
+rustix = { workspace = true, features = ["thread"], optional = true }
 
 [dev-dependencies]
+rustix = { workspace = true, features = ["thread"] }
 # `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
 # `overdrive-store-local` above + ADR-0012 revision 2026-04-24).

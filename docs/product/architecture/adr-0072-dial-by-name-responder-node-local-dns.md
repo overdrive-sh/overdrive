@@ -7,6 +7,20 @@
 decided 2026-06-24/25). Tags: phase-2, mesh, dns, name-layer, reachability,
 observation-store, transparent-mtls, headless, ipv4-only, #243.
 
+**Amended (2026-09-24) by ADR-0138 (GH #295 D-295-R16, accepted 2026-09-24).**
+This ADR is operative on `main`: the responder there is a concrete type with no
+port trait, and workloads resolve names over its wire contract. ADR-0138
+reverses exactly one sub-decision recorded below, DDN-4's rejection of any DNS
+responder port trait or sim adapter. It adds one doc-hidden responder lifecycle
+port, required on `ServerConfig` and implemented by `DnsResponder`, so the
+shared-network supervisor's DNS task-loss and recovery paths can be driven
+through the real composition root. DDN-4's text below is retained as the
+contract that was accepted on 2026-06-25; its "no port trait, no Sim adapter"
+clause is superseded by ADR-0138. The pure `answer_for` and encoder seam, the
+wire contract, `IP_PKTINFO` source-pinning, and the Tier-3 wire evidence are
+unchanged, and the lifecycle port does not simulate the socket path DDN-4 kept
+real.
+
 **REVISED (REV-2, 2026-06-25) — FINAL. Both open forks RATIFIED by the user;
 the gating spike (BLOCKER-1) returned WORKS.** The user ratified shifting the
 answered address from a *volatile per-instance backend addr* to a **stable
@@ -838,6 +852,11 @@ satisfy the `ipi_spec_dst` requirement. We therefore own the
   sockets where one wildcard suffices on the validated node config.
 
 ### DDN-4 (ratified point C1) — the DST seam is a pure `answer_for` + a separately-proptested encoder; NO port trait, NO Sim adapter
+
+*(Amended 2026-09-24: the "no port trait, no Sim adapter" clause is superseded
+by ADR-0138's doc-hidden responder lifecycle port and its sim implementation,
+which cover task lifecycle only. The pure seam and the Tier-3 socket path
+below stand.)*
 
 The deterministic, testable core is a **pure free function**
 `answer_for(name: &MeshServiceName, qtype: hickory_proto::rr::RecordType, index:

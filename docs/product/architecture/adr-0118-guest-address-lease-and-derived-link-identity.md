@@ -2,11 +2,24 @@
 
 ## Status
 
-**Accepted — user-approved and approved by system design review iteration 5 on
-2026-09-16; clarified by the user-directed no-review TAP-activation amendment
-on 2026-09-23.**
+**Accepted — user-approved and approved by system design review iteration 5 on 2026-09-16.**
 GH #295 DESIGN stage 1. This records D-295-4 and C-295-E; ADR-0122 owns the
 typed exhaustion/error family.
+
+**Amended 2026-09-24 by ADR-0132 and ADR-0133 (#295 D-295-R6/R7, accepted
+with the correctness-recovery replacement DESIGN; the D-295-R7 counting policy
+is a user ruling of the same date).** This decision is operative in code
+committed at HEAD `db3af700` on the #295 feature branch: a process-global pool
+(`static ACTION_POOL`, `guest_network.rs:523`) with exactly `assign`, `release`,
+and `snapshot` (`:452`, `:509`, `:518`); not merged to `main`, no persisted
+state. The amendment makes the lease pool the admission linearization point:
+each lease carries an Admitted or Retiring state, and both count against the
+cap until cleanup finishes. One pool exists per server instance, built in the
+composition root, replacing the process-global static. The Decision's sentence
+that the pool "exposes only assignment, release, and snapshot semantics" is
+amended accordingly: the pool also exposes retirement (Admitted to Retiring)
+and a read-only occupancy observation (ADR-0134). Address derivation,
+release-last, and the no-adoption boot rule recorded here are unaffected.
 
 ## Context
 
@@ -19,7 +32,9 @@ not need a `/30` or a slot-shaped master key.
 ## Decision
 
 One internal, process-held guest-address pool owns leases by `AllocationId` and
-exposes only assignment, release, and snapshot semantics. The exact
+exposes only assignment, release, and snapshot semantics *(amended 2026-09-24:
+also retirement and a read-only occupancy observation, one pool per server;
+see Status)*. The exact
 implementation-facing operations are pinned in the feature delta. Assignment
 chooses the smallest free guest IPv4 address from the node-owned prefix,
 excluding network, broadcast, and bridge-gateway addresses. Derive the
@@ -35,14 +50,11 @@ then sweeps prior-epoch TAP/map residue before initializing the new held set.
 It does not adopt a surviving VMM or reconstruct a slot map.
 
 The removed `NetSlotExhausted -> WorkloadNetnsProvisionFailed` disposition is
-therefore deleted, not translated. The already-shipped reason payload itself
-remains the existing action-shim failure shape for current guest-network
-effects: post-Running TAP activation uses the closed stage
-`guest_network_activate` rather than adding a new public lifecycle-reason
-variant. Node admission caps active guests below the address-pool limit
-(ADR-0117); allocator exhaustion inside that admitted envelope remains a typed,
-non-terminal infrastructure-drift refusal and never uses that allocation
-failure reason or consumes restart budget.
+therefore deleted, not translated. Node admission caps active guests below the
+address-pool limit (ADR-0117; since the 2026-09-24 amendment enforced at
+assignment over held leases, ADR-0132 and ADR-0133); an allocator exhaustion inside that admitted
+envelope is a typed, non-terminal infrastructure-drift refusal, not a permanent
+allocation failure that consumes restart budget.
 
 ## Alternatives considered
 

@@ -95,6 +95,8 @@ nix::ioctl_write_ptr_bad!(tun_set_iff, libc::TUNSETIFF, libc::ifreq);
 nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
 #[cfg(target_os = "linux")]
 nix::ioctl_write_int_bad!(tun_set_owner, libc::TUNSETOWNER);
+#[cfg(target_os = "linux")]
+nix::ioctl_write_int_bad!(tun_set_offload, libc::TUNSETOFFLOAD);
 
 /// Create a persistent TAP interface through `/dev/net/tun` without a CLI.
 ///
@@ -124,6 +126,11 @@ pub fn create_persistent_tap(name: &str, owner_uid: u32) -> Result<(), NetlinkEr
     // remains alive and correctly initialized for the complete ioctl call.
     unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
         .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    // A direct-host TAP must deliver complete L4 checksums to the TCX ingress
+    // classifier and AF_PACKET evidence. Disable every TUN offload bit on the
+    // persistent device before Cloud Hypervisor reopens it.
+    unsafe { tun_set_offload(file.as_raw_fd(), 0) }
+        .map_err(|errno| NetlinkError::netns("tunsetoffload", std::io::Error::from(errno)))?;
     // SAFETY: the fd owns the newly created TAP. Grant the exact numeric uid
     // that the composition root later drops Cloud Hypervisor to before the fd
     // is made persistent and closed.
@@ -205,6 +212,8 @@ pub fn set_persistent_tap_owner(name: &str, owner_uid: u32) -> Result<(), Netlin
     // SAFETY: attach this owned tun fd to the named existing TAP.
     unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
         .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
+    unsafe { tun_set_offload(file.as_raw_fd(), 0) }
+        .map_err(|errno| NetlinkError::netns("tunsetoffload", std::io::Error::from(errno)))?;
     // SAFETY: update the owner on the TAP attached to this fd.
     unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
         .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;

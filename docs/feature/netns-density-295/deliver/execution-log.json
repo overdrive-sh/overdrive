@@ -624,6 +624,13 @@
       "s": "EXECUTED",
       "d": "REMEDIATION RED (authoritative fdbe retry + DESIGN trace): clean native D7 alone passes e2a85d94, but predecessor+restart+D7 c4d36190 reproduces the genuine zero-frame violation. On caller TAP ifindex 58748, three ARP replies (EtherType 0x0806, packet_type=3, ARP opcode 2, SHA/source 02:01:00:00:00:03, SPA 100.95.0.3, target gateway 100.95.0.1) and one IPv4 TCP RST (EtherType 0x0800, packet_type=3, source 100.95.0.3) have SO_TIMESTAMPNS <= the exact mtls.intercept.install.success barrier 1790158856433839673. The guest init implementation is current and applies require_down, IPv6 disable/readback, arp_notify=0/readback, static address/netmask, link-up, route, resolver in crates/overdrive-init/src/main.rs:526-541; VmFixture rebuilds this binary into /sbin/init. HostGuestNetworkProvisioner sets the production TAP up before VMM start/READY. arp_notify=0 suppresses gratuitous announcements but cannot suppress kernel ARP replies to bridge neighbor traffic; accepted ordering simultaneously requires TAP-ready before VMM/READY and zero autonomous L2 frames through intercept-live. This is an accepted DESIGN/ADR-0088 topology contradiction; no existing owner transition can close the interval without changing the approved order/API, so no production code was changed. Body-7 focused run 2efa6d6d independently fails before its intended post-READY fault at spawn_failure_observed_mtls_server_at because ProductInputHookFixture::install at guest_stack_mtls_egress.rs:5524 mutates the shared ip overdrive-mtls table before the replacement server starts; the existing watchdog then correctly refuses the semantically foreign production table at fault_fixture.rs:893. The exact acceptance fixture hunk to revisit is moving the fixture install after replacement server boot (or otherwise scoping it to allocation install), not broad production cleanup. Full 35 e7316eb4 remains 21 passed/13 failed/1 timed out; D7 and body-7 aborts cause collateral startup failures. No GREEN or COMMIT.",
       "t": "2026-09-23T10:27:04Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-09-23T13:22:30Z"
     }
   ]
 }

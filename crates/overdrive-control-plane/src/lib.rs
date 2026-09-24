@@ -2463,15 +2463,93 @@ impl ServerShutdownError {
     }
 }
 
-/// Zero-sized witness returned after abrupt test-owner shutdown is complete.
+/// Zero-sized witness returned once [`ServerHandle::kill_for_test`] has
+/// abandoned the server owner.
 ///
-/// The workload and its host resources deliberately survive, but every
-/// control-plane-owned task, socket, resolver, rule guard, and connection has
-/// already been invalidated and joined before this value is returned.
+/// The workload and the kernel state the owner held deliberately survive;
+/// every control-plane-owned task, socket, store handle, and listener has been
+/// released before this value is returned.
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
 #[derive(Debug)]
 pub struct AbruptServerResidue;
+
+/// Killed mode's final step: drop the mTLS worker as its LAST owner on a
+/// dedicated thread that has relinquished every Linux capability, so the
+/// worker's guard destructors cannot mutate kernel state the dead owner held.
+///
+/// Every `AppState` clone holds a worker reference; the caller has already
+/// aborted and joined every task holding one, and lagging connection tasks
+/// release theirs once they observe axum's immediate shutdown. A bounded wait
+/// for sole ownership covers that lag. A degraded path (ownership never
+/// becomes exclusive, the thread cannot be spawned, or capabilities cannot be
+/// relinquished) is reported loudly; killed-mode callers prove the surviving
+/// kernel residue independently by read-back.
+#[cfg(any(test, feature = "integration-tests"))]
+async fn release_killed_worker_without_host_authority(
+    worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+) {
+    const SOLE_OWNERSHIP_BOUND: Duration = Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + SOLE_OWNERSHIP_BOUND;
+    while Arc::strong_count(&worker) > 1 {
+        if std::time::Instant::now() >= deadline {
+            tracing::error!(
+                name: "serve.kill.worker_still_shared",
+                strong_count = Arc::strong_count(&worker),
+                "killed mode could not become the worker's last owner; its guard \
+                 destructors will run elsewhere with host authority"
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (released_tx, released_rx) = tokio::sync::oneshot::channel();
+    let runtime = tokio::runtime::Handle::current();
+    let spawned =
+        std::thread::Builder::new().name("serve-kill-release".to_owned()).spawn(move || {
+            let _entered = runtime.enter();
+            let empty = rustix::thread::CapabilitySet::empty();
+            let relinquished = rustix::thread::set_capabilities(
+                None,
+                rustix::thread::CapabilitySets {
+                    effective: empty,
+                    permitted: empty,
+                    inheritable: empty,
+                },
+            );
+            if let Err(error) = &relinquished {
+                tracing::error!(
+                    name: "serve.kill.capabilities_retained",
+                    error = %error,
+                    "killed mode could not relinquish capabilities before dropping the worker"
+                );
+            }
+            drop(worker);
+            let _ = released_tx.send(relinquished.is_ok());
+        });
+    if let Err(error) = spawned {
+        tracing::error!(
+            name: "serve.kill.release_thread_unavailable",
+            error = %error,
+            "killed mode could not spawn its release thread; the worker was dropped here"
+        );
+        return;
+    }
+    match released_rx.await {
+        Ok(true) => tracing::info!(
+            name: "serve.kill.worker_released",
+            "killed mode dropped the mTLS worker without host authority"
+        ),
+        Ok(false) => tracing::error!(
+            name: "serve.kill.worker_released_with_authority",
+            "killed mode dropped the mTLS worker without relinquishing capabilities"
+        ),
+        Err(_) => tracing::error!(
+            name: "serve.kill.worker_release_lost",
+            "killed-mode release thread ended without reporting"
+        ),
+    }
+}
 
 impl std::fmt::Debug for ServerHandle {
     /// Manual `Debug` (the derive was dropped when the test-gated
@@ -2509,20 +2587,42 @@ impl ServerHandle {
         self.shared_network_supervisor.shutdown_requested().await
     }
 
-    /// Abruptly revoke every in-process task owned by this server without
-    /// running the graceful drain or any workload stop/cleanup path.
+    /// Killed mode: abandon this server owner the way process death would —
+    /// no graceful drain, no workload stop, no worker teardown, no capability
+    /// retirement — so a test can boot again against the unchanged durable
+    /// directories.
     ///
-    /// This is the in-process analogue of losing the `serve` process after its
-    /// durable writes have landed: task abort closes listeners and store owners,
-    /// while driver-owned workload processes and host resources remain for the
-    /// next boot's production reclamation path. The DNS responder's blocking
-    /// receive loop needs its private stop flag set so it can release `:53`;
-    /// this is fixture-owner resource release, not workload lifecycle cleanup.
+    /// Rust cannot halt a task without dropping it, so this is what still runs,
+    /// in order:
+    ///
+    /// 1. axum's immediate (non-graceful) shutdown notification, then abort and
+    ///    join of the server, convergence, emit-drain, interest-router and
+    ///    exit-observer tasks. Their futures are dropped on runtime threads:
+    ///    listeners, connections, `AppState` clones and store handles are
+    ///    released, and any effect still in flight runs its destructors there.
+    /// 2. The resolver's List/Watch drain task is cancelled and joined
+    ///    (userspace only).
+    /// 3. The shared-network supervisor future is cancelled and joined; its
+    ///    DNS owner stops the responder's blocking sockets so `:53` is
+    ///    released as it would be at process death.
+    /// 4. The mTLS worker — sole owner of every allocation's nft element
+    ///    guards, TPROXY rule guards, and the shared constant-program guard —
+    ///    is dropped as its last owner on a dedicated thread that first
+    ///    relinquishes every Linux capability. Its destructors run, but the
+    ///    kernel refuses their netlink/BPF requests for lack of
+    ///    `CAP_NET_ADMIN`/`CAP_BPF` (the element guard logs
+    ///    `health.mtls.shared_element_cleanup_failed`), so the kernel objects
+    ///    the dead owner held survive as after `SIGKILL`, while its sockets,
+    ///    listener threads, and store handles are released.
+    ///
+    /// Workload processes (spawned `kill_on_drop(false)`), cgroups, TAPs, the
+    /// bridge, pinned TCX links and nft objects are never touched. The
+    /// production graceful path ([`Self::shutdown`]) is unchanged.
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
-    pub async fn abort_for_test(self) -> Result<AbruptServerResidue, ServerShutdownError> {
+    pub async fn kill_for_test(self) -> AbruptServerResidue {
         let Self {
-            inner: _,
+            inner,
             server_task,
             convergence_task,
             exit_observer_tasks,
@@ -2537,6 +2637,14 @@ impl ServerHandle {
             shared_network_supervisor,
         } = self;
 
+        // The axum server owns one `AppState` clone and each accepted
+        // connection task owns another.  Aborting only the server task leaves
+        // those connection tasks detached; they retain the observation store
+        // across the abrupt-owner boundary and a same-data-dir replacement
+        // then fails redb's single-open lock.  Signal the non-graceful
+        // shutdown first so every watcher drops its service, then retain the
+        // existing abort/join fence for the server task itself.
+        inner.shutdown();
         server_task.abort();
         convergence_task.abort();
         emit_drain_task.abort();
@@ -2553,16 +2661,14 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        let worker_failure = if let Some(worker) = mtls_worker_owner {
-            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
-        } else {
-            None
-        };
         if let Some(resolve) = mtls_resolve_owner {
             resolve.shutdown().await;
         }
         shared_network_supervisor.shutdown().await;
-        worker_failure.map_or(Ok(AbruptServerResidue), Err)
+        if let Some(worker) = mtls_worker_owner {
+            release_killed_worker_without_host_authority(worker).await;
+        }
+        AbruptServerResidue
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -4416,6 +4522,19 @@ pub async fn run_server_with_obs_and_drivers(
         guest_network_exec.supervisor(),
         supervisor_shutdown,
     );
+
+    // The retained supervisor has completed the fresh-process owner
+    // composition above; only now may the dependency-neutral EXEC capability
+    // transition from BootClosed to Open.  Allocation start publishes
+    // Running before it reaches the existing VmDriver EXEC-release hook, so
+    // leaving this gate closed would strand the convergence evaluation after
+    // its durable Running write and block a later public stop evaluation on
+    // the same target.
+    if !guest_network_exec.supervisor().open_after_boot() {
+        return Err(error::ControlPlaneError::GuestNetworkBoot(
+            guest_network::GuestNetworkError::ExecGateNotBootClosed,
+        ));
+    }
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the

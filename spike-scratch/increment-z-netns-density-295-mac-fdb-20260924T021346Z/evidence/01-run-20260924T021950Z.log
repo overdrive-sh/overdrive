@@ -1,0 +1,49 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/increment-z-netns-density-295-mac-fdb-20260924T021346Z/spike.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=630cde53fe8f50d857e064c4 pid=61012
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 159,661 bytes  received 3,516 bytes  108,784.67 bytes/sec
+total size is 266,073,092  speedup is 1,630.58
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+[+ 0.015210] PREFLIGHT hypothesis=native root x86_64 metal, no pre-existing exact resources for this tag
+SWEEP removed=[]
+[+ 0.032508] ENV uname=Linux 7.0.0-29-generic x86_64 GNU/Linux
+[+ 0.035098] ENV kernel_release=7.0.0-29-generic
+[+ 0.035124] ENV systemd_detect_virt=none
+[+ 0.035138] ENV python=3.14.4
+[+ 0.037731] ENV parent_identity=uid=0(root) gid=0(root) groups=0(root)
+[+ 0.037742] ENV names bridge=spikebrefb3 tap_a=spiketapaefb3 tap_b=spiketapbefb3 nft=spikeguardefb3
+[+ 0.037764] ENV bridge_mac=02:01:00:00:00:01 guestA_mac=02:00:64:5f:00:02 guestB_mac=02:00:64:5f:00:03 guestC_mac=02:00:64:5f:00:04
+[+ 0.037769] ENV pre_run_sweep=[]
+[+ 0.037774] PREFLIGHT RESULT=PASS
+[+ 0.037778] STEP1 hypothesis=a bridge with an explicit MAC + two persistent owner-4200 TAPs, enslaved and up, model two guest microVM TAPs
+[+ 0.037782] STEP1 prediction=bridge MAC=02:01:00:00:00:01; both TAPs persistent owner=4200 master=bridge; forwarding once a queue attaches (carrier on)
+[+ 0.037786] STEP1 falsification=explicit bridge MAC not honored, TAP not persistent/owned, or not enslaved
+[+ 0.053778] STEP1 bridge_mac_readback=ae:78:3c:64:d9:48
+[+ 0.057380] STEP1 spiketapaefb3: address=62:4d:52:b1:fb:19 tun_flags=0x1802 owner=4200 master=spikebrefb3 flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP']
+[+ 0.059777] STEP1 spiketapbefb3: address=2e:c1:42:7e:68:08 tun_flags=0x1802 owner=4200 master=spikebrefb3 flags=['NO-CARRIER', 'BROADCAST', 'MULTICAST', 'UP']
+[+ 0.059808] FAILURE error=SystemExit: STEP1: bridge MAC not honored: ae:78:3c:64:d9:48
+VERDICT INCOMPLETE
+CLEANUP residue_found_by_fallback=['link=spiketapaefb3', 'link=spiketapbefb3', 'link=spikebrefb3']
+CLEANUP {"bridge_exists": false, "nft_exists": false, "tap_a_exists": false, "tap_b_exists": false}
+cleanup_complete=True
+STEP1: bridge MAC not honored: ae:78:3c:64:d9:48
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1289[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

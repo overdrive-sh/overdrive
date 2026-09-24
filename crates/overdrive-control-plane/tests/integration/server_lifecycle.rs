@@ -160,34 +160,6 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
     );
 }
 
-/// CONTRACT_SHAPE: bounded-change (abrupt server-owner loss returns typed diagnostics from a sealed one-shot owner).
-#[allow(
-    clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-)]
-#[tokio::test]
-async fn abrupt_shutdown_propagates_worker_failure_without_a_retry_capability() {
-    let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
-    let worker = shutdown_failure_worker();
-    worker.inject_owner_shutdown_failure_for_test();
-    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
-
-    let failure = handle
-        .abort_for_test()
-        .await
-        .expect_err("abrupt owner loss cannot discard typed worker teardown failure");
-    assert_eq!(failure.teardown_failure().failures.len(), 1);
-    assert_eq!(
-        worker
-            .shutdown_owner()
-            .await
-            .expect_err("abrupt one-shot owner retains the original diagnostic")
-            .failures
-            .len(),
-        1
-    );
-}
-
 // -------------------------------------------------------------------
 // AC (a) — ephemeral-port bind reported back to the caller
 // -------------------------------------------------------------------

@@ -188,6 +188,11 @@ impl GuestNetworkProvisioner for SimSharedGuestNetworkOwner {
         Self::result(&self.provision, GuestNetworkOperation::TapCreate)
     }
 
+    async fn activate(&self, _plan: &GuestNetworkPlan) -> Result<()> {
+        self.record(GuestNetworkOperation::TapSetUp);
+        Self::result(&self.provision, GuestNetworkOperation::TapSetUp)
+    }
+
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
         self.record(GuestNetworkOperation::TapDelete);
         Self::result(&self.teardown, GuestNetworkOperation::TapDelete)

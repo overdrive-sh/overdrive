@@ -1221,9 +1221,6 @@ impl GuestTcxProgram {
         Ok(())
     }
     pub fn read_endpoint(&self, ifindex: u32) -> Result<Option<GuestTcxEndpoint>, GuestTcxError> {
-        if let Some(endpoint) = self.endpoints.get(&ifindex) {
-            return Ok(Some(*endpoint));
-        }
         let map = self
             .endpoint_map
             .as_ref()

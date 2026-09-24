@@ -482,10 +482,7 @@ impl DirectHandlerInstance {
     }
 
     pub async fn shutdown_requested(&mut self) -> ServeShutdownRequest {
-        let _ = self.handle.as_mut().expect("live server handle");
-        panic!(
-            "pending DELIVER implementation: the server handler has no shared-network request owner"
-        )
+        self.handle.as_mut().expect("live server handle").shutdown_requested().await
     }
 
     /// Drive the injected production clock while observing admission only

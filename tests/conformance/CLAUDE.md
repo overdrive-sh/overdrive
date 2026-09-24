@@ -10,10 +10,11 @@ These rules apply to everything under `tests/conformance/` and specialize
 - Drive behavior through the server's public API. Do not route API-owned
   behavior through `overdrive deploy`, CLI command handlers, stdout, or config
   discovery.
-- Do not spawn the `overdrive` binary merely because the test is called E2E or
-  conformance. Spawn an executable only when executable behavior is itself the
-  contract; use `assert_cmd` for dynamic assertions and `trycmd` for stable
-  fixture-driven CLI protocol cases.
+- Never spawn the `overdrive` binary or drive the CLI. The conformance harness
+  starts the server in-process and uses its public API only. Running the built
+  CLI is reserved for a verification expectation that verifies the CLI's own
+  output (`.claude/rules/testing.md` § "Classify external execution before
+  writing it").
 - Never call internal application components as the behavior-driving port.
   Public constructors and accepted injected production-owner helpers may be
   used only to build the real composition or inject an approved driven-port

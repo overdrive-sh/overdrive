@@ -204,6 +204,15 @@ max-threads = 1
 filter = 'package(overdrive-sim) & binary(vm_lifecycle_latency_283_spike)'
 test-group = 'host-kernel-shared'
 
+# netns-density-295 recovery proof §3.2 fills one simulated node to the private
+# 16,384 admission cap through the production reconciler evaluation. Each
+# evaluation hydrates every node row, so the in-process fill is quadratic in
+# the cap, and the cap cannot be lowered without a production change. No
+# kernel state; widened budget only.
+[[profile.default.overrides]]
+filter = 'package(overdrive-sim) & binary(netns_density_node_admission)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 [[profile.default.overrides]]
 filter = 'package(overdrive-control-plane) & binary(integration) & test(convergence_loop_spawned_in_production_boot)'
 test-group = 'host-kernel-shared'
@@ -515,6 +524,14 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'package(overdrive-cli) & binary(integration) & test(a_restarted_microvm_workload_is_re_enrolled_in_the_mesh_before_it_runs_again)'
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# netns-density-295 recovery proof §3.5 boots the real composition twice around
+# a killed serve owner (guest build + boot + deploy + kill + 60 s-bounded
+# reboot + replacement + cleanup). Widened budget only; the binary is already
+# in `host-kernel-shared`.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits)'
+slow-timeout = { period = "60s", terminate-after = 6 }
 
 # microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
 # `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by

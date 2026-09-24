@@ -1,0 +1,19 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/increment-z-netns-density-295-mac-fdb-20260924T021346Z/spike.py --sweep`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f4acf2b30f3d12277af2271f pid=60003
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 582,768 bytes  received 23,615 bytes  404,255.33 bytes/sec
+total size is 266,069,685  speedup is 438.78
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SWEEP removed=[]

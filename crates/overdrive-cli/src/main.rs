@@ -201,14 +201,31 @@ async fn run(cli: Cli) -> Result<()> {
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 
-            // SIGINT handling per `crates/overdrive-cli/CLAUDE.md`: the
-            // binary selects on the shutdown signal and the server task.
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("SIGINT received; shutting down");
-                }
+            // The process-lifetime owner lives in the library
+            // (`commands::serve_lifetime`); the binary only binds the
+            // production signal source and clock and maps the typed outcome
+            // to the process exit status.
+            let signals = overdrive_cli::commands::serve_lifetime::OsServeSignals::install()
+                .map_err(|e| color_eyre::eyre::eyre!("install SIGINT/SIGTERM handlers: {e}"))?;
+            let lifetime = overdrive_cli::commands::serve_lifetime::ServeLifetime::new(
+                signals,
+                std::sync::Arc::new(overdrive_host::SystemClock),
+            );
+            let exit = lifetime.run(handle).await?;
+            let code = exit.exit_code();
+            if let overdrive_cli::commands::serve_lifetime::ServeExit::SharedGuestNetworkFailStop {
+                request,
+                ..
+            } = exit
+            {
+                let err = overdrive_cli::http_client::CliError::SharedGuestNetworkFailStop { request };
+                eprint!("{}", overdrive_cli::render::cli_error(&err));
             }
-            handle.shutdown().await?;
+            if code != 0 {
+                // A non-zero outcome exits without runtime/task teardown so
+                // teardown cannot extend the fail-stop outer bound.
+                std::process::exit(code);
+            }
             Ok(())
         }
         other => {
