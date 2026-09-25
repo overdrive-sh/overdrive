@@ -186,7 +186,10 @@ fn xdp_identical_vip_port_proto_rejected() {
         proto: conflict_proto,
         first_route,
         second_route,
-    } = err;
+    } = err
+    else {
+        panic!("expected a service-write conflict, not an allocation-reclaim conflict");
+    };
     assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(5));
     assert_eq!(conflict_proto, Proto::Tcp);
@@ -212,7 +215,10 @@ fn register_vs_deregister_on_same_key_rejected() {
         proto: conflict_proto,
         first_route,
         second_route,
-    } = err;
+    } = err
+    else {
+        panic!("expected a service-write conflict, not an allocation-reclaim conflict");
+    };
     assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(7));
     assert_eq!(conflict_proto, overdrive_core::dataplane::backend_key::Proto::Tcp);
@@ -256,7 +262,10 @@ fn cgroup_identical_vip_port_proto_rejected() {
         proto: conflict_proto,
         first_route,
         second_route,
-    } = err;
+    } = err
+    else {
+        panic!("expected a service-write conflict, not an allocation-reclaim conflict");
+    };
     assert_eq!(conflict_sid, service_id());
     assert_eq!(conflict_vip, vip(9));
     assert_eq!(conflict_proto, Proto::Tcp);

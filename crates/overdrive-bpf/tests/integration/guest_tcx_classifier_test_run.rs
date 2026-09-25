@@ -687,24 +687,11 @@ fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
             }
         }
 
-        // A frame shorter than an Ethernet header cannot reach the program
-        // through BPF_PROG_TEST_RUN: the kernel refuses a skb test input below
-        // ETH_HLEN with EINVAL before the classifier runs, so no verdict or
-        // counter can be observed for it at this tier.
-        for length in 0..14 {
-            reset(&mut endpoints, &mut counters, EgressEndpoints::Registered);
-            let refused =
-                test_run_at_egress(&program_fd, &registered_unicast[..length], LOOPBACK_IFINDEX)
-                    .err()
-                    .unwrap_or_else(|| {
-                        panic!("a {length}-byte frame is refused before the program runs")
-                    });
-            assert_eq!(refused.raw_os_error(), Some(libc::EINVAL), "{length}-byte frame refusal");
-            assert!(
-                snapshot(&counters).iter().all(|value| *value == 0),
-                "{length}-byte frame refusal moves no counter"
-            );
-        }
+        // A frame shorter than an Ethernet header is not exercised here: the
+        // kernel refuses a `BPF_PROG_TEST_RUN` skb input below `ETH_HLEN` with
+        // `EINVAL` before the classifier runs (S-ND295-47, item 9), so such an
+        // assertion would prove the harness's bounds check, not the program's.
+        // The program's own bounds check is the verifier-enforced guarantee.
     }));
     let cleanup = remove_pin_dir(&pin_dir);
     match (primary, cleanup) {

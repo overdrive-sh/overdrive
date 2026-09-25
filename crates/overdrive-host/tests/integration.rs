@@ -60,4 +60,13 @@ mod integration {
     // process, same x86_64 + nested-KVM floor as `vmm_equivalence`.
     #[cfg(feature = "kvm-tests")]
     mod vm_host_state_equivalence;
+    // netns-density-295 S-ND295-40 (D-295-R2, FD § "Core `VmmError`
+    // additions") — the VMM adapter maps each TAP queue-attach failure onto
+    // its pinned `VmmError`, observed through the public `Vmm::create`
+    // contract against real kernel TAPs. `kvm-tests`: `create` must clear its
+    // rootfs-clone / hypervisor-present / confined-paths stages (real staged
+    // kernel + rootfs + `cloud-hypervisor`) before it reaches the queue
+    // attach, so only the TAP is wrong.
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_tap_queue_errors;
 }

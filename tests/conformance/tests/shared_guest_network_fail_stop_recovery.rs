@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::guest_network::GuestNetworkOperation;
 use overdrive_core::guest_network::{
-    ServeShutdownRequest, SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
+    SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
 };
 use overdrive_sim::adapters::guest_network::{SimQuiesceOutcome, SimSharedGuestNetworkOwner};
 use overdrive_system_conformance::accepted_cadence::{
@@ -396,44 +396,4 @@ async fn undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh
     assert!(history.iter().any(|entry| entry.contains("phase=fail_stop_observed")));
     assert!(history.iter().any(|entry| entry.contains("phase=fresh_handler_admitted")));
     assert!(history.iter().any(|entry| entry.contains("phase=cleanup_complete")));
-}
-
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-33 — A failed handler shuts down before a fresh handler admits work
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 10-03 (S-ND295-33)"]
-async fn forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain() {
-    let trace = TraceHistory::install_global();
-    let harness = DirectHandlerHarness::new();
-    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
-    let mut handler = harness.start(Arc::clone(&owner)).await;
-    owner.script_audit_failure(true);
-    let clock = Arc::clone(handler.clock());
-    let request = tokio::spawn(async move {
-        let request = handler.shutdown_requested().await;
-        (handler, request)
-    });
-    tokio::task::yield_now().await;
-    for _ in 0..24 {
-        clock.tick(Duration::from_millis(250));
-        tokio::task::yield_now().await;
-    }
-    let (handler, request) = tokio::time::timeout(Duration::from_secs(16), request)
-        .await
-        .expect("bounded fail-stop request")
-        .expect("request waiter joins");
-    assert!(matches!(request, ServeShutdownRequest::SharedGuestNetwork(_)));
-    handler
-        .shutdown_result(Duration::ZERO)
-        .await
-        .expect_err("zero outer bound forces the abandoned-at-exit branch");
-
-    let events = trace.snapshot();
-    assert!(events_named(&events, "guest_network.shared_owner_fail_stop").iter().any(|event| {
-        event.fields.get("cleanup").map(String::as_str) == Some("abandoned_at_exit")
-    }));
-    assert!(!events_named(&events, "guest_network.shared_owner_fail_stop").iter().any(|event| {
-        event.fields.get("cleanup").map(String::as_str) == Some("drained_before_exit")
-    }));
 }

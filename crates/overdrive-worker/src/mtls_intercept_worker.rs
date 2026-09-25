@@ -7228,6 +7228,183 @@ mod tests {
         worker.shutdown_owner().await.expect("the shared owner joins");
     }
 
+    /// An `MtlsResolve` whose `resolve` announces it has entered (the claim is
+    /// held) and then blocks until released, so a body can hold a relay's
+    /// classifying claim in flight while a stop runs.
+    struct GatedResolve {
+        arm: MtlsResolution,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl MtlsResolve for GatedResolve {
+        async fn probe(&self) -> overdrive_core::traits::mtls_resolve::Result<()> {
+            Ok(())
+        }
+
+        async fn resolve(
+            &self,
+            _orig_dst: SocketAddrV4,
+        ) -> overdrive_core::traits::mtls_resolve::Result<MtlsResolution> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            Ok(self.arm.clone())
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// C-295-L pass-through obligation (FD § "Why a stop ends its pass-through
+    /// relays", 2026-09-25): a relay whose connection is classified WHILE the
+    /// stop's claim wait is in progress belongs to the retired generation, so
+    /// `stop_alloc` returns only after both of that relay's legs are closed and
+    /// no relay of the generation remains. An implementation that ends relays
+    /// before the claim wait, or registers a relay after releasing its claim
+    /// (the current `handle_shared_outbound` detach, `:3563-3567`), fails this.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_allocation_stop_ends_a_relay_classified_during_its_claim_wait() {
+        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind upstream server");
+        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
+            std::net::SocketAddr::V4(addr) => addr,
+            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
+        };
+        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
+        let accept_thread = std::thread::spawn(move || {
+            let (stream, _) = upstream.accept().expect("accept pass-through dial");
+            accepted_tx.send(stream).expect("return accepted upstream leg");
+        });
+
+        let (spy, _calls) = SpyEnforcement::new();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            spy,
+            Arc::new(GatedResolve {
+                arm: MtlsResolution::NonMesh,
+                entered: Arc::clone(&entered),
+                release: Arc::clone(&release),
+            }) as Arc<dyn MtlsResolve>,
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let the_alloc = alloc("shared-relay-during-claim-wait");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
+        let (leg, _addr, mut client) = accepted_leg_f();
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
+
+        // The classifying claim is now held in flight (resolve is blocked).
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .expect("the relay's classifying claim is taken and resolve is in flight");
+
+        // Stop begins while the claim is still in flight; it must not return
+        // until the relay it will produce has ended.
+        let mut stop = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let the_alloc = the_alloc.clone();
+            async move { worker.stop_alloc(&the_alloc).await }
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut stop).await.is_err(),
+            "stop cannot return while a relay's classifying claim is in flight"
+        );
+
+        // Release the classification; the relay is established, then ended by
+        // the stop's claim wait.
+        release.notify_one();
+        let _accepted = accepted_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the classified relay connects to upstream");
+        accept_thread.join().expect("upstream accept thread");
+        tokio::time::timeout(Duration::from_secs(10), stop)
+            .await
+            .expect("stop is bounded")
+            .expect("stop task joins")
+            .expect("stop succeeds");
+
+        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            client.read(&mut byte).expect("the relay's client leg is closed when stop returns"),
+            0,
+            "no relay of the retired generation remains after stop"
+        );
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// C-295-L owner-shutdown obligation (FD § "Why a stop ends its pass-through
+    /// relays"): when `shutdown_owner` returns, every relay of every allocation
+    /// has ended — a live pass-through relay's legs are both closed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_owner_shutdown_ends_a_live_relay() {
+        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind upstream server");
+        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
+            std::net::SocketAddr::V4(addr) => addr,
+            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
+        };
+        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
+        let accept_thread = std::thread::spawn(move || {
+            let (stream, _) = upstream.accept().expect("accept pass-through dial");
+            accepted_tx.send(stream).expect("return accepted upstream leg");
+        });
+
+        let (spy, _calls) = SpyEnforcement::new();
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            spy,
+            resolve_scripting(upstream_addr, MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let the_alloc = alloc("shared-relay-owner-shutdown");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
+        let (leg, _addr, mut client) = accepted_leg_f();
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
+        let mut accepted = accepted_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the live relay connects to upstream");
+        accept_thread.join().expect("upstream accept thread");
+
+        tokio::time::timeout(Duration::from_secs(10), worker.shutdown_owner())
+            .await
+            .expect("owner shutdown is bounded")
+            .expect("the shared owner joins");
+
+        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
+        accepted.set_read_timeout(Some(Duration::from_secs(1))).expect("set upstream timeout");
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            client.read(&mut byte).expect("the relay's client leg is closed after owner shutdown"),
+            0
+        );
+        assert_eq!(
+            accepted.read(&mut byte).expect("the relay's upstream leg is closed after owner shutdown"),
+            0
+        );
+    }
+
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
     /// CONTRACT_SHAPE: bounded-change.

@@ -261,19 +261,26 @@ WHEN the VMM adapter builds and starts the launch
 THEN the network argument names only descriptor 3 and the guest MAC
 AND every queue attach failure is reported as the matching VMM queue error
 AND a launch that fails to start leaves no queue held, before any cleanup waits
-AND the launcher no longer requires the ip tool and refuses a Cloud Hypervisor older than v53
+AND the launcher no longer requires the ip tool
 ```
+
+No Cloud Hypervisor version is parsed, compared, or gated (user ruling of
+2026-09-25, feature delta § "User ruling of 2026-09-25"); the capability stage
+reads `--version` only as diagnostic text. This scenario therefore carries no
+version-refusal oracle and no `cloud_hypervisor_older_than_v53_is_refused_by_the_probe`
+body (confirmed absent by `grep -rn cloud_hypervisor_older_than_v53 crates` →
+zero; the name was never committed).
 
 | Field | Value |
 |---|---|
-| Discharges | E2 in-process, E5 in-process (spawn-error/no-pid branch closes the queue first, F19); G4/r2; D-295-R1, R2 (FD 627-699, 849-873, 875-895) |
-| Contract shape | pure-function (render, mapping) / bounded-change (Lima queue-release) |
-| Lane | pure (source-local `overdrive-host` `vmm::tests`) + lima-kernel (spawn failure) |
-| Driving port | `CloudHypervisorVmm::create` / `cloud_hypervisor_network_arg` / `Vmm::probe` |
-| Fault stimulus | each `TapQueueError` variant as mapping input; a configured launcher path that fails to spawn |
-| Oracle | exact argv `fd=[3],mac=…,offload_tso=off,offload_ufo=off,offload_csum=off`; mapping `Open/Attach/FlagsReadBack/AdminStateReadBack → VmmError::TapQueue { stage }` with source, `Flags/NotDown → TapQueuePostcondition`; after the spawn error returns, a fresh `attach_tap_queue` on the scratch TAP succeeds; `REQUIRED_LAUNCH_TOOLS` lacks `ip`; probe refuses a reported version below 53.0 with the existing typed probe error |
-| Seed / isolation | table; Lima case uses a scratch TAP; the `overdrive-host` library test binary is not `host-kernel-shared` (the scratch TAP is its only kernel object) |
-| Rust home | `crates/overdrive-host/src/vmm.rs::tests::mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher` (RETARGETED argv) + NEW `…::tests::{every_tap_queue_error_maps_to_its_vmm_queue_error, cloud_hypervisor_older_than_v53_is_refused_by_the_probe}` + NEW `…::launch_seccomp_kernel::a_failed_spawn_releases_the_queue_before_any_cleanup_await` |
+| Discharges | E2 in-process, E5 in-process (spawn-error/no-pid branch closes the queue first, F19); G4/r2; D-295-R1, R2 (feature delta § "Core `VmmError` additions", § "`CloudHypervisorVmm` in `overdrive-host`") |
+| Contract shape | pure-function (render) / bounded-change (queue-error mapping through `create`; Lima queue-release) |
+| Lane | pure (source-local `overdrive-host` `vmm::tests`, launch shape) + lima-kernel (spawn failure, `launch_seccomp_kernel`) + native (queue-error mapping through `create`, `kvm-tests`) |
+| Driving port | `CloudHypervisorVmm::create` / `cloud_hypervisor_network_arg` |
+| Fault stimulus | each queue-attach failure reachable from a real kernel state (an administratively-up TAP; an absent name that creates a fresh non-persistent device; a single-queue TAP whose one queue is already held); a configured launcher path that fails to spawn |
+| Oracle | exact argv `fd=[3],mac=…,offload_tso=off,offload_ufo=off,offload_csum=off`; through `create`, each reachable queue-attach failure surfaces as its pinned `VmmError` — an up TAP → `TapQueuePostcondition { violation: NotDown }`, an absent name → `TapQueuePostcondition { violation: Flags { observed } }` with `observed & IFF_PERSIST == 0`, an already-held queue → `TapQueue { stage: Attach }`; `Open`, `FlagsReadBack`, and `AdminStateReadBack` are NOT asserted — no real kernel state produces them (opening `/dev/net/tun`, `TUNGETIFF` on the open queue, and `SIOCGIFFLAGS` on the named TAP all succeed), so their one-for-one mapping is the adapter's own concern, not this public-contract body; after the spawn error returns, a fresh `attach_tap_queue` on the scratch TAP succeeds; `REQUIRED_LAUNCH_TOOLS` lacks `ip` |
+| Seed / isolation | table; the queue-error body runs as root on scratch TAPs (deleted by RAII) in the `host-kernel-shared` `overdrive-host` integration binary; the launch-shape body needs no kernel object |
+| Rust home | `crates/overdrive-host/src/vmm.rs::tests::mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher` (RETARGETED argv, launch shape) + NEW `crates/overdrive-host/tests/integration/vmm_tap_queue_errors.rs::every_tap_queue_error_maps_to_its_vmm_queue_error` (native, `kvm-tests`, through `create` — retargeted from a private-mapping unit test to the public `Vmm::create` contract, item 8) + NEW `…/vmm.rs::launch_seccomp_kernel::a_failed_spawn_releases_the_queue_before_any_cleanup_await` |
 | Disposition / step | RETARGETED + NEW — 05-03 |
 
 #### S-ND295-41 — The launched child inherits exactly descriptors 0 to 3
@@ -389,7 +396,7 @@ AND each thread carries exactly one more filter than the hypervisor installs its
 | Lane | native |
 | Driving port | `serve::run_with_kek` + `deploy` |
 | Fault stimulus | none |
-| Oracle | every `/proc/<ch>/task/*/status`: `NoNewPrivs: 1`, `Seccomp: 2`; `Seccomp_filters`: leader 1, `vmm` and `http-server` 2, every other thread 3 (increment-aa table, pinned to CH v53 by OBL-295-SECCOMP-REVERIFY) |
+| Oracle | every `/proc/<ch>/task/*/status`: `NoNewPrivs: 1`, `Seccomp: 2`; `Seccomp_filters`: leader 1, `vmm` and `http-server` 2, every other thread 3 — the audited build's counts (the increment-aa control table, measured on the audited v53.0 build), re-measured by OBL-295-SECCOMP-REVERIFY when the shipped Cloud Hypervisor build changes; no version is gated at runtime (user ruling of 2026-09-25) |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | `crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs::vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader` RETARGETED and renamed `every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters` — the old body asserts the leader reports `SECCOMP_MODE_DISABLED`, which D-295-R22 makes false |
 | Disposition / step | RETARGETED — 05-02 (native run required in that step) |
@@ -488,8 +495,15 @@ GIVEN a managed TAP whose registered guest MAC is known to the node
 WHEN frames leave the host towards that guest
 THEN broadcast and multicast are always delivered
 AND unicast is delivered only when addressed to the registered guest MAC
-AND unicast to any other MAC, unicast when the TAP has no registration, and a truncated frame are dropped and counted once
+AND unicast to any other MAC and unicast when the TAP has no registration are dropped and counted once
 ```
+
+The verdict table exercises no sub-Ethernet-header frame (item 9): the kernel
+rejects a `BPF_PROG_TEST_RUN` skb input below `ETH_HLEN` with `EINVAL` before
+the classifier runs, so asserting that refusal would prove the harness's own
+bounds check, not the program's. The program's own bounds check is the
+verifier-enforced guarantee (the loader rejects an out-of-bounds access at
+load time), so it needs no runtime row here.
 
 | Field | Value |
 |---|---|
@@ -497,7 +511,7 @@ AND unicast to any other MAC, unicast when the TAP has no registration, and a tr
 | Contract shape | bounded-change |
 | Lane | tier2 |
 | Driving port | the embedded `gh295c_egress` classifier via `BPF_PROG_TEST_RUN`, `__sk_buff.ifindex` set to the keyed TAP |
-| Fault stimulus | `ENDPOINTS` entry present/absent; destination = registered, foreign unicast, broadcast, multicast; frame shorter than an Ethernet header |
+| Fault stimulus | `ENDPOINTS` entry present/absent; destination = registered, foreign unicast, broadcast, multicast |
 | Oracle | per row: verdict (`TC_ACT_OK`/`TC_ACT_SHOT`) and `EgressDestinationDrop` (slot 8) delta exactly 0 or 1; slots 0-7 unchanged |
 | Seed / isolation | finite table; map state cleared per row (Tier-2 default) |
 | Rust home | NEW `crates/overdrive-bpf/tests/integration/guest_tcx_classifier_test_run.rs::egress_classifier_delivers_only_registered_unicast_and_every_group_frame` |
@@ -880,7 +894,7 @@ AND none of these writes a Failed row or advances the restart budget
 | Fault stimulus | seeded interleavings of gate transitions and the sim owner's latch |
 | Oracle | activation count from the sim owner's `calls()`: the sim records `TapSetUp` both for a raised activation and for every restore call, successful or not (FD 2150-2151, 6716-6720, 6775-6780), and records nothing for a latched activation. No supervisor runs in this lane, so the test is the only caller of `quiesce_managed_taps` and `restore_quiesced_taps`; it brackets each of its own calls with `calls().len()`, and every `TapSetUp` outside those brackets is an activation. Exactly one such entry appears, after reopen. `guest_network.activation_withheld { alloc, reason: "fail_stop" }` at fail-stop with zero EXEC release and no row; `WorkloadLifecycleView.restart_counts` unchanged |
 | Seed / isolation | `OVERDRIVE_ND295_ACTIVATION_SEEDS` (default fixed list), printed per verdict |
-| Rust home | NEW `crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs::{activation_during_recovery_runs_once_after_reopen_without_a_failed_row, a_latched_activation_retries_after_reopen, fail_stop_withholds_activation_and_the_command}`; sim-owner surface self-tests NEW `crates/overdrive-sim/src/adapters/guest_network.rs::tests::{scripted_quiescence_outcomes_condemn_each_named_allocation_once, activate_reports_raised_latched_or_condemned, restore_failure_slot_keeps_the_latch}` and `…::tests::standing_owner_controls_preserve_exact_operation_semantics` (RETARGETED: `script_quiesce_outcome` replaces `script_quiesce_failure`) |
+| Rust home | NEW `crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs::{activation_during_recovery_runs_once_after_reopen_without_a_failed_row, a_latched_activation_retries_after_reopen, fail_stop_withholds_activation_and_the_command}`; sim-owner surface self-tests NEW `crates/overdrive-sim/src/adapters/guest_network.rs::tests::scripted_quiescence_outcomes_condemn_each_named_allocation_once` and `…::tests::standing_owner_controls_preserve_exact_operation_semantics` (RETARGETED: `script_quiesce_outcome` replaces `script_quiesce_failure`); test-local-owner self-tests NEW `crates/overdrive-control-plane/src/shared_network_test_ports.rs::tests::{activate_reports_raised_latched_or_condemned, restore_failure_slot_keeps_the_latch}` — re-homed out of `overdrive-sim` because `activate` needs a `GuestNetworkPlan`, which is control-plane-private with no cross-crate constructor, and the `overdrive-sim`↔`overdrive-control-plane` dependency cycle makes only `TestSharedOwner` (not `SimSharedGuestNetworkOwner`) usable in a source-local lane; these are active (the double is fully implemented) and are the only coverage of the failed-restore-keeps-the-latch path (item 7) |
 | Disposition / step | NEW + RETARGETED — 06-04 |
 
 ### Group E — Retry-retaining cleanup and reclaim (gap 5; R10, R11)
@@ -1243,7 +1257,7 @@ AND deleting only the guard table still leaves the intercept program catching or
 | Lane | native (RED first, then GREEN) |
 | Driving port | `serve::run_with_kek` + `deploy` with a probe guest image that emits scripted SYNs |
 | Fault stimulus | real `nft delete table ip overdrive-mtls`; separately `nft delete table ip overdrive-mtls-guard`; pre-test `net.ipv4.ip_forward` recorded and set to 1 as a declared precondition |
-| Oracle | peer-TAP capture: zero forwarded intercept-marked frames; host listener on `0.0.0.0:<port>` accepts nothing and no SYN-ACK reaches the guest; healthy control: guard rule counter 0 |
+| Oracle | peer-TAP capture: zero forwarded intercept-marked frames; host listener on `0.0.0.0:<port>` accepts nothing and no SYN-ACK reaches the guest. **Healthy baseline (before any fault, the guard's non-interference control):** with both tables present, leg F listening, and `observe_intercept_mark_guard()` returning `Ok(true)`, each R18 guest SYN (to the peer's address, the bridge gateway, and another host address, at a wildcard host listener's port) receives a SYN-ACK and that listener accepts nothing — the intercept answered and the guard dropped nothing; the guard rule carries no counter (`observe_intercept_mark_guard` is a bool presence read). **Per-run SYN-entered-host check (every R18 GREEN case and the guard-only case):** the probe SYN is captured on its sender's TAP while that TAP reads back administratively up, `GuestTcxCounter::Intercept` rises by at least the SYNs sent, and the bridge guard's default-drop counter is unchanged; a run whose TAP was already quiesced (e.g. an `IpRules` loss quiesced the managed TAPs) is void, not GREEN |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | NEW `crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs::{marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program, the_intercept_program_still_catches_marked_tcp_without_the_guard_table}` |
 | Disposition / step | NEW — 08-01 (the RED run decides R18: if neither table-loss path reproduces, R18 is withdrawn and its conditional parts are removed, FD 3487-3490) |
@@ -1326,10 +1340,24 @@ members through the awaited `remove_allocation_elements` (S-ND295-54); the
 observable complements these bodies assert are unchanged. B-7 changes how the
 worker obtains and stops its listeners, not these contracts (FD 3702-3718).
 
+**Pass-through relay stop obligations (C-295-L pin, 2026-09-25, feature delta
+§ "Why a stop ends its pass-through relays").** The live twin
+`shared_allocation_stop_joins_a_passthrough_child` asserts one case — stop
+closes both legs of a relay established before the stop began. Two clauses of
+the pin it does not cover each gain a NEW worker body: (1) a relay whose
+connection is classified WHILE the stop's claim wait is in progress — stop
+returns only after both of its legs are closed and no relay of that generation
+remains; (2) `shutdown_owner` with a live relay — when it returns, the relay's
+legs are both closed. An implementation that ends relays before the claim
+wait, or registers a relay after releasing its claim (the current
+`handle_shared_outbound` detach, `mtls_intercept_worker.rs:3563-3567`), passes
+the twin and fails these. The shared dispatch's detach is the review item C-295-L
+names for the step that lands shared stop (05-01).
+
 | Field | Value |
 |---|---|
 | Discharges | G2/r4 (late success cannot resurrect a terminal); G5/r5 (listener loss) |
-| Rust home | `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs` (ten bodies; moved from `tests/acceptance/`, integration lane), `crates/overdrive-worker/src/mtls_intercept_worker.rs::{shared_listener_task_owner_acceptance, capability_registry_acceptance, tests}::*`, native `crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::{two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops, real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle}` |
+| Rust home | `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs` (ten bodies; moved from `tests/acceptance/`, integration lane), `crates/overdrive-worker/src/mtls_intercept_worker.rs::{shared_listener_task_owner_acceptance, capability_registry_acceptance, tests}::*` including NEW `tests::{shared_allocation_stop_ends_a_relay_classified_during_its_claim_wait, shared_owner_shutdown_ends_a_live_relay}` (the two C-295-L pass-through relay-stop obligations, pending `05-01`), native `crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::{two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops, real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle}` |
 | Disposition / step | RETAINED — active. Every test double implementing `MtlsIntercept` gains faithful implementations of the three new methods (mechanical fallout). The nine acceptance bodies keep their assertions and their real client connections: from the B-7 step `RecordingSharedIntercept` returns a `LoopbackInterceptListener`. The worker's `tests::*` bodies that drive the per-allocation listener branch are deleted by the step that deletes the branch; each surviving contract is carried as § *Intercept listener and stop-error test support* tabulates (shared-allocation twins pending `05-01`). `crates/overdrive-reconcilers/src/workload_lifecycle.rs::service_projection_keeps_first_tcp_order_deduplicates_tcp_and_excludes_udp` (S-ND295-21, stepless marker) is run once: if GREEN its stale marker is removed; if RED it is re-marked `pending DELIVER step 07-01 (S-ND295-21)` |
 
 #### S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled
@@ -1542,8 +1570,13 @@ GIVEN the node runs VM workloads through one production server handler with requ
 WHEN shared-network ownership cannot be restored in the bounded window, or quiescence cannot be determined
 THEN the handler returns one typed fail-stop request naming the cause
 AND a fresh handler over the same roots accepts work only after its startup checks complete
-AND a forced shutdown that outlives its bound is recorded as abandoned, separately from a drain
 ```
+
+The forced-shutdown/abandoned-at-exit obligation is NOT part of this scenario
+(item 6, 2026-09-25): the deleted body
+`forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain`
+checked records only the CLI serve lifetime emits, which S-ND295-68 already
+covers through its drained and abandoned cases.
 
 | Field | Value |
 |---|---|
@@ -1552,9 +1585,9 @@ AND a forced shutdown that outlives its bound is recorded as abandoned, separate
 | Lane | in-process (`tests/conformance`, exported handler + HTTPS API only) |
 | Driving port | `DirectHandlerHarness` (`tests/conformance/src/lib.rs`) over `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD 9533-9559), with `SimMtlsIntercept`, `SimGuestDnsFactory`, the `SimSharedGuestNetworkOwner`, and `vm_cgroups` over `SimCgroupFs`; the request is observed as § *In-process observation* states |
 | Fault stimulus | `SimSharedGuestNetworkOwner` standing `Bridge` component failure plus `script_converge_failure(true)`; `script_quiesce_outcome(Fail)` |
-| Oracle | typed `ServeShutdownRequest::SharedGuestNetwork { cause: RecoveryDeadlineExceeded / TapQuiescenceUndetermined }` via `ServerHandle::shutdown_requested`; fresh handler admits over HTTPS only after boot; abandoned-at-exit recorded separately |
+| Oracle | typed `ServeShutdownRequest::SharedGuestNetwork { cause: RecoveryDeadlineExceeded / TapQuiescenceUndetermined }` via `ServerHandle::shutdown_requested`; fresh handler admits over HTTPS only after boot |
 | Seed / isolation | example; the conformance binary is `host-kernel-shared` |
-| Rust home | `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs::{shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admission, forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain}` (RETARGETED to required ports); NEW `…::undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh_handler_reopens`; `…::unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop` DELETED (defends the superseded kill-all-then-fail-stop contract; per-VM scope is S-ND295-30A/30B) |
+| Rust home | `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs::shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admission` (RETARGETED to required ports); NEW `…::undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh_handler_reopens`; `…::unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop` DELETED (defends the superseded kill-all-then-fail-stop contract; per-VM scope is S-ND295-30A/30B); `…::forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain` DELETED (item 6 — records only the CLI serve lifetime emits, covered by S-ND295-68's drained/abandoned cases) |
 | Disposition / step | RETARGETED + NEW + DELETED — 10-03 |
 
 ### Group J — Native fault evidence and non-regression
@@ -1785,7 +1818,7 @@ Other dispositions that phase B must apply:
 | S-ND295-37 | bounded-change | native | RETARGETED | 10-02 |
 | S-ND295-38 | bounded-change | lima-kernel | NEW | 05-03 |
 | S-ND295-39 | bounded-change | lima-kernel | NEW | 06-02 |
-| S-ND295-40 | pure-function / bounded-change | pure + lima-kernel | RETARGETED + NEW | 05-03 |
+| S-ND295-40 | pure-function / bounded-change | pure + lima-kernel + native | RETARGETED + NEW | 05-03 |
 | S-ND295-41 | bounded-change | lima-kernel (x86_64) | NEW | 05-02 |
 | S-ND295-42 | pure-function | pure (x86_64, proptest) | NEW | 05-02 |
 | S-ND295-43 | bounded-change | lima-kernel (x86_64) + native (f) | NEW | 05-02 |
@@ -1824,15 +1857,22 @@ expanded: S-ND295-02/03, 08/09, 14-18, 20-26, 27/28, 31A/31B). By scenario:
 19, 29B, 32, 33, 34, 35, 37, 45, 68 — including the four landed proofs §3.2-§3.5
 and the re-targeted §3.6 fault); **NEW 38** (05A, 05C, 05E, 13D, 29A, 30A, 30B,
 38-44, 46-67 except 45, 69, and 70). Individual NEW bodies are also added inside
-RETARGETED scenarios. **DELETED:** 7 bodies plus 2 moved files (register
-above); the step that lands B-7 also deletes, with the per-allocation listener
-branch, the worker bodies that drive it (§ *Intercept listener and stop-error
-test support*). Error, fault, or boundary scenarios: **66 of 82 (80.5 %)**. By
-lane, counted once per expanded scenario ID for every lane its matrix row
-names: pure 45, seeded-sim 7, seeded-in-process 1, in-process 9,
-lima-kernel 29, tier2 3, native 24, xtask-integration 1. Of the seven
-seeded-sim entries only S-ND295-05D is behind `integration-tests`, for its
-wall-clock budget. No verification expectation.
+RETARGETED scenarios. **DELETED:** 8 bodies plus 2 moved files (register
+above; the eighth is the S-ND295-33
+`forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain`
+body, item 6); the step that lands B-7 also deletes, with the per-allocation
+listener branch, the worker bodies that drive it (§ *Intercept listener and
+stop-error test support*). Error, fault, or boundary scenarios: **66 of 82
+(80.5 %)**. By lane, counted once per expanded scenario ID for every lane its
+matrix row names: pure 45, seeded-sim 7, seeded-in-process 1, in-process 9,
+lima-kernel 29, tier2 3, native 25, integration 11, xtask-integration 1
+(recomputed 2026-09-25: the `integration` lane — the worker/control-plane
+integration binaries with real loopback sockets, S-ND295-13D, 20-26, 31A, 31B,
+61 — was omitted before the WP-5 move to the worker integration binary; and
+S-ND295-40's queue-error body moved from `overdrive-host` `vmm::tests` to its
+`tests/integration` native `kvm-tests` lane, item 8, adding 1 to native).
+Of the seven seeded-sim entries only S-ND295-05D is behind `integration-tests`,
+for its wall-clock budget. No verification expectation.
 
 ## Evidence-row coverage (E1-E21)
 

@@ -606,3 +606,140 @@ impl LegListener for Arc<dyn InterceptListener> {
         self.local_addr()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Self-tests of the test-local shared owner (S-ND295-53)
+// ---------------------------------------------------------------------------
+//
+// These specify the `SharedGuestNetworkOwner` activate/restore contract the
+// S-ND295-53 activation-order proof and the source-local supervisor bodies
+// depend on, over the double they actually use here: `TestSharedOwner`. The
+// sim-side twin (`SimSharedGuestNetworkOwner`) cannot host them because its
+// `activate(&GuestNetworkPlan)` needs a `GuestNetworkPlan`, and that type is
+// control-plane-private with no cross-crate constructor (FD § "B1 — replace
+// obsolete plan vocabulary"); a plan is built here through the crate-visible
+// `assign_action_plan`. "A failed restore keeps the latch" has no other
+// coverage, so a double that regressed it would pass the SUT proof silently —
+// that is exactly what these guard against (a fixture must not fail before,
+// or lie to, the SUT).
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::TestSharedOwner;
+    use crate::guest_network::{
+        GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner, SharedGuestNetworkOwner,
+        TapActivation, assign_action_plan,
+    };
+    use overdrive_core::id::AllocationId;
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("valid allocation id")
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// `activate` reports `Raised` on a fresh allocation, `QuiescenceLatched`
+    /// while a quiescence latch is set (raising nothing), and the source-less
+    /// `PostconditionMismatch` for an allocation a returned quiescence result
+    /// condemned. Re-homed from `overdrive-sim` because a `GuestNetworkPlan`
+    /// is control-plane-private (item 7, DISTILL follow-up).
+    #[tokio::test]
+    async fn activate_reports_raised_latched_or_condemned() {
+        let owner = TestSharedOwner::new();
+        let plan_a = assign_action_plan(alloc("s53-selftest-a")).expect("plan A");
+        let plan_b = assign_action_plan(alloc("s53-selftest-b")).expect("plan B");
+
+        // Fresh, no latch, not condemned → Raised.
+        assert_eq!(
+            owner.activate(&plan_a).await.expect("a fresh activation raises"),
+            TapActivation::Raised
+        );
+
+        // A latch makes every activation return QuiescenceLatched, raising nothing.
+        owner.quiesce_managed_taps().await.expect("full quiescence latches");
+        assert!(owner.latched(), "quiescence sets the latch");
+        assert_eq!(
+            owner.activate(&plan_a).await.expect("a latched activation is not a failure"),
+            TapActivation::QuiescenceLatched
+        );
+
+        // Restore clears the latch; activation raises again.
+        owner.restore_quiesced_taps().await.expect("restore clears the latch");
+        assert!(!owner.latched(), "a successful restore clears the latch");
+        assert_eq!(
+            owner.activate(&plan_a).await.expect("activation after restore"),
+            TapActivation::Raised
+        );
+
+        // Condemn plan B through a scripted quiescence, then clear the latch so
+        // the condemnation — not the latch — is the reason it is refused.
+        owner.script_quiesce(super::TestQuiesceScript::Unconfirmed(
+            std::collections::BTreeSet::from([alloc("s53-selftest-b")]),
+        ));
+        let quiescence = owner.quiesce_managed_taps().await.expect("scripted quiescence");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
+            vec![alloc("s53-selftest-b")],
+            "the scripted allocation is reported unconfirmed"
+        );
+        assert!(owner.condemned().contains(&alloc("s53-selftest-b")), "and condemned");
+        owner.restore_quiesced_taps().await.expect("restore clears the latch");
+        let refusal = owner.activate(&plan_b).await.expect_err("a condemned allocation is refused");
+        assert!(
+            matches!(
+                refusal,
+                GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    ..
+                }
+            ),
+            "the refusal is the source-less missing-record mismatch: {refusal:?}"
+        );
+        // An uncondemned allocation still raises.
+        assert_eq!(
+            owner.activate(&plan_a).await.expect("an uncondemned allocation still raises"),
+            TapActivation::Raised
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A failed `restore_quiesced_taps` returns `Err` and leaves the
+    /// quiescence latch set, so a subsequent activation still returns
+    /// `QuiescenceLatched`; only a successful restore clears it. Nothing else
+    /// covers the failed-restore-keeps-the-latch path (item 7, DISTILL
+    /// follow-up).
+    #[tokio::test]
+    async fn restore_failure_slot_keeps_the_latch() {
+        let owner = TestSharedOwner::new();
+        let plan = assign_action_plan(alloc("s53-selftest-restore")).expect("plan");
+
+        owner.quiesce_managed_taps().await.expect("full quiescence latches");
+        assert!(owner.latched(), "quiescence sets the latch");
+
+        owner.script_restore_failure(true);
+        let failed = owner.restore_quiesced_taps().await;
+        assert!(
+            matches!(failed, Err(GuestNetworkError::Io { operation: GuestNetworkOperation::TapSetUp, .. })),
+            "an armed restore fails with the typed set-up error: {failed:?}"
+        );
+        assert!(owner.latched(), "a failed restore keeps the latch");
+        assert_eq!(
+            owner.activate(&plan).await.expect("still latched after the failed restore"),
+            TapActivation::QuiescenceLatched
+        );
+
+        owner.script_restore_failure(false);
+        owner.restore_quiesced_taps().await.expect("the retry restores and clears the latch");
+        assert!(!owner.latched(), "the successful retry clears the latch");
+        assert_eq!(
+            owner.activate(&plan).await.expect("activation after the successful restore"),
+            TapActivation::Raised
+        );
+    }
+}

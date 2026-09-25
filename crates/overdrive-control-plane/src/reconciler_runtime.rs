@@ -1269,7 +1269,25 @@ async fn surface_reconcile_conflict(
         proto,
         first_route,
         second_route,
-    } = violation;
+    } = violation
+    else {
+        // GH #295 D-295-R11 (RED scaffold): `ConflictingAllocationReclaim`
+        // carries no service-LB `(service_id, vip, port, proto)` slot, so no
+        // `reconcile_conflict` observation row is written for it — only the
+        // tracing signal fires. The reclaim variant is not constructed before
+        // DELIVER step 07-02, so this branch is unreachable today; the full
+        // surfacing rule lands with the validator rule in that step.
+        tracing::error!(
+            target: "overdrive::reconciler",
+            name = "reconciler.output.invariant_violation",
+            reconciler = %reconciler_name,
+            target = %target.as_str(),
+            tick = tick.tick,
+            violation = ?violation,
+            "reconciler emitted conflicting Actions in one tick; skipping dispatch"
+        );
+        return;
+    };
     let (service_id, vip, vip_port, proto, first_route, second_route) =
         (*service_id, *vip, *vip_port, *proto, *first_route, *second_route);
     // `vip_port` is `Some(_)` for every surviving conflict class in

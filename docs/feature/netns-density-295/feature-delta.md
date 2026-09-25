@@ -13856,10 +13856,14 @@ DELIVER step.
 | I — supervisor and lifetime (gaps 2, 4) | S-ND295-27-30A, 32-34, 65, 68 | complete component matrix, per-VM kill scope, bounded calls, required ports, CLI exit status 1 |
 | J — native fault evidence | S-ND295-30B, 36, 37, 66, 67, 69 | per-VM kill on real guests, double loss, absent-part stop, MAC hijack and recovery, table deletion repair |
 
-Counts: 82 scenario entries — 22 RETAINED, 22 RETARGETED, 38 NEW; 7 bodies
-DELETED and 2 proof files moved in phase B, and the worker bodies that drive
-the per-allocation listener branch deleted with it by the step that lands
-B-7. Error/fault/boundary share **80.5 %**.
+Counts: 82 scenario entries — 22 RETAINED, 22 RETARGETED, 38 NEW; 8 bodies
+DELETED (the seven earlier deletions plus the S-ND295-33
+`forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain`
+body dropped 2026-09-25 — it checked records only the CLI serve lifetime
+emits, which S-ND295-68 covers via drained/abandoned) and 2 proof files moved
+in phase B, and the worker bodies that drive the per-allocation listener
+branch deleted with it by the step that lands B-7. Error/fault/boundary
+share **80.5 %**.
 Benchmark and measurement receipts (T1-BASE, T1-PORT4, M-ND295-E18) are
 listed separately from tests. #295 has no verification expectation.
 
@@ -14096,7 +14100,7 @@ plan and adopts these IDs.
 |---|---|---|---|---|
 | 05-01 | Required serve-boundary ports: `ServerConfig::new(kek, mtls_intercept, guest_dns)` consumed; worker, DNS owner, and supervisor always composed; `compose_mtls`, `dns_probe_fault`, and the no-worker supervisor branch deleted; `GuestDns`/`GuestDnsDeps`/`GuestDnsFactory`/`HostGuestDnsFactory`; `DnsServeTaskOwner` over `Arc<dyn GuestDns>`; `DnsResponder::audit`; action-shim lifecycle parameters non-optional. Required `AppState` inputs: both constructors take the worker, the shared owner, the EXEC gate, and the pool (the gate and pool are threaded and consumed at 06-04 / 06-03); `ServerHandle` owner fields non-`Option`; `replace_mtls_worker_for_test`, `inject_owner_shutdown_failure_for_test`, and `owner_shutdown_failures` deleted; the `None` fallback of `dispatch_with_network_owner` and its `.expect` deleted; the source-local `s19_server_handle` supplies a `ServiceBackendsResolve` built over its sim store. Fixture fallout: every `AppState` fixture passes a worker over sim ports and an owner (`SimSharedGuestNetworkOwner` in `tests/` suites and other crates, `TestSharedOwner` source-locally), keeping its lane and its assertions. Intercept listener (B-7), carried here unless DELIVER lands it in a step ordered before this one: `bind_transparent` returns `Arc<dyn InterceptListener>`; the host listener over today's `IP_TRANSPARENT` socket with its pinned obligations; the shared owner and its accept tasks share each listener `Arc` and stop by cancellation (no `try_clone`, `await_pending_connection`, 200 ms slices, or `stop` flag), and per-connection dispatch awaits `MtlsResolve::resolve`; the per-allocation listener branch of `start_alloc` deleted with the bodies that drive it; the four test-support lines of `test-scenarios.md` § *Intercept listener and stop-error test support* changed; an accept helper left without a production caller deleted with its tests | R16; B-1 pin (FD 1850-2034, 7231-7238); B-7 pin (FD 3492-3766) | S-ND295-65, 34 (port bodies), 70, and the `shared_…` twins of S-ND295-20 that script a connection | — |
 | 05-02 | Audited launch hook and launch seccomp filter: pure program builder and deny-list; `register_launch_child_hook` (close-on-exec, no-new-privs, filter); `create`-first architecture refusal; probe `launch-seccomp` stage and three `VmmProbeError` variants; `deny(unsafe_code)` and narration fixes; CI selector | R3 (hook), R22 | S-ND295-41-45 | — |
-| 05-03 | Cloud Hypervisor fd handoff: `TapQueue`/`attach_tap_queue`; queue mapped to fd 3; argv `fd=[3]`; `VmmError::TapQueue*`; `Command` dropped before any await; `ip` removed from launch tools; CH ≥ v53 probe floor | R1, R2 | S-ND295-38, 40 | 05-02 |
+| 05-03 | Cloud Hypervisor fd handoff: `TapQueue`/`attach_tap_queue`; queue mapped to fd 3; argv `fd=[3]`; `VmmError::TapQueue*`; `Command` dropped before any await; `ip` removed from launch tools (no Cloud Hypervisor version gate — user ruling of 2026-09-25) | R1, R2 | S-ND295-38, 40 | 05-02 |
 | 05-04 | Creation-time close-on-exec at the eight sites (FD 724-732) and the `xtask::cloexec_lint` source gate with `cargo xtask cloexec-lint` (FD 745-847) | OBL-295-CLOEXEC | S-ND295-46 | — |
 | 06-01 | Egress guest-MAC classifier (Tier-2 program, counter slot 9, dataplane attach/pin/query/detach, inventory) and debug-mask netlink reads | R21 (adapters), R22 (read-back adapter) | S-ND295-47, 48, 49 | — |
 | 06-02 | Owner allocation lifecycle: owner uid 0; provision egress step and down read-back with host-MAC record and mask 0; teardown converges on absence; recorded plan replaces pool lookups; per-allocation audit attribution, pins, guard, dump | R4, R21, R22, M2, H1 | S-ND295-10, 11, 12, 39, 50 | 06-01 |
