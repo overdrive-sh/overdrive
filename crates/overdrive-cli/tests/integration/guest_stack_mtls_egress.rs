@@ -2665,6 +2665,7 @@ async fn genuine_pre_change_contract(
         restart_count: raw.restart_count,
         last_terminated: None,
         terminal: None,
+        network_cleanup_pending: false,
     };
 
     let expected_spiffe = SpiffeId::for_allocation(&raw.workload_id, &raw.alloc_id);

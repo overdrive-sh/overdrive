@@ -521,6 +521,12 @@ struct GuestTcxBpfTestAttr {
     flags: u32,
     cpu: u32,
     batch_size: u32,
+    /// Explicit zero tail, as in `sys::prog_test_run::BpfTestRunAttr`: without
+    /// it the 8-byte-aligned struct carries 4 bytes of uninitialized trailing
+    /// padding, which `attr.test = test` copies into the attribute, and the
+    /// kernel's `CHECK_ATTR` rejects any non-zero byte after `test.batch_size`
+    /// with `EINVAL`.
+    _pad: [u8; 4],
 }
 
 #[cfg(target_os = "linux")]
@@ -607,6 +613,7 @@ fn run_tcp_probe(
         flags: 0,
         cpu: 0,
         batch_size: 0,
+        _pad: [0; 4],
     };
     // The union arm is the exact private BPF_PROG_TEST_RUN layout; all
     // pointed-to storage remains live until the syscall returns.

@@ -43,3 +43,82 @@ pub mod frontend_addr_allocator;
 pub mod name_index;
 pub mod responder;
 pub mod wire;
+
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::observation_store::ObservationStore;
+
+use self::frontend_addr_allocator::FrontendAddrAllocator;
+use self::responder::{DnsResponder, Result};
+
+/// The shared-gateway DNS owner port (D-295-R16): one responder the serve
+/// task owner probes, serves, audits, and stops.
+///
+/// Production binds it to [`DnsResponder`] through [`HostGuestDnsFactory`];
+/// the DST double is `overdrive_sim::adapters::SimGuestDns`.
+#[doc(hidden)]
+#[async_trait::async_trait]
+pub trait GuestDns: Send + Sync {
+    /// Earned-Trust gate: bind the responder's sockets and seed its index.
+    /// `Err` refuses boot or fails a replacement.
+    async fn probe(&self) -> Result<()>;
+    /// Run the serve loop until [`stop`](Self::stop) or a terminal failure.
+    async fn serve(self: Arc<Self>);
+    /// Non-mutating read-back of the socket identities `probe` recorded.
+    async fn audit(&self) -> Result<()>;
+    /// Signal the serve loop to stop. Idempotent.
+    fn stop(&self);
+}
+
+/// The construction dependencies of one [`GuestDns`] responder.
+#[doc(hidden)]
+pub struct GuestDnsDeps {
+    /// The observation store the responder's name index reads.
+    pub store: Arc<dyn ObservationStore>,
+    /// The injected clock (SOA serial source).
+    pub clock: Arc<dyn Clock>,
+    /// The shared bridge gateway used for the fallback bind.
+    pub gateway: Ipv4Addr,
+    /// The one shared frontend-address allocator.
+    pub frontend: FrontendAddrAllocator,
+}
+
+/// Builds the [`GuestDns`] responders the serve task owner runs: one at boot,
+/// and a fresh one for every recovery replacement.
+#[doc(hidden)]
+pub trait GuestDnsFactory: Send + Sync {
+    /// Build one fresh responder over `deps`.
+    fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns>;
+}
+
+/// The production [`GuestDnsFactory`]: builds a [`DnsResponder`].
+#[doc(hidden)]
+pub struct HostGuestDnsFactory;
+
+impl GuestDnsFactory for HostGuestDnsFactory {
+    fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {
+        Arc::new(DnsResponder::new(deps.store, deps.clock, deps.gateway, deps.frontend))
+    }
+}
+
+#[async_trait::async_trait]
+impl GuestDns for DnsResponder {
+    async fn probe(&self) -> Result<()> {
+        Self::probe(self).await
+    }
+
+    async fn serve(self: Arc<Self>) {
+        Self::serve(self).await;
+    }
+
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-01")]
+    async fn audit(&self) -> Result<()> {
+        todo!("RED scaffold: D-295-R16 DnsResponder::audit — DELIVER step 05-01")
+    }
+
+    fn stop(&self) {
+        Self::stop(self);
+    }
+}

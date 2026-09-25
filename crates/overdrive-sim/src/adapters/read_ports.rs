@@ -12,6 +12,7 @@
 //! | [`ServiceVipView`] | [`SimServiceVipView`] | `PersistentServiceVipAllocator` (dataplane) |
 //! | [`WorkflowLiveSet`] | [`SimWorkflowLiveSet`] | `WorkflowEngine` (control-plane) |
 //! | [`HeldSvidView`] | [`SimHeldSvidView`] | `IdentityMgr` (control-plane) |
+//! | [`GuestAttachmentView`] | [`SimGuestAttachmentView`] | the server's guest-address pool (control-plane; D-295-R8, ADR-0134) |
 //!
 //! These four doubles make the hydration boundary **DST-injectable for the first
 //! time** (ADR-0086 D8): a scenario can seed a stale/empty [`SimWorkflowLiveSet`]
@@ -52,10 +53,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use overdrive_core::identity::HeldSvidFacts;
 use overdrive_core::traits::observation_store::ListenerRow;
-use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
+use overdrive_core::traits::{
+    GuestAttachmentLease, GuestAttachmentObservation, GuestAttachmentView, HeldSvidView,
+    ListenerFacts, ServiceVipView, WorkflowLiveSet,
+};
 
 // ---------------------------------------------------------------------------
 // SimListenerFacts — the per-ServiceId listener-fact read port (ADR-0086 D5).
@@ -200,5 +205,59 @@ impl HeldSvidView for SimHeldSvidView {
         // Owned clone of the GLOBAL snapshot (the leaf private key is never
         // projected — K2). Pure read; never mutates the held set.
         self.held.clone()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SimGuestAttachmentView — the node guest-attachment occupancy read port
+// (D-295-R8, ADR-0134).
+// ---------------------------------------------------------------------------
+
+/// In-memory [`GuestAttachmentView`] double for DST.
+///
+/// Serves one preloaded occupancy reading and one preloaded lease map. Like the
+/// four ADR-0086 read-port doubles above, its inputs are required parameters of
+/// a `const fn new` and it has no mutator: a scenario that changes occupancy or
+/// leases between evaluations constructs a new view (the `HydrationContext`
+/// that lends it is per tick).
+///
+/// Unlike them it has **no `Default`**. The occupancy input is what placement
+/// and restart gating compare with the cap; a default would put every scenario
+/// that omitted it at zero occupancy, silently below the cap. A scenario that
+/// means an empty node passes zero occupancy and an empty lease map explicitly.
+///
+/// Occupancy and leases are independent inputs: the double does not derive
+/// `held` or `retiring` from the lease map, because the production view reports
+/// node-wide occupancy beside the leases of one workload's allocations.
+#[derive(Debug, Clone)]
+pub struct SimGuestAttachmentView {
+    /// Preloaded node-wide occupancy, returned unchanged by every `observe`.
+    occupancy: GuestAttachmentOccupancy,
+    /// Preloaded per-allocation leases. `BTreeMap` for deterministic order.
+    leases: BTreeMap<AllocationId, GuestAttachmentLease>,
+}
+
+impl SimGuestAttachmentView {
+    /// Construct over a **required** occupancy reading and lease map.
+    #[must_use]
+    pub const fn new(
+        occupancy: GuestAttachmentOccupancy,
+        leases: BTreeMap<AllocationId, GuestAttachmentLease>,
+    ) -> Self {
+        Self { occupancy, leases }
+    }
+}
+
+impl GuestAttachmentView for SimGuestAttachmentView {
+    /// Returns the preloaded occupancy unchanged and, in `leases`, the
+    /// preloaded lease of each requested allocation that has one. A requested
+    /// allocation absent from the preloaded map is absent from the result, and
+    /// a preloaded allocation that was not requested is omitted.
+    fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
+        let leases = allocs
+            .iter()
+            .filter_map(|alloc| self.leases.get(alloc).map(|lease| (alloc.clone(), *lease)))
+            .collect();
+        GuestAttachmentObservation { occupancy: self.occupancy, leases }
     }
 }

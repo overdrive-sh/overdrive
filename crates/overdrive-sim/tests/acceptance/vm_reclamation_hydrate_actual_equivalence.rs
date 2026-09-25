@@ -117,6 +117,10 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
         service_vip_view: &service_vip_view,
         workflow_live_set: &workflow_live_set,
         held_svid_view: &held_svid_view,
+        guest_attachments: &overdrive_sim::adapters::SimGuestAttachmentView::new(
+            overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            BTreeMap::new(),
+        ),
         node_id: &node,
         host_ipv4: std::net::Ipv4Addr::LOCALHOST,
         intent_redb_path: &intent_path,

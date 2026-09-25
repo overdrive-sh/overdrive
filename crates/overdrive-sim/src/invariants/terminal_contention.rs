@@ -659,7 +659,7 @@ fn hide_lww_loss(evidence: &Evidence) -> Evidence {
 
 /// Evaluate the seeded production stop/exit contention invariant.
 pub async fn evaluate(seed: u64) -> InvariantResult {
-    let evidence = match drive(seed).await {
+    let evidence = match Box::pin(drive(seed)).await {
         Ok(evidence) => evidence,
         Err(cause) => return fail(cause),
     };
@@ -701,14 +701,14 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "current_thread")]
     async fn fixed_seed_drives_real_lww_loss_and_one_rebase() {
-        let result = evaluate(424_242).await;
+        let result = Box::pin(evaluate(424_242)).await;
         assert_eq!(result.status, InvariantStatus::Pass, "{:?}", result.cause);
     }
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "current_thread")]
     async fn invariant_has_teeth_when_lww_loss_is_hidden() {
-        let evidence = match drive(424_242).await {
+        let evidence = match Box::pin(drive(424_242)).await {
             Ok(evidence) => evidence,
             Err(cause) => panic!("fixed seed did not drive contention: {cause}"),
         };

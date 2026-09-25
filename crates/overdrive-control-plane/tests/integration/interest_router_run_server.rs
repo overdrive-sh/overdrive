@@ -66,6 +66,8 @@ async fn production_boot_spawns_the_interest_router() {
         // Inject `SimDataplane` per architecture.md § 4.7 — the SUT here is
         // the interest-router spawn wiring, not the dataplane attach path.
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
+        mtls_intercept: std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        guest_dns: std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
         dataplane_probe_fault: None,
         mtls_probe_fault: None,
         dns_probe_fault: None,
@@ -82,6 +84,10 @@ async fn production_boot_spawns_the_interest_router() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .expect("server boot");

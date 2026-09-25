@@ -50,6 +50,12 @@ futures.workspace        = true
 tokio.workspace          = true
 parking_lot.workspace    = true
 tokio-stream.workspace   = true
+# `libc` — the real `errno` constants. `SimMtlsIntercept`'s socket-free
+# listener refuses a held address with `from_raw_os_error(libc::EADDRINUSE)`,
+# the exact source the host listener's bind returns (GH #295, B-7), and its
+# contract tests arm faults in the real error shapes (`EPERM` = missing
+# `CAP_NET_ADMIN`, `ENOPROTOOPT` = kernel without `IP_TRANSPARENT`).
+libc.workspace           = true
 rand.workspace           = true
 thiserror.workspace      = true
 tempfile.workspace       = true
@@ -132,12 +138,6 @@ overdrive-core = { workspace = true, features = ["test-utils"] }
 # `[dependencies]`, not the test-only graph). Gated behind `integration-tests`.
 rcgen.workspace        = true
 x509-parser.workspace  = true
-# Dev-dep ONLY — the `SimMtlsIntercept` contract tests (GH #250, S-MIF-06/07)
-# arm faults in the REAL error shapes the production substrate produces, which
-# means naming the real `errno` constants (`EPERM` = missing `CAP_NET_ADMIN`,
-# `ENOPROTOOPT` = kernel without `IP_TRANSPARENT`). The adapter itself takes a
-# plain `i32` and never names `libc`, so this stays out of `[dependencies]`.
-libc.workspace         = true
 # Dev-dep ONLY — the `observation.lww.rejected` capture test
 # (`tests/acceptance/sim_observation_lww_reject_logging.rs`) installs a
 # thread-local `Layer` to assert the event fires on reject and does NOT

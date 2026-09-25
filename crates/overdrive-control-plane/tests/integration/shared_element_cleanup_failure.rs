@@ -354,6 +354,120 @@ impl MtlsIntercept for ElementFaultIntercept {
     ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
         Ok(Box::new(self.model.install(BTreeSet::from([SetMember::InboundDestination(virt)]))))
     }
+
+    fn observe_shared_state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        self.state()
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &overdrive_worker::mtls_intercept_port::InterceptMembers,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        if self.program.observe_shared()?.is_none() {
+            return Ok(None);
+        }
+        let expected_members = expected
+            .managed_guest_ips
+            .iter()
+            .map(|ip| SetMember::ManagedGuest(*ip))
+            .chain(expected.outbound_sources.iter().map(|ip| SetMember::OutboundSource(*ip)))
+            .chain(
+                expected
+                    .inbound_destinations
+                    .iter()
+                    .map(|destination| SetMember::InboundDestination(*destination)),
+            )
+            .collect();
+        *self.model.members.lock() = expected_members;
+        self.state()
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> overdrive_worker::mtls_intercept::Result<
+        overdrive_worker::mtls_intercept_port::InterceptState,
+    > {
+        let requested: BTreeSet<SetMember> =
+            [SetMember::ManagedGuest(source_addr), SetMember::OutboundSource(source_addr)]
+                .into_iter()
+                .chain(
+                    destinations
+                        .iter()
+                        .map(|destination| SetMember::InboundDestination(*destination)),
+                )
+                .collect();
+        // The port's convergent removal routes through the model's single
+        // lower removal effect (guard id 0 names the port call), so an armed
+        // lower fault reaches it exactly as it reaches a guard release.
+        self.model.remove(0, &requested).map_err(|cause| {
+            overdrive_worker::mtls_intercept::InterceptError::NftElementUpdateFailed {
+                set: overdrive_worker::mtls_intercept::InterceptSet::ManagedGuestIps,
+                operation: overdrive_worker::mtls_intercept::InterceptElementOperation::Delete,
+                key: overdrive_worker::mtls_intercept::InterceptElementKey::Address(source_addr),
+                source: overdrive_worker::mtls_intercept::NetlinkError::nft(
+                    "shared-element-remove",
+                    std::io::Error::other(cause),
+                ),
+            }
+        })?;
+        self.state()?.ok_or_else(|| {
+            overdrive_worker::mtls_intercept::InterceptError::NftRuleInstallFailed {
+                op: "shared-element-owner",
+                source: overdrive_worker::mtls_intercept::NetlinkError::nft(
+                    "shared-element-owner",
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotConnected,
+                        "shared constant program is not published",
+                    ),
+                ),
+            }
+        })
+    }
+}
+
+impl ElementFaultIntercept {
+    /// The program the inner sim recorded plus this model's members.
+    #[allow(
+        clippy::result_large_err,
+        reason = "returns the exact InterceptError the port's methods return"
+    )]
+    fn state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        let Some(program) = self.program.observe_shared()? else {
+            return Ok(None);
+        };
+        let mut members = overdrive_worker::mtls_intercept_port::InterceptMembers::default();
+        for member in self.model.members() {
+            match member {
+                SetMember::ManagedGuest(ip) => {
+                    members.managed_guest_ips.insert(ip);
+                }
+                SetMember::OutboundSource(ip) => {
+                    members.outbound_sources.insert(ip);
+                }
+                SetMember::InboundDestination(destination) => {
+                    members.inbound_destinations.insert(destination);
+                }
+            }
+        }
+        Ok(Some(overdrive_worker::mtls_intercept_port::InterceptState {
+            program,
+            policy_route: true,
+            intercept_mark_guard: true,
+            members,
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,9 +529,11 @@ impl GuestNetworkProvisioner for RecordingGuestNetwork {
     async fn activate(
         &self,
         plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<()> {
+    ) -> overdrive_control_plane::guest_network::Result<
+        overdrive_control_plane::guest_network::TapActivation,
+    > {
         self.record(GuestNetworkOperation::TapSetUp, plan);
-        Ok(())
+        Ok(overdrive_control_plane::guest_network::TapActivation::Raised)
     }
 
     async fn teardown(

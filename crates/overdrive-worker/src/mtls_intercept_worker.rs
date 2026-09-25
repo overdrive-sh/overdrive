@@ -90,7 +90,8 @@ use std::sync::{Arc, Weak};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::mtls_enforcement::{
-    EnforcedConnection, InterceptedConnection, MtlsEnforcement, Routed,
+    EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
+    MtlsEnforcementError, Routed,
 };
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_core::{AllocationId, SpiffeId};
@@ -232,15 +233,47 @@ pub enum MtlsInterceptInstallError {
     },
 }
 
-/// A terminal allocation stop reached one or more authoritative mTLS
-/// connection teardowns that did not complete successfully.
-#[derive(Clone, Debug, thiserror::Error)]
-#[error("mTLS teardown failed for allocation {alloc_id}: {failures:?}")]
-pub struct MtlsInterceptStopError {
-    /// Allocation whose terminal cleanup remains incomplete.
-    pub alloc_id: AllocationId,
-    /// Stable diagnostics for every connection teardown that failed.
-    pub failures: Vec<String>,
+/// One allocation's retirement attempt did not converge (D-295-R10).
+///
+/// `Clone` so every caller joined on one attempt, and every later caller of a
+/// finished owner shutdown, receives the stored result (DISTILL gap B-6). Each
+/// typed source is shared through an `Arc`, so clones carry pointer-equal
+/// sources and a caller reaches the cause through the field (`&*source`).
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum MtlsInterceptStopError {
+    /// In this attempt `MtlsEnforcement::teardown` returned `Err` for at least
+    /// one published handle. `failures` names each such handle once, in the
+    /// order the attempt tore them down, with its exact error. Element removal
+    /// was not attempted; the failed handles, the drain with its element
+    /// guards, and the Retiring record are retained.
+    #[error("allocation {alloc_id}: enforced-handle teardown failed for {} handle(s)", failures.len())]
+    HandleTeardown {
+        /// Allocation whose retirement remains incomplete.
+        alloc_id: AllocationId,
+        /// Every handle whose teardown failed in this attempt, in teardown order.
+        failures: Vec<HandleTeardownFailure>,
+    },
+    /// Every handle teardown in this attempt succeeded and
+    /// `remove_allocation_elements` returned `Err`; `source` is that error. The
+    /// drain, its element guards, and the Retiring record are retained.
+    #[error("allocation {alloc_id}: shared intercept element removal failed")]
+    ElementRemoval {
+        /// Allocation whose retirement remains incomplete.
+        alloc_id: AllocationId,
+        /// The element-removal failure, shared by every clone.
+        #[source]
+        source: Arc<InterceptError>,
+    },
+}
+
+/// One enforced-connection handle whose teardown failed in a retirement
+/// attempt.
+#[derive(Debug, Clone)]
+pub struct HandleTeardownFailure {
+    /// The connection whose authoritative teardown failed.
+    pub connection: EnforcedConnectionId,
+    /// The exact teardown error, shared by every clone.
+    pub source: Arc<MtlsEnforcementError>,
 }
 
 /// A full worker-owner shutdown attempt that did not converge.
@@ -301,6 +334,41 @@ pub enum MtlsSharedOwnerError {
     TaskCancelled { leg: crate::mtls_intercept::InterceptLeg },
     #[error("shared mTLS listener task observation channel closed")]
     TaskObserverClosed,
+    #[error("shared mTLS dynamic members could not be cleared at boot")]
+    BootMemberClear {
+        #[source]
+        source: InterceptError,
+    },
+    #[error(
+        "shared mTLS dynamic members differ from the registry: expected {expected:?}, observed {observed:?}"
+    )]
+    MemberMismatch {
+        expected: crate::mtls_intercept_port::InterceptMembers,
+        observed: crate::mtls_intercept_port::InterceptMembers,
+    },
+    #[error("shared mTLS dynamic member repair failed")]
+    MemberRepair {
+        #[source]
+        source: InterceptError,
+    },
+}
+
+impl MtlsSharedOwnerError {
+    /// The one shared-network component this error reports; the SSOT the
+    /// supervisor consumes.
+    ///
+    /// | Variant | Component |
+    /// |---|---|
+    /// | `ListenerBind`, `ListenerLocalAddr`, `ListenerPostcondition`, `TaskReturned`, `TaskFailed`, `TaskPanicked`, `TaskCancelled` | `LegF` or `LegC`, by `leg` |
+    /// | `Intercept` | `IpRules` |
+    /// | `MemberMismatch`, `MemberRepair`, `BootMemberClear` | `IpSets` |
+    /// | `NotStarted`, `OwnerShutdown`, `TaskObserverClosed` | `Supervisor` |
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-03")]
+    #[must_use]
+    pub fn component(&self) -> overdrive_core::guest_network::SharedGuestNetworkComponent {
+        let _ = self;
+        todo!("RED scaffold: D-295-R15 MtlsSharedOwnerError::component — DELIVER step 08-03")
+    }
 }
 
 type SharedListenerTaskResult = std::io::Result<()>;
@@ -2970,7 +3038,10 @@ impl MtlsInterceptWorker {
                     let id = handle.id().clone();
                     let retry_handle = handle.clone();
                     if let Err(source) = enforcement.teardown(handle).await {
-                        failures.push(format!("{id}: {source}"));
+                        failures.push(HandleTeardownFailure {
+                            connection: id,
+                            source: Arc::new(source),
+                        });
                         retry_handles.push(retry_handle);
                     }
                 }
@@ -2984,7 +3055,7 @@ impl MtlsInterceptWorker {
                 *stop_for_work.result.lock() = Some(if failures.is_empty() {
                     Ok(())
                 } else {
-                    Err(MtlsInterceptStopError { alloc_id, failures })
+                    Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
                 });
                 return;
             }
@@ -3029,7 +3100,8 @@ impl MtlsInterceptWorker {
             for handle in handles {
                 let id = handle.id().clone();
                 if let Err(source) = enforcement.teardown(handle).await {
-                    failures.push(format!("{id}: {source}"));
+                    failures
+                        .push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
                 }
             }
             drop(drain.take_elements());
@@ -3037,7 +3109,7 @@ impl MtlsInterceptWorker {
             *stop_for_work.result.lock() = Some(if failures.is_empty() {
                 Ok(())
             } else {
-                Err(MtlsInterceptStopError { alloc_id, failures })
+                Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
             });
         });
         Some(stop)
@@ -3177,14 +3249,19 @@ impl MtlsInterceptWorker {
                     for handle in handles {
                         let id = handle.id().clone();
                         if let Err(source) = owner.enforcement.teardown(handle).await {
-                            teardown_failures.push(format!("{id}: {source}"));
+                            teardown_failures.push(HandleTeardownFailure {
+                                connection: id,
+                                source: Arc::new(source),
+                            });
                         }
                     }
                     drop(drain.take_elements());
                     drain.complete();
                     if !teardown_failures.is_empty() {
-                        failures
-                            .push(MtlsInterceptStopError { alloc_id, failures: teardown_failures });
+                        failures.push(MtlsInterceptStopError::HandleTeardown {
+                            alloc_id,
+                            failures: teardown_failures,
+                        });
                     }
                     continue;
                 }
@@ -3217,10 +3294,16 @@ impl MtlsInterceptWorker {
                 })
                 .is_ok()
             {
-                failures.push(MtlsInterceptStopError {
-                    alloc_id: AllocationId::new("injected-owner-shutdown")
-                        .unwrap_or_else(|_| unreachable!("static allocation id is valid")),
-                    failures: vec!["injected outer-boundary teardown failure".to_owned()],
+                let alloc_id = AllocationId::new("injected-owner-shutdown")
+                    .unwrap_or_else(|_| unreachable!("static allocation id is valid"));
+                failures.push(MtlsInterceptStopError::HandleTeardown {
+                    failures: vec![HandleTeardownFailure {
+                        connection: EnforcedConnectionId::new(alloc_id.clone(), 0),
+                        source: Arc::new(MtlsEnforcementError::Io(std::io::Error::other(
+                            "injected outer-boundary teardown failure",
+                        ))),
+                    }],
+                    alloc_id,
                 });
             }
             *attempt_for_work.result.lock() = Some(if failures.is_empty() {
@@ -3681,7 +3764,7 @@ fn start_capability_drain_retry(
             let id = handle.id().clone();
             let retry_handle = handle.clone();
             if let Err(source) = enforcement.teardown(handle).await {
-                failures.push(format!("{id}: {source}"));
+                failures.push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
                 retry_handles.push(retry_handle);
             }
         }
@@ -3695,7 +3778,7 @@ fn start_capability_drain_retry(
         *stop_for_work.result.lock() = Some(if failures.is_empty() {
             Ok(())
         } else {
-            Err(MtlsInterceptStopError { alloc_id, failures })
+            Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
         });
     });
 }
@@ -3723,7 +3806,7 @@ async fn finish_handle_teardown(
     for handle in handles {
         let id = handle.id().clone();
         if let Err(source) = enforcement.teardown(handle.clone()).await {
-            failures.push(format!("{id}: {source}"));
+            failures.push(HandleTeardownFailure { connection: id, source: Arc::new(source) });
             retry.push(handle);
         }
     }
@@ -3731,7 +3814,7 @@ async fn finish_handle_teardown(
     *stop.result.lock() = Some(if failures.is_empty() {
         Ok(())
     } else {
-        Err(MtlsInterceptStopError { alloc_id, failures })
+        Err(MtlsInterceptStopError::HandleTeardown { alloc_id, failures })
     });
 }
 
@@ -4004,11 +4087,25 @@ mod tests {
 
     struct TestSharedIntercept {
         observation: Mutex<Option<InterceptPostcondition>>,
+        members: Mutex<crate::mtls_intercept_port::InterceptMembers>,
     }
 
     impl TestSharedIntercept {
         fn new() -> Self {
-            Self { observation: Mutex::new(None) }
+            Self {
+                observation: Mutex::new(None),
+                members: Mutex::new(crate::mtls_intercept_port::InterceptMembers::default()),
+            }
+        }
+
+        fn state(&self) -> Option<crate::mtls_intercept_port::InterceptState> {
+            let program = self.observation.lock().clone()?;
+            Some(crate::mtls_intercept_port::InterceptState {
+                program,
+                policy_route: true,
+                intercept_mark_guard: true,
+                members: self.members.lock().clone(),
+            })
         }
     }
 
@@ -4064,6 +4161,49 @@ mod tests {
             _agent_leg_c_port: u16,
         ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
             Ok(Box::new(TestSharedGuard))
+        }
+
+        fn observe_shared_state(
+            &self,
+        ) -> crate::mtls_intercept::Result<Option<crate::mtls_intercept_port::InterceptState>>
+        {
+            Ok(self.state())
+        }
+
+        fn converge_allocation_elements(
+            &self,
+            expected: &crate::mtls_intercept_port::InterceptMembers,
+        ) -> crate::mtls_intercept::Result<Option<crate::mtls_intercept_port::InterceptState>>
+        {
+            if self.observation.lock().is_none() {
+                return Ok(None);
+            }
+            *self.members.lock() = expected.clone();
+            Ok(self.state())
+        }
+
+        fn remove_allocation_elements(
+            &self,
+            source_addr: Ipv4Addr,
+            destinations: &[SocketAddrV4],
+        ) -> crate::mtls_intercept::Result<crate::mtls_intercept_port::InterceptState> {
+            let mut members = self.members.lock();
+            members.managed_guest_ips.remove(&source_addr);
+            members.outbound_sources.remove(&source_addr);
+            for destination in destinations {
+                members.inbound_destinations.remove(destination);
+            }
+            drop(members);
+            self.state().ok_or_else(|| InterceptError::NftRuleInstallFailed {
+                op: "shared-element-owner",
+                source: crate::mtls_intercept::NetlinkError::nft(
+                    "shared-element-owner",
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotConnected,
+                        "shared constant program is not published",
+                    ),
+                ),
+            })
         }
     }
 
@@ -4956,9 +5096,12 @@ mod tests {
             .stop_alloc(&allocation)
             .await
             .expect_err("the exact first teardown source is surfaced");
-        assert_eq!(first.alloc_id, allocation);
-        assert_eq!(first.failures.len(), 1);
-        assert!(first.failures[0].contains("injected shared teardown failure"));
+        let super::MtlsInterceptStopError::HandleTeardown { alloc_id, failures } = &first else {
+            panic!("expected a handle-teardown failure, got {first:?}");
+        };
+        assert_eq!(*alloc_id, allocation);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].source.to_string().contains("injected shared teardown failure"));
         let expected_handle = EnforcedConnectionId::new(allocation.clone(), 0);
         let retained_retry_ids =
             worker.stopping.lock().get(&allocation).and_then(|stops| stops.last()).map_or_else(

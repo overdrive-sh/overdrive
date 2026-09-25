@@ -243,7 +243,11 @@ fn server_config_with(
         dataplane: Some(fx.dataplane_config()),
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
         // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     }
 }
 
@@ -539,7 +543,11 @@ async fn boot_refuses_when_client_iface_does_not_exist() {
         }),
         dataplane_pin_dir: Some(bpffs_root.path().to_path_buf()),
         // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
 
     let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
@@ -840,7 +848,11 @@ async fn boot_refuses_when_earned_trust_probe_fails() {
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
         dataplane_probe_fault: Some(fault_msg),
         // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let pin_path = fx.pin_dir.join("SERVICE_MAP");
 

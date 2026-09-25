@@ -1687,6 +1687,10 @@ pub(crate) fn build_hydration_context<'a>(
         service_vip_view: allocator,
         workflow_live_set: state.workflow_engine.as_ref(),
         held_svid_view: state.identity.as_ref(),
+        // RED scaffold (D-295-R8): consumed in DELIVER step 07-03. The
+        // production view wraps the process's static pool until DELIVER 05-01
+        // gives `AppState` the server's pool.
+        guest_attachments: &crate::guest_network::ActionPoolAttachmentView,
         node_id: &state.node_id,
         host_ipv4: state.host_ipv4,
         intent_redb_path: &state.intent_redb_path,

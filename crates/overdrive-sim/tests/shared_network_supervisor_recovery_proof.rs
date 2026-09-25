@@ -353,7 +353,10 @@ impl GuestNetworkProvisioner for ProofOwner {
     async fn provision(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
         self.sim.provision(plan).await
     }
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
+    async fn activate(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> GuestNetworkResult<overdrive_control_plane::guest_network::TapActivation> {
         self.sim.activate(plan).await
     }
     async fn teardown(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
@@ -372,7 +375,12 @@ impl SharedGuestNetworkOwner for ProofOwner {
     async fn converge_shared(&self) -> GuestNetworkResult<()> {
         self.sim.converge_shared().await
     }
-    async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
+    async fn audit_shared(
+        &self,
+    ) -> std::result::Result<
+        overdrive_control_plane::guest_network::SharedGuestNetworkAudit,
+        SharedGuestNetworkAuditError,
+    > {
         if self.audit_panic.swap(false, Ordering::SeqCst) {
             self.audit_panics.fetch_add(1, Ordering::SeqCst);
             panic!("proof owner-port fault: shared-owner audit adapter panicked");
@@ -385,8 +393,13 @@ impl SharedGuestNetworkOwner for ProofOwner {
         }
         self.sim.audit_shared().await
     }
-    async fn quiesce_managed_taps(&self) -> GuestNetworkResult<()> {
+    async fn quiesce_managed_taps(
+        &self,
+    ) -> GuestNetworkResult<overdrive_control_plane::guest_network::TapQuiescence> {
         self.sim.quiesce_managed_taps().await
+    }
+    async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
+        self.sim.restore_quiesced_taps().await
     }
 }
 
@@ -449,7 +462,11 @@ impl Node {
                 backend_iface: "lo".to_owned(),
             }),
             dataplane_override: Some(Arc::new(SimDataplane::new())),
-            ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+            ..ServerConfig::new(
+                Arc::new(SimKek::for_boot()),
+                std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+                std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+            )
         };
         let owner = Arc::new(ProofOwner::default());
         let owner_port: Arc<dyn SharedGuestNetworkOwner> = owner.clone();
@@ -470,6 +487,10 @@ impl Node {
             Arc::new(SimVmHostState::new()),
             owner_port,
             wiring,
+            overdrive_worker::cgroup_manager::CgroupManager::new(
+                std::path::PathBuf::from("/sys/fs/cgroup"),
+                std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+            ),
         )
         .await
         .unwrap_or_else(|error| panic!("seed={seed:#x}: production boot failed: {error}"));
@@ -1336,7 +1357,9 @@ async fn unconfirmed_quiescence_kills_affected_vms_before_repair_and_fail_stops(
             let vm_count = rng.gen_range(1..=3_usize);
             let mut node = Node::boot(seed).await;
             let affected = deploy_running_vms(&mut node, vm_count).await;
-            node.owner.sim.script_quiesce_failure(true);
+            node.owner.sim.script_quiesce_outcome(
+                overdrive_sim::adapters::guest_network::SimQuiesceOutcome::Fail,
+            );
             let cell = format!("{component:?}/vms={vm_count}");
             let verdict = match arm_and_detect(&mut node, component, phase).await {
                 Err(missed) => Verdict::Unreached(format!("precondition detection: {missed}")),

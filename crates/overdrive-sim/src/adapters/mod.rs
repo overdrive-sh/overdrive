@@ -40,6 +40,9 @@ pub mod kek;
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+// GH #295 D-295-R16 — `SimGuestDnsFactory` / `SimGuestDns`, the socket-free
+// doubles of the control-plane shared-gateway DNS owner port.
+pub mod guest_dns;
 pub mod guest_network;
 pub mod identity_read;
 pub mod llm;
@@ -102,15 +105,21 @@ pub mod vm_host_state;
 pub use ca::SimCa;
 pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
+pub use guest_dns::{SimGuestDns, SimGuestDnsFactory, SimGuestDnsServeExit};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
-pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
+pub use mtls_intercept::{
+    SimAcceptScript, SimInterceptFault, SimInterceptListener, SimMtlsIntercept,
+};
 pub use mtls_intercept_lifecycle::{
     SimMtlsInterceptLifecycle, SimMtlsInterceptLifecycleEvent, SimMtlsInterceptLifecycleSnapshot,
     SimMtlsInterceptLifecycleState,
 };
 pub use mtls_resolve::SimMtlsResolve;
-pub use read_ports::{SimHeldSvidView, SimListenerFacts, SimServiceVipView, SimWorkflowLiveSet};
+pub use read_ports::{
+    SimGuestAttachmentView, SimHeldSvidView, SimListenerFacts, SimServiceVipView,
+    SimWorkflowLiveSet,
+};
 pub use vm_host_state::SimVmHostState;
 pub use vmm::{SimVmm, SimVmmProbeFault};

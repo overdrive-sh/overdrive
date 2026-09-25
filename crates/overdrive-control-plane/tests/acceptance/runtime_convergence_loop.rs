@@ -1042,6 +1042,13 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
+            occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
+                held: 0,
+                retiring: 0,
+            },
+            leases: std::collections::BTreeMap::new(),
+        },
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
@@ -1054,6 +1061,13 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
+            occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
+                held: 0,
+                retiring: 0,
+            },
+            leases: std::collections::BTreeMap::new(),
+        },
     });
 
     // Single TickContext shared across both reconcile calls — same
@@ -1080,6 +1094,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: std::collections::BTreeMap::new(),
+        reclaim_emitted_at: std::collections::BTreeMap::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
@@ -1284,6 +1300,8 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: std::collections::BTreeMap::new(),
+        reclaim_emitted_at: std::collections::BTreeMap::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
@@ -1405,6 +1423,8 @@ async fn drop_workload_lifecycle_view_removes_seeded_view() {
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: std::collections::BTreeMap::new(),
+        reclaim_emitted_at: std::collections::BTreeMap::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 

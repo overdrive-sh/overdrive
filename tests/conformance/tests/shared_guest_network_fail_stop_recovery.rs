@@ -260,7 +260,7 @@ async fn unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop
     handler.wait_running("shared-network-quiesce-refused", Duration::from_secs(30)).await;
 
     owner.script_audit_failure(true);
-    owner.script_quiesce_failure(true);
+    owner.script_quiesce_outcome(overdrive_sim::adapters::guest_network::SimQuiesceOutcome::Fail);
     let clock = Arc::clone(handler.clock());
     let request = tokio::spawn(async move {
         let request = handler.shutdown_requested().await;

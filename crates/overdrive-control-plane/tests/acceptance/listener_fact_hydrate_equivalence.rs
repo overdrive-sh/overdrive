@@ -162,6 +162,13 @@ fn build_ctx<'a>(
     workflow_live_set: &'a dyn WorkflowLiveSet,
     held_svid_view: &'a dyn HeldSvidView,
 ) -> HydrationContext<'a> {
+    // The empty-node guest-attachment reading (zero occupancy, no leases),
+    // passed explicitly; this cell does not read it.
+    static GUEST_ATTACHMENTS: overdrive_sim::adapters::SimGuestAttachmentView =
+        overdrive_sim::adapters::SimGuestAttachmentView::new(
+            overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            std::collections::BTreeMap::new(),
+        );
     HydrationContext {
         intent_store: state.store.as_ref(),
         observation_store: state.obs.as_ref(),
@@ -171,6 +178,7 @@ fn build_ctx<'a>(
         service_vip_view,
         workflow_live_set,
         held_svid_view,
+        guest_attachments: &GUEST_ATTACHMENTS,
         node_id: &state.node_id,
         host_ipv4: state.host_ipv4,
         intent_redb_path: &state.intent_redb_path,

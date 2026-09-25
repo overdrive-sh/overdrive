@@ -77,6 +77,11 @@ overdrive-reconcilers.workspace    = true
 # production binding here is the intended shape.
 overdrive-host.path                = "../overdrive-host"
 overdrive-control-plane.path       = "../overdrive-control-plane"
+# `overdrive-worker` — the production transparent-mTLS intercept binding.
+# `serve` passes `Arc::new(HostMtlsIntercept::new())` as the required
+# `ServerConfig.mtls_intercept` port (GH #295, D-295-R16); the binary is the
+# composition root that names the production binding.
+overdrive-worker.path              = "../overdrive-worker"
 eyre.workspace                     = true
 color-eyre.workspace               = true
 clap.workspace                     = true

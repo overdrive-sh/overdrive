@@ -459,7 +459,11 @@ async fn drive(effect: Effect) {
         clock: clock.clone(),
         dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
@@ -470,6 +474,10 @@ async fn drive(effect: Effect) {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .unwrap();
@@ -574,7 +582,11 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
         clock: clock.clone(),
         dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
@@ -585,6 +597,10 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .unwrap();
@@ -694,7 +710,11 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         clock: clock.clone(),
         dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
@@ -705,6 +725,10 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .unwrap();
@@ -1241,7 +1265,11 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         clock: clock.clone(),
         dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
@@ -1252,6 +1280,10 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .unwrap();
@@ -1464,7 +1496,11 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
         clock: clock.clone(),
         dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
@@ -1475,6 +1511,10 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .unwrap();

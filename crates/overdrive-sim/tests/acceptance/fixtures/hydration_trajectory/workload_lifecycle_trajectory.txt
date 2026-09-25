@@ -65,6 +65,8 @@ WorkloadLifecycle(
         last_failure_seen_at: {},
         released_for_deletion: {},
         observed_generation: 0,
+        reclaim_attempts: {},
+        reclaim_emitted_at: {},
     },
 )
 
@@ -83,6 +85,8 @@ WorkloadLifecycle(
         last_failure_seen_at: {},
         released_for_deletion: {},
         observed_generation: 0,
+        reclaim_attempts: {},
+        reclaim_emitted_at: {},
     },
 )
 
@@ -122,6 +126,8 @@ WorkloadLifecycle(
         last_failure_seen_at: {},
         released_for_deletion: {},
         observed_generation: 0,
+        reclaim_attempts: {},
+        reclaim_emitted_at: {},
     },
 )
 
@@ -161,6 +167,8 @@ WorkloadLifecycle(
         last_failure_seen_at: {},
         released_for_deletion: {},
         observed_generation: 0,
+        reclaim_attempts: {},
+        reclaim_emitted_at: {},
     },
 )
 
@@ -179,5 +187,7 @@ WorkloadLifecycle(
         last_failure_seen_at: {},
         released_for_deletion: {},
         observed_generation: 0,
+        reclaim_attempts: {},
+        reclaim_emitted_at: {},
     },
 )

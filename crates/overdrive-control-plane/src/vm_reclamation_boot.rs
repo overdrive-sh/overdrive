@@ -378,6 +378,13 @@ mod tests {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
+                occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
+                    held: 0,
+                    retiring: 0,
+                },
+                leases: std::collections::BTreeMap::new(),
+            },
         };
         let lifecycle_actual = WorkloadLifecycleState {
             job: None,

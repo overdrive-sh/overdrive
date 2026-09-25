@@ -6,12 +6,16 @@
 //! that boundary.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use overdrive_control_plane::action_shim::MtlsInterceptLifecycle;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::AllocationSpec;
-use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptStopError};
+use overdrive_core::traits::mtls_enforcement::{EnforcedConnectionId, MtlsEnforcementError};
+use overdrive_worker::mtls_intercept_worker::{
+    HandleTeardownFailure, MtlsInterceptInstallError, MtlsInterceptStopError,
+};
 use parking_lot::Mutex;
 
 /// Observable lifecycle ownership state for one allocation.
@@ -100,10 +104,12 @@ impl SimMtlsInterceptLifecycle {
         }
     }
 
+    /// Stop `alloc_id`. On a scripted fault the error pairs the popped detail
+    /// strings (what the events record) with the typed stop error.
     fn stop_locked(
         state: &mut State,
         alloc_id: &AllocationId,
-    ) -> Result<Option<SimMtlsInterceptLifecycleState>, MtlsInterceptStopError> {
+    ) -> Result<Option<SimMtlsInterceptLifecycleState>, (Vec<String>, MtlsInterceptStopError)> {
         let prior = state.allocations.get(alloc_id).copied();
         let Some(prior) = prior else {
             state.events.push(SimMtlsInterceptLifecycleEvent::StopCompleted {
@@ -115,12 +121,12 @@ impl SimMtlsInterceptLifecycle {
 
         state.allocations.insert(alloc_id.clone(), SimMtlsInterceptLifecycleState::TeardownPending);
         if let Some(detail) = state.stop_faults.get_mut(alloc_id).and_then(VecDeque::pop_front) {
-            let failures = vec![detail];
+            let failures = vec![detail.clone()];
             state.events.push(SimMtlsInterceptLifecycleEvent::StopFailed {
                 alloc_id: alloc_id.clone(),
                 failures: failures.clone(),
             });
-            return Err(MtlsInterceptStopError { alloc_id: alloc_id.clone(), failures });
+            return Err((failures, Self::scripted_stop_error(alloc_id, detail)));
         }
 
         state.allocations.remove(alloc_id);
@@ -129,6 +135,21 @@ impl SimMtlsInterceptLifecycle {
             prior: Some(prior),
         });
         Ok(Some(prior))
+    }
+
+    /// The typed stop error one scripted fault models: one transiently failed
+    /// connection teardown (`HandleTeardown` over connection 0), whose source
+    /// carries the scripted detail.
+    fn scripted_stop_error(alloc_id: &AllocationId, detail: String) -> MtlsInterceptStopError {
+        let connection = EnforcedConnectionId::new(alloc_id.clone(), 0);
+        let source = Arc::new(MtlsEnforcementError::TeardownFailed {
+            id: connection.clone(),
+            source: std::io::Error::other(detail),
+        });
+        MtlsInterceptStopError::HandleTeardown {
+            alloc_id: alloc_id.clone(),
+            failures: vec![HandleTeardownFailure { connection, source }],
+        }
     }
 }
 
@@ -144,11 +165,11 @@ impl MtlsInterceptLifecycle for SimMtlsInterceptLifecycle {
         let mut state = self.state.lock();
         if state.allocations.contains_key(&spec.alloc) {
             let prior_events = state.events.len();
-            if let Err(source) = Self::stop_locked(&mut state, &spec.alloc) {
+            if let Err((failures, source)) = Self::stop_locked(&mut state, &spec.alloc) {
                 state.events.truncate(prior_events);
                 state.events.push(SimMtlsInterceptLifecycleEvent::StartPriorTeardownFailed {
                     alloc_id: spec.alloc.clone(),
-                    failures: source.failures.clone(),
+                    failures,
                 });
                 return Err(MtlsInterceptInstallError::PriorTeardown { source });
             }
@@ -163,6 +184,6 @@ impl MtlsInterceptLifecycle for SimMtlsInterceptLifecycle {
 
     async fn stop_alloc(&self, alloc_id: &AllocationId) -> Result<(), MtlsInterceptStopError> {
         let mut state = self.state.lock();
-        Self::stop_locked(&mut state, alloc_id).map(|_| ())
+        Self::stop_locked(&mut state, alloc_id).map(|_| ()).map_err(|(_, source)| source)
     }
 }

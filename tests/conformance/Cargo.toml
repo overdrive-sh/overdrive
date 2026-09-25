@@ -21,6 +21,9 @@ overdrive-control-plane = { path = "../../crates/overdrive-control-plane", featu
 overdrive-core = { path = "../../crates/overdrive-core" }
 overdrive-netlink = { path = "../../crates/overdrive-netlink" }
 overdrive-sim = { path = "../../crates/overdrive-sim", features = ["integration-tests"] }
+# The server composition's required `vm_cgroups: CgroupManager` argument
+# (GH #295, D-295-R14) names the worker's cgroup manager.
+overdrive-worker = { path = "../../crates/overdrive-worker" }
 reqwest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

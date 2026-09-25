@@ -2408,6 +2408,7 @@ dependencies = [
  "overdrive-core",
  "overdrive-netlink",
  "overdrive-sim",
+ "overdrive-worker",
  "reqwest",
  "serde_json",
  "tempfile",

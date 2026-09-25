@@ -221,6 +221,12 @@ fn classify_vmm_error(err: &VmmError, rootfs: &RootfsPlan) -> DriverError {
         // reaches the explicit unknown fallback rather than being guessed
         // into an absence class.
         VmmError::Create { detail } => start_rejected_unclassified(detail.clone()),
+        // A TAP-queue handoff failure (D-295-R4) routes through the same
+        // create-failure start rejection; no class is minted for it. The
+        // detail is the whole adapter `Display` (tap, stage or violation).
+        VmmError::TapQueue { .. } | VmmError::TapQueuePostcondition { .. } => {
+            start_rejected_unclassified(err.to_string())
+        }
         // `create`'s ONLY `Io` source is `ficlone_rootfs` — the per-launch
         // rootfs clone (host adapter: "Every other staging failure stays
         // Io / Create", whose sole `Io` producer there is the clone). After

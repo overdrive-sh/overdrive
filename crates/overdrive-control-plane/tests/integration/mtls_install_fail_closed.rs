@@ -453,7 +453,9 @@ impl GuestNetworkProvisioner for EventOrderedProvisioner {
     async fn activate(
         &self,
         _plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<()> {
+    ) -> overdrive_control_plane::guest_network::Result<
+        overdrive_control_plane::guest_network::TapActivation,
+    > {
         assert!(
             self.install_seen.load(Ordering::SeqCst),
             "the exact mTLS success event must be emitted before TAP activation"
@@ -472,7 +474,7 @@ impl GuestNetworkProvisioner for EventOrderedProvisioner {
                 }),
             })
         } else {
-            Ok(())
+            Ok(overdrive_control_plane::guest_network::TapActivation::Raised)
         }
     }
 
@@ -1196,7 +1198,9 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[allow(
     clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    clippy::too_many_lines,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
+              the scenario keeps its complete ordered oracle in one body"
 )]
 #[tokio::test]
 async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
@@ -1882,8 +1886,36 @@ impl MtlsIntercept for RetirementBarrierIntercept {
             while !*released {
                 released = wake.wait(released).expect("release wait");
             }
+            drop(released);
         }
         self.inner.install_inbound(virt, leg_c_port).map(|guard| self.wrap(guard))
+    }
+
+    fn observe_shared_state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        self.inner.observe_shared_state()
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &overdrive_worker::mtls_intercept_port::InterceptMembers,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        self.inner.converge_allocation_elements(expected)
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> overdrive_worker::mtls_intercept::Result<
+        overdrive_worker::mtls_intercept_port::InterceptState,
+    > {
+        self.inner.remove_allocation_elements(source_addr, destinations)
     }
 }
 
@@ -1980,6 +2012,10 @@ struct RegistrationRetiredOutcome {
     slot_still_held: bool,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the driver keeps the complete ordered registration-retired sequence in one body"
+)]
 async fn drive_registration_retired_through_action_shim(
     fail_teardown: bool,
 ) -> RegistrationRetiredOutcome {

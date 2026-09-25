@@ -1755,6 +1755,27 @@ impl MtlsIntercept for MetalSharedIntercept {
             .install_inbound(virt, leg_c_port)
             .map(|guard| Self::wrap(guard, &self.allocation_guard_drops))
     }
+
+    fn observe_shared_state(
+        &self,
+    ) -> InterceptResult<Option<overdrive_worker::mtls_intercept_port::InterceptState>> {
+        self.inner.observe_shared_state()
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &overdrive_worker::mtls_intercept_port::InterceptMembers,
+    ) -> InterceptResult<Option<overdrive_worker::mtls_intercept_port::InterceptState>> {
+        self.inner.converge_allocation_elements(expected)
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> InterceptResult<overdrive_worker::mtls_intercept_port::InterceptState> {
+        self.inner.remove_allocation_elements(source_addr, destinations)
+    }
 }
 
 struct AllMeshResolve {
@@ -1877,7 +1898,8 @@ impl SharedPeerOwner {
     async fn wait_ready(&self) {
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
-                match self.ready.lock().expect("peer ready lock").try_recv() {
+                let polled = self.ready.lock().expect("peer ready lock").try_recv();
+                match polled {
                     Ok(()) => break,
                     Err(std::sync::mpsc::TryRecvError::Empty) => tokio::task::yield_now().await,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {

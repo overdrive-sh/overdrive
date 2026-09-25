@@ -160,12 +160,12 @@ mod integration {
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
     /// S-2.2-28. Body panics until DELIVER fills it.
     mod service_map_hydrator_dispatch;
-    /// GH #295 S-ND295-00 — composed production-startup ordering and
-    /// scratch-probe refusal through the accepted shared-owner port.
-    mod shared_guest_network_startup;
     /// netns-density-295 recovery proof §3.4 — lower element deletion /
     /// read-back failure through the real `StopAllocation` owner path.
     mod shared_element_cleanup_failure;
+    /// GH #295 S-ND295-00 — composed production-startup ordering and
+    /// scratch-probe refusal through the accepted shared-owner port.
+    mod shared_guest_network_startup;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of
     /// `reconciler-memory-redb`. Action shim threads `Action.terminal`

@@ -24,6 +24,7 @@ use ipnet::Ipv4Net;
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::GuestNetworkAssignment;
+use overdrive_core::traits::{GuestAttachmentObservation, GuestAttachmentView};
 use overdrive_netlink::NetlinkError;
 
 #[cfg(target_os = "linux")]
@@ -101,12 +102,34 @@ impl GuestNetworkPlan {
 #[doc(hidden)]
 #[async_trait::async_trait]
 pub trait GuestNetworkProvisioner: Send + Sync {
-    /// Provision the named attachment to its full read-back postcondition.
+    /// Provision the named attachment to its full read-back postcondition,
+    /// with the TAP administratively down. Never performs `TapSetUp`.
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()>;
-    /// Activate the protected attachment after the allocation intercept is live.
-    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<()>;
-    /// Tear down the named attachment to its empty complement.
+    /// Activate the protected attachment after the allocation intercept is
+    /// live: the only allocation operation allowed to set the TAP up.
+    ///
+    /// `Ok(TapActivation::Raised)` once the TAP is up and read back with its
+    /// exact master (idempotent on a completed activation);
+    /// `Ok(TapActivation::QuiescenceLatched)` with no mutation while runtime
+    /// quiescence is latched. A condemned allocation, or a missing or
+    /// non-matching allocation record, is the source-less
+    /// `PostconditionMismatch`.
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation>;
+    /// Tear down the named attachment to its empty complement. An absent part
+    /// is already its postcondition; the final complement read-back alone
+    /// decides success.
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()>;
+}
+
+/// The outcome of one `activate` call that did not fail.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapActivation {
+    /// The TAP is administratively up and read back with its exact master.
+    Raised,
+    /// Runtime quiescence is latched; nothing was mutated. The caller waits
+    /// for recovery to reopen the EXEC gate and calls `activate` again.
+    QuiescenceLatched,
 }
 
 /// One source-honest failure from the shared owner's ordered component audit.
@@ -128,10 +151,37 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + Send + Sync {
     async fn sweep_stale(&self) -> Result<()>;
     /// Converge the one production shared switch identity.
     async fn converge_shared(&self) -> Result<()>;
-    /// Non-repairing complete registered-inventory audit.
-    async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError>;
-    /// Return only after every managed TAP is observed administratively down.
-    async fn quiesce_managed_taps(&self) -> Result<()>;
+    /// Non-repairing audit. `Err` names the first failing node-level
+    /// component; `Ok` carries every allocation whose own attachment parts
+    /// failed.
+    async fn audit_shared(
+        &self,
+    ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError>;
+    /// Latch quiescence, then set every `Active` TAP down and read it back.
+    async fn quiesce_managed_taps(&self) -> Result<TapQuiescence>;
+    /// Raise every quiesced activation-complete TAP and read it back, then
+    /// clear the quiescence latch.
+    async fn restore_quiesced_taps(&self) -> Result<()>;
+}
+
+/// The per-TAP result of one quiescence pass.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct TapQuiescence {
+    /// Each allocation whose TAP could not be confirmed administratively down,
+    /// with the typed cause. Every other `Active` allocation was read back down
+    /// and is now `QuiescedActive`.
+    pub unconfirmed: BTreeMap<AllocationId, GuestNetworkError>,
+}
+
+/// The per-allocation result of one audit that found every node-level
+/// component healthy.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct SharedGuestNetworkAudit {
+    /// Each allocation whose own attachment parts failed the audit, with the
+    /// first failing check. Empty means every audited allocation is exact.
+    pub damaged: BTreeMap<AllocationId, GuestNetworkError>,
 }
 
 /// Guest-network operation carrying the original adapter failure.
@@ -177,6 +227,10 @@ pub enum GuestNetworkOperation {
     TcxLinkUnpin,
     CleanupComplement,
     SharedAudit,
+    TcxEgressAttach,
+    TcxEgressLinkPin,
+    TcxEgressQuery,
+    TcxEgressDetach,
 }
 
 /// Closed semantic startup-probe stages.
@@ -359,6 +413,18 @@ pub enum GuestNetworkFact {
         component: SharedGuestNetworkComponent,
         healthy: bool,
     },
+    /// A TAP's host-side MAC: expected is the MAC recorded at provision,
+    /// observed is the live one.
+    TapHostMac {
+        ifindex: u32,
+        mac: Option<[u8; 6]>,
+    },
+    /// A TAP's ethtool debug message mask: expected is 0, observed is the
+    /// live one (the ADR-0130 read-back set).
+    TapDebugMsgMask {
+        ifindex: u32,
+        mask: u32,
+    },
 }
 
 /// Source-honest orchestration error for all guest-network effects.
@@ -403,15 +469,24 @@ pub enum GuestNetworkError {
         cleanup: Box<GuestNetworkError>,
         observed: GuestNetworkScratchComplement,
     },
+    #[error("guest-network admission cap reached: {held} held ({retiring} retiring) of {cap}")]
+    AdmissionCapReached { held: u32, retiring: u32, cap: u32 },
+    #[error("allocation {alloc} holds a retiring guest-network lease")]
+    LeaseRetiring { alloc: AllocationId },
 }
 
 /// Guest-network result alias.
 pub type Result<T, E = GuestNetworkError> = std::result::Result<T, E>;
 
-/// Private process-local lease owner. It is intentionally not a repository.
+/// The server's process-local guest-address lease owner (D-295-R6). It is
+/// intentionally not a repository.
+///
+/// Doc-hidden public so fixtures outside this crate's source can construct the
+/// one pool a server composes (F-02 precedent); its lease operations stay
+/// crate-private.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
-#[allow(dead_code, reason = "private pool is exercised by owner and source-local tests")]
-pub(crate) struct GuestAddressPool {
+pub struct GuestAddressPool {
     node_prefix: Ipv4Net,
     bridge: String,
     gateway: Ipv4Addr,
@@ -432,12 +507,12 @@ struct GuestAddressPoolState {
     reason = "GH #295 exact accepted scaffold; production construction lands in DELIVER"
 )]
 impl GuestAddressPool {
-    pub(crate) fn new(
-        node_prefix: Ipv4Net,
-        bridge: String,
-        gateway: Ipv4Addr,
-        dns: Ipv4Addr,
-    ) -> Self {
+    /// Construct an empty pool over the node guest prefix, the bridge the
+    /// shared owner is composed with, and the gateway and DNS addresses every
+    /// assignment hands the guest.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new(node_prefix: Ipv4Net, bridge: String, gateway: Ipv4Addr, dns: Ipv4Addr) -> Self {
         Self {
             node_prefix,
             bridge,
@@ -519,6 +594,39 @@ impl GuestAddressPool {
 
     pub(crate) fn snapshot(&self) -> BTreeMap<AllocationId, GuestNetworkPlan> {
         self.held.lock().plans.clone()
+    }
+
+    /// Move an Admitted lease to Retiring; `true` only for that transition.
+    /// An absent or already-Retiring lease returns `false` with no change, and
+    /// Retiring never returns to Admitted. The lease still counts against the
+    /// cap until [`Self::release`].
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-03")]
+    pub(crate) fn retire(&self, alloc: &AllocationId) -> bool {
+        let _ = alloc;
+        todo!("RED scaffold: D-295-R7 GuestAddressPool::retire — DELIVER step 06-03")
+    }
+
+    /// Occupancy (Admitted plus Retiring held, and the Retiring subset) and the
+    /// leases of `allocs`, read in one lock acquisition. Read-only.
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-03")]
+    pub(crate) fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
+        let _ = allocs;
+        todo!("RED scaffold: D-295-R8 GuestAddressPool::observe — DELIVER step 06-03")
+    }
+}
+
+/// The production [`GuestAttachmentView`] the reconciler runtime lends each
+/// hydration context (D-295-R8, ADR-0134). Its `observe` delegates to the
+/// pool's one-snapshot `observe`.
+///
+/// RED scaffold (D-295-R8): until DELIVER 05-01 gives `AppState` the server's
+/// pool, it wraps the process's static action pool; nothing calls it before
+/// DELIVER step 07-03 hydrates occupancy through it.
+pub(crate) struct ActionPoolAttachmentView;
+
+impl GuestAttachmentView for ActionPoolAttachmentView {
+    fn observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation {
+        action_pool().observe(allocs)
     }
 }
 
@@ -1045,6 +1153,11 @@ impl RealSharedGuestNetworkScratchIo {
 }
 
 #[async_trait::async_trait]
+#[allow(
+    clippy::too_many_lines,
+    clippy::significant_drop_tightening,
+    reason = "GH #295 staged owner algorithm: each port call is one D12A-ordered sequence; DELIVER 06-02/06-04 restructure these bodies to the R4/R5/R21/R22 contracts; the lifecycle and scratch-state guards serialize each whole owner operation by design (D12A); releasing them early would admit interleaved owner calls"
+)]
 impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
     async fn apply_netlink(
         &self,
@@ -1245,7 +1358,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                     overdrive_dataplane::guest_tcx::detach_pinned_link(&plan.tcx_link_pin)?;
                 }
                 for pin in [&plan.endpoint_map_pin, &plan.counter_map_pin] {
-                    match std::fs::remove_file(pin) {
+                    match tokio::fs::remove_file(pin).await {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(source) => return Err(GuestTcxError::Io { source }),
@@ -1399,7 +1512,7 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
             }
             GuestNetworkScratchTcxAction::DetachLink => {
                 let pending = self.pending_link.lock().take();
-                if let Some(link) = pending { link.detach() } else { Ok(()) }
+                pending.map_or_else(|| Ok(()), GuestTcxLink::detach)
             }
             GuestNetworkScratchTcxAction::UnpinCounterMap => {
                 self.ensure_adopted_for_cleanup(plan)?;
@@ -1592,19 +1705,19 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
                     BridgeGuardObservation::Exact { inventory }
                     | BridgeGuardObservation::Conflict { inventory } => match resource {
                         GuestNetworkScratchNetlinkResource::BridgeGuardTable => {
-                            inventory.tables.len() as u32
+                            u32::try_from(inventory.tables.len()).unwrap_or(u32::MAX)
                         }
                         GuestNetworkScratchNetlinkResource::BridgeGuardChain => {
-                            inventory.chains.len() as u32
+                            u32::try_from(inventory.chains.len()).unwrap_or(u32::MAX)
                         }
                         GuestNetworkScratchNetlinkResource::BridgeGuardSet => {
-                            inventory.sets.len() as u32
+                            u32::try_from(inventory.sets.len()).unwrap_or(u32::MAX)
                         }
                         GuestNetworkScratchNetlinkResource::BridgeGuardRule => {
-                            inventory.rules.len() as u32
+                            u32::try_from(inventory.rules.len()).unwrap_or(u32::MAX)
                         }
                         GuestNetworkScratchNetlinkResource::BridgeGuardMember => {
-                            inventory.members.len() as u32
+                            u32::try_from(inventory.members.len()).unwrap_or(u32::MAX)
                         }
                         _ => 0,
                     },
@@ -1682,6 +1795,8 @@ enum GuestNetworkAllocationTapObservation {
         up: bool,
         owner_uid: Option<u32>,
         master_ifindex: Option<u32>,
+        /// Projected from `ObservedLinkIdentity::mac` (D-295-R21).
+        mac: Option<[u8; 6]>,
     },
 }
 
@@ -1755,6 +1870,38 @@ trait GuestNetworkAllocationIo: Send + Sync {
     ) -> std::result::Result<(), GuestTcxError>;
     fn detach_pinned_link(&self, plan: &GuestNetworkPlan)
     -> std::result::Result<(), GuestTcxError>;
+    fn attach_first_egress(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError>;
+    fn pin_egress_link(&self, plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError>;
+    fn query_egress_attachment(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<GuestTcxAttachment, GuestTcxError>;
+    fn egress_link_pin_present(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<bool, GuestTcxError>;
+    fn detach_pending_egress_link(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError>;
+    fn detach_pinned_egress_link(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError>;
+    /// The TAP's debug message mask, or `None` when the TAP no longer exists
+    /// (the netlink read reports `ENODEV`). Used by provision and `activate`.
+    async fn observe_tap_debug_msg_mask(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<Option<u32>, NetlinkError>;
+    /// Every netdev's debug message mask keyed by ifindex, in one dump.
+    /// Used once per audit pass.
+    async fn observe_debug_msg_masks(
+        &self,
+    ) -> std::result::Result<BTreeMap<u32, u32>, NetlinkError>;
 }
 
 #[allow(dead_code, reason = "D12 exact private RED owner state")]
@@ -1816,8 +1963,7 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
     }
     async fn set_tap_up(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
         overdrive_netlink::ethtool::disable_tx_offload(&plan.assignment().tap).await?;
-        let result = overdrive_netlink::Client::new()?.set_link_up(&plan.assignment().tap).await;
-        result
+        overdrive_netlink::Client::new()?.set_link_up(&plan.assignment().tap).await
     }
     async fn set_tap_down(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
         overdrive_netlink::Client::new()?.set_link_down(&plan.assignment().tap).await
@@ -1856,6 +2002,7 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
                     up: link.up,
                     owner_uid,
                     master_ifindex: link.master_ifindex,
+                    mac: link.mac,
                 })
             }
         }
@@ -1962,7 +2109,8 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
         &self,
         plan: &GuestNetworkPlan,
     ) -> std::result::Result<(), GuestTcxError> {
-        if let Some(link) = self.pending_links.lock().remove(plan.alloc()) {
+        let pending = self.pending_links.lock().remove(plan.alloc());
+        if let Some(link) = pending {
             link.detach()?;
         }
         Ok(())
@@ -1976,6 +2124,65 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
             return Ok(());
         }
         overdrive_dataplane::guest_tcx::detach_pinned_link(pin)
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn attach_first_egress(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 attach_first_egress — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn pin_egress_link(&self, plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 pin_egress_link — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn query_egress_attachment(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 query_egress_attachment — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn egress_link_pin_present(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<bool, GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 egress_link_pin_present — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn detach_pending_egress_link(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 detach_pending_egress_link — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    fn detach_pinned_egress_link(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<(), GuestTcxError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R21 detach_pinned_egress_link — DELIVER step 06-01")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-02")]
+    async fn observe_tap_debug_msg_mask(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> std::result::Result<Option<u32>, NetlinkError> {
+        let _ = plan;
+        todo!("RED scaffold: D-295-R22 observe_tap_debug_msg_mask — DELIVER step 06-02")
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-02")]
+    async fn observe_debug_msg_masks(
+        &self,
+    ) -> std::result::Result<BTreeMap<u32, u32>, NetlinkError> {
+        todo!("RED scaffold: D-295-R22 observe_debug_msg_masks — DELIVER step 06-02")
     }
 }
 
@@ -2109,7 +2316,7 @@ impl HostSharedGuestNetworkOwner {
     fn guard_error(operation: GuestNetworkOperation, error: BridgeGuardError) -> GuestNetworkError {
         match error {
             BridgeGuardError::Netlink(source) => Self::netlink_error(operation, source),
-            other => GuestNetworkError::Io {
+            other @ BridgeGuardError::Validation(_) => GuestNetworkError::Io {
                 operation,
                 source: std::io::Error::other(other.to_string()),
             },
@@ -2220,7 +2427,6 @@ impl HostSharedGuestNetworkOwner {
     }
 
     fn guard_postcondition(
-        &self,
         expected_members: &BTreeSet<String>,
         observed: BridgeGuardObservation,
     ) -> Result<()> {
@@ -2381,7 +2587,7 @@ impl HostSharedGuestNetworkOwner {
         self.allocation_io
             .observe_guard(&expected_members)
             .map_err(|error| Self::guard_error(GuestNetworkOperation::CleanupComplement, error))
-            .and_then(|observed| self.guard_postcondition(&expected_members, observed))
+            .and_then(|observed| Self::guard_postcondition(&expected_members, observed))
     }
 
     async fn rollback_provision(
@@ -2532,6 +2738,10 @@ impl HostSharedGuestNetworkOwner {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "GH #295 staged owner algorithm: each port call is one D12A-ordered sequence; DELIVER 06-02/06-04 restructure these bodies to the R4/R5/R21/R22 contracts"
+    )]
     async fn run_probe(&self, plan: &GuestNetworkScratchPlan) -> Result<()> {
         let netlink_actions = [
             (
@@ -2599,27 +2809,21 @@ impl HostSharedGuestNetworkOwner {
                 .probe_attachment(plan)
                 .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxQuery, source))?;
             if attachment.program_ids != vec![program_id] {
+                let ifindex =
+                    tokio::fs::read_to_string(format!("/sys/class/net/{}/ifindex", plan.tap))
+                        .await
+                        .ok()
+                        .and_then(|value| value.trim().parse::<u32>().ok())
+                        .unwrap_or_default();
                 return Err(GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::TcxQuery,
                     expected: GuestNetworkFact::TcxAttachment {
-                        ifindex: std::fs::read_to_string(format!(
-                            "/sys/class/net/{}/ifindex",
-                            plan.tap
-                        ))
-                        .ok()
-                        .and_then(|value| value.trim().parse::<u32>().ok())
-                        .unwrap_or_default(),
+                        ifindex,
                         program_id: Some(program_id),
                         attach_point: Some(TcxAttachPoint::Ingress),
                     },
                     observed: Some(GuestNetworkFact::TcxAttachment {
-                        ifindex: std::fs::read_to_string(format!(
-                            "/sys/class/net/{}/ifindex",
-                            plan.tap
-                        ))
-                        .ok()
-                        .and_then(|value| value.trim().parse::<u32>().ok())
-                        .unwrap_or_default(),
+                        ifindex,
                         program_id: attachment.program_ids.first().copied(),
                         attach_point: Some(TcxAttachPoint::Ingress),
                     }),
@@ -2862,6 +3066,11 @@ impl HostSharedGuestNetworkOwner {
 }
 
 #[async_trait::async_trait]
+#[allow(
+    clippy::too_many_lines,
+    clippy::significant_drop_tightening,
+    reason = "GH #295 staged owner algorithm: each port call is one D12A-ordered sequence; DELIVER 06-02/06-04 restructure these bodies to the R4/R5/R21/R22 contracts; the lifecycle and scratch-state guards serialize each whole owner operation by design (D12A); releasing them early would admit interleaved owner calls"
+)]
 impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()> {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
@@ -2974,7 +3183,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             let guard = self.allocation_io.observe_guard(&expected_members).map_err(|error| {
                 Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error)
             })?;
-            self.guard_postcondition(&expected_members, guard)?;
+            Self::guard_postcondition(&expected_members, guard)?;
 
             self.allocation_io
                 .insert_endpoint(plan, tap_ifindex)
@@ -3159,7 +3368,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
         Ok(())
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<()> {
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation> {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
         if lifecycle.quiescing {
             return Err(GuestNetworkError::PostconditionMismatch {
@@ -3197,7 +3406,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             }
         })?;
         if matches!(state.phase, HostGuestNetworkAllocationPhase::Active) {
-            return Ok(());
+            return Ok(TapActivation::Raised);
         }
 
         let bridge_ifindex = self.observe_bridge(plan).await?;
@@ -3236,7 +3445,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             .allocation_io
             .observe_guard(&expected_members)
             .map_err(|error| Self::guard_error(GuestNetworkOperation::GuardMemberInsert, error))?;
-        self.guard_postcondition(&expected_members, guard)?;
+        Self::guard_postcondition(&expected_members, guard)?;
         let endpoint = self
             .allocation_io
             .read_endpoint(plan, tap_ifindex)
@@ -3360,7 +3569,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             .allocations
             .entry(plan.alloc().clone())
             .and_modify(|state| state.phase = HostGuestNetworkAllocationPhase::Active);
-        Ok(())
+        Ok(TapActivation::Raised)
     }
 
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
@@ -3471,9 +3680,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                 .link_pin_present(plan)
                 .map_err(|source| Self::tcx_error(GuestNetworkOperation::TcxLinkPin, source))
                 .and_then(|present| {
-                    if !present {
-                        Ok(())
-                    } else {
+                    if present {
                         Err(GuestNetworkError::PostconditionMismatch {
                             operation: GuestNetworkOperation::TcxLinkPin,
                             expected: GuestNetworkFact::BpfLinkPin {
@@ -3485,6 +3692,8 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
                                 link_id: Some(state.program_id),
                             }),
                         })
+                    } else {
+                        Ok(())
                     }
                 })
         );
@@ -3546,7 +3755,7 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
             self.allocation_io
                 .observe_guard(&expected_members)
                 .map_err(|error| Self::guard_error(GuestNetworkOperation::CleanupComplement, error))
-                .and_then(|observed| self.guard_postcondition(&expected_members, observed))
+                .and_then(|observed| Self::guard_postcondition(&expected_members, observed))
         );
         if let Some(error) = first {
             return Err(error);
@@ -3561,6 +3770,10 @@ impl GuestNetworkProvisioner for HostGuestNetworkProvisioner {
 #[expect(
     clippy::too_many_lines,
     reason = "the approved host-owner port keeps startup, sweep, convergence, audit, and allocation lifecycle on one owner"
+)]
+#[allow(
+    clippy::significant_drop_tightening,
+    reason = "the lifecycle and scratch-state guards serialize each whole owner operation by design (D12A); releasing them early would admit interleaved owner calls"
 )]
 impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn probe_startup(&self) -> Result<()> {
@@ -3610,29 +3823,28 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
             let mut first_error = None;
-            match std::fs::read_dir("/sys/class/net") {
-                Ok(entries) => {
-                    for entry in entries {
-                        let entry = match entry {
-                            Ok(entry) => entry,
-                            Err(source) => {
-                                if first_error.is_none() {
-                                    first_error =
-                                        Some(overdrive_netlink::NetlinkError::connect(source));
-                                }
-                                continue;
+            match tokio::fs::read_dir("/sys/class/net").await {
+                Ok(mut entries) => loop {
+                    let entry = match entries.next_entry().await {
+                        Ok(Some(entry)) => entry,
+                        Ok(None) => break,
+                        Err(source) => {
+                            if first_error.is_none() {
+                                first_error =
+                                    Some(overdrive_netlink::NetlinkError::connect(source));
                             }
-                        };
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        if name.starts_with("ovd-tp-") {
-                            if let Err(error) = client.del_link(&name).await {
-                                if first_error.is_none() {
-                                    first_error = Some(error);
-                                }
+                            continue;
+                        }
+                    };
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name.starts_with("ovd-tp-") {
+                        if let Err(error) = client.del_link(&name).await {
+                            if first_error.is_none() {
+                                first_error = Some(error);
                             }
                         }
                     }
-                }
+                },
                 Err(source) => {
                     first_error = Some(overdrive_netlink::NetlinkError::connect(source));
                 }
@@ -3641,7 +3853,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 "/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints",
                 "/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters",
             ] {
-                match std::fs::remove_file(path) {
+                match tokio::fs::remove_file(path).await {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => {
@@ -3653,10 +3865,11 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 }
             }
             let links = std::path::Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/links");
-            if let Ok(entries) = std::fs::read_dir(links) {
-                for entry in entries {
-                    let path = match entry {
-                        Ok(entry) => entry.path(),
+            if let Ok(mut entries) = tokio::fs::read_dir(links).await {
+                loop {
+                    let path = match entries.next_entry().await {
+                        Ok(Some(entry)) => entry.path(),
+                        Ok(None) => break,
                         Err(source) => {
                             if first_error.is_none() {
                                 first_error =
@@ -3665,7 +3878,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                             continue;
                         }
                     };
-                    match std::fs::remove_file(path) {
+                    match tokio::fs::remove_file(path).await {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) if first_error.is_none() => {
@@ -3756,9 +3969,9 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         })
     }
     async fn converge_shared(&self) -> Result<()> {
-        let mut lifecycle = self.allocation_lifecycle.lock().await;
         const BRIDGE: &str = "ovd-gbr0";
         const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
+        let mut lifecycle = self.allocation_lifecycle.lock().await;
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
             client.ensure_bridge(BRIDGE).await?;
@@ -3974,7 +4187,9 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         }
         Ok(())
     }
-    async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
+    async fn audit_shared(
+        &self,
+    ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         let lifecycle = self.allocation_lifecycle.lock().await;
         let bridge = overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
@@ -4117,12 +4332,12 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 });
             }
         }
-        Ok(())
+        Ok(SharedGuestNetworkAudit::default())
     }
-    async fn quiesce_managed_taps(&self) -> Result<()> {
+    async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
         if lifecycle.quiescing {
-            return Ok(());
+            return Ok(TapQuiescence::default());
         }
         lifecycle.quiescing = true;
         let active = lifecycle
@@ -4155,7 +4370,11 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 state.phase = HostGuestNetworkAllocationPhase::QuiescedActive;
             });
         }
-        Ok(())
+        Ok(TapQuiescence::default())
+    }
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-04")]
+    async fn restore_quiesced_taps(&self) -> Result<()> {
+        todo!("RED scaffold: D-295-R14 restore_quiesced_taps — DELIVER step 06-04")
     }
 }
 
@@ -4566,7 +4785,14 @@ mod scratch_probe_acceptance {
 }
 
 #[cfg(test)]
-#[allow(dead_code, clippy::doc_markdown, clippy::expect_used, clippy::too_many_lines)]
+#[allow(
+    dead_code,
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::too_many_lines,
+    clippy::significant_drop_tightening,
+    reason = "scripted packet-probe fixtures mutate their script under one lock per port call"
+)]
 mod scratch_probe_packet_acceptance {
     use super::*;
 
@@ -4698,7 +4924,8 @@ mod scratch_probe_packet_acceptance {
             }
             self.record(PacketProbeCall::Probe(stage, ProbeTarget::Peer));
             self.record(PacketProbeCall::Probe(stage, ProbeTarget::Gateway));
-            match self.script.lock().failure {
+            let failure = self.script.lock().failure;
+            match failure {
                 Some((failed_stage, ProbeFailure::TypedSource)) if failed_stage == stage => {
                     Err(std::io::Error::other(GuestTcxError::Io {
                         source: std::io::Error::from_raw_os_error(libc::EREMOTEIO),
@@ -5303,7 +5530,15 @@ mod scratch_probe_packet_acceptance {
 }
 
 #[cfg(test)]
-#[allow(dead_code, clippy::doc_markdown, clippy::expect_used, clippy::too_many_lines)]
+#[allow(
+    dead_code,
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::too_many_lines,
+    clippy::option_if_let_else,
+    clippy::significant_drop_in_scrutinee,
+    reason = "the scripted leaf pops its read-back queues under their lock only in the branch that consumes them"
+)]
 mod allocation_owner_acceptance {
     //! Allocation-owner model exercised here:
     //! `Unpublished -> Provisioning -> ProvisionedDown -> Activating -> Active
@@ -5339,6 +5574,14 @@ mod allocation_owner_acceptance {
         SetTapDown,
         DeleteTap,
         DeleteGuard,
+        AttachFirstEgress,
+        PinEgressLink,
+        QueryEgressAttachment,
+        EgressLinkPinPresent,
+        DetachPendingEgressLink,
+        DetachPinnedEgressLink,
+        ObserveTapDebugMsgMask,
+        ObserveDebugMsgMasks,
     }
 
     struct ScriptedAllocationIo {
@@ -5367,6 +5610,7 @@ mod allocation_owner_acceptance {
                         up: false,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
@@ -5374,6 +5618,7 @@ mod allocation_owner_acceptance {
                         up: false,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
@@ -5381,6 +5626,7 @@ mod allocation_owner_acceptance {
                         up: false,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
@@ -5388,6 +5634,7 @@ mod allocation_owner_acceptance {
                         up: false,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
@@ -5395,6 +5642,7 @@ mod allocation_owner_acceptance {
                         up: true,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Persistent {
                         name: "ovd-tp-0002".to_owned(),
@@ -5402,6 +5650,7 @@ mod allocation_owner_acceptance {
                         up: true,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                 ])),
                 bridge_observations: parking_lot::Mutex::new(VecDeque::from([
@@ -5479,6 +5728,7 @@ mod allocation_owner_acceptance {
                         up: false,
                         owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                         master_ifindex: Some(29),
+                        mac: None,
                     },
                     GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
                 ])),
@@ -5518,6 +5768,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
             ]);
@@ -5695,7 +5946,8 @@ mod allocation_owner_acceptance {
                 Err(tcx_failure())
             } else {
                 let calls = self.calls.lock().clone();
-                if let Some(value) = self.endpoint_reads.lock().pop_front() {
+                let next_read = self.endpoint_reads.lock().pop_front();
+                if let Some(value) = next_read {
                     Ok(value)
                 } else if calls.contains(&AllocationCall::RemoveEndpoint) {
                     Ok(None)
@@ -5776,6 +6028,83 @@ mod allocation_owner_acceptance {
         ) -> std::result::Result<(), GuestTcxError> {
             if self.record(AllocationCall::DetachPinnedLink) { Err(tcx_failure()) } else { Ok(()) }
         }
+        fn attach_first_egress(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            if self.record(AllocationCall::AttachFirstEgress) { Err(tcx_failure()) } else { Ok(()) }
+        }
+        fn pin_egress_link(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<u32, GuestTcxError> {
+            if self.record(AllocationCall::PinEgressLink) { Err(tcx_failure()) } else { Ok(2_951) }
+        }
+        fn query_egress_attachment(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+            if self.record(AllocationCall::QueryEgressAttachment) {
+                return Err(tcx_failure());
+            }
+            let calls = self.calls.lock().clone();
+            let attached = calls.contains(&AllocationCall::AttachFirstEgress)
+                && !calls.contains(&AllocationCall::DetachPinnedEgressLink);
+            Ok(GuestTcxAttachment {
+                revision: 1,
+                program_ids: if attached { vec![2_951] } else { Vec::new() },
+            })
+        }
+        fn egress_link_pin_present(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<bool, GuestTcxError> {
+            if self.record(AllocationCall::EgressLinkPinPresent) {
+                return Err(tcx_failure());
+            }
+            let calls = self.calls.lock().clone();
+            Ok(calls.contains(&AllocationCall::PinEgressLink)
+                && !calls.contains(&AllocationCall::DetachPinnedEgressLink))
+        }
+        fn detach_pending_egress_link(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            if self.record(AllocationCall::DetachPendingEgressLink) {
+                Err(tcx_failure())
+            } else {
+                Ok(())
+            }
+        }
+        fn detach_pinned_egress_link(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            if self.record(AllocationCall::DetachPinnedEgressLink) {
+                Err(tcx_failure())
+            } else {
+                Ok(())
+            }
+        }
+        async fn observe_tap_debug_msg_mask(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> std::result::Result<Option<u32>, NetlinkError> {
+            if self.record(AllocationCall::ObserveTapDebugMsgMask) {
+                Err(netlink_failure())
+            } else {
+                Ok(Some(0))
+            }
+        }
+        async fn observe_debug_msg_masks(
+            &self,
+        ) -> std::result::Result<BTreeMap<u32, u32>, NetlinkError> {
+            if self.record(AllocationCall::ObserveDebugMsgMasks) {
+                Err(netlink_failure())
+            } else {
+                Ok(BTreeMap::from([(295, 0)]))
+            }
+        }
     }
 
     fn plan(name: &str, address: Ipv4Addr) -> GuestNetworkPlan {
@@ -5822,7 +6151,7 @@ mod allocation_owner_acceptance {
 
     fn exposed_attachment_facts(
         plan: &GuestNetworkPlan,
-        state: HostGuestNetworkAllocationState,
+        state: &HostGuestNetworkAllocationState,
     ) -> Vec<GuestNetworkFact> {
         let up = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
         vec![
@@ -6032,6 +6361,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: plan.assignment().tap.clone(),
@@ -6039,6 +6369,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
             ]);
             io.failures.lock().insert((AllocationCall::ObserveBridge, 4));
@@ -6093,6 +6424,7 @@ mod allocation_owner_acceptance {
             up: false,
             owner_uid: Some(uid),
             master_ifindex: Some(29),
+            mac: None,
         };
         let first_tap_cases = [
             (
@@ -6160,6 +6492,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid + 1),
                     master_ifindex: None,
+                    mac: None,
                 },
                 tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact(
@@ -6178,6 +6511,7 @@ mod allocation_owner_acceptance {
                     up: true,
                     owner_uid: Some(uid),
                     master_ifindex: None,
+                    mac: None,
                 },
                 tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
@@ -6235,6 +6569,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(30),
+                    mac: None,
                 },
             ],
             [bridge_29.clone()],
@@ -6298,6 +6633,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(30),
+                    mac: None,
                 },
                 GuestNetworkOperation::TapObserve,
                 master_fact(295, Some(29)),
@@ -6348,6 +6684,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
                 GuestNetworkOperation::TapObserve,
                 tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
@@ -6368,6 +6705,7 @@ mod allocation_owner_acceptance {
                     up: false,
                     owner_uid: Some(uid + 1),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
                 GuestNetworkOperation::TapObserve,
                 tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
@@ -6410,6 +6748,7 @@ mod allocation_owner_acceptance {
                     up: true,
                     owner_uid: Some(uid),
                     master_ifindex: Some(29),
+                    mac: None,
                 },
                 GuestNetworkOperation::TapObserve,
                 tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
@@ -6500,6 +6839,7 @@ mod allocation_owner_acceptance {
             up: false,
             owner_uid: Some(uid),
             master_ifindex: Some(29),
+            mac: None,
         };
         let io = ScriptedAllocationIo::with_observations(
             [
@@ -6609,7 +6949,7 @@ mod allocation_owner_acceptance {
         let leases_before = pool.snapshot();
         let unrelated_plan_before =
             leases_before.get(unrelated.alloc()).expect("unrelated lease present").clone();
-        let unrelated_facts_before = exposed_attachment_facts(&unrelated, unrelated_state.clone());
+        let unrelated_facts_before = exposed_attachment_facts(&unrelated, &unrelated_state);
 
         let error = owner
             .teardown(&named)
@@ -6686,7 +7026,7 @@ mod allocation_owner_acceptance {
         assert_eq!(
             exposed_attachment_facts(
                 &unrelated,
-                owner
+                &owner
                     .allocations
                     .lock()
                     .get(unrelated.alloc())

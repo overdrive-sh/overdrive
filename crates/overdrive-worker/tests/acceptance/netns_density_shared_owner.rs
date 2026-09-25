@@ -25,7 +25,9 @@ use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
-use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+use overdrive_worker::mtls_intercept_port::{
+    InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+};
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptWorker, MtlsSharedOwnerError};
 use parking_lot::Mutex;
 
@@ -138,6 +140,7 @@ struct RecordingSharedIntercept {
     shared_guard_drops: Arc<AtomicUsize>,
     allocation_guard_drops: Arc<AtomicUsize>,
     allocation_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
+    retired_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
     occupy_exact_rebind: AtomicBool,
     blockers: Mutex<Vec<TcpListener>>,
 }
@@ -158,6 +161,7 @@ impl RecordingSharedIntercept {
             shared_guard_drops: Arc::new(AtomicUsize::new(0)),
             allocation_guard_drops: Arc::new(AtomicUsize::new(0)),
             allocation_elements: Arc::new(Mutex::new(BTreeSet::new())),
+            retired_elements: Arc::new(Mutex::new(BTreeSet::new())),
             occupy_exact_rebind: AtomicBool::new(false),
             blockers: Mutex::new(Vec::new()),
         }
@@ -283,6 +287,9 @@ fn allocation_elements(spec: &AllocationSpec) -> BTreeSet<SharedElement> {
 
 struct RecordingElementGuard {
     active: Arc<Mutex<BTreeSet<SharedElement>>>,
+    /// Elements `remove_allocation_elements` already removed: their tokens are
+    /// retired, so this guard's `Drop` performs no effect for them.
+    retired: Arc<Mutex<BTreeSet<SharedElement>>>,
     owned: BTreeSet<SharedElement>,
     drops: Arc<AtomicUsize>,
 }
@@ -291,11 +298,90 @@ impl InterceptGuard for RecordingElementGuard {}
 
 impl Drop for RecordingElementGuard {
     fn drop(&mut self) {
+        let mut retired = self.retired.lock();
+        let still_owned: Vec<SharedElement> =
+            self.owned.iter().filter(|element| !retired.remove(*element)).copied().collect();
+        drop(retired);
         let mut active = self.active.lock();
-        for element in &self.owned {
+        for element in &still_owned {
             assert!(active.remove(element), "the exact allocation element remains singly owned");
         }
+        drop(active);
         self.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// The dynamic members one element set holds.
+fn intercept_members(elements: &BTreeSet<SharedElement>) -> InterceptMembers {
+    let mut members = InterceptMembers::default();
+    for element in elements {
+        match *element {
+            SharedElement::ManagedGuest(ip) => {
+                members.managed_guest_ips.insert(ip);
+            }
+            SharedElement::OutboundSource(ip) => {
+                members.outbound_sources.insert(ip);
+            }
+            SharedElement::InboundDestination(destination) => {
+                members.inbound_destinations.insert(destination);
+            }
+        }
+    }
+    members
+}
+
+/// The element set one member set names.
+fn member_elements(members: &InterceptMembers) -> BTreeSet<SharedElement> {
+    members
+        .managed_guest_ips
+        .iter()
+        .map(|ip| SharedElement::ManagedGuest(*ip))
+        .chain(members.outbound_sources.iter().map(|ip| SharedElement::OutboundSource(*ip)))
+        .chain(
+            members
+                .inbound_destinations
+                .iter()
+                .map(|destination| SharedElement::InboundDestination(*destination)),
+        )
+        .collect()
+}
+
+/// The typed refusal for a member effect while no program is published.
+fn program_not_published() -> InterceptError {
+    InterceptError::NftRuleInstallFailed {
+        op: "shared-element-owner",
+        source: overdrive_worker::mtls_intercept::NetlinkError::nft(
+            "shared-element-owner",
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "shared constant program is not published",
+            ),
+        ),
+    }
+}
+
+/// Convergent removal of one allocation's members over a recorded element set:
+/// present requested elements are removed and their guards' tokens retired.
+fn remove_elements(
+    active: &Mutex<BTreeSet<SharedElement>>,
+    retired: &Mutex<BTreeSet<SharedElement>>,
+    source_addr: Ipv4Addr,
+    destinations: &[SocketAddrV4],
+) {
+    let requested =
+        [SharedElement::ManagedGuest(source_addr), SharedElement::OutboundSource(source_addr)]
+            .into_iter()
+            .chain(
+                destinations
+                    .iter()
+                    .map(|destination| SharedElement::InboundDestination(*destination)),
+            );
+    let mut active = active.lock();
+    let mut retired = retired.lock();
+    for element in requested {
+        if active.remove(&element) {
+            retired.insert(element);
+        }
     }
 }
 
@@ -384,6 +470,7 @@ impl MtlsIntercept for RecordingSharedIntercept {
         self.allocation_elements.lock().extend(owned.iter().copied());
         Ok(Box::new(RecordingElementGuard {
             active: Arc::clone(&self.allocation_elements),
+            retired: Arc::clone(&self.retired_elements),
             owned,
             drops: Arc::clone(&self.allocation_guard_drops),
         }))
@@ -398,9 +485,46 @@ impl MtlsIntercept for RecordingSharedIntercept {
         self.allocation_elements.lock().extend(owned.iter().copied());
         Ok(Box::new(RecordingElementGuard {
             active: Arc::clone(&self.allocation_elements),
+            retired: Arc::clone(&self.retired_elements),
             owned,
             drops: Arc::clone(&self.allocation_guard_drops),
         }))
+    }
+
+    fn observe_shared_state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
+        Ok(self.shared_observation.lock().clone().map(|program| InterceptState {
+            program,
+            policy_route: true,
+            intercept_mark_guard: true,
+            members: intercept_members(&self.allocation_elements.lock()),
+        }))
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
+        if self.shared_observation.lock().clone().is_none() {
+            return Ok(None);
+        }
+        *self.allocation_elements.lock() = member_elements(expected);
+        self.observe_shared_state()
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> overdrive_worker::mtls_intercept::Result<InterceptState> {
+        remove_elements(
+            &self.allocation_elements,
+            &self.retired_elements,
+            source_addr,
+            destinations,
+        );
+        self.observe_shared_state()?.ok_or_else(program_not_published)
     }
 }
 
@@ -646,6 +770,7 @@ struct ActivationBarrierIntercept {
     block_once: AtomicBool,
     guard_drops: Arc<AtomicUsize>,
     allocation_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
+    retired_elements: Arc<Mutex<BTreeSet<SharedElement>>>,
 }
 
 impl ActivationBarrierIntercept {
@@ -657,6 +782,7 @@ impl ActivationBarrierIntercept {
             block_once: AtomicBool::new(true),
             guard_drops: Arc::new(AtomicUsize::new(0)),
             allocation_elements: Arc::new(Mutex::new(BTreeSet::new())),
+            retired_elements: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -712,6 +838,7 @@ impl MtlsIntercept for ActivationBarrierIntercept {
         self.allocation_elements.lock().extend(owned.iter().copied());
         Ok(Box::new(RecordingElementGuard {
             active: Arc::clone(&self.allocation_elements),
+            retired: Arc::clone(&self.retired_elements),
             owned,
             drops: Arc::clone(&self.guard_drops),
         }))
@@ -735,9 +862,46 @@ impl MtlsIntercept for ActivationBarrierIntercept {
         self.allocation_elements.lock().extend(owned.iter().copied());
         Ok(Box::new(RecordingElementGuard {
             active: Arc::clone(&self.allocation_elements),
+            retired: Arc::clone(&self.retired_elements),
             owned,
             drops: Arc::clone(&self.guard_drops),
         }))
+    }
+
+    fn observe_shared_state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
+        Ok(self.shared.shared_observation.lock().clone().map(|program| InterceptState {
+            program,
+            policy_route: true,
+            intercept_mark_guard: true,
+            members: intercept_members(&self.allocation_elements.lock()),
+        }))
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
+        if self.shared.shared_observation.lock().clone().is_none() {
+            return Ok(None);
+        }
+        *self.allocation_elements.lock() = member_elements(expected);
+        self.observe_shared_state()
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> overdrive_worker::mtls_intercept::Result<InterceptState> {
+        remove_elements(
+            &self.allocation_elements,
+            &self.retired_elements,
+            source_addr,
+            destinations,
+        );
+        self.observe_shared_state()?.ok_or_else(program_not_published)
     }
 }
 

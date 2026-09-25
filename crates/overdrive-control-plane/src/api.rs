@@ -424,6 +424,9 @@ pub struct AllocStatusRowBody {
     /// Current terminal-condition claim carried by this allocation row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
+    /// Network cleanup for this allocation has not finished (D-295-R20).
+    #[serde(default)]
+    pub network_cleanup_pending: bool,
 }
 
 /// Verbatim wire projection of the durable `AllocStatusRow.last_terminated`

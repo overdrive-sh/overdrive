@@ -55,6 +55,13 @@ WorkloadLifecycle(
         service_spec_digest: None,
         probe_descriptors: [],
         service_ports: [],
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy {
+                held: 0,
+                retiring: 0,
+            },
+            leases: {},
+        },
     },
 )
 
@@ -123,5 +130,12 @@ WorkloadLifecycle(
         service_spec_digest: None,
         probe_descriptors: [],
         service_ports: [],
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy {
+                held: 0,
+                retiring: 0,
+            },
+            leases: {},
+        },
     },
 )

@@ -16,12 +16,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use overdrive_control_plane::dns_responder::HostGuestDnsFactory;
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_host::RealCgroupFs;
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use url::Url;
 
 use crate::http_client::CliError;
@@ -295,7 +297,7 @@ async fn run_inner(
     // invariant: probe-success is a property of the handle that was
     // probed, not of "some handle to the same substrate".
 
-    // `..ServerConfig::new(kek)` populates `tick_cadence`
+    // `..ServerConfig::new(kek, intercept, dns)` populates `tick_cadence`
     // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
     // (`Arc::new(SystemClock)` from `overdrive-host`). Per CLAUDE.md
     // "Repository structure" `overdrive-host` is the only crate
@@ -315,7 +317,7 @@ async fn run_inner(
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         dataplane_override,
-        ..ServerConfig::new(kek)
+        ..ServerConfig::new(kek, Arc::new(HostMtlsIntercept::new()), Arc::new(HostGuestDnsFactory))
     });
     let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any

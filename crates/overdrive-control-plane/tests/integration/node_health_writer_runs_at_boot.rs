@@ -67,7 +67,11 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
         // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let wiring =
@@ -79,6 +83,10 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .expect("run_server_with_obs_and_driver");
@@ -150,7 +158,11 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
         // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let wiring =
@@ -162,6 +174,10 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .expect("run_server_with_obs_and_driver");

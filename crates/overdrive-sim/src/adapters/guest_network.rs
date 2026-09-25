@@ -5,14 +5,17 @@
     reason = "the sim implements the exact accepted control-plane GuestNetworkError contract"
 )]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use overdrive_control_plane::guest_network::{
-    GuestNetworkError, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner, Result,
-    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
+    GuestLinkKind, GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
+    GuestNetworkProvisioner, Result, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner, TapActivation, TapQuiescence,
 };
 use overdrive_core::guest_network::{GuestNetworkExecWiring, SharedGuestNetworkComponent};
+use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::vm_host_state::{VmHostObservation, VmHostState};
 use parking_lot::Mutex;
@@ -32,6 +35,36 @@ struct Trace {
     sweep_calls: Vec<SimSharedGuestNetworkSweepCall>,
 }
 
+/// Standing outcome of every subsequent `quiesce_managed_taps` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SimQuiesceOutcome {
+    /// `Ok(TapQuiescence)` naming these allocations unconfirmed, each with a
+    /// fresh `GuestNetworkError::Io { operation: TapSetDown, .. }`; empty is
+    /// full quiescence. The `Default`.
+    Unconfirmed(BTreeSet<AllocationId>),
+    /// `Err(GuestNetworkError::Io { operation: TapSetDown, .. })`.
+    Fail,
+    /// A future that never resolves.
+    Hang,
+}
+
+impl Default for SimQuiesceOutcome {
+    fn default() -> Self {
+        Self::Unconfirmed(BTreeSet::new())
+    }
+}
+
+/// The owner's private runtime-quiescence model: the latch and the
+/// `Condemned` exclusion set (D-295-R5, R14).
+#[derive(Debug, Default)]
+struct Quiescence {
+    /// Set by every `quiesce_managed_taps`; cleared only by a successful
+    /// `restore_quiesced_taps`.
+    latched: bool,
+    /// Every allocation a returned quiescence or audit result has named.
+    condemned: BTreeSet<AllocationId>,
+}
+
 /// Sim owner with one standing failure slot per accepted owner operation.
 #[derive(Debug, Default)]
 pub struct SimSharedGuestNetworkOwner {
@@ -40,8 +73,11 @@ pub struct SimSharedGuestNetworkOwner {
     probe: AtomicBool,
     sweep: AtomicBool,
     converge: AtomicBool,
+    restore: AtomicBool,
     audit_components: [AtomicBool; 12],
-    quiesce: AtomicBool,
+    quiesce_outcome: Mutex<SimQuiesceOutcome>,
+    audit_damage: Mutex<BTreeSet<AllocationId>>,
+    quiescence: Mutex<Quiescence>,
     probe_error: Mutex<Option<GuestNetworkError>>,
     audit_error: Mutex<Option<(SharedGuestNetworkComponent, GuestNetworkError)>>,
     sweep_host_state: Option<SimVmHostState>,
@@ -92,8 +128,19 @@ impl SimSharedGuestNetworkOwner {
     ) {
         *self.audit_error.lock() = Some((component, source));
     }
-    pub fn script_quiesce_failure(&self, armed: bool) {
-        self.quiesce.store(armed, Ordering::SeqCst);
+    /// Set the standing outcome of every subsequent `quiesce_managed_taps`.
+    pub fn script_quiesce_outcome(&self, outcome: SimQuiesceOutcome) {
+        *self.quiesce_outcome.lock() = outcome;
+    }
+    /// Arm (`true`) or disarm (`false`) the standing `restore_quiesced_taps`
+    /// refusal.
+    pub fn script_restore_failure(&self, armed: bool) {
+        self.restore.store(armed, Ordering::SeqCst);
+    }
+    /// Set the standing damage set `audit_shared` reports when no node-level
+    /// audit slot fires.
+    pub fn script_audit_damage(&self, damaged: BTreeSet<AllocationId>) {
+        *self.audit_damage.lock() = damaged;
     }
 
     /// Ordered production-port calls observed by this simulation adapter.
@@ -113,14 +160,49 @@ impl SimSharedGuestNetworkOwner {
     }
 
     fn result(armed: &AtomicBool, operation: GuestNetworkOperation) -> Result<()> {
-        if armed.load(Ordering::SeqCst) {
-            Err(GuestNetworkError::Io {
-                operation,
-                source: std::io::Error::other("scripted sim owner refusal"),
-            })
-        } else {
-            Ok(())
+        if armed.load(Ordering::SeqCst) { Err(Self::refusal(operation)) } else { Ok(()) }
+    }
+
+    /// The fixed typed error every scripted non-audit refusal returns, with a
+    /// fresh source per call.
+    fn refusal(operation: GuestNetworkOperation) -> GuestNetworkError {
+        GuestNetworkError::Io {
+            operation,
+            source: std::io::Error::other("scripted sim owner refusal"),
         }
+    }
+
+    /// The host's source-less refusal for an allocation with no activatable
+    /// record — here, a condemned one.
+    fn condemned_refusal(plan: &GuestNetworkPlan) -> GuestNetworkError {
+        GuestNetworkError::PostconditionMismatch {
+            operation: GuestNetworkOperation::TapObserve,
+            expected: GuestNetworkFact::Tap {
+                name: plan.assignment().tap.clone(),
+                ifindex: None,
+                link_kind: GuestLinkKind::Tap,
+                persistent: true,
+                up: false,
+                owner_uid: Some(0),
+            },
+            observed: None,
+        }
+    }
+
+    /// Condemn every not-yet-condemned allocation of `named`, mapping each to
+    /// a fresh typed error for `operation`. Already-condemned allocations are
+    /// never named again.
+    fn condemn(
+        &self,
+        named: &BTreeSet<AllocationId>,
+        operation: GuestNetworkOperation,
+    ) -> BTreeMap<AllocationId, GuestNetworkError> {
+        let mut quiescence = self.quiescence.lock();
+        named
+            .iter()
+            .filter(|alloc| quiescence.condemned.insert((*alloc).clone()))
+            .map(|alloc| (alloc.clone(), Self::refusal(operation)))
+            .collect()
     }
 
     const COMPONENTS: [SharedGuestNetworkComponent; 12] = [
@@ -188,9 +270,22 @@ impl GuestNetworkProvisioner for SimSharedGuestNetworkOwner {
         Self::result(&self.provision, GuestNetworkOperation::TapCreate)
     }
 
-    async fn activate(&self, _plan: &GuestNetworkPlan) -> Result<()> {
+    /// `Ok(QuiescenceLatched)` with nothing recorded while the latch is set;
+    /// otherwise records `TapSetUp` and returns the host's source-less
+    /// `PostconditionMismatch` for a condemned allocation, `Ok(Raised)` else.
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation> {
+        let condemned = {
+            let quiescence = self.quiescence.lock();
+            if quiescence.latched {
+                return Ok(TapActivation::QuiescenceLatched);
+            }
+            quiescence.condemned.contains(plan.alloc())
+        };
         self.record(GuestNetworkOperation::TapSetUp);
-        Self::result(&self.provision, GuestNetworkOperation::TapSetUp)
+        if condemned {
+            return Err(Self::condemned_refusal(plan));
+        }
+        Ok(TapActivation::Raised)
     }
 
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
@@ -231,18 +326,47 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
         Self::result(&self.converge, GuestNetworkOperation::BridgeConverge)
     }
 
-    async fn audit_shared(&self) -> std::result::Result<(), SharedGuestNetworkAuditError> {
+    /// Node-level result as D11 pins it; when no node-level slot fires,
+    /// `Ok` naming each scripted damaged allocation not yet condemned (each
+    /// joins the condemned set).
+    async fn audit_shared(
+        &self,
+    ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.record(GuestNetworkOperation::BridgeObserve);
         let taken = self.audit_error.lock().take();
         if let Some((component, source)) = taken {
             return Err(SharedGuestNetworkAuditError { component, source });
         }
-        self.standing_audit_error().map_or(Ok(()), Err)
+        if let Some(error) = self.standing_audit_error() {
+            return Err(error);
+        }
+        let damage = self.audit_damage.lock().clone();
+        Ok(SharedGuestNetworkAudit {
+            damaged: self.condemn(&damage, GuestNetworkOperation::TapObserve),
+        })
     }
 
-    async fn quiesce_managed_taps(&self) -> Result<()> {
+    /// Sets the latch, records `TapSetDown`, and returns the standing outcome.
+    async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
+        self.quiescence.lock().latched = true;
         self.record(GuestNetworkOperation::TapSetDown);
-        Self::result(&self.quiesce, GuestNetworkOperation::TapSetDown)
+        let outcome = self.quiesce_outcome.lock().clone();
+        match outcome {
+            SimQuiesceOutcome::Unconfirmed(named) => Ok(TapQuiescence {
+                unconfirmed: self.condemn(&named, GuestNetworkOperation::TapSetDown),
+            }),
+            SimQuiesceOutcome::Fail => Err(Self::refusal(GuestNetworkOperation::TapSetDown)),
+            SimQuiesceOutcome::Hang => std::future::pending().await,
+        }
+    }
+
+    /// Records `TapSetUp`; returns the standing restore refusal, and clears
+    /// the latch only on `Ok`.
+    async fn restore_quiesced_taps(&self) -> Result<()> {
+        self.record(GuestNetworkOperation::TapSetUp);
+        Self::result(&self.restore, GuestNetworkOperation::TapSetUp)?;
+        self.quiescence.lock().latched = false;
+        Ok(())
     }
 }
 
@@ -353,12 +477,12 @@ mod tests {
         owner.script_sweep_failure(true);
         owner.script_converge_failure(true);
         owner.script_audit_failure(true);
-        owner.script_quiesce_failure(true);
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
 
         for (result, operation) in [
             (owner.sweep_stale().await, GuestNetworkOperation::CleanupComplement),
             (owner.converge_shared().await, GuestNetworkOperation::BridgeConverge),
-            (owner.quiesce_managed_taps().await, GuestNetworkOperation::TapSetDown),
+            (owner.quiesce_managed_taps().await.map(|_| ()), GuestNetworkOperation::TapSetDown),
         ] {
             assert!(matches!(
                 result,
@@ -387,7 +511,7 @@ mod tests {
         owner.script_sweep_failure(false);
         owner.script_converge_failure(false);
         owner.script_audit_failure(false);
-        owner.script_quiesce_failure(false);
+        owner.script_quiesce_outcome(SimQuiesceOutcome::default());
         owner.sweep_stale().await.expect("sweep slot disarms independently");
         owner.converge_shared().await.expect("converge slot disarms independently");
         owner.audit_shared().await.expect("audit slot disarms independently");

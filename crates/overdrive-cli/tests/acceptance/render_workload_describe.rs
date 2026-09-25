@@ -446,6 +446,7 @@ fn row_with_state(
         error: error.map(str::to_owned),
         last_terminated: None,
         terminal: None,
+        network_cleanup_pending: false,
         restart_count: 0,
     }
 }

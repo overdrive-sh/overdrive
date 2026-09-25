@@ -147,7 +147,11 @@ fn config(tmp: &TempDir) -> ServerConfig {
         operator_config_dir,
         dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     }
 }
 
@@ -185,9 +189,19 @@ async fn run_refusing_boot(
     let _guard = tracing::subscriber::set_default(subscriber);
 
     let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
-    let result =
-        run_server_with_obs_and_driver(config, obs, driver, vm_host_state, owner_port, wiring)
-            .await;
+    let result = run_server_with_obs_and_driver(
+        config,
+        obs,
+        driver,
+        vm_host_state,
+        owner_port,
+        wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
+    )
+    .await;
     let error = match result {
         Err(error) => error,
         Ok(handle) => {

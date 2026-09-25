@@ -99,6 +99,7 @@ fn audit_field_set_is_exactly_the_read_surfaces(ctx: HydrationContext<'_>) {
         service_vip_view: _,
         workflow_live_set: _,
         held_svid_view: _,
+        guest_attachments: _,
         node_id: _,
         host_ipv4: _,
         intent_redb_path: _,

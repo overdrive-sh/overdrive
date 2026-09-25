@@ -50,7 +50,11 @@ mod tests {
                 backend_iface: "lo".to_owned(),
             }),
             dataplane_override: Some(Arc::new(SimDataplane::new())),
-            ..ServerConfig::new(Arc::new(SimKek::for_boot()))
+            ..ServerConfig::new(
+                Arc::new(SimKek::for_boot()),
+                std::sync::Arc::new(crate::adapters::SimMtlsIntercept::new()),
+                std::sync::Arc::new(crate::adapters::SimGuestDnsFactory::default()),
+            )
         };
 
         let host = SimVmHostState::new();
@@ -81,12 +85,22 @@ mod tests {
         let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
         let wiring = GuestNetworkExecWiring::new(Arc::clone(&config.clock));
 
-        let handle =
-            run_server_with_obs_and_driver(config, obs, driver, host_port, owner_port, wiring)
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("seed={seed}: production boot failed before oracle: {error}")
-                });
+        let handle = run_server_with_obs_and_driver(
+            config,
+            obs,
+            driver,
+            host_port,
+            owner_port,
+            wiring,
+            overdrive_worker::cgroup_manager::CgroupManager::new(
+                std::path::PathBuf::from("/sys/fs/cgroup"),
+                std::sync::Arc::new(crate::adapters::SimCgroupFs::new()),
+            ),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            panic!("seed={seed}: production boot failed before oracle: {error}")
+        });
 
         let calls = owner.calls();
         let sweep_calls = owner.sweep_calls();

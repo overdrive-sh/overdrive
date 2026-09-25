@@ -69,6 +69,7 @@ fn fixture_row(
         error: None,
         last_terminated: None,
         terminal: None,
+        network_cleanup_pending: false,
         restart_count: 0,
     }
 }

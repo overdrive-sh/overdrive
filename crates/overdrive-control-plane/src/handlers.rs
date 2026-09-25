@@ -175,6 +175,9 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             restart_count: row.restart_count,
             last_terminated,
             terminal: row.terminal,
+            // RED scaffold (D-295-R20): consumed in DELIVER step 07-04, which
+            // derives it from the allocation's lease and row state.
+            network_cleanup_pending: false,
         }
     }
 }

@@ -1131,7 +1131,9 @@ async fn dispatch_with_network_provisioner_and_guest(
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result = dispatch_single(
+        // Boxed: the per-action state machine is the bulk of every dispatch
+        // future; boxing it keeps each caller's future small.
+        let result = Box::pin(dispatch_single(
             action,
             drivers,
             alloc_drivers,
@@ -1151,7 +1153,7 @@ async fn dispatch_with_network_provisioner_and_guest(
             network_provisioner,
             guest_provisioner,
             host,
-        )
+        ))
         .await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
@@ -1683,7 +1685,16 @@ async fn activate_guest_network(
     plan: &crate::guest_network::GuestNetworkPlan,
     guest_provisioner: &dyn GuestNetworkProvisioner,
 ) -> Result<(), ShimError> {
-    guest_provisioner.activate(plan).await.map_err(ShimError::from)
+    match guest_provisioner.activate(plan).await.map_err(ShimError::from)? {
+        crate::guest_network::TapActivation::Raised => Ok(()),
+        // D-295-R5: wait on the EXEC gate and activate again.
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-04")]
+        crate::guest_network::TapActivation::QuiescenceLatched => {
+            todo!(
+                "RED scaffold: D-295-R5 activation wait on a latched quiescence — DELIVER step 06-04"
+            )
+        }
+    }
 }
 
 async fn teardown_for_dispatch(
@@ -2613,25 +2624,23 @@ async fn dispatch_single(
                 }
                 if let (Some(plan), Some(guest_provisioner)) =
                     (guest_plan.as_ref(), guest_provisioner)
-                {
-                    if let Err(activation_error) =
+                    && let Err(activation_error) =
                         activate_guest_network(plan, guest_provisioner).await
-                    {
-                        return fail_closed_on_guest_network_activation(
-                            driver.as_ref(),
-                            mtls_lifecycle,
-                            net_slot_allocator,
-                            network_provisioner,
-                            guest_provisioner,
-                            obs,
-                            bus,
-                            tick,
-                            &row,
-                            handle_opt.as_ref(),
-                            &activation_error,
-                        )
-                        .await;
-                    }
+                {
+                    return fail_closed_on_guest_network_activation(
+                        driver.as_ref(),
+                        mtls_lifecycle,
+                        net_slot_allocator,
+                        network_provisioner,
+                        guest_provisioner,
+                        obs,
+                        bus,
+                        tick,
+                        &row,
+                        handle_opt.as_ref(),
+                        &activation_error,
+                    )
+                    .await;
                 }
                 if guest_command_release_permitted(
                     true,
@@ -2702,145 +2711,71 @@ async fn dispatch_single(
             let successor_outcome = match provision_result {
                 Err(error) => {
                     let Some(cause) = netns_provision_cause(&error) else {
-                    return finish_restart(
-                        Err(error),
-                        &prior_drivers,
-                        &predecessor_handle,
-                        prior_workload_addr,
-                        alloc_drivers,
-                        mtls_lifecycle,
+                        return finish_restart(
+                            Err(error),
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                        )
+                        .await;
+                    };
+                    let successor_network_cleanup = teardown_for_dispatch(
+                        &successor_alloc_id,
+                        None,
                         net_slot_allocator,
                         network_provisioner,
                         guest_provisioner,
-                    )
-                    .await;
-                    };
-                    let successor_network_cleanup = teardown_for_dispatch(
-                    &successor_alloc_id,
-                    None,
-                    net_slot_allocator,
-                    network_provisioner,
-                    guest_provisioner,
                     )
                     .await
                     .err();
                     let successor_record = fail_closed_on_netns_provision(
-                    obs,
-                    bus,
-                    tick,
-                    successor_alloc_id.clone(),
-                    prior_row.workload_id.clone(),
-                    prior_row.node_id.clone(),
-                    kind,
-                    prior_state,
-                    cause,
-                    None,
+                        obs,
+                        bus,
+                        tick,
+                        successor_alloc_id.clone(),
+                        prior_row.workload_id.clone(),
+                        prior_row.node_id.clone(),
+                        kind,
+                        prior_state,
+                        cause,
+                        None,
                     )
                     .await;
                     match (successor_record, successor_network_cleanup) {
-                    (Err(record_error), Some(cleanup_error)) => {
-                        tracing::error!(
-                            name: "restart.provision.abort.cleanup.failed",
-                            alloc = %successor_alloc_id,
-                            primary = %error,
-                            cleanup = %cleanup_error,
-                            "successor provision failure and successor unwind both failed"
-                        );
-                        Err(record_error)
-                    }
-                    (Err(record_error), None) => Err(record_error),
-                    (Ok(()), Some(cleanup_error)) => Err(cleanup_error),
-                    (Ok(()), None) => Ok(()),
+                        (Err(record_error), Some(cleanup_error)) => {
+                            tracing::error!(
+                                name: "restart.provision.abort.cleanup.failed",
+                                alloc = %successor_alloc_id,
+                                primary = %error,
+                                cleanup = %cleanup_error,
+                                "successor provision failure and successor unwind both failed"
+                            );
+                            Err(record_error)
+                        }
+                        (Err(record_error), None) => Err(record_error),
+                        (Ok(()), Some(cleanup_error)) => Err(cleanup_error),
+                        (Ok(()), None) => Ok(()),
                     }
                 }
                 Ok(plan) => {
                     if intercept_required
-                    && let Err(issue_error) = ensure_intercept_identity(
-                        &successor_alloc_id,
-                        &prior_row.workload_id,
-                        &prior_row.node_id,
-                        ca,
-                        obs,
-                        clock,
-                        identity,
-                    )
-                    .await
-                {
-                    if let Err(cleanup_error) = cleanup_restart_successor(
-                        None,
-                        mtls_lifecycle,
-                        &successor_alloc_id,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await
+                        && let Err(issue_error) = ensure_intercept_identity(
+                            &successor_alloc_id,
+                            &prior_row.workload_id,
+                            &prior_row.node_id,
+                            ca,
+                            obs,
+                            clock,
+                            identity,
+                        )
+                        .await
                     {
-                        tracing::error!(
-                            name: "restart.abort.cleanup.failed",
-                            alloc = %successor_alloc_id,
-                            primary = %issue_error,
-                            cleanup = ?cleanup_error,
-                            "successor identity failure retained as primary after successor unwind failed"
-                        );
-                    }
-                    return finish_restart(
-                        Err(issue_error),
-                        &prior_drivers,
-                        &predecessor_handle,
-                        prior_workload_addr,
-                        alloc_drivers,
-                        mtls_lifecycle,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await;
-                }
-
-                // Route the supplied successor payload to its composed driver.
-                let start_outcome = match drivers.get(driver_kind) {
-                    Some(driver) => driver.start(&spec).await,
-                    None => Err(DriverError::StartRejected {
-                        failure: DriverStartFailure {
-                            class: DriverStartClass::Unclassified { driver: driver_kind },
-                            detail: format!(
-                                "no {driver_kind} driver composed on this node: the node's \
-                                 {driver_kind} capability probe did not pass; see the startup \
-                                 log's driver.{driver_kind}.not_composed reason for the specific cause"
-                            ),
-                        },
-                    }),
-                };
-
-                // A duplicate owner is an idempotent stale dispatch. Preserve
-                // the existing no-op semantics, then still perform the one
-                // exact-old cleanup attempt required by this action.
-                if matches!(
-                    &start_outcome,
-                    Err(DriverError::StartRejected { failure })
-                        if is_duplicate_vm_owner(failure, &successor_alloc_id)
-                ) {
-                    return finish_restart(
-                        Ok(()),
-                        &prior_drivers,
-                        &predecessor_handle,
-                        prior_workload_addr,
-                        alloc_drivers,
-                        mtls_lifecycle,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await;
-                }
-
-                // A rejected/failed launch has no successor driver handle;
-                // unwind its mTLS/network ownership before old cleanup.
-                let (start_outcome, successor_abort_cleanup) = match start_outcome {
-                    Ok(handle) => (Ok(handle), None),
-                    Err(error) => {
-                        let cleanup = cleanup_restart_successor(
+                        if let Err(cleanup_error) = cleanup_restart_successor(
                             None,
                             mtls_lifecycle,
                             &successor_alloc_id,
@@ -2849,60 +2784,17 @@ async fn dispatch_single(
                             guest_provisioner,
                         )
                         .await
-                        .err();
-                        (Err(error), cleanup)
-                    }
-                };
-
-                let (handle_opt, state, reason, detail, source): (
-                    Option<AllocationHandle>,
-                    AllocState,
-                    Option<TransitionReason>,
-                    Option<String>,
-                    TransitionSource,
-                ) = match start_outcome {
-                    Ok(handle) => (
-                        Some(handle),
-                        AllocState::Running,
-                        Some(TransitionReason::Started),
-                        None,
-                        TransitionSource::Driver(driver_kind),
-                    ),
-                    Err(DriverError::StartRejected { failure }) => {
-                        let failure = if let Some(cleanup) = &successor_abort_cleanup {
-                            DriverStartFailure {
-                                class: DriverStartClass::Unclassified {
-                                    driver: failure.class.driver_type(),
-                                },
-                                detail: format!(
-                                    "primary rejection: {}; restart cleanup: {}",
-                                    failure.detail,
-                                    restart_abort_cleanup_detail(cleanup),
-                                ),
-                            }
-                        } else {
-                            failure
-                        };
-                        (
-                            None,
-                            AllocState::Failed,
-                            Some(TransitionReason::from(&failure)),
-                            Some(failure.detail.clone()),
-                            TransitionSource::Driver(failure.class.driver_type()),
-                        )
-                    }
-                    Err(other) => {
-                        if let Some(cleanup_error) = &successor_abort_cleanup {
+                        {
                             tracing::error!(
                                 name: "restart.abort.cleanup.failed",
                                 alloc = %successor_alloc_id,
-                                primary = %other,
+                                primary = %issue_error,
                                 cleanup = ?cleanup_error,
-                                "successor start failure retained as primary after successor unwind failed"
+                                "successor identity failure retained as primary after successor unwind failed"
                             );
                         }
                         return finish_restart(
-                            Err(ShimError::Driver(other)),
+                            Err(issue_error),
                             &prior_drivers,
                             &predecessor_handle,
                             prior_workload_addr,
@@ -2914,44 +2806,201 @@ async fn dispatch_single(
                         )
                         .await;
                     }
-                };
 
-                // A fresh successor starts with zero/None per-allocation
-                // history. A failed launch never reached Running.
-                let started_at = (state == AllocState::Running).then_some(tick.now_unix);
-                let workload_addr = (state == AllocState::Running)
-                    .then_some(spec.network.as_ref().map(|network| network.address))
-                    .flatten();
-                let row = build_alloc_status_row(
-                    successor_alloc_id.clone(),
-                    prior_row.workload_id.clone(),
-                    prior_row.node_id.clone(),
-                    state,
-                    LogicalTimestamp::dominating(tick.tick, prior_row.node_id.clone(), None),
-                    reason,
-                    detail,
-                    None,
-                    None,
-                    kind,
-                    started_at,
-                    workload_addr,
-                    None,
-                );
+                    // Route the supplied successor payload to its composed driver.
+                    let start_outcome = match drivers.get(driver_kind) {
+                        Some(driver) => driver.start(&spec).await,
+                        None => Err(DriverError::StartRejected {
+                            failure: DriverStartFailure {
+                                class: DriverStartClass::Unclassified { driver: driver_kind },
+                                detail: format!(
+                                    "no {driver_kind} driver composed on this node: the node's \
+                                 {driver_kind} capability probe did not pass; see the startup \
+                                 log's driver.{driver_kind}.not_composed reason for the specific cause"
+                                ),
+                            },
+                        }),
+                    };
 
-                let occurrence = match obs.write_alloc_lifecycle(row.clone(), source).await {
-                    Ok(occurrence) => occurrence,
-                    Err(write_error) => {
-                        if state == AllocState::Failed {
-                            if let Some(driver) = drivers.get(driver_kind) {
-                                driver.release_supervision(&successor_alloc_id);
-                            }
+                    // A duplicate owner is an idempotent stale dispatch. Preserve
+                    // the existing no-op semantics, then still perform the one
+                    // exact-old cleanup attempt required by this action.
+                    if matches!(
+                        &start_outcome,
+                        Err(DriverError::StartRejected { failure })
+                            if is_duplicate_vm_owner(failure, &successor_alloc_id)
+                    ) {
+                        return finish_restart(
+                            Ok(()),
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                        )
+                        .await;
+                    }
+
+                    // A rejected/failed launch has no successor driver handle;
+                    // unwind its mTLS/network ownership before old cleanup.
+                    let (start_outcome, successor_abort_cleanup) = match start_outcome {
+                        Ok(handle) => (Ok(handle), None),
+                        Err(error) => {
+                            let cleanup = cleanup_restart_successor(
+                                None,
+                                mtls_lifecycle,
+                                &successor_alloc_id,
+                                net_slot_allocator,
+                                network_provisioner,
+                                guest_provisioner,
+                            )
+                            .await
+                            .err();
+                            (Err(error), cleanup)
+                        }
+                    };
+
+                    let (handle_opt, state, reason, detail, source): (
+                        Option<AllocationHandle>,
+                        AllocState,
+                        Option<TransitionReason>,
+                        Option<String>,
+                        TransitionSource,
+                    ) = match start_outcome {
+                        Ok(handle) => (
+                            Some(handle),
+                            AllocState::Running,
+                            Some(TransitionReason::Started),
+                            None,
+                            TransitionSource::Driver(driver_kind),
+                        ),
+                        Err(DriverError::StartRejected { failure }) => {
+                            let failure = if let Some(cleanup) = &successor_abort_cleanup {
+                                DriverStartFailure {
+                                    class: DriverStartClass::Unclassified {
+                                        driver: failure.class.driver_type(),
+                                    },
+                                    detail: format!(
+                                        "primary rejection: {}; restart cleanup: {}",
+                                        failure.detail,
+                                        restart_abort_cleanup_detail(cleanup),
+                                    ),
+                                }
+                            } else {
+                                failure
+                            };
+                            (
+                                None,
+                                AllocState::Failed,
+                                Some(TransitionReason::from(&failure)),
+                                Some(failure.detail.clone()),
+                                TransitionSource::Driver(failure.class.driver_type()),
+                            )
+                        }
+                        Err(other) => {
                             if let Some(cleanup_error) = &successor_abort_cleanup {
+                                tracing::error!(
+                                    name: "restart.abort.cleanup.failed",
+                                    alloc = %successor_alloc_id,
+                                    primary = %other,
+                                    cleanup = ?cleanup_error,
+                                    "successor start failure retained as primary after successor unwind failed"
+                                );
+                            }
+                            return finish_restart(
+                                Err(ShimError::Driver(other)),
+                                &prior_drivers,
+                                &predecessor_handle,
+                                prior_workload_addr,
+                                alloc_drivers,
+                                mtls_lifecycle,
+                                net_slot_allocator,
+                                network_provisioner,
+                                guest_provisioner,
+                            )
+                            .await;
+                        }
+                    };
+
+                    // A fresh successor starts with zero/None per-allocation
+                    // history. A failed launch never reached Running.
+                    let started_at = (state == AllocState::Running).then_some(tick.now_unix);
+                    let workload_addr = (state == AllocState::Running)
+                        .then_some(spec.network.as_ref().map(|network| network.address))
+                        .flatten();
+                    let row = build_alloc_status_row(
+                        successor_alloc_id.clone(),
+                        prior_row.workload_id.clone(),
+                        prior_row.node_id.clone(),
+                        state,
+                        LogicalTimestamp::dominating(tick.tick, prior_row.node_id.clone(), None),
+                        reason,
+                        detail,
+                        None,
+                        None,
+                        kind,
+                        started_at,
+                        workload_addr,
+                        None,
+                    );
+
+                    let occurrence = match obs.write_alloc_lifecycle(row.clone(), source).await {
+                        Ok(occurrence) => occurrence,
+                        Err(write_error) => {
+                            if state == AllocState::Failed {
+                                if let Some(driver) = drivers.get(driver_kind) {
+                                    driver.release_supervision(&successor_alloc_id);
+                                }
+                                if let Some(cleanup_error) = &successor_abort_cleanup {
+                                    tracing::error!(
+                                        name: "restart.successor.cleanup.failed",
+                                        alloc = %successor_alloc_id,
+                                        primary = %write_error,
+                                        cleanup = ?cleanup_error,
+                                        "successor publication failed after successor unwind failed"
+                                    );
+                                }
+                                return finish_restart(
+                                    Err(write_error.into()),
+                                    &prior_drivers,
+                                    &predecessor_handle,
+                                    prior_workload_addr,
+                                    alloc_drivers,
+                                    mtls_lifecycle,
+                                    net_slot_allocator,
+                                    network_provisioner,
+                                    guest_provisioner,
+                                )
+                                .await;
+                            }
+
+                            let driver = drivers.get(driver_kind).unwrap_or_else(|| {
+                            unreachable!(
+                                "Running successor has a composed driver after a successful start"
+                            )
+                        });
+                            let handle = handle_opt.as_ref().unwrap_or_else(|| {
+                                unreachable!("Running successor has a driver handle")
+                            });
+                            let successor_cleanup = cleanup_restart_successor(
+                                Some((driver.as_ref(), handle)),
+                                mtls_lifecycle,
+                                &successor_alloc_id,
+                                net_slot_allocator,
+                                network_provisioner,
+                                guest_provisioner,
+                            )
+                            .await;
+                            if let Err(cleanup_error) = &successor_cleanup {
                                 tracing::error!(
                                     name: "restart.successor.cleanup.failed",
                                     alloc = %successor_alloc_id,
                                     primary = %write_error,
                                     cleanup = ?cleanup_error,
-                                    "successor publication failed after successor unwind failed"
+                                    "successor publication failed and successor cleanup was incomplete"
                                 );
                             }
                             return finish_restart(
@@ -2967,15 +3016,41 @@ async fn dispatch_single(
                             )
                             .await;
                         }
+                    };
 
-                        let driver = drivers.get(driver_kind).unwrap_or_else(|| {
-                            unreachable!(
-                                "Running successor has a composed driver after a successful start"
-                            )
-                        });
-                        let handle = handle_opt.as_ref().unwrap_or_else(|| {
-                            unreachable!("Running successor has a driver handle")
-                        });
+                    if state == AllocState::Failed {
+                        if let Some(driver) = drivers.get(driver_kind) {
+                            driver.release_supervision(&successor_alloc_id);
+                        }
+                        emit_lifecycle_occurrence(bus, occurrence.as_ref());
+                        let successor_outcome = successor_abort_cleanup.map_or(Ok(()), Err);
+                        return finish_restart(
+                            successor_outcome,
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                        )
+                        .await;
+                    }
+
+                    let driver = drivers.get(driver_kind).unwrap_or_else(|| {
+                        unreachable!(
+                            "Running successor has a composed driver after a successful start"
+                        )
+                    });
+                    let handle = handle_opt
+                        .as_ref()
+                        .unwrap_or_else(|| unreachable!("Running successor has a driver handle"));
+
+                    // Ok(None) is a rejected fresh-key publication. It is not
+                    // retried inside this shim: unwind the successor completely,
+                    // then let the outer runtime re-drive from its durable View.
+                    if occurrence.is_none() {
                         let successor_cleanup = cleanup_restart_successor(
                             Some((driver.as_ref(), handle)),
                             mtls_lifecycle,
@@ -2985,131 +3060,66 @@ async fn dispatch_single(
                             guest_provisioner,
                         )
                         .await;
-                        if let Err(cleanup_error) = &successor_cleanup {
-                            tracing::error!(
-                                name: "restart.successor.cleanup.failed",
-                                alloc = %successor_alloc_id,
-                                primary = %write_error,
-                                cleanup = ?cleanup_error,
-                                "successor publication failed and successor cleanup was incomplete"
-                            );
+                        return finish_restart(
+                            successor_cleanup,
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                        )
+                        .await;
+                    }
+
+                    // Running-confirmed index and hooks are released only after
+                    // the fresh Running row is accepted.
+                    alloc_drivers.lock().insert(successor_alloc_id.clone(), driver_kind);
+                    if let Some(mtls_lifecycle) = mtls_lifecycle
+                        && intercept_required
+                    {
+                        if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
+                            let successor_outcome = fail_closed_on_mtls_install_with_guest(
+                                driver.as_ref(),
+                                mtls_lifecycle,
+                                net_slot_allocator,
+                                network_provisioner,
+                                guest_provisioner,
+                                obs,
+                                bus,
+                                tick,
+                                &row,
+                                prior_state,
+                                Some(handle),
+                                &cause,
+                            )
+                            .await;
+                            return finish_restart(
+                                successor_outcome,
+                                &prior_drivers,
+                                &predecessor_handle,
+                                prior_workload_addr,
+                                alloc_drivers,
+                                Some(mtls_lifecycle),
+                                net_slot_allocator,
+                                network_provisioner,
+                                guest_provisioner,
+                            )
+                            .await;
                         }
-                        return finish_restart(
-                            Err(write_error.into()),
-                            &prior_drivers,
-                            &predecessor_handle,
-                            prior_workload_addr,
-                            alloc_drivers,
-                            mtls_lifecycle,
-                            net_slot_allocator,
-                            network_provisioner,
-                            guest_provisioner,
-                        )
-                        .await;
+                        tracing::info!(
+                            name: "mtls.intercept.install.success",
+                            alloc = %successor_alloc_id,
+                            driver = ?driver_kind,
+                            "installed allocation mTLS intercept"
+                        );
                     }
-                };
-
-                if state == AllocState::Failed {
-                    if let Some(driver) = drivers.get(driver_kind) {
-                        driver.release_supervision(&successor_alloc_id);
-                    }
-                    emit_lifecycle_occurrence(bus, occurrence.as_ref());
-                    let successor_outcome = successor_abort_cleanup.map_or(Ok(()), Err);
-                    return finish_restart(
-                        successor_outcome,
-                        &prior_drivers,
-                        &predecessor_handle,
-                        prior_workload_addr,
-                        alloc_drivers,
-                        mtls_lifecycle,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await;
-                }
-
-                let driver = drivers.get(driver_kind).unwrap_or_else(|| {
-                    unreachable!("Running successor has a composed driver after a successful start")
-                });
-                let handle = handle_opt
-                    .as_ref()
-                    .unwrap_or_else(|| unreachable!("Running successor has a driver handle"));
-
-                // Ok(None) is a rejected fresh-key publication. It is not
-                // retried inside this shim: unwind the successor completely,
-                // then let the outer runtime re-drive from its durable View.
-                if occurrence.is_none() {
-                    let successor_cleanup = cleanup_restart_successor(
-                        Some((driver.as_ref(), handle)),
-                        mtls_lifecycle,
-                        &successor_alloc_id,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await;
-                    return finish_restart(
-                        successor_cleanup,
-                        &prior_drivers,
-                        &predecessor_handle,
-                        prior_workload_addr,
-                        alloc_drivers,
-                        mtls_lifecycle,
-                        net_slot_allocator,
-                        network_provisioner,
-                        guest_provisioner,
-                    )
-                    .await;
-                }
-
-                // Running-confirmed index and hooks are released only after
-                // the fresh Running row is accepted.
-                alloc_drivers.lock().insert(successor_alloc_id.clone(), driver_kind);
-                if let Some(mtls_lifecycle) = mtls_lifecycle
-                    && intercept_required
-                {
-                    if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
-                        let successor_outcome = fail_closed_on_mtls_install_with_guest(
-                            driver.as_ref(),
-                            mtls_lifecycle,
-                            net_slot_allocator,
-                            network_provisioner,
-                            guest_provisioner,
-                            obs,
-                            bus,
-                            tick,
-                            &row,
-                            prior_state,
-                            Some(handle),
-                            &cause,
-                        )
-                        .await;
-                        return finish_restart(
-                            successor_outcome,
-                            &prior_drivers,
-                            &predecessor_handle,
-                            prior_workload_addr,
-                            alloc_drivers,
-                            Some(mtls_lifecycle),
-                            net_slot_allocator,
-                            network_provisioner,
-                            guest_provisioner,
-                        )
-                        .await;
-                    }
-                    tracing::info!(
-                        name: "mtls.intercept.install.success",
-                        alloc = %successor_alloc_id,
-                        driver = ?driver_kind,
-                        "installed allocation mTLS intercept"
-                    );
-                }
                     if let (Some(plan), Some(guest_provisioner)) =
                         (plan.as_ref(), guest_provisioner)
-                {
-                    if let Err(activation_error) =
-                        activate_guest_network(plan, guest_provisioner).await
+                        && let Err(activation_error) =
+                            activate_guest_network(plan, guest_provisioner).await
                     {
                         let successor_outcome = fail_closed_on_guest_network_activation(
                             driver.as_ref(),
@@ -3138,11 +3148,10 @@ async fn dispatch_single(
                         )
                         .await;
                     }
-                }
-                driver.release_for_exit_emission(handle).await;
-                driver.on_alloc_running(&spec);
-                emit_lifecycle_occurrence(bus, occurrence.as_ref());
-                Ok(())
+                    driver.release_for_exit_emission(handle).await;
+                    driver.on_alloc_running(&spec);
+                    emit_lifecycle_occurrence(bus, occurrence.as_ref());
+                    Ok(())
                 }
             };
 
@@ -3445,6 +3454,14 @@ async fn dispatch_single(
         // write-time terminality guard -> kill -> discard -> write -> four
         // evaluations); a refused race
         // returns `Ok(())` by design, never a `ShimError`.
+        // D-295-R11: reclaim a leased, unowned, finished allocation's guest
+        // network. Dispatch lands in DELIVER step 07-02; no reconciler emits
+        // the variant before step 07-03.
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-02")]
+        Action::ReclaimAllocationNetwork { alloc_id } => {
+            let _ = alloc_id;
+            todo!("RED scaffold: D-295-R11 ReclaimAllocationNetwork dispatch — DELIVER step 07-02")
+        }
         Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
             &alloc_id,
             drivers,

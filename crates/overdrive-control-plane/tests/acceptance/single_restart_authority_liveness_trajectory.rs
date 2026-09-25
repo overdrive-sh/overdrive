@@ -177,6 +177,13 @@ fn workload_states(row: AllocStatusRow) -> (WorkloadLifecycleState, WorkloadLife
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
+            occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
+                held: 0,
+                retiring: 0,
+            },
+            leases: std::collections::BTreeMap::new(),
+        },
     };
     let mut actual_allocs = BTreeMap::new();
     actual_allocs.insert(row.alloc_id.clone(), row);

@@ -420,7 +420,11 @@ impl DirectHandlerHarness {
             dataplane_override: Some(Arc::new(
                 overdrive_sim::adapters::dataplane::SimDataplane::new(),
             )),
-            ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+            ..ServerConfig::new(
+                Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+                std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+                std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+            )
         };
         let sequence = self.sequence.fetch_add(1, Ordering::SeqCst);
         self.record("handler_start_attempt", &format!("sequence={sequence}"));
@@ -433,10 +437,20 @@ impl DirectHandlerHarness {
         let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
             owner.clone();
         let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
-        let handle =
-            run_server_with_obs_and_driver(config, obs, driver, vm_host_state, owner_port, wiring)
-                .await
-                .expect("start production server handler");
+        let handle = run_server_with_obs_and_driver(
+            config,
+            obs,
+            driver,
+            vm_host_state,
+            owner_port,
+            wiring,
+            overdrive_worker::cgroup_manager::CgroupManager::new(
+                std::path::PathBuf::from("/sys/fs/cgroup"),
+                std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+            ),
+        )
+        .await
+        .expect("start production server handler");
         let address = handle.local_addr().await.expect("server handler bound address");
         let trust_path = self.config_dir.join(".overdrive/config");
         let api = PublicApi::from_trust_config(&trust_path).expect("load server trust triple");

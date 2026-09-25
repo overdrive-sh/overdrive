@@ -139,7 +139,11 @@ async fn boot_attempt(
         operator_config_dir: dirs.operator_config_dir.clone(),
         dataplane_override: Some(Arc::new(SimDataplane::new())),
         dataplane: Some(super::super::dataplane_lo::lo_dataplane_config()),
-        ..ServerConfig::new(kek)
+        ..ServerConfig::new(
+            kek,
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     run_server(config, Arc::new(RealCgroupFs::new())).await
 }

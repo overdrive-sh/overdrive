@@ -282,7 +282,9 @@ impl GuestNetworkProvisioner for LeaseLedger {
             state.live.insert(plan.alloc().clone());
             state.lease_peak = state.lease_peak.max(state.live.len());
             state.window_acquired.push(plan.alloc().clone());
-            self.measure_admitted.load(Ordering::SeqCst).then(|| state.live.clone())
+            let snapshot = self.measure_admitted.load(Ordering::SeqCst).then(|| state.live.clone());
+            drop(state);
+            snapshot
         };
         if let Some(live_now) = live_now {
             let rows = self.obs.alloc_status_rows().await.expect("observation read in ledger");
@@ -303,7 +305,10 @@ impl GuestNetworkProvisioner for LeaseLedger {
         self.inner.provision(plan).await
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
+    async fn activate(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> GuestNetworkResult<overdrive_control_plane::guest_network::TapActivation> {
         self.inner.activate(plan).await
     }
 
@@ -525,11 +530,9 @@ impl SimNode {
         let intent = WorkloadIntent::Service(service.clone());
         let archived = intent.archive_for_store().expect("archive workload intent");
         let digest = intent.spec_digest().expect("spec digest");
-        if let Ok(name) = MeshServiceName::new(&format!(
-            "{}.{}",
-            service.id.as_str(),
-            MeshServiceName::SUFFIX
-        )) {
+        if let Ok(name) =
+            MeshServiceName::new(&format!("{}.{}", service.id.as_str(), MeshServiceName::SUFFIX))
+        {
             self.state.frontend_addr_allocator.assign(&name).expect("frontend address");
         }
         let vip = {
@@ -620,7 +623,8 @@ impl SimNode {
                 _ => census.in_flight += 1,
             }
         }
-        let node_running_rows = rows.values().filter(|row| row.state == AllocState::Running).count();
+        let node_running_rows =
+            rows.values().filter(|row| row.state == AllocState::Running).count();
         (census, node_running_rows, rows)
     }
 
@@ -768,7 +772,11 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
             ));
         }
         if (index + 1) % 4_096 == 0 {
-            eprintln!("seed={seed} fill progress {}/{CAP} after {:?}", index + 1, fill_started.elapsed());
+            eprintln!(
+                "seed={seed} fill progress {}/{CAP} after {:?}",
+                index + 1,
+                fill_started.elapsed()
+            );
         }
     }
     let baseline = Census { running: CAP, in_flight: 0, retiring: 0 };
@@ -1077,7 +1085,9 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
                 entry.evidence
             )
         })
-        .chain(report.observations.iter().map(|(id, evidence)| format!("  [OBS] {id}: {evidence}\n")))
+        .chain(
+            report.observations.iter().map(|(id, evidence)| format!("  [OBS] {id}: {evidence}\n")),
+        )
         .collect();
     eprintln!("seed={seed} node-wide admission verdicts:\n{table}");
     let red: Vec<&str> =

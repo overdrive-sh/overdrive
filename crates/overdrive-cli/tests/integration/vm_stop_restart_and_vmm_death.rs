@@ -755,7 +755,11 @@ async fn spawn_clocked_vm_server_at_with_vmm(
         clock,
         dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
         vmm_override: Some(vmm),
-        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
     run_server(config, Arc::new(RealCgroupFs::new()))
         .await

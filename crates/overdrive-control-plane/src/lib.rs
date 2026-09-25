@@ -142,6 +142,13 @@ pub mod worker;
 // executor that core's trait declaration delegates to.
 pub mod workflow_runtime;
 
+// GH #295 (DISTILL gap B-4): crate-private test-local implementations of the
+// three ports this crate declares, for the source-local supervisor and
+// admission cells (the `overdrive-sim` doubles implement a second compiled
+// copy of these traits here).
+#[cfg(test)]
+mod shared_network_test_ports;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -153,7 +160,7 @@ use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use futures::stream::{FuturesUnordered, StreamExt};
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
@@ -162,6 +169,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_store_local::LocalIntentStore;
+use overdrive_worker::cgroup_manager::CgroupManager;
 use tokio_util::sync::CancellationToken;
 
 use crate::identity_mgr::IdentityMgr;
@@ -801,8 +809,9 @@ pub struct ServerConfig {
     /// § "Port-trait dependencies" and feature-delta § C1-AMEND. Because a
     /// mandatory `Arc<dyn Kek>` cannot be defaulted to a benign value,
     /// `ServerConfig` has **no `Default` impl**; use
-    /// [`ServerConfig::new`](Self::new) + the `..ServerConfig::new(kek)`
-    /// rest-pattern instead.
+    /// [`ServerConfig::new`](Self::new) + the
+    /// `..ServerConfig::new(kek, mtls_intercept, guest_dns)` rest-pattern
+    /// instead.
     ///
     /// Excluded from [`Debug`] — `Arc<dyn Kek>` is not [`Debug`].
     ///
@@ -896,6 +905,22 @@ pub struct ServerConfig {
     ///
     /// [`Dataplane`]: overdrive_core::traits::dataplane::Dataplane
     pub dataplane_override: Option<Arc<dyn overdrive_core::traits::dataplane::Dataplane>>,
+
+    /// The required transparent-mTLS intercept port (D-295-R16). Production
+    /// passes `HostMtlsIntercept`; tests inject `SimMtlsIntercept` or a
+    /// test-local intercept. `run_server*` always composes the worker over it.
+    ///
+    /// RED scaffold (D-295-R16): consumed in DELIVER step 05-01; until then
+    /// `run_server*` keep today's composition and do not read it.
+    pub mtls_intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept>,
+
+    /// The required shared-gateway DNS responder factory (D-295-R16).
+    /// Production passes `HostGuestDnsFactory`; tests inject
+    /// `SimGuestDnsFactory`.
+    ///
+    /// RED scaffold (D-295-R16): consumed in DELIVER step 05-01; until then
+    /// `run_server*` keep today's composition and do not read it.
+    pub guest_dns: Arc<dyn crate::dns_responder::GuestDnsFactory>,
 
     /// Test-only failure-injection seam for the `EbpfDataplane::probe`
     /// Earned-Trust call site. When `Some(msg)`, the boot path
@@ -1027,7 +1052,9 @@ impl std::fmt::Debug for ServerConfig {
             .field(
                 "dataplane_override",
                 &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
-            );
+            )
+            .field("mtls_intercept", &"<dyn MtlsIntercept>")
+            .field("guest_dns", &"<dyn GuestDnsFactory>");
         #[cfg(feature = "integration-tests")]
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
@@ -1057,9 +1084,9 @@ impl ServerConfig {
     /// in a cold environment. See feature-delta § C1-AMEND and
     /// `.claude/rules/development.md` § "Port-trait dependencies".
     ///
-    /// Fixtures swap `..Default::default()` → `..ServerConfig::new(test_kek)`:
-    /// the rest-pattern still supplies every non-`kek` field, while `kek` is
-    /// now an explicit, type-checked argument.
+    /// Fixtures use `..ServerConfig::new(test_kek, intercept, dns)`: the
+    /// rest-pattern still supplies every other field, while the three required
+    /// ports are explicit, type-checked arguments.
     ///
     /// `bind`, `data_dir`, and `operator_config_dir` get sentinel values that
     /// callers MUST override (as under the prior `Default`). `tick_cadence`
@@ -1069,9 +1096,17 @@ impl ServerConfig {
     /// "Repository structure". Tests that need a controllable clock override
     /// `clock` in the same struct literal.
     ///
+    /// The intercept and DNS ports (D-295-R16) are equally required: a boot
+    /// site that forgets either fails to compile. Production passes
+    /// `HostMtlsIntercept` and `HostGuestDnsFactory`.
+    ///
     /// [`Kek`]: overdrive_core::ca::kek::Kek
     #[must_use]
-    pub fn new(kek: Arc<dyn overdrive_core::ca::kek::Kek>) -> Self {
+    pub fn new(
+        kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+        mtls_intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept>,
+        guest_dns: Arc<dyn crate::dns_responder::GuestDnsFactory>,
+    ) -> Self {
         // 127.0.0.1:0 — IPv4 loopback, ephemeral port. Constructed
         // directly rather than via `parse()` so the constructor
         // is infallible and clippy's `expect_used` lint stays clean.
@@ -1108,6 +1143,8 @@ impl ServerConfig {
             // inject `Some(Arc::new(SimDataplane::new()))` per
             // architecture.md § 4.7.
             dataplane_override: None,
+            mtls_intercept,
+            guest_dns,
             // Step 02-03: `None` means production default (probe
             // runs against the real BACKEND_MAP via the typed
             // `EbpfDataplane` handle). Tests inject
@@ -1248,6 +1285,75 @@ pub(crate) enum SharedNetworkSupervisorError {
     Dns(#[from] crate::dns_responder::responder::DnsResponderError),
 }
 
+/// The ports the one runtime shared-network supervisor task owns (D-295-R13,
+/// R14, R16). They replace `run_mtls_owner`'s parameters in DELIVER step
+/// 09-01.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+struct SharedNetworkSupervisorPorts {
+    shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+    mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    dns: DnsServeTaskOwner,
+    dns_factory: Arc<dyn dns_responder::GuestDnsFactory>,
+    dns_deps: dns_responder::GuestDnsDeps,
+    vm_kill: vm_kill::VmKillCapability,
+}
+
+/// Kill-only capability over VMM cgroups (review finding H3). The
+/// `CgroupManager` field and the constructor are private to this child
+/// module and the two kill methods are `pub(super)`, so the enclosing
+/// supervisor module can call exactly `kill_allocation` and
+/// `kill_workloads_slice` and reach no other `CgroupManager` surface (no
+/// create, placement, limit, removal, or bootstrap authority) — "exposes
+/// exactly two methods" holds structurally (review finding L4).
+mod vm_kill {
+    /// Writes `1` to VMM cgroups' `cgroup.kill`; nothing else.
+    #[allow(
+        clippy::redundant_pub_crate,
+        reason = "the DESIGN pins `pub(super)`: visibility is stated relative to the supervisor module"
+    )]
+    pub(super) struct VmKillCapability {
+        #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+        cgroups: super::CgroupManager,
+    }
+
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+    impl VmKillCapability {
+        /// Wrap the manager over the same cgroup root and `CgroupFs` every
+        /// composed `VmDriver` writes through.
+        pub(super) const fn new(cgroups: super::CgroupManager) -> Self {
+            Self { cgroups }
+        }
+
+        /// Write `1` to one allocation's scope `cgroup.kill`. An absent scope is
+        /// `Ok`: the VMM can no longer execute.
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+        #[expect(
+            clippy::unused_async,
+            reason = "RED scaffold — DELIVER step 09-01 awaits the kill write"
+        )]
+        pub(super) async fn kill_allocation(
+            &self,
+            alloc: &super::AllocationId,
+        ) -> std::io::Result<()> {
+            let _ = alloc;
+            todo!("RED scaffold: D-295-R14 VmKillCapability::kill_allocation — DELIVER step 09-01")
+        }
+
+        /// Write `1` to the workloads slice's `cgroup.kill`, killing every
+        /// workload VMM.
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+        #[expect(
+            clippy::unused_async,
+            reason = "RED scaffold — DELIVER step 09-01 awaits the kill write"
+        )]
+        pub(super) async fn kill_workloads_slice(&self) -> std::io::Result<()> {
+            todo!(
+                "RED scaffold: D-295-R14 VmKillCapability::kill_workloads_slice — DELIVER step 09-01"
+            )
+        }
+    }
+}
+
 struct SharedNetworkSupervisorHandle {
     request_rx: tokio::sync::mpsc::Receiver<overdrive_core::guest_network::ServeShutdownRequest>,
     task: Option<tokio::task::JoinHandle<std::result::Result<(), SharedNetworkSupervisorError>>>,
@@ -1311,6 +1417,27 @@ impl SharedNetworkSupervisorHandle {
                 }
             }
         }
+    }
+
+    /// The one runtime shared-network supervisor (D-295-R13, R14, R15, R16):
+    /// detection, component-specific quiescence, bounded recovery, per-VM
+    /// kill scope, restore, and typed fail-stop. Replaces `run_mtls_owner`
+    /// in DELIVER step 09-01.
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+    #[expect(
+        clippy::unused_async,
+        reason = "RED scaffold — DELIVER step 09-01 awaits the owner calls"
+    )]
+    async fn run_shared_network_supervisor(
+        ports: SharedNetworkSupervisorPorts,
+        exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+        clock: Arc<dyn Clock>,
+        request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
+        shutdown: CancellationToken,
+    ) -> std::result::Result<(), SharedNetworkSupervisorError> {
+        let _ = (ports, exec, clock, request_tx, shutdown);
+        todo!("RED scaffold: D-295-R13 run_shared_network_supervisor — DELIVER step 09-01")
     }
 
     #[expect(
@@ -1380,6 +1507,15 @@ impl SharedNetworkSupervisorHandle {
                         } => overdrive_core::guest_network::SharedGuestNetworkComponent::IpRules,
                         _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
                     },
+                    overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::BootMemberClear {
+                        ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::MemberMismatch {
+                        ..
+                    }
+                    | overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::MemberRepair {
+                        ..
+                    } => overdrive_core::guest_network::SharedGuestNetworkComponent::IpSets,
                     _ => overdrive_core::guest_network::SharedGuestNetworkComponent::Supervisor,
                 }
             };
@@ -1506,7 +1642,7 @@ enum DnsServeTaskOwnerError {
 
 struct DnsServeTaskOwner {
     state: DnsServeTaskState,
-    responder: Option<Arc<crate::dns_responder::responder::DnsResponder>>,
+    responder: Option<Arc<dyn crate::dns_responder::GuestDns>>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -1516,7 +1652,7 @@ struct DnsServeTaskOwner {
 )]
 impl DnsServeTaskOwner {
     const fn new(
-        responder: Arc<crate::dns_responder::responder::DnsResponder>,
+        responder: Arc<dyn crate::dns_responder::GuestDns>,
         task: tokio::task::JoinHandle<()>,
     ) -> Self {
         Self { state: DnsServeTaskState::Running, responder: Some(responder), task: Some(task) }
@@ -1546,11 +1682,9 @@ impl DnsServeTaskOwner {
 
     async fn replace(
         &mut self,
-        replacement: Arc<crate::dns_responder::responder::DnsResponder>,
+        replacement: Arc<dyn crate::dns_responder::GuestDns>,
         stop_bound: std::time::Duration,
-        spawn: impl FnOnce(
-            Arc<crate::dns_responder::responder::DnsResponder>,
-        ) -> tokio::task::JoinHandle<()>,
+        spawn: impl FnOnce(Arc<dyn crate::dns_responder::GuestDns>) -> tokio::task::JoinHandle<()>,
     ) -> std::result::Result<(), DnsServeTaskOwnerError> {
         if !matches!(self.state, DnsServeTaskState::Running | DnsServeTaskState::Exited(_)) {
             return Err(DnsServeTaskOwnerError::InvalidReplacementState { state: self.state });
@@ -1658,6 +1792,7 @@ mod shared_network_task_owner_acceptance {
 
     struct S19Intercept {
         shared_observation: Mutex<Option<InterceptPostcondition>>,
+        members: Mutex<overdrive_worker::mtls_intercept_port::InterceptMembers>,
         listener_addresses: Mutex<Vec<SocketAddrV4>>,
         bind_calls: AtomicUsize,
         converge_calls: AtomicUsize,
@@ -1671,6 +1806,9 @@ mod shared_network_task_owner_acceptance {
         fn new() -> Self {
             Self {
                 shared_observation: Mutex::new(None),
+                members: Mutex::new(
+                    overdrive_worker::mtls_intercept_port::InterceptMembers::default(),
+                ),
                 listener_addresses: Mutex::new(Vec::new()),
                 bind_calls: AtomicUsize::new(0),
                 converge_calls: AtomicUsize::new(0),
@@ -1777,6 +1915,65 @@ mod shared_network_task_owner_acceptance {
             self.inbound_install_calls.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(S19InertGuard))
         }
+
+        fn observe_shared_state(
+            &self,
+        ) -> overdrive_worker::mtls_intercept::Result<
+            Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+        > {
+            Ok(self.state())
+        }
+
+        fn converge_allocation_elements(
+            &self,
+            expected: &overdrive_worker::mtls_intercept_port::InterceptMembers,
+        ) -> overdrive_worker::mtls_intercept::Result<
+            Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+        > {
+            if self.shared_observation.lock().is_none() {
+                return Ok(None);
+            }
+            *self.members.lock() = expected.clone();
+            Ok(self.state())
+        }
+
+        fn remove_allocation_elements(
+            &self,
+            source_addr: Ipv4Addr,
+            destinations: &[SocketAddrV4],
+        ) -> overdrive_worker::mtls_intercept::Result<
+            overdrive_worker::mtls_intercept_port::InterceptState,
+        > {
+            let mut members = self.members.lock();
+            members.managed_guest_ips.remove(&source_addr);
+            members.outbound_sources.remove(&source_addr);
+            for destination in destinations {
+                members.inbound_destinations.remove(destination);
+            }
+            drop(members);
+            self.state().ok_or_else(|| InterceptError::NftRuleInstallFailed {
+                op: "shared-element-owner",
+                source: overdrive_netlink::NetlinkError::nft(
+                    "shared-element-owner",
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotConnected,
+                        "shared constant program is not published",
+                    ),
+                ),
+            })
+        }
+    }
+
+    impl S19Intercept {
+        fn state(&self) -> Option<overdrive_worker::mtls_intercept_port::InterceptState> {
+            let program = self.shared_observation.lock().clone()?;
+            Some(overdrive_worker::mtls_intercept_port::InterceptState {
+                program,
+                policy_route: true,
+                intercept_mark_guard: true,
+                members: self.members.lock().clone(),
+            })
+        }
     }
 
     fn s19_worker(intercept: Arc<S19Intercept>, clock: Arc<SimClock>) -> Arc<MtlsInterceptWorker> {
@@ -1843,9 +2040,9 @@ mod shared_network_task_owner_acceptance {
         async fn activate(
             &self,
             _plan: &guest_network::GuestNetworkPlan,
-        ) -> guest_network::Result<()> {
+        ) -> guest_network::Result<guest_network::TapActivation> {
             self.record(guest_network::GuestNetworkOperation::TapSetUp);
-            Ok(())
+            Ok(guest_network::TapActivation::Raised)
         }
 
         async fn teardown(
@@ -1876,13 +2073,23 @@ mod shared_network_task_owner_acceptance {
 
         async fn audit_shared(
             &self,
-        ) -> std::result::Result<(), guest_network::SharedGuestNetworkAuditError> {
+        ) -> std::result::Result<
+            guest_network::SharedGuestNetworkAudit,
+            guest_network::SharedGuestNetworkAuditError,
+        > {
             self.record(guest_network::GuestNetworkOperation::BridgeObserve);
-            Ok(())
+            Ok(guest_network::SharedGuestNetworkAudit::default())
         }
 
-        async fn quiesce_managed_taps(&self) -> guest_network::Result<()> {
+        async fn quiesce_managed_taps(
+            &self,
+        ) -> guest_network::Result<guest_network::TapQuiescence> {
             self.record(guest_network::GuestNetworkOperation::TapSetDown);
+            Ok(guest_network::TapQuiescence::default())
+        }
+
+        async fn restore_quiesced_taps(&self) -> guest_network::Result<()> {
+            self.record(guest_network::GuestNetworkOperation::TapSetUp);
             Ok(())
         }
     }
@@ -2296,7 +2503,7 @@ mod shared_network_task_owner_acceptance {
 
         let old = responder();
         let mut owner =
-            DnsServeTaskOwner::new(Arc::clone(&old), tokio::spawn(std::future::pending::<()>()));
+            DnsServeTaskOwner::new(old.clone(), tokio::spawn(std::future::pending::<()>()));
         let spawned = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let spawned_for_closure = Arc::clone(&spawned);
         owner
@@ -3047,6 +3254,7 @@ pub async fn run_server(
         vm_host_state,
         Arc::new(guest_network::HostSharedGuestNetworkOwner::new()),
         guest_network_exec,
+        bootstrap_manager,
     )
     .await
 }
@@ -3322,6 +3530,7 @@ pub async fn run_server_with_obs_and_driver(
     vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
+    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     let mut registry = DriverRegistry::new();
     registry.insert(driver);
@@ -3332,6 +3541,7 @@ pub async fn run_server_with_obs_and_driver(
         vm_host_state,
         shared_guest_network,
         guest_network_exec,
+        vm_cgroups,
     )
     .await
 }
@@ -3358,7 +3568,11 @@ pub async fn run_server_with_obs_and_drivers(
     vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
+    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
+    // RED scaffold (D-295-R14): consumed in DELIVER step 09-01, which wraps it
+    // in the supervisor's kill-only `VmKillCapability`.
+    let _ = vm_cgroups;
     if let Err(cause) = shared_guest_network.probe_startup().await {
         tracing::error!(
             name: "health.startup.refused",
@@ -4296,8 +4510,9 @@ pub async fn run_server_with_obs_and_drivers(
         // Probe Ok — spawn the source-pinned serve loop and hold both the task
         // handle AND the responder (so shutdown can `stop()` the SO_RCVTIMEO-
         // bounded serve loop before aborting).
+        let owned_responder: Arc<dyn crate::dns_responder::GuestDns> = responder.clone();
         dns_responder_owner =
-            Some(DnsServeTaskOwner::new(Arc::clone(&responder), tokio::spawn(responder.serve())));
+            Some(DnsServeTaskOwner::new(owned_responder, tokio::spawn(responder.serve())));
     }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so

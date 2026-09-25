@@ -166,6 +166,8 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // production probe path runs (or is bypassed entirely
         // because `dataplane_override` short-circuits the
         // `EbpfDataplane` construction above).
+        mtls_intercept: std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        guest_dns: std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
         dataplane_probe_fault: None,
         // ADR-0082/ADR-0083 step 01-08: no VM boot artifacts configured —
         // this fixture does not exercise the `[vm]` driver.
@@ -195,6 +197,10 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await
     .expect("server boot");

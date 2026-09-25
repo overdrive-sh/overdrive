@@ -21,9 +21,21 @@
 //!   [`std::net::TcpListener`] without a syscall. **Any test that drives this
 //!   `Ok` arm binds a socket and is therefore INTEGRATION-lane** per
 //!   `.claude/rules/testing.md` § "Integration vs unit gating".
-//! - **The `Ok` arm of the three installs returns an INERT guard** that records
-//!   nothing and whose `Drop` is a no-op. The double installs no nft rule, so
-//!   there is none to remove.
+//! - **The `Ok` arm of the two allocation installs records the dynamic members
+//!   the shared owner's host adapter would add** (one managed-guest and one
+//!   outbound-source member per outbound install; one inbound-destination
+//!   member per inbound install) under a process-local element token. The
+//!   guard's `Drop` removes its members unless
+//!   [`remove_allocation_elements`](MtlsIntercept::remove_allocation_elements)
+//!   retired its token first. `converge_shared`'s guard is inert. No nft rule
+//!   exists, so the member model is observable only through
+//!   [`observe_shared_state`](MtlsIntercept::observe_shared_state).
+//! - **The listener surface** ([`SimInterceptListener`], [`SimAcceptScript`])
+//!   opens no socket, descriptor, thread, task, or timer: a fabricated port,
+//!   a weak live-listener table, and scripted accept outcomes. Until the step
+//!   that changes `bind_transparent`'s return type (DELIVER 05-01),
+//!   `bind_transparent`'s `Ok` arm still returns a real socket, so the table
+//!   stays empty and both scripting calls return `false`.
 //!
 //! # Determinism
 //!
@@ -33,13 +45,21 @@
 //! identity so caller-side audit and recovery ordering are observable without
 //! pretending to implement or prove the host nft algorithm.
 
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::sync::{Arc, Weak};
 
+use async_trait::async_trait;
 use overdrive_worker::mtls_intercept::{
-    InterceptError, InterceptPostcondition, NetlinkError, Result,
+    InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
+    InterceptSet, NetlinkError, Result,
 };
-use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+use overdrive_worker::mtls_intercept_port::{
+    InterceptAcceptError, InterceptAccepted, InterceptGuard, InterceptListener, InterceptMembers,
+    InterceptState, MtlsIntercept,
+};
 use parking_lot::Mutex;
+use tokio::sync::Notify;
 
 /// A scripted intercept-install fault, expressed in the REAL error shapes the
 /// production substrate produces (research Finding 5.3 — inject errors that
@@ -137,21 +157,241 @@ pub struct SimMtlsIntercept {
     outbound_fault: Mutex<Option<SimInterceptFault>>,
     /// Standing fault for [`install_inbound`](MtlsIntercept::install_inbound).
     inbound_fault: Mutex<Option<SimInterceptFault>>,
+    /// The owned program's dynamic members and their live element tokens.
+    members: Arc<Mutex<SimMemberState>>,
+    /// Weak live-listener table keyed by bound address. The adapter never
+    /// extends a listener's life.
+    listeners: Mutex<BTreeMap<SocketAddrV4, Weak<SimInterceptListener>>>,
 }
 
-/// The inert guard the double's install `Ok` arms return. No rule was
+/// The inert guard `converge_shared`'s `Ok` arm returns. No rule was
 /// installed, so `Drop` removes nothing. Private — consumers see only
 /// `Box<dyn InterceptGuard>`.
 struct InertGuard;
 
 impl InterceptGuard for InertGuard {}
 
+/// One dynamic member of the owned program's three sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SimMember {
+    ManagedGuest(Ipv4Addr),
+    OutboundSource(Ipv4Addr),
+    InboundDestination(SocketAddrV4),
+}
+
+/// The member sets plus the process-local element tokens that own them.
+#[derive(Debug, Default)]
+struct SimMemberState {
+    members: InterceptMembers,
+    /// Live token per member: `(generation, holders)`. A retired token is
+    /// absent, so a guard holding its generation removes nothing.
+    tokens: BTreeMap<SimMember, (u64, usize)>,
+    next_generation: u64,
+}
+
+impl SimMemberState {
+    fn insert(&mut self, member: SimMember) {
+        match member {
+            SimMember::ManagedGuest(address) => {
+                self.members.managed_guest_ips.insert(address);
+            }
+            SimMember::OutboundSource(address) => {
+                self.members.outbound_sources.insert(address);
+            }
+            SimMember::InboundDestination(destination) => {
+                self.members.inbound_destinations.insert(destination);
+            }
+        }
+    }
+
+    fn remove(&mut self, member: SimMember) {
+        match member {
+            SimMember::ManagedGuest(address) => {
+                self.members.managed_guest_ips.remove(&address);
+            }
+            SimMember::OutboundSource(address) => {
+                self.members.outbound_sources.remove(&address);
+            }
+            SimMember::InboundDestination(destination) => {
+                self.members.inbound_destinations.remove(&destination);
+            }
+        }
+    }
+
+    /// Acquire one holder of each member's token, adding absent members; a
+    /// re-install adopts the live token rather than duplicating the member.
+    fn acquire(&mut self, members: &[SimMember]) -> Vec<(SimMember, u64)> {
+        members
+            .iter()
+            .map(|member| {
+                let generation = if let Some((generation, holders)) = self.tokens.get_mut(member) {
+                    *holders += 1;
+                    *generation
+                } else {
+                    self.next_generation += 1;
+                    let generation = self.next_generation;
+                    self.tokens.insert(*member, (generation, 1));
+                    self.insert(*member);
+                    generation
+                };
+                (*member, generation)
+            })
+            .collect()
+    }
+}
+
+/// The guard an allocation install's `Ok` arm returns: its `Drop` releases one
+/// holder of each member token it acquired and removes a member whose last
+/// holder dropped, unless the token was retired meanwhile.
+struct SimElementGuard {
+    state: Arc<Mutex<SimMemberState>>,
+    keys: Vec<(SimMember, u64)>,
+}
+
+impl InterceptGuard for SimElementGuard {}
+
+impl Drop for SimElementGuard {
+    fn drop(&mut self) {
+        let mut state = self.state.lock();
+        for (member, generation) in &self.keys {
+            let Some((live, holders)) = state.tokens.get_mut(member) else {
+                continue;
+            };
+            if *live != *generation {
+                continue;
+            }
+            if *holders > 1 {
+                *holders -= 1;
+            } else {
+                state.tokens.remove(member);
+                state.remove(*member);
+            }
+        }
+    }
+}
+
+/// One scripted outcome for the next `accept` of a [`SimInterceptListener`].
+#[derive(Debug)]
+pub enum SimAcceptScript {
+    /// The next `accept` returns `Ok(accepted)`.
+    Connection(InterceptAccepted),
+    /// The next `accept` returns `Err(OriginalDestination { source })`, with
+    /// `io::Error::from_raw_os_error(errno)`; the listener stays usable.
+    OriginalDestinationFailure { errno: i32 },
+    /// That and every later `accept` returns `Err(Accept { source })`, with
+    /// `io::Error::from_raw_os_error(errno)`: the listener accepts nothing more.
+    ListenerLost { errno: i32 },
+}
+
+/// The socket-free [`InterceptListener`] of [`SimMtlsIntercept`].
+///
+/// Live from its bind until its last `Arc` drops; the adapter holds only a
+/// `Weak` reference. It holds no socket, descriptor, thread, task, timer,
+/// clock, or entropy.
+#[derive(Debug)]
+pub struct SimInterceptListener {
+    addr: SocketAddrV4,
+    state: Mutex<SimListenerState>,
+    wake: Notify,
+}
+
+#[derive(Debug, Default)]
+struct SimListenerState {
+    /// Scripted outcomes, FIFO.
+    scripts: VecDeque<SimAcceptScript>,
+    /// Set once a `ListenerLost` script is taken: every later accept fails.
+    lost: Option<i32>,
+    /// Set by `script_local_addr_failure`: every later `local_addr` fails.
+    local_addr_errno: Option<i32>,
+    /// Accept futures that have been polled, are pending, and are not dropped.
+    parked: usize,
+}
+
+/// Decrements the parked count when a pending accept completes or is dropped.
+struct ParkedAccept<'a> {
+    listener: &'a SimInterceptListener,
+}
+
+impl Drop for ParkedAccept<'_> {
+    fn drop(&mut self) {
+        self.listener.state.lock().parked -= 1;
+    }
+}
+
+impl SimInterceptListener {
+    fn new(addr: SocketAddrV4) -> Self {
+        Self { addr, state: Mutex::new(SimListenerState::default()), wake: Notify::new() }
+    }
+
+    /// Take the next outcome, if one is decided: a lost listener, or the head
+    /// of the script FIFO.
+    fn take_outcome(&self) -> Option<std::result::Result<InterceptAccepted, InterceptAcceptError>> {
+        let script = {
+            let mut state = self.state.lock();
+            if let Some(errno) = state.lost {
+                return Some(Err(InterceptAcceptError::Accept {
+                    source: std::io::Error::from_raw_os_error(errno),
+                }));
+            }
+            let script = state.scripts.pop_front()?;
+            if let SimAcceptScript::ListenerLost { errno } = script {
+                state.lost = Some(errno);
+            }
+            script
+        };
+        Some(match script {
+            SimAcceptScript::Connection(accepted) => Ok(accepted),
+            SimAcceptScript::OriginalDestinationFailure { errno } => {
+                Err(InterceptAcceptError::OriginalDestination {
+                    source: std::io::Error::from_raw_os_error(errno),
+                })
+            }
+            SimAcceptScript::ListenerLost { errno } => Err(InterceptAcceptError::Accept {
+                source: std::io::Error::from_raw_os_error(errno),
+            }),
+        })
+    }
+}
+
+#[async_trait]
+impl InterceptListener for SimInterceptListener {
+    fn local_addr(&self) -> std::io::Result<SocketAddrV4> {
+        let errno = self.state.lock().local_addr_errno;
+        errno.map_or(Ok(self.addr), |errno| Err(std::io::Error::from_raw_os_error(errno)))
+    }
+
+    async fn accept(&self) -> std::result::Result<InterceptAccepted, InterceptAcceptError> {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(InterceptAcceptError::Accept {
+                source: std::io::Error::other(
+                    "sim intercept listener accept polled with no current Tokio runtime",
+                ),
+            });
+        }
+        let mut parked: Option<ParkedAccept<'_>> = None;
+        loop {
+            // Created before the outcome is read, so a script appended
+            // between the read and the await still wakes this future.
+            let notified = self.wake.notified();
+            if let Some(outcome) = self.take_outcome() {
+                drop(parked);
+                return outcome;
+            }
+            if parked.is_none() {
+                self.state.lock().parked += 1;
+                parked = Some(ParkedAccept { listener: self });
+            }
+            notified.await;
+        }
+    }
+}
+
 impl SimMtlsIntercept {
     /// A double with NO fault armed — every method takes its `Ok` arm. Faults
     /// are armed explicitly through the scripting helpers below (no builder
     /// over a *dependency*; these script OUTCOMES, mirroring `SimMtlsResolve`).
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             converge_shared_fault: Mutex::new(None),
             observe_shared_fault: Mutex::new(None),
@@ -159,6 +399,112 @@ impl SimMtlsIntercept {
             bind_fault: Mutex::new(None),
             outbound_fault: Mutex::new(None),
             inbound_fault: Mutex::new(None),
+            members: Arc::new(Mutex::new(SimMemberState::default())),
+            listeners: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// Append `script` to the FIFO of the live listener at `at` and wake a
+    /// parked `accept`. `false`, recording nothing, when no live listener
+    /// holds `at`.
+    #[must_use]
+    pub fn script_accept(&self, at: SocketAddrV4, script: SimAcceptScript) -> bool {
+        let Some(listener) = self.live_listener(at) else {
+            return false;
+        };
+        listener.state.lock().scripts.push_back(script);
+        listener.wake.notify_waiters();
+        true
+    }
+
+    /// Make the live listener at `at` report
+    /// `Err(io::Error::from_raw_os_error(errno))` from `local_addr()` from now
+    /// on. `false`, recording nothing, when no live listener holds `at`.
+    #[must_use]
+    pub fn script_local_addr_failure(&self, at: SocketAddrV4, errno: i32) -> bool {
+        let Some(listener) = self.live_listener(at) else {
+            return false;
+        };
+        listener.state.lock().local_addr_errno = Some(errno);
+        true
+    }
+
+    /// The addresses of every live listener, ascending.
+    #[must_use]
+    pub fn live_listeners(&self) -> Vec<SocketAddrV4> {
+        self.listeners
+            .lock()
+            .iter()
+            .filter(|(_, listener)| listener.strong_count() > 0)
+            .map(|(addr, _)| *addr)
+            .collect()
+    }
+
+    /// The live listener at `at`'s pending, polled, not-dropped `accept`
+    /// futures; 0 when no live listener holds `at`.
+    #[must_use]
+    pub fn parked_accepts(&self, at: SocketAddrV4) -> usize {
+        self.live_listener(at).map_or(0, |listener| listener.state.lock().parked)
+    }
+
+    fn live_listener(&self, at: SocketAddrV4) -> Option<Arc<SimInterceptListener>> {
+        self.listeners.lock().get(&at).and_then(Weak::upgrade)
+    }
+
+    /// Register a socket-free listener: port 0 takes the smallest port ≥ 49152
+    /// no live listener of this adapter holds at that IP; a non-zero address is
+    /// honoured exactly; an address a live listener holds is refused with
+    /// `EADDRINUSE`.
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-01 (B-7)")]
+    #[allow(
+        clippy::result_large_err,
+        reason = "returns the exact InterceptError the port's bind_transparent returns"
+    )]
+    fn register_listener(&self, addr: SocketAddrV4) -> Result<Arc<SimInterceptListener>> {
+        let mut listeners = self.listeners.lock();
+        listeners.retain(|_, listener| listener.strong_count() > 0);
+        let bound = if addr.port() == 0 {
+            let port = (49_152..=u16::MAX)
+                .find(|port| !listeners.contains_key(&SocketAddrV4::new(*addr.ip(), *port)))
+                .ok_or_else(|| InterceptError::TransparentListener {
+                    addr,
+                    source: std::io::Error::from_raw_os_error(libc::EADDRINUSE),
+                })?;
+            SocketAddrV4::new(*addr.ip(), port)
+        } else if listeners.contains_key(&addr) {
+            return Err(InterceptError::TransparentListener {
+                addr,
+                source: std::io::Error::from_raw_os_error(libc::EADDRINUSE),
+            });
+        } else {
+            addr
+        };
+        let listener = Arc::new(SimInterceptListener::new(bound));
+        listeners.insert(bound, Arc::downgrade(&listener));
+        drop(listeners);
+        Ok(listener)
+    }
+
+    /// One snapshot of the owned program and its members, or `None` when no
+    /// program has been converged.
+    fn state_snapshot(&self) -> Option<InterceptState> {
+        let program = self.shared_observation.lock().clone()?;
+        let members = self.members.lock().members.clone();
+        Some(InterceptState { program, policy_route: true, intercept_mark_guard: true, members })
+    }
+
+    /// The typed refusal for a member effect while no program is published —
+    /// the shape the host adapter returns.
+    fn program_not_published() -> InterceptError {
+        InterceptError::NftRuleInstallFailed {
+            op: "shared-element-owner",
+            source: NetlinkError::nft(
+                "shared-element-owner",
+                std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "shared constant program is not published",
+                ),
+            ),
         }
     }
 
@@ -303,7 +649,7 @@ impl MtlsIntercept for SimMtlsIntercept {
 
     fn install_outbound(
         &self,
-        _source_addr: std::net::Ipv4Addr,
+        source_addr: std::net::Ipv4Addr,
         _agent_leg_f_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
         if let Some(fault) = armed(&self.outbound_fault) {
@@ -315,9 +661,13 @@ impl MtlsIntercept for SimMtlsIntercept {
             return Err(materialise(fault, SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)));
         }
 
-        // The double installs no nft rule, so the guard owns nothing and its
-        // `Drop` releases nothing — honouring the `InterceptGuard` contract.
-        Ok(Box::new(InertGuard))
+        // The double installs no nft rule; it records the two members the
+        // host adapter adds, and the guard owns exactly those.
+        let keys = self.members.lock().acquire(&[
+            SimMember::ManagedGuest(source_addr),
+            SimMember::OutboundSource(source_addr),
+        ]);
+        Ok(Box::new(SimElementGuard { state: Arc::clone(&self.members), keys }))
     }
 
     fn install_inbound(
@@ -329,7 +679,68 @@ impl MtlsIntercept for SimMtlsIntercept {
             return Err(materialise(fault, virt));
         }
 
-        Ok(Box::new(InertGuard))
+        let keys = self.members.lock().acquire(&[SimMember::InboundDestination(virt)]);
+        Ok(Box::new(SimElementGuard { state: Arc::clone(&self.members), keys }))
+    }
+
+    fn observe_shared_state(&self) -> Result<Option<InterceptState>> {
+        Ok(self.state_snapshot())
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> Result<Option<InterceptState>> {
+        if self.shared_observation.lock().is_none() {
+            return Ok(None);
+        }
+        self.members.lock().members = expected.clone();
+        Ok(self.state_snapshot())
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> Result<InterceptState> {
+        let mut seen = BTreeSet::new();
+        if let Some(rejected) = destinations
+            .iter()
+            .find(|destination| destination.port() == 0 || !seen.insert(**destination))
+        {
+            return Err(InterceptError::NftElementUpdateFailed {
+                set: InterceptSet::InboundDestinations,
+                operation: InterceptElementOperation::Delete,
+                key: InterceptElementKey::Destination(*rejected),
+                source: NetlinkError::nft(
+                    "shared-element-remove",
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "duplicate or zero-port destination",
+                    ),
+                ),
+            });
+        }
+        if self.shared_observation.lock().is_none() {
+            return Err(Self::program_not_published());
+        }
+        let requested =
+            [SimMember::ManagedGuest(source_addr), SimMember::OutboundSource(source_addr)]
+                .into_iter()
+                .chain(
+                    destinations
+                        .iter()
+                        .map(|destination| SimMember::InboundDestination(*destination)),
+                );
+        let mut state = self.members.lock();
+        for member in requested {
+            // Convergent: an absent member is already its postcondition.
+            // Retiring the token makes every guard over it a no-op.
+            state.remove(member);
+            state.tokens.remove(&member);
+        }
+        drop(state);
+        self.state_snapshot().ok_or_else(Self::program_not_published)
     }
 }
 

@@ -411,6 +411,169 @@ pub trait MtlsIntercept: Send + Sync + 'static {
         virt: SocketAddrV4,
         agent_leg_c_port: u16,
     ) -> Result<Box<dyn InterceptGuard>>;
+
+    /// Observe the complete owned intercept state without mutation.
+    ///
+    /// # Postconditions on `Ok`
+    /// `Ok(None)` exactly when the owned table is absent. Otherwise one
+    /// generation-bracketed observation of the owned table, both chains, the
+    /// three sets, and the eight rules (including the D-295-R19 rule order),
+    /// every dynamic member, the target-table foreign complement, the policy
+    /// route (the `fwmark 0x1 lookup 100` rule and table 100's
+    /// `local 0.0.0.0/0 dev lo` route), and the D-295-R18 intercept-mark guard
+    /// table.
+    ///
+    /// # Edge cases
+    /// Partial, foreign, duplicate, malformed, or generation-unstable state is
+    /// a typed error, never a projection.
+    ///
+    /// # Observable invariants
+    /// Performs no kernel mutation.
+    fn observe_shared_state(&self) -> Result<Option<InterceptState>>;
+
+    /// Converge all three dynamic member sets to exactly `expected` in one
+    /// atomic batch: insert missing members and delete unexpected ones.
+    ///
+    /// # Preconditions
+    /// When this adapter holds a recorded program identity, the observed
+    /// program must equal it; when it holds none (a fresh process, before
+    /// [`converge_shared`](Self::converge_shared)), the observed program must
+    /// have the canonical owned shape with any non-zero targets. Otherwise a
+    /// typed refusal with no mutation.
+    ///
+    /// # Postconditions on `Ok`
+    /// `Ok(None)` without any write when the owned table is absent.
+    /// `Ok(Some(state))` only after a read-back whose members equal `expected`,
+    /// with the program and the foreign complement unchanged.
+    ///
+    /// # Edge cases
+    /// A batch rejection preserves the pre-state. A post-commit read failure
+    /// or mismatch performs one inverse transition to the captured pre-state
+    /// plus a verification, then returns a sourced error retaining both causes.
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> Result<Option<InterceptState>>;
+
+    /// Remove one allocation's dynamic members, convergently: the requested
+    /// set is `{managed(source_addr), outbound(source_addr)} ∪ {inbound(d)}`.
+    ///
+    /// # Preconditions
+    /// Duplicate or zero-port `destinations` are rejected before any I/O. The
+    /// adapter's recorded program identity must equal the observed program;
+    /// otherwise a typed refusal with no mutation.
+    ///
+    /// # Postconditions on `Ok(state)`
+    /// Exactly those requested members that were present were deleted in one
+    /// atomic batch; the returned post-observation shows every requested member
+    /// absent, and every other member, the program, and the foreign complement
+    /// unchanged. Every process-local element token for the requested keys is
+    /// retired, so their guards' `Drop` performs no effect.
+    ///
+    /// # Edge cases
+    /// Members already absent before the call are simply missing from the
+    /// returned state; they are not an error. A batch rejection preserves the
+    /// pre-state; a post-commit read failure or mismatch performs one inverse
+    /// transition plus a verification and returns a sourced error retaining
+    /// both causes. On `Err` the element tokens are untouched.
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> Result<InterceptState>;
+}
+
+/// The three dynamic member sets of the owned intercept program.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InterceptMembers {
+    /// Managed guest source addresses.
+    pub managed_guest_ips: BTreeSet<Ipv4Addr>,
+    /// Admitted outbound guest sources.
+    pub outbound_sources: BTreeSet<Ipv4Addr>,
+    /// Registered inbound destinations.
+    pub inbound_destinations: BTreeSet<SocketAddrV4>,
+}
+
+/// One complete observation of the owned intercept state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterceptState {
+    /// The owned constant program (`InterceptPostcondition::ConstantRules`).
+    pub program: InterceptPostcondition,
+    /// Whether the policy route is present: the `fwmark 0x1 lookup 100` rule
+    /// and table 100's `local 0.0.0.0/0 dev lo` route (review finding F18).
+    pub policy_route: bool,
+    /// Whether the D-295-R18 intercept-mark guard table is present and exact.
+    pub intercept_mark_guard: bool,
+    /// The dynamic members.
+    pub members: InterceptMembers,
+}
+
+/// A listener the [`MtlsIntercept`] port owns (DISTILL gap B-7).
+///
+/// It exposes exactly the operations the worker uses: its bound address and an
+/// accept. Sharing is through `Arc`, so no descriptor is duplicated;
+/// cooperative stop is the cancellation of an [`accept`](Self::accept) future.
+#[async_trait::async_trait]
+pub trait InterceptListener: Send + Sync + 'static {
+    /// The bound address, the same for the listener's lifetime. Non-mutating.
+    ///
+    /// # Edge cases
+    /// `Err` means the adapter cannot read its bound address (on the host, a
+    /// `getsockname` failure).
+    fn local_addr(&self) -> std::io::Result<SocketAddrV4>;
+
+    /// Take exactly one connection from this listener.
+    ///
+    /// # Postconditions on `Ok(accepted)`
+    /// The caller owns `stream`; `peer` is the remote address the accept
+    /// reported and `local` the accepted connection's local address (on the
+    /// host, the original destination the peer dialed).
+    ///
+    /// # Edge cases
+    /// - `Err(Accept)` — the accept itself failed; terminal for the caller. A
+    ///   listener that can accept nothing more completes a pending or later
+    ///   `accept` with `Accept`; it never waits forever.
+    /// - `Err(OriginalDestination)` — one connection was accepted, its local
+    ///   address could not be read, and the adapter closed it; the listener
+    ///   stays usable.
+    /// - Polled when no Tokio runtime is current, it returns `Err(Accept)`
+    ///   with a cause-distinct `io::Error`; it never panics.
+    ///
+    /// # Observable invariants
+    /// Waits until a connection is ready or the accept fails, with no timeout,
+    /// clock read, polling interval, or busy wait. Cancel-safe: dropping a
+    /// pending future takes no connection.
+    async fn accept(&self) -> std::result::Result<InterceptAccepted, InterceptAcceptError>;
+}
+
+/// One connection taken from an [`InterceptListener`].
+#[derive(Debug)]
+pub struct InterceptAccepted {
+    /// The accepted connection, owned by the caller; dropping it closes it.
+    pub stream: std::os::fd::OwnedFd,
+    /// The remote address the accept reported.
+    pub peer: SocketAddrV4,
+    /// The accepted connection's local address.
+    pub local: SocketAddrV4,
+}
+
+/// The two failure outcomes of [`InterceptListener::accept`], each with its own
+/// caller obligation (end the accept task, or skip one connection).
+#[derive(Debug, thiserror::Error)]
+pub enum InterceptAcceptError {
+    /// The accept itself failed; the listener accepts nothing more.
+    #[error("intercept listener accept failed: {source}")]
+    Accept {
+        #[source]
+        source: std::io::Error,
+    },
+    /// One connection was accepted and its original destination could not be
+    /// recovered; the adapter closed it and the listener stays usable.
+    #[error("original destination of an accepted connection could not be recovered: {source}")]
+    OriginalDestination {
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Production [`MtlsIntercept`] binding.
@@ -932,6 +1095,30 @@ impl MtlsIntercept for HostMtlsIntercept {
         }
         install_inbound_tproxy(virt, agent_leg_c_port)
             .map(|guard| Box::new(guard) as Box<dyn InterceptGuard>)
+    }
+
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
+    fn observe_shared_state(&self) -> Result<Option<InterceptState>> {
+        todo!("RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02")
+    }
+
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> Result<Option<InterceptState>> {
+        let _ = expected;
+        todo!("RED scaffold: D-295-R12 converge_allocation_elements — DELIVER step 08-02")
+    }
+
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-01")]
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> Result<InterceptState> {
+        let _ = (source_addr, destinations);
+        todo!("RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01")
     }
 }
 

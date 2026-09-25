@@ -763,7 +763,11 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
         mtls_identity_override: Some(pki.identity()),
         // THE seam under test: force the DNS responder's `probe()` to fail.
         dns_probe_fault: Some("injected dns probe fault (D2)".to_owned()),
-        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+        ..ServerConfig::new(
+            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        )
     };
 
     let wiring =
@@ -775,6 +779,10 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
         Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
     )
     .await;
 

@@ -576,6 +576,9 @@ components:
             description: |-
               Last-transition structured record. `None` for never-transitioned
               rows (e.g. the very first Pending observation).
+        network_cleanup_pending:
+          type: boolean
+          description: Network cleanup for this allocation has not finished (D-295-R20).
         node_id:
           type: string
         reason:
