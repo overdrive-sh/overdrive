@@ -10,19 +10,6 @@ it without a network round trip. Overdrive's [built-in CA](/docs/concepts/identi
 mints; this subsystem holds, reads, and drops. It is a reconciler that converges
 the set of held identities against the set of running allocations.
 
-<Callout title="Wired into serve, backed by the persistent CA, now read on the wire">
-	The lifecycle runs in `overdrive serve` today: the reconciler is registered, and
-	every running allocation gets an SVID issued, held, audited, re-issued near
-	expiry, and dropped on stop. It is backed by the
-	[built-in CA](/docs/concepts/identity)'s **persistent**, envelope-encrypted root
-	— adopted at boot, the same root across restarts. A production consumer
-	**reads** a held SVID to present it on a connection:
-	[transparent mTLS](/docs/concepts/transparent-mtls) reads it through the port
-	below to run the mesh handshake in both directions. The ingress gateway and the
-	telemetry sink are still unbuilt. See
-	[Where it stands](#where-it-stands).
-</Callout>
-
 ## The CA mints; nothing held what it minted
 
 Overdrive is sidecarless (see the [architecture overview](/docs/concepts/architecture)).
@@ -120,12 +107,9 @@ double:
   dropped, reading it returns `None` — the read surface reflects the drop, so a
   consumer can never read back a credential the lifecycle has already removed.
 
-A production consumer now binds this port: the
-[transparent mTLS](/docs/concepts/transparent-mtls) proxy reads the held SVID
-through it to run the outbound mesh handshake, and takes the read port as a
-required constructor parameter, so it cannot be wired without one. The remaining
-consumers — the ingress gateway and the telemetry sink — will bind the same port
-when they are built.
+The [transparent mTLS](/docs/concepts/transparent-mtls) proxy binds this port. It
+reads the held SVID through it to run the mesh handshake, and it takes the read
+port as a required constructor parameter, so it cannot be wired without one.
 
 ## Surviving a restart
 
@@ -136,6 +120,10 @@ reads as running-but-not-held, which is precisely the `IssueSvid` trigger. The
 control plane re-issues a fresh, audited identity for each one. No special
 recovery path, no held-state serialization — the same two-line rule that runs
 every tick also rebuilds the held set after a crash.
+
+The root that signs the fresh identities does not change. The
+[built-in CA](/docs/concepts/identity) adopts the same persistent root on every
+boot, so a certificate issued before the restart still verifies after it.
 
 The reconciler's only memory across ticks is retry bookkeeping: how many times an
 issuance has been attempted, and when the last one failed. A failed re-issue
@@ -183,32 +171,6 @@ attempt past the certificate's own expiry. (External *public-certificate* rotati
 the ACME request-then-wait-for-DNS dance, is the genuinely
 [workflow-shaped](/docs/concepts/workflows) case — a separate concern from these
 internal SVIDs.)
-
-## Where it stands
-
-The lifecycle is implemented and wired into a running control plane, with one
-honest boundary:
-
-- **Live in serve:** the `SvidLifecycle` reconciler is registered in the boot
-  path, and `IdentityMgr` is threaded into the control plane's shared state. A
-  running allocation gets an SVID issued, held, and audited; a near-expiry one is
-  re-issued; a stopped one has its identity dropped. Convergence and audit are
-  proven by simulation tests and a test-tier `openssl verify` of the minted chain.
-- **Backed by the persistent root:** the CA composed into `serve` is the
-  [built-in CA](/docs/concepts/identity)'s envelope-encrypted root, adopted at boot
-  under the operator KEK — the same root across restarts. A certificate issued
-  today verifies under the same anchor after a restart; the held set is rebuilt by
-  re-issuing, but the root that signs it does not change.
-- **A consumer presents it:** the [transparent mTLS](/docs/concepts/transparent-mtls)
-  proxy reads a held SVID through the port and presents it on inbound and outbound
-  mesh connections, encrypting them with TLS 1.3 — proven by a packet capture. The
-  ingress gateway and the telemetry sink that would also read the held SVID are
-  unbuilt, so identity is read and presented across the mesh but not yet on those
-  paths.
-- **One inspection verb, no issue verb:** holding and dropping identity is an
-  internal mechanism with no operator command to mint one. `overdrive workload describe`
-  does report the current certificate for each running allocation — serial, SPIFFE
-  identity, issuer serial, and expiry — drawn from the audit rows, never the key.
 
 ## Where to go next
 

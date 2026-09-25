@@ -148,9 +148,9 @@ row — the running-allocation set, the service backends — lists the kinds it
 reads. One runtime task, the **interest router**, subscribes to the observation
 store's change feed once and, on every accepted row change, submits an evaluation
 to each reconciler that declared interest in that kind. An allocation exiting
-writes a single `alloc_status` row, and the router wakes the four reconcilers
-that read it — workload lifecycle, backend discovery, service lifecycle, and SVID
-lifecycle — without the writer naming any of them.
+writes a single `alloc_status` row, and the router wakes the three reconcilers
+that read it — workload lifecycle, service lifecycle, and SVID lifecycle —
+without the writer naming any of them.
 
 `resync_schedule()` declares a **level wake**: a period and a scope —
 "re-evaluate `node/<id>` every 30 seconds." A reconciler that hydrates its actual
@@ -224,7 +224,7 @@ inputs.
 
 `reconcile` returns `Vec<Action>` — typed descriptions of what should happen, not
 the happening itself. A separate **action shim** executes them: `StartAllocation`
-launches a process, `DataplaneUpdateService` programs an eBPF map,
+boots a microVM, `DataplaneUpdateService` programs an eBPF map,
 `WriteServiceBackendRow` records observation, `StartWorkflow` launches a durable
 sequence. This boundary is load-bearing. It keeps `reconcile` pure and puts every
 side effect behind one gate the runtime drives, which is what lets the loop be
@@ -234,7 +234,7 @@ the producer-push path from
 
 ## The reconcilers that ship
 
-Eight reconcilers run in `overdrive serve`:
+Seven reconcilers run in `overdrive serve`:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and owns every restart. A crash and a liveness kill both draw down its one
@@ -242,13 +242,13 @@ Eight reconcilers run in `overdrive serve`:
   restart authority; no other reconciler restarts anything.
 - **ServiceLifecycle** — drives a service through its health gates from probe
   results: not `Stable` until startup passes, not sent traffic until readiness
-  passes. On a terminal liveness failure it emits `StopAllocation` and stops
-  there — the restart belongs to WorkloadLifecycle's single budget, not the
-  service layer.
-- **BackendDiscoveryBridge** — turns live allocations into `service_backends`
-  observation rows.
-- **ServiceMapHydrator** — programs the eBPF service map when the backend set
-  drifts, emitting `DataplaneUpdateService`.
+  passes. It is the only publisher of `service_backends` observation rows, which
+  record each backend and its health. On a terminal liveness failure it emits
+  `StopAllocation` and stops there — the restart belongs to WorkloadLifecycle's
+  single budget, not the service layer.
+- **ServiceMapHydrator** — programs the eBPF service maps from those rows when
+  the backend set drifts, emitting `DataplaneUpdateService` and local-backend
+  register and deregister actions.
 - **WorkflowLifecycle** — the bridge to the workflow engine: re-emits
   `StartWorkflow` for a workflow instance that should be running but has no live
   task. See [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
@@ -272,7 +272,7 @@ sequence — rolling a certificate through four steps, migrating an allocation
 between nodes. For those a reconciler starts a
 [workflow](/docs/concepts/workflows) by emitting `Action::StartWorkflow`, and
 later observes the workflow's terminal status to converge the instance.
-`WorkflowLifecycle` is the reconciler that ships for exactly this. The full loop —
+`WorkflowLifecycle` is the reconciler for exactly this. The full loop —
 including how a workflow emits actions back into the same pipeline — is in
 [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
 

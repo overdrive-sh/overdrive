@@ -1,12 +1,12 @@
 ---
 title: CLI reference
-description: Every overdrive command, flag, and exit code that ships in Phase 1 — serve, deploy, and the job, node, workload, and cluster inspection verbs.
+description: Every overdrive command, flag, and exit code — serve, deploy, and the job, node, workload, and cluster inspection verbs.
 ---
 
 `overdrive` is the single binary for both running the control plane and
-operating it. This page documents the command surface that ships today. Phase 1
-is single-node: there is no node-join flow and no multi-region configuration, so
-the commands here assume one machine running one control plane.
+operating it. The control plane runs on a single node. There is no node-join
+flow and no multi-region configuration, so the commands here assume one machine
+running one control plane.
 
 ## How the CLI finds the server
 
@@ -78,8 +78,8 @@ overdrive job stop <ID>      # stop the workload with this id
 
 `stop` declares that the named workload should no longer run; the control plane
 records the intent and its allocations wind down. To read back what is running,
-use [`workload describe <ID>`](#overdrive-workload) — `job list` is parsed but not
-yet wired (see [Accepted but not yet functional](#accepted-but-not-yet-functional)).
+use [`workload describe <ID>`](#overdrive-workload) — `job list` parses but does
+nothing (see [Commands that parse but do nothing](#commands-that-parse-but-do-nothing)).
 
 ## `overdrive workload`
 
@@ -124,16 +124,16 @@ overdrive cluster status
 `cluster status` reports the control plane's current mode — `single` on a fresh
 node.
 
-## Accepted but not yet functional
+## Commands that parse but do nothing
 
 Two subcommands are part of the `clap` argv surface — they parse, and
-`--help` lists them — but their handlers are not wired in Phase 1. Each
-currently logs `command not yet wired` and exits `0` without doing anything:
+`--help` lists them — but they have no handler. Each logs
+`command not yet wired` and exits `0` without doing anything:
 
 | Command | State |
 | --- | --- |
-| `overdrive job list` | Parsed, no handler. Use [`workload describe <ID>`](#overdrive-workload) to inspect a workload today. |
-| `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. High-availability mode is design-stage; Phase 1 is single-node. |
+| `overdrive job list` | Parsed, no handler. Use [`workload describe <ID>`](#overdrive-workload) to inspect a workload. |
+| `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. |
 
 They are documented here so the behavior is not mistaken for a bug: the command
 appears to succeed (exit `0`) but has no effect.

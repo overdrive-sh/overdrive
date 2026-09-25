@@ -10,7 +10,7 @@ requirements, so they live behind different abstractions, in different stores,
 with different propagation mechanisms.
 
 The guiding principle, from Overdrive's design: *strong consistency where it
-matters, gossip where it scales.*
+matters, eventual consistency where it scales.*
 
 ## Why two kinds of state
 
@@ -26,7 +26,6 @@ Intent and observation pull in opposite directions:
 | | Intent — *what should be* | Observation — *what is* |
 | --- | --- | --- |
 | Consistency | Strong (linearizable) | Eventual (converges) |
-| Mechanism | Raft consensus | Gossip CRDT |
 | Written by | Typed actions only | The authoritative observer of each row |
 | Examples | desired job spec, declared policy | allocation status, node health |
 
@@ -39,21 +38,8 @@ value that belongs to one layer cannot be silently written to the other,
 because the type system and the trait surfaces will not allow it.
 
 This matters because the consistency split is only meaningful if it cannot be
-bypassed. By making the two stores non-substitutable, the design turns "don't
-cross the streams" from a guideline into a compile-time property.
-
-<Tabs items={["Intent", "Observation"]}>
-	<Tab value="Intent">
-		Declared state — the desired shape of the cluster. It is written only via
-		typed actions that go through Raft, so every replica agrees on the same
-		ordered history. This is the source of truth.
-	</Tab>
-	<Tab value="Observation">
-		Measured state — what each node currently reports. It propagates by gossip
-		and is allowed to be briefly out of date on any given node, as long as the
-		cluster converges. Each row has exactly one authoritative writer.
-	</Tab>
-</Tabs>
+bypassed. Because the two stores cannot stand in for each other, the boundary is
+a compile-time property, not a guideline.
 
 ## Reconciliation closes the loop
 

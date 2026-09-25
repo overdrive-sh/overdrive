@@ -1,19 +1,17 @@
 ---
 title: Deploy a workload
-description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a process or a Cloud Hypervisor microVM.
+description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a Cloud Hypervisor microVM service or job.
 ---
 
-This guide takes you from an empty machine to a deployed workload using the
-commands Overdrive ships today. You start a control plane, write a TOML spec,
-deploy it, and confirm the control plane accepted it. Every command here runs on
-a single node — Phase 1 is single-node by design, so there is no cluster to join
-and no membership to configure first.
+This guide takes you from an empty machine to a deployed workload. You start a
+control plane, write a TOML spec, deploy it, and confirm the control plane
+accepted it. Every command here runs on a single node, so there is no cluster to
+join and no membership to configure first.
 
 <Callout title="Prerequisites">
 	A build of the `overdrive` binary and a writable home directory. The control
 	plane stores its state on the local disk and binds a TLS listener on
-	loopback; it needs no external network, database, or kernel features to run
-	this flow.
+	loopback. It needs no external network or database.
 </Callout>
 
 ## Start the control plane
@@ -50,27 +48,31 @@ file every other command reads to find and authenticate to the server.
 
 ## Write a workload spec
 
-A workload is a TOML file. Its top-level section names the workload's **kind**:
-`[service]` for a long-running workload that serves traffic, `[job]` for one that
-runs to completion. Every spec also carries an `[exec]` block — the process to
-run — and a `[resources]` block. A service additionally declares one or more
-`[[listener]]` ports and, under them, its health-check probes:
+A workload is a TOML file, and every workload runs as a
+[Cloud Hypervisor microVM](/docs/concepts/microvms). The spec's top-level
+section names the workload's **kind**: `[service]` for a long-running workload
+that serves traffic, `[job]` for one that runs to completion. Every spec also
+carries a `[vm]` block — what to boot and what to run inside the guest — and a
+`[resources]` block. A service additionally declares one or more `[[listener]]`
+ports and its health-check probes:
 
 ```toml title="payments.toml"
 [service]
 id       = "payments"   # name across the cluster — stop / inspect / re-deploy by it
 replicas = 1
 
-[exec]
-command = "/opt/payments/bin/payments-server"
+[vm]
+command = "/opt/payments/bin/payments-server"  # the command run inside the guest
 args    = ["--port", "8080"]
+kernel  = "/srv/vm/payments/kernel"            # host path to a bootable kernel image
+rootfs  = "/srv/vm/payments/rootfs.ext4"       # host path to an ext4 root filesystem
 
 [resources]
-cpu_milli    = 500         # CPU in thousandths of a core (500 = half a core)
-memory_bytes = 134217728   # hard memory cap in bytes (134217728 = 128 MiB)
+cpu_milli    = 500         # CPU in thousandths of a core; sets the guest's vCPU count
+memory_bytes = 134217728   # the guest's memory in bytes (134217728 = 128 MiB)
 
 [[listener]]
-port     = 8080   # a port the service holds open
+port     = 8080   # a port the service holds open inside the guest
 protocol = "tcp"
 
 # Readiness — may it receive traffic yet?
@@ -86,6 +88,12 @@ path = "/healthz"
 port = 8080
 ```
 
+All four `[vm]` fields are required. `command` and `args` name the program to run
+inside the guest. `kernel` and `rootfs` are host paths to a bootable kernel and an
+ext4 root filesystem. You supply both, because Overdrive builds neither. The spec
+carries no network settings: the platform assigns the guest's address and wires
+it into the [encrypted mesh](/docs/concepts/transparent-mtls).
+
 ### Health checks
 
 Health-check probes tell the platform when a service has started, when it is
@@ -95,58 +103,41 @@ answers "did it succeed?".
 
 - **Three roles.** `startup` gates "has it come up?", `readiness` gates "send it
   traffic", and `liveness` gates "restart it if this fails".
-- **Three mechanics.** `type = "tcp"` connects to a `port`; `type = "http"`
+- **Two mechanics.** `type = "tcp"` connects to a `port`; `type = "http"`
   issues a GET to a `path` (plain HTTP; the path must start with `/`) on a
-  `port`; `type = "exec"` runs a `command` inside the workload and treats exit
-  `0` as a pass.
+  `port`. Probes run on the host and target the guest's address.
 - **A startup probe is inferred by default.** Declare none and the platform
   synthesises a single TCP probe against your first listener, so a service is
   never reported "up" before something is actually listening. Write
   `health_check.startup = []` to opt out.
 - **Each probe is tunable.** `timeout_seconds` (default 5), `interval_seconds`
-  (startup 2, readiness 2, liveness 10), and `max_attempts` (default 30 — a 60s
-  startup deadline), plus `failure_threshold` for liveness (default 3) and
-  `success_threshold` for readiness (default 1).
+  (default 2), and `max_attempts` (default 30 — a 60s startup deadline), plus
+  `failure_threshold` for liveness (default 3) and `success_threshold` for
+  readiness (default 1).
 
-## Run a microVM instead of a process
+## Run a job instead of a service
 
-A `[vm]` block runs the workload as a Cloud Hypervisor microVM — its own kernel,
-hardware-virtualised — in place of `[exec]`. A spec carries exactly one driver
-table, so `[vm]` and `[exec]` are alternatives, not a pair. A microVM runs under
-`[job]`; a `[vm]` spec under `[service]` is rejected at deploy time.
+A `[job]` runs its command to completion and stops. It declares no listeners and
+no health checks:
 
 ```toml title="nightly-report.toml"
 [job]
 id = "nightly-report"   # name across the cluster — stop / inspect / re-deploy by it
 
 [vm]
-command = "/usr/bin/report"      # the command run INSIDE the guest
-args     = ["--out", "/var/out"]
-kernel   = "/srv/vm/kernel"      # host path to a bootable kernel image
-rootfs   = "/srv/vm/report.ext4" # host path to an ext4 root filesystem
+command = "/usr/bin/report"
+args    = ["--out", "/var/out"]
+kernel  = "/srv/vm/report/kernel"
+rootfs  = "/srv/vm/report/rootfs.ext4"
 
 [resources]
-cpu_milli    = 500         # sizes the guest's vCPUs
-memory_bytes = 134217728   # sizes the guest's memory (128 MiB)
+cpu_milli    = 500
+memory_bytes = 134217728
 ```
 
-All four `[vm]` fields are required. `command` and `args` name the program to run
-inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
-ext4 root filesystem you supply. `[resources]` sizes the VM the way it caps a
-process — `cpu_milli` derives the vCPU count, `memory_bytes` sets the guest's
-memory.
-
-Deploy, inspect, and stop a microVM job with the same verbs as any other workload
-— the steps below are identical. The allocation reaches `Running` once the guest
-has booted, and its terminal state carries the guest's own exit code, not the
-hypervisor's.
-
-<Callout title="What the node needs">
-	A microVM boots through KVM, so the node runs `cloud-hypervisor` on a host with
-	`/dev/kvm`. The kernel and rootfs are yours to supply — Overdrive builds
-	neither. For what a microVM is and how it stays isolated, see
-	[microVMs](/docs/concepts/microvms).
-</Callout>
+Deploy, inspect, and stop a job with the same verbs as a service — the steps
+below are identical. The allocation reaches `Running` once the guest has booted,
+and its terminal state carries the guest's own exit code, not the hypervisor's.
 
 ## Deploy it
 
@@ -227,6 +218,8 @@ the new intent and the workload's allocations wind down.
 
 ## Where to go next
 
+- What a workload runs in, and how it stays isolated:
+  [microVMs](/docs/concepts/microvms).
 - Every command, flag, and exit code in one place:
   [CLI reference](/docs/reference/cli).
 - Why the control plane keeps your declared spec (intent) separate from what is

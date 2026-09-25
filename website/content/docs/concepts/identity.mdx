@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and a node-agent L4 proxy now presents it on the wire to encrypt traffic between workloads.
+description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and a node-agent L4 proxy presents it on the wire to encrypt traffic between workloads.
 ---
 
 Overdrive is its own certificate authority. Every workload gets a cryptographic
@@ -8,30 +8,16 @@ identity — a SPIFFE SVID — minted by a built-in CA the platform runs itself,
 no external PKI to stand up: no SPIRE, no Vault, no cert-manager. This page
 describes the built-in CA and how it works.
 
-<Callout title="Wired into serve, and now on the wire">
-	The built-in CA runs in `overdrive serve` today. At boot the control plane
-	resolves the operator key-encryption key, decrypts and adopts the persistent
-	root, and refuses to start if the envelope will not open. Every running
-	allocation then gets a SPIFFE SVID issued, held, and audited, and
-	`overdrive workload describe` reports each one. A held SVID reaches the wire:
-	[transparent mTLS](/docs/concepts/transparent-mtls) presents it on inbound and
-	outbound mesh connections and encrypts the traffic with TLS 1.3. The consumers
-	still unbuilt are the ingress gateway and the telemetry sink, so identity is
-	minted, persistent, and presented across the mesh, but not yet on those two
-	paths. See [Where it stands](#where-it-stands).
-</Callout>
-
 ## Two TLS stories, two CAs
 
 Overdrive has two distinct uses of TLS, with two separate trust roots, and it is
 worth keeping them apart:
 
-- **Operator ↔ control plane (shipped today).** `overdrive serve` mints a
+- **Operator ↔ control plane.** `overdrive serve` mints a
   boot-time ephemeral CA, issues itself a server leaf and you a client leaf, and
   writes the trust triple to `~/.overdrive/config`. This is the mutual TLS the CLI
   uses, described in the
-  [architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
-  It runs now.
+  [architecture overview](/docs/concepts/architecture#two-mutual-tls-paths).
 - **Workload ↔ workload (this page).** The built-in CA issues
   identities to the *workloads themselves* — SPIFFE SVIDs that let one workload
   authenticate another. A separate subsystem with its own persistent trust root;
@@ -43,17 +29,19 @@ Everything below is the second story.
 
 A workload's identity is a **SPIFFE SVID**: an X.509 leaf certificate carrying
 exactly one SPIFFE URI as its subject alternative name, like
-`spiffe://overdrive.local/job/payments/alloc/a1b2c3`. The identity names the
-workload — its job and allocation — not a hostname or an IP, so it travels with
-the workload wherever it runs.
+`spiffe://overdrive.local/workload/payments/alloc/a1b2c3`. The identity names the
+workload and its allocation — not a hostname or an IP, so it travels with the
+workload wherever it runs.
 
 SVIDs are **short-lived** — a leaf is valid for about an hour — and **re-issued,
 not renewed**: as an identity nears expiry the platform mints a fresh certificate
 with a new serial and a new validity window rather than extending the old one.
 Short lifetimes shrink the blast radius of a leaked key and make revocation mostly
 a matter of waiting one out. Because Overdrive is sidecarless, the **node agent
-holds the leaf private key** and runs the TLS handshake on the workload's behalf —
-there is no in-pod agent to hold it.
+holds the leaf private key** — there is no in-pod agent to hold it. The agent's
+[transparent mTLS](/docs/concepts/transparent-mtls) proxy runs the TLS handshake
+on the workload's behalf and presents the SVID on inbound and outbound mesh
+connections.
 
 ## The trust hierarchy
 
@@ -135,24 +123,6 @@ the same seed produces byte-identical certificates and issuance replays exactly.
 The core crate defines only the trait — no crypto backend sits on the core compile
 path.
 
-## Where it stands
-
-The built-in CA runs in `overdrive serve`:
-
-- **Wired and live:** at boot the control plane resolves the operator KEK,
-  decrypts the persistent root and the node intermediate, and adopts them before
-  issuing anything — refusing to start if an envelope will not open. Every running
-  allocation gets an audited SVID, and `overdrive workload describe` reports each one.
-  The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
-  intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
-  host/sim parity all sit on the production path.
-- **On the wire, with consumers still to come:** a held SVID is presented on
-  the wire. [Transparent mTLS](/docs/concepts/transparent-mtls) reads it to run the
-  mesh handshake in both directions and encrypt the connection with TLS 1.3 over
-  kTLS — provable with a packet capture. The remaining consumers, the ingress
-  gateway and the telemetry sink, are unbuilt, so a workload's identity is carried
-  across the mesh but not yet on those paths.
-
 ## Where to go next
 
 - How each identity is held, dropped, and re-issued near expiry:
@@ -160,6 +130,6 @@ The built-in CA runs in `overdrive serve`:
 - How a held identity is presented on the wire to encrypt traffic between workloads:
   [transparent mTLS](/docs/concepts/transparent-mtls).
 - The mutual TLS that secures the operator connection:
-  [the architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
+  [the architecture overview](/docs/concepts/architecture#two-mutual-tls-paths).
 - Why issuance is replayable under simulation:
   [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

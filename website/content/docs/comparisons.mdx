@@ -1,6 +1,6 @@
 ---
 title: Overdrive vs Kubernetes, Nomad, and Fly.io
-description: How Overdrive's single-binary, eBPF-native design compares to Kubernetes, HashiCorp Nomad, and Fly.io — feature by feature, and where each of those platforms is the better choice today.
+description: How Overdrive's single-binary, eBPF-native design compares to Kubernetes, HashiCorp Nomad, and Fly.io — feature by feature, and where each of those platforms is the better choice.
 ---
 
 Overdrive folds into one Rust binary what other platforms assemble from
@@ -15,30 +15,21 @@ product you deploy onto, not one you operate.
 This page compares the four on architecture and design philosophy. It is not a
 maturity claim.
 
-<Callout title="Read this first: Overdrive is early">
-	Overdrive is at Phase 1 — single-node and pre-production. Kubernetes, Nomad,
-	and Fly.io are production systems running real workloads at scale today.
-	Where this page compares Overdrive's design against a competitor's shipped
-	behaviour, it is comparing an intended architecture to a proven one. Where a
-	competitor is more mature, more proven, or simply the right choice, the page
-	says so plainly.
-</Callout>
-
 ## The short version
 
 | | Overdrive | Kubernetes | Nomad | Fly.io |
 | --- | --- | --- | --- | --- |
 | Orchestration | Reconcilers + workflows | Controllers + CRDs | Bin-packing scheduler | flyd + Machines API |
-| Workload types | exec · microVM · VM · unikernel · WASM | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
+| Workload types | Cloud Hypervisor microVMs | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
 | Load balancing | eBPF XDP, in-kernel | CNI; eBPF via Cilium | basic; LB via Consul | fly-proxy (userspace, Rust) |
 | Service mesh | Sidecarless, in the binary | Add-on: sidecar or sidecarless | Consul Connect (add-on) | Not a per-workload mesh |
 | Workload-to-workload mTLS | Kernel kTLS, per-workload SPIFFE | Mesh add-on | Consul Connect (add-on) | WireGuard (machine-level) |
-| Intent store | Raft (per region) | etcd | Raft (in servers) | managed |
-| Observation store | Corrosion CRDT gossip | etcd (one store for all) | Raft state | Corrosion CRDT gossip |
+| Intent store | Strongly consistent, separate store | etcd | Raft (in servers) | managed |
+| Observation store | Eventually consistent, separate store | etcd (one store for all) | Raft state | Corrosion CRDT gossip |
 | Identity | Built-in CA, SPIFFE, default mTLS | SPIRE / mesh add-on | Vault + Consul (add-ons) | WireGuard keys |
 | Correctness testing | Deterministic simulation, day one | Standard testing | Standard testing | Not publicly documented |
 | Operational footprint | One binary | etcd + several components | One binary (+ Consul + Vault) | Managed for you |
-| Maturity | Phase 1, pre-production | Dominant, proven at scale | Mature, proven | Proven at global scale |
+| Maturity | Pre-production | Dominant, proven at scale | Mature, proven | Proven at global scale |
 | License | Source-available (FSL-1.1-ALv2) | Apache 2.0 | Business Source License | Proprietary |
 
 The rest of this page explains the rows that matter, one competitor at a time.
@@ -53,9 +44,9 @@ Then the primitives changed.
 Stable eBPF and XDP put a programmable load balancer in the kernel. kTLS moves
 encryption off the userspace proxy. SPIFFE gives every workload a cryptographic
 identity. WASM with the Component Model makes a sandboxed, language-agnostic
-extension model practical. openraft and Corrosion make the consistency split
-tractable in a single process. None of these were production-ready when
-Kubernetes set its shape.
+extension model practical. Embeddable Rust consensus and replication libraries
+make the consistency split tractable in a single process. None of these were
+production-ready when Kubernetes set its shape.
 
 Build on the 2026 primitives instead of retrofitting them, and the parts that
 Kubernetes keeps separate collapse into one binary. That is the bet. It is a
@@ -88,10 +79,10 @@ proved and changes three things underneath it.
   networking from a CNI plugin, mTLS from a mesh add-on or SPIRE, and certificates
   from cert-manager. Overdrive builds the load balancer, the mesh, and the
   certificate authority into the same binary that runs the control plane.
-- **All workload types are first-class.** Kubernetes runs containers; VMs need
-  KubeVirt and stronger isolation needs Kata Containers — both add-ons. Overdrive
-  runs exec processes, microVMs, full VMs, unikernels, and WASM modules through
-  one driver interface, one identity model, and one dataplane.
+- **Every workload is a microVM.** Kubernetes runs containers that share the
+  host kernel; VMs need KubeVirt and stronger isolation needs Kata Containers —
+  both add-ons. Overdrive runs every workload as a Cloud Hypervisor microVM with
+  its own kernel, so hardware isolation is the default rather than an add-on.
 
 **The honest counterweight.** Sidecarless, eBPF-based service mesh is no longer
 a Kubernetes weakness — Cilium and Istio's ambient mode (GA in November 2024,
@@ -106,8 +97,8 @@ Kubernetes wins, and will for a long time.
 	your cloud, a large hiring pool, or one of the thousands of existing operators.
 	Choose **Overdrive** when operational simplicity matters more than ecosystem
 	maturity — one binary instead of etcd, a CNI plugin, a mesh, and cert-manager —
-	and you want built-in mTLS and mixed workload types (containers *and* microVMs
-	*and* WASM under one model). The cost is pre-production software.
+	and you want built-in mTLS and hardware-isolated microVMs for every workload.
+	The cost is pre-production software.
 </Callout>
 
 ## Versus Nomad
@@ -163,10 +154,9 @@ are a proven global edge, a polished deploy experience (`fly deploy`), and the
 fact that you operate none of it.
 
 **How Overdrive differs.** This is the most architecturally similar of the three,
-which makes the differences precise. Overdrive uses the *same* Corrosion component
-for its observation store, and it arrives at the same topology Fly runs in
-production — per-region strong consistency for intent, global gossip for observed
-state. It diverges on two axes.
+which makes the differences precise. Overdrive's design arrives at the same split
+Fly runs in production: strong consistency for intent, eventual consistency for
+observed state. It diverges on three axes.
 
 - **The dataplane is in the kernel, not userspace.** Fly routes traffic between workloads
   through `fly-proxy` and the WireGuard mesh. Overdrive uses XDP for load balancing
@@ -208,7 +198,7 @@ maturity, the competitors win:
 
 Overdrive's bet is that the 2026 primitives make a structurally simpler, more
 secure, more verifiable platform possible — one binary instead of a stack, mTLS
-by default instead of by add-on, every workload type under one model, and
+by default instead of by add-on, hardware isolation for every workload, and
 correctness checked by simulation from day one. That bet is not yet proven in
 production. If maturity is the deciding factor, choose one of the platforms
 above. If the architecture is what you are evaluating, that is what this page is

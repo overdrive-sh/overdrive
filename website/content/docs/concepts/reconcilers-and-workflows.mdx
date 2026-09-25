@@ -79,7 +79,7 @@ A multi-step operation flows around a loop:
 5. A reconciler observes that terminal row and converges the instance — marking it
    done and stopping any re-trigger.
 
-The bridge reconciler that ships today is **WorkflowLifecycle**. It watches
+The bridge reconciler is **WorkflowLifecycle**. It watches
 workflow instances in observed state and re-emits `StartWorkflow` for any that
 should be running but have no live engine task — the signature of a crash. The
 engine's journal load then decides cold start versus resume. So a workflow's

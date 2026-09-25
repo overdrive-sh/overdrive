@@ -1,6 +1,6 @@
 ---
 title: Workflows
-description: The control plane's second primitive — a durable async function that runs a terminating sequence once and survives crashes by replaying a journal. Internal today, authored in Rust and driven by reconcilers.
+description: The control plane's second primitive — a durable async function that runs a terminating sequence once and survives crashes by replaying a journal. Internal, authored in Rust and driven by reconcilers.
 ---
 
 Overdrive has two control-plane primitives. A
@@ -12,7 +12,7 @@ four-step certificate rotation, restart on a fresh process, and continue from
 where it stopped — without repeating the steps that already ran. It does this by
 journaling every non-deterministic decision and replaying the journal on resume.
 
-Workflows are internal today. No `overdrive` command starts one and no spec field
+Workflows are internal. No `overdrive` command starts one and no spec field
 declares one — the primitive is authored in Rust by platform engineers and driven
 by the control plane itself.
 
@@ -127,8 +127,7 @@ convention.
 When a workflow ends, the engine projects the outcome to a `WorkflowStatus` —
 `Completed { output }` or `Failed { terminal }` — and writes it to the
 observation store. Two further variants, `Cancelled` and `TimedOut`, are reserved
-for engine-driven cancellation and deadlines a later slice will add; the body can
-never produce them. The status is observation, not intent: a lifecycle reconciler
+for engine-driven cancellation and deadlines. The body can never produce them. The status is observation, not intent: a lifecycle reconciler
 reads it to decide the instance is done, the same
 [intent / observation discipline](/docs/concepts/intent-observation) the rest of
 the platform follows.
@@ -166,21 +165,11 @@ convergence loop noticing a gap, the same mechanism that restarts a crashed
 allocation. The workflow author writes the body and the trigger; durability,
 retry, and resume belong to the runtime.
 
-The relationship runs both ways, in one vocabulary. A reconciler starts a workflow
-by emitting `Action::StartWorkflow`; a workflow drives the cluster back by emitting
-actions of its own through `ctx.emit_action` — the *same* `Action` type a
-reconciler emits, committed through the same action shim and Raft path. A workflow
-never writes intent directly; it emits an action, exactly as a reconciler does. So
-the two primitives form a loop rather than living in separate worlds: a reconciler
-starts a workflow, the workflow emits actions that change cluster state mid-run,
-reconcilers converge on the result, and the workflow's terminal status is itself a
-row a reconciler observes to close the instance out.
-
 ## What workflows are for
 
 The operations that want a workflow rather than a reconciler share a profile: a
 fixed, ordered sequence with a natural end, where each step has an external effect
-that must not be repeated on a retry. Two are on the roadmap:
+that must not be repeated on a retry. Two examples:
 
 - **Certificate rotation** — request a certificate, wait for the DNS challenge to
   propagate, validate it, then signal readiness. Four ordered steps, each with an
@@ -188,8 +177,6 @@ that must not be repeated on a retry. Two are on the roadmap:
 - **Allocation migration** — start a replacement allocation on another node, wait
   for it to pass health checks, drain the original, stop it. A sequence that
   terminates once the move is complete.
-
-Neither is "keep N replicas running" — that never ends, so it is a reconciler.
 
 ## Where to go next
 

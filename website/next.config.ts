@@ -13,6 +13,20 @@ const nextConfig: NextConfig = {
 	images: {
 		unoptimized: true,
 	},
+	async redirects() {
+		return [
+			{
+				source: "/docs/concepts/dial-by-name",
+				destination: "/docs/concepts/service-names",
+				permanent: true,
+			},
+			{
+				source: "/docs/concepts/dial-by-name.md",
+				destination: "/docs/concepts/service-names.md",
+				permanent: true,
+			},
+		];
+	},
 	// Per-page `.md` export routing (slice 04 / US-04). Next 16 cannot express a
 	// literal `.md` suffix on a catch-all segment as a per-page dynamic route
 	// (a `[[...slug]].md` / `[...slug].md` folder collapses to a static literal

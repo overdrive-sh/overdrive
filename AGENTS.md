@@ -294,39 +294,34 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/bogota-v3] recent context, 2026-09-12 10:21pm GMT+2
+# [helios/monterrey-v1] recent context, 2026-09-26 12:56am GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
+Stats: 50 obs (28,936t read) | 1,093,506t work | 97% savings
 
-### Jun 21, 2026
-S9210 Fix P1 orphaned-kTLS-handle race (GH #26) via Outside-In TDD; dispatch directly to CRAFTER phase (no deliver wave). Single production file, pinned API shape, exactly per design. (Jun 21 at 9:26 PM)
-S9211 Surgical correction of stale GitHub issue references and daemon terminology across design documentation after #178 split (Jun 21 at 9:39 PM)
-S9212 User approved re-targeting architect corrections to canonical documentation copies and resolving docs/feature/ vs docs/architecture/ divergence (Jun 21 at 9:39 PM)
-S9213 Re-run architect corrections against canonical post-finalize documentation copies after discovering initial edits targeted wrong (temporary) paths (Jun 21 at 9:41 PM)
-### Jun 22, 2026
-S9217 Systematic documentation update to remap GitHub issue references following #178 umbrella issue reorganization into focused issues (Jun 22 at 7:00 AM)
-S9220 Documentation issue-reference remapping following #178 umbrella issue reorganization, with post-commit verification and investigation of canonical file locations (Jun 22 at 7:05 AM)
-S9221 Complete in-code GitHub issue reference remapping (#178→#241/#242/#243 and #61→#243) with validation (Jun 22 at 7:07 AM)
-S9257 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 7:40 AM)
-S9254 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 1:18 PM)
-S9258 Fix CI timeout failures in trybuild compile-fail tests by correcting nextest filter pattern mismatch (Jun 22 at 1:21 PM)
+### May 16, 2026
+S6519 Create GitHub issue for IPIP DSR implementation based on completed research (May 16 at 2:14 PM)
+S6520 Complete IPIP DSR research and create tracking issue for implementation (May 16 at 2:17 PM)
+S6521 IPIP DSR research completion and GitHub issue creation for Phase 3 implementation (May 16 at 2:17 PM)
+S6920 Update GitHub issue #133 body to correct the framing from RPITIT dyn-compatibility to associated type erasure (May 16 at 2:18 PM)
+### May 24, 2026
+S6919 Research RPITIT dyn-compatibility status in Rust to determine viability of issue #133 Option 3 (May 24 at 10:28 AM)
+S6921 Update GitHub issue #133 body to correct the framing from RPITIT blocker to associated type erasure blocker (May 24 at 10:32 AM)
+S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
+### Jun 17, 2026
+S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
+S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
+S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:44 AM)
 ### Jul 29, 2026
-57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
-57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope
-57744 5:22p 🔵 Stateright's Three Real Adopters: Microsoft CCF, Quickwit, PostHog All Recent Auxiliary Verification
-57745 " 🔵 The Spec-Implementation Gap: Why TLA+ Alone Is Insufficient Industry Consensus 2025-2026
-57746 " 🔵 TLC Model Checking State Space Explosion Concrete Numbers: MongoDB 16s→44min on One Extra Key
 57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
 57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
 57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
 57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
 57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
 57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
-57753 " 🔵 Aurora DSQL Uses ONLY Simulation Testing, NOT Formal Methods: Marc Brooker Blog Debunks Potential AWS Universality Claim
 57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
 57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
 57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
@@ -360,26 +355,33 @@ S9258 Fix CI timeout failures in trybuild compile-fail tests by correcting nexte
 57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
 57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
 57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-**57787** " 🔵 **Python Virtual Environment Created With websocket-client for CDP Automation**
-The attempt to install websocket-client into the system Python environment failed due to PEP 668 protection which prevents package installations that could break OS-managed Python distributions. The workaround created an isolated Python virtual environment at /tmp/cdpvenv/ and successfully installed websocket-client version 1.9.0 within it. This provides the necessary WebSocket communication library for Chrome DevTools Protocol automation, enabling programmatic browser control via CDP's WebSocket interface. The venv approach maintains system Python integrity while providing the required dependencies for headless browser automation that could potentially bypass Cloudflare's bot detection better than simple --dump-dom mode.
-~349t 🔍 1,337
+57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
+57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
+57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
+57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
+57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
+### Sep 7, 2026
+**73345** 2:24a ⚖️ **Schema Evolution Coverage Excluded from Scope**
+The project explicitly excludes schema evolution and migration coverage. Since this is a greenfield project with no existing users, there are no prior stored values that would require migration support. This simplifies the initial implementation by removing the need to handle backward compatibility for data formats.
+~165t ⚖️ 28,144
 
-**57788** 5:57p 🔵 **Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333**
-Verification of the Chrome DevTools Protocol infrastructure confirmed a Chrome instance was running with remote debugging enabled on port 9333 and properly exposing the CDP endpoint. The /json endpoint returned well-formed target information including WebSocket debugger URLs for programmatic browser control. The presence of two targets (a blank page and a service worker from a chrome-extension) indicates Chrome was fully initialized and ready for CDP commands. The WebSocket URLs follow the standard CDP format enabling connection for page navigation, DOM inspection, and JavaScript execution commands. This infrastructure was then cleaned up by killing the Chrome process, confirming the automation attempt had been made but presumably failed to bypass Cloudflare protection.
-~404t 🔍 1,225
+**73347** " 🟣 **Timestamp Hardening Work Initiated**
+Work commenced on GitHub issue #281 to harden timestamp representations across the Overdrive repository. The issue identifies that raw u64 UNIX-epoch values (like *_unix_ms fields) lose unit and type safety across system boundaries. An agent named timestamp_inventory was spawned to conduct a comprehensive audit of all production timestamp representations. The migration will convert wall-clock instant fields to use the established UnixInstant semantic type end-to-end, while preserving duration/counter/opaque numeric fields that are not wall-clock instants. Since this is a greenfield project with no existing users, schema evolution and migration coverage for prior stored values is explicitly excluded from scope.
+~370t 🛠️ 30,449
 
-**57789** " 🔵 **Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335**
-The primary session successfully launched Chrome in headless mode with anti-bot-detection configuration including disabled automation control features and a fresh user data directory to avoid fingerprinting from previous sessions. The browser became operational within 2 seconds, exposing the Chrome DevTools Protocol endpoint on port 9335 with three targets ready for interaction. The configuration uses flags specifically designed to evade headless browser detection: --disable-blink-features=AutomationControlled prevents JavaScript from detecting automation mode, and a custom user-agent string mimics a future Chrome release. This represents the foundation for CDP-based navigation that could potentially bypass Cloudflare's JavaScript challenges by executing them in a real browser context rather than simple DOM dumping.
-~447t 🔍 1,362
+73350 " 🔵 Timestamp Inventory Agent Repeatedly Timing Out After Multiple Retry Attempts
+**73351** 2:26a 🔵 **Timestamp Inventory Agent Completed After Extended Timeout Retry Cycle**
+The timestamp inventory agent eventually completed successfully after an extended series of timeout failures. The agent was spawned multiple times with identical configuration, experiencing seven consecutive 60-second wait timeouts before the eighth wait operation returned successful completion. This pattern indicates the inventory task legitimately required more than 3 minutes to scan the Overdrive codebase for timestamp field usage patterns. The repeated timeouts followed by eventual success suggests either the agent was continuously running but reporting progress slowly, or there was severe resource contention that gradually cleared. The 60-second timeout windows were fundamentally mismatched to the actual execution time required for a repository-wide code inventory task.
+~373t 🔍 725
 
-**57790** " 🔵 **Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag**
-The CDP automation debugging script successfully launched Chrome and retrieved the target list via HTTP, confirming the browser was operational with remote debugging enabled on port 9336. However, when attempting to establish a WebSocket connection to control the page, Chrome's security layer rejected the handshake with HTTP 403. The error message explicitly identifies the missing configuration: Chrome's recent security updates require the --remote-allow-origins flag to whitelist which origins can establish WebSocket CDP connections. Without this flag, all WebSocket upgrade requests from localhost are blocked despite the HTTP JSON endpoint remaining accessible. This represents a solvable configuration issue requiring one additional launch argument rather than a fundamental Cloudflare bypass problem.
-~449t 🔍 2,595
+**73348** " 🔵 **Timestamp Inventory Agent Exceeded 60-Second Wait Timeout**
+The timestamp_inventory agent was spawned to inventory raw epoch timestamp fields for migration to UnixInstant, but did not complete within a 60-second wait timeout. The agent was dispatched with GitHub issue #281 context and instructions to audit all production timestamp representations. The timeout suggests either the inventory task requires more than 60 seconds to scan the codebase, the agent is waiting for resources/queuing, or encountered a blocking issue during execution. This is a concrete operational finding about agent execution timing in the Conductor environment.
+~260t 🔍 30,894
 
-**57791** " 🔵 **CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving**
-The CDP automation reached the furthest point yet by successfully establishing a WebSocket connection to Chrome after adding the required origin allowlist flag, then navigating to the ACM DOI page. Cloudflare's JavaScript challenge loaded and began executing in a real Chrome browser context with anti-automation flags enabled. However, the challenge never resolved over 90 seconds of continuous polling at 6-second intervals. The page remained frozen at the "Just a moment..." interstitial with exactly 27,412 bytes of HTML, indicating the JavaScript either detected the headless/automated environment despite the stealth flags, or requires additional browser fingerprinting signals (WebGL, canvas, audio context, etc.) that the headless Chrome configuration doesn't provide. This definitively demonstrates that even sophisticated CDP-based browser automation cannot bypass ACM's Cloudflare protection configuration for this resource.
-~474t 🔍 3,320
+**73353** 2:27a 🔵 **UnixInstant Atomicity Investigation for Concurrent Timestamp Access**
+Investigation into whether UnixInstant can be made atomic for lock-free concurrent timestamp access across pump threads. The current UnixInstant implementation wraps a Duration which internally requires two fields (seconds as u64 + nanoseconds as u32), making it larger than a single machine word and incompatible with standard atomic primitives like AtomicU64. The existing mtls splice pump code works around this by storing wall-clock progress as raw AtomicU64 nanoseconds (last_progress_unix_nanos) rather than as a typed UnixInstant, then reconstructing UnixInstant values when needed via UnixInstant::from_unix_duration(Duration::from_nanos(...)). This investigation is exploring whether UnixInstant can be refactored to enable atomic read/write operations for concurrent timestamp coordination between pump threads without locks.
+~394t 🔍 11,246
 
 
-Access 1367k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 1094k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

@@ -141,6 +141,30 @@ operator-facing docs, journeys, or examples, the only correct verb is
 `overdrive deploy <SPEC>`. Do not copy `job submit` from older phase
 docs.
 
+## Operators will have no node shell — the API is the only surface
+
+Overdrive **will ship** as a sealed appliance OS: no SSH, no root access,
+no shell on the node. The API, and the `overdrive` CLI that speaks to
+it, will be the only operator surface. The appliance image will
+preinstall the kernel features the node needs (cgroup v2, eBPF, mesh
+networking, KVM). **The appliance OS is not implemented yet.** Do not
+describe it as shipped.
+
+Write operator-facing material for that target, even while nodes still
+run on ordinary hosts:
+
+- Never tell an operator to inspect or repair node internals from a
+  shell (`bpftool`, `nft list`, `ip netns`, `journalctl`, `/sys/fs/...`).
+  Nobody will be able to run those commands on a node.
+- Do not justify docs content by what an operator "would see" by
+  dumping kernel state. If the API does not expose it, operators cannot
+  observe it.
+- Do not list kernel features as operator prerequisites. The appliance
+  will provide them.
+
+Describing what an integration test observes on a dev VM is a
+different thing and is fine.
+
 ## Two distinct certificate authorities — do not conflate them
 
 `overdrive serve` wires **two independent CAs**. They share nothing but

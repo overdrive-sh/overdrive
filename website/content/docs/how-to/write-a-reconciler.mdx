@@ -174,7 +174,7 @@ actions, and reloads it on the next boot. You never touch a database.
 ## Emit actions for every effect
 
 `reconcile` returns `Vec<Action>`; the action shim runs them behind its single I/O
-boundary. To start a process, return `Action::StartAllocation`; to program the
+boundary. To start a workload, return `Action::StartAllocation`; to program the
 dataplane, `Action::DataplaneUpdateService`; to wake another reconciler,
 `Action::EnqueueEvaluation`; to launch a durable sequence,
 `Action::StartWorkflow` (see
@@ -222,7 +222,7 @@ covers the partition and the one exception to that rule.
 ## Register it
 
 A reconciler runs once it is registered in the control-plane runtime at boot —
-the same place the eight first-party reconcilers are registered in `overdrive serve`:
+the same place the seven first-party reconcilers are registered in `overdrive serve`:
 
 ```rust
 runtime.register(my_reconciler()).await?;

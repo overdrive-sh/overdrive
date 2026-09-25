@@ -23,23 +23,35 @@ actually run right now:
 - **Ship from one file.** Describe a service or job in a single TOML spec and
   deploy it with `overdrive deploy`. Deploy is idempotent on the spec's content
   hash — an identical spec is a no-op, so it is safe to run straight from CI.
-- **Boot a microVM with enforced limits.** Declare a `[vm]` workload and it
-  boots as a Cloud Hypervisor microVM with its own kernel, isolated by hardware
-  virtualization. The hypervisor runs confined — non-root, seccomp- and
-  Landlock-restricted — and the platform reports the guest's real exit code, so
-  a VM that boots and fails is never counted as a success. You supply the
-  kernel and rootfs; the node needs `/dev/kvm`.
+- **Every workload is a microVM.** Each service or job boots as a
+  [Cloud Hypervisor microVM](https://overdrive.sh/docs/concepts/microvms)
+  with its own kernel, isolated by hardware virtualization. The hypervisor runs
+  confined — non-root, seccomp- and Landlock-restricted — and the platform
+  reports the guest's real exit code, so a VM that boots and fails is never
+  counted as a success. You supply the kernel and rootfs.
 - **Health-checked and restarted.** Readiness and liveness probes gate traffic
   and catch failures; an allocation that fails its liveness check restarts, and
-  the platform holds the replica count you declared.
+  the platform holds the replica count you declared. See
+  [reconcilers](https://overdrive.sh/docs/concepts/reconcilers).
 - **In-kernel load balancing.** Traffic to a service spreads across its healthy
-  backends in the kernel, with no userspace proxy in the path.
+  backends in the kernel, with no userspace proxy in that load-balancing path.
+  See the [architecture overview](https://overdrive.sh/docs/concepts/architecture#the-service-dataplane-is-in-the-kernel).
 - **An identity per workload.** Every workload gets a short-lived cryptographic
   identity (SPIFFE) from a built-in certificate authority, so policy can name
-  what a service is rather than the IP it currently holds.
+  what a service is rather than the IP it currently holds. The
+  [workload identity lifecycle](https://overdrive.sh/docs/concepts/workload-identity-lifecycle)
+  holds each identity while its allocation runs.
+- **Transparent mTLS between workloads.** On a single node, an
+  [agent-light TPROXY L4 proxy with kTLS](https://overdrive.sh/docs/concepts/transparent-mtls)
+  encrypts mesh connections in both directions. Workloads open ordinary TCP
+  sockets and hold no certificates or private keys.
+- **Reach a service by name.** On a single node, workloads resolve
+  [service names](https://overdrive.sh/docs/concepts/service-names) such as
+  `payments.svc.overdrive.local` to a stable address; the mTLS proxy connects
+  each call to a running, healthy copy without an application discovery client.
 
-Encryption in the kernel, WebAssembly functions, the gateway, multi-node HA, and
-the immutable OS are all on the roadmap below — designed, not yet shipped.
+WebAssembly functions, the gateway, multi-node HA, and the immutable OS are all
+on the roadmap below — designed, not yet shipped.
 
 ## Deploy a workload
 
@@ -54,11 +66,17 @@ replicas = 1
 
 [vm]
 command = "/opt/payments/bin/server"
+args    = ["--port", "8080"]
 kernel  = "/var/lib/overdrive/kernel"
 rootfs  = "/var/lib/overdrive/rootfs.ext4"
 
+[resources]
+cpu_milli    = 500
+memory_bytes = 134217728
+
 [[listener]]
-port = 8080
+port     = 8080
+protocol = "tcp"
 
 [[health_check.readiness]]
 type = "http"
@@ -81,25 +99,52 @@ The `[vm]` block names the guest command plus the operator-supplied kernel and
 rootfs; the guest is hardware-isolated and its real exit code is reported back. See
 [microVMs](https://overdrive.sh/docs/concepts/microvms).
 
+## Concepts
+
+- [Architecture overview](https://overdrive.sh/docs/concepts/architecture) — how
+  the single-node binary, control plane, worker, and dataplane fit together.
+- [microVMs](https://overdrive.sh/docs/concepts/microvms) — boot a
+  hardware-isolated Cloud Hypervisor workload with your kernel and rootfs.
+- [The intent / observation boundary](https://overdrive.sh/docs/concepts/intent-observation)
+  — keep declared state separate from what the node observes.
+- [Reconcilers](https://overdrive.sh/docs/concepts/reconcilers) — repeatedly
+  converge observed state toward declared intent.
+- [Workflows](https://overdrive.sh/docs/concepts/workflows) — run durable,
+  ordered operations that terminate.
+- [Reconcilers and workflows](https://overdrive.sh/docs/concepts/reconcilers-and-workflows)
+  — see how the two control-plane primitives cooperate.
+- [Identity](https://overdrive.sh/docs/concepts/identity) — issue workload
+  SPIFFE identities from the built-in certificate authority.
+- [Workload identity lifecycle](https://overdrive.sh/docs/concepts/workload-identity-lifecycle)
+  — hold each SVID while its allocation runs and drop it on stop.
+- [Transparent mTLS](https://overdrive.sh/docs/concepts/transparent-mtls) — capture
+  workload connections and encrypt them with kTLS.
+- [Service Names](https://overdrive.sh/docs/concepts/service-names) — resolve a
+  service name to a live backend without an application discovery client.
+- [Deterministic Simulation Testing](https://overdrive.sh/docs/concepts/deterministic-simulation-testing)
+  — replay control-plane behavior from a seed.
+
 ## Roadmap
 
 The platform is built in phases, each tracked as a GitHub milestone. Phase 1 is
 essentially complete (22 of 24 issues closed); Phase 2 is in progress (19 of 34);
 Phases 3–7 are planned and mostly unstarted, though the Cloud Hypervisor microVM
-driver (#42) has landed ahead of the rest of Phase 3 and runs today. Everything
-in the phases below is tracked work — designed, issue-by-issue, not shipped.
+driver (#42) has landed ahead of the rest of Phase 3 and runs today. Some Phase 2
+work, including transparent mTLS and the SVID lifecycle, already runs; the other
+items remain tracked work.
 Issue numbers link the specifics.
 
 ### [Phase 2 — eBPF dataplane & identity](https://github.com/overdrive-sh/overdrive/milestone/2) · in progress
 
-Encryption and enforcement move into the kernel: mutual TLS via sockops + kTLS
-(#26), BPF LSM mandatory access control (#27), agentless flow and resource
-telemetry (#31, #32), the workload SVID lifecycle and near-expiry rotation
-(#35, #40), node enrollment (#36), and the real-kernel test harness (#29, #30).
+The shipped mesh path uses a TPROXY L4 proxy + kTLS for transparent mTLS (#26),
+and the workload SVID lifecycle issues, rotates, and drops identities (#35).
+Other tracked work includes BPF LSM mandatory access control (#27), agentless
+flow and resource telemetry (#31, #32), node enrollment (#36), and the
+real-kernel test harness (#29, #30).
 
 ### [Phase 3 — workload drivers & policy](https://github.com/overdrive-sh/overdrive/milestone/3)
 
-Run more than processes: WebAssembly serverless functions with scale-to-zero
+Run more than microVMs: WebAssembly serverless functions with scale-to-zero
 (#44) and shared volumes (#43). A dual policy engine compiles Regorus and WASM
 policy down to in-kernel verdicts (#38, #45, #47), and node drain migrates
 workloads off unhealthy nodes — the reactive tier of self-healing (#50).
