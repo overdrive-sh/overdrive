@@ -1,0 +1,144 @@
+---
+title: What deterministic simulation testing is, and how we use it for Overdrive
+description: A practical explanation of deterministic simulation testing, property testing, fuzzing, and fault injection in Overdrive's control plane.
+date: 2026-09-23
+author: Marcus
+summary: Deterministic simulation runs real decision logic in a controlled environment. Here is how Overdrive uses seeds, properties, generated inputs, and injected faults to find reproducible failures.
+---
+
+A control plane can pass a test a thousand times and still fail when two events
+arrive in the wrong order. An allocation stops while its driver reports an exit.
+A node misses a gossip update, then rejoins. A network provisioner fails after
+creating half of an allocation's resources. The interesting question is not
+whether each operation works alone. It is whether the system reaches the right
+state after those events collide.
+
+## What deterministic simulation testing is
+
+Deterministic simulation testing (DST) runs a system's real decision logic
+inside a controlled version of its environment. The simulator stands in for
+things the code cannot control in production: time, network delivery, random
+numbers, and external operations. A test chooses the initial state and the
+events the environment delivers. It then checks what the system did.
+
+"Deterministic" does not mean every test takes the same path. It means that
+the same code, initial state, inputs, and seed produce the same observed path
+again. The simulator can draw varied delays or fault choices from a seeded
+pseudorandom generator. Change the seed to explore another case. Reuse it to
+replay the case that failed.
+
+This differs from running a test against a live cluster and hoping the OS
+schedules the same race twice. It also differs from testing a model that merely
+approximates the program: Overdrive's simulated ports drive production
+control-plane code. The simulator controls what that code sees at its external
+boundaries.
+
+I first learned about [deterministic simulation testing from Antithesis](https://antithesis.com/docs/resources/deterministic_simulation_testing/).
+Their work gave me a way to think about these failures. Control the environment,
+explore more event sequences, and keep enough information to replay a failure.
+The [Resonate explanation](https://journal.resonatehq.io/p/deterministic-simulation-testing)
+is another useful account of why concurrency and partial failure make ordinary
+test runs hard to reproduce.
+
+## A seed turns a failure into a case
+
+Overdrive puts time, transport, entropy, workload drivers, and other external
+effects behind port traits. Production connects those ports to the host.
+`overdrive-sim` connects them to adapters that a test can control. `SimClock`
+advances when the test ticks it. `SimTransport` can partition a pair of
+addresses and drop their datagrams. `SimEntropy` draws from a seed.
+
+The `cargo dst` runner takes one seed and checks a catalogue of named
+invariants. It prints the seed before the run starts and writes the results to
+`target/dst/summary.json`. If an invariant fails, the report names it and gives
+a replay command:
+
+```bash
+cargo dst --seed 1234
+cargo dst --seed 1234 --only terminal-contention-converges
+```
+
+A seed is useful because it identifies the scenario that failed. It does not
+prove that every possible schedule passed. We run different seeds to explore
+different cases, then keep the failing seed while fixing the code. An
+integration test checks repeatability. Two runs with the same seed produce the
+same invariant results, apart from elapsed wall-clock time in the report.
+
+## Properties tell us what counts as correct
+
+An example test can assert that one chosen sequence ends in `Running`. A
+property asks what must hold across a family of sequences. Overdrive checks
+three kinds of property:
+
+- **Safety:** a failed VM network provision must never start the driver or
+  leave allocation-owned network artifacts behind.
+- **Liveness:** after that failure, the allocation must reach `Failed` and a
+  successor must reach `Running` within a bounded number of dispatch ticks.
+- **Convergence:** after concurrent observation writes and gossip delivery,
+  peers must agree on the winning row for each allocation they observed.
+
+Those are testable claims about state and effects. They give the simulator a
+verdict even when the order of operations changes. For the observation-store
+property, a `proptest` test generates scenarios with concurrent writes and
+seeded delivery order. It runs each scenario twice. Then it checks peer
+agreement and identical results across the two runs.
+
+## Generated inputs widen the search
+
+Fuzzing means exploring inputs automatically instead of choosing every case by
+hand. A fuzzer needs an oracle: some way to tell a bad result from a good one.
+Properties provide that oracle for Overdrive's generated scenarios.
+
+We use `proptest` to generate inputs that a hand-written example would be
+unlikely to cover. These include write orders, seeds, addresses, retry budgets,
+and other bounded domain values. When a generated case fails, `proptest`
+shrinks it toward a smaller counterexample. This is the generated-input exploration in our
+current suite. We do not claim to run a coverage-guided byte fuzzer.
+
+The two techniques reinforce each other. A fixed `cargo dst` seed makes a
+specific control-plane failure easy to replay. Property testing searches a
+larger input space for another failure worth keeping. Both need strong
+assertions. A test that only checks for a panic can miss a leaked resource or a
+lost terminal state.
+
+## Faults belong at real boundaries
+
+Fault injection deliberately makes an external operation fail, stall, or
+arrive at an inconvenient time. It lets a test ask what production logic does
+when success is incomplete or delayed.
+
+Our simulated adapters can reject a driver start, withhold a datagram during a
+partition, or fail network provisioning after creating a seeded subset of
+resources. The production action path then handles the error. In the VM
+provision-failure invariant, the check follows the real dispatch path through
+cleanup. It verifies that the failed allocation's network artifacts disappear.
+It also verifies that the slot becomes available to the successor.
+
+The harness also controls ordering at the observation-store boundary. One
+invariant parks a stop proposal, lets a driver's terminal event win the first
+write, then releases the stop proposal. The check verifies that production
+rebases the operator stop and converges to the authoritative terminal state.
+The test lets the production paths make their own writes and observes the
+store's decision.
+
+That boundary matters. A fault injected into a path production never uses can
+make a test impressive without proving the behavior we care about. We keep
+simulated faults at the ports and drive the same control-plane composition that
+handles them in production.
+
+## Simulation has a boundary too
+
+Simulation gives us control over the effects represented by its adapters. It
+cannot prove what a real kernel, VMM, network namespace, or eBPF program will
+do. Overdrive uses separate real-infrastructure tests for those effects. A
+passing simulation run says that the covered control-plane path held its
+invariants under the explored cases. It cannot establish every host effect or
+schedule as correct.
+
+Antithesis's account of [DST's strengths and limitations](https://antithesis.com/docs/resources/deterministic_simulation_testing/#what-are-the-strengths-and-limitations-of-deterministic-simulation-testing)
+is worth reading for that distinction. When a rare ordering fails inside the
+simulated boundary, we can name the property and save the seed. We can make the
+failure happen again. The next fix starts
+with evidence of what happened.
+
+To run the current invariant catalogue, see [Run the DST harness](/docs/how-to/run-the-dst-harness).

@@ -1,15 +1,45 @@
 ---
 name: technical-writer
-description: Write technical prose in the plain style — direct, concrete, position-taking, free of hedge-words and filler. Use whenever the user asks for technical writing of any kind: articles, blog posts, essays, whitepapers, design docs, documentation, technical explainers, architecture writeups, engineering analysis, design reviews, or any prose intended for technical readers. Also use when revising existing technical writing to make it tighter, clearer, or more confident. Trigger even when the user does not name a style explicitly — if the task is technical prose for a thinking reader, this skill applies.
+description: >-
+  Write technical prose in the plain style for articles, blog posts, docs,
+  design records, reviews, and other technical writing. Use this skill when
+  drafting or revising prose for technical readers, even without a style request.
 ---
 
 # Technical Writer
 
 A skill for writing technical prose in the plain style: concrete nouns, active verbs, sparing hedges, owned positions, named tradeoffs, varied rhythm, no filler.
 
+## Keep the prose easy to read
+
+Apply these structural rules from Simplified Technical English to the prose
+this skill produces. Keep the appropriate voice for the piece.
+
+- **Do not use semicolons.** Write two sentences instead.
+- **Keep sentences short.** Use at most 25 words in explanations and 20 words
+  in instructions. Split a sentence when it carries more than one new fact.
+- **Keep paragraphs small.** Give each paragraph one topic and at most six
+  sentences. Prefer two to four sentences when the thought permits it.
+- **Use one instruction per sentence.** Write instructions as commands. Put a
+  required condition first: "If the build fails, read the log."
+- **Use active voice and simple verb forms.** Avoid contractions, complex
+  auxiliary verbs, and verbs that hide an action inside a noun. Use "can",
+  "will", or "must" when a modal is needed.
+- **Name each thing consistently.** Choose one technical noun for each
+  concept. Break noun chains longer than three words with a preposition.
+- **Use vertical lists for complex text.** Give warnings before the action
+  they concern. State the action or condition, then the risk.
+- **Preserve exact technical text.** Do not rewrite code, identifiers,
+  commands, paths, product names, or quoted output to fit the prose rules.
+
+Before delivery, count the words in the three longest sentences. Search for
+semicolons, contractions, "has been", "have been", and unnecessary hedges.
+Check that each "if" or "when" condition starts its sentence and that each
+technical noun keeps the same name throughout.
+
 The style traces back through Orwell and Hemingway to classical rhetoric's "plain style" — the rhetorical mode that hides its rhetoric. Modern practitioners include Paul Graham, Patrick McKenzie, Bret Victor, Dan Luu, and William Zinsser. The principles below are operational distillations of what makes their writing work.
 
-The hardest thing about this style is that it exposes confused thinking. Vague writing hides confusion; plain writing shows it. When the prose resists being made plain, the underlying thought is usually not finished yet. Sharpen the thought, then write.
+The hardest thing about this style is that it exposes confused thinking. Vague writing hides confusion. Plain writing shows it. When the prose resists being made plain, the underlying thought is usually not finished yet. Sharpen the thought, then write.
 
 ---
 
@@ -36,7 +66,7 @@ When a modifier needs to be there, split the sentence. The "modifier between sub
 
 ### 2. Be specific, not just concrete
 
-Concrete nouns beat abstract ones. Specific concrete nouns beat generic concrete ones. `Three engineers at Stripe debugged this for six hours` lands harder than `several engineers debugged this for a while`, which lands harder than `personnel investigated the issue`. The first version is concrete *and* specific; the second is concrete but generic; the third is neither.
+Concrete nouns beat abstract ones. Specific concrete nouns beat generic concrete ones. `Three engineers at Stripe debugged this for six hours` lands harder than `several engineers debugged this for a while`, which lands harder than `personnel investigated the issue`. The first version is concrete *and* specific. The second is concrete but generic. The third is neither.
 
 Specificity does three things at once: it forces the writer to know the actual facts, it gives the reader something to verify or remember, and it signals that the claim isn't being smuggled past on vague-sounding plausibility.
 
@@ -83,13 +113,13 @@ Heuristic: reach for `I argue` (or `I think`, `I propose`) when dropping it woul
 
 Avoid the inverse failure too: false ownership of mechanism descriptions. `I have designed the lease manager such that it rejects stale acquisitions` puts the author in a sentence that should be about the system. Cut to `The lease manager rejects stale acquisitions.`
 
-**Back claims with one beat of reasoning.** Taking a position isn't bare assertion — when a claim isn't self-evident, the next sentence usually shows why in one beat. Not a proof, not a derivation; a hint. Readers extend more trust to confident claims that are followed by a reason than to confident claims that just sit there.
+**Back claims with one beat of reasoning.** Taking a position isn't bare assertion — when a claim isn't self-evident, the next sentence usually shows why in one beat. Not a proof or a derivation. A hint. Readers extend more trust to confident claims that are followed by a reason than to confident claims that just sit there.
 
 **Do this:** Pessimistic locking penalizes the common case. Most acquisitions don't conflict, so the lock cost is paid every time to prevent the rare collision.
 
 **Not this:** Pessimistic locking penalizes the common case. We use optimistic concurrency instead.
 
-The second version states a position and a choice but never connects them — the reader has to supply the reasoning. The first version closes the loop. One sentence of backing is usually enough; if a claim needs three, it probably needs its own paragraph.
+The second version states a position and a choice but never connects them — the reader has to supply the reasoning. The first version closes the loop. One sentence of backing is usually enough. If a claim needs three, it probably needs its own paragraph.
 
 ### 5. Name tradeoffs, commit to a side
 
@@ -100,7 +130,7 @@ Real technical writing involves choices, and choices involve tradeoffs. Name the
 
 The second sentence has no content. It describes the *existence* of a tradeoff without telling the reader what it is or what was chosen. This is consultant-speak — the rhetorical mode that conveys having opinions without holding any.
 
-The inverse failure is fake balance: manufacturing a tradeoff to look even-handed when one option is just better. `Approach A is simpler and faster, but Approach B has its own merits` is dishonest if Approach B's merits don't actually weigh against A's win. Real tradeoffs have a real cost on the chosen side; if you can't name the cost, there isn't a tradeoff, there's a choice. State it as a choice and move on.
+The inverse failure is fake balance: manufacturing a tradeoff to look even-handed when one option is just better. `Approach A is simpler and faster, but Approach B has its own merits` is dishonest if Approach B's merits don't actually weigh against A's win. Real tradeoffs have a real cost on the chosen side. If you can't name the cost, there isn't a tradeoff. There is a choice. State it and move on.
 
 ### 6. Vary rhythm, default short
 
@@ -132,7 +162,7 @@ Confident writing acknowledges limitations. Performative humility undermines the
 
 **Not this:** Of course, we make no claims about completeness, and reasonable people may certainly disagree with this characterization, which is offered tentatively and subject to revision.
 
-The first version states the limitation as fact. The second performs humility while saying nothing. Honest limitation is content; performative humility is decoration.
+The first version states the limitation as fact. The second performs humility while saying nothing. Honest limitation is content. Performative humility is decoration.
 
 ---
 
@@ -150,7 +180,7 @@ Principle 4 covers the three modes (bare declarative, first-person staked, imper
 
 A few patterns that appear repeatedly in this style:
 
-**Open with the conclusion, not the setup.** The first paragraph of a section should state what the section argues, not promise that an argument is coming. Readers can skim a piece that opens with conclusions; they can't skim a piece that opens with windups.
+**Open with the conclusion, not the setup.** The first paragraph of a section should state what the section argues, not promise that an argument is coming. Readers can skim a piece that opens with conclusions. They can't skim a piece that opens with windups.
 
 **Use headings as content, not as labels.** "Why existing tools fail agents" tells the reader what the section will argue. "Background on existing tools" does not.
 
@@ -166,7 +196,7 @@ A few clarifications, because the style can be misapplied.
 
 **Plain style is not casual style.** Plain writing is direct, but it is not chatty, joking, or filler-laden. The directness is a craft choice, not an absence of effort. Avoid "honestly", "to be clear", "real talk" and similar conversational markers in formal technical writing.
 
-**Plain style is not minimalist style.** Sentences can be long when they're carrying complex thoughts. The goal is not "short prose" but "no wasted words." A 40-word sentence with no filler is plain; a 12-word sentence padded with hedges is not.
+**Plain style is not minimalist style.** A sentence can carry a complex thought without filler. Split it when it exceeds the sentence limits above. A short sentence padded with hedges still needs revision.
 
 **Plain style is not opinion-free style.** Quite the opposite. The whole point is to make positions visible and ownable. Writing without positions ("various perspectives exist on this question") is the failure mode the style is designed against.
 
@@ -181,9 +211,9 @@ Most technical writing benefits from a revision pass focused specifically on the
 1. **Find the weak verbs.** Search for *is, are, was, were, has, have, involves, exhibits, contains, includes, represents, constitutes, comprises*. For each, ask whether a stronger verb is hiding in the noun phrase.
 2. **Find the hedges.** Search for *perhaps, possibly, potentially, arguably, somewhat, generally, often, may, might, could, seems, appears, tends to.* Delete the ones that aren't earning their place.
 3. **Find the filler.** Search for *it is important to note, in order to, at this point in time, due to the fact that, the fact of the matter is, needless to say.* Delete or rewrite.
-4. **Find the voice mismatches.** Three patterns to fix: disowned claims (`it could be argued`, `it may be the case that`) → bare declarative; author intruding on mechanism descriptions (`I have designed X to do Y`) → impersonal; reflexive `I argue` / `I think` on claims that read fine without them → drop the wrapper. Keep first-person only where it actively flags epistemic status.
+4. **Find the voice mismatches.** Three patterns to fix: disowned claims (`it could be argued`, `it may be the case that`) → bare declarative. Author intruding on mechanism descriptions (`I have designed X to do Y`) → impersonal. Reflexive `I argue` / `I think` on claims that read fine without them → drop the wrapper. Keep first-person only where it actively flags epistemic status.
 5. **Find the consultant-speak.** Search for *various, several, different approaches, considerations, factors, aspects, characteristics.* These often mark sentences that describe the existence of a tradeoff without naming it. Name the tradeoff and pick a side.
-6. **Find the generic quantifiers.** *Several, various, many, multiple, some, most, often, typically, generally* — for each, ask whether a specific number, name, or condition was available and got dropped. Replace with specifics where they exist; state the gap honestly where they don't.
+6. **Find the generic quantifiers.** *Several, various, many, multiple, some, most, often, typically, generally* — for each, ask whether a specific number, name, or condition was available and got dropped. Replace with specifics where they exist. State the gap honestly where they don't.
 7. **Find the bare positions.** Look for confident claims that aren't followed by one beat of reasoning. Either back them in a sentence or remove them — an unsupported claim sitting alone reads as opinion-as-fact.
 8. **Read aloud.** Sentences that trip in the mouth usually have filler, vague nouns, or buried verbs. Fix the trips.
 
