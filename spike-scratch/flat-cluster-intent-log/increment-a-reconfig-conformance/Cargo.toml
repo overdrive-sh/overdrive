@@ -25,9 +25,7 @@ quint-connect = "=0.1.2"
 [profile.dev]
 opt-level = 1
 
-# SPIKE FORK (observation + fix prototyping): the pinned viewstamp @ f7fbcd96 cloned into the gitignored
-# .tools/viewstamp-fork; its diff vs the base SHA is saved under patches/.
-# (enable to build against the fork; left commented for the as-is evidence runs)
-# [patch."https://github.com/al8n/viewstamp"]
-# viewstamp-proto = { path = ".tools/viewstamp-fork/viewstamp-proto" }
-# viewstamp-simulation = { path = ".tools/viewstamp-fork/tests/viewstamp-simulation" }
+# Run the model-based replay against the sibling submodule fork at vendors/viewstamp.
+[patch."https://github.com/al8n/viewstamp"]
+viewstamp-proto = { path = "../../../vendors/viewstamp/viewstamp-proto" }
+viewstamp-simulation = { path = "../../../vendors/viewstamp/tests/viewstamp-simulation" }

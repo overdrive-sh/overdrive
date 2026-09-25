@@ -15,7 +15,8 @@
 //                 covers the head.
 //   epoch swap    COMMIT-FIRST: installing the successor happens when a replica commits the Reconfigure
 //                 op whose pinned predecessor is its current config (normal.rs commit_reconfigure). The
-//                 view is PRESERVED across the swap, so primaryship remaps (primary = voters[v % n]).
+//                 the successor epoch starts at view/log_view 0, so predecessor primaryship cannot
+//                 remap into a successor view the new group never formed.
 //                 Messages emitted in the same step carry the PRE-install epoch (the SwapEpoch root
 //                 lands asynchronously after the emit).
 //   view change   TigerBeetle-style: SVC quorum = quorum_view_change = n - quorum + 1 (flexible),
@@ -27,8 +28,8 @@
 //                 adopted head >= own commit_min (a violation is a fail-stop panic in viewstamp).
 //   crossing      a replica behind in EPOCH state-syncs from a donor's durable CHECKPOINT (served once it
 //                 covers the donor's install op) and installs the donor's config;
-//                 its VIEW and LOG_VIEW are PRESERVED (state_sync.rs install_sync / apply_sync touch
-//                 neither; log_view is written only at view_change.rs:1161 and :1684).
+//                 the successor epoch begins durably at VIEW 0 / LOG_VIEW 0 and predecessor-epoch
+//                 view-change standing is abandoned (VR Revisited §8.3).
 //   crash/restart durable: cfg, view, log_view, log, commit. Volatile: acks, SVC/DVC tallies, proof.
 //                 A restarted Normal primary abdicates to view+1; one crashed mid view-change re-drives.
 //   add learner   a brand-new node is bootstrapped out of band with the installed successor membership
@@ -44,12 +45,9 @@ module vr_sc {
   const MAX_LOG: int
   const MAX_VIEW: int
   const CHECKPOINT_OPS: int
-  // CANDIDATE FIX (fork work item, not viewstamp@f7fbcd96 behaviour): a cross-epoch state-sync install
-  // does not carry the node's predecessor-epoch VIEW STANDING into the successor epoch. The crossing node
-  // durably resets log_view to 0 and, when view > 0, leaves Normal for the view-change posture at its
-  // current view (a voter re-drives with a log_view-0 DVC; a learner catches up via GetView/StartView), so
-  // it neither ranks a predecessor-epoch log_view against successor-epoch logs nor acts as a primary of a
-  // successor view it never formed or adopted (VR Revisited §8.3 / §7.1.1). false == viewstamp as-is.
+  // Cross-epoch view reset feature switch retained for the historical as-is/fixed comparison modules.
+  // The primary topology modules set this true: crossing starts the successor at view/log_view 0 and
+  // carries no predecessor-epoch SVC/DVC standing (VR Revisited §8.3 / §7.1.1).
   const CROSS_FIX: bool
 
   // ---------------------------------------------------------------------------------------------
@@ -201,16 +199,16 @@ module vr_sc {
   // commit_min) or a repair hole is outstanding.
   pure def admits(s: NState): bool = s.cmax <= s.commit and s.holes.size() == 0
 
-  // Installing a successor configuration (swap_membership_in_place): a node absent from the
-  // successor retires; a VC in progress drops its DVC tally; the learner proof is cleared.
+  // Installing a successor configuration: every epoch has an independent view-number space, so the
+  // durable/live identity resets to view/log_view 0 and predecessor SVC/DVC standing is abandoned.
+  // A node absent from the successor retires; the learner proof is cleared.
   pure def install(s: NState, c: Cfg): NState =
+    val reset = persist(s.with("view", 0).with("logView", 0).with("svcTarget", 0)
+                         .with("svcFrom", Set()).with("dvcs", Set()))
     if (not(isMember(c, s.id)))
-      s.with("cfg", c).with("status", "retired")
+      reset.with("cfg", c).with("status", "retired")
     else
-      // rekey_slot_quorums_for_swap: the SVC tally keeps exactly the members that stay VOTERS
-      persist(s).with("cfg", c).with("boot", false).with("idle", s.idle or s.status == "normal")
-        .with("svcFrom", s.svcFrom.intersect(setOf(c.voters)))
-        .with("dvcs", if (s.status == "vc") Set() else s.dvcs)
+      reset.with("cfg", c).with("status", "normal").with("boot", false).with("idle", true)
         .with("proofTarget", -1).with("proofAt", -1).with("proofFrontier", -1)
 
   // Commit exactly `op` (== s.commit + 1): a committed Reconfigure op pinned to the current config
@@ -1117,9 +1115,9 @@ module vr_sc {
     val installOp = q.inst
     // When no higher-epoch primary's heartbeat reaches a Normal voter BACKUP, its only lower-epoch traffic is
     // its primary_idle timeout: propose_next_view raises svc_target to view+1 and JOINS (own bit + SVC
-    // broadcast) before the EpochAhead answer arrives — and the crossing KEEPS the raised target (install_sync
-    // does not touch it; the swap rekey keeps the bits of retained voters). (A join that would complete an SVC
-    // quorum — entering a predecessor-epoch view change mid-crossing — is not modelled: disabled.)
+    // broadcast) before the EpochAhead answer arrives. The fixed crossing discards that predecessor-epoch
+    // proposal with the rest of the old view identity. (A join that would complete an SVC quorum — entering a
+    // predecessor-epoch view change mid-crossing — is not modelled: disabled.)
     val idleSvc = not(primaryHeartbeatReaches(st, n)) and voterSelf(s) and s.status == "normal" and not(primarySelf(s))
     val raise = s.view + 1 > s.svcTarget
     val sj = if (idleSvc)
@@ -1144,19 +1142,20 @@ module vr_sc {
       not(q.boot),
       val synced =
         sj.with("cfg", q.cfg).with("log", q.log.slice(0, cp)).with("stamp", zeros(cp)).with("commit", cp).with("cmax", cp)
-               .with("dcommit", cp).with("hdrs", 1.to(cp)).with("ckpt", cp).with("inst", installOp).with("boot", false)
+               .with("dcommit", cp)
+               .with("hdrs", 0.to(MAX_LOG).filter(op => op >= 1 and op <= cp))
+               .with("ckpt", cp).with("inst", installOp).with("boot", false)
                .with("holes", Set()).with("reg", Set()).with("wmis", Set()).with("nohdr", Set()).with("nacks", Set())
                .with("sync", 0).with("syncForced", false).with("pfloor", 0)
                .with("idle", true)
                .with("svcFrom", sj.svcFrom.intersect(setOf(q.cfg.voters))).with("dvcs", Set()).with("acks", Set())
                .with("proofTarget", -1).with("proofAt", -1).with("proofFrontier", -1)
-      // viewstamp as-is: the crossing KEEPS view/log_view/status (the node may land as a Normal primary of a
-      // successor view it never formed — the phantom). CROSS_FIX: log_view := 0 (durable) and, off view 0,
-      // leave Normal exactly like recovery's `log_view < view` branch (voter re-drives, learner catches up).
-      val fixed = persist(synced.with("logView", 0))
-      val out = if (not(CROSS_FIX) or s.view == 0) (synced, Set())
-                else if (isVoter(q.cfg, n)) enterVc(fixed, s.view)
-                else (fixed.with("status", "vc").with("svcTarget", imax(fixed.svcTarget, s.view)), Set())
+      // VR Revisited §8.3: each epoch has an independent view-number space and begins at view 0. The
+      // crossing root persists the same `(view, logView) = (0, 0)` pair, and the live install abandons
+      // every predecessor-epoch SVC/DVC collection before the endpoint can participate in the successor.
+      val fixed = persist(synced.with("view", 0).with("logView", 0).with("status", "normal")
+                                  .with("svcTarget", 0).with("svcFrom", Set()).with("dvcs", Set()))
+      val out = if (CROSS_FIX) (fixed, Set()) else (synced, Set())
       commitStep(st.set(n, out._1), out._2, Set(), true, isPrefix(committedOf(s), q.log), true, 0,
                  SyncFrom({ n: n, d: d, cp: cp })),
     }
@@ -1272,7 +1271,7 @@ module vr_sc {
   //      at an (epoch, view) strictly before (E, v) (lexicographic). A primary lacking such an op is one
   //      view change away from truncating a committed op.
   val formedPrimaries: Set[int] =
-    NODES.filter(n => st.get(n).started and st.get(n).status == "normal" and primarySelf(st.get(n))
+    NODES.filter(n => live(st.get(n)) and st.get(n).status == "normal" and primarySelf(st.get(n))
                        and st.get(n).logView == st.get(n).view)
   pure def ev(s: NState): int = s.cfg.epoch * (MAX_VIEW + 1) + s.view
   val completeness: bool =
@@ -1326,7 +1325,7 @@ module vr_sc_4v {
     MAX_LOG = 4,
     MAX_VIEW = 3,
     CHECKPOINT_OPS = 4,
-    CROSS_FIX = false
+    CROSS_FIX = true
   ).* from "./vr_sc"
 
   // ---- churn from a GROWN cluster (see vr_sc_solo): demote 3, then promote it back (E2 = V[0,1,2,3]).
@@ -1376,8 +1375,10 @@ module vr_sc_4v {
       .then(deliverDvcM(msgAt("dvc", 3, 1, 1, 0, 1)))          // n1 forms (E0,v1): log [R], logView 1
       .then(crashM(0))
       .then(deliverPrepareM(msgAt("prepare", 0, 2, 0, 1, 3)))  // n2 appends c2
-      .then(syncFromM(1, 2, 1))                                // n1 crosses into E1 at checkpoint 1,
-                                                               // KEEPING view 1 / log_view 1 -> phantom
+      .then(syncFromM(1, 2, 1))                                // n1 crosses into E1 at checkpoint 1 and
+                                                               // starts E1 at view 0; no phantom primary
+      .expect(st.get(1).cfg.epoch == 1 and st.get(1).view == 0
+              and st.get(1).logView == 0 and not(primarySelf(st.get(1))) and agreement and noFailStop)
 
   // (A) Fail-stop: n2 learned c1 committed (commit 2) and then catches up to the phantom's higher view.
   run phantomFailStop =
@@ -1404,9 +1405,8 @@ module vr_sc_4v {
       .then(deliverCommitM(commitMsgAt(0, 2, 0, 1, 2)))        // n2 learns c1 committed
       .then(crashM(0))
       .then(deliverPrepareM(msgAt("prepare", 0, 2, 0, 1, 3)))
-      .then(syncFromM(1, 2, 1))                                // phantom primary n1 @ (E1, v1)
-      .then(catchUpViewM(2, 1))                                // n2 GetViews the phantom: head 1 < commit 2
-      .expect(not(noFailStop))
+      .then(syncFromM(1, 2, 1))                                // n1 enters E1/view 0 as a backup
+      .expect(st.get(1).view == 0 and not(primarySelf(st.get(1))) and noFailStop and agreement)
 
   // (B) Silent loss: n2 never learned c1 committed; it adopts the phantom's short head, and a later
   //     view change forms from {n1, n2} (both log_view 1) and a new op overwrites c1.
@@ -1433,18 +1433,9 @@ module vr_sc_4v {
       .then(deliverDvcM(msgAt("dvc", 3, 1, 1, 0, 1)))
       .then(crashM(0))                                         // the only node that knows c1 committed
       .then(deliverPrepareM(msgAt("prepare", 0, 2, 0, 1, 3)))
-      .then(syncFromM(1, 2, 1))                                // phantom primary n1 @ (E1, v1)
-      .then(catchUpViewM(2, 1))                                // n2 adopts [R]: c1 truncated from n2
-      .then(restartM(0))                                       // n0 abdicates -> VC(E1, v1)
-      .then(timeoutM(0))                                       // n0 escalates: SVC(v2)
-      .then(deliverSvcM(msgAt("svc", 0, 1, 2, 1, 0)))          // n1 joins -> VC(v2), DVC -> n2
-      .then(deliverSvcM(msgAt("svc", 0, 2, 2, 1, 0)))          // n2 joins -> VC(v2) as its primary
-      .then(deliverDvcM(msgAt("dvc", 1, 2, 2, 1, 1)))          // n2 forms (E1, v2) from {n1, n2}: [R]
-      .then(deliverSvM(msgAt("sv", 2, 1, 2, 1, 1)))            // n1 adopts (E1, v2)
-      .then(clientRequestM(2))                                 // c3 minted at op 2 (where c1 was)
-      .then(deliverPrepareM(msgAt("prepare", 2, 1, 2, 1, 2)))
-      .then(deliverPrepareOkM(msgAt("prepareOk", 1, 2, 2, 1, 2))) // c3 COMMITTED at op 2
-      .expect(not(agreement))
+      .then(syncFromM(1, 2, 1))                                // n1 enters E1/view 0 as a backup; the
+                                                               // phantom-loss suffix is unreachable
+      .expect(st.get(1).view == 0 and not(primarySelf(st.get(1))) and agreement and noFailStop)
 }
 
 // 3 voters + 1 genesis learner + 1 spare node that can be AddLearner'd.
@@ -1456,7 +1447,7 @@ module vr_sc_3v1l {
     MAX_LOG = 4,
     MAX_VIEW = 3,
     CHECKPOINT_OPS = 4,
-    CROSS_FIX = false
+    CROSS_FIX = true
   ).* from "./vr_sc"
 
   // ---- churn from a GROWN cluster (see vr_sc_solo): promote the genesis learner 3 (E1 = V[0,1,2,3]).
@@ -1486,7 +1477,7 @@ module vr_sc_solo {
     MAX_LOG = 5,
     MAX_VIEW = 3,
     CHECKPOINT_OPS = 4,
-    CROSS_FIX = false
+    CROSS_FIX = true
   ).* from "./vr_sc"
 
   // ---- churn from a GROWN cluster: a scripted grow prefix, then a random stepChurn suffix (quint test

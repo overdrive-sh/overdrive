@@ -1,0 +1,3 @@
+[submodule "vendors/viewstamp"]
+	path = vendors/viewstamp
+	url = https://github.com/overdrive-sh/viewstamp

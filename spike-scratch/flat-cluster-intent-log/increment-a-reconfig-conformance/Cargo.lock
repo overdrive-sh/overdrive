@@ -1074,7 +1074,6 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "viewstamp-proto"
 version = "0.0.0"
-source = "git+https://github.com/al8n/viewstamp?rev=f7fbcd96ebcee2aafa08f3ac136844743c7f9773#f7fbcd96ebcee2aafa08f3ac136844743c7f9773"
 dependencies = [
  "buffa",
  "buffa-build",
@@ -1086,7 +1085,6 @@ dependencies = [
 [[package]]
 name = "viewstamp-simulation"
 version = "0.0.0"
-source = "git+https://github.com/al8n/viewstamp?rev=f7fbcd96ebcee2aafa08f3ac136844743c7f9773#f7fbcd96ebcee2aafa08f3ac136844743c7f9773"
 dependencies = [
  "bytes",
  "smol_str",

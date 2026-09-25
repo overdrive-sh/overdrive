@@ -91,7 +91,7 @@ def check(path, max_view):
         if not (s["ghostOk"] and all(is_prefix(committed(ns), g) for ns in st.values())):
             fails.append("agreement")
         for n, ns in st.items():
-            if ns["started"] and ns["status"] == "normal" and primary_self(ns) and ns["logView"] == ns["view"]:
+            if ns["started"] and ns["up"] and ns["status"] == "normal" and primary_self(ns) and ns["logView"] == ns["view"]:
                 ev = ns["cfg"]["epoch"] * (max_view + 1) + ns["view"]
                 for k in range(len(g)):
                     if gat[k] < ev and not (k < len(ns["log"]) and ns["log"][k] == g[k]):
