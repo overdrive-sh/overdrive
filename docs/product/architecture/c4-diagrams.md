@@ -1623,7 +1623,7 @@ C4Context
   Person(operator, "Platform operator", "Deploys and observes microVM workloads")
   System(overdrive, "Overdrive node", "Admits guest attachments node-wide, owns the TAP queue handoff, transparent mTLS, and bounded shared-owner recovery")
   System_Ext(guest, "Identity-unaware microVM guests", "Dial plaintext; hold no certificate or key; no L2 frame before intercept-live")
-  System_Ext(ch, "Cloud Hypervisor v53+", "Inherits only descriptors 0-3, fd 3 being one TAP queue, and the launch seccomp filter on every thread; never raises or mutates the TAP")
+  System_Ext(ch, "Cloud Hypervisor (appliance-shipped build; audited v53.0)", "Inherits only descriptors 0-3, fd 3 being one TAP queue, and the launch seccomp filter on every thread; never raises or mutates the TAP")
   System_Ext(kernel, "Linux/KVM", "Bridge, persistent TAP, TCX, nftables, policy routing, cgroup v2, kTLS, splice")
   System_Ext(proc_supervisor, "External process supervisor", "Restarts serve after exit status 1; deployment precondition, not #295")
 
