@@ -1,0 +1,17 @@
+# TLC (quint verify --backend tlc) — 2026-09-25T12:42:46Z — uname -r 7.0.0-31-generic — quint 0.32.0 — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+ok3-AllSafety                                        rc=0 1293309 states generated, 230455 distinct states found, 0 states left on queue. The depth of the complete state graph search is 25.  | [ok] No violation found (4947ms). 
+ok4-AllSafety                                        rc=0 530555169 states generated, 73847889 distinct states found, 0 states left on queue. The depth of the complete state graph search is 33.  | [ok] No violation found (1443217ms). 
+# TLC (quint verify --backend tlc) — 2026-09-25T14:12:28Z — uname -r 7.0.0-31-generic — quint 0.32.0 — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+B1-majority-GateOnlyWithAllVoters                    rc=1 The depth of the complete state graph search is 5.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B2-proposetime-GateOnlyWithAllVoters                 rc=1 The depth of the complete state graph search is 7.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B3-nofence-NoAckAfterSeal                            rc=1 The depth of the complete state graph search is 5.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B3-nofence-CommittedPrefixPreserved                  rc=1 The depth of the complete state graph search is 5.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B3-nofence-NoTwoCommittingPrimaries                  rc=1 The depth of the complete state graph search is 4.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B4-unverifiedfetch-LearnerNoDivergence               rc=1 The depth of the complete state graph search is 9.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B5-admitunsupported-VotersSupportClusterVersion      rc=1 The depth of the complete state graph search is 7.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B6-resealnofence-UniqueSuccessor                     rc=1 The depth of the complete state graph search is 5.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+B7-applyunsupported-NoApplyAboveSupported            rc=1 The depth of the complete state graph search is 7.  | Error: Invariant q_inv is violated. Error: The behavior up to this point is: 
+# TLC (quint verify --backend tlc) — 2026-09-25T14:13:37Z — uname -r 7.0.0-31-generic — quint 0.32.0 — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+ok3-GateEventuallyCommits                            rc=0 Progress(25) at 2026-09-25 16:13:55: 1,293,309 states generated, 230,455 distinct states found, 0 states left on queue. 1293309 states generated, 230455 distinct states found, 0 states left on queue. The depth of the complete state graph search is 25.  | [ok] No violation found (14036ms). 
+# TLC (quint verify --backend tlc) — 2026-09-25T14:14:37Z — uname -r 7.0.0-31-generic — quint 0.32.0 — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+ok5-AllSafety-attempt2-vartmp                        rc=1  | 

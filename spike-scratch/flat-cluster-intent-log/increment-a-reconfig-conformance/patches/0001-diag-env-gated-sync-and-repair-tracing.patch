@@ -1,0 +1,293 @@
+diff --git a/viewstamp-proto/src/endpoint/normal.rs b/viewstamp-proto/src/endpoint/normal.rs
+index 654ffbe..5d2ddc7 100644
+--- a/viewstamp-proto/src/endpoint/normal.rs
++++ b/viewstamp-proto/src/endpoint/normal.rs
+@@ -1,5 +1,17 @@
+ use super::*;
+ 
++// SPIKE DIAGNOSTIC (observation only): env-gated trace of commit-advance / repair registration.
++#[cfg(feature = "std")]
++macro_rules! vs_diag2 {
++  ($($t:tt)*) => {
++    if ::std::env::var_os("VS_DIAG_SYNC").is_some() { ::std::eprintln!($($t)*); }
++  };
++}
++#[cfg(not(feature = "std"))]
++macro_rules! vs_diag2 {
++  ($($t:tt)*) => {};
++}
++
+ /// Why a NEW op cannot be minted right now — the shared, op-content-INDEPENDENT admission verdict that
+ /// fences BOTH the client-request path ([`Endpoint::on_request`]) and the reconfiguration-proposal path
+ /// ([`Endpoint::propose_membership`](crate::Endpoint::propose_membership)). It enumerates EXACTLY the
+@@ -1532,6 +1544,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // window so the install is the single atomic mutation point (the captured held-tail decision + the
+     // monotonic advances stay exactly as at STAGE, no commit_max rewind). Return BEFORE learning the commit.
+     if self.pending_install.is_some() {
++      vs_diag2!("[vs-diag] advance_commit({target}) early-return: pending_install");
+       return CommitFlow::Continue;
+     }
+     // Record the learned commit regardless of whether we hold — or can yet apply — the ops: `commit_max` is
+@@ -1547,8 +1560,10 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // above but must NOT apply here; the retry reconstructs the SM under the fixed M pointer and ops
+     // re-apply via the next Commit/Prepare once the obligation clears.
+     if self.sm_reconstruct_owed() {
++      vs_diag2!("[vs-diag] advance_commit({target}) early-return: sm_reconstruct_owed (commit_min={})", self.commit_min.get());
+       return CommitFlow::Continue;
+     }
++    vs_diag2!("[vs-diag] advance_commit({target}) loop from commit_min={} op={} status={}", self.commit_min.get(), self.op.get(), self.status.as_str());
+     while self.commit_min.get() < target && self.commit_min.get() < self.op.get() {
+       let op = self.commit_min.get() + 1;
+       // Faults-as-data (peer fault-repair): a committed op whose body read back
+diff --git a/viewstamp-proto/src/endpoint/repair.rs b/viewstamp-proto/src/endpoint/repair.rs
+index c684ed5..936d71c 100644
+--- a/viewstamp-proto/src/endpoint/repair.rs
++++ b/viewstamp-proto/src/endpoint/repair.rs
+@@ -1,5 +1,17 @@
+ use super::*;
+ 
++// SPIKE DIAGNOSTIC (observation only): env-gated trace of commit-advance / repair registration.
++#[cfg(feature = "std")]
++macro_rules! vs_diag2 {
++  ($($t:tt)*) => {
++    if ::std::env::var_os("VS_DIAG_SYNC").is_some() { ::std::eprintln!($($t)*); }
++  };
++}
++#[cfg(not(feature = "std"))]
++macro_rules! vs_diag2 {
++  ($($t:tt)*) => {};
++}
++
+ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+   /// Register op `op` for peer fault-repair: its committed body read back permanently faulty, so
+   /// we drop any stale (header-only / wrong) cache entry, record the hole, immediately solicit the op
+@@ -63,6 +75,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+   /// run is holes-only. Each hole in `[lo, hi]` is registered identically to `request_repair`'s single
+   /// op, then the retry timer is armed and the force-sync escalation evaluated ONCE for the whole run.
+   pub(crate) fn request_repair_run(&mut self, now: Instant, lo: u64) {
++    vs_diag2!("[vs-diag] request_repair_run(lo={lo}) commit_max={} op={} status={}", self.commit_max.get(), self.op.get(), self.status.as_str());
+     // Walk the contiguous hole band up from `lo`, bounded by the repair window and the known-committed
+     // frontier. An op is a HOLE iff it is missing from `self.log` OR held header-only (`Repairing`); a
+     // BODY-BEARING op (`Present` OR `Reconfigure`) terminates the band (it is filled, not a hole — a held
+@@ -669,6 +682,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     storage: &mut Storage<W, B, S>,
+     p: &Prepare,
+   ) -> bool {
++    vs_diag2!("[vs-diag] fill_repair(op={}) registered={} repair={:?}", p.op().get(), self.repair.contains(&p.op().get()), self.repair);
+     let _ = (now, &mut *storage); // the apply/advance is deferred to on_wal_done; no commit here
+     let op = p.op().get();
+     if !self.repair.contains(&op) {
+diff --git a/viewstamp-proto/src/endpoint/state_sync.rs b/viewstamp-proto/src/endpoint/state_sync.rs
+index 2465b19..0620360 100644
+--- a/viewstamp-proto/src/endpoint/state_sync.rs
++++ b/viewstamp-proto/src/endpoint/state_sync.rs
+@@ -1,5 +1,18 @@
+ use super::*;
+ 
++// SPIKE DIAGNOSTIC (flat-cluster-intent-log increment A, observation only - no behaviour change): when
++// VS_DIAG_SYNC is set, name the gate that drops a SyncCheckpoint / rejects a sync install.
++#[cfg(feature = "std")]
++macro_rules! vs_diag {
++  ($($t:tt)*) => {
++    if ::std::env::var_os("VS_DIAG_SYNC").is_some() { ::std::eprintln!($($t)*); }
++  };
++}
++#[cfg(not(feature = "std"))]
++macro_rules! vs_diag {
++  ($($t:tt)*) => {};
++}
++
+ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+   /// Whether the live transfer has a frontier WALK outstanding — its frontiers are inside a job, and
+   /// the decision that walk carries (install the drained checkpoint, or pull the next missing block)
+@@ -1133,12 +1146,15 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+   ) {
+     // Freshness + relevance: we must be a Normal replica with an outstanding sync whose nonce matches.
+     if !self.status.is_normal() {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if !self.status.is_normal() (");
+       return;
+     }
+     let Some(s) = self.sync else {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: let Some(s) = self.sync else (");
+       return; // no sync outstanding (already applied / never triggered) — ignore.
+     };
+     if m.nonce() != s.nonce {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if m.nonce() != s.nonce (");
+       return; // a reply to a prior solicitation / forged — not fresh.
+     }
+     // SINGLE-SUPERBLOCK-WRITER: a sync install must not be STAGED while ANY superblock root is
+@@ -1156,6 +1172,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     //   while a root is in flight; `sync` stays armed (forced + `require_cross_epoch` + target intact),
+     //   so the solicit timer re-fetches once the root lands and its forced checkpoint clears.
+     if self.pending_sb.is_some() || self.pending_checkpoint.is_some() {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if self.pending_sb.is_some() || self.pending_checkpoint.is_some() (");
+       return;
+     }
+     // SM-RECONSTRUCT obligation owed (a post-root restore faulted; `self.checkpoint_op == M`): a fresh
+@@ -1180,9 +1197,11 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+       // Trust the bytes only if they hash to the advertised id (the same integrity gate the ordinary path
+       // applies below) before re-pinning the fetch to this donor's `sm_root`.
+       if crate::checkpoint_id(m.snapshot()) != m.checkpoint_id() {
++        vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if crate::checkpoint_id(m.snapshot()) != m.checkpoint_id() (");
+         return;
+       }
+       self.refetch_sm_reconstruct(now, storage, from, &m);
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if crate::checkpoint_id(m.snapshot()) != m.checkpoint_id() (");
+       return;
+     }
+     if m.checkpoint_op().get() < s.target.get() && !s.require_cross_epoch {
+@@ -1196,6 +1215,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+       //   `apply_sync`, where the monotone-own-checkpoint gate (`> self.checkpoint_op`, just below), the
+       //   no-rewind (`>= commit_min`), and the successor verification are the true admission. Without this
+       //   carve-out a bogus hinted target would reject every valid below-hint successor reply forever.
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if m.checkpoint_op().get() < s.target.get() && !s.require_cross_epoch (");
+       return;
+     }
+     // The `<= self.op` drop is ONLY for the ordinary trigger: there, an equal/lower checkpoint means a
+@@ -1205,15 +1225,18 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // on `>= self.checkpoint_op` below (advances our own checkpoint) + `apply_sync`'s `>= commit_min`
+     // assert (never rewinds the applied frontier — which holds since target `>= N > commit_min`).
+     if !s.forced && m.checkpoint_op().get() <= self.op.get() {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if !s.forced && m.checkpoint_op().get() <= self.op.get() (");
+       return; // a racing tail-apply already covered the checkpoint — no sync needed (re-assert trigger).
+     }
+     if m.checkpoint_op().get() <= self.checkpoint_op.get() {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if m.checkpoint_op().get() <= self.checkpoint_op.get() (");
+       return; // never regress our own checkpoint (monotone).
+     }
+     // The load-bearing integrity gate: never restore a snapshot whose bytes do not hash to the
+     // advertised id (corrupt / forged / torn). Verified BEFORE any SM mutation. Keep `sync` armed so
+     // the solicit timer re-fetches from another peer.
+     if crate::checkpoint_id(m.snapshot()) != m.checkpoint_id() {
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if crate::checkpoint_id(m.snapshot()) != m.checkpoint_id() (");
+       return;
+     }
+     // A PRIMARY must NOT APPLY a state-sync in
+@@ -1263,6 +1286,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+       // drained blocks survive in the store for a fresh sync, exactly as a view-change reset.
+       self.pending_install = None;
+       self.timers.sync_solicit = None;
++      vs_diag!("[vs-diag] reject at handle_sync_checkpoint: if !s.require_cross_epoch && !self.sm_reconstruct_owed() && self.abdicate_if_primary(now) (");
+       return;
+     }
+     self.begin_block_sync(now, storage, from, m);
+@@ -1333,6 +1357,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // `checkpoint_id` integrity gate, but a malformed/truncated envelope must not panic — reject it as a
+     // fault and leave `sync` armed so the solicit timer re-fetches from another peer.
+     let Some((_, sm_root, sessions_root)) = Self::decode_checkpoint(m.snapshot()) else {
++      vs_diag!("[vs-diag] reject at begin_block_sync: let Some((_, sm_root, sessions_root)) = Self::decode_checkpoint(m.snapshot()) else (");
+       return;
+     };
+     // A reply reaching here while an SM-reconstruct obligation is owed is, by the ingress gates, a
+@@ -1363,12 +1388,14 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // answered this sync, so drop defensively (keeping `sync` armed for the re-solicit) rather than
+     // fabricate a target.
+     if from.is_client() {
++      vs_diag!("[vs-diag] reject at begin_block_sync: if from.is_client() (");
+       return;
+     }
+     // ONE PIN AT A TIME: a reply is not admitted while the live transfer is mid-walk (see
+     // [`Self::transfer_walk_in_flight`]). It is RETAINED, and re-delivered the moment that walk lands.
+     if self.transfer_walk_in_flight() {
+       self.defer_pin_until_walk_completes(from, m);
++      vs_diag!("[vs-diag] reject at begin_block_sync: if self.transfer_walk_in_flight() (");
+       return;
+     }
+     // PROVENANCE-AWARE replacement: a reply that does NOT present a crossing must never DOWNGRADE a live
+@@ -1388,6 +1415,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+       .is_some_and(|bf| bf.crossing_answered)
+       && !self.checkpoint_presents_crossing(&m)
+     {
++      vs_diag!("[vs-diag] reject at begin_block_sync: && !self.checkpoint_presents_crossing(&m)");
+       return;
+     }
+     let donor = from;
+@@ -1813,6 +1841,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+           self.pending_install = None;
+           self.timers.sync_solicit = None;
+         }
++        vs_diag!("[vs-diag] reject at apply_sync: if !self.sync.is_some_and(|s| s.require_cross_epoch) (");
+         return;
+       }
+     } else {
+@@ -1841,6 +1870,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // stay admissible. A refusal keeps `sync` armed so the solicit cadence re-fetches a reply at
+     // or above the timeline.
+     if checkpoint_op < storage.effective_root().checkpoint_op() {
++      vs_diag!("[vs-diag] reject at apply_sync: if checkpoint_op < storage.effective_root().checkpoint_op() (");
+       return;
+     }
+     // Decode the verified envelope FIRST (before staging anything irreversible). `on_sync_checkpoint`
+@@ -1851,6 +1881,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // SM/session bytes are NOT in the envelope — only the two DAG roots, whose blocks the block-fetch
+     // already drained.
+     let Some((bound_op, sm_root, sessions_root)) = Self::decode_checkpoint(m.snapshot()) else {
++      vs_diag!("[vs-diag] reject at apply_sync: let Some((bound_op, sm_root, sessions_root)) = Self::decode_checkpoint(m.snapshot()) else (");
+       return;
+     };
+     // BIND-CHECK (safety): the op hashed INTO the snapshot must equal the advertised `checkpoint_op`
+@@ -1860,6 +1891,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     // frontier to B — silently dropping the committed ops in `(A, B]`. Reject (no staging; `sync` stays
+     // armed so another peer answers) rather than drop committed state.
+     if bound_op != checkpoint_op {
++      vs_diag!("[vs-diag] reject at apply_sync: if bound_op != checkpoint_op (");
+       return;
+     }
+     // PRESERVE-TAIL decision, captured for the deferred install: does this sync
+@@ -1902,6 +1934,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+     let successor = if m.config_id() != self.membership.config_id() && !m.membership().is_empty() {
+       let Some(payload) = crate::message::ReconfigurePayload::decode_body(m.membership()).ok()
+       else {
++        vs_diag!("[vs-diag] reject at apply_sync: let Some(payload) = crate::message::ReconfigurePayload::decode_body(m.membership()).ok()");
+         return;
+       };
+       // VERIFY the carried successor reconstructs to its claimed `config_id` (the hash-chain
+@@ -1933,6 +1966,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+           // member offline across more than two legal changes rejoin instead of stranding forever on a
+           // "closer donor" the protocol does not preserve.
+           if successor.epoch() <= self.membership.epoch() {
++            vs_diag!("[vs-diag] reject at apply_sync: if successor.epoch() <= self.membership.epoch() (");
+             return;
+           }
+           // Strictly ordered against the session TIMELINE as well. The live check above is the
+@@ -1954,6 +1988,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+                 .membership_opt()
+                 .is_some_and(|m| m.config_id() != successor.config_id()));
+           if below_timeline {
++            vs_diag!("[vs-diag] reject at apply_sync: if below_timeline (");
+             return;
+           }
+           // The op that PRODUCED the carried successor — the donor's `config_install_op`, recorded
+@@ -1978,6 +2013,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+           //   equal-epoch re-persist of this node's own in-flight swap legitimately carries the
+           //   SAME producing op the timeline already records.
+           let Some(install_op) = m.config_install_op() else {
++            vs_diag!("[vs-diag] reject at apply_sync: let Some(install_op) = m.config_install_op() else (");
+             return;
+           };
+           if install_op > checkpoint_op
+@@ -1985,11 +2021,15 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+               .membership_opt()
+               .is_some_and(|_| install_op < effective.config_install_op())
+           {
++            vs_diag!("[vs-diag] reject at apply_sync: || effective");
+             return;
+           }
+           Some((successor, verified_prev, install_op))
+         }
+-        Err(_) => return,
++        Err(_) => {
++          vs_diag!("[vs-diag] reject at apply_sync: to_membership_verified Err");
++          return;
++        }
+       }
+     } else {
+       None
+@@ -2030,6 +2070,7 @@ impl<S: StateMachine, R: Reconfig> Endpoint<S, R> {
+       && s.require_cross_epoch
+       && successor.is_none()
+     {
++      vs_diag!("[vs-diag] reject at apply_sync: && successor.is_none()");
+       return;
+     }
+     // Assemble the verified install — every field the durable re-persist + the deferred `install_sync`

@@ -1,0 +1,21 @@
+[package]
+name = "gate-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "Spike probe: an application-level committed cluster-version gate on viewstamp"
+
+# Self-contained: not a member of the Overdrive workspace.
+[workspace]
+
+# viewstamp pinned to an exact commit (HEAD of al8n/viewstamp main on 2026-09-25).
+[dependencies]
+viewstamp-proto = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773", features = ["std", "tcp"] }
+viewstamp-driver = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773" }
+viewstamp-reactor = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773", features = ["tokio"] }
+viewstamp-simulation = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773" }
+agnostic = { version = "0.10", default-features = false, features = ["net", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
+bytes = "1"
+flume = { version = "0.12", default-features = false, features = ["async"] }

@@ -1,0 +1,15 @@
+batch A2 start 2026-09-25T19:06:55+02:00 cap=5400s port=18931
+vr_sc_solo_fix depth=4 mode=bmc rc=1 wall=291s :: error: Ran out of heap memory: Java heap space 
+vr_sc_4v_fix depth=3 mode=bmc rc=1 wall=305s :: error: Ran out of heap memory: Java heap space 
+vr_sc_3v1l_fix depth=3 mode=bmc rc=1 wall=117s :: error: Uncaught (in promise) Error: 1 CANCELLED: Call cancelled 
+vr_sc_4v depth=3 mode=bmc rc=1 wall=289s :: error: Ran out of heap memory: Java heap space 
+vr_sc_3v1l depth=3 mode=bmc rc=1 wall=255s :: error: Uncaught (in promise) Error: 1 CANCELLED: Call cancelled 
+vr_sc_solo_fix depth=6 mode=bmc rc=1 wall=243s :: error: Ran out of heap memory: Java heap space 
+vr_sc_4v_fix depth=4 mode=bmc rc=1 wall=285s :: error: Ran out of heap memory: Java heap space 
+vr_sc_3v1l_fix depth=4 mode=bmc rc=1 wall=219s :: error: Uncaught (in promise) Error: 1 CANCELLED: Call cancelled 
+vr_sc_4v_fix depth=15 mode=random rc=1 wall=235s :: error: Ran out of heap memory: Java heap space 
+vr_sc_3v1l_fix depth=15 mode=random rc=1 wall=234s :: error: Ran out of heap memory: Java heap space 
+vr_sc_solo_fix depth=15 mode=random rc=1 wall=99s :: error: Uncaught (in promise) Error: 1 CANCELLED: Call cancelled 
+vr_sc_4v depth=15 mode=random rc=1 wall=317s :: error: Ran out of heap memory: Java heap space 
+vr_sc_4v_fix depth=5 mode=bmc rc=1 wall=247s :: error: Ran out of heap memory: Java heap space 
+batch A2 done 2026-09-25T19:59:11+02:00

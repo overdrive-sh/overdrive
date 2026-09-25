@@ -1,0 +1,137 @@
+$ TMPDIR=/var/tmp/fcil-incb-tlc quint verify --backend tlc --server-endpoint localhost:18931 --main bugNoFence --invariant NoAckAfterSeal gate_seal.qnt
+# started 2026-09-25T14:12:42Z — uname -r 7.0.0-31-generic — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+[TLC] Compiling to TLA+ (via Apalache)...
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T16-12-44_9169802233431634402
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@16:12:44.154
+Starting checker server on port 18931...                          I@16:12:44.159
+The Apalache server is running on port 18931. Press Ctrl-C to stop.
+Sep 25, 2026 4:12:45 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+PASS #0: SanyParser                                               I@16:12:46.251
+[TLC] Running TLC model checker...
+
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 63 and seed -7684935897787002312 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 358911] (Linux 7.0.0-31-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /var/tmp/fcil-incb-tlc/quint-tlc-eRvpvB/bugNoFence.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Apalache.tla
+Parsing file /tmp/Variants.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module bugNoFence
+Starting... (2026-09-25 16:12:46)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 16:12:47.
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ bugNoFence_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_vlog = <<>>
+/\ bugNoFence_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugNoFence_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugNoFence_gate_seal_curEpoch = 0
+/\ bugNoFence_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugNoFence_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugNoFence_gate_seal_acklog = <<>>
+/\ bugNoFence_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_supported = [n1 |-> 1, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugNoFence_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugNoFence_gate_seal_nextId = 0
+/\ bugNoFence_gate_seal_opsDone = 0
+/\ bugNoFence_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugNoFence_gate_seal_clusterVersion = 1
+/\ bugNoFence_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+
+State 2: <bugNoFence_gate_seal_Seal line 697, col 9 to line 756, col 45 of module bugNoFence>
+/\ bugNoFence_gate_seal_segLen = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_vlog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugNoFence_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+/\ bugNoFence_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugNoFence_gate_seal_curEpoch = 1
+/\ bugNoFence_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugNoFence_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugNoFence_gate_seal_acklog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugNoFence_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_supported = [n1 |-> 1, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugNoFence_gate_seal_sealCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugNoFence_gate_seal_nextId = 1
+/\ bugNoFence_gate_seal_opsDone = 0
+/\ bugNoFence_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_parent = (0 :> -1 @@ 1 :> 0 @@ 2 :> -1)
+/\ bugNoFence_gate_seal_clusterVersion = 1
+/\ bugNoFence_gate_seal_ackCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+
+State 3: <bugNoFence_gate_seal_AppendOp line 631, col 5 to line 642, col 39 of module bugNoFence>
+/\ bugNoFence_gate_seal_segLen = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_vlog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugNoFence_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+/\ bugNoFence_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugNoFence_gate_seal_curEpoch = 1
+/\ bugNoFence_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugNoFence_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugNoFence_gate_seal_acklog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ],
+   [ target |-> 0,
+     epoch |-> 0,
+     kind |-> "op",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 1 ] >>
+/\ bugNoFence_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_supported = [n1 |-> 1, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugNoFence_gate_seal_sealCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugNoFence_gate_seal_nextId = 2
+/\ bugNoFence_gate_seal_opsDone = 1
+/\ bugNoFence_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugNoFence_gate_seal_parent = (0 :> -1 @@ 1 :> 0 @@ 2 :> -1)
+/\ bugNoFence_gate_seal_clusterVersion = 1
+/\ bugNoFence_gate_seal_ackCount = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugNoFence_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+
+374 states generated, 120 distinct states found, 99 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 7 (minimum is 5, the maximum 9 and the 95th percentile is 9).
+Finished in 00s at (2026-09-25 16:12:47)
+
+[violation] Found an issue (715ms).
+error: found a counterexample
+# exit 1, wall-clock 5 s

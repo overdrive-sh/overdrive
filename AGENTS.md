@@ -294,46 +294,23 @@ directory listed above.
 <claude-mem-context>
 # Memory Context
 
-# [helios/bogota-v3] recent context, 2026-09-12 10:21pm GMT+2
+# [helios/baghdad-v1] recent context, 2026-09-25 8:30pm GMT+2
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (33,814t read) | 1,366,695t work | 98% savings
+Stats: 50 obs (26,255t read) | 550,421t work | 95% savings
 
-### Jun 21, 2026
-S9210 Fix P1 orphaned-kTLS-handle race (GH #26) via Outside-In TDD; dispatch directly to CRAFTER phase (no deliver wave). Single production file, pinned API shape, exactly per design. (Jun 21 at 9:26 PM)
-S9211 Surgical correction of stale GitHub issue references and daemon terminology across design documentation after #178 split (Jun 21 at 9:39 PM)
-S9212 User approved re-targeting architect corrections to canonical documentation copies and resolving docs/feature/ vs docs/architecture/ divergence (Jun 21 at 9:39 PM)
-S9213 Re-run architect corrections against canonical post-finalize documentation copies after discovering initial edits targeted wrong (temporary) paths (Jun 21 at 9:41 PM)
-### Jun 22, 2026
-S9217 Systematic documentation update to remap GitHub issue references following #178 umbrella issue reorganization into focused issues (Jun 22 at 7:00 AM)
-S9220 Documentation issue-reference remapping following #178 umbrella issue reorganization, with post-commit verification and investigation of canonical file locations (Jun 22 at 7:05 AM)
-S9221 Complete in-code GitHub issue reference remapping (#178→#241/#242/#243 and #61→#243) with validation (Jun 22 at 7:07 AM)
-S9257 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 7:40 AM)
-S9254 Fix CI timeout failures in trybuild compile-fail tests caused by nextest filter mismatch (Jun 22 at 1:18 PM)
-S9258 Fix CI timeout failures in trybuild compile-fail tests by correcting nextest filter pattern mismatch (Jun 22 at 1:21 PM)
+### May 24, 2026
+S8700 Mapping blue/green deployment scenario with intelligent VM provisioning onto Overdrive architecture (May 24 at 10:41 AM)
+### Jun 17, 2026
+S8704 Create GitHub issue for machine-provisioner primitive gap (Jun 17 at 10:11 AM)
+S8705 Create GitHub issue for machine-provisioner primitive gap in Overdrive (Jun 17 at 10:11 AM)
+S8706 Create GitHub issue documenting machine-provisioner primitive gap for elastic cloud VM provisioning (Jun 17 at 10:13 AM)
+S13839 Architectural investigation: why Raft & Corrosion are both needed vs atomic broadcast with viewstamped replication and gossip with CRDTs (Jun 17 at 10:44 AM)
 ### Jul 29, 2026
-57741 5:20p 🔵 Stellar Never Adopted Stateright: Graydon Hoare's Personal Side Project
-57742 " 🔵 Marc Brooker on Formal Methods' Limits: Performance, Cost, Latency Outside TLA+/P Scope
-57744 5:22p 🔵 Stateright's Three Real Adopters: Microsoft CCF, Quickwit, PostHog All Recent Auxiliary Verification
-57745 " 🔵 The Spec-Implementation Gap: Why TLA+ Alone Is Insufficient Industry Consensus 2025-2026
-57746 " 🔵 TLC Model Checking State Space Explosion Concrete Numbers: MongoDB 16s→44min on One Extra Key
-57747 5:25p 🔵 Antithesis Found Bugs in Every Raft Implementation Tested: Formal Spec Verified But Implementations Broken
-57748 " 🔵 CCF Smart Casual Verification: 6 Bugs Found via TLA+ Model Checking + Trace Validation in CI Pipeline
-57749 " 🔵 TraceLink and ModelFuzz: Trace Validation Found 9 Compiler Bugs, Model-Guided Fuzzing Found 13 Bugs (4 Unique)
-57750 " 🔵 TLC Symmetry Reduction Concrete Numbers: 218× Reduction (42,228→193 States) But Factorial Startup Cost
-57751 " 🔵 Jack Vanlightly Kafka TLA+ Spec: Symmetry+View Reduces 322,596→1,839 States (175×), Liveness "Only Possible Using Simulation Mode"
-57752 " 🔵 AWS Systems Correctness Practices (CACM May 2025): TLA+ Success But "Steep Learning Curve" Barrier, Semi-Formal Methods Underadopted
-57753 " 🔵 Aurora DSQL Uses ONLY Simulation Testing, NOT Formal Methods: Marc Brooker Blog Debunks Potential AWS Universality Claim
-57754 5:29p 🔵 Aurora DSQL Uses BOTH TLA+/P Formal Methods AND Deterministic Simulation Testing: Marc Brooker's Hybrid Approach
-57755 " 🔵 FoundationDB Deterministic Simulation Known Limitations: Cannot Test Third-Party Libraries, Performance Bugs, Code Outside Flow
-57756 " 🔵 TigerBeetle VOPR Fuzzer Blind Spot: Jepsen Found Bug Four Fuzzers Missed Due to Structured Workload Hiding Intersection Probe Codepath
 57757 5:32p 🔵 TigerBeetle VOPR Fuzzing Fleet: 1,024 Cores Running 24/7 at 700× Real-Time Speed, 2 Millennia Simulated Per Day
-57758 " 🔵 Will Wilson (Antithesis/FoundationDB Founder) on DST Limitations: Cannot Test Exotic Hardware, Third-Party Dependencies, Simple Programs; 77 of 100 MongoDB Bugs Found Only by Antithesis
-57759 " 🔵 FoundationDB Testing Investment: "Trillions of Real World Hours" Total, 5-10M Simulation Hours Per Night, Only 1-2 Customer-Reported Bugs in Company History
-57760 " 🔵 Antithesis Test Composer: Dynamic Branching Explores "Multiverse" of Random Choices vs Naive Seed Replay, Coverage-Guided Machine Learning Under Development
 57761 5:38p 🔵 Wayback Machine Rate Limit Persists Beyond 5-Minute Backoff
 57762 " 🔵 CORS Proxy Services Fail to Access Wayback Machine Content
 57763 " 🔵 AWS Systems Correctness Practices Research Findings via Alternative Sources
@@ -360,26 +337,60 @@ S9258 Fix CI timeout failures in trybuild compile-fail tests by correcting nexte
 57784 " 🔵 White Rose Repository Contains 7 Woodcock Publications from 2025-2026 But Target Paper Absent
 57785 " 🔵 Browser Automation Infrastructure Available But Python Libraries Not Installed
 57786 5:55p 🔵 Headless Chrome Blocked by Cloudflare Bot Detection on ACM DOI Page
-**57787** " 🔵 **Python Virtual Environment Created With websocket-client for CDP Automation**
-The attempt to install websocket-client into the system Python environment failed due to PEP 668 protection which prevents package installations that could break OS-managed Python distributions. The workaround created an isolated Python virtual environment at /tmp/cdpvenv/ and successfully installed websocket-client version 1.9.0 within it. This provides the necessary WebSocket communication library for Chrome DevTools Protocol automation, enabling programmatic browser control via CDP's WebSocket interface. The venv approach maintains system Python integrity while providing the required dependencies for headless browser automation that could potentially bypass Cloudflare's bot detection better than simple --dump-dom mode.
-~349t 🔍 1,337
+57787 " 🔵 Python Virtual Environment Created With websocket-client for CDP Automation
+57788 5:57p 🔵 Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333
+57789 " 🔵 Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335
+57790 " 🔵 Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag
+57791 " 🔵 CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving
+### Sep 7, 2026
+73345 2:24a ⚖️ Schema Evolution Coverage Excluded from Scope
+73347 " 🟣 Timestamp Hardening Work Initiated
+73350 " 🔵 Timestamp Inventory Agent Repeatedly Timing Out After Multiple Retry Attempts
+73351 2:26a 🔵 Timestamp Inventory Agent Completed After Extended Timeout Retry Cycle
+73348 " 🔵 Timestamp Inventory Agent Exceeded 60-Second Wait Timeout
+73353 2:27a 🔵 UnixInstant Atomicity Investigation for Concurrent Timestamp Access
+### Sep 24, 2026
+77485 2:36a 🔵 Baghdad-v1 uses dual-store architecture: Raft for IntentStore and Corrosion for ObservationStore
+77486 " 🔵 Corrosion ObservationStore architecture driven by Fly.io production incident learnings and DST testing
+77487 2:37a 🔵 Whitepaper Design Principle #9 defines Intent/Observation split rationale rejecting consensus-for-everything
+77488 " 🔵 Corrosion production scale evidence shows 800-server Fly.io deployment with three major incident classes informing guardrails
+77489 " 🔵 CRDT theory distinguishes G-Counter from scalar LWW-Register with single-writer-per-key safety requirement for monotone counters
+77490 2:39a 🔵 Phase 1 implements LocalIntentStore and LocalObservationStore placeholders with RaftStore and CorrosionStore planned for Phase 2
+77491 " 🔵 Antithesis defines atomic broadcast as totally-ordered command sequence commonly implemented via consensus algorithms like Raft or Viewstamped Replication
+S13840 Deep evaluation of viewstamp library as Viewstamped Replication alternative to openraft for IntentStore implementation in issue #67 (Sep 24 at 2:40 AM)
+**77492** 2:42a 🔵 **Viewstamp repository is 8-month-old single-author project with 1 star and reconfiguration support implemented**
+Investigation into viewstamp repository metadata reveals it is very recent library created January 29 2026 approximately 8 months before current date with minimal community adoption (1 star, 0 forks) and single primary developer al8n responsible for 282 of 285 total commits. Repository shows active development with last push September 5 2026 and Apache 2.0 license compatible with baghdad-v1 project. Despite pre-0.1 unstable status noted in documentation codebase demonstrates significant implementation completeness with membership reconfiguration as first-class feature evidenced by dedicated modules (membership, reconfigure_plan, endpoint/reconfig.rs, endpoint/reconfigure.rs) and extensive testing including simulation-based tests (reconfig_ingress.rs, reconfig_live.rs, epoch_ingress.rs, learner_membership.rs) plus integration tests for both compio and reactor I/O runtimes. Reconfiguration support addresses one of Raft's operational challenges (adding/removing nodes) suggesting viewstamp aims for production-readiness despite youth. Single-author concentration represents significant risk factor: al8n is sole domain expert with no demonstrated community to sustain project if author becomes unavailable or loses interest. Contrast with openraft which has established community, multiple contributors, and production deployments. Viewstamp's simulation-driven testing approach aligns well with baghdad-v1's Deterministic Simulation Testing methodology and Antithesis integration goals but library's 8-month age and 1-star adoption indicate unproven status compared to openraft's maturity. For Phase 2 consensus implementation this represents classic early-adopter risk/reward trade-off: better simulation testing alignment and TigerBeetle-derived storage fault model versus single-author project with zero demonstrated production usage.
+~803t 🔍 2,350
 
-**57788** 5:57p 🔵 **Chrome DevTools Protocol Endpoint Successfully Accessible on Port 9333**
-Verification of the Chrome DevTools Protocol infrastructure confirmed a Chrome instance was running with remote debugging enabled on port 9333 and properly exposing the CDP endpoint. The /json endpoint returned well-formed target information including WebSocket debugger URLs for programmatic browser control. The presence of two targets (a blank page and a service worker from a chrome-extension) indicates Chrome was fully initialized and ready for CDP commands. The WebSocket URLs follow the standard CDP format enabling connection for page navigation, DOM inspection, and JavaScript execution commands. This infrastructure was then cleaned up by killing the Chrome process, confirming the automation attempt had been made but presumably failed to bypass Cloudflare protection.
-~404t 🔍 1,225
+**77493** " 🔵 **Viewstamp source code shows no evidence of linearizable read optimizations or lease-based read paths**
+Source code inspection of viewstamp repository reveals absence of standard Raft read optimization patterns suggesting either immature read path implementation or fundamentally different approach. Grep searches across core library files (viewstamp-proto/src/lib.rs, viewstamp-driver/src/lib.rs) and test suite found zero matches for linearizable reads, read-index protocol, lease-based reads, stale-read modes, or read-only query optimizations that mature Raft implementations like openraft provide for serving reads without log round-trip. Single read-related test file read_delay.rs focuses on WAL read latency during crash recovery testing scenario where solo voter replica must wait for slow disk read to complete rather than optimized read serving to clients. Test exercises fault-injection path where minority of WAL slots answer only past give-up horizon forcing recovery wait discipline to become load-bearing, demonstrating storage-fault-first approach inherited from TigerBeetle but not client read optimization. README mentions learners as separate role for read/standby scale-out suggesting awareness of read scaling concern but providing no implementation detail on how linearizable reads work or whether they require primary round-trip. This gap matters for baghdad-v1 IntentStore use case where control plane reconcilers reading workload specs, policies, and scheduler decisions may generate significant read load requiring optimized path. Openraft provides ReadIndex and lease-based reads avoiding log writes for read-only operations - viewstamp showing no evidence of equivalent optimization means all reads may require primary involvement or lack linearizability guarantees. Combined with 8-month age, single author, and 1-star adoption this represents additional risk factor beyond unstable wire format: feature completeness for production IntentStore workload unknown without deeper investigation or prototype implementation.
+~836t 🔍 5,802
 
-**57789** " 🔵 **Chrome Headless Started Successfully With Anti-Bot-Detection Flags on Port 9335**
-The primary session successfully launched Chrome in headless mode with anti-bot-detection configuration including disabled automation control features and a fresh user data directory to avoid fingerprinting from previous sessions. The browser became operational within 2 seconds, exposing the Chrome DevTools Protocol endpoint on port 9335 with three targets ready for interaction. The configuration uses flags specifically designed to evade headless browser detection: --disable-blink-features=AutomationControlled prevents JavaScript from detecting automation mode, and a custom user-agent string mimics a future Chrome release. This represents the foundation for CDP-based navigation that could potentially bypass Cloudflare's JavaScript challenges by executing them in a real browser context rather than simple DOM dumping.
-~447t 🔍 1,362
+S13842 Viewstamped Replication Scalability Analysis - Voting Group Constraints and System-Wide Scaling Strategies (Sep 24 at 2:42 AM)
+**77494** 2:44a 🔵 **IntentStore trait contract explicitly requires linearizable reads with future RaftStore implementation planned**
+Codebase inspection confirms IntentStore and ObservationStore dual-store architecture is deeply embedded across trait contracts, ADRs, and implementation expectations despite only local Phase 1 adapters currently existing. IntentStore trait documentation explicitly states linearizable authoritative storage requirement with openraft + redb planned for future RaftStore implementation. Trait contract provides get, put, delete, txn, watch primitives plus export_snapshot and bootstrap_from methods with StateSnapshot type explicitly designed for single-mode LocalStore to multi-node RaftStore migration path. Multiple codebase locations reinforce linearizable requirement: CA root key material documented as linearizable intent never observation, VIP allocator relies on IntentStore as linearizable-state flat key-value mapping, service map hydrator uses linearizable Raft path for intent flow. This confirms whitepaper claim that linearizable reads are promised contract not optional optimization. ObservationStore trait documented as live eventually-consistent cluster map with production implementation planned using Corrosion (cr-sqlite + SWIM/QUIC gossip) and simulation using injectable gossip-delay and partition support. Comments throughout ObservationStore trait reference single-writer-at-a-time discipline from ADR-0077, gossip in-flight scenarios, LWW idempotency for re-delivered rows, and Phase 2 Corrosion replacement gossiping rows under same LWW semantics. Twenty-three ADRs already mention Raft or Corrosion architectural decisions showing dual-store pattern influences CA material handling, workflow journal layout, reconciler terminal conditions, LWW counter semantics, and observation store server implementation. ADR-0020 explicitly states Intent/Observation split where intent is linearizable written once at commit while observation is owner-writer eventually consistent. This demonstrates viewstamp or any IntentStore implementation must provide linearizable read guarantee not just write ordering, making missing read-index/lease-read primitives significant gap requiring spike validation before adoption.
+~1021t 🔍 7,624
 
-**57790** " 🔵 **Chrome WebSocket Connection Rejected With HTTP 403 Due to Missing Origin Allowlist Flag**
-The CDP automation debugging script successfully launched Chrome and retrieved the target list via HTTP, confirming the browser was operational with remote debugging enabled on port 9336. However, when attempting to establish a WebSocket connection to control the page, Chrome's security layer rejected the handshake with HTTP 403. The error message explicitly identifies the missing configuration: Chrome's recent security updates require the --remote-allow-origins flag to whitelist which origins can establish WebSocket CDP connections. Without this flag, all WebSocket upgrade requests from localhost are blocked despite the HTTP JSON endpoint remaining accessible. This represents a solvable configuration issue requiring one additional launch argument rather than a fundamental Cloudflare bypass problem.
-~449t 🔍 2,595
+**77495** 2:45a 🔵 **Codebase has single/HA mode infrastructure with Phase 1 hardcoded to single and CLI prepared for future HA mode**
+Code inspection reveals baghdad-v1 Phase 1 implementation has infrastructure for single/HA mode split already designed into codebase architecture but currently hardcoded to single mode pending Phase 2 distributed implementation. Control plane handlers include comment explicitly stating Phase 1 scope mode is always single with HA arriving Phase 2+ and ClusterStatus response hardcodes mode string to single. However CLI argument parser already accepts --mode flag with value_parser allowing both single and ha options showing future HA support infrastructure prepared in user-facing tooling. IntentStore trait documentation describes mode split clearly stating Single mode backed by redb direct storage while HA mode uses openraft + redb consensus with simulation harness using single-mode path since Raft itself tested separately by dedicated consensus tests. This confirms whitepaper Design Principle #8 (one binary any topology with role declared at bootstrap not build time) and whitepaper §4 IntentStore description of LocalStore vs RaftStore implementations are already designed into trait surface and CLI tooling. Phase 1 delivers single-mode-only implementation with all HA mode references as forward-compatible placeholders awaiting Phase 2 openraft or viewstamp integration via issue #67. This mode split infrastructure means whichever consensus library adopted must implement same IntentStore trait behind mode configuration flag matching existing CLI surface and cluster info response shape.
+~645t 🔍 2,160
 
-**57791** " 🔵 **CDP Automation Successfully Connected But Cloudflare Challenge Runs Indefinitely Without Resolving**
-The CDP automation reached the furthest point yet by successfully establishing a WebSocket connection to Chrome after adding the required origin allowlist flag, then navigating to the ACM DOI page. Cloudflare's JavaScript challenge loaded and began executing in a real Chrome browser context with anti-automation flags enabled. However, the challenge never resolved over 90 seconds of continuous polling at 6-second intervals. The page remained frozen at the "Just a moment..." interstitial with exactly 27,412 bytes of HTML, indicating the JavaScript either detected the headless/automated environment despite the stealth flags, or requires additional browser fingerprinting signals (WebGL, canvas, audio context, etc.) that the headless Chrome configuration doesn't provide. This definitively demonstrates that even sophisticated CDP-based browser automation cannot bypass ACM's Cloudflare protection configuration for this resource.
-~474t 🔍 3,320
+S13843 Overdrive distributed architecture using blockchain-inspired gossip discovery and Viewstamped Replication consensus protocol validation (Sep 24 at 2:45 AM)
+S13841 Evolved architectural design from Raft & Corrosion rationale into flat learner-based cluster model using viewstamp with auto-promotion reconciler (Sep 24 at 2:45 AM)
+**77539** 2:47a ⚖️ **Overdrive Distributed Architecture Using Blockchain-Inspired Gossip and Consensus**
+Overdrive workload orchestration platform adopting blockchain-inspired distributed architecture. Each node runs both worker (execution) and control plane (coordination) components creating fully distributed system without centralized control plane. Consensus mechanism coordinates scheduling decisions ensuring agreement across cluster on workload placement. Machine discovery uses gossip protocol: when machine configures WireGuard endpoint to another machine, connected machine broadcasts all available machines while new machine broadcasts itself, creating peer-to-peer discovery similar to blockchain node bootstrapping. Leader election mechanism selects coordinator machine from cluster. All machines participate in single topology enabling workload distribution. Workloads can specify explicit machine placement constraints or omit placement configuration allowing Overdrive to automatically spread instances across available machines. Architecture design principle: every component has two execution modes (local or remote) enabling flexible deployment patterns. This approach provides decentralized coordination, self-healing discovery, and horizontal scalability without single point of failure.
+~519t ⚖️ 13,034
+
+### Sep 25, 2026
+S13844 Overdrive distributed architecture design: VR consensus scaling, per-node component roles, and blockchain-inspired discovery patterns (Sep 25 at 1:23 AM)
+**Investigated**: Examined VR consensus voting group scaling limits and how consensus systems scale beyond small quorums. Analyzed issue #267 proposing per-node component enablement (gateway, web, control-plane, worker, telemetry, wasm, storage) for Overdrive orchestration platform. Mapped blockchain validator model and discovery patterns to Overdrive's VR-based architecture. Explored separation between gossip-based observation layer and consensus-based decision layer.
+
+**Learned**: VR voting group stays small (3-5 nodes) due to primary egress bandwidth, tail latency from f-th fastest backup, no resilience gain beyond 2f+1, heavier view changes and recovery, and increased membership change frequency. Consensus systems scale via non-voting learners for reads, peer-to-peer log relay to offload primary fan-out, batching before sharding, and keeping high-volume observation data off consensus log. Flat cluster architecture uses 3-5 voters placed across failure domains with thousands of learners all holding complete log enabling instant promotion and local reads. Per-node component roles stored in replicated log (not gossip) with control-plane marking "may vote" eligibility while cluster autonomously selects actual voters. All components enabled by default preserving zero-config single-node and join workflows. Blockchain validator model validates bounded-voter approach with validators as voters and full nodes as learners using deterministic round-robin leader rotation. Admission control via join tokens required since no proof-of-work/stake prevents Sybil attacks. Leader election must use quorum-based view change not gossip to prevent split-brain across partition. Consensus commits placement decisions not scheduling computation preserving replica determinism across version skew during rolling upgrades. Workers read assignments from local log copy eliminating push from leader. Gossip layer carries ephemeral observation facts (endpoints, heartbeats, health, allocation status) while log layer carries durable decisions (membership, roles, voter selection, placement, "machine M down" rulings). Leader observes gossip then commits decisions creating clear layer separation.
+
+**Completed**: Architectural design completed for Overdrive consensus-based orchestration combining VR protocol with blockchain-inspired discovery. Scaling model validated supporting thousands of nodes via small voter set with learner replicas. Per-node component role model designed supporting control-plane voter eligibility, worker scheduling capability, and other subsystem flags. Blockchain pattern mapping completed identifying useful elements (gossip discovery, validator model, deterministic leader rotation) and rejected elements (BFT 3f+1 overhead, probabilistic finality). Clear architectural principle established separating gossip observation layer from consensus decision layer.
+
+**Next Steps**: Potential implementation of per-node component enablement from issue #267. Design admission control join token mechanism for WireGuard key authorization. Implement gossip protocol for endpoint and health propagation. Design automatic voter selection algorithm across failure domains. Define workload placement decision commit format in log.
 
 
-Access 1367k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 550k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

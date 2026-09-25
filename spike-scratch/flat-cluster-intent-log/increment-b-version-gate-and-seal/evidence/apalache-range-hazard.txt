@@ -1,0 +1,93 @@
+# Apalache range-hazard A/B — 2026-09-25T11:14:36Z — uname -r 7.0.0-31-generic — quint 0.32.0 — apalache 0.56.1
+# A = spec/hazard/gate_seal_state_bound_range.qnt : nondet v = (clusterVersion + 1).to(MAXV).oneOf()
+# B = spec/gate_seal.qnt                           : nondet v = 1.to(MAXV).oneOf() + guard v > clusterVersion
+# Property: bugApplyUnsupported / NoApplyAboveSupported. Expected (faithful semantics): VIOLATED.
+
+## simulator  hazard/gate_seal_state_bound_range.qnt  init=debugPreProposeInit
+$ quint run --main bugApplyUnsupported --init debugPreProposeInit --step step --invariant NoApplyAboveSupported --max-steps 4 --max-samples 2000 --seed 1 --verbosity 1 hazard/gate_seal_state_bound_range.qnt
+[violation] Found an issue (340ms at 971 traces/second).
+error: Invariant violated
+(wall-clock 3 s)
+
+## apalache   hazard/gate_seal_state_bound_range.qnt  init=debugPreProposeInit
+$ quint verify --main bugApplyUnsupported --init debugPreProposeInit --step step --invariant NoApplyAboveSupported --max-steps 4 --server-endpoint localhost:18922 hazard/gate_seal_state_bound_range.qnt
+The outcome is: NoError                                           I@13:14:58.729
+[ok] No violation found (13428ms).
+(wall-clock 20 s)
+
+## apalache   hazard/gate_seal_state_bound_range.qnt  init=init (max-steps 7)
+$ quint verify --main bugApplyUnsupported --invariant NoApplyAboveSupported --max-steps 7 --server-endpoint localhost:18922 hazard/gate_seal_state_bound_range.qnt
+The outcome is: NoError                                           I@13:16:55.229
+[ok] No violation found (113939ms).
+(wall-clock 116 s)
+
+## simulator  gate_seal.qnt  init=debugPreProposeInit
+$ quint run --main bugApplyUnsupported --init debugPreProposeInit --step step --invariant NoApplyAboveSupported --max-steps 4 --max-samples 2000 --seed 1 --verbosity 1 gate_seal.qnt
+[violation] Found an issue (177ms at 5192 traces/second).
+error: Invariant violated
+(wall-clock 2 s)
+
+## apalache   gate_seal.qnt  init=debugPreProposeInit
+$ quint verify --main bugApplyUnsupported --init debugPreProposeInit --step step --invariant NoApplyAboveSupported --max-steps 4 --server-endpoint localhost:18922 gate_seal.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-00_17175530285905165528/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-00_17175530285905165528/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-00_17175530285905165528/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-00_17175530285905165528/violation1.itf.json I@13:17:08.187
+Found 1 error(s)                                                  I@13:17:08.190
+The outcome is: Error                                             I@13:17:08.200
+[violation] Found an issue (8625ms).
+error: found a counterexample
+(wall-clock 11 s)
+
+## apalache   gate_seal.qnt  init=init (max-steps 7)
+$ quint verify --main bugApplyUnsupported --invariant NoApplyAboveSupported --max-steps 7 --server-endpoint localhost:18922 gate_seal.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-11_9347932279899010390/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-11_9347932279899010390/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-11_9347932279899010390/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-11_9347932279899010390/violation1.itf.json I@13:17:50.805
+Found 1 error(s)                                                  I@13:17:50.818
+The outcome is: Error                                             I@13:17:50.844
+[violation] Found an issue (39895ms).
+error: found a counterexample
+(wall-clock 43 s)
+
+# Context-free minimal reproductions (NOT triggering the hazard — kept as falsified hypotheses):
+## apalache   repro_if_const.qnt  reproBugTrue
+$ quint verify --main reproBugTrue --invariant Inv --max-steps 3 --server-endpoint localhost:18922 repro_if_const.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-52_3041126630240788369/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-52_3041126630240788369/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-52_3041126630240788369/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-52_3041126630240788369/violation1.itf.json I@13:17:55.065
+Found 1 error(s)                                                  I@13:17:55.066
+The outcome is: Error                                             I@13:17:55.068
+[violation] Found an issue (3184ms).
+error: found a counterexample
+(wall-clock 4 s)
+
+## apalache   repro_if_const.qnt  reproValBugTrue
+$ quint verify --main reproValBugTrue --invariant Inv --max-steps 3 --server-endpoint localhost:18922 repro_if_const.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-56_14746295183972938297/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-56_14746295183972938297/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-56_14746295183972938297/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-17-56_14746295183972938297/violation1.itf.json I@13:17:59.054
+Found 1 error(s)                                                  I@13:17:59.055
+The outcome is: Error                                             I@13:17:59.057
+[violation] Found an issue (3079ms).
+error: found a counterexample
+(wall-clock 4 s)
+
+## apalache   repro_if_const.qnt  reproNondetBugTrue
+$ quint verify --main reproNondetBugTrue --invariant Inv --max-steps 3 --server-endpoint localhost:18922 repro_if_const.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-00_6876123100880316795/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-00_6876123100880316795/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-00_6876123100880316795/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-00_6876123100880316795/violation1.itf.json I@13:18:03.465
+Found 1 error(s)                                                  I@13:18:03.466
+The outcome is: Error                                             I@13:18:03.469
+[violation] Found an issue (3535ms).
+error: found a counterexample
+(wall-clock 4 s)
+
+## apalache   repro_range.qnt  rangeState
+$ quint verify --main rangeState --invariant Inv --max-steps 3 --server-endpoint localhost:18922 repro_range.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-04_10284109066268146325/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-04_10284109066268146325/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-04_10284109066268146325/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-04_10284109066268146325/violation1.itf.json I@13:18:07.770
+Found 1 error(s)                                                  I@13:18:07.771
+The outcome is: Error                                             I@13:18:07.773
+[violation] Found an issue (3438ms).
+error: found a counterexample
+(wall-clock 5 s)
+
+## apalache   repro_range.qnt  rangeConst
+$ quint verify --main rangeConst --invariant Inv --max-steps 3 --server-endpoint localhost:18922 repro_range.qnt
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-09_480770152139348731/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-09_480770152139348731/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-09_480770152139348731/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-18-09_480770152139348731/violation1.itf.json I@13:18:11.851
+Found 1 error(s)                                                  I@13:18:11.852
+The outcome is: Error                                             I@13:18:11.854
+[violation] Found an issue (3171ms).
+error: found a counterexample
+(wall-clock 4 s)
+

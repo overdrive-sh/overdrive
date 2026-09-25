@@ -1,0 +1,41 @@
+=== quint run --main=vr_sc_4v --invariant=safety --max-samples=20000 --max-steps=50 
+[ok] No violation found (58027ms at 345 traces/second).
+Witnesses:
+wEpoch1 was witnessed in 2431 trace(s) out of 20000 explored (12.16%)
+wEpoch2 was witnessed in 136 trace(s) out of 20000 explored (0.68%)
+wGrew was witnessed in 0 trace(s) out of 20000 explored (0.00%)
+wShrank was witnessed in 2431 trace(s) out of 20000 explored (12.16%)
+wViewChanged was witnessed in 15610 trace(s) out of 20000 explored (78.05%)
+wRetired was witnessed in 65 trace(s) out of 20000 explored (0.33%)
+wBootstrapped was witnessed in 0 trace(s) out of 20000 explored (0.00%)
+wForkedViews was witnessed in 7357 trace(s) out of 20000 explored (36.79%)
+wCommitted3 was witnessed in 57 trace(s) out of 20000 explored (0.29%)
+=== exit=0 wall=60.407681298s
+=== quint run --main=vr_sc_3v1l --invariant=safety --max-samples=20000 --max-steps=50 
+[violation] Found an issue (75838ms at 235 traces/second).
+Witnesses:
+wEpoch1 was witnessed in 3688 trace(s) out of 17808 explored (20.71%)
+wEpoch2 was witnessed in 250 trace(s) out of 17808 explored (1.40%)
+wGrew was witnessed in 33 trace(s) out of 17808 explored (0.19%)
+wShrank was witnessed in 1338 trace(s) out of 17808 explored (7.51%)
+wViewChanged was witnessed in 13489 trace(s) out of 17808 explored (75.75%)
+wRetired was witnessed in 972 trace(s) out of 17808 explored (5.46%)
+wBootstrapped was witnessed in 993 trace(s) out of 17808 explored (5.58%)
+wForkedViews was witnessed in 12100 trace(s) out of 17808 explored (67.95%)
+wCommitted3 was witnessed in 243 trace(s) out of 17808 explored (1.36%)
+error: Invariant violated
+=== exit=1 wall=79.799423701s
+=== quint run --main=vr_sc_solo --invariant=safety --max-samples=20000 --max-steps=50 
+[violation] Found an issue (40945ms at 163 traces/second).
+Witnesses:
+wEpoch1 was witnessed in 6464 trace(s) out of 6668 explored (96.94%)
+wEpoch2 was witnessed in 5399 trace(s) out of 6668 explored (80.97%)
+wGrew was witnessed in 8 trace(s) out of 6668 explored (0.12%)
+wShrank was witnessed in 0 trace(s) out of 6668 explored (0.00%)
+wViewChanged was witnessed in 6661 trace(s) out of 6668 explored (99.90%)
+wRetired was witnessed in 1903 trace(s) out of 6668 explored (28.54%)
+wBootstrapped was witnessed in 6211 trace(s) out of 6668 explored (93.15%)
+wForkedViews was witnessed in 6041 trace(s) out of 6668 explored (90.60%)
+wCommitted3 was witnessed in 6665 trace(s) out of 6668 explored (99.96%)
+error: Invariant violated
+=== exit=1 wall=46.977230890s

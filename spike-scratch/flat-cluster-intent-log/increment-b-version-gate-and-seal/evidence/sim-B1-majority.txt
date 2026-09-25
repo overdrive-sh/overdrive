@@ -1,0 +1,784 @@
+$ quint run --main bugMajority --invariant GateOnlyWithAllVoters --max-steps 40 --max-samples 40000 --seed 20260925 gate_seal.qnt
+An example execution:
+
+[State 0]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog: [],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 0,
+  bugMajority::gate_seal::opsDone: 0,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog: [],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 1]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog: [],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 0,
+  bugMajority::gate_seal::opsDone: 0,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog: [],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 2]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog: [],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 0,
+  bugMajority::gate_seal::opsDone: 0,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog: [],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 3]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog: [],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 0,
+  bugMajority::gate_seal::opsDone: 0,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog: [],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 4]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog: [],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 0,
+  bugMajority::gate_seal::opsDone: 0,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog: [],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 5]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [{ epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 }],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 1,
+  bugMajority::gate_seal::opsDone: 1,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [{ epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 }],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 6]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 2,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 7]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 0,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 2,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 8]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> -1, "n3" -> 0, "n4" -> -1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 9]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> -1, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 10]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> -1, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 11]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 12]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 0),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 13]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 1,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 3,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 14]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 4,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 15]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 4,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 16]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 4,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: true, epoch: 2, target: 2 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 17]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 4,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: true, epoch: 2, target: 2 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 18]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 1,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 4,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: true, epoch: 2, target: 2 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 19]
+{
+  bugMajority::gate_seal::ackCount: Map(0 -> 3, 1 -> 1, 2 -> 1),
+  bugMajority::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 },
+      { epoch: 2, id: 4, kind: "gate", okAtCommit: false, tag: 2, target: 2 }
+    ],
+  bugMajority::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 1, "n3" -> 0, "n4" -> 1),
+  bugMajority::gate_seal::clusterVersion: 2,
+  bugMajority::gate_seal::curEpoch: 2,
+  bugMajority::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugMajority::gate_seal::nextId: 5,
+  bugMajority::gate_seal::opsDone: 2,
+  bugMajority::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 1),
+  bugMajority::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugMajority::gate_seal::sealCount: Map(0 -> 1, 1 -> 1, 2 -> 0),
+  bugMajority::gate_seal::segLen: Map(0 -> 3, 1 -> 1, 2 -> 1),
+  bugMajority::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugMajority::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 1, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 },
+      { epoch: 2, id: 4, kind: "gate", okAtCommit: false, tag: 2, target: 2 }
+    ],
+  bugMajority::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n1", "n2", "n3")
+    ),
+  bugMajority::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[violation] Found an issue (34ms at 29 traces/second).
+Use --verbosity=3 to show executions.
+Use --seed=0x135283d --backend=rust to reproduce.
+error: Invariant violated
+# exit 1, wall-clock 1 s

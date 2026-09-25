@@ -1,0 +1,63 @@
+### tlc-B1-majority-GateOnlyWithAllVoters.txt  (5 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+  State 3 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+  State 4 <ProposeGate>: pending=[active |-> TRUE, target |-> 2, epoch |-> 0]
+  State 5 <CommitGate>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> FALSE, id |-> 0 ] >>; clusterVersion=2; nextId=1; pending=[active |-> FALSE, target |-> 0, epoch |-> -1]; segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> FALSE, id |-> 0 ] >>
+
+### tlc-B2-proposetime-GateOnlyWithAllVoters.txt  (7 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+  State 3 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+  State 4 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+  State 5 <ProposeGate>: pending=[active |-> TRUE, target |-> 2, epoch |-> 0]
+  State 6 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; closedFor=[n1 |-> 0, n2 |-> 0, n3 |-> -1, n4 |-> -1]; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n4"} @@ 2 :> {})
+  State 7 <CommitGate>: ackCount=(0 :> 1 @@ 1 :> 1 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 2, epoch |-> 1, kind |-> "gate", tag |-> 2, okAtCommit |-> FALSE, id |-> 1 ] >>; clusterVersion=2; nextId=2; pending=[active |-> FALSE, target |-> 0, epoch |-> -1]; segLen=(0 :> 1 @@ 1 :> 1 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 2, epoch |-> 1, kind |-> "gate", tag |-> 2, okAtCommit |-> FALSE, id |-> 1 ] >>
+
+### tlc-B3-nofence-CommittedPrefixPreserved.txt  (3 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+  State 3 <AppendOp>: ackCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 0, epoch |-> 0, kind |-> "op", tag |-> 1, okAtCommit |-> TRUE, id |-> 1 ] >>; nextId=2; opsDone=1
+
+### tlc-B3-nofence-NoAckAfterSeal.txt  (3 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+  State 3 <AppendOp>: ackCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 0, epoch |-> 0, kind |-> "op", tag |-> 1, okAtCommit |-> TRUE, id |-> 1 ] >>; nextId=2; opsDone=1
+
+### tlc-B3-nofence-NoTwoCommittingPrimaries.txt  (3 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 1, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+  State 3 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+
+### tlc-B4-unverifiedfetch-LearnerNoDivergence.txt  (7 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+  State 3 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 2, n4 |-> 1]
+  State 4 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+  State 5 <AppendOp>: ackCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 0, epoch |-> 0, kind |-> "op", tag |-> 1, okAtCommit |-> TRUE, id |-> 1 ] >>; nextId=2; opsDone=1
+  State 6 <Apply>: applied=[n1 |-> 1, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+  State 7 <Apply>: applied=[n1 |-> 2, n2 |-> 0, n3 |-> 0, n4 |-> 0]; diverged=[n1 |-> TRUE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+
+### tlc-B5-admitunsupported-VotersSupportClusterVersion.txt  (7 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+  State 3 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+  State 4 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+  State 5 <ProposeGate>: pending=[active |-> TRUE, target |-> 2, epoch |-> 0]
+  State 6 <CommitGate>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ] >>; clusterVersion=2; nextId=1; pending=[active |-> FALSE, target |-> 0, epoch |-> -1]; segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ] >>
+  State 7 <Seal>: ackCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 2, okAtCommit |-> TRUE, id |-> 1 ] >>; closedFor=[n1 |-> 0, n2 |-> 0, n3 |-> -1, n4 |-> -1]; curEpoch=1; nextId=2; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 2, okAtCommit |-> TRUE, id |-> 1 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n4"} @@ 2 :> {})
+
+### tlc-B6-resealnofence-UniqueSuccessor.txt  (3 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Seal>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; curEpoch=1; nextId=1; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> -1); sealCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ] >>; voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {})
+  State 3 <Seal>: ackCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 1, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 0 ], [ target |-> 2, epoch |-> 0, kind |-> "seal", tag |-> 1, okAtCommit |-> TRUE, id |-> 1 ] >>; curEpoch=2; nextId=2; parent=(0 :> -1 @@ 1 :> 0 @@ 2 :> 0); sealCount=(0 :> 2 @@ 1 :> 0 @@ 2 :> 0); voters=(0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n3"} @@ 2 :> {"n1", "n2", "n3"})
+
+### tlc-B7-applyunsupported-NoApplyAboveSupported.txt  (7 states; BFS => shortest counterexample)
+  State 1 <init>
+  State 2 <Upgrade>: supported=[n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+  State 3 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+  State 4 <Upgrade>: supported=[n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+  State 5 <ProposeGate>: pending=[active |-> TRUE, target |-> 2, epoch |-> 0]
+  State 6 <CommitGate>: ackCount=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); acklog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ] >>; clusterVersion=2; nextId=1; pending=[active |-> FALSE, target |-> 0, epoch |-> -1]; segLen=(0 :> 1 @@ 1 :> 0 @@ 2 :> 0); vlog=<< [ target |-> 2, epoch |-> 0, kind |-> "gate", tag |-> 2, okAtCommit |-> TRUE, id |-> 0 ] >>
+  State 7 <Apply>: applied=[n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 1]; appliedAbove=[n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> TRUE]
+

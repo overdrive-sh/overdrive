@@ -1,0 +1,227 @@
+$ TMPDIR=/var/tmp/fcil-incb-tlc quint verify --backend tlc --server-endpoint localhost:18931 --main bugAdmitUnsupported --invariant VotersSupportClusterVersion gate_seal.qnt
+# started 2026-09-25T14:13:05Z — uname -r 7.0.0-31-generic — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+[TLC] Compiling to TLA+ (via Apalache)...
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T16-13-07_4338912655925171376
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@16:13:07.822
+Starting checker server on port 18931...                          I@16:13:07.829
+The Apalache server is running on port 18931. Press Ctrl-C to stop.
+Sep 25, 2026 4:13:10 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+PASS #0: SanyParser                                               I@16:13:10.803
+[TLC] Running TLC model checker...
+
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 107 and seed -8864180465154577771 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 359412] (Linux 7.0.0-31-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /var/tmp/fcil-incb-tlc/quint-tlc-bCb1fD/bugAdmitUnsupported.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Apalache.tla
+Parsing file /tmp/Variants.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module bugAdmitUnsupported
+Starting... (2026-09-25 16:13:11)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 16:13:11.
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = <<>>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 1
+/\ bugAdmitUnsupported_gate_seal_acklog = <<>>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 0
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 1, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 2: <bugAdmitUnsupported_gate_seal_Upgrade line 460, col 3 to line 491, col 46 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = <<>>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 1
+/\ bugAdmitUnsupported_gate_seal_acklog = <<>>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 0
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 3: <bugAdmitUnsupported_gate_seal_Upgrade line 460, col 3 to line 491, col 46 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = <<>>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 1
+/\ bugAdmitUnsupported_gate_seal_acklog = <<>>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 0
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 4: <bugAdmitUnsupported_gate_seal_Upgrade line 460, col 3 to line 491, col 46 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = <<>>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 1
+/\ bugAdmitUnsupported_gate_seal_acklog = <<>>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 0
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 5: <bugAdmitUnsupported_gate_seal_ProposeGate line 792, col 5 to line 810, col 48 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> TRUE, target |-> 2, epoch |-> 0]
+/\ bugAdmitUnsupported_gate_seal_vlog = <<>>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 1
+/\ bugAdmitUnsupported_gate_seal_acklog = <<>>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 0
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 6: <bugAdmitUnsupported_gate_seal_CommitGate line 816, col 3 to line 840, col 46 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = << [ target |-> 2,
+     epoch |-> 0,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 2
+/\ bugAdmitUnsupported_gate_seal_acklog = << [ target |-> 2,
+     epoch |-> 0,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 1
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 0
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+State 7: <bugAdmitUnsupported_gate_seal_Seal line 850, col 9 to line 925, col 54 of module bugAdmitUnsupported>
+/\ bugAdmitUnsupported_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugAdmitUnsupported_gate_seal_vlog = << [ target |-> 2,
+     epoch |-> 0,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 0 ],
+   [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 1 ] >>
+/\ bugAdmitUnsupported_gate_seal_clusterVersion = 2
+/\ bugAdmitUnsupported_gate_seal_acklog = << [ target |-> 2,
+     epoch |-> 0,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 0 ],
+   [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 2,
+     okAtCommit |-> TRUE,
+     id |-> 1 ] >>
+/\ bugAdmitUnsupported_gate_seal_closedFor = [n1 |-> 0, n2 |-> 0, n3 |-> -1, n4 |-> -1]
+/\ bugAdmitUnsupported_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugAdmitUnsupported_gate_seal_ackCount = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_nextId = 2
+/\ bugAdmitUnsupported_gate_seal_opsDone = 0
+/\ bugAdmitUnsupported_gate_seal_parent = (0 :> -1 @@ 1 :> 0 @@ 2 :> -1)
+/\ bugAdmitUnsupported_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugAdmitUnsupported_gate_seal_sealCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugAdmitUnsupported_gate_seal_segLen = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugAdmitUnsupported_gate_seal_curEpoch = 1
+/\ bugAdmitUnsupported_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n4"} @@ 2 :> {})
+/\ bugAdmitUnsupported_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+
+136509 states generated, 34749 distinct states found, 28976 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 6 (minimum is 0, the maximum 23 and the 95th percentile is 21).
+Finished in 01s at (2026-09-25 16:13:12)
+
+[violation] Found an issue (1473ms).
+error: found a counterexample
+# exit 1, wall-clock 8 s

@@ -1,0 +1,63 @@
+$ quint verify --backend tlc --main ok5 --invariant AllSafety gate_seal.qnt
+[TLC] Compiling to TLA+ (via Apalache)...
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T15-07-07_17760770363355922258
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@15:07:07.751
+Starting checker server on port 8822...                           I@15:07:07.756
+The Apalache server is running on port 8822. Press Ctrl-C to stop.
+Sep 25, 2026 3:07:09 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+PASS #0: SanyParser                                               I@15:07:09.826
+[TLC] Running TLC model checker...
+
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 34 and seed 6085100207208062509 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 331074] (Linux 7.0.0-31-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/quint-tlc-2jJmY0/ok5.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Apalache.tla
+Parsing file /tmp/Variants.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module ok5
+Starting... (2026-09-25 15:07:10)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 15:07:10.
+Progress(7) at 2026-09-25 15:07:13: 958,770 states generated (958,770 s/min), 372,089 distinct states found (372,089 ds/min), 331,002 states left on queue.
+Progress(8) at 2026-09-25 15:08:13: 25,217,893 states generated (24,259,123 s/min), 6,236,313 distinct states found (5,864,224 ds/min), 4,678,674 states left on queue.
+Progress(9) at 2026-09-25 15:09:13: 49,933,569 states generated (24,715,676 s/min), 11,386,737 distinct states found (5,150,424 ds/min), 8,142,355 states left on queue.
+Progress(9) at 2026-09-25 15:10:13: 74,709,834 states generated (24,776,265 s/min), 16,252,761 distinct states found (4,866,024 ds/min), 11,268,586 states left on queue.
+Progress(10) at 2026-09-25 15:11:13: 99,162,357 states generated (24,452,523 s/min), 21,055,545 distinct states found (4,802,784 ds/min), 14,325,163 states left on queue.
+Progress(10) at 2026-09-25 15:12:13: 123,479,997 states generated (24,317,640 s/min), 25,745,631 distinct states found (4,690,086 ds/min), 17,233,268 states left on queue.
+Progress(10) at 2026-09-25 15:13:13: 147,812,841 states generated (24,332,844 s/min), 30,059,561 distinct states found (4,313,930 ds/min), 19,756,682 states left on queue.
+Progress(10) at 2026-09-25 15:14:13: 173,348,666 states generated (25,535,825 s/min), 33,955,026 distinct states found (3,895,465 ds/min), 21,796,880 states left on queue.
+Progress(10) at 2026-09-25 15:15:13: 197,382,570 states generated (24,033,904 s/min), 38,399,360 distinct states found (4,444,334 ds/min), 24,449,823 states left on queue.
+Progress(10) at 2026-09-25 15:16:13: 222,323,199 states generated (24,940,629 s/min), 42,537,080 distinct states found (4,137,720 ds/min), 26,732,865 states left on queue.
+Progress(10) at 2026-09-25 15:17:13: 247,304,044 states generated (24,980,845 s/min), 46,422,258 distinct states found (3,885,178 ds/min), 28,710,138 states left on queue.
+Progress(10) at 2026-09-25 15:18:13: 271,955,227 states generated (24,651,183 s/min), 50,424,173 distinct states found (4,001,915 ds/min), 30,868,942 states left on queue.
+Progress(11) at 2026-09-25 15:19:13: 294,406,661 states generated (22,451,434 s/min), 55,229,591 distinct states found (4,805,418 ds/min), 33,944,719 states left on queue.
+Progress(11) at 2026-09-25 15:20:13: 317,744,588 states generated (23,337,927 s/min), 59,548,909 distinct states found (4,319,318 ds/min), 36,417,020 states left on queue.
+Progress(11) at 2026-09-25 15:21:13: 342,412,560 states generated (24,667,972 s/min), 63,441,037 distinct states found (3,892,128 ds/min), 38,431,274 states left on queue.
+Error: when writing the disk (StatePoolWriter.run):
+No space left on device
+Error: TLC threw an unexpected exception.
+This was probably caused by an error in the spec or model.
+See the User Output or TLC Console for clues to what happened.
+The exception was a java.lang.RuntimeException
+: java.io.IOException: No space left on device
+
+[failure] TLC encountered an error (847688ms).
+error: TLC error (see output above)
+# exit 1, wall-clock 853 s

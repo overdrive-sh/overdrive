@@ -1,0 +1,7 @@
+.tools/
+node_modules/
+target/
+out/
+_apalache-out/
+__pycache__/
+tmp/

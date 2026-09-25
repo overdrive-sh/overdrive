@@ -1,0 +1,8 @@
+
+  vr_sc_4v
+    ok phantomPrefix passed 1 test(s)
+    ok phantomFailStop passed 1 test(s)
+    ok phantomLoss passed 1 test(s)
+
+  3 passing (384ms)
+=== quint test exit=0 wall=2.936674305s

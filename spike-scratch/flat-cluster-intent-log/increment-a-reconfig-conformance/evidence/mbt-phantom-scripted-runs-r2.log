@@ -1,0 +1,329 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID 4e1442ea-3f38-4f6e-be60-e363540d59b5 with nextest profile: default
+    Starting 3 tests across 1 binary (3 tests skipped)
+       START [         ] (1/3) vs-reconfig-conformance::mbt run_phantom_fail_stop
+
+running 1 test
+== Running model based tests for phantomFailStop
+   Generating 1 traces using `0x1` as random seed ...
+   Replaying traces ...
+   [Trace 1]
+   [Step 0]
+   Action taken: Init
+
+   [Step 1]
+   Action taken: Propose
+
+   [Step 2]
+   Action taken: DeliverPrepare
+
+   [Step 3]
+   Action taken: Crash
+
+   [Step 4]
+   Action taken: Restart
+
+   [Step 5]
+   Action taken: DeliverPrepare
+
+   [Step 6]
+   Action taken: DeliverPrepareOk
+
+   [Step 7]
+   Action taken: DeliverPrepare
+
+   [Step 8]
+   Action taken: Timeout
+
+   [Step 9]
+   Action taken: DeliverPrepareOk
+
+   [Step 10]
+   Action taken: DeliverSvc
+
+   [Step 11]
+   Action taken: DeliverCommit
+
+   [Step 12]
+   Action taken: ClientRequest
+
+   [Step 13]
+   Action taken: SyncFrom
+
+   [Step 14]
+   Action taken: Crash
+
+   [Step 15]
+   Action taken: DeliverSvc
+
+   [Step 16]
+   Action taken: ClientRequest
+
+   [Step 17]
+   Action taken: DeliverPrepare
+
+   [Step 18]
+   Action taken: DeliverPrepareOk
+
+   [Step 19]
+   Action taken: DeliverDvc
+
+   [Step 20]
+   Action taken: DeliverCommit
+
+   [Step 21]
+   Action taken: Crash
+
+   [Step 22]
+   Action taken: DeliverPrepare
+
+   [Step 23]
+   Action taken: SyncFrom
+
+   [Step 24]
+   Action taken: CatchUpView
+
+
+thread 'run_phantom_fail_stop' (360362) panicked at /home/marcus.guest/.cargo/git/checkouts/viewstamp-2b8ee9d888b5e89f/f7fbcd9/viewstamp-proto/src/endpoint/view_change.rs:1624:5:
+must not rewind below our committed op
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   [OK] phantomFailStop
+==== phantomFailStop: replay result = CONFORMS (every step matched)
+     traces=1 steps=25
+     note: [SyncFrom] syncFrom n3<-n0: spec cp=1, impl commit=1 op=1
+     note: [SyncFrom] syncFrom n1<-n2: spec cp=1, impl commit=1 op=1
+     IMPLEMENTATION FINDING: [CatchUpView] FAIL-STOP: n2 panicked: must not rewind below our committed op
+     final implementation state:
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+     client replies (client, request, label): [(1000001, 1, 1)]
+test run_phantom_fail_stop ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.65s
+
+        PASS [   2.660s] (1/3) vs-reconfig-conformance::mbt run_phantom_fail_stop
+       START [         ] (2/3) vs-reconfig-conformance::mbt run_phantom_loss
+
+running 1 test
+== Running model based tests for phantomLoss
+   Generating 1 traces using `0x1` as random seed ...
+   Replaying traces ...
+   [Trace 1]
+   [Step 0]
+   Action taken: Init
+
+   [Step 1]
+   Action taken: Propose
+
+   [Step 2]
+   Action taken: DeliverPrepare
+
+   [Step 3]
+   Action taken: Crash
+
+   [Step 4]
+   Action taken: Restart
+
+   [Step 5]
+   Action taken: DeliverPrepare
+
+   [Step 6]
+   Action taken: DeliverPrepareOk
+
+   [Step 7]
+   Action taken: DeliverPrepare
+
+   [Step 8]
+   Action taken: Timeout
+
+   [Step 9]
+   Action taken: DeliverPrepareOk
+
+   [Step 10]
+   Action taken: DeliverSvc
+
+   [Step 11]
+   Action taken: DeliverCommit
+
+   [Step 12]
+   Action taken: ClientRequest
+
+   [Step 13]
+   Action taken: SyncFrom
+
+   [Step 14]
+   Action taken: Crash
+
+   [Step 15]
+   Action taken: DeliverSvc
+
+   [Step 16]
+   Action taken: ClientRequest
+
+   [Step 17]
+   Action taken: DeliverPrepare
+
+   [Step 18]
+   Action taken: DeliverPrepareOk
+
+   [Step 19]
+   Action taken: DeliverDvc
+
+   [Step 20]
+   Action taken: Crash
+
+   [Step 21]
+   Action taken: DeliverPrepare
+
+   [Step 22]
+   Action taken: SyncFrom
+
+   [Step 23]
+   Action taken: CatchUpView
+
+   [Step 24]
+   Action taken: Restart
+
+   [Step 25]
+   Action taken: Timeout
+
+   [Step 26]
+   Action taken: DeliverSvc
+
+   [Step 27]
+   Action taken: DeliverSvc
+
+   [Step 28]
+   Action taken: DeliverDvc
+
+   [Step 29]
+   Action taken: DeliverSv
+
+   [Step 30]
+   Action taken: ClientRequest
+
+   [Step 31]
+   Action taken: DeliverPrepare
+
+   [Step 32]
+   Action taken: DeliverPrepareOk
+
+   [OK] phantomLoss
+==== phantomLoss: replay result = CONFORMS (every step matched)
+     traces=1 steps=33
+     note: [SyncFrom] syncFrom n3<-n0: spec cp=1, impl commit=1 op=1
+     note: [SyncFrom] syncFrom n1<-n2: spec cp=1, impl commit=1 op=1
+     IMPLEMENTATION FINDING: [DeliverPrepareOk] AGREEMENT: n2 applied label 3 at op 2, but label 1 was committed there
+     final implementation state:
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 applied=[]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit2 cmax2 PRIMARY applied=[(2, 3)]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+     client replies (client, request, label): [(1000001, 1, 1), (1000003, 1, 3)]
+test run_phantom_loss ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.49s
+
+        PASS [   2.501s] (2/3) vs-reconfig-conformance::mbt run_phantom_loss
+       START [         ] (3/3) vs-reconfig-conformance::mbt run_phantom_prefix
+
+running 1 test
+== Running model based tests for phantomPrefix
+   Generating 1 traces using `0x1` as random seed ...
+   Replaying traces ...
+   [Trace 1]
+   [Step 0]
+   Action taken: Init
+
+   [Step 1]
+   Action taken: Propose
+
+   [Step 2]
+   Action taken: DeliverPrepare
+
+   [Step 3]
+   Action taken: Crash
+
+   [Step 4]
+   Action taken: Restart
+
+   [Step 5]
+   Action taken: DeliverPrepare
+
+   [Step 6]
+   Action taken: DeliverPrepareOk
+
+   [Step 7]
+   Action taken: DeliverPrepare
+
+   [Step 8]
+   Action taken: Timeout
+
+   [Step 9]
+   Action taken: DeliverPrepareOk
+
+   [Step 10]
+   Action taken: DeliverSvc
+
+   [Step 11]
+   Action taken: DeliverCommit
+
+   [Step 12]
+   Action taken: ClientRequest
+
+   [Step 13]
+   Action taken: SyncFrom
+
+   [Step 14]
+   Action taken: Crash
+
+   [Step 15]
+   Action taken: DeliverSvc
+
+   [Step 16]
+   Action taken: ClientRequest
+
+   [Step 17]
+   Action taken: DeliverPrepare
+
+   [Step 18]
+   Action taken: DeliverPrepareOk
+
+   [Step 19]
+   Action taken: DeliverDvc
+
+   [Step 20]
+   Action taken: Crash
+
+   [Step 21]
+   Action taken: DeliverPrepare
+
+   [Step 22]
+   Action taken: SyncFrom
+
+   [OK] phantomPrefix
+==== phantomPrefix: replay result = CONFORMS (every step matched)
+     traces=1 steps=23
+     note: [SyncFrom] syncFrom n3<-n0: spec cp=1, impl commit=1 op=1
+     note: [SyncFrom] syncFrom n1<-n2: spec cp=1, impl commit=1 op=1
+     implementation monitors: no violation
+     final implementation state:
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+     client replies (client, request, label): [(1000001, 1, 1)]
+test run_phantom_prefix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 2.50s
+
+        PASS [   2.503s] (3/3) vs-reconfig-conformance::mbt run_phantom_prefix
+────────────
+     Summary [   7.667s] 3 tests run: 3 passed, 3 skipped
+=== nextest exit=0 wall=8.365033457s

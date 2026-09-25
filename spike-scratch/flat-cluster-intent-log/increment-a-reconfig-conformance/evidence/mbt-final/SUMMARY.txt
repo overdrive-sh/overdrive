@@ -1,0 +1,96 @@
+## ev3-step-0x1.log
+==== phantomFailStop: replay result = CONFORMS (every step matched)
+     traces=1 steps=25
+     IMPLEMENTATION FINDING: [CatchUpView] FAIL-STOP: n2 panicked: must not rewind below our committed op
+==== phantomLoss: replay result = CONFORMS (every step matched)
+     traces=1 steps=33
+     IMPLEMENTATION FINDING: [DeliverPrepareOk] AGREEMENT: n2 applied label 3 at op 2, but label 1 was committed there
+==== phantomPrefix: replay result = CONFORMS (every step matched)
+     traces=1 steps=23
+==== vr_sc_3v1l random step=step seed=0x1: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x1: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x1: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=63.528575209s
+## ev3-step-0x2.log
+==== vr_sc_3v1l random step=step seed=0x2: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x2: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x2: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=52.310211730s
+## ev3-step-0x3.log
+==== vr_sc_3v1l random step=step seed=0x3: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x3: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x3: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=51.251307058s
+## ev3-step-0x33.log
+==== phantomFailStop: replay result = CONFORMS (every step matched)
+     traces=1 steps=25
+     IMPLEMENTATION FINDING: [CatchUpView] FAIL-STOP: n2 panicked: must not rewind below our committed op
+==== phantomLoss: replay result = CONFORMS (every step matched)
+     traces=1 steps=33
+     IMPLEMENTATION FINDING: [DeliverPrepareOk] AGREEMENT: n2 applied label 3 at op 2, but label 1 was committed there
+==== phantomPrefix: replay result = CONFORMS (every step matched)
+     traces=1 steps=23
+==== vr_sc_3v1l random step=step seed=0x33: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x33: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x33: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=65.061283421s
+## ev3-step-0x4.log
+==== vr_sc_3v1l random step=step seed=0x4: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x4: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x4: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=53.047425483s
+## ev3-step-0x5.log
+==== phantomFailStop: replay result = CONFORMS (every step matched)
+     traces=1 steps=25
+     IMPLEMENTATION FINDING: [CatchUpView] FAIL-STOP: n2 panicked: must not rewind below our committed op
+==== phantomLoss: replay result = CONFORMS (every step matched)
+     traces=1 steps=33
+     IMPLEMENTATION FINDING: [DeliverPrepareOk] AGREEMENT: n2 applied label 3 at op 2, but label 1 was committed there
+==== phantomPrefix: replay result = CONFORMS (every step matched)
+     traces=1 steps=23
+==== vr_sc_3v1l random step=step seed=0x5: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x5: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x5: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=80.819522869s
+## ev3-step-0x6.log
+==== vr_sc_3v1l random step=step seed=0x6: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x6: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x6: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=51.482906695s
+## ev3-step-0x7.log
+==== vr_sc_3v1l random step=step seed=0x7: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=step seed=0x7: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=step seed=0x7: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=65.190106185s
+## ev-churn-0x11.log
+==== vr_sc_3v1l random step=stepChurn seed=0x11: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_4v random step=stepChurn seed=0x11: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+==== vr_sc_solo random step=stepChurn seed=0x11: replay result = CONFORMS (every step matched)
+     traces=200 steps=8200
+=== nextest exit=0 wall=55.341977642s

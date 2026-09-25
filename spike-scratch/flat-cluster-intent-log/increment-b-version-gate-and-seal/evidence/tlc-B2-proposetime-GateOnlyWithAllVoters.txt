@@ -1,0 +1,227 @@
+$ TMPDIR=/var/tmp/fcil-incb-tlc quint verify --backend tlc --server-endpoint localhost:18931 --main bugProposeTime --invariant GateOnlyWithAllVoters gate_seal.qnt
+# started 2026-09-25T14:12:35Z — uname -r 7.0.0-31-generic — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+[TLC] Compiling to TLA+ (via Apalache)...
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T16-12-37_9992489458761810699
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@16:12:37.696
+Starting checker server on port 18931...                          I@16:12:37.701
+The Apalache server is running on port 18931. Press Ctrl-C to stop.
+Sep 25, 2026 4:12:39 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+PASS #0: SanyParser                                               I@16:12:39.739
+[TLC] Running TLC model checker...
+
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 58 and seed 8770199899860513439 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 358725] (Linux 7.0.0-31-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /var/tmp/fcil-incb-tlc/quint-tlc-snGLOe/bugProposeTime.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Apalache.tla
+Parsing file /tmp/Variants.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module bugProposeTime
+Starting... (2026-09-25 16:12:40)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 16:12:40.
+Error: Invariant q_inv is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ bugProposeTime_gate_seal_nextId = 0
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = <<>>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 0
+/\ bugProposeTime_gate_seal_acklog = <<>>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 1, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 2: <bugProposeTime_gate_seal_Upgrade line 433, col 3 to line 457, col 41 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 0
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = <<>>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 0
+/\ bugProposeTime_gate_seal_acklog = <<>>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 1, n3 |-> 1, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 3: <bugProposeTime_gate_seal_Upgrade line 433, col 3 to line 457, col 41 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 0
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = <<>>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 0
+/\ bugProposeTime_gate_seal_acklog = <<>>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 1, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 4: <bugProposeTime_gate_seal_Upgrade line 433, col 3 to line 457, col 41 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 0
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = <<>>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 0
+/\ bugProposeTime_gate_seal_acklog = <<>>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 5: <bugProposeTime_gate_seal_ProposeGate line 711, col 5 to line 727, col 43 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 0
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = <<>>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> -1, n2 |-> -1, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 0
+/\ bugProposeTime_gate_seal_acklog = <<>>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> TRUE, target |-> 2, epoch |-> 0]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 6: <bugProposeTime_gate_seal_Seal line 761, col 9 to line 833, col 49 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 1
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> 0 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n4"} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> 0, n2 |-> 0, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 1
+/\ bugProposeTime_gate_seal_acklog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ] >>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> TRUE, target |-> 2, epoch |-> 0]
+/\ bugProposeTime_gate_seal_clusterVersion = 1
+
+State 7: <bugProposeTime_gate_seal_CommitGate line 733, col 3 to line 752, col 41 of module bugProposeTime>
+/\ bugProposeTime_gate_seal_nextId = 2
+/\ bugProposeTime_gate_seal_parent = (0 :> -1 @@ 1 :> 0 @@ 2 :> -1)
+/\ bugProposeTime_gate_seal_ackCount = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_vlog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ],
+   [ target |-> 2,
+     epoch |-> 1,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> FALSE,
+     id |-> 1 ] >>
+/\ bugProposeTime_gate_seal_appliedAbove = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_halted = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_opsDone = 0
+/\ bugProposeTime_gate_seal_segLen = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_voters = (0 :> {"n1", "n2", "n3"} @@ 1 :> {"n1", "n2", "n4"} @@ 2 :> {})
+/\ bugProposeTime_gate_seal_closedFor = [n1 |-> 0, n2 |-> 0, n3 |-> -1, n4 |-> -1]
+/\ bugProposeTime_gate_seal_curEpoch = 1
+/\ bugProposeTime_gate_seal_acklog = << [ target |-> 1,
+     epoch |-> 0,
+     kind |-> "seal",
+     tag |-> 1,
+     okAtCommit |-> TRUE,
+     id |-> 0 ],
+   [ target |-> 2,
+     epoch |-> 1,
+     kind |-> "gate",
+     tag |-> 2,
+     okAtCommit |-> FALSE,
+     id |-> 1 ] >>
+/\ bugProposeTime_gate_seal_diverged = [n1 |-> FALSE, n2 |-> FALSE, n3 |-> FALSE, n4 |-> FALSE]
+/\ bugProposeTime_gate_seal_sealCount = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ bugProposeTime_gate_seal_wire = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
+/\ bugProposeTime_gate_seal_supported = [n1 |-> 2, n2 |-> 2, n3 |-> 2, n4 |-> 1]
+/\ bugProposeTime_gate_seal_applied = [n1 |-> 0, n2 |-> 0, n3 |-> 0, n4 |-> 0]
+/\ bugProposeTime_gate_seal_pending = [active |-> FALSE, target |-> 0, epoch |-> -1]
+/\ bugProposeTime_gate_seal_clusterVersion = 2
+
+87691 states generated, 31605 distinct states found, 26495 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 6 (minimum is 0, the maximum 23 and the 95th percentile is 21).
+Finished in 00s at (2026-09-25 16:12:41)
+
+[violation] Found an issue (1355ms).
+error: found a counterexample
+# exit 1, wall-clock 7 s

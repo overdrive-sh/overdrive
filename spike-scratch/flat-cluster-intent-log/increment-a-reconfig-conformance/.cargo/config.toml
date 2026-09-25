@@ -1,0 +1,11 @@
+# Mirror viewstamp's own workspace cfg (viewstamp/.cargo/config.toml @ f7fbcd96): its simulation crate's
+# white-box helpers (e.g. `Endpoint::state_machine_ref`) are compiled only under this flag, exactly as
+# upstream builds its VOPR / CI.
+[build]
+rustflags = ["--cfg", "vsrr_internal_testkit"]
+
+# A [target.<triple>] rustflags table in a parent directory's config (the mold linker flag) takes
+# precedence over build.rustflags; target.<cfg> tables are JOINED with it, so mirror the flag here too
+# (the same workaround viewstamp's own config uses).
+[target.'cfg(all())']
+rustflags = ["--cfg", "vsrr_internal_testkit"]

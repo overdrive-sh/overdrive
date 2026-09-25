@@ -1,0 +1,679 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.31s
+────────────
+ Nextest run ID 431601c2-4e5a-4077-a930-7e798cc822d0 with nextest profile: default
+    Starting 1 test across 1 binary (5 tests skipped)
+       START [         ] (1/1) vs-reconfig-conformance::mbt run_phantom_loss
+
+running 1 test
+== Running model based tests for phantomLoss
+   Generating 1 traces using `0x1` as random seed ...
+   Replaying traces ...
+   [Trace 1]
+   [Step 0]
+   Action taken: Init
+
+   >> impl after Init:
+  n0 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=[]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=[]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=[]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 1]
+   Action taken: Propose
+
+   >> impl after Propose:
+    #1 Prepare n0->n1 v0 e0 op/commit=1
+    #2 Prepare n0->n2 v0 e0 op/commit=1
+    #3 Prepare n0->n3 v0 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=[]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=[]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 2]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #4 PrepareOk n3->n0 v0 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=[]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 3]
+   Action taken: Crash
+
+   >> impl after Crash:
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 4]
+   Action taken: Restart
+
+   >> impl after Restart:
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=[]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+    event n1: StatusChanged(Normal)
+   [Step 5]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #5 PrepareOk n1->n0 v0 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 6]
+   Action taken: DeliverPrepareOk
+
+   >> impl after DeliverPrepareOk:
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=[]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 7]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #6 PrepareOk n2->n0 v0 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 8]
+   Action taken: Timeout
+
+   >> impl after Timeout:
+    #7 StartViewChange n2->n0 v1 e0 op/commit=0
+    #8 StartViewChange n2->n1 v1 e0 op/commit=0
+    #9 StartViewChange n2->n3 v1 e0 op/commit=0
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 9]
+   Action taken: DeliverPrepareOk
+
+   >> impl after DeliverPrepareOk:
+    #10 Commit n0->n1 v0 e0 op/commit=1
+    #11 Commit n0->n2 v0 e0 op/commit=1
+    #12 Commit n0->n3 v0 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+
+    event n0: MembershipChanged(MembershipChanged { op: OpNumber(1), epoch: Epoch(1), config_id: 80481636909522697144453222349132149528, self_is_voter: true, self_is_learner: false })
+    event n0: CheckpointDurable(OpNumber(1))
+   [Step 10]
+   Action taken: DeliverSvc
+
+   >> impl after DeliverSvc:
+    #13 StartViewChange n3->n0 v1 e0 op/commit=0
+    #14 StartViewChange n3->n1 v1 e0 op/commit=0
+    #15 StartViewChange n3->n2 v1 e0 op/commit=0
+    #16 DoViewChange n3->n1 v1 e0 op/commit=1
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n2 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+
+    event n3: StatusChanged(ViewChange)
+   [Step 11]
+   Action taken: DeliverCommit
+
+   >> impl after DeliverCommit:
+  n0 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+
+    event n2: MembershipChanged(MembershipChanged { op: OpNumber(1), epoch: Epoch(1), config_id: 80481636909522697144453222349132149528, self_is_voter: true, self_is_learner: false })
+    event n2: CheckpointDurable(OpNumber(1))
+   [Step 12]
+   Action taken: ClientRequest
+
+   >> impl after ClientRequest:
+    #17 Prepare n0->n1 v0 e1 op/commit=2
+    #18 Prepare n0->n2 v0 e1 op/commit=2
+    #19 Prepare n0->n3 v0 e1 op/commit=2
+  n0 [internals] log_len=2 inflight=2 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n3 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+
+   [Step 13]
+   Action taken: SyncFrom
+
+   >> impl after SyncFrom:
+    #20 RequestSync n3->n0 v0 e0 op/commit=0 (delivered)
+    #21 RequestSync n3->n1 v0 e0 op/commit=0
+    #22 RequestSync n3->n2 v0 e0 op/commit=0
+    #23 SyncCheckpoint n0->n3 v0 e0 op/commit=0 (delivered)
+    #24 RequestBlock n3->n0 v0 e0 op/commit=0 (delivered)
+    #25 BlockResponse n0->n3 v0 e0 op/commit=0 (delivered)
+    #26 RequestBlock n3->n0 v0 e0 op/commit=0 (delivered)
+    #27 BlockResponse n0->n3 v0 e0 op/commit=0 (delivered)
+    #28 GetView n3->n1 v0 e0 op/commit=0
+  n0 [internals] log_len=2 inflight=2 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n3 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n3 view_change e1 V[0, 1, 2] L[3] v1 lv0 op1 commit1 cmax1 applied=[]
+
+    event n3: StatusChanged(Recovering)
+    event n3: StateSyncStarted(OpNumber(1))
+    event n3: MembershipChanged(MembershipChanged { op: OpNumber(1), epoch: Epoch(1), config_id: 80481636909522697144453222349132149528, self_is_voter: false, self_is_learner: true })
+    event n3: StateSyncCompleted(OpNumber(1))
+    event n3: StatusChanged(ViewChange)
+   [Step 14]
+   Action taken: Crash
+
+   >> impl after Crash:
+  n0 [internals] log_len=2 inflight=2 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v0 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 15]
+   Action taken: DeliverSvc
+
+   >> impl after DeliverSvc:
+    #29 StartViewChange n1->n0 v1 e0 op/commit=0
+    #30 StartViewChange n1->n2 v1 e0 op/commit=0
+    #31 StartViewChange n1->n3 v1 e0 op/commit=0
+    #32 DoViewChange n1->n1 v1 e0 op/commit=1
+  n0 [internals] log_len=2 inflight=2 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n1: StatusChanged(ViewChange)
+   [Step 16]
+   Action taken: ClientRequest
+
+   >> impl after ClientRequest:
+    #33 Prepare n0->n1 v0 e1 op/commit=3
+    #34 Prepare n0->n2 v0 e1 op/commit=3
+    #35 Prepare n0->n3 v0 e1 op/commit=3
+  n0 [internals] log_len=3 inflight=3 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 17]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #36 PrepareOk n2->n0 v0 e1 op/commit=2
+  n0 [internals] log_len=3 inflight=3 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit1 cmax1 PRIMARY applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 18]
+   Action taken: DeliverPrepareOk
+
+   >> impl after DeliverPrepareOk:
+    #37 Commit n0->n1 v0 e1 op/commit=2
+    #38 Commit n0->n2 v0 e1 op/commit=2
+    #39 Commit n0->n3 v0 e1 op/commit=2
+  n0 [internals] log_len=3 inflight=3 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit2 cmax2 PRIMARY applied=[(2, 1)]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=0 slots=["1:v0/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e0 V[0, 1, 2, 3] L[] v1 lv0 op1 commit0 cmax0 applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n0: Committed(Committed { op: OpNumber(2), client: ClientId(1000001), request: RequestNumber(1), reply: b"\0\0\0\0\0\0\0\x01" })
+   [Step 19]
+   Action taken: DeliverDvc
+
+   >> impl after DeliverDvc:
+    #40 StartView n1->n0 v1 e0 op/commit=1
+    #41 StartView n1->n2 v1 e0 op/commit=1
+    #42 StartView n1->n3 v1 e0 op/commit=1
+  n0 [internals] log_len=3 inflight=3 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit2 cmax2 PRIMARY applied=[(2, 1)]
+  n1 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v1 lv1 op1 commit0 cmax0 PRIMARY applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n1: StatusChanged(Normal)
+    event n1: ViewChanged(ViewChanged { view: View(1), is_primary: true })
+   [Step 20]
+   Action taken: Crash
+
+   >> impl after Crash:
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v1 lv1 op1 commit0 cmax0 PRIMARY applied=[]
+  n2 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op2 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 21]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #43 PrepareOk n2->n0 v0 e1 op/commit=3
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=0 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e0 V[0, 1, 2, 3] L[] v1 lv1 op1 commit0 cmax0 PRIMARY applied=[]
+  n2 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 22]
+   Action taken: SyncFrom
+
+   >> impl after SyncFrom:
+    #44 EpochAhead n2->n1 v0 e0 op/commit=0 (delivered)
+    #45 RequestSync n1->n0 v0 e0 op/commit=0
+    #46 RequestSync n1->n2 v0 e0 op/commit=0 (delivered)
+    #47 RequestSync n1->n3 v0 e0 op/commit=0
+    #48 SyncCheckpoint n2->n1 v0 e0 op/commit=0 (delivered)
+    #49 RequestBlock n1->n2 v0 e0 op/commit=0 (delivered)
+    #50 BlockResponse n2->n1 v0 e0 op/commit=0 (delivered)
+    #51 RequestBlock n1->n2 v0 e0 op/commit=0 (delivered)
+    #52 BlockResponse n2->n1 v0 e0 op/commit=0 (delivered)
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v0 lv0 op3 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n1: StateSyncStarted(OpNumber(1))
+    event n1: MembershipChanged(MembershipChanged { op: OpNumber(1), epoch: Epoch(1), config_id: 80481636909522697144453222349132149528, self_is_voter: true, self_is_learner: false })
+    event n1: StateSyncCompleted(OpNumber(1))
+   [Step 23]
+   Action taken: CatchUpView
+
+   >> impl after CatchUpView:
+    #53 Commit n1->n0 v1 e1 op/commit=1
+    #54 Commit n1->n2 v1 e1 op/commit=1 (delivered)
+    #55 Commit n1->n3 v1 e1 op/commit=1
+    #56 GetView n2->n1 v0 e0 op/commit=0 (delivered)
+    #57 StartView n1->n2 v1 e1 op/commit=1 (delivered)
+  n0 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[(2, 1)]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n2: StatusChanged(ViewChange)
+    event n2: StatusChanged(Normal)
+    event n2: ViewChanged(ViewChanged { view: View(1), is_primary: false })
+   [Step 24]
+   Action taken: Restart
+
+   >> impl after Restart:
+    #58 DoViewChange n0->n1 v1 e1 op/commit=3
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n0: StatusChanged(ViewChange)
+   [Step 25]
+   Action taken: Timeout
+
+   >> impl after Timeout:
+    #59 StartViewChange n0->n1 v1 e1 op/commit=0
+    #60 StartViewChange n0->n2 v1 e1 op/commit=0
+    #61 StartViewChange n0->n3 v1 e1 op/commit=0
+    #62 DoViewChange n0->n1 v1 e1 op/commit=3
+    #63 StartViewChange n0->n1 v1 e1 op/commit=0
+    #64 StartViewChange n0->n2 v1 e1 op/commit=0
+    #65 StartViewChange n0->n3 v1 e1 op/commit=0
+    #66 DoViewChange n0->n1 v1 e1 op/commit=3
+    #67 StartViewChange n0->n1 v1 e1 op/commit=0
+    #68 StartViewChange n0->n2 v1 e1 op/commit=0
+    #69 StartViewChange n0->n3 v1 e1 op/commit=0
+    #70 DoViewChange n0->n1 v1 e1 op/commit=3
+    #71 StartViewChange n0->n1 v1 e1 op/commit=0
+    #72 StartViewChange n0->n2 v1 e1 op/commit=0
+    #73 StartViewChange n0->n3 v1 e1 op/commit=0
+    #74 DoViewChange n0->n1 v1 e1 op/commit=3
+    #75 StartViewChange n0->n1 v1 e1 op/commit=0
+    #76 StartViewChange n0->n2 v1 e1 op/commit=0
+    #77 StartViewChange n0->n3 v1 e1 op/commit=0
+    #78 DoViewChange n0->n1 v1 e1 op/commit=3
+    #79 StartViewChange n0->n1 v2 e1 op/commit=0
+    #80 StartViewChange n0->n2 v2 e1 op/commit=0
+    #81 StartViewChange n0->n3 v2 e1 op/commit=0
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 PRIMARY applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 26]
+   Action taken: DeliverSvc
+
+   >> impl after DeliverSvc:
+    #82 StartViewChange n1->n0 v2 e1 op/commit=0
+    #83 StartViewChange n1->n2 v2 e1 op/commit=0
+    #84 StartViewChange n1->n3 v2 e1 op/commit=0
+    #85 DoViewChange n1->n2 v2 e1 op/commit=1
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e1 V[0, 1, 2] L[3] v2 lv1 op1 commit1 cmax1 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v1 lv1 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n1: StatusChanged(ViewChange)
+   [Step 27]
+   Action taken: DeliverSvc
+
+   >> impl after DeliverSvc:
+    #86 StartViewChange n2->n0 v2 e1 op/commit=0
+    #87 StartViewChange n2->n1 v2 e1 op/commit=0
+    #88 StartViewChange n2->n3 v2 e1 op/commit=0
+    #89 DoViewChange n2->n2 v2 e1 op/commit=1
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e1 V[0, 1, 2] L[3] v2 lv1 op1 commit1 cmax1 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n2 [wal] checkpoint=1 slots=[]
+  n2 view_change e1 V[0, 1, 2] L[3] v2 lv1 op1 commit1 cmax1 applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n2: StatusChanged(ViewChange)
+   [Step 28]
+   Action taken: DeliverDvc
+
+   >> impl after DeliverDvc:
+    #90 StartView n2->n0 v2 e1 op/commit=1
+    #91 StartView n2->n1 v2 e1 op/commit=1
+    #92 StartView n2->n3 v2 e1 op/commit=1
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 view_change e1 V[0, 1, 2] L[3] v2 lv1 op1 commit1 cmax1 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op1 commit1 cmax1 PRIMARY applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n2: StatusChanged(Normal)
+    event n2: ViewChanged(ViewChanged { view: View(2), is_primary: true })
+   [Step 29]
+   Action taken: DeliverSv
+
+   >> impl after DeliverSv:
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op1 commit1 cmax1 applied=[]
+  n2 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=[]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op1 commit1 cmax1 PRIMARY applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n1: StatusChanged(Normal)
+    event n1: ViewChanged(ViewChanged { view: View(2), is_primary: false })
+   [Step 30]
+   Action taken: ClientRequest
+
+   >> impl after ClientRequest:
+    #93 Prepare n2->n0 v2 e1 op/commit=2
+    #94 Prepare n2->n1 v2 e1 op/commit=2
+    #95 Prepare n2->n3 v2 e1 op/commit=2
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=0 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op1 commit1 cmax1 applied=[]
+  n2 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v2/c1000003/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 PRIMARY applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 31]
+   Action taken: DeliverPrepare
+
+   >> impl after DeliverPrepare:
+    #96 PrepareOk n1->n2 v2 e1 op/commit=2
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1", "2:v2/c1000003/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 applied=[]
+  n2 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v2/c1000003/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 PRIMARY applied=[]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+   [Step 32]
+   Action taken: DeliverPrepareOk
+
+   >> impl after DeliverPrepareOk:
+    #97 Commit n2->n0 v2 e1 op/commit=2
+    #98 Commit n2->n1 v2 e1 op/commit=2
+    #99 Commit n2->n3 v2 e1 op/commit=2
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1", "2:v2/c1000003/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 applied=[]
+  n2 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v2/c1000003/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit2 cmax2 PRIMARY applied=[(2, 3)]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+    event n2: Committed(Committed { op: OpNumber(2), client: ClientId(1000003), request: RequestNumber(1), reply: b"\0\0\0\0\0\0\0\x01" })
+   [OK] phantomLoss
+==== phantomLoss: replay result = CONFORMS (every step matched)
+     traces=1 steps=33
+     note: [SyncFrom] syncFrom n3<-n0: spec cp=1, impl commit=1 op=1
+     note: [SyncFrom] syncFrom n1<-n2: spec cp=1, impl commit=1 op=1
+     IMPLEMENTATION FINDING: [DeliverPrepareOk] AGREEMENT: n2 applied label 3 at op 2, but label 1 was committed there
+     final implementation state:
+  n0 [internals] log_len=2 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=view_change
+  n0 [wal] checkpoint=1 slots=["1:v0/c340282366920938463463374607431768211455/r1", "2:v0/c1000001/r1", "3:v0/c1000002/r1"]
+  n0 view_change e1 V[0, 1, 2] L[3] v1 lv0 op3 commit1 cmax1 applied=[]
+  n1 [internals] log_len=1 inflight=0 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n1 [wal] checkpoint=1 slots=["1:v1/c340282366920938463463374607431768211455/r1", "2:v2/c1000003/r1"]
+  n1 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit1 cmax1 applied=[]
+  n2 [internals] log_len=1 inflight=1 deferred_appends=0 storage_inflight=false install=(None, None, false, None, false) status=normal
+  n2 [wal] checkpoint=1 slots=["2:v2/c1000003/r1"]
+  n2 normal e1 V[0, 1, 2] L[3] v2 lv2 op2 commit2 cmax2 PRIMARY applied=[(2, 3)]
+  n3 DOWN down e0 V[] L[] v0 lv0 op0 commit0 cmax0 applied=[]
+
+     client replies (client, request, label): [(1000001, 1, 1), (1000003, 1, 3)]
+test run_phantom_loss ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 4.36s
+
+        PASS [   4.372s] (1/1) vs-reconfig-conformance::mbt run_phantom_loss
+────────────
+     Summary [   4.373s] 1 test run: 1 passed, 5 skipped
+=== nextest exit=0 wall=4.932287761s

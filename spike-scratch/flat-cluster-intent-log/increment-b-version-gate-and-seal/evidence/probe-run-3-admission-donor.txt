@@ -1,0 +1,97 @@
+# uname -r: 7.0.0-31-generic
+# whoami: root
+# rustc: rustc 1.95.0 (59807616e 2026-04-14)
+# started: 2026-09-25T14:57:45Z
+# command: CARGO_TARGET_DIR=probe/target cargo run --offline --bin admission_donor
+[1m[92m   Compiling[0m gate-probe v0.0.0 (/Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/probe)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 8.43s
+[1m[92m     Running[0m `target/debug/admission_donor`
+viewstamp rev f7fbcd96ebcee2aafa08f3ac136844743c7f9773 — admission + poisoned-donor probe
+genesis: voters 0,1,2 (binary v2); learner 3 (binary v1); learner 4 (binary v2, joins late, empty store)
+checkpoint interval: 4 ops; trials: 12
+
+== phase 1: gate v2 commits; learner 3 (v1) halts inside its state machine
+  via slot 0: op alpha (v1)                            -> APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+  via slot 0: advertise voter (v2)                     -> ADVERTISE op=2 member=0 max=v2 cv=1 applied=2 digest=668c2082177a52e1
+  via slot 1: advertise voter (v2)                     -> ADVERTISE op=3 member=1 max=v2 cv=1 applied=3 digest=c3429e09f7465363
+  via slot 2: advertise voter (v2)                     -> ADVERTISE op=4 member=2 max=v2 cv=1 applied=4 digest=65cc5afe4790d717
+  via slot 1: advertise learner 3 (v1), via voter 1    -> ADVERTISE op=5 member=3 max=v1 cv=1 applied=5 digest=4752d136302fe470
+  via slot 2: advertise learner 4 (v2), via voter 2    -> ADVERTISE op=6 member=4 max=v2 cv=1 applied=6 digest=b6692903ec1a7046
+  via slot 0: gate v2 over voters {0,1,2}              -> GATE-COMMITTED op=7 v=2 voters=[0, 1, 2] cv=2 applied=7 digest=6abe1fb1500f6c35
+  via slot 0: op filler (v2)                           -> APPLIED op=8 tag=v2 cv=2 applied=8 digest=cacf9732741e534a
+  via slot 0: op filler (v2)                           -> APPLIED op=9 tag=v2 cv=2 applied=9 digest=09bacabb3a039b85
+  via slot 0: op filler (v2)                           -> APPLIED op=10 tag=v2 cv=2 applied=10 digest=a80423f1c82cec42
+  via slot 0: op filler (v2)                           -> APPLIED op=11 tag=v2 cv=2 applied=11 digest=748ca01dbb1f6b65
+  via slot 0: op filler (v2)                           -> APPLIED op=12 tag=v2 cv=2 applied=12 digest=f0a780192483af1a
+  via slot 0: op filler (v2)                           -> APPLIED op=13 tag=v2 cv=2 applied=13 digest=e7711dd176301915
+  via slot 0: op filler (v2)                           -> APPLIED op=14 tag=v2 cv=2 applied=14 digest=7bbc8e87a15962e2
+  via slot 0: op filler (v2)                           -> APPLIED op=15 tag=v2 cv=2 applied=15 digest=243aacac9a6b2675
+  via slot 0: op filler (v2)                           -> APPLIED op=16 tag=v2 cv=2 applied=16 digest=cecd247383ac362a
+  learner 3 at gate op 7: HALT op=7 gate=v2 supports=v1 cv=1 applied=6 digest=b6692903ec1a7046
+  slot 0 CheckpointDurable ops: [4, 8, 12, 16]
+  slot 1 CheckpointDurable ops: [4, 8, 12, 16]
+  slot 2 CheckpointDurable ops: [4, 8, 12, 16]
+  slot 3 CheckpointDurable ops: [4, 8, 12, 16]
+OBSERVE halted learner 3 made checkpoints durable ABOVE its halt op 7: [8, 12, 16] (its SM image is frozen at op 6)
+
+== phase D: learner 3 stays up (halted); a fresh v2 learner 4 joins on an EMPTY store, 12 times
+  trial 00: state-syncs at [16]; op 17: IDENTICAL
+      learner 4: APPLIED op=17 tag=v2 cv=2 applied=17 digest=e0f942f393364ad6
+      voter 0  : APPLIED op=17 tag=v2 cv=2 applied=17 digest=e0f942f393364ad6
+  trial 01: state-syncs at [16]; op 18: IDENTICAL
+      learner 4: APPLIED op=18 tag=v2 cv=2 applied=18 digest=687c874fe2b7d070
+      voter 0  : APPLIED op=18 tag=v2 cv=2 applied=18 digest=687c874fe2b7d070
+  trial 02: state-syncs at [16]; op 19: IDENTICAL
+      learner 4: APPLIED op=19 tag=v2 cv=2 applied=19 digest=0d59f6940c1a3ec4
+      voter 0  : APPLIED op=19 tag=v2 cv=2 applied=19 digest=0d59f6940c1a3ec4
+  trial 03: state-syncs at [16, 20]; op 20: NO-COMPARABLE-REPLY
+      learner 4: <none>
+      voter 0  : APPLIED op=20 tag=v2 cv=2 applied=20 digest=07d1f50ed22dbc4e
+  trial 04: state-syncs at [20]; op 21: IDENTICAL
+      learner 4: APPLIED op=21 tag=v2 cv=2 applied=21 digest=ba719e612c409412
+      voter 0  : APPLIED op=21 tag=v2 cv=2 applied=21 digest=ba719e612c409412
+  trial 05: state-syncs at [20]; op 22: DIVERGED
+      learner 4: REJECTED-UNCOMMITTED-FORMAT op=22 tag=v2 cv=1 applied=8 digest=ca621e18e203a7c4
+      voter 0  : APPLIED op=22 tag=v2 cv=2 applied=22 digest=077fe6c0106f8fec
+  trial 06: state-syncs at [20]; op 23: IDENTICAL
+      learner 4: APPLIED op=23 tag=v2 cv=2 applied=23 digest=33a2083904137128
+      voter 0  : APPLIED op=23 tag=v2 cv=2 applied=23 digest=33a2083904137128
+  trial 07: state-syncs at [24]; op 24: NO-COMPARABLE-REPLY
+      learner 4: <none>
+      voter 0  : APPLIED op=24 tag=v2 cv=2 applied=24 digest=8235d29a0d692a42
+  trial 08: state-syncs at [24]; op 25: IDENTICAL
+      learner 4: APPLIED op=25 tag=v2 cv=2 applied=25 digest=8a64166c17f33a9e
+      voter 0  : APPLIED op=25 tag=v2 cv=2 applied=25 digest=8a64166c17f33a9e
+  trial 09: state-syncs at [24]; op 26: IDENTICAL
+      learner 4: APPLIED op=26 tag=v2 cv=2 applied=26 digest=887ce0668f7bff78
+      voter 0  : APPLIED op=26 tag=v2 cv=2 applied=26 digest=887ce0668f7bff78
+  trial 10: state-syncs at [24]; op 27: DIVERGED
+      learner 4: REJECTED-UNCOMMITTED-FORMAT op=27 tag=v2 cv=1 applied=9 digest=bdf69ba8a99fcdcb
+      voter 0  : APPLIED op=27 tag=v2 cv=2 applied=27 digest=eaf224c978e46be7
+  trial 11: state-syncs at [28]; op 28: NO-COMPARABLE-REPLY
+      learner 4: <none>
+      voter 0  : APPLIED op=28 tag=v2 cv=2 applied=28 digest=6605b849c9dce962
+OBSERVE poisoned donor: 7 IDENTICAL, 2 DIVERGED, 3 no comparable reply, out of 12 trials
+
+== phase A: promote the HALTED v1 learner 3 to voter via Handle::reconfigure_to (cluster version is v2)
+  reconfigure_to -> Ok(Ok(()))
+  slot 0 MembershipChanged at op 29: epoch=Epoch(1) config_id=ed9e2653e16588afce8fa1de5045fe71 self_is_voter=true self_is_learner=false
+  slot 1 MembershipChanged at op 29: epoch=Epoch(1) config_id=ed9e2653e16588afce8fa1de5045fe71 self_is_voter=true self_is_learner=false
+  slot 2 MembershipChanged at op 29: epoch=Epoch(1) config_id=ed9e2653e16588afce8fa1de5045fe71 self_is_voter=true self_is_learner=false
+  slot 3 MembershipChanged at op 29: epoch=Epoch(1) config_id=ed9e2653e16588afce8fa1de5045fe71 self_is_voter=true self_is_learner=false
+  via slot 0: op after promotion -> APPLIED op=30 tag=v2 cv=2 applied=29 digest=983118f32e219e9c
+OBSERVE voter 0's apply stream jumps from op 28 to op 30; op(s) [29] never reached StateMachine::apply (the Reconfigure op is consumed by the endpoint)
+
+== phase A2: stop voter 2 -> voters {0,1,3} live, quorum 3 of 4: every commit now needs halted voter 3's ack
+  voter 2 shutdown: Ok(ShutdownReport { storage: Quiesced })
+  via slot 0: op needing voter 3 -> Some("APPLIED op=31 tag=v2 cv=2 applied=30 digest=010063125e74eb5d")
+  halted voter 3's own apply output at op 31 (caught=true): Some("SKIP-HALTED op=31 halted_at=7 needs=v2 supports=v1 cv=1 applied=6 digest=b6692903ec1a7046")
+
+== phase A3: also stop voter 3 -> only {0,1} live: a commit must now be impossible
+  voter 3 shutdown: Ok(ShutdownReport { storage: Quiesced })
+  via slot 0: op with only {0,1} live (8 s budget) -> None
+OBSERVE halted-voter ack load-bearing: commit with {0,1,3} = true, commit with {0,1} = false
+
+elapsed: 103131 ms
+# exit: 0
+# finished: 2026-09-25T14:59:37Z

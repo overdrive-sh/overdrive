@@ -1,0 +1,15 @@
+# uname -r: 7.0.0-31-generic
+# whoami: root
+# rustc: rustc 1.95.0 (59807616e 2026-04-14)
+# started: 2026-09-25T11:33:28Z
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 22.19s
+     Running `target/debug/gate-probe`
+viewstamp rev f7fbcd96ebcee2aafa08f3ac136844743c7f9773 — gate probe
+cluster: slots 0,1,2 = voters (binary supports v2); slot 3 = learner (binary supports v1)
+checkpoint interval: 4 ops
+
+
+thread 'main' (170532) panicked at src/main.rs:247:4:
+driver builds and binds its listener: Recover(UnformattedVoter)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+# exit: 0

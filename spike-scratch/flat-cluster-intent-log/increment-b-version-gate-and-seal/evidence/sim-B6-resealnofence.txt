@@ -1,0 +1,431 @@
+$ quint run --main bugResealNoFence --invariant UniqueSuccessor --max-steps 40 --max-samples 40000 --seed 20260925 gate_seal.qnt
+An example execution:
+
+[State 0]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog: [],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 0,
+  bugResealNoFence::gate_seal::opsDone: 0,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog: [],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 1]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog: [],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 0,
+  bugResealNoFence::gate_seal::opsDone: 0,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog: [],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 2]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog: [],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 0,
+  bugResealNoFence::gate_seal::opsDone: 0,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog: [],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 3]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog: [],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 0,
+  bugResealNoFence::gate_seal::opsDone: 0,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog: [],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 4]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog: [],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 0,
+  bugResealNoFence::gate_seal::opsDone: 0,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog: [],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 5]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [{ epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 }],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 1,
+  bugResealNoFence::gate_seal::opsDone: 1,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [{ epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 }],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 6]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 2,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 7]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 0,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 2,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 8]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 1,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 3,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 9]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 1,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 3,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 10]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 1,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 3,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n1", "n2", "n4"), 2 -> Set()),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 11]
+{
+  bugResealNoFence::gate_seal::ackCount: Map(0 -> 4, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 0, id: 3, kind: "seal", okAtCommit: true, tag: 1, target: 2 }
+    ],
+  bugResealNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 1, "n4" -> 0),
+  bugResealNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugResealNoFence::gate_seal::clusterVersion: 1,
+  bugResealNoFence::gate_seal::curEpoch: 2,
+  bugResealNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugResealNoFence::gate_seal::nextId: 4,
+  bugResealNoFence::gate_seal::opsDone: 2,
+  bugResealNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugResealNoFence::gate_seal::sealCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::segLen: Map(0 -> 3, 1 -> 0, 2 -> 0),
+  bugResealNoFence::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugResealNoFence::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 },
+      { epoch: 0, id: 2, kind: "seal", okAtCommit: true, tag: 1, target: 1 }
+    ],
+  bugResealNoFence::gate_seal::voters:
+    Map(
+      0 -> Set("n1", "n2", "n3"),
+      1 -> Set("n1", "n2", "n4"),
+      2 -> Set("n2", "n3", "n4")
+    ),
+  bugResealNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[violation] Found an issue (31ms at 32 traces/second).
+Use --verbosity=3 to show executions.
+Use --seed=0x135283d --backend=rust to reproduce.
+error: Invariant violated
+# exit 1, wall-clock 1 s

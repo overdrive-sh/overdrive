@@ -1,0 +1,57 @@
+$ TMPDIR=/var/tmp/fcil-incb-tlc quint verify --backend tlc --server-endpoint localhost:18931 --main ok3 --temporal GateEventuallyCommits gate_seal.qnt
+# started 2026-09-25T14:13:37Z — uname -r 7.0.0-31-generic — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+[TLC] Compiling to TLA+ (via Apalache)...
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T16-13-40_12135677330984153457
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@16:13:40.456
+Starting checker server on port 18931...                          I@16:13:40.462
+The Apalache server is running on port 18931. Press Ctrl-C to stop.
+Sep 25, 2026 4:13:41 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+PASS #0: SanyParser                                               I@16:13:42.456
+[TLC] Running TLC model checker...
+
+TLC2 Version 2.19 of 08 August 2024
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 97 and seed 4629743298591332815 with 8 workers on 8 cores with 8192MB heap and 64MB offheap memory [pid: 359897] (Linux 7.0.0-31-generic aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /var/tmp/fcil-incb-tlc/quint-tlc-wPno0c/ok3.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Apalache.tla
+Parsing file /tmp/Variants.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Apalache
+Semantic processing of module Variants
+Semantic processing of module ok3
+Starting... (2026-09-25 16:13:43)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 16:13:43.
+Checking temporal properties for the current state space with 62695 total distinct states at (2026-09-25 16:13:46)
+Finished checking temporal properties in 00s at 2026-09-25 16:13:46
+Progress(13) at 2026-09-25 16:13:46: 323,288 states generated (323,288 s/min), 62,695 distinct states found (62,695 ds/min), 18,911 states left on queue.
+Progress(25) at 2026-09-25 16:13:55: 1,293,309 states generated, 230,455 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 230455 total distinct states at (2026-09-25 16:13:55)
+Finished checking temporal properties in 01s at 2026-09-25 16:13:56
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.3E-8
+  based on the actual fingerprints:  val = 4.5E-9
+1293309 states generated, 230455 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 25.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 12 and the 95th percentile is 2).
+Finished in 13s at (2026-09-25 16:13:56)
+
+[ok] No violation found (14036ms).
+# exit 0, wall-clock 20 s

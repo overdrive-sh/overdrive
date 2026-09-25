@@ -1,0 +1,12 @@
+# Mirrors viewstamp's own workspace config (.cargo/config.toml at rev f7fbcd96): the
+# `viewstamp-simulation` in-memory Wal/Superblock fixtures only compile with this cfg.
+[build]
+rustflags = ["--cfg", "vsrr_internal_testkit"]
+
+[target.'cfg(all())']
+rustflags = ["--cfg", "vsrr_internal_testkit"]
+
+# viewstamp-proto's build.rs shells out to protoc (buffa-build). A spike-local protoc 29.3
+# (linux aarch_64) lives outside git in the Lima VM's /tmp tools dir.
+[env]
+PROTOC = "/tmp/fcil-incb-tools/protoc/bin/protoc"

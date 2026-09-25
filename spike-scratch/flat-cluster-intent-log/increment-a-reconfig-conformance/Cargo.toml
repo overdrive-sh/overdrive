@@ -1,0 +1,33 @@
+[package]
+name = "vs-reconfig-conformance"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "SPIKE (throwaway): quint-connect model-based conformance of viewstamp SingleChange reconfiguration"
+
+# Self-contained: NOT a member of the repository workspace. `.tools/` (the viewstamp fork) is excluded so
+# the fork's crates resolve against their OWN workspace root rather than becoming implicit members here.
+[workspace]
+exclude = [".tools"]
+
+[dependencies]
+# viewstamp, pinned to an exact commit (main @ 2026-09-03).
+viewstamp-proto = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773", features = ["std", "tcp"] }
+viewstamp-simulation = { git = "https://github.com/al8n/viewstamp", rev = "f7fbcd96ebcee2aafa08f3ac136844743c7f9773" }
+bytes = "1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+itf = "0.4"
+quint-connect = "=0.1.2"
+
+[dev-dependencies]
+
+[profile.dev]
+opt-level = 1
+
+# SPIKE FORK (observation + fix prototyping): the pinned viewstamp @ f7fbcd96 cloned into the gitignored
+# .tools/viewstamp-fork; its diff vs the base SHA is saved under patches/.
+# (enable to build against the fork; left commented for the as-is evidence runs)
+# [patch."https://github.com/al8n/viewstamp"]
+# viewstamp-proto = { path = ".tools/viewstamp-fork/viewstamp-proto" }
+# viewstamp-simulation = { path = ".tools/viewstamp-fork/tests/viewstamp-simulation" }

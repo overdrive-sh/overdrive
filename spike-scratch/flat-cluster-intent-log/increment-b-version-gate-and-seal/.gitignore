@@ -1,0 +1,7 @@
+# Spike-local tooling and build output — never committed.
+.tools/
+node_modules/
+target/
+out/
+# Apalache scratch output (counterexample traces are copied into evidence/).
+_apalache-out/

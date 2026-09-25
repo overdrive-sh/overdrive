@@ -1,0 +1,152 @@
+# uname -r: 7.0.0-31-generic
+# whoami: root
+# rustc: rustc 1.95.0 (59807616e 2026-04-14)
+# started: 2026-09-25T11:50:47Z
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.04s
+     Running `target/debug/gate-probe`
+viewstamp rev f7fbcd96ebcee2aafa08f3ac136844743c7f9773 — gate probe
+cluster: slots 0,1,2 = voters (binary supports v2); slot 3 = learner (binary supports v1)
+checkpoint interval: 4 ops
+
+== phase 1: submit sequence (reply shown is the SUBMITTING replica's apply output)
+  one bounded attempt through the LEARNER's own handle (Handle::submit, 5 s):
+    learner submit did NOT resolve within 5 s (no error returned)
+  via slot 0: op alpha (tag v1)                                -> APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+  via slot 0: op bravo (tag v1)                                -> APPLIED op=2 tag=v1 cv=1 applied=2 digest=787c8afe180e9d14
+  via slot 0: advertise (voter, own handle)                    -> ADVERTISE op=3 member=0 max=v2 cv=1 applied=3 digest=017d5201458b9fdb
+  via slot 1: advertise (voter, own handle)                    -> ADVERTISE op=4 member=1 max=v2 cv=1 applied=4 digest=5a5080439d0b1b4a
+  via slot 2: advertise (voter, own handle)                    -> ADVERTISE op=5 member=2 max=v2 cv=1 applied=5 digest=829b01c62ebf721d
+  via slot 1: advertise (learner slot 3's fact, via voter 1)   -> ADVERTISE op=6 member=3 max=v1 cv=1 applied=6 digest=5dff2e933525cbf9
+  via slot 0: gate v3 over voters {0,1,2} — must be REJECTED   -> GATE-REJECTED op=7 v=3 voters=[0, 1, 2] cv=1 applied=7 digest=1495b65b614d9a5f
+  via slot 0: gate v2 over voters {0,1,2} — must COMMIT        -> GATE-COMMITTED op=8 v=2 voters=[0, 1, 2] cv=2 applied=8 digest=d2c6905598116e5d
+  via slot 0: op charlie (tag v2)                              -> APPLIED op=9 tag=v2 cv=2 applied=9 digest=f336ad6e5caf5836
+  via slot 0: op delta (tag v1, N-1 format)                    -> APPLIED op=10 tag=v1 cv=2 applied=10 digest=4bc456015b8f27f5
+  via slot 0: op echo (tag v3, uncommitted format)             -> REJECTED-UNCOMMITTED-FORMAT op=11 tag=v3 cv=2 applied=11 digest=9897af6683a271be
+  via slot 0: op filler (tag v2)                               -> APPLIED op=12 tag=v2 cv=2 applied=12 digest=c7a5ca235a5e1bfb
+  via slot 0: op filler (tag v2)                               -> APPLIED op=13 tag=v2 cv=2 applied=13 digest=2b399dff07b30d4a
+  via slot 0: op filler (tag v2)                               -> APPLIED op=14 tag=v2 cv=2 applied=14 digest=d83fe81968a41a9b
+  via slot 0: op filler (tag v2)                               -> APPLIED op=15 tag=v2 cv=2 applied=15 digest=504528f55063337e
+  via slot 0: op filler (tag v2)                               -> APPLIED op=16 tag=v2 cv=2 applied=16 digest=eb84b65389b2dbbb
+
+== phase 1: every replica's own apply stream (Event::Committed replies), by op
+  op  1
+    slot 0: APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+    slot 1: APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+    slot 2: APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+    slot 3: APPLIED op=1 tag=v1 cv=1 applied=1 digest=21331c095a611371
+  op  2
+    slot 0: APPLIED op=2 tag=v1 cv=1 applied=2 digest=787c8afe180e9d14
+    slot 1: APPLIED op=2 tag=v1 cv=1 applied=2 digest=787c8afe180e9d14
+    slot 2: APPLIED op=2 tag=v1 cv=1 applied=2 digest=787c8afe180e9d14
+    slot 3: APPLIED op=2 tag=v1 cv=1 applied=2 digest=787c8afe180e9d14
+  op  3
+    slot 0: ADVERTISE op=3 member=0 max=v2 cv=1 applied=3 digest=017d5201458b9fdb
+    slot 1: ADVERTISE op=3 member=0 max=v2 cv=1 applied=3 digest=017d5201458b9fdb
+    slot 2: ADVERTISE op=3 member=0 max=v2 cv=1 applied=3 digest=017d5201458b9fdb
+    slot 3: ADVERTISE op=3 member=0 max=v2 cv=1 applied=3 digest=017d5201458b9fdb
+  op  4
+    slot 0: ADVERTISE op=4 member=1 max=v2 cv=1 applied=4 digest=5a5080439d0b1b4a
+    slot 1: ADVERTISE op=4 member=1 max=v2 cv=1 applied=4 digest=5a5080439d0b1b4a
+    slot 2: ADVERTISE op=4 member=1 max=v2 cv=1 applied=4 digest=5a5080439d0b1b4a
+    slot 3: ADVERTISE op=4 member=1 max=v2 cv=1 applied=4 digest=5a5080439d0b1b4a
+  op  5
+    slot 0: ADVERTISE op=5 member=2 max=v2 cv=1 applied=5 digest=829b01c62ebf721d
+    slot 1: ADVERTISE op=5 member=2 max=v2 cv=1 applied=5 digest=829b01c62ebf721d
+    slot 2: ADVERTISE op=5 member=2 max=v2 cv=1 applied=5 digest=829b01c62ebf721d
+    slot 3: ADVERTISE op=5 member=2 max=v2 cv=1 applied=5 digest=829b01c62ebf721d
+  op  6
+    slot 0: ADVERTISE op=6 member=3 max=v1 cv=1 applied=6 digest=5dff2e933525cbf9
+    slot 1: ADVERTISE op=6 member=3 max=v1 cv=1 applied=6 digest=5dff2e933525cbf9
+    slot 2: ADVERTISE op=6 member=3 max=v1 cv=1 applied=6 digest=5dff2e933525cbf9
+    slot 3: ADVERTISE op=6 member=3 max=v1 cv=1 applied=6 digest=5dff2e933525cbf9
+  op  7
+    slot 0: GATE-REJECTED op=7 v=3 voters=[0, 1, 2] cv=1 applied=7 digest=1495b65b614d9a5f
+    slot 1: GATE-REJECTED op=7 v=3 voters=[0, 1, 2] cv=1 applied=7 digest=1495b65b614d9a5f
+    slot 2: GATE-REJECTED op=7 v=3 voters=[0, 1, 2] cv=1 applied=7 digest=1495b65b614d9a5f
+    slot 3: GATE-REJECTED op=7 v=3 voters=[0, 1, 2] cv=1 applied=7 digest=1495b65b614d9a5f
+  op  8
+    slot 0: GATE-COMMITTED op=8 v=2 voters=[0, 1, 2] cv=2 applied=8 digest=d2c6905598116e5d
+    slot 1: GATE-COMMITTED op=8 v=2 voters=[0, 1, 2] cv=2 applied=8 digest=d2c6905598116e5d
+    slot 2: GATE-COMMITTED op=8 v=2 voters=[0, 1, 2] cv=2 applied=8 digest=d2c6905598116e5d
+    slot 3: HALT op=8 gate=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op  9
+    slot 0: APPLIED op=9 tag=v2 cv=2 applied=9 digest=f336ad6e5caf5836
+    slot 1: APPLIED op=9 tag=v2 cv=2 applied=9 digest=f336ad6e5caf5836
+    slot 2: APPLIED op=9 tag=v2 cv=2 applied=9 digest=f336ad6e5caf5836
+    slot 3: SKIP-HALTED op=9 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 10
+    slot 0: APPLIED op=10 tag=v1 cv=2 applied=10 digest=4bc456015b8f27f5
+    slot 1: APPLIED op=10 tag=v1 cv=2 applied=10 digest=4bc456015b8f27f5
+    slot 2: APPLIED op=10 tag=v1 cv=2 applied=10 digest=4bc456015b8f27f5
+    slot 3: SKIP-HALTED op=10 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 11
+    slot 0: REJECTED-UNCOMMITTED-FORMAT op=11 tag=v3 cv=2 applied=11 digest=9897af6683a271be
+    slot 1: REJECTED-UNCOMMITTED-FORMAT op=11 tag=v3 cv=2 applied=11 digest=9897af6683a271be
+    slot 2: REJECTED-UNCOMMITTED-FORMAT op=11 tag=v3 cv=2 applied=11 digest=9897af6683a271be
+    slot 3: SKIP-HALTED op=11 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 12
+    slot 0: APPLIED op=12 tag=v2 cv=2 applied=12 digest=c7a5ca235a5e1bfb
+    slot 1: APPLIED op=12 tag=v2 cv=2 applied=12 digest=c7a5ca235a5e1bfb
+    slot 2: APPLIED op=12 tag=v2 cv=2 applied=12 digest=c7a5ca235a5e1bfb
+    slot 3: SKIP-HALTED op=12 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 13
+    slot 0: APPLIED op=13 tag=v2 cv=2 applied=13 digest=2b399dff07b30d4a
+    slot 1: APPLIED op=13 tag=v2 cv=2 applied=13 digest=2b399dff07b30d4a
+    slot 2: APPLIED op=13 tag=v2 cv=2 applied=13 digest=2b399dff07b30d4a
+    slot 3: SKIP-HALTED op=13 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 14
+    slot 0: APPLIED op=14 tag=v2 cv=2 applied=14 digest=d83fe81968a41a9b
+    slot 1: APPLIED op=14 tag=v2 cv=2 applied=14 digest=d83fe81968a41a9b
+    slot 2: APPLIED op=14 tag=v2 cv=2 applied=14 digest=d83fe81968a41a9b
+    slot 3: SKIP-HALTED op=14 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 15
+    slot 0: APPLIED op=15 tag=v2 cv=2 applied=15 digest=504528f55063337e
+    slot 1: APPLIED op=15 tag=v2 cv=2 applied=15 digest=504528f55063337e
+    slot 2: APPLIED op=15 tag=v2 cv=2 applied=15 digest=504528f55063337e
+    slot 3: SKIP-HALTED op=15 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+  op 16
+    slot 0: APPLIED op=16 tag=v2 cv=2 applied=16 digest=eb84b65389b2dbbb
+    slot 1: APPLIED op=16 tag=v2 cv=2 applied=16 digest=eb84b65389b2dbbb
+    slot 2: APPLIED op=16 tag=v2 cv=2 applied=16 digest=eb84b65389b2dbbb
+    slot 3: SKIP-HALTED op=16 halted_at=8 needs=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+
+== phase 1: checkpoint events (CheckpointDurable op) per replica
+  slot 0: [4, 8, 12, 16]
+  slot 1: [4, 8, 12, 16]
+  slot 2: [4, 8, 12, 16]
+  slot 3: [4, 8, 12, 16]
+
+== phase 1 checks
+CHECK all four replicas emitted a commit for every op: PASS — 16 ops
+CHECK voters' apply outputs are identical at every op: PASS — 
+CHECK gate v3 rejected on every replica (not every voter advertised v3): PASS — op Some(7)
+CHECK gate v2 committed on the voters: PASS — op Some(8)
+CHECK learner's apply output is identical to the voters' for every op BEFORE the gate: PASS — 
+CHECK learner HALTs at the gate op (does not apply it): PASS — HALT op=8 gate=v2 supports=v1 cv=1 applied=7 digest=1495b65b614d9a5f
+CHECK learner applies NOTHING after the gate (every later op is SKIP-HALTED): PASS — 8 later ops
+CHECK learner's frozen state digest == voters' digest just before the gate (a prefix, not a divergence): PASS — voters@gate-1=Some("1495b65b614d9a5f") learner-after-gate={"1495b65b614d9a5f"}
+CHECK voters (v2) continue applying v2-format entries after the gate: PASS — 
+OBSERVE learner endpoint made checkpoints DURABLE at ops above its halt point 8: [12, 16] (each binds the HALTED image — state as of op 7 — to a later op number)
+
+== phase 2: the embedder stops the halted learner's process; voters keep committing
+  learner shutdown: Ok(ShutdownReport { storage: Quiesced })
+  via slot 1: op after learner stopped -> APPLIED op=17 tag=v2 cv=2 applied=17 digest=6024ab05a4b342b4
+CHECK cluster commits with the learner stopped: PASS — APPLIED op=17 tag=v2 cv=2 applied=17 digest=6024ab05a4b342b4
+
+== phase 3a: upgrade the learner to a v2 binary and restart it IN PLACE over its own store
+  restarted learner emitted 1 commits (ops Some(17)..Some(17)); caught up to last op: true
+    op 17: REJECTED-UNCOMMITTED-FORMAT op=17 tag=v2 cv=1 applied=8 digest=cb504b1bde9a1b30
+       voter: <phase-2 op>
+OBSERVE in-place restart: learner digest at op 17 = Some("cb504b1bde9a1b30"); voters = Some("6024ab05a4b342b4") -> DIVERGED
+
+== phase 3b: upgrade the learner to a v2 binary on a FRESH EMPTY store (wipe + rejoin as learner)
+  wiped learner started on an UNFORMATTED empty store
+  via slot 0: op after rejoin -> APPLIED op=18 tag=v2 cv=2 applied=18 digest=9f22dc9258f6bb44
+  fresh learner: 2 commits, state-syncs at [16], caught up to op 18: true
+  fresh learner op 18: Some("APPLIED op=18 tag=v2 cv=2 applied=18 digest=9f22dc9258f6bb44")
+  voter         op 18: Some("APPLIED op=18 tag=v2 cv=2 applied=18 digest=9f22dc9258f6bb44")
+OBSERVE wipe+rejoin: learner digest at op 18 = Some("9f22dc9258f6bb44"); voters = Some("9f22dc9258f6bb44") -> IDENTICAL
+
+PHASE-1/2 RESULT: ALL CHECKS PASS
+elapsed: 6978 ms
+# exit: 0

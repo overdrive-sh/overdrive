@@ -1,0 +1,15 @@
+# quint run cross-check — 2026-09-25T11:51:33Z — uname -r 7.0.0-31-generic — quint 0.32.0 — spec sha256 f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+ok4-AllSafety                                              rc=0  [ok] No violation found (253675ms at 158 traces/second).
+ok5-AllSafety                                              rc=0  [ok] No violation found (878257ms at 46 traces/second).
+ok3-AllSafety                                              rc=0  [ok] No violation found (66825ms at 599 traces/second).
+B4prime-unverifiedFetchFenced                              rc=0  [ok] No violation found (138551ms at 289 traces/second).
+B6prime-resealFenced                                       rc=0  [ok] No violation found (117737ms at 340 traces/second).
+B1-majority                                                rc=1  [violation] Found an issue (34ms at 29 traces/second).
+B2-proposetime                                             rc=1  [violation] Found an issue (308ms at 373 traces/second).
+B3-nofence-NoAckAfterSeal                                  rc=1  [violation] Found an issue (36ms at 56 traces/second).
+B3-nofence-CommittedPrefix                                 rc=1  [violation] Found an issue (33ms at 61 traces/second).
+B3-nofence-NoTwoCommitting                                 rc=1  [violation] Found an issue (34ms at 29 traces/second).
+B4-unverifiedfetch                                         rc=1  [violation] Found an issue (39ms at 51 traces/second).
+B5-admitunsupported                                        rc=1  [violation] Found an issue (1016ms at 262 traces/second).
+B6-resealnofence                                           rc=1  [violation] Found an issue (31ms at 32 traces/second).
+B7-applyunsupported                                        rc=1  [violation] Found an issue (1338ms at 371 traces/second).

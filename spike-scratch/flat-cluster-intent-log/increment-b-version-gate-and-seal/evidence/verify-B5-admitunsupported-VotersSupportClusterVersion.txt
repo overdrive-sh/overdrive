@@ -1,0 +1,381 @@
+# label:      B5-admitunsupported-VotersSupportClusterVersion
+# command:    quint verify --main bugAdmitUnsupported --invariant VotersSupportClusterVersion --max-steps 8 --server-endpoint localhost:18922 gate_seal.qnt
+# spec sha256: f25db0406a6d488c12a32cc4ac4d85a61cecdda5bc1c79d2998b42e2a745f7e2
+# quint:      0.32.0
+# apalache:   0.56.1 (Quint default; /tmp/fcil-incb-tools/quint-home/apalache-dist-0.56.1)
+# java:       openjdk version "21.0.12.1" 2026-08-18 LTS
+# uname -r:   7.0.0-31-generic
+# started:    2026-09-25T11:20:16Z
+# ---------------------------------------------------------------- raw output
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-20-19_6059574975428206151
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@13:20:19.448
+Starting checker server on port 18922...                          I@13:20:19.455
+The Apalache server is running on port 18922. Press Ctrl-C to stop.
+Sep 25, 2026 1:20:21 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+As of 2022/09/29 (release 21.7) makeExtensionsImmutable should not be called from protobuf gencode. If you are seeing this message, your gencode is vulnerable to a denial of service attack. You should regenerate your code using protobuf 25.6 or later. Use the latest version that meets your needs. However, if you understand the risks and wish to continue with vulnerable gencode, you can set the system property `-Dcom.google.protobuf.use_unsafe_pre22_gencode` on the command line to silence this warning. You also can set `-Dcom.google.protobuf.error_on_unsafe_pre22_gencode` to throw an error instead. See security vulnerability: https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-h4h5-3hr4-j3g2
+PASS #0: SanyParser                                               I@13:20:22.592
+PASS #1: TypeCheckerSnowcat                                       I@13:20:23.215
+ > Running Snowcat .::.                                           I@13:20:23.215
+ > Your types are purrfect!                                       I@13:20:24.080
+ > All expressions are typed                                      I@13:20:24.081
+PASS #2: ConfigurationPass                                        I@13:20:24.082
+  > Set the initialization predicate to q::init                   I@13:20:24.085
+  > Set the transition predicate to q::step                       I@13:20:24.086
+  > Set an invariant to q::inv                                    I@13:20:24.087
+PASS #3: DesugarerPass                                            I@13:20:24.092
+  > Desugaring...                                                 I@13:20:24.092
+PASS #4: InlinePass                                               I@13:20:24.102
+Leaving only relevant operators: CInitPrimed, q::init, q::initPrimed, q::inv, q::step I@13:20:24.103
+PASS #5: TemporalPass                                             I@13:20:24.152
+  > Rewriting temporal operators...                               I@13:20:24.153
+  > No temporal property specified, nothing to encode             I@13:20:24.153
+PASS #6: InlinePass                                               I@13:20:24.154
+Leaving only relevant operators: CInitPrimed, q::init, q::initPrimed, q::inv, q::step I@13:20:24.155
+PASS #7: PrimingPass                                              I@13:20:24.167
+  > Introducing q::initPrimed for q::init'                        I@13:20:24.169
+PASS #8: VCGen                                                    I@13:20:24.170
+  > Producing verification conditions from the invariant q::inv   I@13:20:24.171
+  > VCGen produced 1 verification condition(s)                    I@13:20:24.176
+PASS #9: PreprocessingPass                                        I@13:20:24.178
+  > Before preprocessing: unique renaming                         I@13:20:24.178
+ > Applying standard transformations:                             I@13:20:24.183
+  > PrimePropagation                                              I@13:20:24.184
+  > Desugarer                                                     I@13:20:24.187
+  > UniqueRenamer                                                 I@13:20:24.191
+  > Normalizer                                                    I@13:20:24.196
+  > Keramelizer                                                   I@13:20:24.202
+  > After preprocessing: UniqueRenamer                            I@13:20:24.218
+PASS #10: TransitionFinderPass                                    I@13:20:24.229
+  > Found 1 initializing transitions                              I@13:20:24.240
+  > Found 13 transitions                                          I@13:20:24.259
+  > No constant initializer                                       I@13:20:24.260
+  > Applying unique renaming                                      I@13:20:24.260
+PASS #11: OptimizationPass                                        I@13:20:24.268
+ > Applying optimizations:                                        I@13:20:24.276
+  > ConstSimplifier                                               I@13:20:24.279
+  > ExprOptimizer                                                 I@13:20:24.295
+  > SetMembershipSimplifier                                       I@13:20:24.303
+  > ConstSimplifier                                               I@13:20:24.306
+PASS #12: AnalysisPass                                            I@13:20:24.318
+ > Marking skolemizable existentials and sets to be expanded...   I@13:20:24.320
+  > Skolemization                                                 I@13:20:24.321
+  > Expansion                                                     I@13:20:24.323
+  > Remove unused let-in defs                                     I@13:20:24.329
+ > Running analyzers...                                           I@13:20:24.335
+  > Introduced expression grades                                  I@13:20:24.341
+PASS #13: BoundedChecker                                          I@13:20:24.343
+State 0: Checking 1 state invariants                              I@13:20:24.635
+State 0: state invariant 0 holds.                                 I@13:20:24.649
+Step 0: picking a transition out of 1 transition(s)               I@13:20:24.652
+Step 1: Transition #0 is disabled                                 I@13:20:24.657
+State 1: Checking 1 state invariants                              I@13:20:24.680
+State 1: state invariant 0 holds.                                 I@13:20:24.694
+Step 1: Transition #3 is disabled                                 I@13:20:24.714
+Step 1: Transition #4 is disabled                                 I@13:20:24.725
+Step 1: Transition #5 is disabled                                 I@13:20:24.768
+Step 1: Transition #7 is disabled                                 I@13:20:24.838
+Step 1: Transition #8 is disabled                                 I@13:20:24.865
+Step 1: Transition #9 is disabled                                 I@13:20:24.945
+State 1: Checking 1 state invariants                              I@13:20:25.011
+State 1: state invariant 0 holds.                                 I@13:20:25.016
+Step 1: Transition #11 is disabled                                I@13:20:25.032
+Step 1: Transition #12 is disabled                                I@13:20:25.058
+Step 1: picking a transition out of 4 transition(s)               I@13:20:25.060
+Step 2: Transition #0 is disabled                                 I@13:20:25.091
+State 2: Checking 1 state invariants                              I@13:20:25.104
+State 2: state invariant 0 holds.                                 I@13:20:25.112
+Step 2: Transition #3 is disabled                                 I@13:20:25.126
+Step 2: Transition #5 is disabled                                 I@13:20:25.180
+Step 2: Transition #7 is disabled                                 I@13:20:25.263
+Step 2: Transition #8 is disabled                                 I@13:20:25.297
+Step 2: Transition #9 is disabled                                 I@13:20:25.387
+State 2: Checking 1 state invariants                              I@13:20:25.479
+State 2: state invariant 0 holds.                                 I@13:20:25.492
+Step 2: Transition #11 is disabled                                I@13:20:25.512
+Step 2: picking a transition out of 6 transition(s)               I@13:20:25.551
+Step 3: Transition #0 is disabled                                 I@13:20:25.590
+State 3: Checking 1 state invariants                              I@13:20:25.627
+State 3: state invariant 0 holds.                                 I@13:20:25.660
+Step 3: Transition #3 is disabled                                 I@13:20:25.697
+Step 3: Transition #5 is disabled                                 I@13:20:25.833
+Step 3: Transition #7 is disabled                                 I@13:20:25.976
+Step 3: Transition #8 is disabled                                 I@13:20:26.005
+Step 3: Transition #9 is disabled                                 I@13:20:26.072
+State 3: Checking 1 state invariants                              I@13:20:26.176
+State 3: state invariant 0 holds.                                 I@13:20:26.234
+Step 3: Transition #11 is disabled                                I@13:20:26.314
+Step 3: picking a transition out of 6 transition(s)               I@13:20:26.408
+Step 4: Transition #0 is disabled                                 I@13:20:26.440
+State 4: Checking 1 state invariants                              I@13:20:26.556
+State 4: state invariant 0 holds.                                 I@13:20:26.680
+Step 4: Transition #5 is disabled                                 I@13:20:27.458
+Step 4: Transition #7 is disabled                                 I@13:20:27.648
+Step 4: Transition #8 is disabled                                 I@13:20:27.677
+Step 4: Transition #9 is disabled                                 I@13:20:27.768
+State 4: Checking 1 state invariants                              I@13:20:27.935
+State 4: state invariant 0 holds.                                 I@13:20:28.075
+Step 4: Transition #11 is disabled                                I@13:20:28.750
+Step 4: picking a transition out of 7 transition(s)               I@13:20:28.880
+Step 5: Transition #0 is disabled                                 I@13:20:28.913
+State 5: Checking 1 state invariants                              I@13:20:29.072
+State 5: state invariant 0 holds.                                 I@13:20:29.264
+Step 5: Transition #5 is disabled                                 I@13:20:31.427
+State 5: Checking 1 state invariants                              I@13:20:31.932
+State 5: state invariant 0 holds.                                 I@13:20:32.281
+Step 5: Transition #8 is disabled                                 I@13:20:32.376
+Step 5: Transition #9 is disabled                                 I@13:20:32.526
+State 5: Checking 1 state invariants                              I@13:20:32.836
+State 5: state invariant 0 holds.                                 I@13:20:33.278
+Step 5: Transition #11 is disabled                                I@13:20:35.175
+Step 5: picking a transition out of 8 transition(s)               I@13:20:35.368
+State 6: Checking 1 state invariants                              I@13:20:36.254
+State 6: state invariant 0 holds.                                 I@13:20:37.028
+Step 6: Transition #5 is disabled                                 I@13:20:42.661
+State 6: Checking 1 state invariants                              I@13:20:43.829
+State 6: state invariant 0 holds.                                 I@13:20:44.351
+Step 6: Transition #8 is disabled                                 I@13:20:44.583
+Step 6: Transition #9 is disabled                                 I@13:20:44.846
+State 6: Checking 1 state invariants                              I@13:20:45.465
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-20-19_6059574975428206151/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-20-19_6059574975428206151/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-20-19_6059574975428206151/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T13-20-19_6059574975428206151/violation1.itf.json I@13:20:47.167
+State 6: state invariant 0 violated.                              I@13:20:47.168
+Found 1 error(s)                                                  I@13:20:47.176
+The outcome is: Error                                             I@13:20:47.196
+An example execution:
+
+[State 0]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog: [],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 1,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 0,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog: [],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 1]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog: [],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 1,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 0,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog: [],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 2]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog: [],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 1,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 0,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 2, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog: [],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 3]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog: [],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 1,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 0,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 2, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog: [],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 4]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog: [],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 1,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 0,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: true, epoch: 0, target: 2 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 2, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog: [],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 5]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog:
+    [{ epoch: 0, id: 0, kind: "gate", okAtCommit: true, tag: 2, target: 2 }],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 2,
+  bugAdmitUnsupported::gate_seal::curEpoch: 0,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 1,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 2, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog:
+    [{ epoch: 0, id: 0, kind: "gate", okAtCommit: true, tag: 2, target: 2 }],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 6]
+{
+  bugAdmitUnsupported::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "gate", okAtCommit: true, tag: 2, target: 2 },
+      { epoch: 0, id: 1, kind: "seal", okAtCommit: true, tag: 2, target: 1 }
+    ],
+  bugAdmitUnsupported::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugAdmitUnsupported::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::closedFor:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> -1),
+  bugAdmitUnsupported::gate_seal::clusterVersion: 2,
+  bugAdmitUnsupported::gate_seal::curEpoch: 1,
+  bugAdmitUnsupported::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugAdmitUnsupported::gate_seal::nextId: 2,
+  bugAdmitUnsupported::gate_seal::opsDone: 0,
+  bugAdmitUnsupported::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugAdmitUnsupported::gate_seal::pending:
+    { active: false, epoch: -1, target: 0 },
+  bugAdmitUnsupported::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::segLen: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugAdmitUnsupported::gate_seal::supported:
+    Map("n1" -> 2, "n2" -> 2, "n3" -> 2, "n4" -> 1),
+  bugAdmitUnsupported::gate_seal::vlog:
+    [
+      { epoch: 0, id: 0, kind: "gate", okAtCommit: true, tag: 2, target: 2 },
+      { epoch: 0, id: 1, kind: "seal", okAtCommit: true, tag: 2, target: 1 }
+    ],
+  bugAdmitUnsupported::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n2", "n3", "n4"), 2 -> Set()),
+  bugAdmitUnsupported::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[violation] Found an issue (28348ms).
+error: found a counterexample
+# ---------------------------------------------------------------- end raw output
+# exit code:  1
+# wall-clock: 31 s
+# finished:   2026-09-25T11:20:47Z

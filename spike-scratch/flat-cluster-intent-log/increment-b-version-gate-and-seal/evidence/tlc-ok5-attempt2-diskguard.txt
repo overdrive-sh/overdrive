@@ -1,0 +1,31 @@
+# disk guard for ok5 TLC attempt 2 — started 2026-09-25T14:14:37Z — stop if avail(/var/tmp) < 25 GB
+2026-09-25T14:16:37Z avail=88G work=2
+2026-09-25T14:18:37Z avail=87G work=2
+2026-09-25T14:20:37Z avail=87G work=3
+2026-09-25T14:22:38Z avail=86G work=3
+2026-09-25T14:24:38Z avail=85G work=4
+2026-09-25T14:26:38Z avail=85G work=4
+2026-09-25T14:28:38Z avail=83G work=5
+2026-09-25T14:30:38Z avail=82G work=6
+2026-09-25T14:32:38Z avail=81G work=6
+2026-09-25T14:34:38Z avail=80G work=7
+2026-09-25T14:36:38Z avail=76G work=7
+2026-09-25T14:38:39Z avail=74G work=7
+2026-09-25T14:40:39Z avail=68G work=7
+2026-09-25T14:42:39Z avail=67G work=8
+2026-09-25T14:44:39Z avail=66G work=8
+2026-09-25T14:46:40Z avail=66G work=8
+2026-09-25T14:48:40Z avail=64G work=8
+2026-09-25T14:50:40Z avail=64G work=9
+2026-09-25T14:52:40Z avail=63G work=9
+2026-09-25T14:54:40Z avail=62G work=9
+2026-09-25T14:56:40Z avail=60G work=10
+2026-09-25T14:58:41Z avail=60G work=10
+2026-09-25T15:00:41Z avail=59G work=11
+2026-09-25T15:02:42Z avail=58G work=11
+2026-09-25T15:04:43Z avail=58G work=11
+2026-09-25T15:06:43Z avail=56G work=12
+2026-09-25T15:08:13Z STOPPED BY AGENT (resume): ok5 exhaustive infeasible on this VM (state space far beyond ok4, disk-bound; sibling agent sharing cores) — see findings §4.4
+2026-09-25T15:08:43Z avail=67G work=1
+# runner exited 2026-09-25T15:08:43Z
+# removed /var/tmp/fcil-incb-tlc-ok5

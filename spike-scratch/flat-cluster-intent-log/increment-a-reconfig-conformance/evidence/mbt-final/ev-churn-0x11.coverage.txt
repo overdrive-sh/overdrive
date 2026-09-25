@@ -1,0 +1,12 @@
+== out/qc-vr_sc_4v-stepChurn: traces=200 steps=8000 max_epoch=2
+   actions: CatchUpView=55, ClientRequest=54, Crash=400, DeliverCommit=268, DeliverDvc=364, DeliverPrepare=988, DeliverPrepareOk=293, DeliverProof=10, DeliverReqProof=12, DeliverSv=208, DeliverSvc=1072, Heartbeat=308, Idle=1663, Init=200, Propose=263, ProposeRefused=10, RepairExchange=23, RequestProof=24, Restart=391, SyncFrom=139, Timeout=1455
+   minted reconfigs: demote=244, remove=19
+   traces reaching: committed>=2=8, crash=200, crossed(syncFrom)=60, epoch>=1=71, epoch>=2=5, minted:demote=199, minted:remove=19, retired=1, shrank=71, viewChanged=137
+== out/qc-vr_sc_3v1l-stepChurn: traces=200 steps=8000 max_epoch=4
+   actions: Bootstrap=23, CatchUpView=85, ClientRequest=61, CompleteSync=7, Crash=395, DeliverCommit=348, DeliverDvc=346, DeliverPrepare=1218, DeliverPrepareOk=186, DeliverProof=147, DeliverReqProof=161, DeliverSv=182, DeliverSvc=770, Heartbeat=311, Idle=1441, Init=200, Propose=311, ProposeRefused=66, RepairExchange=21, RequestProof=210, Restart=387, SyncFrom=172, Timeout=1152
+   minted reconfigs: add=67, demote=172, promote=1, remove=71
+   traces reaching: bootstrapped=23, committed>=2=18, crash=200, crossed(syncFrom)=79, epoch>=1=96, epoch>=2=14, epoch>=3=1, minted:add=61, minted:demote=148, minted:promote=1, minted:remove=66, retired=12, shrank=52, viewChanged=141
+== out/qc-vr_sc_solo-stepChurn: traces=200 steps=8000 max_epoch=5
+   actions: Bootstrap=285, ClientRequest=191, CompleteSync=135, Crash=400, DeliverCommit=441, DeliverDvc=1, DeliverPrepare=254, DeliverProof=84, DeliverReqProof=141, DeliverSv=1, DeliverSvc=2, Heartbeat=220, Idle=4197, Init=200, Propose=810, RecoverHead=2, RepairExchange=2, RequestProof=331, Restart=400, SyncFrom=100, Timeout=3
+   minted reconfigs: add=511, demote=1, promote=1, remove=297
+   traces reaching: bootstrapped=186, committed>=2=200, crash=200, crossed(syncFrom)=78, epoch>=1=200, epoch>=2=200, epoch>=3=194, grew=1, minted:add=200, minted:demote=1, minted:promote=1, minted:remove=197, recoveringHead=2, retired=10, viewChanged=1

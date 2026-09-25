@@ -1,0 +1,201 @@
+# label:      B3-nofence-CommittedPrefixPreserved
+# command:    quint verify --main bugNoFence --invariant CommittedPrefixPreserved --max-steps 8 --server-endpoint localhost:18922 gate_seal.qnt
+# spec sha256: bb40d633d20a994b7fb688fe7a8d9b9185734e1eaeb9527810c70074f7c23506
+# quint:      0.32.0
+# apalache:   0.56.1 (Quint default; /tmp/fcil-incb-tools/quint-home/apalache-dist-0.56.1)
+# java:       openjdk version "21.0.12.1" 2026-08-18 LTS
+# uname -r:   7.0.0-31-generic
+# started:    2026-09-25T10:48:31Z
+# ---------------------------------------------------------------- raw output
+# Usage statistics is OFF. We care about your privacy.
+# If you want to help our project, consider enabling statistics with config --enable-stats=true.
+
+Output directory: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T12-48-33_18034272064108104865
+# APALACHE version: 0.56.1 | build: 70cdaf4                       I@12:48:33.722
+Starting checker server on port 18922...                          I@12:48:33.729
+The Apalache server is running on port 18922. Press Ctrl-C to stop.
+Sep 25, 2026 12:48:35 PM com.google.protobuf.GeneratedMessage warnPre22Gencode
+WARNING: Vulnerable protobuf generated type in use: io.grpc.reflection.v1alpha.ServerReflectionRequest
+As of 2022/09/29 (release 21.7) makeExtensionsImmutable should not be called from protobuf gencode. If you are seeing this message, your gencode is vulnerable to a denial of service attack. You should regenerate your code using protobuf 25.6 or later. Use the latest version that meets your needs. However, if you understand the risks and wish to continue with vulnerable gencode, you can set the system property `-Dcom.google.protobuf.use_unsafe_pre22_gencode` on the command line to silence this warning. You also can set `-Dcom.google.protobuf.error_on_unsafe_pre22_gencode` to throw an error instead. See security vulnerability: https://github.com/protocolbuffers/protobuf/security/advisories/GHSA-h4h5-3hr4-j3g2
+PASS #0: SanyParser                                               I@12:48:35.863
+PASS #1: TypeCheckerSnowcat                                       I@12:48:36.471
+ > Running Snowcat .::.                                           I@12:48:36.471
+ > Your types are purrfect!                                       I@12:48:37.298
+ > All expressions are typed                                      I@12:48:37.301
+PASS #2: ConfigurationPass                                        I@12:48:37.303
+  > Set the initialization predicate to q::init                   I@12:48:37.308
+  > Set the transition predicate to q::step                       I@12:48:37.309
+  > Set an invariant to q::inv                                    I@12:48:37.310
+PASS #3: DesugarerPass                                            I@12:48:37.316
+  > Desugaring...                                                 I@12:48:37.317
+PASS #4: InlinePass                                               I@12:48:37.329
+Leaving only relevant operators: CInitPrimed, q::init, q::initPrimed, q::inv, q::step I@12:48:37.329
+PASS #5: TemporalPass                                             I@12:48:37.382
+  > Rewriting temporal operators...                               I@12:48:37.383
+  > No temporal property specified, nothing to encode             I@12:48:37.383
+PASS #6: InlinePass                                               I@12:48:37.384
+Leaving only relevant operators: CInitPrimed, q::init, q::initPrimed, q::inv, q::step I@12:48:37.384
+PASS #7: PrimingPass                                              I@12:48:37.396
+  > Introducing q::initPrimed for q::init'                        I@12:48:37.397
+PASS #8: VCGen                                                    I@12:48:37.399
+  > Producing verification conditions from the invariant q::inv   I@12:48:37.399
+  > VCGen produced 2 verification condition(s)                    I@12:48:37.403
+PASS #9: PreprocessingPass                                        I@12:48:37.408
+  > Before preprocessing: unique renaming                         I@12:48:37.408
+ > Applying standard transformations:                             I@12:48:37.413
+  > PrimePropagation                                              I@12:48:37.414
+  > Desugarer                                                     I@12:48:37.416
+  > UniqueRenamer                                                 I@12:48:37.422
+  > Normalizer                                                    I@12:48:37.427
+  > Keramelizer                                                   I@12:48:37.433
+  > After preprocessing: UniqueRenamer                            I@12:48:37.448
+PASS #10: TransitionFinderPass                                    I@12:48:37.455
+  > Found 1 initializing transitions                              I@12:48:37.464
+  > Found 13 transitions                                          I@12:48:37.482
+  > No constant initializer                                       I@12:48:37.483
+  > Applying unique renaming                                      I@12:48:37.484
+PASS #11: OptimizationPass                                        I@12:48:37.489
+ > Applying optimizations:                                        I@12:48:37.493
+  > ConstSimplifier                                               I@12:48:37.494
+  > ExprOptimizer                                                 I@12:48:37.507
+  > SetMembershipSimplifier                                       I@12:48:37.516
+  > ConstSimplifier                                               I@12:48:37.518
+PASS #12: AnalysisPass                                            I@12:48:37.529
+ > Marking skolemizable existentials and sets to be expanded...   I@12:48:37.531
+  > Skolemization                                                 I@12:48:37.532
+  > Expansion                                                     I@12:48:37.534
+  > Remove unused let-in defs                                     I@12:48:37.540
+ > Running analyzers...                                           I@12:48:37.546
+  > Introduced expression grades                                  I@12:48:37.552
+PASS #13: BoundedChecker                                          I@12:48:37.553
+State 0: Checking 2 state invariants                              I@12:48:37.922
+State 0: state invariant 0 holds.                                 I@12:48:37.925
+State 0: state invariant 1 holds.                                 I@12:48:37.942
+Step 0: picking a transition out of 1 transition(s)               I@12:48:37.943
+Step 1: Transition #0 is disabled                                 I@12:48:37.952
+Step 1: Transition #3 is disabled                                 I@12:48:38.029
+Step 1: Transition #5 is disabled                                 I@12:48:38.080
+State 1: Checking 2 state invariants                              I@12:48:38.124
+State 1: state invariant 0 holds.                                 I@12:48:38.125
+State 1: state invariant 1 holds.                                 I@12:48:38.132
+Step 1: Transition #7 is disabled                                 I@12:48:38.175
+Step 1: Transition #8 is disabled                                 I@12:48:38.208
+Step 1: Transition #9 is disabled                                 I@12:48:38.269
+State 1: Checking 2 state invariants                              I@12:48:38.332
+State 1: state invariant 0 holds.                                 I@12:48:38.333
+State 1: state invariant 1 holds.                                 I@12:48:38.338
+Step 1: Transition #11 is disabled                                I@12:48:38.354
+Step 1: Transition #12 is disabled                                I@12:48:38.378
+Step 1: picking a transition out of 4 transition(s)               I@12:48:38.379
+Step 2: Transition #0 is disabled                                 I@12:48:38.406
+Step 2: Transition #3 is disabled                                 I@12:48:38.441
+State 2: Checking 2 state invariants                              I@12:48:38.485
+Check the trace in: /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T12-48-33_18034272064108104865/violation1.tla, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T12-48-33_18034272064108104865/MCviolation1.out, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T12-48-33_18034272064108104865/violation1.json, /Users/marcus/conductor/workspaces/helios/baghdad-v1/spike-scratch/flat-cluster-intent-log/increment-b-version-gate-and-seal/spec/_apalache-out/server/2026-09-25T12-48-33_18034272064108104865/violation1.itf.json I@12:48:38.719
+State 2: state invariant 0 violated.                              I@12:48:38.719
+Found 1 error(s)                                                  I@12:48:38.721
+The outcome is: Error                                             I@12:48:38.728
+An example execution:
+
+[State 0]
+{
+  bugNoFence::gate_seal::ackCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::acklog: [],
+  bugNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugNoFence::gate_seal::clusterVersion: 1,
+  bugNoFence::gate_seal::curEpoch: 0,
+  bugNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::nextId: 0,
+  bugNoFence::gate_seal::opsDone: 0,
+  bugNoFence::gate_seal::parent: Map(0 -> -1, 1 -> -1, 2 -> -1),
+  bugNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugNoFence::gate_seal::sealCount: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::segLen: Map(0 -> 0, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugNoFence::gate_seal::vlog: [],
+  bugNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set(), 2 -> Set()),
+  bugNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 1]
+{
+  bugNoFence::gate_seal::ackCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::acklog:
+    [{ epoch: 0, id: 0, kind: "seal", okAtCommit: true, tag: 1, target: 1 }],
+  bugNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugNoFence::gate_seal::clusterVersion: 1,
+  bugNoFence::gate_seal::curEpoch: 1,
+  bugNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::nextId: 1,
+  bugNoFence::gate_seal::opsDone: 0,
+  bugNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugNoFence::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::segLen: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugNoFence::gate_seal::vlog:
+    [{ epoch: 0, id: 0, kind: "seal", okAtCommit: true, tag: 1, target: 1 }],
+  bugNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n2", "n3", "n4"), 2 -> Set()),
+  bugNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[State 2]
+{
+  bugNoFence::gate_seal::ackCount: Map(0 -> 2, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::acklog:
+    [
+      { epoch: 0, id: 0, kind: "seal", okAtCommit: true, tag: 1, target: 1 },
+      { epoch: 0, id: 1, kind: "op", okAtCommit: true, tag: 1, target: 0 }
+    ],
+  bugNoFence::gate_seal::applied:
+    Map("n1" -> 0, "n2" -> 0, "n3" -> 0, "n4" -> 0),
+  bugNoFence::gate_seal::appliedAbove:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::closedFor:
+    Map("n1" -> -1, "n2" -> -1, "n3" -> -1, "n4" -> -1),
+  bugNoFence::gate_seal::clusterVersion: 1,
+  bugNoFence::gate_seal::curEpoch: 1,
+  bugNoFence::gate_seal::diverged:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::halted:
+    Map("n1" -> false, "n2" -> false, "n3" -> false, "n4" -> false),
+  bugNoFence::gate_seal::nextId: 2,
+  bugNoFence::gate_seal::opsDone: 1,
+  bugNoFence::gate_seal::parent: Map(0 -> -1, 1 -> 0, 2 -> -1),
+  bugNoFence::gate_seal::pending: { active: false, epoch: -1, target: 0 },
+  bugNoFence::gate_seal::sealCount: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::segLen: Map(0 -> 1, 1 -> 0, 2 -> 0),
+  bugNoFence::gate_seal::supported:
+    Map("n1" -> 1, "n2" -> 1, "n3" -> 1, "n4" -> 1),
+  bugNoFence::gate_seal::vlog:
+    [{ epoch: 0, id: 0, kind: "seal", okAtCommit: true, tag: 1, target: 1 }],
+  bugNoFence::gate_seal::voters:
+    Map(0 -> Set("n1", "n2", "n3"), 1 -> Set("n2", "n3", "n4"), 2 -> Set()),
+  bugNoFence::gate_seal::wire: Map(0 -> 1, 1 -> 1, 2 -> 1)
+}
+
+[violation] Found an issue (5479ms).
+error: found a counterexample
+# ---------------------------------------------------------------- end raw output
+# exit code:  1
+# wall-clock: 7 s
+# finished:   2026-09-25T10:48:38Z
