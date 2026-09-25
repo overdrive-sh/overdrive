@@ -74,8 +74,8 @@ silently change the production composition.
 ## Consequences
 
 Positive: every supervisor component and task-loss class becomes reachable
-through the real composition root. The production composition can no longer be
-disabled by a test field.
+in-process through the server composition that `run_server` delegates to. The
+production composition can no longer be disabled by a test field.
 
 Negative:
 
@@ -83,9 +83,17 @@ Negative:
 - ADR-0072's no-port DNS stance is reversed. The DNS wire contract is not.
 - The `dns_probe_fault` test field is removed, because the sim DNS adapter
   expresses that fault.
-- Every in-process `run_server` composition includes the real enforcement
-  probe, which is host kTLS I/O. Those lanes therefore run under Lima as root
-  and are not deterministic simulation. Seeded simulation of the supervisor
-  runs source-locally over sim adapters, outside `run_server`.
+- Every in-process composition through `run_server` or the server
+  composition it delegates to includes the real enforcement probe, which is
+  host kTLS I/O. Those lanes therefore run under Lima as root and are not
+  deterministic simulation.
+- Seeded simulation of the supervisor runs source-locally in
+  `overdrive-control-plane`, outside the server composition. It uses the sim
+  adapters of ports declared in `overdrive-core` and `overdrive-worker`, and
+  test-local implementations of the shared-owner and guest-DNS ports that
+  `overdrive-control-plane` declares. `overdrive-sim` depends on
+  `overdrive-control-plane`, so its implementations of those ports cannot be
+  used by that crate's own source-local tests; they serve its integration
+  suites and other crates.
 - The action shim's intercept lifecycle becomes a required parameter. No
   composition can raise a guest TAP without intercept-live.

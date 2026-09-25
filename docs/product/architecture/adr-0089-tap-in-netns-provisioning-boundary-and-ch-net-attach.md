@@ -14,9 +14,10 @@ async port so the same-ID replacement protocol has a pure Tier-1 simulation
 boundary, and **amended** (2026-09-24) by the accepted #295
 correctness-recovery replacement (see § *Accepted amendment 2026-09-24* at the
 end): for the shared bridge, the named-TAP attachment and §A2's rejection of fd
-passing are superseded, and §1's listener-loss claim is corrected. This ADR is
-operative on `main`, where Cloud Hypervisor launches through `ip netns exec`
-with `--net tap=`. Companion to ADR-0088 (topology + addressing).
+passing are superseded, and §1's listener-loss claim is corrected. It is also
+**amended** (2026-09-25) by the #295 interface-contract pins B-6 and B-7 (see
+§ *Amendment 2026-09-25* at the end). This ADR is operative on `main`, where
+Cloud Hypervisor launches through `ip netns exec` with `--net tap=`. Companion to ADR-0088 (topology + addressing).
 Extends the C3 provision seam (ADR-0071 Q2/C3), the veth provisioner
 (ADR-0061 converge-on-boot), `overdrive-netlink` (ADR-0085 subprocess-free),
 and the `Vmm`/`VmConfig` boundary (ADR-0082/0083). GH #222.
@@ -864,3 +865,28 @@ stated here.
    through to the drop; it is accepted conditional on its native RED. This ADR's
    per-allocation rules leave with the #295 single cut and keep their recorded
    order until then.
+
+## Amendment 2026-09-25 — #295 interface-contract pins B-6 and B-7
+
+Pinned on evidence under the user's ruling that technical decisions are settled
+on evidence. Exact signatures live in
+`docs/feature/netns-density-295/feature-delta.md`. The §7 lifecycle port, its
+production binding, and the §7.3 invariant are unchanged.
+
+1. **Context, the simulated listener (B-7).** The Context says the worker's
+   start path obtains two `std::net::TcpListener`s from
+   `MtlsIntercept::bind_transparent`, so `SimMtlsIntercept` binds a real
+   loopback socket "exactly as ADR-0076 requires". Under #295, `bind_transparent`
+   returns a port-owned listener that the simulation implements with no socket
+   (ADR-0076 Rev 10). §7's reason to exist still holds: it is the socket-free
+   boundary for the action shim's allocation lifecycle, which the same-ID
+   invariant needs whatever the lower port binds.
+2. **§7.2, the scripted stop failure (B-6).** §7.2 says a scripted failure
+   returns `MtlsInterceptStopError { alloc_id, failures: vec![detail] }` and
+   that `StartPriorTeardownFailed` carries "the nested stop error's exact
+   allocation and failure vector". That describes the struct #295's D-295-R10
+   replaces. The error is now the R10 enum, `Clone`, with its typed sources
+   shared through `Arc` (B-6). `SimMtlsInterceptLifecycle` returns one of its
+   variants built from the scripted detail. Which variant, and how the detail
+   maps into it and into the simulation's own event payloads, is test-support
+   surface for the #295 DISTILL wave.

@@ -6,7 +6,8 @@ Accepted. 2026-08-01 (rev 6, same day — three factual corrections to § 7c / �
 applied in place, mandated by ADR-0077 § D6); amended 2026-09-01 by
 ADR-0089 §7 for the action-shim allocation-lifecycle boundary only; amended
 2026-09-16 by the user-authorized GH #295 solution-review F-03 remediation for
-node-shared listener ownership only.
+node-shared listener ownership only; amended 2026-09-25 by the GH #295
+interface-contract pin B-7 for the listener type only (Rev 10).
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -127,6 +128,34 @@ failed post-commit read-back rolls back to the captured prior program or refuses
 startup with rollback uncertainty. Foreign/conflicting objects never mutate.
 Runtime still rebinds only recorded ports and never rewrites targets. Exact
 methods/errors remain single-sourced in the #295 feature delta.
+
+**Rev 10 changes** (2026-09-25, GH #295 interface-contract pin B-7, settled on
+evidence under the user's ruling that technical decisions are settled on
+evidence): `bind_transparent` returns a port-owned listener,
+`Arc<dyn InterceptListener>`, instead of `std::net::TcpListener`. The listener
+exposes its bound address and a cancel-safe async `accept` that yields the
+accepted descriptor with its peer and local address. The reason is that a
+`std::net::TcpListener` exists only as a bound socket, so under GH #295's
+always-composed worker every simulation-composed test bound real sockets and
+ran real accept threads. Three statements below are superseded by this
+revision:
+
+- § 1a's listener postcondition now describes the port's `InterceptListener`,
+  not a `TcpListener`;
+- § 1a's statement that the simulation adapter binds a plain listener "by
+  necessity". It now binds none; the other half of that sentence, that it
+  appends no rule, still holds;
+- § 5's statement that the simulation's successful bind arm binds a real plain
+  listener, making any test that drives it integration-lane. The simulation
+  listener binds no socket, opens no descriptor, and accepts only what a test
+  scripts.
+
+`HostMtlsIntercept` keeps today's `IP_TRANSPARENT` + `IP_FREEBIND` socket and
+the accepted-descriptor state it has today. The port itself stays synchronous
+(§ Decision 1); only the listener's `accept` is async, because it is an
+unbounded wait for I/O. Exact signatures and behaviour are single-sourced in
+the #295 feature delta (§ *Driven port — intercept listener (DISTILL gap
+B-7)*).
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -336,16 +365,20 @@ carried 0; distinct listeners per call; node-global converge is idempotent for
 identical F/C targets and returns one guard owning only shared objects; audit is
 read-only; allocation installs return guards owning only their declared
 elements; guard `Drop` neither panics nor errors; and nothing acquired by a
-failing call outlives it.
+failing call outlives it. *(Rev 10: the listener is the port's
+`InterceptListener`; see Status.)*
 
 This matters because the simulation adapter binds a plain listener and appends
-no rule, **both by necessity** (§ Decision 5, § Decision 2). Stating the
+no rule, **both by necessity** (§ Decision 5, § Decision 2). *(Rev 10: the
+simulation listener now binds nothing; the no-rule half stands.)* Stating the
 substrate specifics as *trait* postconditions would make the contract
 unimplementable by half its sanctioned implementors —
 `.claude/rules/development.md` § "Trait definitions specify behavior, not just
 signature" is explicit that adapters diverging on the same call means the bug is
 in the trait contract, not in either adapter. Post-split, the equivalence test's
-asserted set and the trait contract **coincide exactly**, and the honest
+asserted set and the trait contract **coincide exactly** *(Rev 10: except the
+listener's `accept` clauses, which the #295 listener evidence asserts)*, and
+the honest
 untestable residue is the fault arms alone.
 
 ### 2. `InterceptGuard` marker trait; the port returns `Box<dyn InterceptGuard>`
@@ -435,6 +468,8 @@ Fault arms short-circuit before any syscall and are therefore **pure**
 (default-lane-safe). The `Ok` arm of `bind_transparent` binds a real, **plain**
 (non-transparent) loopback listener — there is no way to fabricate a
 `std::net::TcpListener` — so any test driving that arm is integration-lane.
+*(Superseded by Rev 10: the simulation listener binds nothing, so that arm is
+default-lane-safe too.)*
 
 ### 6. Test and mutation-gate contract
 
