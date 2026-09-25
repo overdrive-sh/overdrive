@@ -14,6 +14,15 @@
 //! worker/action-shim ordering seam this file already owns and require no real
 //! netns.
 //!
+//! The S-ND295-52 bodies drive the post-#295 action owner through
+//! `dispatch_with_guest_network_provisioner_for_test` over the seam fixture of
+//! `test-scenarios.md` § *Seam fixture* (one owner instance, one EXEC wiring
+//! opened by its paired supervisor, one pool, one worker over sim ports). They
+//! observe one ordered journal written by every participant at its own driven
+//! port — the owner, the VM-shaped driver, the intercept — plus the pinned
+//! structured events (`mtls.intercept.install.success`,
+//! `guest_network.lease_retired`, `guest_network.lease_released`).
+//!
 //! # Why this test exists — and why the port exists
 //!
 //! The gate-non-release is a property of the CALL SITE's `return` placement,
@@ -170,7 +179,9 @@ use overdrive_control_plane::action_shim::{
     dispatch_with_guest_network_provisioner_for_test, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::guest_network::{
-    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
+    GuestAddressPool, GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
+    GuestNetworkProvisioner, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner, TapActivation, TapQuiescence,
 };
 use overdrive_control_plane::veth_provisioner::{
     NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
@@ -179,6 +190,9 @@ use overdrive_control_plane::veth_provisioner::{
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::guest_network::{
+    GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
+};
 use overdrive_core::id::{AllocationId, CertSerial, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
@@ -198,6 +212,7 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -407,131 +422,136 @@ impl Driver for RecordingDriver {
     }
 }
 
-/// Driver double whose async release is deliberately held. Its Drop marker
-/// makes cancellation observable without starting a second task inside the
-/// method—the exact structured-concurrency property under test.
-struct HoldingReleaseDriver {
-    inner: SimDriver,
-    release_entered: tokio::sync::Semaphore,
-    release_permit: tokio::sync::Semaphore,
-    release_cancelled: AtomicBool,
-    release_completed: AtomicBool,
-    on_alloc_running_called: AtomicBool,
+// ---------------------------------------------------------------------------
+// S-ND295-52 test support: one ordered journal written by every participant
+// at its own driven port, and the seam fixture of `test-scenarios.md`
+// § *Seam fixture*.
+// ---------------------------------------------------------------------------
+
+/// One observed step of the action owner's start / cleanup sequence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    /// The owner's `provision`.
+    Provision,
+    /// `Driver::start`.
+    DriverStart,
+    /// `start_alloc` installed the allocation's intercept elements.
+    InterceptInstalled,
+    /// The synchronous `mtls.intercept.install.success` event.
+    InstallSuccessEvent,
+    /// The owner's `activate`.
+    Activate,
+    /// `Driver::stop`.
+    DriverStop,
+    /// `guest_network.lease_retired`.
+    LeaseRetired,
+    /// `stop_alloc` released the allocation's intercept elements.
+    ElementRelease,
+    /// The owner's `teardown`.
+    Teardown,
+    /// `guest_network.lease_released`.
+    LeaseReleased,
+    /// `Driver::release_for_exit_emission` (the EXEC release).
+    ReleaseForExitEmission,
+    /// `Driver::on_alloc_running`.
+    OnAllocRunning,
 }
 
-#[derive(Clone)]
-struct InstallSuccessLayer(Arc<AtomicBool>);
+#[derive(Clone, Debug)]
+struct JournalEntry {
+    step: Step,
+    /// The allocation the step names, when the participant knows it.
+    alloc: Option<String>,
+}
 
-impl<S> Layer<S> for InstallSuccessLayer
+/// Append-only, ordered across every participant.
+type Journal = Arc<parking_lot::Mutex<Vec<JournalEntry>>>;
+
+fn record(journal: &Journal, step: Step, alloc: Option<&AllocationId>) {
+    journal.lock().push(JournalEntry { step, alloc: alloc.map(ToString::to_string) });
+}
+
+/// The journal's steps for `alloc` (steps that name no allocation included),
+/// with repeated consecutive element steps collapsed to one.
+fn steps_for(journal: &Journal, alloc: &AllocationId) -> Vec<Step> {
+    let entries = journal.lock().clone();
+    for entry in &entries {
+        eprintln!("[journal] {:?} {:?}", entry.step, entry.alloc);
+    }
+    let mut steps: Vec<Step> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if entry.alloc.as_deref().is_some_and(|named| named != alloc.as_str()) {
+            continue;
+        }
+        let collapses = matches!(entry.step, Step::InterceptInstalled | Step::ElementRelease)
+            && steps.last() == Some(&entry.step);
+        if !collapses {
+            steps.push(entry.step);
+        }
+    }
+    steps
+}
+
+#[derive(Default)]
+struct EventFields(BTreeMap<String, String>);
+
+impl tracing::field::Visit for EventFields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+/// Records the install-success event and the pinned lease events
+/// (`guest_network.lease_retired` / `lease_released`, FD 2741-2744).
+#[derive(Clone)]
+struct JournalLayer(Journal);
+
+impl<S> Layer<S> for JournalLayer
 where
     S: Subscriber,
 {
     fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-        if event.metadata().name() == "mtls.intercept.install.success" {
-            self.0.store(true, Ordering::SeqCst);
-        }
+        let mut fields = EventFields::default();
+        event.record(&mut fields);
+        let name = fields
+            .0
+            .get("event")
+            .or_else(|| fields.0.get("name"))
+            .cloned()
+            .unwrap_or_else(|| event.metadata().name().to_owned());
+        let step = match name.as_str() {
+            "mtls.intercept.install.success" => Step::InstallSuccessEvent,
+            "guest_network.lease_retired" => Step::LeaseRetired,
+            "guest_network.lease_released" => Step::LeaseReleased,
+            _ => return,
+        };
+        self.0.lock().push(JournalEntry { step, alloc: fields.0.get("alloc").cloned() });
     }
 }
 
-struct EventOrderedProvisioner {
-    install_seen: Arc<AtomicBool>,
-    calls: parking_lot::Mutex<Vec<GuestNetworkOperation>>,
-    activation_error: bool,
-    cleanup_observers: Option<(Arc<RecordingDriver>, Arc<MtlsInterceptWorker>)>,
-}
-
-#[async_trait::async_trait]
-impl GuestNetworkProvisioner for EventOrderedProvisioner {
-    async fn provision(
-        &self,
-        _plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<()> {
-        self.calls.lock().push(GuestNetworkOperation::TapCreate);
-        Ok(())
-    }
-
-    async fn activate(
-        &self,
-        _plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<
-        overdrive_control_plane::guest_network::TapActivation,
-    > {
-        assert!(
-            self.install_seen.load(Ordering::SeqCst),
-            "the exact mTLS success event must be emitted before TAP activation"
-        );
-        self.calls.lock().push(GuestNetworkOperation::TapSetUp);
-        if self.activation_error {
-            Err(overdrive_control_plane::guest_network::GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::TapSetUp,
-                expected: overdrive_control_plane::guest_network::GuestNetworkFact::LinkUp {
-                    ifindex: 295,
-                    up: true,
-                },
-                observed: Some(overdrive_control_plane::guest_network::GuestNetworkFact::LinkUp {
-                    ifindex: 295,
-                    up: false,
-                }),
-            })
-        } else {
-            Ok(overdrive_control_plane::guest_network::TapActivation::Raised)
-        }
-    }
-
-    async fn teardown(
-        &self,
-        _plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<()> {
-        if let Some((driver, worker)) = &self.cleanup_observers {
-            assert_eq!(driver.stops.lock().len(), 1, "driver quiescence precedes network teardown");
-            assert_eq!(
-                worker.stop_alloc_calls_for_test(),
-                1,
-                "mTLS teardown precedes structural network teardown"
-            );
-        }
-        self.calls.lock().push(GuestNetworkOperation::TapDelete);
-        Ok(())
-    }
-}
-
-impl HoldingReleaseDriver {
-    fn new() -> Self {
-        Self {
-            inner: SimDriver::new(DriverType::Vm),
-            release_entered: tokio::sync::Semaphore::new(0),
-            release_permit: tokio::sync::Semaphore::new(0),
-            release_cancelled: AtomicBool::new(false),
-            release_completed: AtomicBool::new(false),
-            on_alloc_running_called: AtomicBool::new(false),
-        }
-    }
-}
-
-struct HeldReleaseDrop<'a> {
-    cancelled: &'a AtomicBool,
-    completed: bool,
-}
-
-impl Drop for HeldReleaseDrop<'_> {
-    fn drop(&mut self) {
-        if !self.completed {
-            self.cancelled.store(true, Ordering::SeqCst);
-        }
-    }
+/// VM-shaped sim driver recording every lifecycle call in the journal.
+struct JournalDriver {
+    inner: SimDriver,
+    journal: Journal,
 }
 
 #[async_trait::async_trait]
-impl Driver for HoldingReleaseDriver {
+impl Driver for JournalDriver {
     fn r#type(&self) -> DriverType {
         self.inner.r#type()
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        record(&self.journal, Step::DriverStart, Some(&spec.alloc));
         self.inner.start(spec).await
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        record(&self.journal, Step::DriverStop, Some(&handle.alloc));
         self.inner.stop(handle).await
     }
 
@@ -548,23 +568,316 @@ impl Driver for HoldingReleaseDriver {
     }
 
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
-        let mut drop_marker =
-            HeldReleaseDrop { cancelled: &self.release_cancelled, completed: false };
-        self.release_entered.add_permits(1);
-        self.release_permit.acquire().await.expect("release permit remains open").forget();
+        record(&self.journal, Step::ReleaseForExitEmission, Some(&handle.alloc));
         self.inner.release_for_exit_emission(handle).await;
-        self.release_completed.store(true, Ordering::SeqCst);
-        drop_marker.completed = true;
     }
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
-        assert!(
-            self.release_completed.load(Ordering::SeqCst),
-            "on_alloc_running must follow completed async release for {}",
-            spec.alloc
-        );
-        self.on_alloc_running_called.store(true, Ordering::SeqCst);
+        record(&self.journal, Step::OnAllocRunning, Some(&spec.alloc));
+        self.inner.on_alloc_running(spec);
     }
+}
+
+/// Element guard that journals its release.
+struct JournalGuard {
+    _inner: Box<dyn InterceptGuard>,
+    journal: Journal,
+}
+
+impl InterceptGuard for JournalGuard {}
+
+impl Drop for JournalGuard {
+    fn drop(&mut self) {
+        record(&self.journal, Step::ElementRelease, None);
+    }
+}
+
+/// Test-local intercept over `SimMtlsIntercept` that journals element
+/// installation and release; `bind_transparent` delegates to the sim.
+struct JournalIntercept {
+    inner: SimMtlsIntercept,
+    journal: Journal,
+}
+
+impl JournalIntercept {
+    fn guard(&self, inner: Box<dyn InterceptGuard>) -> Box<dyn InterceptGuard> {
+        Box::new(JournalGuard { _inner: inner, journal: Arc::clone(&self.journal) })
+    }
+}
+
+impl MtlsIntercept for JournalIntercept {
+    fn bind_transparent(
+        &self,
+        address: SocketAddrV4,
+    ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+        self.inner.bind_transparent(address)
+    }
+
+    fn converge_shared(
+        &self,
+        prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        self.inner.converge_shared(prior, leg_f, leg_c)
+    }
+
+    fn observe_shared(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
+        self.inner.observe_shared()
+    }
+
+    fn install_outbound(
+        &self,
+        source_addr: Ipv4Addr,
+        leg_f_port: u16,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        let guard = self.inner.install_outbound(source_addr, leg_f_port)?;
+        record(&self.journal, Step::InterceptInstalled, None);
+        Ok(self.guard(guard))
+    }
+
+    fn install_inbound(
+        &self,
+        virt: SocketAddrV4,
+        leg_c_port: u16,
+    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
+        let guard = self.inner.install_inbound(virt, leg_c_port)?;
+        record(&self.journal, Step::InterceptInstalled, None);
+        Ok(self.guard(guard))
+    }
+
+    fn observe_shared_state(
+        &self,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        self.inner.observe_shared_state()
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &overdrive_worker::mtls_intercept_port::InterceptMembers,
+    ) -> overdrive_worker::mtls_intercept::Result<
+        Option<overdrive_worker::mtls_intercept_port::InterceptState>,
+    > {
+        self.inner.converge_allocation_elements(expected)
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> overdrive_worker::mtls_intercept::Result<
+        overdrive_worker::mtls_intercept_port::InterceptState,
+    > {
+        record(&self.journal, Step::ElementRelease, None);
+        self.inner.remove_allocation_elements(source_addr, destinations)
+    }
+}
+
+/// The one owner instance: a journaling decorator over the pinned
+/// `SimSharedGuestNetworkOwner`. With `refuse_activation`, `activate` returns
+/// a typed post-set-up mismatch instead of delegating.
+struct JournalOwner {
+    inner: Arc<SimSharedGuestNetworkOwner>,
+    journal: Journal,
+    refuse_activation: bool,
+}
+
+#[async_trait::async_trait]
+impl GuestNetworkProvisioner for JournalOwner {
+    async fn provision(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        record(&self.journal, Step::Provision, Some(plan.alloc()));
+        self.inner.provision(plan).await
+    }
+
+    async fn activate(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<TapActivation> {
+        record(&self.journal, Step::Activate, Some(plan.alloc()));
+        if self.refuse_activation {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapSetUp,
+                expected: GuestNetworkFact::LinkUp { ifindex: 295, up: true },
+                observed: Some(GuestNetworkFact::LinkUp { ifindex: 295, up: false }),
+            });
+        }
+        self.inner.activate(plan).await
+    }
+
+    async fn teardown(
+        &self,
+        plan: &GuestNetworkPlan,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        record(&self.journal, Step::Teardown, Some(plan.alloc()));
+        self.inner.teardown(plan).await
+    }
+}
+
+#[async_trait::async_trait]
+impl SharedGuestNetworkOwner for JournalOwner {
+    async fn probe_startup(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.probe_startup().await
+    }
+
+    async fn sweep_stale(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.sweep_stale().await
+    }
+
+    async fn converge_shared(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.converge_shared().await
+    }
+
+    async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
+        self.inner.audit_shared().await
+    }
+
+    async fn quiesce_managed_taps(
+        &self,
+    ) -> overdrive_control_plane::guest_network::Result<TapQuiescence> {
+        self.inner.quiesce_managed_taps().await
+    }
+
+    async fn restore_quiesced_taps(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.restore_quiesced_taps().await
+    }
+}
+
+/// The seam fixture (`test-scenarios.md` § *Seam fixture*): one owner
+/// instance, one EXEC wiring over the fixture clock, one pool from
+/// `GuestAddressPool::new`, and one worker over sim ports.
+///
+/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD 1876-1989),
+/// `AppState::new` takes today's inputs, and the owner reaches dispatch only
+/// as the seam's `provisioner`; the gate and pool are held here. 05-01 changes
+/// only the constructor call in [`SeamFixture::new`]: it passes `worker`,
+/// `owner`, `wiring.gate()`, and `guest_pool` to `AppState::new`, so
+/// `AppState`'s owner and the seam's provisioner are the one instance.
+struct SeamFixture {
+    _tmp: TempDir,
+    state: Arc<overdrive_control_plane::AppState>,
+    obs: Arc<SimObservationStore>,
+    worker: Arc<MtlsInterceptWorker>,
+    owner: Arc<JournalOwner>,
+    supervisor: Arc<GuestNetworkExecSupervisor>,
+    _exec_gate: Arc<GuestNetworkExecGate>,
+    _guest_pool: Arc<GuestAddressPool>,
+}
+
+impl SeamFixture {
+    async fn new(
+        driver: Arc<dyn Driver>,
+        intercept: Arc<dyn MtlsIntercept>,
+        owner: Arc<JournalOwner>,
+        identity: Arc<overdrive_control_plane::identity_mgr::IdentityMgr>,
+    ) -> Self {
+        let tmp = TempDir::new().expect("tempdir");
+        let store_path = tmp.path().join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
+        let obs = build_obs();
+        let clock: Arc<SimClock> = Arc::new(SimClock::new());
+        let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as _);
+        let worker = build_worker(intercept);
+        let guest_pool = Arc::new(GuestAddressPool::new(
+            ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        ));
+        let mut runtime =
+            overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+                tmp.path(),
+            )
+            .expect("runtime");
+        runtime
+            .register(overdrive_control_plane::noop_heartbeat())
+            .await
+            .expect("register heartbeat");
+        let mut state = overdrive_control_plane::AppState::new(
+            Arc::clone(&store),
+            store_path,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::new(runtime),
+            driver,
+            clock,
+            Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(295),
+            ))),
+            identity,
+            NodeId::new("node-001").expect("node id"),
+            build_vip_allocator(
+                Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
+            ),
+            overdrive_control_plane::test_empty_listener_facts(),
+            Ipv4Addr::LOCALHOST,
+        );
+        state.mtls_worker = Some(Arc::clone(&worker));
+        Self {
+            _tmp: tmp,
+            state: Arc::new(state),
+            obs,
+            worker,
+            owner,
+            supervisor: wiring.supervisor(),
+            _exec_gate: wiring.gate(),
+            _guest_pool: guest_pool,
+        }
+    }
+
+    /// Open the fixture's EXEC gate through its paired supervisor, as a
+    /// dispatch that reaches `claim_release` requires.
+    fn open_exec(&self) {
+        assert!(self.supervisor.open_after_boot(), "the fixture's gate leaves BootClosed once");
+    }
+
+    async fn dispatch(&self, action: Action) -> Result<(), ShimError> {
+        let tick = tick_now();
+        Box::pin(dispatch_with_guest_network_provisioner_for_test(
+            vec![action],
+            self.state.as_ref(),
+            &tick,
+            self.owner.as_ref(),
+        ))
+        .await
+    }
+}
+
+/// A seam fixture over the journaling participants, with the journal layer
+/// installed as the thread's default subscriber for the returned guard's
+/// lifetime.
+async fn journaled_fixture(
+    inner_owner: Arc<SimSharedGuestNetworkOwner>,
+    refuse_activation: bool,
+) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard) {
+    let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let guard = tracing::subscriber::set_default(
+        tracing_subscriber::registry().with(JournalLayer(Arc::clone(&journal))),
+    );
+    let fixture = SeamFixture::new(
+        Arc::new(JournalDriver {
+            inner: SimDriver::new(DriverType::Vm),
+            journal: Arc::clone(&journal),
+        }),
+        Arc::new(JournalIntercept {
+            inner: SimMtlsIntercept::new(),
+            journal: Arc::clone(&journal),
+        }),
+        Arc::new(JournalOwner {
+            inner: inner_owner,
+            journal: Arc::clone(&journal),
+            refuse_activation,
+        }),
+        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+    )
+    .await;
+    (fixture, journal, guard)
 }
 
 /// Drive a single `Action` through the production `action_shim::dispatch` with
@@ -853,57 +1166,24 @@ fn assert_ordering_observables(scenario: &str, outcome: &FailClosedOutcome) {
 }
 
 // ---------------------------------------------------------------------------
-// Rejected initial Running writes. C3 provisioning precedes Driver::start, so
-// its structural resources must unwind even though the observation store
-// cannot record the initial Running row.
+// Rejected initial Running writes. Guest-network provisioning precedes
+// Driver::start, so its attachment must unwind — and its lease retire before
+// it is released — even though the observation store cannot record the
+// initial Running row.
 // ---------------------------------------------------------------------------
-
-struct RunningWriteRejectNetwork {
-    provisions: AtomicUsize,
-    teardowns: AtomicUsize,
-}
-
-impl WorkloadNetworkProvisioner for RunningWriteRejectNetwork {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
-        self.provisions.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.teardowns.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
 
 struct RunningWriteRejectOutcome {
     result: Result<(), ShimError>,
-    starts: Vec<AllocationId>,
-    provisions: usize,
-    teardowns: usize,
-    slot_still_held: bool,
+    alloc: AllocationId,
+    steps: Vec<Step>,
 }
 
 /// Drive the production start/restart arm through a rejected initial Running
-/// write after C3 provision and driver start, using a deterministic structural
-/// network adapter rather than requiring host network privileges.
+/// write after provision and driver start, over the seam fixture.
 async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
-    let obs = build_obs();
-    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
-    let driver = Arc::new(RecordingDriver::new());
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
-        Arc::new(registry)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let net_slots = NetSlotAllocator::new();
+    let (fixture, journal, _trace_guard) =
+        journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
+    fixture.open_exec();
     let alloc = AllocationId::new(match arm {
         Arm::Start => "running-write-reject-start",
         Arm::Restart => "running-write-reject-restart",
@@ -913,11 +1193,10 @@ async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
         .expect("valid predecessor allocation id");
     let successor = AllocationId::new("running-write-reject-restart-successor")
         .expect("valid successor allocation id");
-    let effect_alloc = if matches!(arm, Arm::Start) { &alloc } else { &successor };
+    let effect_alloc = if matches!(arm, Arm::Start) { alloc.clone() } else { successor.clone() };
     let workload = WorkloadId::new("svc-running-write-reject").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
-    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
-    identity.hold(effect_alloc.clone(), held_svid(&workload, effect_alloc));
+    fixture.state.identity.hold(effect_alloc.clone(), held_svid(&workload, &effect_alloc));
     let action = match arm {
         Arm::Start => Action::StartAllocation {
             alloc_id: alloc.clone(),
@@ -927,7 +1206,7 @@ async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
             kind: WorkloadKind::Service,
         },
         Arm::Restart => {
-            seed_restart_predecessor(obs.as_ref(), &predecessor, &workload, &node).await;
+            seed_restart_predecessor(fixture.obs.as_ref(), &predecessor, &workload, &node).await;
             Action::RestartAllocation {
                 alloc_id: predecessor,
                 spec: build_spec(&successor),
@@ -935,54 +1214,19 @@ async fn drive_running_write_rejection(arm: Arm) -> RunningWriteRejectOutcome {
             }
         }
     };
-    obs.inject_write_failure(ObservationStoreError::Unreachable {
+    fixture.obs.inject_write_failure(ObservationStoreError::Unreachable {
         peer: "rejected-running-write".to_owned(),
     });
-    let network = RunningWriteRejectNetwork {
-        provisions: AtomicUsize::new(0),
-        teardowns: AtomicUsize::new(0),
-    };
-    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
-    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-        overdrive_sim::adapters::entropy::SimEntropy::new(0),
-    ));
-    let clock = SimClock::new();
-    let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
-    let writer_node = NodeId::new("writer-1").expect("node id");
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_lifecycle = (&worker) as &dyn MtlsInterceptLifecycle;
-    let result = dispatch_with_network_provisioner(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        &dataplane,
-        &ca,
-        &clock,
-        &identity,
-        &lifecycle_tx,
-        &tick_now(),
-        &writer_node,
-        build_vip_allocator(store),
-        &broker,
-        None,
-        Some(mtls_lifecycle),
-        &net_slots,
-        &network,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await;
-
-    RunningWriteRejectOutcome {
-        result,
-        starts: driver.starts.lock().clone(),
-        provisions: network.provisions.load(Ordering::SeqCst),
-        teardowns: network.teardowns.load(Ordering::SeqCst),
-        slot_still_held: net_slots.snapshot().contains_key(effect_alloc),
-    }
+    let result = fixture.dispatch(action).await;
+    let steps = steps_for(&journal, &effect_alloc);
+    RunningWriteRejectOutcome { result, alloc: effect_alloc, steps }
 }
 
-fn assert_running_write_rejection_unwinds_network(
+fn position(steps: &[Step], step: Step) -> Option<usize> {
+    steps.iter().position(|candidate| *candidate == step)
+}
+
+fn assert_running_write_rejection_retires_then_releases(
     scenario: &str,
     outcome: &RunningWriteRejectOutcome,
 ) {
@@ -991,29 +1235,59 @@ fn assert_running_write_rejection_unwinds_network(
         "{scenario}: the injected initial Running write rejection must surface; got {:?}",
         outcome.result
     );
-    assert_eq!(outcome.starts.len(), 1, "{scenario}: driver must start before the rejected write");
-    assert_eq!(outcome.provisions, 1, "{scenario}: C3 must provision exactly one network owner");
-    assert_eq!(outcome.teardowns, 1, "{scenario}: rejected write must tear that owner down");
+    let steps = &outcome.steps;
+    assert_eq!(
+        steps.get(..2),
+        Some([Step::Provision, Step::DriverStart].as_slice()),
+        "{scenario}: provision precedes the one driver start of {}; journal {steps:?}",
+        outcome.alloc
+    );
+    for once in [Step::DriverStop, Step::LeaseRetired, Step::Teardown, Step::LeaseReleased] {
+        assert_eq!(
+            steps.iter().filter(|step| **step == once).count(),
+            1,
+            "{scenario}: exactly one {once:?} for {}; journal {steps:?}",
+            outcome.alloc
+        );
+    }
+    let driver_stop = position(steps, Step::DriverStop);
+    let retired = position(steps, Step::LeaseRetired);
+    let teardown = position(steps, Step::Teardown);
+    let released = position(steps, Step::LeaseReleased);
     assert!(
-        !outcome.slot_still_held,
-        "{scenario}: structural teardown must release the allocation's slot"
+        driver_stop < teardown && retired < teardown && teardown < released,
+        "{scenario}: the lease is Retiring before the attachment's teardown, which precedes its \
+         release; journal {steps:?}"
+    );
+    assert_eq!(
+        steps.last(),
+        Some(&Step::LeaseReleased),
+        "{scenario}: the lease is released last; journal {steps:?}"
     );
 }
 
-/// A rejected fresh-start Running write unwinds its C3 network owner.
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
+/// A rejected fresh-start Running write retires the lease before its
+/// attachment's teardown and releases it last.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn start_running_write_rejection_tears_down_network_and_releases_slot() {
     let outcome = drive_running_write_rejection(Arm::Start).await;
-    assert_running_write_rejection_unwinds_network("fresh start", &outcome);
+    assert_running_write_rejection_retires_then_releases("fresh start", &outcome);
 }
 
-/// A rejected restarted Running write follows the same structural unwind.
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
+/// A rejected restarted Running write follows the same retire-then-release
+/// unwind for the successor.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn restart_running_write_rejection_tears_down_network_and_releases_slot() {
     let outcome = drive_running_write_rejection(Arm::Restart).await;
-    assert_running_write_rejection_unwinds_network("restart", &outcome);
+    assert_running_write_rejection_retires_then_releases("restart", &outcome);
 }
 
 /// S-MIF-04 (`@keystone`) — a failed intercept install on a FRESH allocation
@@ -1179,29 +1453,55 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     assert_supersession_observable("S-MIF-05", &outcome);
 }
 
-/// The production StartAllocation arm emits intercept success, awaits exact TAP
-/// activation, then awaits the existing async Driver release hook. Cancelling
-/// dispatch while that hook is held must drop the same owned future; it may not
-/// proceed to `on_alloc_running` or leave a detached release behind.
-///
-/// The body uses the existing post-#295 production-action composition with a
-/// a private recording implementation of the accepted driven port. It does not
-/// enter the historical `HostNetworkProvisioner`/netns path or add a product
-/// failure setter.
-///
-/// Observable universe: dispatch completion plus every boolean exposed by
-/// `HoldingReleaseDriver`. The permitted cancellation delta is exactly
-/// release-entered=false->true and release-cancelled=false->true; release
-/// completion and the subsequent lifecycle hook remain false.
-///
+/// The accepted failure projection of an activation `Err` (FD 2037-2054):
+/// `driver.stop`, lease retired, `stop_alloc`, teardown, lease released last;
+/// a dominating Failed row; zero EXEC release.
+async fn assert_activation_failure_projection(
+    scenario: &str,
+    fixture: &SeamFixture,
+    journal: &Journal,
+    alloc: &AllocationId,
+) {
+    let steps = steps_for(journal, alloc);
+    assert_eq!(
+        steps,
+        [
+            Step::Provision,
+            Step::DriverStart,
+            Step::InterceptInstalled,
+            Step::InstallSuccessEvent,
+            Step::Activate,
+            Step::DriverStop,
+            Step::LeaseRetired,
+            Step::ElementRelease,
+            Step::Teardown,
+            Step::LeaseReleased,
+        ],
+        "{scenario}: an activation failure stops the VMM, retires the lease, stops protection, \
+         tears down, and releases the lease last, never releasing EXEC"
+    );
+    assert_eq!(fixture.worker.stop_alloc_calls_for_test(), 1, "{scenario}: one protection stop");
+    let row = fixture
+        .obs
+        .alloc_status_row(alloc)
+        .await
+        .expect("activation-failure row read succeeds")
+        .expect("activation-failure row is retained");
+    assert_eq!(row.state, AllocState::Failed, "{scenario}: the Failed row dominates Running");
+    assert!(
+        matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
+                if stage == "guest_network_activate"
+        ),
+        "{scenario}: the Failed row names the activation stage; got {:?}",
+        row.reason
+    );
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
 /// CONTRACT_SHAPE: bounded-change.
-/// Outcome anchor: DISCUSS Elevator Pitch
-#[allow(
-    clippy::doc_markdown,
-    clippy::too_many_lines,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
-              the scenario keeps its complete ordered oracle in one body"
-)]
 #[tokio::test]
 async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
     if !is_root() {
@@ -1210,89 +1510,187 @@ async fn tap_activation_occurs_after_intercept_success_and_before_exec_release()
         );
         return;
     }
-
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
-    let obs = build_obs();
-    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
-    worker.start_shared_owner().await.expect("boot-composed shared listener owner is healthy");
-    let driver = Arc::new(HoldingReleaseDriver::new());
-    let clock = Arc::new(SimClock::new());
-    let mut runtime =
-        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
-            tmp.path(),
-        )
-        .expect("runtime");
-    runtime.register(overdrive_control_plane::noop_heartbeat()).await.expect("register heartbeat");
-    let mut state = overdrive_control_plane::AppState::new(
-        Arc::clone(&store),
-        store_path,
-        Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(runtime),
-        Arc::clone(&driver) as Arc<dyn Driver>,
-        clock,
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(295),
-        ))),
-        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
-        NodeId::new("node-001").expect("node id"),
-        build_vip_allocator(
-            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
-        ),
-        overdrive_control_plane::test_empty_listener_facts(),
-        Ipv4Addr::LOCALHOST,
-    );
-    state.mtls_worker = Some(Arc::clone(&worker));
-    let state = Arc::new(state);
-    let install_seen = Arc::new(AtomicBool::new(false));
-    let subscriber =
-        tracing_subscriber::registry().with(InstallSuccessLayer(Arc::clone(&install_seen)));
-    let _trace_guard = tracing::subscriber::set_default(subscriber);
-    let shared_owner = Arc::new(EventOrderedProvisioner {
-        install_seen: Arc::clone(&install_seen),
-        calls: parking_lot::Mutex::new(Vec::new()),
-        activation_error: false,
-        cleanup_observers: None,
-    });
-    let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
-    let workload = WorkloadId::new("svc-gti-held-release").expect("valid workload id");
-    let node = NodeId::new("node-001").expect("valid node id");
+    let (fixture, journal, _trace_guard) =
+        journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
+    fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
+    fixture.open_exec();
+    let alloc = AllocationId::new("gti-activation-order").expect("valid alloc id");
     let action = Action::StartAllocation {
         alloc_id: alloc.clone(),
-        workload_id: workload,
-        node_id: node,
+        workload_id: WorkloadId::new("svc-gti-activation-order").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        spec: build_spec(&alloc),
+        kind: WorkloadKind::Service,
+    };
+
+    fixture.dispatch(action).await.expect("the activated start completes");
+
+    assert_eq!(
+        steps_for(&journal, &alloc),
+        [
+            Step::Provision,
+            Step::DriverStart,
+            Step::InterceptInstalled,
+            Step::InstallSuccessEvent,
+            Step::Activate,
+            Step::ReleaseForExitEmission,
+            Step::OnAllocRunning,
+        ],
+        "start_alloc, then the protection-live event, then activation, then the EXEC release, \
+         then the running hook"
+    );
+
+    fixture.worker.stop_alloc(&alloc).await.expect("allocation protection teardown succeeds");
+    fixture.worker.shutdown_owner().await.expect("the shared owner shuts down");
+}
+
+/// Driver double whose async EXEC release is deliberately held. Its drop
+/// marker makes cancellation observable without starting a second task inside
+/// the method.
+struct HoldingReleaseDriver {
+    inner: SimDriver,
+    release_entered: tokio::sync::Semaphore,
+    release_permit: tokio::sync::Semaphore,
+    release_cancelled: AtomicBool,
+    release_completed: AtomicBool,
+    on_alloc_running_called: AtomicBool,
+}
+
+impl HoldingReleaseDriver {
+    fn new() -> Self {
+        Self {
+            inner: SimDriver::new(DriverType::Vm),
+            release_entered: tokio::sync::Semaphore::new(0),
+            release_permit: tokio::sync::Semaphore::new(0),
+            release_cancelled: AtomicBool::new(false),
+            release_completed: AtomicBool::new(false),
+            on_alloc_running_called: AtomicBool::new(false),
+        }
+    }
+}
+
+struct HeldReleaseDrop<'a> {
+    cancelled: &'a AtomicBool,
+    completed: bool,
+}
+
+impl Drop for HeldReleaseDrop<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Driver for HoldingReleaseDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.inner.stop(handle).await
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        let mut drop_marker =
+            HeldReleaseDrop { cancelled: &self.release_cancelled, completed: false };
+        self.release_entered.add_permits(1);
+        self.release_permit.acquire().await.expect("release permit remains open").forget();
+        self.inner.release_for_exit_emission(handle).await;
+        self.release_completed.store(true, Ordering::SeqCst);
+        drop_marker.completed = true;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        assert!(
+            self.release_completed.load(Ordering::SeqCst),
+            "on_alloc_running must follow completed async release for {}",
+            spec.alloc
+        );
+        self.on_alloc_running_called.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-27 / S-ND295-28 — One guest-command gate; recovery never leaks or wrongly releases a command
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The RETAINED action-shim await/cancellation contract, kept as its own body
+/// when S-ND295-52 retargeted its former home: after activation the start arm
+/// awaits the async EXEC release in place; cancelling the dispatch while that
+/// release is held drops the same release future, and neither the release nor
+/// the running hook completes afterwards.
+#[tokio::test]
+async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release() {
+    if !is_root() {
+        eprintln!(
+            "SKIP cancelling_dispatch_while_the_exec_release_is_held_drops_that_release: not root"
+        );
+        return;
+    }
+    let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let _trace_guard = tracing::subscriber::set_default(
+        tracing_subscriber::registry().with(JournalLayer(Arc::clone(&journal))),
+    );
+    let driver = Arc::new(HoldingReleaseDriver::new());
+    let fixture = Arc::new(
+        SeamFixture::new(
+            Arc::clone(&driver) as Arc<dyn Driver>,
+            Arc::new(JournalIntercept {
+                inner: SimMtlsIntercept::new(),
+                journal: Arc::clone(&journal),
+            }),
+            Arc::new(JournalOwner {
+                inner: Arc::new(SimSharedGuestNetworkOwner::default()),
+                journal: Arc::clone(&journal),
+                refuse_activation: false,
+            }),
+            Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+        )
+        .await,
+    );
+    fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
+    fixture.open_exec();
+    let alloc = AllocationId::new("gti-held-release").expect("valid alloc id");
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: WorkloadId::new("svc-gti-held-release").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
         spec: build_spec(&alloc),
         kind: WorkloadKind::Service,
     };
 
     let task = {
-        let state = Arc::clone(&state);
-        let shared_owner = Arc::clone(&shared_owner);
-        tokio::spawn(async move {
-            let tick = tick_now();
-            dispatch_with_guest_network_provisioner_for_test(
-                vec![action],
-                state.as_ref(),
-                &tick,
-                shared_owner.as_ref(),
-            )
-            .await
-        })
+        let fixture = Arc::clone(&fixture);
+        tokio::spawn(async move { fixture.dispatch(action).await })
     };
-
     tokio::time::timeout(Duration::from_secs(10), driver.release_entered.acquire())
         .await
-        .expect("dispatch reaches the post-install async release")
+        .expect("dispatch reaches the post-activation async release")
         .expect("release-entered semaphore remains open")
         .forget();
-    assert!(!task.is_finished(), "dispatch must remain pending inside the held release future");
-    assert!(install_seen.load(Ordering::SeqCst));
+    assert!(!task.is_finished(), "dispatch remains pending inside the held release future");
     assert_eq!(
-        shared_owner.calls.lock().as_slice(),
-        [GuestNetworkOperation::TapCreate, GuestNetworkOperation::TapSetUp],
-        "provision-down and event-ordered activation both complete before EXEC release begins"
+        steps_for(&journal, &alloc),
+        [Step::Provision, Step::InterceptInstalled, Step::InstallSuccessEvent, Step::Activate],
+        "provision, protection, the protection-live event, and activation precede the release"
     );
     assert!(!driver.release_completed.load(Ordering::SeqCst));
     assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
@@ -1307,17 +1705,16 @@ async fn tap_activation_occurs_after_intercept_success_and_before_exec_release()
     assert!(!driver.release_completed.load(Ordering::SeqCst));
     assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
 
-    worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
-    worker.shutdown_owner().await.expect("shared listener owner shuts down");
-    let _ = driver.stop(&AllocationHandle { alloc, pid: None }).await;
+    fixture.worker.stop_alloc(&alloc).await.expect("allocation protection teardown succeeds");
+    fixture.worker.shutdown_owner().await.expect("the shared owner shuts down");
 }
 
-/// S-ND295-01 / S-ND295-11 — a post-Running activation refusal withholds EXEC,
-/// stops the VMM, removes the allocation mTLS owner, tears down the attachment,
-/// and leaves one dominating typed Failed row.
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
+/// A genuine activation failure takes the full failure projection.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
 async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running() {
     if !is_root() {
         eprintln!(
@@ -1325,51 +1722,10 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
         );
         return;
     }
-
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
-    let obs = build_obs();
-    let worker = build_worker(Arc::new(SimMtlsIntercept::new()));
-    worker.start_shared_owner().await.expect("shared listener owner is healthy");
-    let driver = Arc::new(RecordingDriver::new());
-    let mut runtime =
-        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
-            tmp.path(),
-        )
-        .expect("runtime");
-    runtime.register(overdrive_control_plane::noop_heartbeat()).await.expect("register heartbeat");
-    let mut state = overdrive_control_plane::AppState::new(
-        Arc::clone(&store),
-        store_path,
-        Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(runtime),
-        Arc::clone(&driver) as Arc<dyn Driver>,
-        Arc::new(SimClock::new()),
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(296),
-        ))),
-        Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
-        NodeId::new("node-001").expect("node id"),
-        build_vip_allocator(
-            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
-        ),
-        overdrive_control_plane::test_empty_listener_facts(),
-        Ipv4Addr::LOCALHOST,
-    );
-    state.mtls_worker = Some(Arc::clone(&worker));
-    let state = Arc::new(state);
-    let install_seen = Arc::new(AtomicBool::new(false));
-    let subscriber =
-        tracing_subscriber::registry().with(InstallSuccessLayer(Arc::clone(&install_seen)));
-    let _trace_guard = tracing::subscriber::set_default(subscriber);
-    let owner = EventOrderedProvisioner {
-        install_seen: Arc::clone(&install_seen),
-        calls: parking_lot::Mutex::new(Vec::new()),
-        activation_error: true,
-        cleanup_observers: Some((Arc::clone(&driver), Arc::clone(&worker))),
-    };
+    let (fixture, journal, _trace_guard) =
+        journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), true).await;
+    fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
+    fixture.open_exec();
     let alloc = AllocationId::new("gti-activation-refused").expect("valid alloc id");
     let action = Action::StartAllocation {
         alloc_id: alloc.clone(),
@@ -1379,43 +1735,67 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
         kind: WorkloadKind::Service,
     };
 
-    dispatch_with_guest_network_provisioner_for_test(
-        vec![action],
-        state.as_ref(),
-        &tick_now(),
-        &owner,
-    )
-    .await
-    .expect("activation refusal is durably projected as Failed");
+    fixture.dispatch(action).await.expect("the activation refusal is durably projected as Failed");
 
-    assert!(install_seen.load(Ordering::SeqCst));
+    assert_activation_failure_projection("typed activation error", &fixture, &journal, &alloc)
+        .await;
+    fixture.worker.shutdown_owner().await.expect("the shared owner shuts down");
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
+/// The owner condemned the allocation (an audit reported it damaged, without
+/// latching quiescence), so its activation is refused source-less and the
+/// same failure projection follows (FD 6708-6718).
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]
+async fn activation_of_a_condemned_allocation_takes_the_failure_projection() {
+    if !is_root() {
+        eprintln!(
+            "SKIP activation_of_a_condemned_allocation_takes_the_failure_projection: not root"
+        );
+        return;
+    }
+    let sim_owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let (fixture, journal, _trace_guard) = journaled_fixture(Arc::clone(&sim_owner), false).await;
+    fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
+    fixture.open_exec();
+    let alloc = AllocationId::new("gti-activation-condemned").expect("valid alloc id");
+
+    sim_owner.script_audit_damage(std::collections::BTreeSet::from([alloc.clone()]));
+    let audit = fixture.owner.audit_shared().await.expect("no node-level component fails");
     assert_eq!(
-        owner.calls.lock().as_slice(),
-        [
-            GuestNetworkOperation::TapCreate,
-            GuestNetworkOperation::TapSetUp,
-            GuestNetworkOperation::TapDelete,
-        ],
-        "activation refusal cleanup is provision -> activate -> structural teardown"
+        audit.damaged.keys().collect::<Vec<_>>(),
+        [&alloc],
+        "the one audit condemns exactly the scripted allocation"
     );
-    assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&alloc));
-    assert_eq!(driver.stops.lock().as_slice(), std::slice::from_ref(&alloc));
-    assert!(driver.releases.lock().is_empty(), "EXEC is never released");
-    assert!(driver.on_alloc_running_calls.lock().is_empty());
-    assert_eq!(worker.stop_alloc_calls_for_test(), 1);
-    let row = state
+
+    let action = Action::StartAllocation {
+        alloc_id: alloc.clone(),
+        workload_id: WorkloadId::new("svc-gti-activation-condemned").expect("workload id"),
+        node_id: NodeId::new("node-001").expect("node id"),
+        spec: build_spec(&alloc),
+        kind: WorkloadKind::Service,
+    };
+    fixture
+        .dispatch(action)
+        .await
+        .expect("the condemned activation is durably projected as Failed");
+
+    assert_activation_failure_projection("condemned allocation", &fixture, &journal, &alloc).await;
+    let detail = fixture
         .obs
         .alloc_status_row(&alloc)
         .await
-        .expect("activation-failure row read succeeds")
-        .expect("activation-failure row is retained");
-    assert_eq!(row.state, AllocState::Failed);
-    assert!(matches!(
-        row.reason,
-        Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-            if stage == "guest_network_activate"
-    ));
-    worker.shutdown_owner().await.expect("shared listener owner shuts down");
+        .expect("row read succeeds")
+        .and_then(|row| row.detail)
+        .expect("the Failed row carries the activation detail");
+    assert!(
+        detail.contains("postcondition mismatch after TapObserve") && detail.contains("None"),
+        "the refusal is the owner's source-less missing-record mismatch: {detail}"
+    );
+    fixture.worker.shutdown_owner().await.expect("the shared owner shuts down");
 }
 
 // ---------------------------------------------------------------------------

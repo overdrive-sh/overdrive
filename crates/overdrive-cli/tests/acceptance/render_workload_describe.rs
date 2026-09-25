@@ -26,6 +26,8 @@
 //!       witness).
 //!   (j) Job kind-aware view (Verdict + per-attempt Exit + stderr tail).
 //!   (g/g2/h/i) Listeners, VIP, Failed-cause, issued-certificates.
+//!   (k) S-ND295-60 cleanup-pending State cell + lifecycle detail line,
+//!       and byte-identical output for rows that are not cleanup-pending.
 
 #![allow(
     clippy::doc_markdown,
@@ -1072,4 +1074,379 @@ fn render_workload_describe_job_renders_restarts_in_the_detail_block_not_a_colum
         rendered.contains("last terminated: Failed at (c=2,w=local)"),
         "and the crash is named; got:\n{rendered}",
     );
+}
+
+// -------------------------------------------------------------------
+// (k) S-ND295-60 (netns-density-295, D-295-R20) — cleanup-pending status
+// on the LIVE path.
+//
+// `AllocStatusRowBody.network_cleanup_pending` (`#[serde(default)]`) is the
+// server's projection of an allocation whose guest-network cleanup has not
+// finished. The live renderer's State cell reads `CleanupPending` for such a
+// row in both the Service per-allocation table and the Job per-attempt
+// table. The 14-character label overflows the 12-character minimum column
+// width for that row only. A presence-guarded detail line beneath the row
+// keeps the lifecycle state visible, so a crashed allocation still reads
+// Failed. The Job verdict keeps its row-state derivation, and every
+// non-pending row renders byte-identically to today's output
+// (feature-delta § D-295-R20 "CLI rendering").
+// -------------------------------------------------------------------
+
+/// The State cell a cleanup-pending row renders.
+const CLEANUP_PENDING_LABEL: &str = "CleanupPending";
+
+/// The finite lifecycle-state set, each paired with the State-cell label
+/// the describe output prints for it today.
+const ND295_LIFECYCLE_STATES: [(AllocStateWire, &str); 6] = [
+    (AllocStateWire::Pending, "Pending"),
+    (AllocStateWire::Running, "Running"),
+    (AllocStateWire::Draining, "Draining"),
+    (AllocStateWire::Suspended, "Suspended"),
+    (AllocStateWire::Terminated, "Terminated"),
+    (AllocStateWire::Failed, "Failed"),
+];
+
+/// One workload-kind arm of the S-ND295-60 fixtures: the fixture, today's
+/// rendered output of it (every row not pending), and the key that starts
+/// a row's table line (the text before its State cell).
+struct Nd295Arm {
+    name: &'static str,
+    describe: fn() -> WorkloadDescribeOutput,
+    golden: &'static str,
+    row_key: fn(&AllocStatusRowBody, usize) -> String,
+}
+
+const ND295_ARMS: [Nd295Arm; 2] = [
+    Nd295Arm {
+        name: "Service per-allocation table",
+        describe: nd295_service_describe,
+        golden: ND295_SERVICE_GOLDEN,
+        row_key: |row, _| format!("{:<24} ", row.alloc_id),
+    },
+    Nd295Arm {
+        name: "Job per-attempt table",
+        describe: nd295_job_describe,
+        golden: ND295_JOB_GOLDEN,
+        row_key: |_, index| format!("{:<8} ", index + 1),
+    },
+];
+
+/// A `Stable` terminal condition, the only terminal the Service table
+/// renders a detail line for.
+fn nd295_stable_terminal() -> overdrive_core::transition_reason::TerminalCondition {
+    overdrive_core::transition_reason::TerminalCondition::Stable {
+        settled_in_ms: 1234,
+        witness: overdrive_core::transition_reason::ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
+            inferred: false,
+        },
+    }
+}
+
+/// A row `alloc-<workload>-<index>` of `workload` in `state`, with the given
+/// verbatim detail and exit code, not cleanup-pending.
+fn nd295_row(
+    workload: &str,
+    index: usize,
+    state: AllocStateWire,
+    error: Option<&str>,
+    exit_code: Option<i32>,
+) -> AllocStatusRowBody {
+    AllocStatusRowBody {
+        workload_id: workload.to_owned(),
+        ..row_with_state(&format!("alloc-{workload}-{index}"), state, error, exit_code)
+    }
+}
+
+/// Rows 0-5: one detail-free row per lifecycle state, in
+/// `ND295_LIFECYCLE_STATES` order, so a cleanup-pending detail line is the
+/// only line beneath a flipped row. Every row is not cleanup-pending.
+fn nd295_lifecycle_rows(
+    workload: &str,
+    exit_code: fn(AllocStateWire) -> Option<i32>,
+) -> Vec<AllocStatusRowBody> {
+    ND295_LIFECYCLE_STATES
+        .iter()
+        .enumerate()
+        .map(|(index, &(state, _))| {
+            let mut row = nd295_row(workload, index, state, None, exit_code(state));
+            if state != AllocStateWire::Pending {
+                row.started_at = Some(format!("2026-09-25T10:0{index}:00Z"));
+            }
+            row
+        })
+        .collect()
+}
+
+/// A Service with one allocation per lifecycle state (rows 0-5), then a
+/// recovered Stable allocation with a restart history and an address
+/// (row 6) and a crashed allocation with a named cause, verbatim detail,
+/// and exit code (row 7). Every row is not cleanup-pending.
+fn nd295_service_describe() -> WorkloadDescribeOutput {
+    let mut rows = nd295_lifecycle_rows("cache", |_| None);
+
+    let mut recovered = nd295_row("cache", 6, AllocStateWire::Running, None, None);
+    recovered.started_at = Some("2026-09-25T10:06:00Z".to_owned());
+    recovered.restart_count = 2;
+    recovered.last_terminated = Some(crash_snapshot());
+    recovered.terminal = Some(nd295_stable_terminal());
+    recovered.workload_addr = Some("10.99.128.6".parse().expect("valid guest address"));
+    rows.push(recovered);
+
+    let mut crashed = nd295_row(
+        "cache",
+        7,
+        AllocStateWire::Failed,
+        Some("guest console: kernel panic\nguest console: halted\n"),
+        Some(137),
+    );
+    crashed.reason = Some(overdrive_core::TransitionReason::VmKernelNotFound {
+        path: "/srv/vm/vmlinuz".to_owned(),
+    });
+    rows.push(crashed);
+
+    // Replica counts are the server's projection (S-ND295-59); the renderer
+    // prints them verbatim.
+    wrap_live(AllocStatusResponse {
+        workload_id: Some("cache".to_owned()),
+        spec_digest: Some(NONEMPTY_DIGEST.to_owned()),
+        kind: Some(WorkloadKind::Service),
+        replicas_desired: 2,
+        replicas_running: 2,
+        rows,
+        vip: Some("10.96.0.7".to_owned()),
+        listeners: vec![listener(8080, Proto::Tcp)],
+        ..Default::default()
+    })
+}
+
+/// A Job with one attempt per lifecycle state (attempts 1-6; the
+/// Terminated and Failed attempts exited 1), then a Failed attempt with a
+/// restart history (attempt 7). Every row is not cleanup-pending.
+fn nd295_job_describe() -> WorkloadDescribeOutput {
+    let mut rows = nd295_lifecycle_rows("batch", |state| {
+        matches!(state, AllocStateWire::Terminated | AllocStateWire::Failed).then_some(1)
+    });
+
+    let mut retried = nd295_row("batch", 6, AllocStateWire::Failed, None, Some(2));
+    retried.started_at = Some("2026-09-25T10:06:00Z".to_owned());
+    retried.restart_count = 2;
+    retried.last_terminated = Some(crash_snapshot());
+    rows.push(retried);
+
+    wrap_live(job_snapshot("batch", rows))
+}
+
+/// Today's output for `nd295_service_describe()`.
+const ND295_SERVICE_GOLDEN: &str = concat!(
+    "Service 'cache' (kind: Service)\n",
+    "Spec digest: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    "Replicas (desired/running): 2/2\n",
+    "Alloc                    State        Restarts   Since               \n",
+    "alloc-cache-0            Pending      0          —                   \n",
+    "alloc-cache-1            Running      0          2026-09-25T10:01:00Z\n",
+    "alloc-cache-2            Draining     0          2026-09-25T10:02:00Z\n",
+    "alloc-cache-3            Suspended    0          2026-09-25T10:03:00Z\n",
+    "alloc-cache-4            Terminated   0          2026-09-25T10:04:00Z\n",
+    "alloc-cache-5            Failed       0          2026-09-25T10:05:00Z\n",
+    "alloc-cache-6            Running      2          2026-09-25T10:06:00Z\n",
+    "    terminal: Stable\n",
+    "    last terminated: Failed at (c=2,w=local) — crashed (exit Some(137), signal Some(9))\n",
+    "    last terminated ran since: 1700000000.000000000\n",
+    "    last terminated detail: killed by SIGKILL\n",
+    "    last terminated stderr (last 5 lines):\n",
+    "      Segmentation fault\n",
+    "alloc-cache-7            Failed       0          —                   \n",
+    "    reason: VM kernel not found: /srv/vm/vmlinuz\n",
+    "    error:\n",
+    "      guest console: kernel panic\n",
+    "      guest console: halted\n",
+    "    exit code: 137\n",
+    "Memory:        1024\n",
+    "Addresses:\n",
+    "  alloc-cache-6: 10.99.128.6\n",
+    "VIP:           10.96.0.7\n",
+    "Listeners:\n",
+    "  8080/tcp\n",
+);
+
+/// Today's output for `nd295_job_describe()`.
+const ND295_JOB_GOLDEN: &str = concat!(
+    "Job 'batch' (kind: Job)\n",
+    "Spec digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "Verdict: In progress (no terminal yet)\n",
+    "\n",
+    "Attempt  State        Exit   Started              Duration  \n",
+    "1        Pending      —      —                    —         \n",
+    "2        Running      —      2026-09-25T10:01:00Z —         \n",
+    "3        Draining     —      2026-09-25T10:02:00Z —         \n",
+    "4        Suspended    —      2026-09-25T10:03:00Z —         \n",
+    "5        Terminated   1      2026-09-25T10:04:00Z —         \n",
+    "6        Failed       1      2026-09-25T10:05:00Z —         \n",
+    "7        Failed       2      2026-09-25T10:06:00Z —         \n",
+    "    last terminated: Failed at (c=2,w=local) — crashed (exit Some(137), signal Some(9))\n",
+    "    last terminated ran since: 1700000000.000000000\n",
+    "    last terminated detail: killed by SIGKILL\n",
+    "    restarts: 2\n",
+    "    last terminated stderr (last 5 lines):\n",
+    "      Segmentation fault\n",
+    "Memory:        1024\n",
+);
+
+/// The output the renderer must produce when the row keyed `row_key` in
+/// `baseline` (the same fixture, no row cleanup-pending) is cleanup-pending:
+/// only that row's State cell changes, from the lifecycle label to
+/// `CleanupPending` (overflowing the 12-character column for that row
+/// only), and one detail line naming the lifecycle state is inserted
+/// directly beneath it. Every other byte is unchanged.
+fn nd295_expected_pending_render(baseline: &str, row_key: &str, label: &str) -> String {
+    use std::fmt::Write as _;
+    let lifecycle_cell = format!("{label:<12} ");
+    let mut expected = String::with_capacity(baseline.len() + 64);
+    let mut rewritten = 0_usize;
+    for line in baseline.split_inclusive('\n') {
+        match line.strip_prefix(row_key).and_then(|rest| rest.strip_prefix(&lifecycle_cell)) {
+            Some(rest) => {
+                rewritten += 1;
+                expected.push_str(row_key);
+                expected.push_str(CLEANUP_PENDING_LABEL);
+                expected.push(' ');
+                expected.push_str(rest);
+                let _ =
+                    writeln!(expected, "    network cleanup: pending (lifecycle state: {label})");
+            }
+            None => expected.push_str(line),
+        }
+    }
+    assert_eq!(
+        rewritten, 1,
+        "test integrity: the baseline must carry exactly one table row keyed {row_key:?} whose \
+         State cell reads {label:?}; baseline:\n{baseline}",
+    );
+    expected
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-60 — The describe output shows CleanupPending with the lifecycle state beside it
+/// CONTRACT_SHAPE: pure-function.
+///
+/// For a Service and a Job, and for every lifecycle state, one row of an
+/// otherwise non-pending fixture is flipped to cleanup-pending. Its State
+/// cell must read `CleanupPending`, never its lifecycle label, and the line
+/// directly beneath it must name that lifecycle state. The whole rendered
+/// output must equal the non-pending render with exactly that delta, so no
+/// other row, section, or Job verdict moves. A pending Job attempt keeps
+/// its row-state verdict.
+#[test]
+#[ignore = "pending DELIVER step 07-04 (S-ND295-60)"]
+fn a_cleanup_pending_allocation_renders_cleanup_pending_with_its_lifecycle_state() {
+    for arm in &ND295_ARMS {
+        let baseline = overdrive_cli::render::workload_describe(&(arm.describe)());
+        for (index, &(state, label)) in ND295_LIFECYCLE_STATES.iter().enumerate() {
+            let case = format!("[{}, row {index}, lifecycle state {label}]", arm.name);
+            let mut out = (arm.describe)();
+            assert_eq!(out.snapshot.rows[index].state, state, "test integrity {case}");
+            out.snapshot.rows[index].network_cleanup_pending = true;
+            let row_key = (arm.row_key)(&out.snapshot.rows[index], index);
+
+            let rendered = overdrive_cli::render::workload_describe(&out);
+
+            let mut lines = rendered.lines();
+            let state_cell = lines
+                .by_ref()
+                .find_map(|line| line.strip_prefix(row_key.as_str()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{case}: the pending row keyed {row_key:?} must render; got:\n{rendered}"
+                    )
+                });
+            assert!(
+                state_cell.starts_with(&format!("{CLEANUP_PENDING_LABEL} ")),
+                "{case}: a cleanup-pending row's State cell must read `{CLEANUP_PENDING_LABEL}`, \
+                 never its lifecycle label {label:?}; got row cells {state_cell:?} in:\n{rendered}",
+            );
+            let detail = format!("    network cleanup: pending (lifecycle state: {label})");
+            assert_eq!(
+                lines.next(),
+                Some(detail.as_str()),
+                "{case}: the line directly beneath a cleanup-pending row must name its lifecycle \
+                 state; got:\n{rendered}",
+            );
+            assert_eq!(
+                rendered.matches("network cleanup:").count(),
+                1,
+                "{case}: only the pending row carries a network-cleanup detail line; \
+                 got:\n{rendered}",
+            );
+            assert_eq!(
+                rendered,
+                nd295_expected_pending_render(&baseline, &row_key, label),
+                "{case}: only the pending row's State cell and its one detail line may differ \
+                 from the render with no row cleanup-pending",
+            );
+        }
+    }
+
+    // A pending Job attempt keeps its row-state verdict: the flag changes
+    // the State cell, never `derive_job_verdict`.
+    for (state, exit_code, verdict) in [
+        (AllocStateWire::Running, None, overdrive_cli::render::JobVerdict::InProgress),
+        (AllocStateWire::Terminated, Some(0), overdrive_cli::render::JobVerdict::Succeeded),
+        (AllocStateWire::Failed, Some(1), overdrive_cli::render::JobVerdict::Failed),
+    ] {
+        let row = AllocStatusRowBody {
+            network_cleanup_pending: true,
+            ..nd295_row("batch", 0, state, None, exit_code)
+        };
+        let rows = vec![row];
+        assert_eq!(
+            overdrive_cli::render::derive_job_verdict(&rows),
+            verdict,
+            "a cleanup-pending {state:?} attempt keeps its row-state verdict",
+        );
+        let rendered =
+            overdrive_cli::render::workload_describe(&wrap_live(job_snapshot("batch", rows)));
+        let verdict_line = overdrive_cli::render::format_job_verdict(verdict);
+        assert_eq!(
+            rendered.matches(verdict_line.as_str()).count(),
+            1,
+            "a cleanup-pending {state:?} attempt must render the row-state verdict \
+             {verdict_line:?}; got:\n{rendered}",
+        );
+        assert!(
+            rendered.contains(&format!("1        {CLEANUP_PENDING_LABEL} ")),
+            "the pending {state:?} attempt's State cell must read `{CLEANUP_PENDING_LABEL}` \
+             beside that verdict; got:\n{rendered}",
+        );
+    }
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-60 — The describe output shows CleanupPending with the lifecycle state beside it
+/// CONTRACT_SHAPE: pure-function.
+///
+/// A Service and a Job whose rows cover every lifecycle state, a Stable
+/// terminal, a restart history, a named cause, verbatim detail, an exit
+/// code, an address, a VIP, and a listener, none of them cleanup-pending,
+/// render byte-for-byte as today's renderer rendered them
+/// (`ND295_SERVICE_GOLDEN` / `ND295_JOB_GOLDEN`, captured from it before
+/// D-295-R20 rendering existed).
+#[test]
+fn non_pending_allocations_render_byte_identically() {
+    for arm in &ND295_ARMS {
+        let out = (arm.describe)();
+        assert!(
+            out.snapshot.rows.iter().all(|row| !row.network_cleanup_pending),
+            "test integrity [{}]: the golden fixture carries no cleanup-pending row",
+            arm.name,
+        );
+        let rendered = overdrive_cli::render::workload_describe(&out);
+        assert_eq!(
+            rendered, arm.golden,
+            "[{}]: a render with no cleanup-pending row must be byte-identical to today's output",
+            arm.name,
+        );
+    }
 }

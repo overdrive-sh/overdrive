@@ -2020,9 +2020,12 @@ mod project_service_listen_ports_tests {
         );
     }
 
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-21 — The Service listener projection keeps first-TCP order,
+    /// deduplicates TCP ports, and excludes UDP listeners.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step for GH #295 TCP-only duplicate-normalized membership projection"]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-21)"]
     fn service_projection_keeps_first_tcp_order_deduplicates_tcp_and_excludes_udp() {
         use overdrive_core::aggregate::Listener;
         use overdrive_core::dataplane::Proto;
@@ -2672,5 +2675,964 @@ mod eligibility_tests {
             Some(seen_at + super::backoff_for_attempt(1)),
             "the selected Failed allocation owns its future restart boundary",
         );
+    }
+}
+
+/// GH #295 test support shared by [`restart_gating_acceptance`] and
+/// [`reclaim_emission_acceptance`]: builders for one Service or Job workload's
+/// hydrated `(desired, actual, view, tick)` and projections of the returned
+/// actions. The fixtures set preconditions only; every oracle observes
+/// `WorkloadLifecycle::reconcile` / `next_evaluation_at` output.
+#[cfg(test)]
+mod netns_density_lifecycle_fixture {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::NonZeroU32;
+    use std::time::{Duration, Instant};
+
+    use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+    use overdrive_core::guest_network::GuestAttachmentOccupancy;
+    use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
+    use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+    use overdrive_core::traits::driver::Resources;
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use overdrive_core::traits::{GuestAttachmentLease, GuestAttachmentObservation};
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+    use overdrive_core::wall_clock::UnixInstant;
+
+    use super::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
+
+    pub(super) const WORKLOAD: &str = "nd295-svc";
+
+    pub(super) fn wid() -> WorkloadId {
+        WorkloadId::new(WORKLOAD).expect("valid workload id")
+    }
+
+    pub(super) fn aid(suffix: u32) -> AllocationId {
+        AllocationId::new(&format!("alloc-{WORKLOAD}-{suffix}")).expect("valid allocation id")
+    }
+
+    fn nid() -> NodeId {
+        NodeId::new("local").expect("valid node id")
+    }
+
+    pub(super) const fn at(millis: u64) -> UnixInstant {
+        UnixInstant::from_unix_duration(Duration::from_millis(millis))
+    }
+
+    pub(super) fn tick(now: UnixInstant) -> TickContext {
+        let monotonic = Instant::now();
+        TickContext {
+            now: monotonic,
+            now_unix: now,
+            tick: 0,
+            deadline: monotonic + Duration::from_secs(1),
+        }
+    }
+
+    fn job() -> Job {
+        Job {
+            id: wid(),
+            replicas: NonZeroU32::new(1).expect("one replica"),
+            resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/sbin/serve".to_owned(),
+                args: Vec::new(),
+                kernel: "/srv/vm/kernel".to_owned(),
+                rootfs: "/srv/vm/rootfs.ext4".to_owned(),
+            }),
+        }
+    }
+
+    fn nodes() -> BTreeMap<NodeId, Node> {
+        BTreeMap::from([(
+            nid(),
+            Node {
+                id: nid(),
+                region: Region::new("local").expect("valid region"),
+                capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+            },
+        )])
+    }
+
+    /// The finished or live state of one allocation row, named by what
+    /// happened to it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum RowFact {
+        Pending,
+        Running,
+        Draining,
+        Suspended,
+        /// A crash the reconciler may restart (`Failed`).
+        Crashed,
+        /// A crash observed as `Terminated`.
+        ExitedCrashed,
+        /// A Job exit already finalized `Completed`.
+        JobCompleted,
+        /// A crash already finalized `BackoffExhausted`.
+        BackoffExhausted,
+        OperatorStopped,
+        GcStopped,
+    }
+
+    impl RowFact {
+        pub(super) const fn state(self) -> AllocState {
+            match self {
+                Self::Pending => AllocState::Pending,
+                Self::Running => AllocState::Running,
+                Self::Draining => AllocState::Draining,
+                Self::Suspended => AllocState::Suspended,
+                Self::Crashed | Self::BackoffExhausted => AllocState::Failed,
+                Self::ExitedCrashed
+                | Self::JobCompleted
+                | Self::OperatorStopped
+                | Self::GcStopped => AllocState::Terminated,
+            }
+        }
+
+        /// True for the Failed and Terminated rows network reclaim may own.
+        pub(super) const fn is_finished(self) -> bool {
+            matches!(self.state(), AllocState::Failed | AllocState::Terminated)
+        }
+    }
+
+    pub(super) fn row(suffix: u32, fact: RowFact, kind: WorkloadKind) -> AllocStatusRow {
+        let crashed = TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(23),
+            signal: None,
+            stderr_tail: None,
+        };
+        let (reason, terminal) = match fact {
+            RowFact::Pending | RowFact::Running | RowFact::Draining | RowFact::Suspended => {
+                (None, None)
+            }
+            RowFact::Crashed | RowFact::ExitedCrashed => (Some(crashed), None),
+            RowFact::JobCompleted => (
+                Some(TransitionReason::Stopped { by: StoppedBy::Process }),
+                Some(TerminalCondition::Completed { exit_code: 0 }),
+            ),
+            RowFact::BackoffExhausted => (
+                Some(crashed),
+                Some(TerminalCondition::BackoffExhausted {
+                    attempts: super::RESTART_BACKOFF_CEILING,
+                }),
+            ),
+            RowFact::OperatorStopped => (
+                Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+                Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+            ),
+            RowFact::GcStopped => (
+                Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+                Some(TerminalCondition::Stopped { by: StoppedBy::SystemGc }),
+            ),
+        };
+        AllocStatusRow {
+            alloc_id: aid(suffix),
+            workload_id: wid(),
+            node_id: nid(),
+            state: fact.state(),
+            updated_at: LogicalTimestamp { counter: u64::from(suffix) + 1, writer: nid() },
+            reason,
+            detail: None,
+            terminal,
+            stderr_tail: None,
+            kind,
+            listeners: Vec::new(),
+            started_at: Some(at(1_000)),
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    pub(super) fn observation(
+        held: u32,
+        retiring: u32,
+        leases: BTreeMap<AllocationId, GuestAttachmentLease>,
+    ) -> GuestAttachmentObservation {
+        GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held, retiring }, leases }
+    }
+
+    /// Which intent the workload's desired projection carries.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Intent {
+        /// The workload is declared and running.
+        Declared,
+        /// A stop intent is recorded.
+        Stopped,
+        /// The intent was withdrawn (deleted workload).
+        Deleted,
+    }
+
+    /// The hydrated `(desired, actual)` pair. Both projections carry the same
+    /// guest-attachment snapshot, as hydration reads it once per evaluation.
+    pub(super) fn states(
+        intent: Intent,
+        kind: WorkloadKind,
+        rows: impl IntoIterator<Item = AllocStatusRow>,
+        guest_attachments: &GuestAttachmentObservation,
+    ) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
+        let desired = WorkloadLifecycleState {
+            workload_id: wid(),
+            job: (intent != Intent::Deleted).then(job),
+            desired_to_stop: intent == Intent::Stopped,
+            generation: 0,
+            nodes: nodes(),
+            allocations: BTreeMap::new(),
+            workload_kind: kind,
+            service_spec_digest: None,
+            probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
+            guest_attachments: guest_attachments.clone(),
+        };
+        let actual = WorkloadLifecycleState {
+            job: None,
+            desired_to_stop: false,
+            allocations: rows.into_iter().map(|row| (row.alloc_id.clone(), row)).collect(),
+            ..desired.clone()
+        };
+        (desired, actual)
+    }
+
+    /// A View that issued every allocation in `issued` (the durable ledger)
+    /// and remembers `failure` as the current candidate's last failure.
+    pub(super) fn view(
+        issued: impl IntoIterator<Item = (AllocationId, u32)>,
+        failure: Option<(AllocationId, UnixInstant)>,
+    ) -> WorkloadLifecycleView {
+        WorkloadLifecycleView {
+            restart_counts: issued.into_iter().collect(),
+            last_failure_seen_at: failure.into_iter().collect(),
+            released_for_deletion: BTreeSet::new(),
+            observed_generation: 0,
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn reconcile(
+        desired: &WorkloadLifecycleState,
+        actual: &WorkloadLifecycleState,
+        view: &WorkloadLifecycleView,
+        now: UnixInstant,
+    ) -> (Vec<Action>, WorkloadLifecycleView) {
+        WorkloadLifecycle::canonical().reconcile(desired, actual, view, &tick(now))
+    }
+
+    pub(super) fn next_evaluation_at(
+        desired: &WorkloadLifecycleState,
+        actual: &WorkloadLifecycleState,
+        view: &WorkloadLifecycleView,
+        now: UnixInstant,
+    ) -> Option<UnixInstant> {
+        WorkloadLifecycle::canonical().next_evaluation_at(desired, actual, view, &tick(now))
+    }
+
+    /// The allocation-lifecycle actions, without the `EnqueueEvaluation`
+    /// wakeups the reconciler adds for its sibling reconcilers.
+    pub(super) fn lifecycle_actions(actions: &[Action]) -> Vec<Action> {
+        actions
+            .iter()
+            .filter(|action| !matches!(action, Action::EnqueueEvaluation { .. }))
+            .cloned()
+            .collect()
+    }
+
+    /// Allocations named by a reclaim, in emission order.
+    pub(super) fn reclaimed(actions: &[Action]) -> Vec<AllocationId> {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::ReclaimAllocationNetwork { alloc_id } => Some(alloc_id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Allocations named by a non-reclaim allocation action (the cleanup
+    /// owners a reclaim must never contend with).
+    pub(super) fn owned_by_other_actions(actions: &[Action]) -> BTreeSet<AllocationId> {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::StartAllocation { alloc_id, .. }
+                | Action::RestartAllocation { alloc_id, .. }
+                | Action::StopAllocation { alloc_id, .. }
+                | Action::FinalizeFailed { alloc_id, .. } => Some(alloc_id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The View with its two reclaim-bookkeeping fields cleared, so every
+    /// other remembered input can be compared across evaluations.
+    pub(super) fn without_reclaim_bookkeeping(view: &WorkloadLifecycleView) -> WorkloadLifecycleView {
+        WorkloadLifecycleView {
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
+            ..view.clone()
+        }
+    }
+
+    /// The lease strategy vocabulary: no lease, or one of the two lease states.
+    pub(super) const LEASES: [Option<GuestAttachmentLease>; 3] =
+        [None, Some(GuestAttachmentLease::Admitted), Some(GuestAttachmentLease::Retiring)];
+}
+
+/// GH #295 S-ND295-05C (D-295-R7, R8, R11; FD 2778-2824, 3787-3799) — restart
+/// gating counts the predecessor's lease: below the cap a due restart is
+/// emitted; at the cap a due restart hands a leased predecessor to network
+/// reclaim first; without a lease, or before the restart is due, nothing is
+/// emitted; and a restart refused by a race consumes no restart budget.
+#[cfg(test)]
+mod restart_gating_acceptance {
+    #![allow(clippy::doc_markdown)]
+
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use proptest::prelude::*;
+
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS;
+    use overdrive_core::reconcilers::Action;
+    use overdrive_core::traits::GuestAttachmentLease;
+
+    use super::netns_density_lifecycle_fixture::{
+        Intent, LEASES, RowFact, aid, at, lifecycle_actions, next_evaluation_at, observation,
+        reconcile, row, states, view,
+    };
+    use super::{RESTART_BACKOFF_CEILING, backoff_for_attempt};
+
+    const CAP: u32 = MAX_GUEST_NETWORK_ATTACHMENTS;
+    /// The predecessor's failure was observed at this instant.
+    const SEEN_AT_MS: u64 = 100_000;
+
+    /// Node-wide held attachments, clustered on the cap boundary. At least
+    /// one, because the predecessor's own lease (when present) is counted.
+    fn held_strategy() -> impl Strategy<Value = u32> {
+        prop_oneof![1..CAP - 1, (CAP - 1)..=(CAP + 1), (CAP + 2)..=u32::MAX]
+    }
+
+    fn lease_strategy() -> impl Strategy<Value = Option<GuestAttachmentLease>> {
+        prop::sample::select(LEASES.to_vec())
+    }
+
+    proptest! {
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-05C — A due restart counts its predecessor, and at the cap
+        /// the predecessor is cleaned up first.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-05C)"]
+        fn a_due_restart_counts_its_predecessor_and_reclaims_it_first_at_the_cap(
+            held in held_strategy(),
+            lease in lease_strategy(),
+            attempts in 0..RESTART_BACKOFF_CEILING,
+            elapsed_past_due_ms in 0_u64..=10_000,
+        ) {
+            let predecessor = aid(0);
+            let leases = lease
+                .map(|lease| BTreeMap::from([(predecessor.clone(), lease)]))
+                .unwrap_or_default();
+            let snapshot = observation(held, 0, leases);
+            let (desired, actual) = states(
+                Intent::Declared,
+                WorkloadKind::Service,
+                [row(0, RowFact::Crashed, WorkloadKind::Service)],
+                &snapshot,
+            );
+            let seen_at = at(SEEN_AT_MS);
+            let prior = view([(predecessor.clone(), attempts)], Some((predecessor.clone(), seen_at)));
+            let now = seen_at
+                + backoff_for_attempt(attempts)
+                + Duration::from_millis(elapsed_past_due_ms);
+
+            let (actions, next) = reconcile(&desired, &actual, &prior, now);
+            let emitted = lifecycle_actions(&actions);
+
+            if held < CAP {
+                prop_assert_eq!(emitted.len(), 1, "below the cap one restart is emitted: {:?}", emitted);
+                prop_assert!(
+                    matches!(&emitted[0], Action::RestartAllocation { alloc_id, spec, .. }
+                        if *alloc_id == predecessor && spec.alloc != predecessor),
+                    "held {held} below the cap restarts the predecessor into a fresh id: {emitted:?}",
+                );
+            } else if lease.is_some() {
+                prop_assert_eq!(
+                    &emitted,
+                    &vec![Action::ReclaimAllocationNetwork { alloc_id: predecessor }],
+                    "at the cap (held {}) a leased predecessor is reclaimed instead of restarted",
+                    held,
+                );
+                // No successor is reserved and the restart inputs are untouched.
+                prop_assert_eq!(&next.restart_counts, &prior.restart_counts);
+                prop_assert_eq!(&next.last_failure_seen_at, &prior.last_failure_seen_at);
+            } else {
+                prop_assert!(
+                    actions.is_empty(),
+                    "at the cap (held {held}) with no predecessor lease nothing is emitted: {actions:?}",
+                );
+                prop_assert_eq!(&next, &prior, "waiting for room changes no remembered input");
+            }
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-05C — A restart that is not yet due emits nothing at any
+        /// occupancy; the predecessor keeps its counted lease through the
+        /// backoff window.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn a_restart_that_is_not_yet_due_emits_nothing_at_any_occupancy(
+            held in held_strategy(),
+            lease in lease_strategy(),
+            attempts in 0..RESTART_BACKOFF_CEILING,
+            before_due_ms in 1_u64..=1_000,
+        ) {
+            let predecessor = aid(0);
+            let leases = lease
+                .map(|lease| BTreeMap::from([(predecessor.clone(), lease)]))
+                .unwrap_or_default();
+            let snapshot = observation(held, 0, leases);
+            let (desired, actual) = states(
+                Intent::Declared,
+                WorkloadKind::Service,
+                [row(0, RowFact::Crashed, WorkloadKind::Service)],
+                &snapshot,
+            );
+            let seen_at = at(SEEN_AT_MS);
+            let prior = view([(predecessor.clone(), attempts)], Some((predecessor, seen_at)));
+            let deadline = seen_at + backoff_for_attempt(attempts);
+            let backoff_ms = u64::try_from(backoff_for_attempt(attempts).as_millis())
+                .expect("backoff fits u64 milliseconds");
+            let now = at(SEEN_AT_MS + backoff_ms - before_due_ms.min(backoff_ms));
+
+            let (actions, next) = reconcile(&desired, &actual, &prior, now);
+
+            prop_assert!(actions.is_empty(), "held {held}, lease {lease:?}: not yet due emits nothing: {actions:?}");
+            prop_assert_eq!(&next, &prior, "the backoff window changes no remembered input");
+            prop_assert_eq!(
+                next_evaluation_at(&desired, &actual, &prior, now),
+                Some(deadline),
+                "the workload wakes exactly when its restart becomes due",
+            );
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-05C — A restart refused by a race consumes no restart
+        /// budget and never reuses the reserved successor id.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-05C)"]
+        fn a_raced_restart_refusal_consumes_no_restart_budget(
+            attempts in 0..RESTART_BACKOFF_CEILING,
+            raced_refusals in 1_u32..=(RESTART_BACKOFF_CEILING + 3),
+            predecessor_lease in prop::sample::select(vec![
+                GuestAttachmentLease::Admitted,
+                GuestAttachmentLease::Retiring,
+            ]),
+        ) {
+            let predecessor = aid(0);
+            let seen_at = at(SEEN_AT_MS);
+            let now = seen_at + backoff_for_attempt(attempts);
+            let rows = [row(0, RowFact::Crashed, WorkloadKind::Service)];
+            let room = observation(
+                CAP - 1,
+                0,
+                BTreeMap::from([(predecessor.clone(), predecessor_lease)]),
+            );
+            let initial = view([(predecessor.clone(), attempts)], Some((predecessor.clone(), seen_at)));
+            let (desired, actual) = states(Intent::Declared, WorkloadKind::Service, rows.clone(), &room);
+
+            // Each evaluation saw room, emitted a restart, and the pool's
+            // `assign` refused it: no successor row ever appears.
+            let mut current = initial.clone();
+            let mut reserved = Vec::new();
+            for refusal in 0..raced_refusals {
+                let (actions, next) = reconcile(&desired, &actual, &current, now);
+                let emitted = lifecycle_actions(&actions);
+                let successor = match emitted.as_slice() {
+                    [Action::RestartAllocation { alloc_id, spec, .. }] if *alloc_id == predecessor => {
+                        spec.alloc.clone()
+                    }
+                    other => {
+                        return Err(TestCaseError::fail(format!(
+                            "refusal {refusal}: a due restart with room is emitted, got {other:?}"
+                        )));
+                    }
+                };
+                prop_assert!(
+                    !reserved.contains(&successor) && successor != predecessor,
+                    "refusal {refusal}: successor {successor} was already reserved or is the predecessor",
+                );
+                prop_assert!(next.restart_counts.contains_key(&successor), "the successor id stays reserved");
+                prop_assert_eq!(
+                    next.restart_counts.get(&predecessor),
+                    initial.restart_counts.get(&predecessor),
+                    "refusal {}: the predecessor's restart budget is not consumed",
+                    refusal,
+                );
+                prop_assert_eq!(
+                    next.last_failure_seen_at.get(&predecessor),
+                    initial.last_failure_seen_at.get(&predecessor),
+                    "refusal {}: the predecessor's backoff input is unchanged",
+                    refusal,
+                );
+                reserved.push(successor);
+                current = next;
+            }
+
+            // The runtime's immediate re-evaluation after the refusal sees the
+            // node at the cap: the predecessor cleanup attempt failed, so its
+            // lease still counts, and the due restart hands it to reclaim.
+            let at_cap = observation(
+                CAP,
+                1,
+                BTreeMap::from([(predecessor.clone(), GuestAttachmentLease::Retiring)]),
+            );
+            let (desired_at_cap, actual_at_cap) =
+                states(Intent::Declared, WorkloadKind::Service, rows.clone(), &at_cap);
+            let (actions, after_cap) = reconcile(&desired_at_cap, &actual_at_cap, &current, now);
+            prop_assert_eq!(
+                lifecycle_actions(&actions),
+                vec![Action::ReclaimAllocationNetwork { alloc_id: predecessor.clone() }],
+                "after a raced refusal at the cap the predecessor is reclaimed first",
+            );
+            prop_assert_eq!(&after_cap.restart_counts, &current.restart_counts);
+            prop_assert_eq!(&after_cap.last_failure_seen_at, &current.last_failure_seen_at);
+
+            // Once the reclaim frees the slot the restart is emitted with a
+            // fresh successor id, never a reserved one.
+            let freed = observation(CAP - 1, 0, BTreeMap::new());
+            let (desired_freed, actual_freed) =
+                states(Intent::Declared, WorkloadKind::Service, rows, &freed);
+            let (actions, after_room) = reconcile(&desired_freed, &actual_freed, &after_cap, now);
+            match lifecycle_actions(&actions).as_slice() {
+                [Action::RestartAllocation { alloc_id, spec, .. }] if *alloc_id == predecessor => {
+                    prop_assert!(
+                        !reserved.contains(&spec.alloc),
+                        "the restart after room returns mints a fresh id, got reserved {}",
+                        spec.alloc,
+                    );
+                }
+                other => {
+                    return Err(TestCaseError::fail(format!(
+                        "with room again the due restart is emitted, got {other:?}"
+                    )));
+                }
+            }
+            prop_assert_eq!(
+                after_room.restart_counts.get(&predecessor),
+                initial.restart_counts.get(&predecessor),
+                "no raced refusal consumed restart budget",
+            );
+        }
+    }
+}
+
+/// GH #295 S-ND295-55 (D-295-R11; FD 3779-3855) — every leased, unowned,
+/// Failed or Terminated allocation is reclaimed from every reconcile return
+/// path, in `AllocationId` order; a pending restart owns its predecessor until
+/// it is due at the cap; a failing reclaim is re-emitted no sooner than one
+/// backoff later, with no attempt ceiling, until the lease disappears.
+#[cfg(test)]
+mod reclaim_emission_acceptance {
+    #![allow(clippy::doc_markdown)]
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
+
+    use proptest::prelude::*;
+
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconcilers::Action;
+    use overdrive_core::traits::GuestAttachmentLease;
+    use overdrive_core::wall_clock::UnixInstant;
+
+    use super::netns_density_lifecycle_fixture::{
+        Intent, LEASES, RowFact, aid, at, lifecycle_actions, next_evaluation_at, observation,
+        owned_by_other_actions, reclaimed, reconcile, row, states, view,
+        without_reclaim_bookkeeping,
+    };
+    use super::{RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, backoff_for_attempt};
+
+    const CAP: u32 = MAX_GUEST_NETWORK_ATTACHMENTS;
+    const NOW_MS: u64 = 500_000;
+
+    /// `instant` minus `millis` (every instant here is far past the epoch).
+    fn before(instant: UnixInstant, millis: u64) -> UnixInstant {
+        UnixInstant::from_unix_duration(
+            instant.as_unix_duration().saturating_sub(Duration::from_millis(millis)),
+        )
+    }
+
+    /// Every early return of `reconcile_inner` plus the restart, finalize, and
+    /// placement tails (FD 3818-3827).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ReturnPath {
+        StopBranchStopping,
+        StopBranchComplete,
+        DeletedStopping,
+        DeletedComplete,
+        JobTerminalFence,
+        RunningGuard,
+        DrainingGuard,
+        OperatorStopVeto,
+        JobNaturalExit,
+        DueRestartWithRoom,
+        CeilingFinalize,
+        FinalizedAtCeiling,
+        FreshPlacement,
+        PlacementRefusedAtCap,
+    }
+
+    impl ReturnPath {
+        const ALL: [Self; 14] = [
+            Self::StopBranchStopping,
+            Self::StopBranchComplete,
+            Self::DeletedStopping,
+            Self::DeletedComplete,
+            Self::JobTerminalFence,
+            Self::RunningGuard,
+            Self::DrainingGuard,
+            Self::OperatorStopVeto,
+            Self::JobNaturalExit,
+            Self::DueRestartWithRoom,
+            Self::CeilingFinalize,
+            Self::FinalizedAtCeiling,
+            Self::FreshPlacement,
+            Self::PlacementRefusedAtCap,
+        ];
+
+        const fn intent(self) -> Intent {
+            match self {
+                Self::StopBranchStopping | Self::StopBranchComplete => Intent::Stopped,
+                Self::DeletedStopping | Self::DeletedComplete => Intent::Deleted,
+                _ => Intent::Declared,
+            }
+        }
+
+        const fn kind(self) -> WorkloadKind {
+            match self {
+                Self::JobTerminalFence | Self::JobNaturalExit => WorkloadKind::Job,
+                _ => WorkloadKind::Service,
+            }
+        }
+
+        /// The current (highest-suffix) allocation that routes the evaluation
+        /// onto this path.
+        const fn current(self) -> RowFact {
+            match self {
+                Self::StopBranchStopping | Self::DeletedStopping | Self::RunningGuard => {
+                    RowFact::Running
+                }
+                Self::StopBranchComplete
+                | Self::JobNaturalExit
+                | Self::DueRestartWithRoom
+                | Self::CeilingFinalize => RowFact::Crashed,
+                Self::DeletedComplete => RowFact::ExitedCrashed,
+                Self::JobTerminalFence => RowFact::JobCompleted,
+                Self::DrainingGuard => RowFact::Draining,
+                Self::OperatorStopVeto => RowFact::OperatorStopped,
+                Self::FinalizedAtCeiling => RowFact::BackoffExhausted,
+                Self::FreshPlacement | Self::PlacementRefusedAtCap => RowFact::GcStopped,
+            }
+        }
+
+        /// Superseded-row facts that leave this path's routing unchanged. A
+        /// Job's natural-exit handler finds any active natural exit, so its
+        /// leftovers are live or intentionally stopped.
+        fn leftover_facts(self) -> Vec<RowFact> {
+            if self == Self::JobNaturalExit {
+                return vec![
+                    RowFact::Pending,
+                    RowFact::Draining,
+                    RowFact::Suspended,
+                    RowFact::OperatorStopped,
+                    RowFact::GcStopped,
+                ];
+            }
+            vec![
+                RowFact::Pending,
+                RowFact::Draining,
+                RowFact::Suspended,
+                RowFact::Crashed,
+                RowFact::ExitedCrashed,
+                RowFact::JobCompleted,
+                RowFact::BackoffExhausted,
+                RowFact::OperatorStopped,
+                RowFact::GcStopped,
+            ]
+        }
+
+        /// The restart ledger entry of the current allocation.
+        const fn current_restart_count(self) -> u32 {
+            match self {
+                Self::CeilingFinalize | Self::FinalizedAtCeiling => RESTART_BACKOFF_CEILING,
+                _ => 0,
+            }
+        }
+
+        const fn at_cap(self) -> bool {
+            matches!(self, Self::PlacementRefusedAtCap)
+        }
+    }
+
+    fn fact_strategy(path: ReturnPath) -> impl Strategy<Value = RowFact> {
+        prop::sample::select(path.leftover_facts())
+    }
+
+    fn lease_strategy() -> impl Strategy<Value = Option<GuestAttachmentLease>> {
+        prop::sample::select(LEASES.to_vec())
+    }
+
+    /// A superseded row: its fact and its lease, if any.
+    type Leftover = (RowFact, Option<GuestAttachmentLease>);
+
+    /// A path, its superseded rows (suffixes `0..n`), and the current row's
+    /// lease.
+    fn scenario_strategy()
+    -> impl Strategy<Value = (ReturnPath, Vec<Leftover>, Option<GuestAttachmentLease>)> {
+        prop::sample::select(ReturnPath::ALL.to_vec()).prop_flat_map(|path| {
+            (
+                Just(path),
+                prop::collection::vec((fact_strategy(path), lease_strategy()), 0..=4),
+                lease_strategy(),
+            )
+        })
+    }
+
+    proptest! {
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-55 — Every leased, unowned, finished allocation is reclaimed
+        /// from every reconcile path.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
+        fn every_return_path_reclaims_leased_unowned_finished_allocations(
+            (path, leftovers, current_lease) in scenario_strategy(),
+            other_workloads_held in 0_u32..=64,
+        ) {
+            let current_suffix = u32::try_from(leftovers.len()).expect("at most four leftovers");
+            let current = aid(current_suffix);
+            let mut rows = Vec::with_capacity(leftovers.len() + 1);
+            let mut facts = BTreeMap::new();
+            let mut leases = BTreeMap::new();
+            for (suffix, (fact, lease)) in (0_u32..).zip(&leftovers) {
+                rows.push(row(suffix, *fact, path.kind()));
+                facts.insert(aid(suffix), *fact);
+                if let Some(lease) = lease {
+                    leases.insert(aid(suffix), *lease);
+                }
+            }
+            rows.push(row(current_suffix, path.current(), path.kind()));
+            facts.insert(current.clone(), path.current());
+            if let Some(lease) = current_lease {
+                leases.insert(current, lease);
+            }
+            let held = if path.at_cap() {
+                CAP
+            } else {
+                u32::try_from(leases.len()).expect("few leases") + other_workloads_held
+            };
+            let issued = (0..=current_suffix).map(|suffix| {
+                let count = if suffix == current_suffix { path.current_restart_count() } else { 0 };
+                (aid(suffix), count)
+            });
+            let prior = view(issued, None);
+            let now = at(NOW_MS);
+
+            let leased = observation(held, 0, leases.clone());
+            let (desired, actual) = states(path.intent(), path.kind(), rows.clone(), &leased);
+            let (actions, next) = reconcile(&desired, &actual, &prior, now);
+
+            let unleased = observation(held, 0, BTreeMap::new());
+            let (desired_base, actual_base) = states(path.intent(), path.kind(), rows, &unleased);
+            let (base_actions, base_next) = reconcile(&desired_base, &actual_base, &prior, now);
+
+            // The path's own decision is unchanged by the leases.
+            let own: Vec<Action> = lifecycle_actions(&actions)
+                .into_iter()
+                .filter(|action| !matches!(action, Action::ReclaimAllocationNetwork { .. }))
+                .collect();
+            prop_assert_eq!(&own, &lifecycle_actions(&base_actions), "{:?}: own decision changed", path);
+            prop_assert!(reclaimed(&base_actions).is_empty(), "{path:?}: nothing is reclaimed without a lease");
+
+            // The reclaim set: leased, finished, and named by no other action,
+            // in AllocationId order.
+            let owned = owned_by_other_actions(&actions);
+            let expected: Vec<AllocationId> = leases
+                .keys()
+                .filter(|alloc| facts[*alloc].is_finished() && !owned.contains(*alloc))
+                .cloned()
+                .collect();
+            let emitted = reclaimed(&actions);
+            prop_assert_eq!(&emitted, &expected, "{:?}: reclaim set", path);
+            let emitted_set: BTreeSet<AllocationId> = emitted.iter().cloned().collect();
+            prop_assert!(emitted_set.is_disjoint(&owned), "{path:?}: a reclaim contends with another action");
+
+            // Its bookkeeping: each emission is remembered at this tick as a
+            // first attempt; every other remembered input is the path's own.
+            for alloc in &emitted {
+                prop_assert_eq!(next.reclaim_emitted_at.get(alloc), Some(&now));
+                prop_assert_eq!(next.reclaim_attempts.get(alloc), Some(&1));
+            }
+            prop_assert_eq!(
+                next.reclaim_emitted_at.keys().cloned().collect::<BTreeSet<_>>(),
+                emitted_set,
+                "{:?}: bookkeeping only for emitted reclaims",
+                path,
+            );
+            prop_assert_eq!(without_reclaim_bookkeeping(&next), without_reclaim_bookkeeping(&base_next));
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-55 — A pending restart owns its predecessor until it is due
+        /// at the cap; superseded leftovers are reclaimed meanwhile.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
+        fn a_pending_restart_owns_its_predecessor_until_due_at_the_cap(
+            held in prop_oneof![2..CAP - 1, (CAP - 1)..=(CAP + 1), (CAP + 2)..=u32::MAX],
+            predecessor_lease in prop::sample::select(vec![
+                GuestAttachmentLease::Admitted,
+                GuestAttachmentLease::Retiring,
+            ]),
+            leftover_lease in prop::sample::select(vec![
+                GuestAttachmentLease::Admitted,
+                GuestAttachmentLease::Retiring,
+            ]),
+            attempts in 0..RESTART_BACKOFF_CEILING,
+            offset_ms in -1_000_i64..=5_000,
+        ) {
+            let leftover = aid(0);
+            let predecessor = aid(1);
+            let rows = [
+                row(0, RowFact::Crashed, WorkloadKind::Service),
+                row(1, RowFact::Crashed, WorkloadKind::Service),
+            ];
+            let snapshot = observation(
+                held,
+                0,
+                BTreeMap::from([
+                    (leftover.clone(), leftover_lease),
+                    (predecessor.clone(), predecessor_lease),
+                ]),
+            );
+            let (desired, actual) = states(Intent::Declared, WorkloadKind::Service, rows, &snapshot);
+            let seen_at = at(NOW_MS);
+            let prior = view(
+                [(leftover.clone(), 0), (predecessor.clone(), attempts)],
+                Some((predecessor.clone(), seen_at)),
+            );
+            let deadline = seen_at + backoff_for_attempt(attempts);
+            let now = if offset_ms < 0 {
+                before(deadline, offset_ms.unsigned_abs())
+            } else {
+                deadline + Duration::from_millis(offset_ms.unsigned_abs())
+            };
+            let due = offset_ms >= 0;
+
+            let (actions, _next) = reconcile(&desired, &actual, &prior, now);
+
+            let mut expected = vec![leftover];
+            if due && held >= CAP {
+                expected.push(predecessor.clone());
+            }
+            prop_assert_eq!(
+                reclaimed(&actions),
+                expected,
+                "held {}, due {}: the leftover is always reclaimed; the predecessor only when due at the cap",
+                held,
+                due,
+            );
+            let restarted = actions.iter().any(|action| {
+                matches!(action, Action::RestartAllocation { alloc_id, .. } if *alloc_id == predecessor)
+            });
+            prop_assert_eq!(restarted, due && held < CAP, "held {}, due {}: restart emission", held, due);
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+        /// S-ND295-55 — A failing reclaim backs off one second and never stops.
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
+        fn a_failing_reclaim_backs_off_one_second_and_never_stops(
+            failures in 1_u32..=(RESTART_BACKOFF_CEILING * 3),
+            early_ms in 1_u64..=999,
+            late_ms in 0_u64..=500,
+        ) {
+            prop_assert_eq!(RESTART_BACKOFF_DURATION, Duration::from_secs(1), "the cadence is one second");
+            // A restart predecessor whose one-shot cleanup failed: its lease
+            // is Retiring while its successor runs.
+            let predecessor = aid(0);
+            let successor = aid(1);
+            let rows = [
+                row(0, RowFact::Crashed, WorkloadKind::Service),
+                row(1, RowFact::Running, WorkloadKind::Service),
+            ];
+            let leased = observation(
+                2,
+                1,
+                BTreeMap::from([
+                    (predecessor.clone(), GuestAttachmentLease::Retiring),
+                    (successor.clone(), GuestAttachmentLease::Admitted),
+                ]),
+            );
+            let (desired, actual) =
+                states(Intent::Declared, WorkloadKind::Service, rows.clone(), &leased);
+            let mut current = view([(predecessor.clone(), 0), (successor.clone(), 1)], None);
+            let mut now: UnixInstant = at(NOW_MS);
+
+            for attempt in 1..=failures {
+                let (actions, next) = reconcile(&desired, &actual, &current, now);
+                prop_assert_eq!(
+                    reclaimed(&actions),
+                    vec![predecessor.clone()],
+                    "attempt {} at {:?}: the reclaim is emitted with no attempt ceiling",
+                    attempt,
+                    now,
+                );
+                prop_assert_eq!(next.reclaim_attempts.get(&predecessor), Some(&attempt));
+                prop_assert_eq!(next.reclaim_emitted_at.get(&predecessor), Some(&now));
+                let deadline = now + backoff_for_attempt(attempt);
+                prop_assert_eq!(
+                    next_evaluation_at(&desired, &actual, &next, now),
+                    Some(deadline),
+                    "attempt {}: the workload wakes at the reclaim deadline",
+                    attempt,
+                );
+
+                // The dispatch failed and the runtime re-evaluates before the
+                // deadline: nothing is re-emitted and nothing is remembered.
+                let early = before(deadline, early_ms);
+                let (early_actions, early_next) = reconcile(&desired, &actual, &next, early);
+                prop_assert!(
+                    reclaimed(&early_actions).is_empty(),
+                    "attempt {attempt}: no re-emission {early_ms} ms before the deadline"
+                );
+                prop_assert_eq!(&early_next.reclaim_attempts, &next.reclaim_attempts);
+                prop_assert_eq!(&early_next.reclaim_emitted_at, &next.reclaim_emitted_at);
+
+                current = early_next;
+                now = deadline + Duration::from_millis(late_ms);
+            }
+
+            // The lease is released: nothing is emitted, the entries are
+            // pruned, and no reclaim deadline remains.
+            let released = observation(
+                1,
+                0,
+                BTreeMap::from([(successor, GuestAttachmentLease::Admitted)]),
+            );
+            let (desired_released, actual_released) =
+                states(Intent::Declared, WorkloadKind::Service, rows, &released);
+            let (actions, pruned) = reconcile(&desired_released, &actual_released, &current, now);
+            prop_assert!(reclaimed(&actions).is_empty(), "a released lease is never reclaimed");
+            prop_assert!(!pruned.reclaim_attempts.contains_key(&predecessor));
+            prop_assert!(!pruned.reclaim_emitted_at.contains_key(&predecessor));
+            prop_assert_eq!(next_evaluation_at(&desired_released, &actual_released, &pruned, now), None);
+        }
     }
 }

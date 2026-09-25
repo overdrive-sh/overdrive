@@ -16,6 +16,7 @@
 #![allow(clippy::expect_used)]
 
 mod integration {
+    mod cloexec_lint_workspace;
     mod crate_class_metadata;
     mod dev_setup_bpf_linker;
 }

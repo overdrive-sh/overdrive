@@ -4049,7 +4049,7 @@ mod tests {
     //! wrong-but-valid-peer case "protected" and does NOT thread `IdentityRead`
     //! (`expected_peer` is `None` until #242).
 
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::io::{Read as _, Write as _};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::num::NonZeroU16;
@@ -4066,7 +4066,7 @@ mod tests {
     };
     use overdrive_core::traits::mtls_enforcement::{
         EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
-        PumpLiveness, Routed,
+        MtlsEnforcementError, PumpLiveness, Routed,
     };
     use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
     use overdrive_core::{AllocationId, SpiffeId};
@@ -4078,23 +4078,295 @@ mod tests {
         AcceptLeg, ConnectionReady, EnforcedSet, MtlsInterceptWorker, OutboundAction,
         await_pending_connection, decide_outbound,
     };
-    use crate::mtls_intercept::{InterceptError, InterceptPostcondition};
-    use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+    use crate::mtls_intercept::{
+        InterceptElementKey, InterceptElementOperation, InterceptError, InterceptLeg,
+        InterceptPostcondition, InterceptSet,
+    };
+    use crate::mtls_intercept_port::{
+        InterceptAcceptError, InterceptAccepted, InterceptGuard, InterceptListener,
+        InterceptMembers, MtlsIntercept,
+    };
 
-    struct TestSharedGuard;
+    // ---- shared-owner test support (TS § Intercept listener and stop-error
+    // test support, DISTILL B-6/B-7) -------------------------------------------
+    //
+    // `overdrive-sim` depends on this crate, so in this source-local build the
+    // sim's `SimMtlsIntercept` implements a second compiled copy of
+    // `MtlsIntercept` and cannot be used. The doubles below carry its
+    // semantics: a socket-free listener with scripted accept outcomes, a member
+    // model with process-local element tokens, and the removal scripting the
+    // B-6 caller-rule bodies need. Until the DELIVER step that carries B-7,
+    // `TestSharedIntercept::bind_transparent` keeps today's real loopback
+    // listener, so the live-listener table stays empty and the scripting calls
+    // return `false`; that step changes exactly that one method to return
+    // `register_listener`'s `TestInterceptListener`.
 
-    impl InterceptGuard for TestSharedGuard {}
+    /// One scripted outcome for the next `accept` of a [`TestInterceptListener`]
+    /// — the variants and meaning of `SimAcceptScript`.
+    #[derive(Debug)]
+    enum TestAcceptScript {
+        /// The next `accept` returns `Ok(accepted)`.
+        Connection(InterceptAccepted),
+        /// The next `accept` returns `Err(OriginalDestination { source })`, with
+        /// `io::Error::from_raw_os_error(errno)`; the listener stays usable.
+        OriginalDestinationFailure { errno: i32 },
+        /// That and every later `accept` returns `Err(Accept { source })`, with
+        /// `io::Error::from_raw_os_error(errno)`: the listener accepts nothing more.
+        ListenerLost { errno: i32 },
+    }
+
+    #[derive(Debug, Default)]
+    struct TestListenerState {
+        scripts: VecDeque<TestAcceptScript>,
+        lost: Option<i32>,
+        local_addr_errno: Option<i32>,
+        parked: usize,
+    }
+
+    /// The socket-free listener of [`TestSharedIntercept`], with exactly
+    /// `SimInterceptListener`'s semantics (FD 3646-3663, TS § Intercept
+    /// listener and stop-error test support). Live from its bind until its last
+    /// `Arc` drops; the intercept holds only a `Weak`.
+    #[derive(Debug)]
+    struct TestInterceptListener {
+        addr: SocketAddrV4,
+        state: Mutex<TestListenerState>,
+        wake: tokio::sync::Notify,
+    }
+
+    /// Decrements the parked count when a pending accept completes or is dropped.
+    struct ParkedAccept<'a> {
+        listener: &'a TestInterceptListener,
+    }
+
+    impl Drop for ParkedAccept<'_> {
+        fn drop(&mut self) {
+            self.listener.state.lock().parked -= 1;
+        }
+    }
+
+    impl TestInterceptListener {
+        #[allow(
+            dead_code,
+            reason = "constructed by register_listener, which the DELIVER step that carries B-7 \
+                      wires into TestSharedIntercept::bind_transparent (05-01 at the latest)"
+        )]
+        fn new(addr: SocketAddrV4) -> Self {
+            Self {
+                addr,
+                state: Mutex::new(TestListenerState::default()),
+                wake: tokio::sync::Notify::new(),
+            }
+        }
+
+        fn take_outcome(
+            &self,
+        ) -> Option<std::result::Result<InterceptAccepted, InterceptAcceptError>> {
+            let script = {
+                let mut state = self.state.lock();
+                if let Some(errno) = state.lost {
+                    return Some(Err(InterceptAcceptError::Accept {
+                        source: std::io::Error::from_raw_os_error(errno),
+                    }));
+                }
+                let script = state.scripts.pop_front()?;
+                if let TestAcceptScript::ListenerLost { errno } = script {
+                    state.lost = Some(errno);
+                }
+                script
+            };
+            Some(match script {
+                TestAcceptScript::Connection(accepted) => Ok(accepted),
+                TestAcceptScript::OriginalDestinationFailure { errno } => {
+                    Err(InterceptAcceptError::OriginalDestination {
+                        source: std::io::Error::from_raw_os_error(errno),
+                    })
+                }
+                TestAcceptScript::ListenerLost { errno } => Err(InterceptAcceptError::Accept {
+                    source: std::io::Error::from_raw_os_error(errno),
+                }),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl InterceptListener for TestInterceptListener {
+        fn local_addr(&self) -> std::io::Result<SocketAddrV4> {
+            let errno = self.state.lock().local_addr_errno;
+            errno.map_or(Ok(self.addr), |errno| Err(std::io::Error::from_raw_os_error(errno)))
+        }
+
+        async fn accept(&self) -> std::result::Result<InterceptAccepted, InterceptAcceptError> {
+            if tokio::runtime::Handle::try_current().is_err() {
+                return Err(InterceptAcceptError::Accept {
+                    source: std::io::Error::other(
+                        "test intercept listener accept polled with no current Tokio runtime",
+                    ),
+                });
+            }
+            let mut parked: Option<ParkedAccept<'_>> = None;
+            loop {
+                // Created before the outcome is read, so a script appended
+                // between the read and the await still wakes this future.
+                let notified = self.wake.notified();
+                if let Some(outcome) = self.take_outcome() {
+                    drop(parked);
+                    return outcome;
+                }
+                if parked.is_none() {
+                    self.state.lock().parked += 1;
+                    parked = Some(ParkedAccept { listener: self });
+                }
+                notified.await;
+            }
+        }
+    }
+
+    /// One dynamic member of the owned program's three sets.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum TestMember {
+        ManagedGuest(Ipv4Addr),
+        OutboundSource(Ipv4Addr),
+        InboundDestination(SocketAddrV4),
+    }
+
+    /// The member sets plus the process-local element tokens that own them —
+    /// the model `SimMtlsIntercept` keeps, so an allocation's members are what
+    /// the host adapter's installs would add (FD 2931-2994).
+    #[derive(Debug, Default)]
+    struct TestMemberState {
+        members: InterceptMembers,
+        /// Live token per member: `(generation, holders)`. A retired token is
+        /// absent, so a guard holding its generation removes nothing.
+        tokens: BTreeMap<TestMember, (u64, usize)>,
+        next_generation: u64,
+    }
+
+    impl TestMemberState {
+        fn insert(&mut self, member: TestMember) {
+            match member {
+                TestMember::ManagedGuest(address) => {
+                    self.members.managed_guest_ips.insert(address);
+                }
+                TestMember::OutboundSource(address) => {
+                    self.members.outbound_sources.insert(address);
+                }
+                TestMember::InboundDestination(destination) => {
+                    self.members.inbound_destinations.insert(destination);
+                }
+            }
+        }
+
+        fn remove(&mut self, member: TestMember) {
+            match member {
+                TestMember::ManagedGuest(address) => {
+                    self.members.managed_guest_ips.remove(&address);
+                }
+                TestMember::OutboundSource(address) => {
+                    self.members.outbound_sources.remove(&address);
+                }
+                TestMember::InboundDestination(destination) => {
+                    self.members.inbound_destinations.remove(&destination);
+                }
+            }
+        }
+
+        /// Acquire one holder of each member's token, adding absent members; a
+        /// re-install adopts the live token rather than duplicating the member.
+        fn acquire(&mut self, members: &[TestMember]) -> Vec<(TestMember, u64)> {
+            members
+                .iter()
+                .map(|member| {
+                    let generation =
+                        if let Some((generation, holders)) = self.tokens.get_mut(member) {
+                            *holders += 1;
+                            *generation
+                        } else {
+                            self.next_generation += 1;
+                            let generation = self.next_generation;
+                            self.tokens.insert(*member, (generation, 1));
+                            self.insert(*member);
+                            generation
+                        };
+                    (*member, generation)
+                })
+                .collect()
+        }
+    }
+
+    /// An allocation install's guard: its `Drop` releases one holder of each
+    /// member token it acquired, removing a member whose last holder dropped,
+    /// unless `remove_allocation_elements` retired the token first.
+    struct TestElementGuard {
+        state: Arc<Mutex<TestMemberState>>,
+        keys: Vec<(TestMember, u64)>,
+    }
+
+    impl InterceptGuard for TestElementGuard {}
+
+    impl Drop for TestElementGuard {
+        fn drop(&mut self) {
+            let mut state = self.state.lock();
+            for (member, generation) in &self.keys {
+                let Some((live, holders)) = state.tokens.get_mut(member) else {
+                    continue;
+                };
+                if *live != *generation {
+                    continue;
+                }
+                if *holders > 1 {
+                    *holders -= 1;
+                } else {
+                    state.tokens.remove(member);
+                    state.remove(*member);
+                }
+            }
+        }
+    }
+
+    /// The node guard `converge_shared` returns; its `Drop` is counted so a
+    /// body can tell a relinquished guard from a dropped one.
+    struct TestNodeGuard(Arc<AtomicUsize>);
+
+    impl InterceptGuard for TestNodeGuard {}
+
+    impl Drop for TestNodeGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Removal scripting (TS § Intercept listener and stop-error test support).
+    #[derive(Default)]
+    struct RemovalScript {
+        /// Calls still to fail, and the fresh cause each returns.
+        failures: Option<(usize, fn() -> InterceptError)>,
+        /// While set, every call waits after entering until it is cleared.
+        held: bool,
+    }
 
     struct TestSharedIntercept {
         observation: Mutex<Option<InterceptPostcondition>>,
-        members: Mutex<crate::mtls_intercept_port::InterceptMembers>,
+        members: Arc<Mutex<TestMemberState>>,
+        /// Weak live-listener table keyed by bound address; the intercept never
+        /// extends a listener's life.
+        listeners: Mutex<BTreeMap<SocketAddrV4, Weak<TestInterceptListener>>>,
+        removal: Mutex<RemovalScript>,
+        removal_released: parking_lot::Condvar,
+        removal_calls: AtomicUsize,
+        node_guard_drops: Arc<AtomicUsize>,
     }
 
     impl TestSharedIntercept {
         fn new() -> Self {
             Self {
                 observation: Mutex::new(None),
-                members: Mutex::new(crate::mtls_intercept_port::InterceptMembers::default()),
+                members: Arc::new(Mutex::new(TestMemberState::default())),
+                listeners: Mutex::new(BTreeMap::new()),
+                removal: Mutex::new(RemovalScript::default()),
+                removal_released: parking_lot::Condvar::new(),
+                removal_calls: AtomicUsize::new(0),
+                node_guard_drops: Arc::new(AtomicUsize::new(0)),
             }
         }
 
@@ -4104,8 +4376,149 @@ mod tests {
                 program,
                 policy_route: true,
                 intercept_mark_guard: true,
-                members: self.members.lock().clone(),
+                members: self.members.lock().members.clone(),
             })
+        }
+
+        /// The dynamic members the owned program holds now.
+        fn members(&self) -> InterceptMembers {
+            self.members.lock().members.clone()
+        }
+
+        /// Append `script` to the FIFO of the live listener at `at` and wake a
+        /// parked `accept`. `false`, recording nothing, when no live listener
+        /// holds `at`.
+        #[must_use]
+        fn script_accept(&self, at: SocketAddrV4, script: TestAcceptScript) -> bool {
+            let Some(listener) = self.live_listener(at) else {
+                return false;
+            };
+            listener.state.lock().scripts.push_back(script);
+            listener.wake.notify_waiters();
+            true
+        }
+
+        /// Make the live listener at `at` report
+        /// `Err(io::Error::from_raw_os_error(errno))` from `local_addr()` from now
+        /// on. `false`, recording nothing, when no live listener holds `at`.
+        #[must_use]
+        fn script_local_addr_failure(&self, at: SocketAddrV4, errno: i32) -> bool {
+            let Some(listener) = self.live_listener(at) else {
+                return false;
+            };
+            listener.state.lock().local_addr_errno = Some(errno);
+            true
+        }
+
+        /// The addresses of every live listener, ascending.
+        #[must_use]
+        fn live_listeners(&self) -> Vec<SocketAddrV4> {
+            self.listeners
+                .lock()
+                .iter()
+                .filter(|(_, listener)| listener.strong_count() > 0)
+                .map(|(addr, _)| *addr)
+                .collect()
+        }
+
+        /// The live listener at `at`'s pending, polled, not-dropped `accept`
+        /// futures; 0 when no live listener holds `at`.
+        #[must_use]
+        fn parked_accepts(&self, at: SocketAddrV4) -> usize {
+            self.live_listener(at).map_or(0, |listener| listener.state.lock().parked)
+        }
+
+        fn live_listener(&self, at: SocketAddrV4) -> Option<Arc<TestInterceptListener>> {
+            self.listeners.lock().get(&at).and_then(Weak::upgrade)
+        }
+
+        /// Register a socket-free listener: port 0 takes the smallest port ≥
+        /// 49152 no live listener of this intercept holds at that IP; a non-zero
+        /// address is honoured exactly; an address a live listener holds is
+        /// refused with `EADDRINUSE` (FD 3554-3572).
+        #[allow(
+            dead_code,
+            reason = "the DELIVER step that carries B-7 (05-01 at the latest) makes \
+                      bind_transparent return this listener"
+        )]
+        fn register_listener(
+            &self,
+            addr: SocketAddrV4,
+        ) -> crate::mtls_intercept::Result<Arc<TestInterceptListener>> {
+            let mut listeners = self.listeners.lock();
+            listeners.retain(|_, listener| listener.strong_count() > 0);
+            let bound = if addr.port() == 0 {
+                let port = (49_152..=u16::MAX)
+                    .find(|port| !listeners.contains_key(&SocketAddrV4::new(*addr.ip(), *port)))
+                    .ok_or_else(|| InterceptError::TransparentListener {
+                        addr,
+                        source: std::io::Error::from_raw_os_error(libc::EADDRINUSE),
+                    })?;
+                SocketAddrV4::new(*addr.ip(), port)
+            } else if listeners.contains_key(&addr) {
+                return Err(InterceptError::TransparentListener {
+                    addr,
+                    source: std::io::Error::from_raw_os_error(libc::EADDRINUSE),
+                });
+            } else {
+                addr
+            };
+            let listener = Arc::new(TestInterceptListener::new(bound));
+            listeners.insert(bound, Arc::downgrade(&listener));
+            drop(listeners);
+            Ok(listener)
+        }
+
+        /// The next `count` calls to `remove_allocation_elements` each return a
+        /// fresh `cause()`.
+        fn script_removal_failures(&self, count: usize, cause: fn() -> InterceptError) {
+            self.removal.lock().failures = (count > 0).then_some((count, cause));
+        }
+
+        /// Every `remove_allocation_elements` call, counted on entry.
+        fn removal_calls(&self) -> usize {
+            self.removal_calls.load(Ordering::SeqCst)
+        }
+
+        /// While `held`, each `remove_allocation_elements` call waits after
+        /// entering until the hold is released (the condvar barrier
+        /// `RetirementBarrierIntercept` uses), so a body can join a caller to an
+        /// attempt that is provably in flight.
+        fn hold_removals(&self, held: bool) {
+            self.removal.lock().held = held;
+            if !held {
+                self.removal_released.notify_all();
+            }
+        }
+
+        /// Drops of the node guards `converge_shared` returned.
+        fn node_guard_drops(&self) -> usize {
+            self.node_guard_drops.load(Ordering::SeqCst)
+        }
+
+        /// Wait out a hold, then take one scripted failure if any remain.
+        fn enter_removal(&self) -> Option<fn() -> InterceptError> {
+            let mut removal = self.removal.lock();
+            while removal.held {
+                self.removal_released.wait(&mut removal);
+            }
+            let (remaining, cause) = removal.failures?;
+            removal.failures = (remaining > 1).then_some((remaining - 1, cause));
+            drop(removal);
+            Some(cause)
+        }
+
+        fn program_not_published() -> InterceptError {
+            InterceptError::NftRuleInstallFailed {
+                op: "shared-element-owner",
+                source: crate::mtls_intercept::NetlinkError::nft(
+                    "shared-element-owner",
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotConnected,
+                        "shared constant program is not published",
+                    ),
+                ),
+            }
         }
     }
 
@@ -4140,7 +4553,7 @@ mod tests {
                 prerouting,
                 output,
             });
-            Ok(Box::new(TestSharedGuard))
+            Ok(Box::new(TestNodeGuard(Arc::clone(&self.node_guard_drops))))
         }
 
         fn observe_shared(&self) -> crate::mtls_intercept::Result<Option<InterceptPostcondition>> {
@@ -4149,18 +4562,23 @@ mod tests {
 
         fn install_outbound(
             &self,
-            _source_addr: Ipv4Addr,
+            source_addr: Ipv4Addr,
             _agent_leg_f_port: u16,
         ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            Ok(Box::new(TestSharedGuard))
+            let keys = self.members.lock().acquire(&[
+                TestMember::ManagedGuest(source_addr),
+                TestMember::OutboundSource(source_addr),
+            ]);
+            Ok(Box::new(TestElementGuard { state: Arc::clone(&self.members), keys }))
         }
 
         fn install_inbound(
             &self,
-            _virt: SocketAddrV4,
+            virt: SocketAddrV4,
             _agent_leg_c_port: u16,
         ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            Ok(Box::new(TestSharedGuard))
+            let keys = self.members.lock().acquire(&[TestMember::InboundDestination(virt)]);
+            Ok(Box::new(TestElementGuard { state: Arc::clone(&self.members), keys }))
         }
 
         fn observe_shared_state(
@@ -4172,13 +4590,13 @@ mod tests {
 
         fn converge_allocation_elements(
             &self,
-            expected: &crate::mtls_intercept_port::InterceptMembers,
+            expected: &InterceptMembers,
         ) -> crate::mtls_intercept::Result<Option<crate::mtls_intercept_port::InterceptState>>
         {
             if self.observation.lock().is_none() {
                 return Ok(None);
             }
-            *self.members.lock() = expected.clone();
+            self.members.lock().members = expected.clone();
             Ok(self.state())
         }
 
@@ -4187,23 +4605,48 @@ mod tests {
             source_addr: Ipv4Addr,
             destinations: &[SocketAddrV4],
         ) -> crate::mtls_intercept::Result<crate::mtls_intercept_port::InterceptState> {
-            let mut members = self.members.lock();
-            members.managed_guest_ips.remove(&source_addr);
-            members.outbound_sources.remove(&source_addr);
-            for destination in destinations {
-                members.inbound_destinations.remove(destination);
+            self.removal_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(cause) = self.enter_removal() {
+                return Err(cause());
             }
-            drop(members);
-            self.state().ok_or_else(|| InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: crate::mtls_intercept::NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
+            let mut seen = BTreeSet::new();
+            if let Some(rejected) = destinations
+                .iter()
+                .find(|destination| destination.port() == 0 || !seen.insert(**destination))
+            {
+                return Err(InterceptError::NftElementUpdateFailed {
+                    set: InterceptSet::InboundDestinations,
+                    operation: InterceptElementOperation::Delete,
+                    key: InterceptElementKey::Destination(*rejected),
+                    source: crate::mtls_intercept::NetlinkError::nft(
+                        "shared-element-remove",
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "duplicate or zero-port destination",
+                        ),
                     ),
-                ),
-            })
+                });
+            }
+            if self.observation.lock().is_none() {
+                return Err(Self::program_not_published());
+            }
+            let requested =
+                [TestMember::ManagedGuest(source_addr), TestMember::OutboundSource(source_addr)]
+                    .into_iter()
+                    .chain(
+                        destinations
+                            .iter()
+                            .map(|destination| TestMember::InboundDestination(*destination)),
+                    );
+            let mut state = self.members.lock();
+            for member in requested {
+                // Convergent: an absent member is already its postcondition.
+                // Retiring the token makes every guard over it a no-op.
+                state.remove(member);
+                state.tokens.remove(&member);
+            }
+            drop(state);
+            self.state().ok_or_else(Self::program_not_published)
         }
     }
 
@@ -5369,39 +5812,74 @@ mod tests {
         worker.stop_alloc(&the_alloc).await.expect("replacement owner cleans up");
     }
 
-    /// CONTRACT_SHAPE: bounded-change (failed authoritative teardown is surfaced and retried before completion).
-    #[tokio::test]
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A shared allocation's failed enforced-connection teardown is surfaced as
+    /// `HandleTeardown` with one typed failure per connection, in teardown order,
+    /// and a retried stop converges on the retained handle (FD 3018-3063,
+    /// D-295-R10). RETARGETED onto a shared allocation: the per-allocation
+    /// record the original registered is deleted with B-7's step. The
+    /// connection is delivered through the shared leg-F listener
+    /// (`TestSharedIntercept::script_accept`), so the body waits on that step
+    /// as well as on 07-01.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn allocation_stop_surfaces_teardown_failure_and_retry_converges() {
-        let enforcement = Arc::new(GatedTeardown {
-            entered: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-            calls: AtomicUsize::new(0),
-            fail_first: AtomicBool::new(true),
-        });
+        let enforcement = RetryingSharedEnforcement::new();
+        let (leg, orig_dst, _client) = accepted_leg_f();
+        let intercept = Arc::new(TestSharedIntercept::new());
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
             Arc::new(SimClock::new()),
-            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
         ));
-        let the_alloc = alloc("alloc-stop-retry");
-        let enforced = EnforcedSet::new();
-        enforced.push(enforced_conn("alloc-stop-retry", 1));
-        worker.record_intercept_full(
-            the_alloc.clone(),
-            None,
-            Vec::new(),
-            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
-            enforced,
-            Arc::new(AtomicBool::new(false)),
-            AllocationTaskOwner::new(),
+        let allocation = alloc("alloc-stop-retry");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        within_2s("the delivered connection reaches enforcement", || {
+            enforcement.counter.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        wait_published(&worker, &allocation, 1).await;
+
+        let first =
+            worker.stop_alloc(&allocation).await.expect_err("the teardown failure surfaces");
+        let super::MtlsInterceptStopError::HandleTeardown { alloc_id, failures } = &first else {
+            panic!("expected a typed per-connection teardown failure, got {first:?}");
+        };
+        let expected_connection = EnforcedConnectionId::new(allocation.clone(), 0);
+        assert_eq!(alloc_id, &allocation);
+        assert_eq!(failures.len(), 1, "one failure per failed connection");
+        assert_eq!(failures[0].connection, expected_connection);
+        assert!(
+            matches!(
+                &*failures[0].source,
+                MtlsEnforcementError::TeardownFailed { id, source }
+                    if id == &expected_connection
+                        && source.to_string() == "injected shared teardown failure"
+            ),
+            "the failure keeps the exact typed teardown cause: {:?}",
+            failures[0].source
         );
 
-        enforcement.release.notify_one();
-        assert!(worker.stop_alloc(&the_alloc).await.is_err());
-        enforcement.release.notify_one();
-        worker.stop_alloc(&the_alloc).await.expect("retry completes authoritative teardown");
-        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 2);
+        worker.stop_alloc(&allocation).await.expect("the retried stop converges");
+        assert_eq!(
+            enforcement.teardown_calls.load(Ordering::SeqCst),
+            2,
+            "the retained handle is torn down once more, and only once"
+        );
+        worker.shutdown_owner().await.expect("the shared owner joins");
     }
 
     /// REGRESSION (P1, GH #26): a completed `spawn_enforce` task must retain its
@@ -5637,5 +6115,1140 @@ mod tests {
             Err(super::MtlsInterceptInstallError::OwnerShutdown)
         ));
         assert_eq!(worker.leg_c_addr(&alloc), None);
+    }
+
+    // ---- GH #295 shared-allocation bodies (S-ND295-20/54/61/70) -------------
+
+    /// Wait (bounded at 2 s real time, no clock advanced) until `cond` holds.
+    async fn within_2s(label: &str, mut cond: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while !cond() {
+            assert!(tokio::time::Instant::now() < deadline, "not observed within 2 s: {label}");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+
+    /// A worker over `TestSharedIntercept`, a teardown-succeeding enforcement,
+    /// and a `NonMesh` resolve.
+    fn shared_worker(intercept: &Arc<TestSharedIntercept>) -> Arc<MtlsInterceptWorker> {
+        let (enforcement, _calls) = SpyEnforcement::new();
+        Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::clone(intercept) as Arc<dyn MtlsIntercept>,
+        ))
+    }
+
+    /// The node's two shared listeners, read through the port: leg C is the
+    /// address a shared allocation records (`leg_c_addr`), leg F the other
+    /// live listener the intercept owns.
+    fn shared_legs(
+        intercept: &TestSharedIntercept,
+        worker: &MtlsInterceptWorker,
+        allocation: &AllocationId,
+    ) -> (SocketAddrV4, SocketAddrV4) {
+        let leg_c =
+            worker.leg_c_addr(allocation).expect("a shared allocation records the shared leg C");
+        let live = intercept.live_listeners();
+        assert_eq!(
+            live.len(),
+            2,
+            "the port owns exactly the two shared listeners (none before B-7): {live:?}"
+        );
+        assert!(live.contains(&leg_c), "leg C {leg_c} is a port-owned listener: {live:?}");
+        let leg_f = live
+            .into_iter()
+            .find(|address| *address != leg_c)
+            .unwrap_or_else(|| unreachable!("two distinct live listeners, one of them leg C"));
+        (leg_f, leg_c)
+    }
+
+    /// Deliver one connection from the guest source `source` that dialled
+    /// `orig_dst` through the shared leg-F listener at `leg_f`.
+    fn deliver_leg_f_connection(
+        intercept: &TestSharedIntercept,
+        leg_f: SocketAddrV4,
+        source: Ipv4Addr,
+        orig_dst: SocketAddrV4,
+        stream: std::os::fd::OwnedFd,
+    ) {
+        assert!(
+            intercept.script_accept(
+                leg_f,
+                TestAcceptScript::Connection(InterceptAccepted {
+                    stream,
+                    peer: SocketAddrV4::new(source, 40_000),
+                    local: orig_dst,
+                }),
+            ),
+            "the shared leg-F listener at {leg_f} is live and port-owned"
+        );
+    }
+
+    /// Wait until `handles` enforced handles are published under `allocation`'s
+    /// capability, so a stop observes them in its drain.
+    async fn wait_published(
+        worker: &MtlsInterceptWorker,
+        allocation: &AllocationId,
+        handles: usize,
+    ) {
+        within_2s("the enforced handle is published under the capability", || {
+            worker
+                .capabilities
+                .inner
+                .state
+                .lock()
+                .records
+                .iter()
+                .any(|(key, record)| &key.alloc == allocation && record.handles.len() == handles)
+        })
+        .await;
+    }
+
+    /// The members one shared allocation at `address` owns: its managed-guest
+    /// and outbound-source member and one inbound destination per port.
+    fn allocation_members(address: Ipv4Addr, ports: &[u16]) -> InterceptMembers {
+        InterceptMembers {
+            managed_guest_ips: BTreeSet::from([address]),
+            outbound_sources: BTreeSet::from([address]),
+            inbound_destinations: ports
+                .iter()
+                .map(|port| SocketAddrV4::new(address, *port))
+                .collect(),
+        }
+    }
+
+    /// The fault a scripted element removal returns.
+    fn scripted_element_removal_cause() -> InterceptError {
+        InterceptError::NftElementUpdateFailed {
+            set: InterceptSet::ManagedGuestIps,
+            operation: InterceptElementOperation::Delete,
+            key: InterceptElementKey::Address(Ipv4Addr::new(100, 95, 0, 2)),
+            source: crate::mtls_intercept::NetlinkError::nft(
+                "scripted-element-remove",
+                std::io::Error::from_raw_os_error(libc::EBUSY),
+            ),
+        }
+    }
+
+    fn is_scripted_element_removal_cause(error: &InterceptError) -> bool {
+        matches!(
+            error,
+            InterceptError::NftElementUpdateFailed {
+                operation: InterceptElementOperation::Delete,
+                source: crate::mtls_intercept::NetlinkError::Nft { op, source },
+                ..
+            } if *op == "scripted-element-remove" && source.raw_os_error() == Some(libc::EBUSY)
+        )
+    }
+
+    /// Drive `future` for up to 50 ms; it must still be pending. The first
+    /// poll runs the call's synchronous admission, so a caller polled here has
+    /// provably asked before the body continues.
+    async fn assert_still_pending<F: std::future::Future + Unpin>(label: &str, future: &mut F) {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), future).await.is_err(),
+            "{label}: must still be waiting"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Every handle teardown succeeds and the element removal fails: the stop
+    /// returns `ElementRemoval` with the typed cause, keeps the Retiring record
+    /// (the address stays reserved) and the element guards (every member stays
+    /// installed), and a retried stop runs exactly one new removal and releases
+    /// the address (FD 2931-2954, 3056-3062).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    async fn element_removal_failure_keeps_the_retiring_record_until_a_retry_converges() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let address = Ipv4Addr::new(100, 95, 0, 2);
+        let allocation = alloc("element-removal-retry");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), address))
+            .await
+            .expect("publish one shared allocation");
+        let installed = intercept.members();
+        assert_eq!(installed, allocation_members(address, &[8443]), "precondition: installed");
+        intercept.script_removal_failures(1, scripted_element_removal_cause);
+
+        let failure =
+            worker.stop_alloc(&allocation).await.expect_err("the removal failure surfaces");
+        let super::MtlsInterceptStopError::ElementRemoval { alloc_id, source } = &failure else {
+            panic!("expected ElementRemoval, got {failure:?}");
+        };
+        assert_eq!(alloc_id, &allocation);
+        assert!(
+            is_scripted_element_removal_cause(source),
+            "the typed removal cause is reachable through the field: {source:?}"
+        );
+        assert_eq!(intercept.removal_calls(), 1, "the attempt ran one element removal");
+        assert_eq!(
+            intercept.members(),
+            installed,
+            "a failed removal keeps every member and element guard in place"
+        );
+        let contender =
+            worker.start_alloc(&shared_spec(alloc("element-removal-contender"), address)).await;
+        assert!(
+            matches!(
+                contender,
+                Err(super::MtlsInterceptInstallError::RegistrationConflict { address: reserved })
+                    if reserved == address
+            ),
+            "the Retiring record keeps the address reserved: {contender:?}"
+        );
+
+        worker.stop_alloc(&allocation).await.expect("the retried stop converges");
+        assert_eq!(intercept.removal_calls(), 2, "the retry runs exactly one new removal");
+        assert_eq!(intercept.members(), InterceptMembers::default(), "every member is removed");
+        worker
+            .start_alloc(&shared_spec(alloc("element-removal-successor"), address))
+            .await
+            .expect("the address is reusable once the retry converges");
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// B-6 caller rule 1 (FD 3076-3084): a second `stop_alloc(a)` issued while
+    /// the first attempt's element removal is held joins that attempt. When the
+    /// removal fails, both callers receive equal errors — same variant, same
+    /// allocation — whose sources are `Arc::ptr_eq`, and the attempt called
+    /// `remove_allocation_elements` once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    async fn callers_joined_on_one_failed_stop_receive_equal_failures_with_shared_sources() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let allocation = alloc("joined-stop-callers");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::new(100, 95, 0, 2)))
+            .await
+            .expect("publish one shared allocation");
+        intercept.script_removal_failures(1, scripted_element_removal_cause);
+        intercept.hold_removals(true);
+
+        let first = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let allocation = allocation.clone();
+            async move { worker.stop_alloc(&allocation).await }
+        });
+        within_2s("the first caller's attempt enters element removal", || {
+            intercept.removal_calls() == 1
+        })
+        .await;
+        let mut second = Box::pin(worker.stop_alloc(&allocation));
+        assert_still_pending("a caller joined on the held attempt", &mut second).await;
+        assert_eq!(intercept.removal_calls(), 1, "the joined caller begins no attempt of its own");
+        intercept.hold_removals(false);
+
+        let first = tokio::time::timeout(Duration::from_secs(2), first)
+            .await
+            .expect("the attempt ends within 2 s")
+            .expect("the first caller's task joins")
+            .expect_err("the held removal fails");
+        let second = tokio::time::timeout(Duration::from_secs(2), second)
+            .await
+            .expect("the joined caller returns within 2 s")
+            .expect_err("the joined caller receives the same failure");
+        let (
+            super::MtlsInterceptStopError::ElementRemoval { alloc_id: first_alloc, source: first },
+            super::MtlsInterceptStopError::ElementRemoval {
+                alloc_id: second_alloc,
+                source: second,
+            },
+        ) = (&first, &second)
+        else {
+            panic!("both callers must receive ElementRemoval, got {first:?} and {second:?}");
+        };
+        assert_eq!(first_alloc, &allocation);
+        assert_eq!(second_alloc, &allocation);
+        assert!(Arc::ptr_eq(first, second), "joined callers share one source Arc");
+        assert!(is_scripted_element_removal_cause(first), "the typed cause survives: {first:?}");
+        assert_eq!(intercept.removal_calls(), 1, "one attempt, one element removal");
+
+        worker.stop_alloc(&allocation).await.expect("a later retry converges");
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// B-6 caller rule 3 (FD 3087-3093): after an attempt ends `Err`, two
+    /// simultaneous `stop_alloc(a)` calls begin exactly one new attempt between
+    /// them (`removal_calls()` rises by one, not two), and both receive that
+    /// attempt's result — never the error it supersedes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    async fn the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let address = Ipv4Addr::new(100, 95, 0, 2);
+        let allocation = alloc("simultaneous-retry-callers");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), address))
+            .await
+            .expect("publish one shared allocation");
+        intercept.script_removal_failures(1, scripted_element_removal_cause);
+        let superseded = worker.stop_alloc(&allocation).await.expect_err("the first attempt fails");
+        assert!(
+            matches!(superseded, super::MtlsInterceptStopError::ElementRemoval { .. }),
+            "the superseded attempt failed at element removal: {superseded:?}"
+        );
+        assert_eq!(intercept.removal_calls(), 1);
+
+        intercept.hold_removals(true);
+        let mut left = Box::pin(worker.stop_alloc(&allocation));
+        let mut right = Box::pin(worker.stop_alloc(&allocation));
+        assert_still_pending("the left caller's retry", &mut left).await;
+        assert_still_pending("the right caller", &mut right).await;
+        within_2s("the one new attempt enters element removal", || intercept.removal_calls() == 2)
+            .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            intercept.removal_calls(),
+            2,
+            "simultaneous later callers begin one attempt between them"
+        );
+        intercept.hold_removals(false);
+
+        let left = tokio::time::timeout(Duration::from_secs(2), left)
+            .await
+            .expect("the left caller returns within 2 s");
+        let right = tokio::time::timeout(Duration::from_secs(2), right)
+            .await
+            .expect("the right caller returns within 2 s");
+        left.expect("the left caller receives the new attempt's result, not the superseded error");
+        right
+            .expect("the right caller receives the new attempt's result, not the superseded error");
+        assert_eq!(intercept.removal_calls(), 2, "exactly one retry ran");
+        assert_eq!(
+            intercept.members(),
+            InterceptMembers::default(),
+            "the retry removed every member"
+        );
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// B-6 caller rules 4 and 5 (FD 3094-3104): with `a`'s failed attempt
+    /// retained, `b` active, and removals held so the owner shutdown's teardown
+    /// of `b` is in flight, `stop_alloc(a)` runs no removal or teardown of its
+    /// own and returns, after the owner shutdown, an error equal to the
+    /// shutdown result's entry for `a` (pointer-equal source); `stop_alloc(b)`
+    /// returns `Ok(())` because the owner shutdown's teardown of `b` succeeded.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one owner-shutdown narrative keeps the retained failure, the in-flight \
+                  teardown, both late callers, and the stored result together"
+    )]
+    async fn a_stop_after_owner_shutdown_began_starts_nothing_and_returns_its_shutdown_entry() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let first = alloc("shutdown-entry-a");
+        let second = alloc("shutdown-entry-b");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(first.clone(), Ipv4Addr::new(100, 95, 0, 2)))
+            .await
+            .expect("publish allocation a");
+        worker
+            .start_alloc(&shared_spec(second.clone(), Ipv4Addr::new(100, 95, 0, 3)))
+            .await
+            .expect("publish allocation b");
+        intercept.script_removal_failures(1, scripted_element_removal_cause);
+        let retained = worker.stop_alloc(&first).await.expect_err("a's attempt fails");
+        let super::MtlsInterceptStopError::ElementRemoval { source: retained_source, .. } =
+            &retained
+        else {
+            panic!("expected a's ElementRemoval, got {retained:?}");
+        };
+        assert_eq!(intercept.removal_calls(), 1);
+
+        intercept.hold_removals(true);
+        let shutdown = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            async move { worker.shutdown_owner().await }
+        });
+        within_2s("the owner shutdown's teardown of b is in flight", || {
+            intercept.removal_calls() == 2
+        })
+        .await;
+        let mut stop_first = Box::pin(worker.stop_alloc(&first));
+        let mut stop_second = Box::pin(worker.stop_alloc(&second));
+        assert_still_pending("stop_alloc(a) after owner shutdown began", &mut stop_first).await;
+        assert_still_pending("stop_alloc(b) after owner shutdown began", &mut stop_second).await;
+        assert_eq!(
+            intercept.removal_calls(),
+            2,
+            "a stop after owner shutdown began runs no removal of its own"
+        );
+        intercept.hold_removals(false);
+
+        let shutdown = tokio::time::timeout(Duration::from_secs(2), shutdown)
+            .await
+            .expect("the owner shutdown ends within 2 s")
+            .expect("the owner shutdown task joins")
+            .expect_err("the owner shutdown stores a's retained failure");
+        let entries = shutdown
+            .failures
+            .iter()
+            .filter_map(|failure| match failure {
+                super::MtlsInterceptStopError::ElementRemoval { alloc_id, source } => {
+                    Some((alloc_id.clone(), Arc::clone(source)))
+                }
+                super::MtlsInterceptStopError::HandleTeardown { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(shutdown.failures.len(), 1, "at most one entry per allocation: {shutdown:?}");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, first, "the only entry is a's");
+        assert!(
+            Arc::ptr_eq(&entries[0].1, retained_source),
+            "the entry is a clone of a's last attempt result"
+        );
+
+        let stop_first = tokio::time::timeout(Duration::from_secs(2), stop_first)
+            .await
+            .expect("stop_alloc(a) returns after the owner shutdown")
+            .expect_err("stop_alloc(a) returns a's shutdown entry");
+        let super::MtlsInterceptStopError::ElementRemoval { alloc_id, source } = &stop_first else {
+            panic!("expected a's shutdown entry, got {stop_first:?}");
+        };
+        assert_eq!(alloc_id, &first);
+        assert!(Arc::ptr_eq(source, &entries[0].1), "pointer-equal to the shutdown entry");
+        tokio::time::timeout(Duration::from_secs(2), stop_second)
+            .await
+            .expect("stop_alloc(b) returns after the owner shutdown")
+            .expect("b's teardown by the owner shutdown succeeded");
+        assert_eq!(intercept.removal_calls(), 2, "owner shutdown began no retry for a");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
+    /// CONTRACT_SHAPE: pure-function.
+    ///
+    /// `MtlsSharedOwnerError::component()` is the one SSOT the supervisor
+    /// consumes; its table equals FD 3251-3258 row for row. The exhaustive
+    /// `variant_name` match is the closed-set guard: a new variant fails to
+    /// compile here until the table names it.
+    #[test]
+    #[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
+    fn every_shared_owner_error_reports_its_one_component() {
+        use super::MtlsSharedOwnerError as E;
+        use overdrive_core::guest_network::SharedGuestNetworkComponent as Component;
+
+        fn variant_name(error: &E) -> &'static str {
+            match error {
+                E::NotStarted => "NotStarted",
+                E::OwnerShutdown => "OwnerShutdown",
+                E::ListenerBind { .. } => "ListenerBind",
+                E::ListenerLocalAddr { .. } => "ListenerLocalAddr",
+                E::ListenerPostcondition { .. } => "ListenerPostcondition",
+                E::Intercept { .. } => "Intercept",
+                E::TaskReturned { .. } => "TaskReturned",
+                E::TaskFailed { .. } => "TaskFailed",
+                E::TaskPanicked { .. } => "TaskPanicked",
+                E::TaskCancelled { .. } => "TaskCancelled",
+                E::TaskObserverClosed => "TaskObserverClosed",
+                E::BootMemberClear { .. } => "BootMemberClear",
+                E::MemberMismatch { .. } => "MemberMismatch",
+                E::MemberRepair { .. } => "MemberRepair",
+            }
+        }
+
+        let requested = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
+        let io = || std::io::Error::from_raw_os_error(libc::EIO);
+        let intercept = || InterceptError::TransparentListener { addr: requested, source: io() };
+        let leg_component = |leg: InterceptLeg| match leg {
+            InterceptLeg::F => Component::LegF,
+            InterceptLeg::C => Component::LegC,
+        };
+        let mut rows = Vec::new();
+        for leg in [InterceptLeg::F, InterceptLeg::C] {
+            rows.push((
+                E::ListenerBind { leg, requested, source: intercept() },
+                leg_component(leg),
+            ));
+            rows.push((E::ListenerLocalAddr { leg, source: io() }, leg_component(leg)));
+            rows.push((
+                E::ListenerPostcondition { leg, expected: requested, observed: None },
+                leg_component(leg),
+            ));
+            rows.push((E::TaskReturned { leg }, leg_component(leg)));
+            rows.push((E::TaskFailed { leg, source: io() }, leg_component(leg)));
+            rows.push((E::TaskPanicked { leg }, leg_component(leg)));
+            rows.push((E::TaskCancelled { leg }, leg_component(leg)));
+        }
+        rows.push((E::Intercept { source: intercept() }, Component::IpRules));
+        rows.push((
+            E::MemberMismatch {
+                expected: InterceptMembers::default(),
+                observed: allocation_members(Ipv4Addr::new(100, 95, 0, 2), &[8443]),
+            },
+            Component::IpSets,
+        ));
+        rows.push((E::MemberRepair { source: intercept() }, Component::IpSets));
+        rows.push((E::BootMemberClear { source: intercept() }, Component::IpSets));
+        rows.push((E::NotStarted, Component::Supervisor));
+        rows.push((E::OwnerShutdown, Component::Supervisor));
+        rows.push((E::TaskObserverClosed, Component::Supervisor));
+
+        let covered = rows.iter().map(|(error, _)| variant_name(error)).collect::<BTreeSet<_>>();
+        assert_eq!(covered.len(), 14, "the table names every variant: {covered:?}");
+        for (error, expected) in &rows {
+            assert_eq!(
+                error.component(),
+                *expected,
+                "{} reports {expected:?}",
+                variant_name(error)
+            );
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Each leg parks exactly one accept; dropping the last worker reference
+    /// cancels both waits and releases both listeners (FD 3665-3679: an accept
+    /// task never keeps the worker alive).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn an_idle_accept_task_ends_when_the_last_worker_reference_drops() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        let legs = intercept.live_listeners();
+        assert_eq!(legs.len(), 2, "the port owns both shared listeners: {legs:?}");
+        within_2s("each leg parks exactly one accept", || {
+            legs.iter().all(|leg| intercept.parked_accepts(*leg) == 1)
+        })
+        .await;
+
+        drop(worker);
+        within_2s("both accept waits end and both listeners are released", || {
+            intercept.live_listeners().is_empty()
+                && legs.iter().all(|leg| intercept.parked_accepts(*leg) == 0)
+        })
+        .await;
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// When `shutdown_owner` returns `Ok`, both accept tasks have ended, both
+    /// listeners are released, and the node guard was relinquished, not dropped
+    /// (FD 3665-3679; D15).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn owner_shutdown_ends_both_accept_tasks_releases_both_listeners_and_relinquishes_the_node_guard()
+     {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        let legs = intercept.live_listeners();
+        assert_eq!(legs.len(), 2, "the port owns both shared listeners: {legs:?}");
+        within_2s("each leg parks exactly one accept", || {
+            legs.iter().all(|leg| intercept.parked_accepts(*leg) == 1)
+        })
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(2), worker.shutdown_owner())
+            .await
+            .expect("owner shutdown returns within 2 s")
+            .expect("owner shutdown succeeds");
+        assert!(
+            legs.iter().all(|leg| intercept.parked_accepts(*leg) == 0),
+            "both accept tasks have ended when shutdown returns"
+        );
+        assert!(intercept.live_listeners().is_empty(), "both listeners are released");
+        assert_eq!(intercept.node_guard_drops(), 0, "the node guard is relinquished, not dropped");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A lost leg-F listener ends only leg F's task (`TaskFailed { leg: F }`
+    /// with the listener's errno) while leg C stays parked; the owner releases
+    /// the dead listener before rebinding exactly the recorded leg-F address,
+    /// so the rebind is never refused by its own listener, and the audit then
+    /// passes (FD 3587-3591, 3668-3672).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn a_lost_listener_ends_only_its_own_task_and_the_owner_rebinds_the_recorded_address() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let allocation = alloc("lost-listener-rebind");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::new(100, 95, 0, 2)))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, leg_c) = shared_legs(&intercept, &worker, &allocation);
+        within_2s("each leg parks exactly one accept", || {
+            intercept.parked_accepts(leg_f) == 1 && intercept.parked_accepts(leg_c) == 1
+        })
+        .await;
+
+        assert!(
+            intercept.script_accept(leg_f, TestAcceptScript::ListenerLost { errno: libc::EINVAL })
+        );
+        let failure =
+            tokio::time::timeout(Duration::from_secs(2), worker.wait_shared_owner_failure())
+                .await
+                .expect("the lost listener is observed within 2 s");
+        assert!(
+            matches!(
+                &failure,
+                super::MtlsSharedOwnerError::TaskFailed { leg: InterceptLeg::F, source }
+                    if source.raw_os_error() == Some(libc::EINVAL)
+            ),
+            "leg F's task ends with the listener's own failure: {failure:?}"
+        );
+        assert_eq!(intercept.parked_accepts(leg_c), 1, "leg C keeps waiting");
+
+        worker
+            .converge_shared_owner()
+            .await
+            .expect("the owner rebinds exactly the recorded leg-F address");
+        assert_eq!(
+            intercept.live_listeners(),
+            BTreeSet::from([leg_f, leg_c]).into_iter().collect::<Vec<_>>(),
+            "the rebind took the recorded address, not another port"
+        );
+        within_2s("the rebound leg F parks a new accept", || intercept.parked_accepts(leg_f) == 1)
+            .await;
+        worker.audit_shared_owner().await.expect("the repaired owner audits clean");
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// An accepted connection whose original destination cannot be read is
+    /// connection-scoped: it ends no task and the leg re-parks (FD 3592-3596).
+    /// A later `ListenerLost` proves the task consumed the first script and
+    /// kept waiting.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn a_connection_whose_destination_cannot_be_read_is_dropped_and_the_task_keeps_waiting() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let allocation = alloc("unreadable-destination");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::new(100, 95, 0, 2)))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
+        within_2s("leg F parks one accept", || intercept.parked_accepts(leg_f) == 1).await;
+
+        assert!(intercept.script_accept(
+            leg_f,
+            TestAcceptScript::OriginalDestinationFailure { errno: libc::ENOTCONN }
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), worker.wait_shared_owner_failure())
+                .await
+                .is_err(),
+            "a connection-scoped failure ends no accept task"
+        );
+        within_2s("leg F re-parks", || intercept.parked_accepts(leg_f) == 1).await;
+        worker.audit_shared_owner().await.expect("the owner stays healthy");
+
+        assert!(
+            intercept.script_accept(leg_f, TestAcceptScript::ListenerLost { errno: libc::EIO })
+        );
+        let failure =
+            tokio::time::timeout(Duration::from_secs(2), worker.wait_shared_owner_failure())
+                .await
+                .expect("the later loss is observed within 2 s");
+        assert!(
+            matches!(
+                &failure,
+                super::MtlsSharedOwnerError::TaskFailed { leg: InterceptLeg::F, source }
+                    if source.raw_os_error() == Some(libc::EIO)
+            ),
+            "the task took the next script, so the first one was consumed: {failure:?}"
+        );
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A listener whose bound address cannot be read makes the audit return
+    /// `ListenerLocalAddr` for that leg with the adapter's cause (FD 3574-3578).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn an_unreadable_listener_address_is_reported_by_the_audit() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        let allocation = alloc("unreadable-listener-address");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::new(100, 95, 0, 2)))
+            .await
+            .expect("publish one shared allocation");
+        let (_leg_f, leg_c) = shared_legs(&intercept, &worker, &allocation);
+
+        assert!(intercept.script_local_addr_failure(leg_c, libc::EBADF));
+        let error = worker.audit_shared_owner().await.expect_err("the audit reads leg C's address");
+        assert!(
+            matches!(
+                &error,
+                super::MtlsSharedOwnerError::ListenerLocalAddr { leg: InterceptLeg::C, source }
+                    if source.raw_os_error() == Some(libc::EBADF)
+            ),
+            "the audit names leg C and the adapter's cause: {error:?}"
+        );
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// `MtlsEnforcement` whose `enforce` succeeds at once and whose `teardown`
+    /// waits on a release gate and fails the first time when armed — the
+    /// `GatedTeardown` of the per-allocation originals, over a real enforce so
+    /// a shared allocation can publish a handle.
+    struct GatedSharedEnforcement {
+        counter: std::sync::atomic::AtomicU64,
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+        calls: AtomicUsize,
+        fail_first: AtomicBool,
+    }
+
+    impl GatedSharedEnforcement {
+        fn new(fail_first: bool) -> Arc<Self> {
+            Arc::new(Self {
+                counter: std::sync::atomic::AtomicU64::new(0),
+                entered: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+                calls: AtomicUsize::new(0),
+                fail_first: AtomicBool::new(fail_first),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl MtlsEnforcement for GatedSharedEnforcement {
+        async fn probe(&self) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            Ok(())
+        }
+
+        async fn enforce(
+            &self,
+            connection: InterceptedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
+            let sequence = self.counter.fetch_add(1, Ordering::SeqCst);
+            Ok(EnforcedConnection::new(EnforcedConnectionId::new(connection.alloc, sequence)))
+        }
+
+        fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
+            PumpLiveness::Running
+        }
+
+        async fn teardown(
+            &self,
+            handle: EnforcedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.entered.notify_one();
+            self.release.notified().await;
+            if self.fail_first.swap(false, Ordering::SeqCst) {
+                return Err(MtlsEnforcementError::TeardownFailed {
+                    id: handle.id().clone(),
+                    source: std::io::Error::other("injected teardown failure"),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    /// A started shared owner over `enforcement` whose resolve enforces the
+    /// connection `accepted_leg_f` returns, one shared allocation at loopback,
+    /// and its one published handle, delivered through the shared leg-F
+    /// listener.
+    async fn shared_allocation_with_one_handle(
+        enforcement: Arc<dyn MtlsEnforcement>,
+        name: &str,
+    ) -> (Arc<MtlsInterceptWorker>, Arc<TestSharedIntercept>, AllocationId, TcpStream) {
+        let (leg, orig_dst, client) = accepted_leg_f();
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let allocation = alloc(name);
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        wait_published(&worker, &allocation, 1).await;
+        (worker, intercept, allocation, client)
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `replacement_shutdown_waits_for_the_same_authoritative_teardown`
+    /// over a shared allocation: cancelled and concurrent owner-shutdown
+    /// callers share one sealed completion, and a later caller creates no
+    /// second cleanup generation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_replacement_shutdown_waits_for_the_same_authoritative_teardown() {
+        let enforcement = GatedSharedEnforcement::new(true);
+        let (worker, _intercept, _allocation, _client) = shared_allocation_with_one_handle(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            "shared-shutdown-fence",
+        )
+        .await;
+
+        let leader = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            async move { worker.shutdown_owner().await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("authoritative teardown starts");
+        leader.abort();
+        let mut replacement = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            async move { worker.shutdown_owner().await }
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement).await.is_err(),
+            "replacement caller cannot return before enforcement teardown"
+        );
+        enforcement.release.notify_one();
+        let first = tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement observes full-worker completion")
+            .expect("replacement task joins");
+        assert!(first.is_err(), "every concurrent caller observes the teardown failure");
+        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 1);
+
+        assert!(worker.shutdown_owner().await.is_err());
+        assert_eq!(
+            enforcement.calls.load(Ordering::SeqCst),
+            1,
+            "a sealed process owner never retries failed teardown work"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `same_owner_reinstall_waits_for_prior_teardown_before_readiness`
+    /// over a shared allocation: a same-allocation re-install cannot report
+    /// readiness before the prior teardown ends.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_same_owner_reinstall_waits_for_prior_teardown_before_readiness() {
+        let enforcement = GatedSharedEnforcement::new(false);
+        let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            "shared-same-owner-reinstall-fence",
+        )
+        .await;
+
+        let mut replacement = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST);
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("prior teardown reaches its controllable fence");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut replacement).await.is_err(),
+            "replacement readiness must remain pending while the prior exact owner is retiring"
+        );
+        enforcement.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), replacement)
+            .await
+            .expect("replacement readiness is bounded after teardown release")
+            .expect("replacement task joins")
+            .expect("same-owner reinstall succeeds after prior teardown");
+        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 1);
+        worker.stop_alloc(&allocation).await.expect("replacement owner cleans up");
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `same_owner_reinstall_failure_keeps_readiness_closed_until_retry`
+    /// over a shared allocation: a failed prior teardown keeps the replacement
+    /// closed and retryable.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_same_owner_reinstall_failure_keeps_readiness_closed_until_retry() {
+        let enforcement = GatedSharedEnforcement::new(true);
+        let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
+            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+            "shared-same-owner-reinstall-retry",
+        )
+        .await;
+
+        let first = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST);
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("first prior teardown starts");
+        enforcement.release.notify_one();
+        let first = first.await.expect("first replacement task joins");
+        assert!(matches!(first, Err(super::MtlsInterceptInstallError::PriorTeardown { .. })));
+        assert_eq!(
+            worker.leg_c_addr(&allocation),
+            None,
+            "failed prior teardown cannot install or report a replacement"
+        );
+
+        let retry = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let spec = shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST);
+            async move { worker.start_alloc(&spec).await }
+        });
+        tokio::time::timeout(Duration::from_secs(1), enforcement.entered.notified())
+            .await
+            .expect("retry reaches the retained exact teardown handle");
+        enforcement.release.notify_one();
+        retry
+            .await
+            .expect("retry task joins")
+            .expect("retry converges before replacement installation");
+        assert!(worker.leg_c_addr(&allocation).is_some());
+        assert_eq!(enforcement.calls.load(Ordering::SeqCst), 2);
+        worker.stop_alloc(&allocation).await.expect("replacement owner cleans up");
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `completed_enforce_handle_is_torn_down_not_orphaned` over a
+    /// shared allocation: a completed enforcement's handle is retained under
+    /// the capability and torn down exactly once by stop.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_completed_enforce_handle_is_torn_down_not_orphaned() {
+        let spy = GatedEnforcement::new();
+        let (leg, orig_dst, _client) = accepted_leg_f();
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&spy) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let the_alloc = alloc("shared-orphan-race");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+
+        tokio::time::timeout(Duration::from_secs(5), spy.entered())
+            .await
+            .expect("enforce must enter (in-flight) within 5s");
+        spy.release();
+        wait_published(&worker, &the_alloc, 1).await;
+
+        tokio::time::timeout(Duration::from_secs(10), worker.stop_alloc(&the_alloc))
+            .await
+            .expect("allocation stop is bounded")
+            .expect("teardown succeeds");
+
+        let recorded = spy.torn_down();
+        assert!(spy.exited.load(Ordering::SeqCst), "the in-flight enforce child is joined");
+        assert_eq!(recorded.len(), 1, "the completed handle is torn down exactly once");
+        assert_eq!(recorded[0].alloc(), &the_alloc);
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `allocation_stop_joins_an_inflight_enforce_child` over a shared
+    /// allocation. The per-allocation original requires stop to abort the
+    /// child before it would return; C-295-L instead has retirement wait for
+    /// the in-flight claim and tear the late handle down rather than publish it
+    /// (FD 8183-8193), which the retained shared body
+    /// `enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain`
+    /// asserts. The DESIGN governs, so this twin keeps the join: stop does not
+    /// return while the enforce child is in flight, and when it returns the
+    /// child has ended and its handle is torn down exactly once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_allocation_stop_joins_an_inflight_enforce_child() {
+        let spy = GatedEnforcement::new();
+        let (leg, orig_dst, _client) = accepted_leg_f();
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            Arc::clone(&spy) as Arc<dyn MtlsEnforcement>,
+            resolve_scripting(
+                orig_dst,
+                MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+            ),
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let the_alloc = alloc("shared-stopped-owner-child");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        tokio::time::timeout(Duration::from_secs(2), spy.entered())
+            .await
+            .expect("enforce child enters its blocking gate");
+
+        let mut stop = tokio::spawn({
+            let worker = Arc::clone(&worker);
+            let the_alloc = the_alloc.clone();
+            async move { worker.stop_alloc(&the_alloc).await }
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut stop).await.is_err(),
+            "allocation stop cannot pass the in-flight enforce child"
+        );
+        spy.release();
+        tokio::time::timeout(Duration::from_secs(10), stop)
+            .await
+            .expect("allocation stop is bounded")
+            .expect("allocation stop task joins")
+            .expect("allocation stop succeeds");
+        assert!(spy.exited.load(Ordering::SeqCst), "the enforce child ended before stop returned");
+        let torn_down = spy.torn_down();
+        assert_eq!(torn_down.len(), 1, "the late handle is torn down exactly once, never orphaned");
+        assert_eq!(torn_down[0].alloc(), &the_alloc);
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `allocation_stop_joins_a_passthrough_child` over a shared
+    /// allocation: stop joins every pass-through child before returning, so
+    /// both relay legs are closed when it returns.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
+    async fn shared_allocation_stop_joins_a_passthrough_child() {
+        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind upstream server");
+        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
+            std::net::SocketAddr::V4(addr) => addr,
+            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
+        };
+        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
+        let accept_thread = std::thread::spawn(move || {
+            let (stream, _) = upstream.accept().expect("accept pass-through dial");
+            accepted_tx.send(stream).expect("return accepted upstream leg");
+        });
+
+        let (spy, _calls) = SpyEnforcement::new();
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            spy,
+            resolve_scripting(upstream_addr, MtlsResolution::NonMesh),
+            Arc::new(SimClock::new()),
+            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
+        ));
+        let the_alloc = alloc("shared-stopped-passthrough-child");
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker
+            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
+            .await
+            .expect("publish one shared allocation");
+        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
+        let (leg, _addr, mut client) = accepted_leg_f();
+        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
+        let mut accepted = accepted_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("pass-through child connects to upstream");
+        accept_thread.join().expect("upstream accept thread");
+
+        tokio::time::timeout(Duration::from_secs(10), worker.stop_alloc(&the_alloc))
+            .await
+            .expect("allocation stop is bounded")
+            .expect("allocation stop succeeds");
+
+        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
+        accepted.set_read_timeout(Some(Duration::from_secs(1))).expect("set upstream timeout");
+        let mut byte = [0_u8; 1];
+        assert_eq!(client.read(&mut byte).expect("client leg closes after joined child"), 0);
+        assert_eq!(accepted.read(&mut byte).expect("upstream leg closes after joined child"), 0);
+        worker.shutdown_owner().await.expect("the shared owner joins");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Twin of `allocation_start_after_owner_shutdown_is_rejected_before_install`
+    /// over a shared allocation: a late install creates no listener, member, or
+    /// child.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn shared_allocation_start_after_owner_shutdown_is_rejected_before_install() {
+        let intercept = Arc::new(TestSharedIntercept::new());
+        let worker = shared_worker(&intercept);
+        worker.start_shared_owner().await.expect("publish the shared owner");
+        worker.shutdown_owner().await.expect("worker owner shutdown converges");
+        let alloc = alloc("shared-late-after-owner-shutdown");
+
+        assert!(matches!(
+            worker.start_alloc(&shared_spec(alloc.clone(), Ipv4Addr::new(100, 95, 0, 2))).await,
+            Err(super::MtlsInterceptInstallError::OwnerShutdown)
+        ));
+        assert_eq!(worker.leg_c_addr(&alloc), None);
+        assert_eq!(intercept.members(), InterceptMembers::default(), "no member was installed");
+        assert!(intercept.live_listeners().is_empty(), "no listener outlives the owner");
     }
 }

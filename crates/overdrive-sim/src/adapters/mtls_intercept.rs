@@ -888,8 +888,12 @@ mod tests {
     /// is exactly the default-lane I/O this suite must not perform.
     fn drive_expecting_err(sut: &SimMtlsIntercept, method: Method) -> InterceptError {
         match method {
+            // The `Ok` payload is mapped away before `expect_err` so this
+            // compiles on both sides of the B-7 step: from that step on it is
+            // an `Arc<dyn InterceptListener>`, which is not `Debug`.
             Method::BindTransparent => sut
                 .bind_transparent(LEG_ADDR)
+                .map(|_listener| ())
                 .expect_err("an armed bind fault short-circuits before any syscall"),
             // `Box<dyn InterceptGuard>` is not `Debug` (the guard's entire
             // contract is its `Drop`), so the `Ok` payload is mapped away
@@ -1023,19 +1027,15 @@ mod tests {
     /// after the first `clear_faults()` (both `Ok`, each handing back a guard),
     /// and the same two after a SECOND `clear_faults()` (still `Ok`).
     ///
-    /// `bind_transparent` is deliberately NOT re-driven after the clear — its
-    /// `Ok` arm binds a real plain loopback socket (DFS-5) and would push this
-    /// scenario into the integration lane.
-    ///
-    /// **Consequence, recorded rather than glossed: that the BIND slot is
-    /// cleared is NOT asserted — not here, and nowhere else in the tree.**
-    /// `clear_faults` has exactly two call sites, both in this test; S-MIF-13
-    /// arms its slots on three FRESH doubles and never clears, and the
-    /// integration-lane S-MIF-09 never clears either. So deleting
-    /// `clear_faults`'s `*self.bind_fault.lock() = None;` line survives the
-    /// entire suite. Closing that gap requires re-driving `bind_transparent`,
-    /// whose `Ok` arm is the real socket bind this default-lane scenario
-    /// exists to stay out of — so the gap is stated, not covered.
+    /// `bind_transparent` is not re-driven here. That `clear_faults` also
+    /// disarms the BIND slot is asserted by
+    /// [`clear_faults_also_disarms_the_bind_slot`] (S-ND295-70), which
+    /// re-drives `bind_transparent` after the clear and reads back the
+    /// socket-free listener its `Ok` arm returns. That body stays pending
+    /// until the DELIVER step that carries B-7 (05-01) makes the `Ok` arm
+    /// socket-free; until then the `Ok` arm binds a real plain loopback
+    /// socket (DFS-5), the body is ignored, and deleting `clear_faults`'s
+    /// `*self.bind_fault.lock() = None;` line survives the active suite.
     ///
     /// The second `clear_faults()` is the fault state machine's
     /// illegal-event-from-the-disarmed-state case (C2b), asserted as a benign
@@ -1081,10 +1081,12 @@ mod tests {
     /// S-MIF-06/07/08 — each of those arms exactly one slot and reads back the
     /// same method.
     ///
-    /// Named coverage gap (deliberate): the FOURTH direction — arm an install
-    /// fault, confirm `bind_transparent` still takes its `Ok` arm — requires a
-    /// real socket bind (DFS-5) and is therefore not default-lane. Not
-    /// authored here.
+    /// The FOURTH direction — arm an install fault, confirm
+    /// `bind_transparent` still takes its `Ok` arm — is
+    /// [`an_install_fault_leaves_bind_on_its_success_arm`] (S-ND295-70). It
+    /// stays pending until the DELIVER step that carries B-7 (05-01) makes
+    /// that `Ok` arm socket-free; before that step the arm binds a real socket
+    /// (DFS-5), so the direction is not covered by the active suite.
     #[test]
     fn arming_one_slot_leaves_the_others_on_their_success_arms() {
         // Direction 1 — arming the BIND slot leaks to neither install.
@@ -1115,5 +1117,496 @@ mod tests {
             .expect("an inbound fault does not leak into install_outbound");
         let got = drive_expecting_err(&sut, Method::InstallInbound);
         assert_err_shape(&got, ExpectedErr::IpRuleAdd { errno: libc::EPERM });
+    }
+
+    // -----------------------------------------------------------------------
+    // S-ND295-70 — the socket-free listener surface (B-7, FD 3522-3663).
+    //
+    // Until the DELIVER step that carries B-7 (05-01), `bind_transparent`'s
+    // `Ok` arm returns a real `std::net::TcpListener` and registers nothing,
+    // so every body below is pending that step. The bodies reach the bound
+    // listener only through `LegListener`, so they compile on both sides of
+    // it and that step edits none of them.
+    // -----------------------------------------------------------------------
+
+    /// Every bounded wait in these bodies: a body that is RED fails instead
+    /// of hanging.
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// A loopback address at `port`.
+    const fn loopback(port: u16) -> SocketAddrV4 {
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
+    }
+
+    /// The sim-local copy of the `LegListener` bridge (TS § *Intercept
+    /// listener and stop-error test support*). `bind_transparent`'s `Ok`
+    /// value is a real `std::net::TcpListener` before the B-7 step and an
+    /// `Arc<dyn InterceptListener>` from then on. The `TcpListener`
+    /// implementation is deleted at that step (its test-support line 4).
+    trait LegListener {
+        /// The bound IPv4 address.
+        fn bound_v4(&self) -> std::io::Result<SocketAddrV4>;
+        /// A further holder of the socket-free port listener, or `None` when
+        /// the bind produced a real socket.
+        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>>;
+    }
+
+    impl LegListener for std::net::TcpListener {
+        fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
+            match self.local_addr()? {
+                std::net::SocketAddr::V4(bound) => Ok(bound),
+                std::net::SocketAddr::V6(bound) => {
+                    Err(std::io::Error::other(format!("real listener bound IPv6 {bound}")))
+                }
+            }
+        }
+
+        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>> {
+            None
+        }
+    }
+
+    impl LegListener for Arc<dyn InterceptListener> {
+        fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
+            self.local_addr()
+        }
+
+        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>> {
+            Some(Self::clone(self))
+        }
+    }
+
+    /// Bind through the port; return the holder and its bound address.
+    fn bind_live(sut: &SimMtlsIntercept, addr: SocketAddrV4) -> (impl LegListener, SocketAddrV4) {
+        let held = sut
+            .bind_transparent(addr)
+            .unwrap_or_else(|error| panic!("bind at {addr} must succeed: {error:?}"));
+        let bound = held.bound_v4().expect("a fresh listener reads its bound address");
+        (held, bound)
+    }
+
+    /// A further holder of the socket-free listener `held` holds.
+    fn port_of(held: &impl LegListener) -> Arc<dyn InterceptListener> {
+        held.port_listener().expect(
+            "bind_transparent's Ok arm returns the socket-free sim listener, not a real socket",
+        )
+    }
+
+    /// The error a bind that must be refused returns.
+    fn bind_refusal(sut: &SimMtlsIntercept, addr: SocketAddrV4) -> InterceptError {
+        match sut.bind_transparent(addr) {
+            Ok(_listener) => panic!("a bind at {addr} must be refused while a listener holds it"),
+            Err(error) => error,
+        }
+    }
+
+    /// `error` is the held-address refusal for `addr`.
+    fn assert_eaddrinuse(error: &InterceptError, addr: SocketAddrV4) {
+        assert!(
+            matches!(
+                error,
+                InterceptError::TransparentListener { addr: refused, source }
+                    if *refused == addr && source.raw_os_error() == Some(libc::EADDRINUSE)
+            ),
+            "a held address is refused with TransparentListener {{ {addr}, EADDRINUSE }}, got \
+             {error:?}",
+        );
+    }
+
+    /// A scripted accepted connection. An anonymous pipe stands in for the
+    /// stream: the sim neither reads nor writes it.
+    fn accepted(peer: SocketAddrV4, local: SocketAddrV4) -> InterceptAccepted {
+        let (reader, _writer) =
+            std::io::pipe().expect("an anonymous pipe stands in for the accepted stream");
+        InterceptAccepted { stream: std::os::fd::OwnedFd::from(reader), peer, local }
+    }
+
+    /// Poll `future` exactly once in the current task's context.
+    async fn poll_once<F: Future + Unpin + Send>(future: &mut F) -> std::task::Poll<F::Output> {
+        std::future::poll_fn(|cx| std::task::Poll::Ready(std::pin::Pin::new(&mut *future).poll(cx)))
+            .await
+    }
+
+    /// The `(peer, local)` of an accept that must return a connection.
+    fn connection_of(
+        outcome: std::result::Result<InterceptAccepted, InterceptAcceptError>,
+    ) -> (SocketAddrV4, SocketAddrV4) {
+        let accepted = outcome.expect("the accept returns the scripted connection");
+        (accepted.peer, accepted.local)
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A port-0 bind takes the smallest port ≥ 49152 that no live listener of
+    /// the adapter holds at the requested IP; an exact non-zero address is
+    /// honoured; a released port is handed out again; a fresh adapter repeats
+    /// the same sequence (no clock, no entropy).
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    fn fabricated_ports_are_deterministic_non_zero_and_distinct_among_live_listeners() {
+        let sut = SimMtlsIntercept::new();
+        let (first, first_at) = bind_live(&sut, LEG_ADDR);
+        let (_second, second_at) = bind_live(&sut, LEG_ADDR);
+        assert_eq!(
+            (first_at, second_at),
+            (loopback(49_152), loopback(49_153)),
+            "port 0 takes 49152, then 49153 while the first is held",
+        );
+
+        let (_exact, exact_at) = bind_live(&sut, loopback(49_154));
+        assert_eq!(exact_at, loopback(49_154), "an exact non-zero address is honoured");
+        let (_third, third_at) = bind_live(&sut, LEG_ADDR);
+        assert_eq!(third_at, loopback(49_155), "port 0 skips an exactly-bound live port");
+
+        let other_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let (_remote, remote_at) = bind_live(&sut, SocketAddrV4::new(other_ip, 0));
+        assert_eq!(
+            remote_at,
+            SocketAddrV4::new(other_ip, 49_152),
+            "port 0 binds at the requested IP, whose port space is its own",
+        );
+        assert_eq!(
+            sut.live_listeners(),
+            [remote_at, loopback(49_152), loopback(49_153), loopback(49_154), loopback(49_155)],
+            "live_listeners lists every live address, ascending",
+        );
+
+        drop(first);
+        let (_reused, reused_at) = bind_live(&sut, LEG_ADDR);
+        assert_eq!(reused_at, loopback(49_152), "a released port is the smallest free port again");
+
+        let replay = SimMtlsIntercept::new();
+        let (_replay_first, replay_first_at) = bind_live(&replay, LEG_ADDR);
+        let (_replay_second, replay_second_at) = bind_live(&replay, LEG_ADDR);
+        assert_eq!(
+            (replay_first_at, replay_second_at),
+            (loopback(49_152), loopback(49_153)),
+            "a fresh adapter fabricates the same ports",
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A held address is refused with `TransparentListener { addr,
+    /// EADDRINUSE }` while any `Arc` holds its listener; the refusal acquires
+    /// nothing; the address binds again once the last holder drops. The
+    /// refusal is per address, not per port.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
+        let sut = SimMtlsIntercept::new();
+        let (held, at) = bind_live(&sut, LEG_ADDR);
+        let second_holder = port_of(&held);
+
+        assert_eaddrinuse(&bind_refusal(&sut, at), at);
+        assert_eq!(sut.live_listeners(), [at], "a refused bind acquires nothing");
+
+        let same_port_other_ip = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), at.port());
+        let (_other, other_at) = bind_live(&sut, same_port_other_ip);
+        assert_eq!(other_at, same_port_other_ip, "the same port at another IP is a free address");
+
+        drop(held);
+        assert_eq!(
+            sut.live_listeners(),
+            [other_at, at],
+            "the second holder keeps the listener live"
+        );
+        assert_eaddrinuse(&bind_refusal(&sut, at), at);
+
+        drop(second_holder);
+        assert_eq!(sut.live_listeners(), [other_at], "the last holder's drop releases the address");
+        let (_rebound, rebound_at) = bind_live(&sut, at);
+        assert_eq!(rebound_at, at, "a released exact address binds again");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// With nothing scripted, `accept` stays pending and is counted parked
+    /// once however often it is polled; dropping it un-parks it and takes
+    /// nothing — neither a connection scripted after the drop nor one
+    /// scripted while it was parked but not yet re-polled.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    async fn an_unscripted_accept_stays_parked_and_a_cancelled_accept_takes_nothing() {
+        let sut = SimMtlsIntercept::new();
+        let (held, at) = bind_live(&sut, LEG_ADDR);
+        let listener = port_of(&held);
+        let peer = SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 2), 40_000);
+        let local = SocketAddrV4::new(Ipv4Addr::new(10, 99, 1, 7), 443);
+        assert_eq!(sut.parked_accepts(at), 0, "no accept has been polled");
+
+        let mut pending = listener.accept();
+        assert!(poll_once(&mut pending).await.is_pending(), "nothing scripted: the accept waits");
+        assert_eq!(sut.parked_accepts(at), 1);
+        tokio::task::yield_now().await;
+        assert!(poll_once(&mut pending).await.is_pending(), "it waits with no timeout");
+        assert_eq!(sut.parked_accepts(at), 1, "a re-polled accept is still one parked accept");
+        drop(pending);
+        assert_eq!(sut.parked_accepts(at), 0, "dropping a pending accept un-parks it");
+
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(peer, local))));
+        let next = tokio::time::timeout(WAIT, listener.accept())
+            .await
+            .expect("a scripted connection completes the next accept");
+        assert_eq!(connection_of(next), (peer, local), "the cancelled accept took nothing");
+
+        let mut woken = listener.accept();
+        assert!(poll_once(&mut woken).await.is_pending());
+        let second_peer = SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 40_001);
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(second_peer, local))));
+        drop(woken);
+        assert_eq!(sut.parked_accepts(at), 0);
+        let kept = tokio::time::timeout(WAIT, listener.accept())
+            .await
+            .expect("the connection a dropped accept was woken for stays for the next call");
+        assert_eq!(connection_of(kept), (second_peer, local));
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// One row per `SimAcceptScript` outcome: each completes exactly the
+    /// accept it names. `Connection` and `OriginalDestinationFailure` leave
+    /// the listener usable (the next accept waits, and a script wakes it);
+    /// `ListenerLost` stands for every later accept. Scripts are FIFO, a
+    /// `local_addr` failure is standing and leaves `accept` alone, and scripts
+    /// die with their listener.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    #[allow(clippy::too_many_lines, reason = "one table plus the FIFO and lifetime rules")]
+    async fn each_scripted_outcome_completes_exactly_the_accept_it_names() {
+        #[derive(Debug, Clone, Copy)]
+        enum Row {
+            Connection,
+            OriginalDestinationFailure,
+            ListenerLost,
+        }
+        let peer = SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 2), 40_000);
+        let local = SocketAddrV4::new(Ipv4Addr::new(10, 99, 1, 7), 443);
+        let later_peer = SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 40_001);
+
+        for row in [Row::Connection, Row::OriginalDestinationFailure, Row::ListenerLost] {
+            let sut = SimMtlsIntercept::new();
+            let (held, at) = bind_live(&sut, LEG_ADDR);
+            let listener = port_of(&held);
+            let script = match row {
+                Row::Connection => SimAcceptScript::Connection(accepted(peer, local)),
+                Row::OriginalDestinationFailure => {
+                    SimAcceptScript::OriginalDestinationFailure { errno: libc::ENOTCONN }
+                }
+                Row::ListenerLost => SimAcceptScript::ListenerLost { errno: libc::ECONNABORTED },
+            };
+            assert!(sut.script_accept(at, script), "{row:?}: a live listener takes the script");
+            let first = tokio::time::timeout(WAIT, listener.accept())
+                .await
+                .unwrap_or_else(|_| panic!("{row:?}: the scripted outcome completes the accept"));
+            match (row, first) {
+                (Row::Connection, Ok(got)) => assert_eq!((got.peer, got.local), (peer, local)),
+                (
+                    Row::OriginalDestinationFailure,
+                    Err(InterceptAcceptError::OriginalDestination { source }),
+                ) => assert_eq!(source.raw_os_error(), Some(libc::ENOTCONN)),
+                (Row::ListenerLost, Err(InterceptAcceptError::Accept { source })) => {
+                    assert_eq!(source.raw_os_error(), Some(libc::ECONNABORTED));
+                }
+                (row, other) => panic!("{row:?}: wrong outcome {other:?}"),
+            }
+
+            // The next accepts, with a later connection scripted.
+            if matches!(row, Row::ListenerLost) {
+                assert!(
+                    sut.script_accept(at, SimAcceptScript::Connection(accepted(later_peer, local)))
+                );
+                for later in 0..2 {
+                    let mut next = listener.accept();
+                    let lost = poll_once(&mut next).await;
+                    assert!(
+                        matches!(
+                            &lost,
+                            std::task::Poll::Ready(Err(InterceptAcceptError::Accept { source }))
+                                if source.raw_os_error() == Some(libc::ECONNABORTED)
+                        ),
+                        "ListenerLost stands for later accept {later}, got {lost:?}",
+                    );
+                }
+                assert_eq!(sut.parked_accepts(at), 0, "a lost listener parks nothing");
+            } else {
+                let mut next = listener.accept();
+                assert!(poll_once(&mut next).await.is_pending(), "{row:?}: the listener is usable");
+                assert_eq!(sut.parked_accepts(at), 1);
+                assert!(
+                    sut.script_accept(at, SimAcceptScript::Connection(accepted(later_peer, local)))
+                );
+                let woken = tokio::time::timeout(WAIT, next)
+                    .await
+                    .unwrap_or_else(|_| panic!("{row:?}: a script wakes the parked accept"));
+                assert_eq!(connection_of(woken), (later_peer, local), "{row:?}");
+            }
+        }
+
+        // FIFO: two scripts complete two accepts in script order.
+        let sut = SimMtlsIntercept::new();
+        let (held, at) = bind_live(&sut, LEG_ADDR);
+        let listener = port_of(&held);
+        assert!(sut.script_accept(
+            at,
+            SimAcceptScript::OriginalDestinationFailure { errno: libc::ENOTCONN }
+        ));
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(peer, local))));
+        let first = tokio::time::timeout(WAIT, listener.accept()).await.expect("first script");
+        assert!(matches!(first, Err(InterceptAcceptError::OriginalDestination { .. })));
+        let second = tokio::time::timeout(WAIT, listener.accept()).await.expect("second script");
+        assert_eq!(connection_of(second), (peer, local));
+
+        // A `local_addr` failure is standing and leaves `accept` alone.
+        assert!(sut.script_local_addr_failure(at, libc::EBADF));
+        for read in 0..2 {
+            let failed = listener.local_addr();
+            assert!(
+                matches!(&failed, Err(error) if error.raw_os_error() == Some(libc::EBADF)),
+                "local_addr read {read} fails with the scripted errno, got {failed:?}",
+            );
+        }
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(later_peer, local))));
+        let after = tokio::time::timeout(WAIT, listener.accept()).await.expect("accept unaffected");
+        assert_eq!(connection_of(after), (later_peer, local));
+
+        // Scripts die with their listener; a new listener at the address
+        // starts with none.
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(peer, local))));
+        drop(listener);
+        drop(held);
+        assert!(!sut.script_accept(at, SimAcceptScript::Connection(accepted(peer, local))));
+        assert!(!sut.script_local_addr_failure(at, libc::EBADF));
+        assert_eq!(sut.parked_accepts(at), 0, "no live listener holds the address");
+        let (rebound, rebound_at) = bind_live(&sut, at);
+        assert_eq!(rebound_at, at, "a fresh listener reads its address: no local_addr failure");
+        let fresh = port_of(&rebound);
+        let mut waiting = fresh.accept();
+        assert!(
+            poll_once(&mut waiting).await.is_pending(),
+            "the old listener's script died with it"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Polled with no current Tokio runtime, `accept` returns `Err(Accept)`
+    /// naming the missing runtime — it never panics, parks nothing, and
+    /// consumes no script: the scripted connection is still delivered once a
+    /// runtime polls.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    fn an_accept_polled_without_a_runtime_fails_instead_of_panicking() {
+        let sut = SimMtlsIntercept::new();
+        let (held, at) = bind_live(&sut, LEG_ADDR);
+        let listener = port_of(&held);
+        let peer = SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 2), 40_000);
+        let local = SocketAddrV4::new(Ipv4Addr::new(10, 99, 1, 7), 443);
+        assert!(sut.script_accept(at, SimAcceptScript::Connection(accepted(peer, local))));
+        assert!(
+            tokio::runtime::Handle::try_current().is_err(),
+            "precondition: no Tokio runtime is current",
+        );
+
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for attempt in 0..2 {
+            let mut accept = listener.accept();
+            let polled = accept.as_mut().poll(&mut context);
+            assert!(
+                matches!(
+                    &polled,
+                    std::task::Poll::Ready(Err(InterceptAcceptError::Accept { source }))
+                        if source.to_string().contains("runtime")
+                ),
+                "attempt {attempt}: no runtime gives Err(Accept) naming it, got {polled:?}",
+            );
+        }
+        assert_eq!(sut.parked_accepts(at), 0, "a no-runtime accept parks nothing");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("a current-thread runtime builds");
+        let delivered = runtime
+            .block_on(async { tokio::time::timeout(WAIT, listener.accept()).await })
+            .expect("the scripted connection is still pending for a runtime accept");
+        assert_eq!(connection_of(delivered), (peer, local), "the failed accepts consumed nothing");
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Closes the S-MIF-08 gap: `clear_faults` disarms the BIND slot, so the
+    /// next `bind_transparent` takes its socket-free `Ok` arm; a second clear
+    /// leaves it disarmed.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    fn clear_faults_also_disarms_the_bind_slot() {
+        let sut = SimMtlsIntercept::new();
+        sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
+        assert_err_shape(
+            &drive_expecting_err(&sut, Method::BindTransparent),
+            ExpectedErr::TransparentListener { addr: LEG_ADDR, errno: libc::EPERM },
+        );
+        assert!(sut.live_listeners().is_empty(), "a faulted bind registers nothing");
+
+        sut.clear_faults();
+        let (_first, first_at) = bind_live(&sut, LEG_ADDR);
+        assert_eq!(
+            first_at,
+            loopback(49_152),
+            "the cleared bind slot takes the socket-free Ok arm"
+        );
+        assert_eq!(sut.live_listeners(), [first_at]);
+
+        sut.clear_faults();
+        let (_second, second_at) = bind_live(&sut, LEG_ADDR);
+        assert_eq!(second_at, loopback(49_153), "a second clear leaves the bind slot disarmed");
+        assert_eq!(sut.live_listeners(), [first_at, second_at]);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-70 — The node's protection listeners belong to the protection port: a
+    /// simulated node opens no socket, and a listener stops when its wait is cancelled.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Closes the S-MIF-13 gap (its fourth direction): an armed install fault
+    /// leaks into neither bind, which takes its socket-free `Ok` arm, while
+    /// the armed install still refuses.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+    fn an_install_fault_leaves_bind_on_its_success_arm() {
+        for (method, fault) in [
+            (
+                Method::InstallOutbound,
+                SimInterceptFault::NftRuleInstall { op: "append-egress", errno: libc::EPERM },
+            ),
+            (Method::InstallInbound, SimInterceptFault::IpRuleAdd { errno: libc::EPERM }),
+        ] {
+            let sut = SimMtlsIntercept::new();
+            arm(&sut, method, fault);
+
+            let (_held, at) = bind_live(&sut, LEG_ADDR);
+            assert_eq!(at, loopback(49_152), "{method:?} fault: bind takes its socket-free Ok arm");
+            assert_eq!(sut.live_listeners(), [at], "{method:?} fault: the listener is live");
+            drive_expecting_err(&sut, method);
+        }
     }
 }

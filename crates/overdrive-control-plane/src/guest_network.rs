@@ -4558,34 +4558,6 @@ mod scratch_probe_acceptance {
         }
     }
 
-    const SETUP_AND_PROBE: &[ScratchCall] = &[
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::ConvergeBridge),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::AttachTapToBridge),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::SetTapUp),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardTable),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardChain),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardSet),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateGuardRules),
-        ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::InsertGuardMember),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::LoadProgramAndMaps),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::PinEndpointMap),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::PinCounterMap),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::InsertEndpoint),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::AttachLink),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::PinLink),
-        ScratchCall::Exercise(GuestNetworkProbeStage::Classifier),
-        ScratchCall::Exercise(GuestNetworkProbeStage::OriginalDestination),
-        ScratchCall::CloseLoader,
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptEndpointMap),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptCounterMap),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::AdoptLink),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::QueryLink),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::UnpinLink),
-        ScratchCall::Tcx(GuestNetworkScratchTcxAction::DetachLink),
-        ScratchCall::Exercise(GuestNetworkProbeStage::DetachedLinkGuard),
-    ];
-
     const CLEANUP: &[ScratchCall] = &[
         ScratchCall::CloseLoader,
         ScratchCall::Tcx(GuestNetworkScratchTcxAction::DeleteEndpoint),
@@ -4618,65 +4590,6 @@ mod scratch_probe_acceptance {
         ScratchCall::CountTcx(GuestNetworkScratchTcxResource::CounterMapPin),
         ScratchCall::CountTcx(GuestNetworkScratchTcxResource::TcxLinkPin),
     ];
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[tokio::test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A superseded D5 setup order"]
-    async fn healthy_probe_uses_the_exact_setup_probe_cleanup_and_inventory_order() {
-        let io = Arc::new(ScriptedScratchIo::default());
-        HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
-            .probe_startup()
-            .await
-            .expect("healthy probe plus empty observed complement");
-        let mut expected = SETUP_AND_PROBE.to_vec();
-        expected.extend_from_slice(CLEANUP);
-        assert_eq!(io.calls(), expected);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[tokio::test]
-    #[ignore = "pending DELIVER step 02-01: S-ND295-00 D14A superseded D5 failure order"]
-    async fn every_setup_or_probe_failure_preserves_primary_and_still_runs_complete_cleanup() {
-        for (index, fail) in SETUP_AND_PROBE
-            .iter()
-            .copied()
-            .filter(|call| *call != ScratchCall::CloseLoader)
-            .enumerate()
-        {
-            let io = if let ScratchCall::Exercise(_) = fail {
-                ScriptedScratchIo::with_semantic_failure(match fail {
-                    ScratchCall::Exercise(stage) => stage,
-                    _ => unreachable!(),
-                })
-            } else {
-                ScriptedScratchIo::with_failure(fail)
-            };
-            let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
-                .probe_startup()
-                .await
-                .expect_err("scripted primary failure");
-            assert!(
-                !matches!(error, GuestNetworkError::StartupProbeCleanup { .. }),
-                "case {index} must preserve the original primary when cleanup is empty"
-            );
-            let calls = io.calls();
-            let failure_index = calls.iter().position(|call| *call == fail).expect("failed call");
-            let expected_failure_index = SETUP_AND_PROBE
-                .iter()
-                .position(|call| *call == fail)
-                .expect("failed call belongs to the exact D14A setup table");
-            assert_eq!(
-                &calls[..=failure_index],
-                &SETUP_AND_PROBE[..=expected_failure_index],
-                "case {index} follows the exercise-before-close order up to its failure"
-            );
-            assert_eq!(calls.get(failure_index + 1), Some(&ScratchCall::CloseLoader));
-            assert!(
-                calls.ends_with(&CLEANUP[1..]),
-                "case {index} completes reverse cleanup and inventory"
-            );
-        }
-    }
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
@@ -5531,26 +5444,48 @@ mod scratch_probe_packet_acceptance {
 
 #[cfg(test)]
 #[allow(
-    dead_code,
     clippy::doc_markdown,
     clippy::expect_used,
     clippy::too_many_lines,
-    clippy::option_if_let_else,
+    clippy::significant_drop_tightening,
     clippy::significant_drop_in_scrutinee,
-    reason = "the scripted leaf pops its read-back queues under their lock only in the branch that consumes them"
+    clippy::option_if_let_else,
+    clippy::struct_excessive_bools,
+    reason = "source-local D12A owner tables: each expect() names the fixture precondition it establishes, the fake kernel holds its node lock only inside one leaf call, and its node model keeps each independent kernel fact as its own flag"
 )]
 mod allocation_owner_acceptance {
-    //! Allocation-owner model exercised here:
-    //! `Unpublished -> Provisioning -> ProvisionedDown -> Activating -> Active
-    //! -> TeardownPending -> Absent`, with `QuiescedActive` private to runtime
-    //! recovery.
-    //! Any setup/read-back failure returns to `Unpublished`; any teardown
-    //! failure remains `TeardownPending` with the lease and publication held;
-    //! retry on that same owner reaches `Absent`. Teardown from `Unpublished`
-    //! or `Absent` is an idempotent self-loop. No other transition publishes.
+    //! The one host owner's allocation algorithms, driven through
+    //! D-295-DISTILL-12A's module-private allocation leaf I/O
+    //! (`with_allocation_io`). Allocation phases:
+    //! `Unpublished -> ProvisionedDown -> Active -> QuiescedActive`, with
+    //! `Condemned` reached from quiescence or audit, and every phase torn down
+    //! to `Absent`. A failed provision stays `Unpublished`; a failed teardown
+    //! keeps the allocation for retry.
+    //!
+    //! Two test doubles implement the private leaf trait:
+    //!
+    //! - `ScriptedAllocationIo` queues the TAP and bridge observations each
+    //!   call returns, for the identity-partition and rollback tables whose
+    //!   point is one scripted observation at one checkpoint;
+    //! - `FakeAttachmentKernel` models the node (bridge, guard, TCX program and
+    //!   maps, endpoint entries, TAPs, attachments, pins, debug masks); every
+    //!   leaf reads and writes that model, and a fault is either an out-of-band
+    //!   change to it (a removed TAP, a changed MAC) or a leaf failure armed on
+    //!   a named call. It journals each call with the TAP it named and whether
+    //!   it changed the node.
+    //!
+    //! Every precondition comes from the owner's own port calls (`provision`,
+    //! `activate`, `quiesce_managed_taps`, `audit_shared`); no body writes the
+    //! owner's private state.
 
     use super::*;
-    use overdrive_netlink::nft::bridge::BridgeGuardInventory;
+    use overdrive_dataplane::guest_tcx::GuestTcxObject;
+    use overdrive_netlink::nft::bridge::{
+        BridgeGuardChainDefinition, BridgeGuardChainHook, BridgeGuardChainOccurrence,
+        BridgeGuardChainPolicy, BridgeGuardChainType, BridgeGuardInventory,
+        BridgeGuardMemberIdentity, BridgeGuardMemberOccurrence, BridgeGuardObservedFamily,
+        BridgeGuardRuleOccurrence, BridgeGuardSetFact, BridgeGuardTableFact,
+    };
     use std::collections::VecDeque;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -5584,246 +5519,48 @@ mod allocation_owner_acceptance {
         ObserveDebugMsgMasks,
     }
 
-    struct ScriptedAllocationIo {
-        calls: parking_lot::Mutex<Vec<AllocationCall>>,
-        tap_observations: parking_lot::Mutex<VecDeque<GuestNetworkAllocationTapObservation>>,
-        bridge_observations: parking_lot::Mutex<VecDeque<GuestNetworkAllocationBridgeObservation>>,
-        endpoint_reads: parking_lot::Mutex<VecDeque<Option<GuestTcxEndpoint>>>,
-        attachment_reads: parking_lot::Mutex<VecDeque<GuestTcxAttachment>>,
-        pin_reads: parking_lot::Mutex<VecDeque<bool>>,
-        consume_unattached_readbacks: bool,
-        guard_expectations: parking_lot::Mutex<Vec<BTreeSet<String>>>,
-        failures: parking_lot::Mutex<BTreeSet<(AllocationCall, usize)>>,
-        call_counts: parking_lot::Mutex<BTreeMap<AllocationCall, usize>>,
-        publication_probe: parking_lot::Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
-        publication_trace: parking_lot::Mutex<Vec<bool>>,
-    }
+    /// The TAP owner D-295-R4 requires: the root launcher.
+    const ROOT_UID: Option<u32> = Some(0);
+    /// Program id every ingress `pin_link` reports.
+    const INGRESS_PROGRAM: u32 = 2_950;
+    /// Program id every egress `pin_egress_link` reports.
+    const EGRESS_PROGRAM: u32 = 2_951;
+    /// The shared bridge's ifindex.
+    const BRIDGE_IFINDEX: u32 = 29;
+    /// The ifindex the fake kernel gives the first TAP it creates.
+    const FIRST_TAP_IFINDEX: u32 = 295;
 
-    impl ScriptedAllocationIo {
-        fn healthy() -> Arc<Self> {
-            Arc::new(Self {
-                calls: parking_lot::Mutex::new(Vec::new()),
-                tap_observations: parking_lot::Mutex::new(VecDeque::from([
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: false,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: false,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: false,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: false,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: true,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: true,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                ])),
-                bridge_observations: parking_lot::Mutex::new(VecDeque::from([
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                ])),
-                endpoint_reads: parking_lot::Mutex::new(VecDeque::new()),
-                attachment_reads: parking_lot::Mutex::new(VecDeque::from([GuestTcxAttachment {
-                    revision: 1,
-                    program_ids: vec![2_950],
-                }])),
-                pin_reads: parking_lot::Mutex::new(VecDeque::from([true])),
-                consume_unattached_readbacks: false,
-                guard_expectations: parking_lot::Mutex::new(Vec::new()),
-                failures: parking_lot::Mutex::new(BTreeSet::new()),
-                call_counts: parking_lot::Mutex::new(BTreeMap::new()),
-                publication_probe: parking_lot::Mutex::new(None),
-                publication_trace: parking_lot::Mutex::new(Vec::new()),
-            })
-        }
+    /// Every leaf that can mutate kernel state.
+    const MUTATIONS: [AllocationCall; 17] = [
+        AllocationCall::CreateTap,
+        AllocationCall::AttachTap,
+        AllocationCall::SetTapUp,
+        AllocationCall::SetTapDown,
+        AllocationCall::DeleteTap,
+        AllocationCall::InsertGuard,
+        AllocationCall::DeleteGuard,
+        AllocationCall::InsertEndpoint,
+        AllocationCall::RemoveEndpoint,
+        AllocationCall::AttachFirstIngress,
+        AllocationCall::PinLink,
+        AllocationCall::DetachPendingLink,
+        AllocationCall::DetachPinnedLink,
+        AllocationCall::AttachFirstEgress,
+        AllocationCall::PinEgressLink,
+        AllocationCall::DetachPendingEgressLink,
+        AllocationCall::DetachPinnedEgressLink,
+    ];
 
-        fn with_observations(
-            taps: impl IntoIterator<Item = GuestNetworkAllocationTapObservation>,
-            bridges: impl IntoIterator<Item = GuestNetworkAllocationBridgeObservation>,
-        ) -> Arc<Self> {
-            Arc::new(Self {
-                calls: parking_lot::Mutex::new(Vec::new()),
-                tap_observations: parking_lot::Mutex::new(taps.into_iter().collect()),
-                bridge_observations: parking_lot::Mutex::new(bridges.into_iter().collect()),
-                endpoint_reads: parking_lot::Mutex::new(VecDeque::new()),
-                attachment_reads: parking_lot::Mutex::new(VecDeque::from([GuestTcxAttachment {
-                    revision: 1,
-                    program_ids: vec![2_950],
-                }])),
-                pin_reads: parking_lot::Mutex::new(VecDeque::from([true])),
-                consume_unattached_readbacks: false,
-                guard_expectations: parking_lot::Mutex::new(Vec::new()),
-                failures: parking_lot::Mutex::new(BTreeSet::new()),
-                call_counts: parking_lot::Mutex::new(BTreeMap::new()),
-                publication_probe: parking_lot::Mutex::new(None),
-                publication_trace: parking_lot::Mutex::new(Vec::new()),
-            })
-        }
-
-        fn for_teardown(failures: impl IntoIterator<Item = AllocationCall>) -> Arc<Self> {
-            Arc::new(Self {
-                calls: parking_lot::Mutex::new(Vec::new()),
-                tap_observations: parking_lot::Mutex::new(VecDeque::from([
-                    GuestNetworkAllocationTapObservation::Persistent {
-                        name: "ovd-tp-0002".to_owned(),
-                        ifindex: 295,
-                        up: false,
-                        owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                        master_ifindex: Some(29),
-                        mac: None,
-                    },
-                    GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
-                ])),
-                bridge_observations: parking_lot::Mutex::new(VecDeque::new()),
-                endpoint_reads: parking_lot::Mutex::new(VecDeque::from([None])),
-                attachment_reads: parking_lot::Mutex::new(VecDeque::from([GuestTcxAttachment {
-                    revision: 1,
-                    program_ids: Vec::new(),
-                }])),
-                pin_reads: parking_lot::Mutex::new(VecDeque::from([false])),
-                consume_unattached_readbacks: true,
-                guard_expectations: parking_lot::Mutex::new(Vec::new()),
-                failures: parking_lot::Mutex::new(
-                    failures.into_iter().map(|call| (call, 1)).collect(),
-                ),
-                call_counts: parking_lot::Mutex::new(BTreeMap::new()),
-                publication_probe: parking_lot::Mutex::new(None),
-                publication_trace: parking_lot::Mutex::new(Vec::new()),
-            })
-        }
-
-        fn with_failure_occurrence(call: AllocationCall, occurrence: usize) -> Arc<Self> {
-            let io = Self::for_teardown(std::iter::empty::<AllocationCall>());
-            io.failures.lock().insert((call, occurrence));
-            io
-        }
-
-        fn clear_failures(&self) {
-            self.failures.lock().clear();
-        }
-
-        fn reset_teardown_observations(&self) {
-            *self.tap_observations.lock() = VecDeque::from([
-                GuestNetworkAllocationTapObservation::Persistent {
-                    name: "ovd-tp-0002".to_owned(),
-                    ifindex: 295,
-                    up: false,
-                    owner_uid: Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-                    master_ifindex: Some(29),
-                    mac: None,
-                },
-                GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
-            ]);
-            *self.endpoint_reads.lock() = VecDeque::from([None]);
-            *self.attachment_reads.lock() =
-                VecDeque::from([GuestTcxAttachment { revision: 1, program_ids: Vec::new() }]);
-            *self.pin_reads.lock() = VecDeque::from([false]);
-        }
-
-        fn track_publication(
-            &self,
-            owner: &Arc<HostSharedGuestNetworkOwner>,
-            allocation: AllocationId,
-        ) {
-            let owner = Arc::downgrade(owner);
-            *self.publication_probe.lock() = Some(Arc::new(move || {
-                owner
-                    .upgrade()
-                    .is_some_and(|owner| owner.allocations.lock().contains_key(&allocation))
-            }));
-        }
-
-        fn record(&self, call: AllocationCall) -> bool {
-            let published = self.publication_probe.lock().as_ref().is_some_and(|probe| probe());
-            self.publication_trace.lock().push(published);
-            self.calls.lock().push(call);
-            let mut counts = self.call_counts.lock();
-            let count = counts.entry(call).or_insert(0);
-            *count += 1;
-            let occurrence = *count;
-            drop(counts);
-            self.failures.lock().contains(&(call, occurrence))
-        }
-
-        fn calls(&self) -> Vec<AllocationCall> {
-            self.calls.lock().clone()
-        }
-
-        fn guard_expectations(&self) -> Vec<BTreeSet<String>> {
-            self.guard_expectations.lock().clone()
-        }
-
-        fn publication_trace(&self) -> Vec<bool> {
-            self.publication_trace.lock().clone()
-        }
-
-        fn remaining_teardown_observations(&self) -> (usize, usize, usize, usize) {
-            (
-                self.tap_observations.lock().len(),
-                self.endpoint_reads.lock().len(),
-                self.attachment_reads.lock().len(),
-                self.pin_reads.lock().len(),
-            )
-        }
-    }
+    /// Leaves that read one allocation's own attachment parts.
+    const PER_ALLOCATION_READS: [AllocationCall; 7] = [
+        AllocationCall::ObserveTap,
+        AllocationCall::ReadEndpoint,
+        AllocationCall::QueryAttachment,
+        AllocationCall::LinkPinPresent,
+        AllocationCall::QueryEgressAttachment,
+        AllocationCall::EgressLinkPinPresent,
+        AllocationCall::ObserveTapDebugMsgMask,
+    ];
 
     fn netlink_failure() -> NetlinkError {
         NetlinkError::connect(std::io::Error::from_raw_os_error(libc::EBUSY))
@@ -5833,7 +5570,16 @@ mod allocation_owner_acceptance {
         GuestTcxError::Io { source: std::io::Error::from_raw_os_error(libc::EIO) }
     }
 
-    fn guard_inventory() -> BridgeGuardInventory {
+    fn guard_failure() -> BridgeGuardError {
+        BridgeGuardError::Netlink(netlink_failure())
+    }
+
+    /// What a TCX query of a vanished interface reports.
+    fn absent_interface() -> GuestTcxError {
+        GuestTcxError::Io { source: std::io::Error::from_raw_os_error(libc::ENODEV) }
+    }
+
+    const fn empty_guard_inventory() -> BridgeGuardInventory {
         BridgeGuardInventory {
             generation: 1,
             tables: Vec::new(),
@@ -5842,6 +5588,68 @@ mod allocation_owner_acceptance {
             rules: Vec::new(),
             members: Vec::new(),
             other_children: Vec::new(),
+        }
+    }
+
+    fn endpoint_for(plan: &GuestNetworkPlan) -> GuestTcxEndpoint {
+        GuestTcxEndpoint {
+            source_ipv4: plan.assignment().address,
+            source_mac: plan.assignment().mac,
+            bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+        }
+    }
+
+    // ---- queued-observation leaf -------------------------------------------
+
+    /// D12A leaf whose TAP and bridge observations are queued per call (an
+    /// empty queue observes absence). TCX, endpoint, and guard read-backs
+    /// follow the calls already recorded, so a rollback reads back what it
+    /// actually removed.
+    struct ScriptedAllocationIo {
+        calls: parking_lot::Mutex<Vec<AllocationCall>>,
+        tap_observations: parking_lot::Mutex<VecDeque<GuestNetworkAllocationTapObservation>>,
+        bridge_observations: parking_lot::Mutex<VecDeque<GuestNetworkAllocationBridgeObservation>>,
+        failures: parking_lot::Mutex<BTreeSet<(AllocationCall, usize)>>,
+    }
+
+    impl ScriptedAllocationIo {
+        fn with_observations(
+            taps: impl IntoIterator<Item = GuestNetworkAllocationTapObservation>,
+            bridges: impl IntoIterator<Item = GuestNetworkAllocationBridgeObservation>,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                calls: parking_lot::Mutex::new(Vec::new()),
+                tap_observations: parking_lot::Mutex::new(taps.into_iter().collect()),
+                bridge_observations: parking_lot::Mutex::new(bridges.into_iter().collect()),
+                failures: parking_lot::Mutex::new(BTreeSet::new()),
+            })
+        }
+
+        /// Fail the `occurrence`-th call of `call` (1-based).
+        fn fail(&self, call: AllocationCall, occurrence: usize) {
+            self.failures.lock().insert((call, occurrence));
+        }
+
+        fn record(&self, call: AllocationCall) -> bool {
+            let occurrence = {
+                let mut calls = self.calls.lock();
+                calls.push(call);
+                calls.iter().filter(|prior| **prior == call).count()
+            };
+            self.failures.lock().contains(&(call, occurrence))
+        }
+
+        fn calls(&self) -> Vec<AllocationCall> {
+            self.calls.lock().clone()
+        }
+
+        /// `effect` happened and no `undo` followed its last occurrence.
+        fn holds(&self, effect: AllocationCall, undo: &[AllocationCall]) -> bool {
+            let calls = self.calls.lock();
+            calls
+                .iter()
+                .rposition(|call| *call == effect)
+                .is_some_and(|last| !calls[last..].iter().any(|call| undo.contains(call)))
         }
     }
 
@@ -5879,24 +5687,24 @@ mod allocation_owner_acceptance {
         }
         async fn observe_tap(
             &self,
-            _plan: &GuestNetworkPlan,
+            plan: &GuestNetworkPlan,
         ) -> std::result::Result<GuestNetworkAllocationTapObservation, NetlinkError> {
             if self.record(AllocationCall::ObserveTap) {
                 return Err(netlink_failure());
             }
             Ok(self.tap_observations.lock().pop_front().unwrap_or_else(|| {
-                GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() }
+                GuestNetworkAllocationTapObservation::Absent { name: plan.assignment().tap.clone() }
             }))
         }
         async fn observe_bridge(
             &self,
-            _plan: &GuestNetworkPlan,
+            plan: &GuestNetworkPlan,
         ) -> std::result::Result<GuestNetworkAllocationBridgeObservation, NetlinkError> {
             if self.record(AllocationCall::ObserveBridge) {
                 return Err(netlink_failure());
             }
             Ok(self.bridge_observations.lock().pop_front().unwrap_or_else(|| {
-                GuestNetworkAllocationBridgeObservation::Absent { name: "ovd-gbr0".to_owned() }
+                GuestNetworkAllocationBridgeObservation::Absent { name: plan.bridge().to_owned() }
             }))
         }
         fn insert_guard_member(
@@ -5904,9 +5712,9 @@ mod allocation_owner_acceptance {
             _plan: &GuestNetworkPlan,
         ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
             if self.record(AllocationCall::InsertGuard) {
-                Err(BridgeGuardError::Netlink(netlink_failure()))
+                Err(guard_failure())
             } else {
-                Ok(BridgeGuardMutationOutcome::Converged { observed: guard_inventory() })
+                Ok(BridgeGuardMutationOutcome::Converged { observed: empty_guard_inventory() })
             }
         }
         fn delete_guard_member(
@@ -5914,20 +5722,19 @@ mod allocation_owner_acceptance {
             _plan: &GuestNetworkPlan,
         ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
             if self.record(AllocationCall::DeleteGuard) {
-                Err(BridgeGuardError::Netlink(netlink_failure()))
+                Err(guard_failure())
             } else {
-                Ok(BridgeGuardMutationOutcome::Converged { observed: guard_inventory() })
+                Ok(BridgeGuardMutationOutcome::Converged { observed: empty_guard_inventory() })
             }
         }
         fn observe_guard(
             &self,
-            expected_members: &BTreeSet<String>,
+            _expected_members: &BTreeSet<String>,
         ) -> std::result::Result<BridgeGuardObservation, BridgeGuardError> {
-            self.guard_expectations.lock().push(expected_members.clone());
             if self.record(AllocationCall::ObserveGuard) {
-                Err(BridgeGuardError::Netlink(netlink_failure()))
+                Err(guard_failure())
             } else {
-                Ok(BridgeGuardObservation::Exact { inventory: guard_inventory() })
+                Ok(BridgeGuardObservation::Exact { inventory: empty_guard_inventory() })
             }
         }
         fn insert_endpoint(
@@ -5943,24 +5750,11 @@ mod allocation_owner_acceptance {
             _ifindex: u32,
         ) -> std::result::Result<Option<GuestTcxEndpoint>, GuestTcxError> {
             if self.record(AllocationCall::ReadEndpoint) {
-                Err(tcx_failure())
-            } else {
-                let calls = self.calls.lock().clone();
-                let next_read = self.endpoint_reads.lock().pop_front();
-                if let Some(value) = next_read {
-                    Ok(value)
-                } else if calls.contains(&AllocationCall::RemoveEndpoint) {
-                    Ok(None)
-                } else if calls.contains(&AllocationCall::InsertEndpoint) {
-                    Ok(Some(GuestTcxEndpoint {
-                        source_ipv4: plan.assignment().address,
-                        source_mac: plan.assignment().mac,
-                        bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
-                    }))
-                } else {
-                    Ok(None)
-                }
+                return Err(tcx_failure());
             }
+            Ok(self
+                .holds(AllocationCall::InsertEndpoint, &[AllocationCall::RemoveEndpoint])
+                .then(|| endpoint_for(plan)))
         }
         fn remove_endpoint(
             &self,
@@ -5980,41 +5774,36 @@ mod allocation_owner_acceptance {
             }
         }
         fn pin_link(&self, _plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError> {
-            if self.record(AllocationCall::PinLink) { Err(tcx_failure()) } else { Ok(2_950) }
+            if self.record(AllocationCall::PinLink) {
+                Err(tcx_failure())
+            } else {
+                Ok(INGRESS_PROGRAM)
+            }
         }
         fn query_attachment(
             &self,
             _plan: &GuestNetworkPlan,
         ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
             if self.record(AllocationCall::QueryAttachment) {
-                Err(tcx_failure())
-            } else {
-                let calls = self.calls.lock().clone();
-                if !calls.contains(&AllocationCall::AttachFirstIngress)
-                    && !self.consume_unattached_readbacks
-                {
-                    Ok(GuestTcxAttachment { revision: 1, program_ids: Vec::new() })
-                } else if let Some(value) = self.attachment_reads.lock().pop_front() {
-                    Ok(value)
-                } else {
-                    Ok(GuestTcxAttachment { revision: 1, program_ids: vec![2_950] })
-                }
+                return Err(tcx_failure());
             }
+            let attached = self.holds(
+                AllocationCall::AttachFirstIngress,
+                &[AllocationCall::DetachPendingLink, AllocationCall::DetachPinnedLink],
+            );
+            Ok(GuestTcxAttachment {
+                revision: 1,
+                program_ids: if attached { vec![INGRESS_PROGRAM] } else { Vec::new() },
+            })
         }
         fn link_pin_present(
             &self,
             _plan: &GuestNetworkPlan,
         ) -> std::result::Result<bool, GuestTcxError> {
             if self.record(AllocationCall::LinkPinPresent) {
-                Err(tcx_failure())
-            } else {
-                let calls = self.calls.lock().clone();
-                if !calls.contains(&AllocationCall::PinLink) && !self.consume_unattached_readbacks {
-                    Ok(false)
-                } else {
-                    Ok(self.pin_reads.lock().pop_front().unwrap_or(true))
-                }
+                return Err(tcx_failure());
             }
+            Ok(self.holds(AllocationCall::PinLink, &[AllocationCall::DetachPinnedLink]))
         }
         fn detach_pending_link(
             &self,
@@ -6038,7 +5827,11 @@ mod allocation_owner_acceptance {
             &self,
             _plan: &GuestNetworkPlan,
         ) -> std::result::Result<u32, GuestTcxError> {
-            if self.record(AllocationCall::PinEgressLink) { Err(tcx_failure()) } else { Ok(2_951) }
+            if self.record(AllocationCall::PinEgressLink) {
+                Err(tcx_failure())
+            } else {
+                Ok(EGRESS_PROGRAM)
+            }
         }
         fn query_egress_attachment(
             &self,
@@ -6047,12 +5840,13 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::QueryEgressAttachment) {
                 return Err(tcx_failure());
             }
-            let calls = self.calls.lock().clone();
-            let attached = calls.contains(&AllocationCall::AttachFirstEgress)
-                && !calls.contains(&AllocationCall::DetachPinnedEgressLink);
+            let attached = self.holds(
+                AllocationCall::AttachFirstEgress,
+                &[AllocationCall::DetachPendingEgressLink, AllocationCall::DetachPinnedEgressLink],
+            );
             Ok(GuestTcxAttachment {
                 revision: 1,
-                program_ids: if attached { vec![2_951] } else { Vec::new() },
+                program_ids: if attached { vec![EGRESS_PROGRAM] } else { Vec::new() },
             })
         }
         fn egress_link_pin_present(
@@ -6062,9 +5856,7 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::EgressLinkPinPresent) {
                 return Err(tcx_failure());
             }
-            let calls = self.calls.lock().clone();
-            Ok(calls.contains(&AllocationCall::PinEgressLink)
-                && !calls.contains(&AllocationCall::DetachPinnedEgressLink))
+            Ok(self.holds(AllocationCall::PinEgressLink, &[AllocationCall::DetachPinnedEgressLink]))
         }
         fn detach_pending_egress_link(
             &self,
@@ -6102,11 +5894,895 @@ mod allocation_owner_acceptance {
             if self.record(AllocationCall::ObserveDebugMsgMasks) {
                 Err(netlink_failure())
             } else {
-                Ok(BTreeMap::from([(295, 0)]))
+                Ok(BTreeMap::from([(FIRST_TAP_IFINDEX, 0)]))
             }
         }
     }
 
+    // ---- fake attachment kernel --------------------------------------------
+
+    /// Deterministic host-side MAC the fake kernel gives a TAP it creates.
+    fn host_mac(ifindex: u32) -> [u8; 6] {
+        let [_, _, high, low] = ifindex.to_be_bytes();
+        [0xfe, 0x95, 0x00, 0x00, high, low]
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FakeTap {
+        ifindex: u32,
+        kind: GuestLinkKind,
+        persistent: bool,
+        owner_uid: Option<u32>,
+        up: bool,
+        master: Option<u32>,
+        mac: Option<[u8; 6]>,
+        debug_mask: u32,
+        /// Program ids attached at TCX ingress, ascending.
+        ingress: Vec<u32>,
+        /// Program ids attached at TCX egress, ascending.
+        egress: Vec<u32>,
+        /// Administrative set-up / set-down succeed but change nothing.
+        admin_stuck: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FakeBridge {
+        ifindex: u32,
+        kind: GuestLinkKind,
+        mac: [u8; 6],
+        up: bool,
+        gateway: bool,
+    }
+
+    /// The node state the fake kernel models. Node-level parts (bridge,
+    /// guard structure, TCX program, map identity and pins) are modelled
+    /// beside the per-allocation parts, so a node-level fault is a change to
+    /// this state whatever private leaf the owner reads it through.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FakeNode {
+        bridge: Option<FakeBridge>,
+        guard_table: bool,
+        guard_rules_intact: bool,
+        guard_members: BTreeSet<String>,
+        tcx_program_loaded: bool,
+        endpoint_map_intact: bool,
+        counter_map_intact: bool,
+        endpoint_map_pinned: bool,
+        counter_map_pinned: bool,
+        endpoints: BTreeMap<u32, GuestTcxEndpoint>,
+        taps: BTreeMap<String, FakeTap>,
+        ingress_pins: BTreeSet<String>,
+        egress_pins: BTreeSet<String>,
+        pending_ingress: BTreeSet<String>,
+        pending_egress: BTreeSet<String>,
+        /// Ifindexes the debug-mask dump leaves out.
+        mask_dump_omits: BTreeSet<u32>,
+        next_ifindex: u32,
+    }
+
+    /// One attachment's parts as the node holds them.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct AttachmentParts {
+        tap: Option<FakeTap>,
+        endpoint: Option<GuestTcxEndpoint>,
+        ingress_pin: bool,
+        egress_pin: bool,
+        pending_ingress: bool,
+        pending_egress: bool,
+        guard_member: bool,
+    }
+
+    impl AttachmentParts {
+        const fn is_empty(&self) -> bool {
+            self.tap.is_none()
+                && self.endpoint.is_none()
+                && !self.ingress_pin
+                && !self.egress_pin
+                && !self.pending_ingress
+                && !self.pending_egress
+                && !self.guard_member
+        }
+    }
+
+    /// One part of an allocation's attachment that can vanish out of band.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum AttachmentPart {
+        Tap,
+        IngressAttachment,
+        EgressAttachment,
+        IngressPin,
+        EgressPin,
+        EndpointEntry,
+        GuardMember,
+    }
+
+    const EVERY_PART: [AttachmentPart; 7] = [
+        AttachmentPart::Tap,
+        AttachmentPart::IngressAttachment,
+        AttachmentPart::EgressAttachment,
+        AttachmentPart::IngressPin,
+        AttachmentPart::EgressPin,
+        AttachmentPart::EndpointEntry,
+        AttachmentPart::GuardMember,
+    ];
+
+    impl FakeNode {
+        fn healthy() -> Self {
+            Self {
+                bridge: Some(FakeBridge {
+                    ifindex: BRIDGE_IFINDEX,
+                    kind: GuestLinkKind::Bridge,
+                    mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                    up: true,
+                    gateway: true,
+                }),
+                guard_table: true,
+                guard_rules_intact: true,
+                guard_members: BTreeSet::new(),
+                tcx_program_loaded: true,
+                endpoint_map_intact: true,
+                counter_map_intact: true,
+                endpoint_map_pinned: true,
+                counter_map_pinned: true,
+                endpoints: BTreeMap::new(),
+                taps: BTreeMap::new(),
+                ingress_pins: BTreeSet::new(),
+                egress_pins: BTreeSet::new(),
+                pending_ingress: BTreeSet::new(),
+                pending_egress: BTreeSet::new(),
+                mask_dump_omits: BTreeSet::new(),
+                next_ifindex: FIRST_TAP_IFINDEX,
+            }
+        }
+
+        fn tap_mut(&mut self, tap: &str) -> &mut FakeTap {
+            self.taps.get_mut(tap).expect("the fixture's TAP exists in the node")
+        }
+
+        fn parts(&self, tap: &str, ifindex: u32) -> AttachmentParts {
+            AttachmentParts {
+                tap: self.taps.get(tap).cloned(),
+                endpoint: self.endpoints.get(&ifindex).copied(),
+                ingress_pin: self.ingress_pins.contains(tap),
+                egress_pin: self.egress_pins.contains(tap),
+                pending_ingress: self.pending_ingress.contains(tap),
+                pending_egress: self.pending_egress.contains(tap),
+                guard_member: self.guard_members.contains(tap),
+            }
+        }
+
+        /// Remove `part` out of band. A removed pin releases the link it held,
+        /// so the attachment goes with it; a removed attachment leaves its pin
+        /// behind (a defunct link); a removed TAP takes its attachments.
+        fn remove_part(&mut self, part: AttachmentPart, tap: &str, ifindex: u32) {
+            match part {
+                AttachmentPart::Tap => {
+                    self.taps.remove(tap);
+                }
+                AttachmentPart::IngressAttachment => {
+                    if let Some(entry) = self.taps.get_mut(tap) {
+                        entry.ingress.clear();
+                    }
+                }
+                AttachmentPart::EgressAttachment => {
+                    if let Some(entry) = self.taps.get_mut(tap) {
+                        entry.egress.clear();
+                    }
+                }
+                AttachmentPart::IngressPin => {
+                    self.ingress_pins.remove(tap);
+                    if let Some(entry) = self.taps.get_mut(tap) {
+                        entry.ingress.clear();
+                    }
+                }
+                AttachmentPart::EgressPin => {
+                    self.egress_pins.remove(tap);
+                    if let Some(entry) = self.taps.get_mut(tap) {
+                        entry.egress.clear();
+                    }
+                }
+                AttachmentPart::EndpointEntry => {
+                    self.endpoints.remove(&ifindex);
+                }
+                AttachmentPart::GuardMember => {
+                    self.guard_members.remove(tap);
+                }
+            }
+        }
+
+        fn guard_inventory(&self) -> BridgeGuardInventory {
+            if !self.guard_table {
+                return empty_guard_inventory();
+            }
+            let table = BridgeGuardTableFact {
+                family: BridgeGuardObservedFamily::Bridge,
+                name: "overdrive-mtls".to_owned(),
+            };
+            let mut rules = HostSharedGuestNetworkOwner::guard_spec().expected_rule_facts();
+            if !self.guard_rules_intact {
+                rules.pop();
+            }
+            BridgeGuardInventory {
+                generation: 1,
+                tables: vec![table.clone()],
+                chains: vec![BridgeGuardChainOccurrence {
+                    table: table.clone(),
+                    name: "prerouting".to_owned(),
+                    handle: Some(1),
+                    definition: BridgeGuardChainDefinition::Base {
+                        chain_type: BridgeGuardChainType::Filter,
+                        hook: BridgeGuardChainHook::Prerouting,
+                        priority: -300,
+                        policy: Some(BridgeGuardChainPolicy::Accept),
+                    },
+                }],
+                sets: vec![BridgeGuardSetFact {
+                    table: table.clone(),
+                    name: "managed_taps".to_owned(),
+                    key_len: 16,
+                    ifname_key: true,
+                }],
+                rules: rules
+                    .into_iter()
+                    .zip(2_u64..)
+                    .map(|(fact, handle)| BridgeGuardRuleOccurrence {
+                        table: table.clone(),
+                        chain: "prerouting".to_owned(),
+                        handle,
+                        fact,
+                        counter: None,
+                    })
+                    .collect(),
+                members: self
+                    .guard_members
+                    .iter()
+                    .map(|member| BridgeGuardMemberOccurrence {
+                        table: table.clone(),
+                        set: "managed_taps".to_owned(),
+                        identity: BridgeGuardMemberIdentity::Ifname(member.clone()),
+                    })
+                    .collect(),
+                other_children: Vec::new(),
+            }
+        }
+
+        /// The D9 classification of the modelled guard against the owner's
+        /// expected member set.
+        fn classify_guard(&self, expected_members: &BTreeSet<String>) -> BridgeGuardObservation {
+            let inventory = self.guard_inventory();
+            if !self.guard_table {
+                BridgeGuardObservation::Absent { inventory }
+            } else if self.guard_rules_intact && self.guard_members == *expected_members {
+                BridgeGuardObservation::Exact { inventory }
+            } else {
+                BridgeGuardObservation::Conflict { inventory }
+            }
+        }
+    }
+
+    /// One journaled leaf call: the leaf, the TAP it named (`None` for the
+    /// node-wide guard read and debug-mask dump), and whether it changed the
+    /// node.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct KernelCall {
+        call: AllocationCall,
+        tap: Option<String>,
+        wrote: bool,
+    }
+
+    /// A leaf failure armed on a named call.
+    #[derive(Debug, Clone)]
+    struct LeafFault {
+        call: AllocationCall,
+        tap: Option<String>,
+        /// Only once this call has been journaled since arming.
+        after: Option<AllocationCall>,
+        /// Only the nth matching call since arming (1-based).
+        nth: Option<usize>,
+        /// Keeps failing instead of failing once.
+        standing: bool,
+        armed_at: usize,
+        spent: bool,
+    }
+
+    type NodeMutation = Box<dyn FnOnce(&mut FakeNode) + Send>;
+
+    /// An out-of-band node change applied right after the nth journaled call
+    /// of `after` since arming.
+    struct NodeHook {
+        after: AllocationCall,
+        nth: usize,
+        armed_at: usize,
+        mutate: Option<NodeMutation>,
+    }
+
+    struct FakeAttachmentKernel {
+        node: parking_lot::Mutex<FakeNode>,
+        journal: parking_lot::Mutex<Vec<KernelCall>>,
+        faults: parking_lot::Mutex<Vec<LeafFault>>,
+        hooks: parking_lot::Mutex<Vec<NodeHook>>,
+        guard_expectations: parking_lot::Mutex<Vec<BTreeSet<String>>>,
+    }
+
+    impl FakeAttachmentKernel {
+        fn healthy() -> Arc<Self> {
+            Arc::new(Self {
+                node: parking_lot::Mutex::new(FakeNode::healthy()),
+                journal: parking_lot::Mutex::new(Vec::new()),
+                faults: parking_lot::Mutex::new(Vec::new()),
+                hooks: parking_lot::Mutex::new(Vec::new()),
+                guard_expectations: parking_lot::Mutex::new(Vec::new()),
+            })
+        }
+
+        fn node(&self) -> FakeNode {
+            self.node.lock().clone()
+        }
+
+        fn with_node(&self, change: impl FnOnce(&mut FakeNode)) {
+            change(&mut self.node.lock());
+        }
+
+        fn mark(&self) -> usize {
+            self.journal.lock().len()
+        }
+
+        fn calls_since(&self, mark: usize) -> Vec<KernelCall> {
+            self.journal.lock()[mark..].to_vec()
+        }
+
+        fn trace_since(&self, mark: usize) -> Vec<(AllocationCall, Option<String>)> {
+            self.calls_since(mark).into_iter().map(|call| (call.call, call.tap)).collect()
+        }
+
+        fn mutations_since(&self, mark: usize) -> Vec<KernelCall> {
+            self.calls_since(mark)
+                .into_iter()
+                .filter(|call| MUTATIONS.contains(&call.call))
+                .collect()
+        }
+
+        fn guard_expectations(&self) -> Vec<BTreeSet<String>> {
+            self.guard_expectations.lock().clone()
+        }
+
+        fn arm(
+            &self,
+            call: AllocationCall,
+            tap: Option<&str>,
+            after: Option<AllocationCall>,
+            nth: Option<usize>,
+            standing: bool,
+        ) {
+            let armed_at = self.mark();
+            self.faults.lock().push(LeafFault {
+                call,
+                tap: tap.map(str::to_owned),
+                after,
+                nth,
+                standing,
+                armed_at,
+                spent: false,
+            });
+        }
+
+        fn fail_once(&self, call: AllocationCall) {
+            self.arm(call, None, None, None, false);
+        }
+
+        fn fail_nth(&self, call: AllocationCall, nth: usize) {
+            self.arm(call, None, None, Some(nth), false);
+        }
+
+        fn fail_always(&self, call: AllocationCall) {
+            self.arm(call, None, None, None, true);
+        }
+
+        fn fail_once_for(&self, call: AllocationCall, tap: &str) {
+            self.arm(call, Some(tap), None, None, false);
+        }
+
+        fn fail_once_after(&self, after: AllocationCall, call: AllocationCall) {
+            self.arm(call, None, Some(after), None, false);
+        }
+
+        fn clear_faults(&self) {
+            self.faults.lock().clear();
+        }
+
+        /// Change the node out of band right after the nth `after` call from
+        /// now.
+        fn after_call(
+            &self,
+            after: AllocationCall,
+            nth: usize,
+            mutate: impl FnOnce(&mut FakeNode) + Send + 'static,
+        ) {
+            let armed_at = self.mark();
+            self.hooks.lock().push(NodeHook {
+                after,
+                nth,
+                armed_at,
+                mutate: Some(Box::new(mutate)),
+            });
+        }
+
+        fn take_fault(&self, call: AllocationCall, tap: Option<&str>) -> bool {
+            let journal = self.journal.lock().clone();
+            let mut faults = self.faults.lock();
+            for fault in faults.iter_mut() {
+                if fault.spent
+                    || fault.call != call
+                    || fault.tap.as_deref().is_some_and(|wanted| Some(wanted) != tap)
+                {
+                    continue;
+                }
+                let since = &journal[fault.armed_at..];
+                if fault.after.is_some_and(|after| !since.iter().any(|prior| prior.call == after)) {
+                    continue;
+                }
+                if let Some(nth) = fault.nth {
+                    let occurrence = since
+                        .iter()
+                        .filter(|prior| {
+                            prior.call == call
+                                && fault
+                                    .tap
+                                    .as_deref()
+                                    .is_none_or(|wanted| prior.tap.as_deref() == Some(wanted))
+                        })
+                        .count()
+                        + 1;
+                    if occurrence != nth {
+                        continue;
+                    }
+                }
+                if !fault.standing {
+                    fault.spent = true;
+                }
+                return true;
+            }
+            false
+        }
+
+        fn run_hooks(&self) {
+            let journal = self.journal.lock().clone();
+            let due = self
+                .hooks
+                .lock()
+                .iter_mut()
+                .filter_map(|hook| {
+                    let seen = journal[hook.armed_at..]
+                        .iter()
+                        .filter(|prior| prior.call == hook.after)
+                        .count();
+                    if seen == hook.nth { hook.mutate.take() } else { None }
+                })
+                .collect::<Vec<_>>();
+            for mutate in due {
+                mutate(&mut self.node.lock());
+            }
+        }
+
+        /// Run one leaf: an armed failure returns `failure()` with no effect;
+        /// otherwise `effect` runs against the node. The call is journaled
+        /// with whether it changed the node, then due hooks run.
+        fn leaf<T, E>(
+            &self,
+            call: AllocationCall,
+            tap: Option<&str>,
+            failure: impl FnOnce() -> E,
+            effect: impl FnOnce(&mut FakeNode) -> std::result::Result<T, E>,
+        ) -> std::result::Result<T, E> {
+            let failing = self.take_fault(call, tap);
+            let (result, wrote) = {
+                let mut node = self.node.lock();
+                let before = node.clone();
+                let result = if failing { Err(failure()) } else { effect(&mut node) };
+                let wrote = *node != before;
+                (result, wrote)
+            };
+            self.journal.lock().push(KernelCall { call, tap: tap.map(str::to_owned), wrote });
+            self.run_hooks();
+            result
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl GuestNetworkAllocationIo for FakeAttachmentKernel {
+        async fn create_tap(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::CreateTap, Some(&tap), netlink_failure, |node| {
+                if !node.taps.contains_key(&tap) {
+                    let ifindex = node.next_ifindex;
+                    node.next_ifindex += 1;
+                    node.taps.insert(
+                        tap.clone(),
+                        FakeTap {
+                            ifindex,
+                            kind: GuestLinkKind::Tap,
+                            persistent: true,
+                            owner_uid: ROOT_UID,
+                            up: false,
+                            master: None,
+                            mac: Some(host_mac(ifindex)),
+                            debug_mask: 0,
+                            ingress: Vec::new(),
+                            egress: Vec::new(),
+                            admin_stuck: false,
+                        },
+                    );
+                }
+                Ok(())
+            })
+        }
+        async fn attach_tap_to_bridge(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            let bridge = plan.bridge().to_owned();
+            self.leaf(AllocationCall::AttachTap, Some(&tap), netlink_failure, |node| {
+                let master = node
+                    .bridge
+                    .as_ref()
+                    .map(|bridge| bridge.ifindex)
+                    .ok_or_else(|| NetlinkError::link_absent(bridge))?;
+                node.taps
+                    .get_mut(&tap)
+                    .ok_or_else(|| NetlinkError::link_absent(tap.clone()))?
+                    .master = Some(master);
+                Ok(())
+            })
+        }
+        async fn set_tap_up(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::SetTapUp, Some(&tap), netlink_failure, |node| {
+                let entry = node
+                    .taps
+                    .get_mut(&tap)
+                    .ok_or_else(|| NetlinkError::link_absent(tap.clone()))?;
+                if !entry.admin_stuck {
+                    entry.up = true;
+                }
+                Ok(())
+            })
+        }
+        async fn set_tap_down(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::SetTapDown, Some(&tap), netlink_failure, |node| {
+                let entry = node
+                    .taps
+                    .get_mut(&tap)
+                    .ok_or_else(|| NetlinkError::link_absent(tap.clone()))?;
+                if !entry.admin_stuck {
+                    entry.up = false;
+                }
+                Ok(())
+            })
+        }
+        async fn delete_tap(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DeleteTap, Some(&tap), netlink_failure, |node| {
+                node.taps
+                    .remove(&tap)
+                    .map(drop)
+                    .ok_or_else(|| NetlinkError::link_absent(tap.clone()))
+            })
+        }
+        async fn observe_tap(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<GuestNetworkAllocationTapObservation, NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::ObserveTap, Some(&tap), netlink_failure, |node| {
+                Ok(match node.taps.get(&tap) {
+                    None => GuestNetworkAllocationTapObservation::Absent { name: tap.clone() },
+                    Some(entry) if entry.kind == GuestLinkKind::Tap && entry.persistent => {
+                        GuestNetworkAllocationTapObservation::Persistent {
+                            name: tap.clone(),
+                            ifindex: entry.ifindex,
+                            up: entry.up,
+                            owner_uid: entry.owner_uid,
+                            master_ifindex: entry.master,
+                            mac: entry.mac,
+                        }
+                    }
+                    Some(entry) => GuestNetworkAllocationTapObservation::Incompatible {
+                        name: tap.clone(),
+                        ifindex: entry.ifindex,
+                        kind: entry.kind,
+                        persistent: matches!(entry.kind, GuestLinkKind::Tap | GuestLinkKind::Tun)
+                            .then_some(entry.persistent),
+                        up: entry.up,
+                        owner_uid: entry.owner_uid,
+                        master_ifindex: entry.master,
+                    },
+                })
+            })
+        }
+        async fn observe_bridge(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<GuestNetworkAllocationBridgeObservation, NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            let name = plan.bridge().to_owned();
+            self.leaf(AllocationCall::ObserveBridge, Some(&tap), netlink_failure, |node| {
+                Ok(node.bridge.as_ref().map_or_else(
+                    || GuestNetworkAllocationBridgeObservation::Absent { name: name.clone() },
+                    |bridge| GuestNetworkAllocationBridgeObservation::Present {
+                        name: name.clone(),
+                        ifindex: bridge.ifindex,
+                        kind: bridge.kind,
+                    },
+                ))
+            })
+        }
+        fn insert_guard_member(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::InsertGuard, Some(&tap), guard_failure, |node| {
+                if !node.guard_table {
+                    return Err(BridgeGuardError::Netlink(NetlinkError::nft(
+                        "bridge-insert-member",
+                        std::io::Error::from_raw_os_error(libc::ENOENT),
+                    )));
+                }
+                node.guard_members.insert(tap.clone());
+                Ok(BridgeGuardMutationOutcome::Converged { observed: node.guard_inventory() })
+            })
+        }
+        fn delete_guard_member(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<BridgeGuardMutationOutcome, BridgeGuardError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DeleteGuard, Some(&tap), guard_failure, |node| {
+                node.guard_members.remove(&tap);
+                Ok(BridgeGuardMutationOutcome::Converged { observed: node.guard_inventory() })
+            })
+        }
+        fn observe_guard(
+            &self,
+            expected_members: &BTreeSet<String>,
+        ) -> std::result::Result<BridgeGuardObservation, BridgeGuardError> {
+            self.guard_expectations.lock().push(expected_members.clone());
+            self.leaf(AllocationCall::ObserveGuard, None, guard_failure, |node| {
+                Ok(node.classify_guard(expected_members))
+            })
+        }
+        fn insert_endpoint(
+            &self,
+            plan: &GuestNetworkPlan,
+            ifindex: u32,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            let endpoint = endpoint_for(plan);
+            self.leaf(AllocationCall::InsertEndpoint, Some(&tap), tcx_failure, |node| {
+                node.endpoints.insert(ifindex, endpoint);
+                Ok(())
+            })
+        }
+        fn read_endpoint(
+            &self,
+            plan: &GuestNetworkPlan,
+            ifindex: u32,
+        ) -> std::result::Result<Option<GuestTcxEndpoint>, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::ReadEndpoint, Some(&tap), tcx_failure, |node| {
+                Ok(node.endpoints.get(&ifindex).copied())
+            })
+        }
+        fn remove_endpoint(
+            &self,
+            plan: &GuestNetworkPlan,
+            ifindex: u32,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::RemoveEndpoint, Some(&tap), tcx_failure, |node| {
+                node.endpoints.remove(&ifindex);
+                Ok(())
+            })
+        }
+        fn attach_first_ingress(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::AttachFirstIngress, Some(&tap), tcx_failure, |node| {
+                let entry = node.taps.get_mut(&tap).ok_or_else(absent_interface)?;
+                if !entry.ingress.contains(&INGRESS_PROGRAM) {
+                    entry.ingress.push(INGRESS_PROGRAM);
+                    entry.ingress.sort_unstable();
+                }
+                node.pending_ingress.insert(tap.clone());
+                Ok(())
+            })
+        }
+        fn pin_link(&self, plan: &GuestNetworkPlan) -> std::result::Result<u32, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::PinLink, Some(&tap), tcx_failure, |node| {
+                if node.pending_ingress.remove(&tap) {
+                    node.ingress_pins.insert(tap.clone());
+                    Ok(INGRESS_PROGRAM)
+                } else {
+                    Err(GuestTcxError::ObjectMissing { object: GuestTcxObject::Classifier })
+                }
+            })
+        }
+        fn query_attachment(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::QueryAttachment, Some(&tap), tcx_failure, |node| {
+                node.taps
+                    .get(&tap)
+                    .map(|entry| GuestTcxAttachment {
+                        revision: 1,
+                        program_ids: entry.ingress.clone(),
+                    })
+                    .ok_or_else(absent_interface)
+            })
+        }
+        fn link_pin_present(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<bool, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::LinkPinPresent, Some(&tap), tcx_failure, |node| {
+                Ok(node.ingress_pins.contains(&tap))
+            })
+        }
+        fn detach_pending_link(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DetachPendingLink, Some(&tap), tcx_failure, |node| {
+                if node.pending_ingress.remove(&tap)
+                    && let Some(entry) = node.taps.get_mut(&tap)
+                {
+                    entry.ingress.retain(|program| *program != INGRESS_PROGRAM);
+                }
+                Ok(())
+            })
+        }
+        fn detach_pinned_link(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DetachPinnedLink, Some(&tap), tcx_failure, |node| {
+                if node.ingress_pins.remove(&tap)
+                    && let Some(entry) = node.taps.get_mut(&tap)
+                {
+                    entry.ingress.retain(|program| *program != INGRESS_PROGRAM);
+                }
+                Ok(())
+            })
+        }
+        fn attach_first_egress(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::AttachFirstEgress, Some(&tap), tcx_failure, |node| {
+                let entry = node.taps.get_mut(&tap).ok_or_else(absent_interface)?;
+                if !entry.egress.contains(&EGRESS_PROGRAM) {
+                    entry.egress.push(EGRESS_PROGRAM);
+                    entry.egress.sort_unstable();
+                }
+                node.pending_egress.insert(tap.clone());
+                Ok(())
+            })
+        }
+        fn pin_egress_link(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<u32, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::PinEgressLink, Some(&tap), tcx_failure, |node| {
+                if node.pending_egress.remove(&tap) {
+                    node.egress_pins.insert(tap.clone());
+                    Ok(EGRESS_PROGRAM)
+                } else {
+                    Err(GuestTcxError::ObjectMissing { object: GuestTcxObject::EgressClassifier })
+                }
+            })
+        }
+        fn query_egress_attachment(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<GuestTcxAttachment, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::QueryEgressAttachment, Some(&tap), tcx_failure, |node| {
+                node.taps
+                    .get(&tap)
+                    .map(|entry| GuestTcxAttachment {
+                        revision: 1,
+                        program_ids: entry.egress.clone(),
+                    })
+                    .ok_or_else(absent_interface)
+            })
+        }
+        fn egress_link_pin_present(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<bool, GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::EgressLinkPinPresent, Some(&tap), tcx_failure, |node| {
+                Ok(node.egress_pins.contains(&tap))
+            })
+        }
+        fn detach_pending_egress_link(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DetachPendingEgressLink, Some(&tap), tcx_failure, |node| {
+                if node.pending_egress.remove(&tap)
+                    && let Some(entry) = node.taps.get_mut(&tap)
+                {
+                    entry.egress.retain(|program| *program != EGRESS_PROGRAM);
+                }
+                Ok(())
+            })
+        }
+        fn detach_pinned_egress_link(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<(), GuestTcxError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::DetachPinnedEgressLink, Some(&tap), tcx_failure, |node| {
+                if node.egress_pins.remove(&tap)
+                    && let Some(entry) = node.taps.get_mut(&tap)
+                {
+                    entry.egress.retain(|program| *program != EGRESS_PROGRAM);
+                }
+                Ok(())
+            })
+        }
+        async fn observe_tap_debug_msg_mask(
+            &self,
+            plan: &GuestNetworkPlan,
+        ) -> std::result::Result<Option<u32>, NetlinkError> {
+            let tap = plan.assignment().tap.clone();
+            self.leaf(AllocationCall::ObserveTapDebugMsgMask, Some(&tap), netlink_failure, |node| {
+                Ok(node.taps.get(&tap).map(|entry| entry.debug_mask))
+            })
+        }
+        async fn observe_debug_msg_masks(
+            &self,
+        ) -> std::result::Result<BTreeMap<u32, u32>, NetlinkError> {
+            self.leaf(AllocationCall::ObserveDebugMsgMasks, None, netlink_failure, |node| {
+                Ok(node
+                    .taps
+                    .values()
+                    .filter(|entry| !node.mask_dump_omits.contains(&entry.ifindex))
+                    .map(|entry| (entry.ifindex, entry.debug_mask))
+                    .collect())
+            })
+        }
+    }
+
+    // ---- plans, fixtures, and oracles --------------------------------------
+
+    /// The queued-observation plan: TAP `ovd-tp-0002` on the shared bridge.
     fn plan(name: &str, address: Ipv4Addr) -> GuestNetworkPlan {
         GuestNetworkPlan {
             alloc: AllocationId::new(name).expect("allocation id"),
@@ -6121,6 +6797,48 @@ mod allocation_owner_acceptance {
                 dns: Ipv4Addr::new(100, 95, 0, 1),
             },
         }
+    }
+
+    /// A plan over a scratch TAP name outside `ovd-tp-`, so an owner path
+    /// that still reaches the host never names a production TAP.
+    fn scratch_plan(alloc: &str, tap: &str, host: u8) -> GuestNetworkPlan {
+        GuestNetworkPlan {
+            alloc: AllocationId::new(alloc).expect("allocation id"),
+            bridge: "ovd-gbr0".to_owned(),
+            node_prefix: "100.95.0.0/16".parse().expect("node prefix"),
+            assignment: GuestNetworkAssignment {
+                address: Ipv4Addr::new(100, 95, 0, host),
+                tap: tap.to_owned(),
+                mac: [0x02, 0x00, 100, 95, 0, host],
+                gateway: Ipv4Addr::new(100, 95, 0, 1),
+                prefix: 16,
+                dns: Ipv4Addr::new(100, 95, 0, 1),
+            },
+        }
+    }
+
+    fn owner_over(kernel: &Arc<FakeAttachmentKernel>) -> HostSharedGuestNetworkOwner {
+        HostSharedGuestNetworkOwner::with_allocation_io(kernel.clone())
+    }
+
+    async fn provisioned(owner: &HostSharedGuestNetworkOwner, plan: &GuestNetworkPlan) {
+        owner.provision(plan).await.expect("fixture provisions the attachment down");
+    }
+
+    async fn activated(owner: &HostSharedGuestNetworkOwner, plan: &GuestNetworkPlan) {
+        provisioned(owner, plan).await;
+        assert_eq!(
+            owner.activate(plan).await.expect("fixture activates the attachment"),
+            TapActivation::Raised
+        );
+    }
+
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "journal entries name an optional TAP; every comparison builds that same shape"
+    )]
+    fn tap_of(plan: &GuestNetworkPlan) -> Option<String> {
+        Some(plan.assignment().tap.clone())
     }
 
     fn tap_fact(
@@ -6141,6 +6859,11 @@ mod allocation_owner_acceptance {
         }
     }
 
+    /// The exact persistent, root-owned TAP identity the owner expects.
+    fn expected_tap(plan: &GuestNetworkPlan, ifindex: u32, up: bool) -> GuestNetworkFact {
+        tap_fact(&plan.assignment().tap, Some(ifindex), GuestLinkKind::Tap, true, up, ROOT_UID)
+    }
+
     fn bridge_fact(name: &str, ifindex: Option<u32>, link_kind: GuestLinkKind) -> GuestNetworkFact {
         GuestNetworkFact::BridgeLinkIdentity { name: name.to_owned(), ifindex, link_kind }
     }
@@ -6149,287 +6872,216 @@ mod allocation_owner_acceptance {
         GuestNetworkFact::LinkMaster { ifindex, master_ifindex }
     }
 
-    fn exposed_attachment_facts(
-        plan: &GuestNetworkPlan,
-        state: &HostGuestNetworkAllocationState,
-    ) -> Vec<GuestNetworkFact> {
-        let up = matches!(state.phase, HostGuestNetworkAllocationPhase::Active);
-        vec![
-            tap_fact(
-                &plan.assignment().tap,
-                Some(state.ifindex),
-                GuestLinkKind::Tap,
-                up,
-                true,
-                Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
-            ),
-            GuestNetworkFact::TcxAttachment {
-                ifindex: state.ifindex,
-                program_id: Some(state.program_id),
-                attach_point: Some(TcxAttachPoint::Ingress),
-            },
-            GuestNetworkFact::EndpointMapEntry {
-                ifindex: state.ifindex,
-                value: Some(GuestEndpointFact {
-                    source_ip: plan.assignment().address,
-                    source_mac: plan.assignment().mac,
-                    bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
-                }),
-            },
-        ]
+    fn attachment_fact(
+        ifindex: u32,
+        program_id: Option<u32>,
+        point: TcxAttachPoint,
+    ) -> GuestNetworkFact {
+        GuestNetworkFact::TcxAttachment { ifindex, program_id, attach_point: Some(point) }
     }
 
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "owned expected/observed facts keep each table row self-contained"
-    )]
-    fn assert_mismatch(
-        error: GuestNetworkError,
-        operation: GuestNetworkOperation,
-        expected: GuestNetworkFact,
-        observed: Option<GuestNetworkFact>,
-    ) {
-        assert!(matches!(
-            error,
-            GuestNetworkError::PostconditionMismatch {
-                operation: actual_operation,
-                expected: actual_expected,
-                observed: actual_observed,
-            } if actual_operation == operation
-                && actual_expected == expected
-                && actual_observed == observed
-        ));
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    enum CleanupFailureKind {
-        Tcx,
-        Netlink,
-    }
-
-    fn teardown_calls() -> [AllocationCall; 11] {
-        [
-            AllocationCall::RemoveEndpoint,
-            AllocationCall::DetachPinnedLink,
-            AllocationCall::ReadEndpoint,
-            AllocationCall::QueryAttachment,
-            AllocationCall::LinkPinPresent,
-            AllocationCall::SetTapDown,
-            AllocationCall::ObserveTap,
-            AllocationCall::DeleteTap,
-            AllocationCall::DeleteGuard,
-            AllocationCall::ObserveTap,
-            AllocationCall::ObserveGuard,
-        ]
-    }
-
-    fn assert_cleanup_leaf_error(
-        error: GuestNetworkError,
-        operation: GuestNetworkOperation,
-        kind: CleanupFailureKind,
-    ) {
-        match kind {
-            CleanupFailureKind::Tcx => assert!(matches!(
-                error,
-                GuestNetworkError::Tcx {
-                    operation: actual,
-                    source: GuestTcxError::Io { source },
-                } if actual == operation && source.raw_os_error() == Some(libc::EIO)
-            )),
-            CleanupFailureKind::Netlink => assert!(matches!(
-                error,
-                GuestNetworkError::Netlink {
-                    operation: actual,
-                    source: NetlinkError::Connect { source },
-                } if actual == operation && source.raw_os_error() == Some(libc::EBUSY)
-            )),
-        }
-    }
-
-    /// S-ND295-11 — provision publishes the fully protected attachment down.
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// CONTRACT_SHAPE: bounded-change.
-    #[tokio::test]
-    async fn provision_reads_every_attachment_fact_before_reporting_success() {
-        let io = ScriptedAllocationIo::healthy();
-        let owner = Arc::new(HostSharedGuestNetworkOwner::with_allocation_io(io.clone()));
-        let plan = plan("nd295-s11", Ipv4Addr::new(100, 95, 0, 2));
-        io.track_publication(&owner, plan.alloc().clone());
-        assert!(!owner.allocations.lock().contains_key(plan.alloc()));
-        owner.provision(&plan).await.expect("all leaf effects and exact read-backs succeed");
-
-        assert_eq!(
-            io.calls(),
-            [
-                AllocationCall::CreateTap,
-                AllocationCall::ObserveTap,
-                AllocationCall::AttachTap,
-                AllocationCall::ObserveBridge,
-                AllocationCall::ObserveTap,
-                AllocationCall::InsertGuard,
-                AllocationCall::ObserveGuard,
-                AllocationCall::InsertEndpoint,
-                AllocationCall::ReadEndpoint,
-                AllocationCall::AttachFirstIngress,
-                AllocationCall::PinLink,
-                AllocationCall::QueryAttachment,
-                AllocationCall::LinkPinPresent,
-                AllocationCall::ObserveBridge,
-                AllocationCall::ObserveTap,
-            ]
-        );
-        assert_eq!(
-            io.publication_trace(),
-            vec![false; 15],
-            "the allocation remains unpublished through the final TAP-down read-back call"
-        );
-        assert!(!io.calls().contains(&AllocationCall::SetTapUp));
-        assert_eq!(
-            owner.allocations.lock().get(plan.alloc()).cloned(),
-            Some(HostGuestNetworkAllocationState {
-                tap: "ovd-tp-0002".to_owned(),
-                ifindex: 295,
-                program_id: 2_950,
-                phase: HostGuestNetworkAllocationPhase::ProvisionedDown,
+    fn endpoint_fact(ifindex: u32, endpoint: GuestTcxEndpoint) -> GuestNetworkFact {
+        GuestNetworkFact::EndpointMapEntry {
+            ifindex,
+            value: Some(GuestEndpointFact {
+                source_ip: endpoint.source_ipv4,
+                source_mac: endpoint.source_mac,
+                bridge_mac: endpoint.bridge_mac,
             }),
-            "publication occurs only after the final bridge refresh and TAP-down read-back"
-        );
-    }
-
-    /// S-ND295-11 — activation revalidates protection, performs the sole TAP-up,
-    /// and publishes Active only after final up/master read-back.
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// CONTRACT_SHAPE: bounded-change.
-    #[tokio::test]
-    async fn activation_reads_every_protection_fact_before_reporting_success() {
-        let io = ScriptedAllocationIo::healthy();
-        let owner = Arc::new(HostSharedGuestNetworkOwner::with_allocation_io(io.clone()));
-        let active_plan = plan("nd295-s11-activate", Ipv4Addr::new(100, 95, 0, 2));
-        io.track_publication(&owner, active_plan.alloc().clone());
-        owner.provision(&active_plan).await.expect("provisioned-down attachment is complete");
-        let activation_start = io.calls().len();
-
-        owner.activate(&active_plan).await.expect("all protection and final up read-backs succeed");
-        assert_eq!(
-            &io.calls()[activation_start..],
-            [
-                AllocationCall::ObserveBridge,
-                AllocationCall::ObserveTap,
-                AllocationCall::ObserveGuard,
-                AllocationCall::ReadEndpoint,
-                AllocationCall::QueryAttachment,
-                AllocationCall::LinkPinPresent,
-                AllocationCall::SetTapUp,
-                AllocationCall::ObserveBridge,
-                AllocationCall::ObserveTap,
-            ]
-        );
-        assert_eq!(
-            owner.allocations.lock().get(active_plan.alloc()).cloned(),
-            Some(HostGuestNetworkAllocationState {
-                tap: "ovd-tp-0002".to_owned(),
-                ifindex: 295,
-                program_id: 2_950,
-                phase: HostGuestNetworkAllocationPhase::Active,
-            })
-        );
-
-        owner.activate(&active_plan).await.expect("same-plan active replay is idempotent");
-        assert_eq!(
-            io.calls().iter().filter(|call| **call == AllocationCall::SetTapUp).count(),
-            1,
-            "an already-active exact attachment is read back without a second TAP-up mutation"
-        );
-
-        for quiescence_fails in [false, true] {
-            let io = ScriptedAllocationIo::healthy();
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
-            let plan = plan(
-                if quiescence_fails {
-                    "nd295-s11-activation-quiesce-fails"
-                } else {
-                    "nd295-s11-activation-readback-fails"
-                },
-                Ipv4Addr::new(100, 95, 0, if quiescence_fails { 4 } else { 3 }),
-            );
-            owner.provision(&plan).await.expect("failure fixture provisions down first");
-            let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
-            *io.tap_observations.lock() = VecDeque::from([
-                GuestNetworkAllocationTapObservation::Persistent {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: 295,
-                    up: false,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
-                    mac: None,
-                },
-                GuestNetworkAllocationTapObservation::Persistent {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: 295,
-                    up: false,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
-                    mac: None,
-                },
-            ]);
-            io.failures.lock().insert((AllocationCall::ObserveBridge, 4));
-            if quiescence_fails {
-                io.failures.lock().insert((AllocationCall::SetTapDown, 1));
-            }
-
-            let activation_start = io.calls().len();
-            let error = owner
-                .activate(&plan)
-                .await
-                .expect_err("post-TAP-up read-back failure remains fail-closed");
-            let calls = &io.calls()[activation_start..];
-            assert!(calls.contains(&AllocationCall::SetTapUp));
-            assert!(calls.contains(&AllocationCall::SetTapDown));
-            if quiescence_fails {
-                assert!(matches!(
-                    error,
-                    GuestNetworkError::Netlink { operation: GuestNetworkOperation::TapSetDown, .. }
-                ));
-            } else {
-                assert!(matches!(
-                    error,
-                    GuestNetworkError::Netlink {
-                        operation: GuestNetworkOperation::BridgeObserve,
-                        ..
-                    }
-                ));
-                assert_eq!(
-                    owner.allocations.lock().get(plan.alloc()).map(|state| state.phase),
-                    Some(HostGuestNetworkAllocationPhase::ProvisionedDown),
-                    "successful quiescence returns the attachment to its published down phase"
-                );
-            }
         }
     }
 
-    /// S-ND295-11 — incompatible TAP/bridge identity refuses publication.
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    fn assert_mismatch(
+        error: &GuestNetworkError,
+        operation: GuestNetworkOperation,
+        expected: &GuestNetworkFact,
+        observed: Option<&GuestNetworkFact>,
+    ) {
+        assert!(
+            matches!(
+                error,
+                GuestNetworkError::PostconditionMismatch {
+                    operation: actual_operation,
+                    expected: actual_expected,
+                    observed: actual_observed,
+                } if *actual_operation == operation
+                    && actual_expected == expected
+                    && actual_observed.as_ref() == observed
+            ),
+            "expected {operation:?} mismatch {expected:?} vs {observed:?}, got {error:?}"
+        );
+    }
+
+    fn is_tcx_failure(error: &GuestNetworkError, operation: GuestNetworkOperation) -> bool {
+        matches!(
+            error,
+            GuestNetworkError::Tcx { operation: actual, source: GuestTcxError::Io { source } }
+                if *actual == operation && source.raw_os_error() == Some(libc::EIO)
+        )
+    }
+
+    fn is_netlink_failure(error: &GuestNetworkError, operation: GuestNetworkOperation) -> bool {
+        matches!(
+            error,
+            GuestNetworkError::Netlink { operation: actual, source: NetlinkError::Connect { source } }
+                if *actual == operation && source.raw_os_error() == Some(libc::EBUSY)
+        )
+    }
+
+    /// The owner does not hold the allocation: `activate` refuses it as a
+    /// missing allocation record before any leaf call.
+    async fn assert_unpublished(
+        owner: &HostSharedGuestNetworkOwner,
+        leaf_calls: impl Fn() -> usize,
+        plan: &GuestNetworkPlan,
+    ) {
+        let before = leaf_calls();
+        let refusal = owner.activate(plan).await;
+        assert!(
+            matches!(refusal, Err(GuestNetworkError::PostconditionMismatch { .. })),
+            "an unpublished allocation is refused, got {refusal:?}"
+        );
+        assert_eq!(leaf_calls(), before, "the refusal reads and writes nothing");
+    }
+
+    /// The source-less refusal for a missing, non-matching, or condemned
+    /// allocation record (D-295-R5 activation table).
+    fn assert_refused_as_missing_record(error: &GuestNetworkError, plan: &GuestNetworkPlan) {
+        let record =
+            tap_fact(&plan.assignment().tap, None, GuestLinkKind::Tap, true, false, ROOT_UID);
+        assert!(
+            matches!(
+                error,
+                GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected,
+                    ..
+                } if *expected == record
+            ),
+            "expected the missing-record refusal, got {error:?}"
+        );
+    }
+
+    /// The complete attachment `provision` leaves down in the node.
+    fn provisioned_parts(plan: &GuestNetworkPlan, ifindex: u32) -> AttachmentParts {
+        AttachmentParts {
+            tap: Some(FakeTap {
+                ifindex,
+                kind: GuestLinkKind::Tap,
+                persistent: true,
+                owner_uid: ROOT_UID,
+                up: false,
+                master: Some(BRIDGE_IFINDEX),
+                mac: Some(host_mac(ifindex)),
+                debug_mask: 0,
+                ingress: vec![INGRESS_PROGRAM],
+                egress: vec![EGRESS_PROGRAM],
+                admin_stuck: false,
+            }),
+            endpoint: Some(endpoint_for(plan)),
+            ingress_pin: true,
+            egress_pin: true,
+            pending_ingress: false,
+            pending_egress: false,
+            guard_member: true,
+        }
+    }
+
+    // ---- S-ND295-11 --------------------------------------------------------
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// `provision` performs exactly D12A's order — the egress attach, pin,
+    /// query, and pin read-back as step 6; the bridge refresh, the TAP-down
+    /// identity read-back (owner uid 0, host MAC) and the debug-mask read as
+    /// step 7 — never raises the TAP, and leaves the complete attachment down.
+    /// Only then does the owner hold the allocation: `activate` accepts it.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
+    async fn provision_reads_every_attachment_fact_before_reporting_success() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let plan = scratch_plan("nd295-s11", "t295-s11", 2);
+        let tap = tap_of(&plan);
+
+        owner.provision(&plan).await.expect("every leaf effect and read-back is exact");
+
+        assert_eq!(
+            kernel.trace_since(0),
+            vec![
+                (AllocationCall::CreateTap, tap.clone()),
+                (AllocationCall::ObserveTap, tap.clone()),
+                (AllocationCall::AttachTap, tap.clone()),
+                (AllocationCall::ObserveBridge, tap.clone()),
+                (AllocationCall::ObserveTap, tap.clone()),
+                (AllocationCall::InsertGuard, tap.clone()),
+                (AllocationCall::ObserveGuard, None),
+                (AllocationCall::InsertEndpoint, tap.clone()),
+                (AllocationCall::ReadEndpoint, tap.clone()),
+                (AllocationCall::AttachFirstIngress, tap.clone()),
+                (AllocationCall::PinLink, tap.clone()),
+                (AllocationCall::QueryAttachment, tap.clone()),
+                (AllocationCall::LinkPinPresent, tap.clone()),
+                (AllocationCall::AttachFirstEgress, tap.clone()),
+                (AllocationCall::PinEgressLink, tap.clone()),
+                (AllocationCall::QueryEgressAttachment, tap.clone()),
+                (AllocationCall::EgressLinkPinPresent, tap.clone()),
+                (AllocationCall::ObserveBridge, tap.clone()),
+                (AllocationCall::ObserveTap, tap.clone()),
+                (AllocationCall::ObserveTapDebugMsgMask, tap),
+            ],
+            "D12A order: egress is step 6; bridge refresh, TAP-down read-back, and mask read are step 7"
+        );
+        assert_eq!(
+            kernel.node().parts(&plan.assignment().tap, FIRST_TAP_IFINDEX),
+            provisioned_parts(&plan, FIRST_TAP_IFINDEX),
+            "the complete attachment is present, root-owned, mask 0, and down"
+        );
+        assert_eq!(
+            kernel.guard_expectations(),
+            vec![BTreeSet::from([plan.assignment().tap.clone()])],
+            "the guard read-back expects the complete managed-TAP set"
+        );
+
+        assert_eq!(
+            owner.activate(&plan).await.expect("the owner now holds the allocation"),
+            TapActivation::Raised
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Every incompatible TAP identity at the first, second, and final
+    /// checkpoints, every bridge absence or wrong kind, and every master
+    /// mismatch refuses with the owner-built source-less mismatch, never
+    /// raises the TAP, and publishes nothing. The expected TAP is persistent
+    /// and owned by uid 0 (D-295-R4); a TAP still owned by the VMM uid is an
+    /// incompatible owner.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
     async fn every_incompatible_tap_or_bridge_identity_refuses_owner_publication() {
-        let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
+        let vmm_uid = Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID);
         let bridge_29 = GuestNetworkAllocationBridgeObservation::Present {
             name: "ovd-gbr0".to_owned(),
-            ifindex: 29,
+            ifindex: BRIDGE_IFINDEX,
             kind: GuestLinkKind::Bridge,
         };
         let valid_down = GuestNetworkAllocationTapObservation::Persistent {
             name: "ovd-tp-0002".to_owned(),
             ifindex: 295,
             up: false,
-            owner_uid: Some(uid),
-            master_ifindex: Some(29),
-            mac: None,
+            owner_uid: ROOT_UID,
+            master_ifindex: Some(BRIDGE_IFINDEX),
+            mac: Some(host_mac(295)),
         };
         let first_tap_cases = [
             (
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
-                tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, ROOT_UID),
                 None,
             ),
             (
@@ -6439,18 +7091,11 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Tun,
                     persistent: Some(true),
                     up: false,
-                    owner_uid: Some(uid),
+                    owner_uid: ROOT_UID,
                     master_ifindex: None,
                 },
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(295),
-                    GuestLinkKind::Tun,
-                    true,
-                    false,
-                    Some(uid),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tun, true, false, ROOT_UID)),
             ),
             (
                 GuestNetworkAllocationTapObservation::Incompatible {
@@ -6462,7 +7107,7 @@ mod allocation_owner_acceptance {
                     owner_uid: None,
                     master_ifindex: None,
                 },
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, false, None)),
             ),
             (
@@ -6472,17 +7117,17 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Tap,
                     persistent: Some(false),
                     up: false,
-                    owner_uid: Some(uid),
+                    owner_uid: ROOT_UID,
                     master_ifindex: None,
                 },
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
                     GuestLinkKind::Tap,
                     false,
                     false,
-                    Some(uid),
+                    ROOT_UID,
                 )),
             ),
             (
@@ -6490,43 +7135,42 @@ mod allocation_owner_acceptance {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: false,
-                    owner_uid: Some(uid + 1),
+                    owner_uid: vmm_uid,
                     master_ifindex: None,
-                    mac: None,
+                    mac: Some(host_mac(295)),
                 },
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(295),
-                    GuestLinkKind::Tap,
-                    true,
-                    false,
-                    Some(uid + 1),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, vmm_uid)),
             ),
             (
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: true,
-                    owner_uid: Some(uid),
+                    owner_uid: ROOT_UID,
                     master_ifindex: None,
-                    mac: None,
+                    mac: Some(host_mac(295)),
                 },
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, ROOT_UID)),
             ),
         ];
         for (index, (actual, expected, observed)) in first_tap_cases.into_iter().enumerate() {
             let io = ScriptedAllocationIo::with_observations([actual], [bridge_29.clone()]);
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io);
+            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
             let plan = plan(&format!("nd295-s11-first-tap-{index}"), Ipv4Addr::new(100, 95, 0, 2));
             let error = owner
                 .provision(&plan)
                 .await
                 .expect_err("first TAP checkpoint mismatch refuses publication");
-            assert_mismatch(error, GuestNetworkOperation::TapObserve, expected, observed);
-            assert!(!owner.allocations.lock().contains_key(plan.alloc()));
+            assert_mismatch(
+                &error,
+                GuestNetworkOperation::TapObserve,
+                &expected,
+                observed.as_ref(),
+            );
+            assert!(!io.calls().contains(&AllocationCall::SetTapUp));
+            assert_unpublished(&owner, || io.calls().len(), &plan).await;
         }
 
         for (index, (actual, expected, observed)) in [
@@ -6538,26 +7182,32 @@ mod allocation_owner_acceptance {
             (
                 GuestNetworkAllocationBridgeObservation::Present {
                     name: "ovd-gbr0".to_owned(),
-                    ifindex: 29,
+                    ifindex: BRIDGE_IFINDEX,
                     kind: GuestLinkKind::Other,
                 },
-                bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Bridge),
-                Some(bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Other)),
+                bridge_fact("ovd-gbr0", Some(BRIDGE_IFINDEX), GuestLinkKind::Bridge),
+                Some(bridge_fact("ovd-gbr0", Some(BRIDGE_IFINDEX), GuestLinkKind::Other)),
             ),
         ]
         .into_iter()
         .enumerate()
         {
             let io = ScriptedAllocationIo::with_observations([valid_down.clone()], [actual]);
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io);
+            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
             let plan =
                 plan(&format!("nd295-s11-first-bridge-{index}"), Ipv4Addr::new(100, 95, 0, 2));
             let error = owner
                 .provision(&plan)
                 .await
                 .expect_err("first bridge checkpoint mismatch refuses publication");
-            assert_mismatch(error, GuestNetworkOperation::BridgeObserve, expected, observed);
-            assert!(!owner.allocations.lock().contains_key(plan.alloc()));
+            assert_mismatch(
+                &error,
+                GuestNetworkOperation::BridgeObserve,
+                &expected,
+                observed.as_ref(),
+            );
+            assert!(!io.calls().contains(&AllocationCall::SetTapUp));
+            assert_unpublished(&owner, || io.calls().len(), &plan).await;
         }
 
         let first_master_io = ScriptedAllocationIo::with_observations(
@@ -6567,33 +7217,39 @@ mod allocation_owner_acceptance {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: false,
-                    owner_uid: Some(uid),
+                    owner_uid: ROOT_UID,
                     master_ifindex: Some(30),
-                    mac: None,
+                    mac: Some(host_mac(295)),
                 },
             ],
             [bridge_29.clone()],
         );
-        let first_master_owner = HostSharedGuestNetworkOwner::with_allocation_io(first_master_io);
+        let first_master_owner =
+            HostSharedGuestNetworkOwner::with_allocation_io(first_master_io.clone());
         let first_master_plan = plan("nd295-s11-first-master", Ipv4Addr::new(100, 95, 0, 2));
         let first_master_error = first_master_owner
             .provision(&first_master_plan)
             .await
             .expect_err("down-TAP master mismatch refuses publication");
         assert_mismatch(
-            first_master_error,
+            &first_master_error,
             GuestNetworkOperation::TapObserve,
-            master_fact(295, Some(29)),
-            Some(master_fact(295, Some(30))),
+            &master_fact(295, Some(BRIDGE_IFINDEX)),
+            Some(&master_fact(295, Some(30))),
         );
-        assert!(!first_master_owner.allocations.lock().contains_key(first_master_plan.alloc()));
+        assert_unpublished(
+            &first_master_owner,
+            || first_master_io.calls().len(),
+            &first_master_plan,
+        )
+        .await;
 
         let final_cases = [
             (
                 bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
                 None,
             ),
             (
@@ -6606,13 +7262,13 @@ mod allocation_owner_acceptance {
             (
                 GuestNetworkAllocationBridgeObservation::Present {
                     name: "ovd-gbr0".to_owned(),
-                    ifindex: 29,
+                    ifindex: BRIDGE_IFINDEX,
                     kind: GuestLinkKind::Other,
                 },
                 valid_down.clone(),
                 GuestNetworkOperation::BridgeObserve,
-                bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Bridge),
-                Some(bridge_fact("ovd-gbr0", Some(29), GuestLinkKind::Other)),
+                bridge_fact("ovd-gbr0", Some(BRIDGE_IFINDEX), GuestLinkKind::Bridge),
+                Some(bridge_fact("ovd-gbr0", Some(BRIDGE_IFINDEX), GuestLinkKind::Other)),
             ),
             (
                 GuestNetworkAllocationBridgeObservation::Present {
@@ -6623,7 +7279,7 @@ mod allocation_owner_acceptance {
                 valid_down.clone(),
                 GuestNetworkOperation::TapObserve,
                 master_fact(295, Some(30)),
-                Some(master_fact(295, Some(29))),
+                Some(master_fact(295, Some(BRIDGE_IFINDEX))),
             ),
             (
                 bridge_29.clone(),
@@ -6631,12 +7287,12 @@ mod allocation_owner_acceptance {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: false,
-                    owner_uid: Some(uid),
+                    owner_uid: ROOT_UID,
                     master_ifindex: Some(30),
-                    mac: None,
+                    mac: Some(host_mac(295)),
                 },
                 GuestNetworkOperation::TapObserve,
-                master_fact(295, Some(29)),
+                master_fact(295, Some(BRIDGE_IFINDEX)),
                 Some(master_fact(295, Some(30))),
             ),
             (
@@ -6647,19 +7303,12 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Tun,
                     persistent: Some(true),
                     up: false,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
+                    owner_uid: ROOT_UID,
+                    master_ifindex: Some(BRIDGE_IFINDEX),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(295),
-                    GuestLinkKind::Tun,
-                    true,
-                    false,
-                    Some(uid),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tun, true, false, ROOT_UID)),
             ),
             (
                 bridge_29.clone(),
@@ -6670,10 +7319,10 @@ mod allocation_owner_acceptance {
                     persistent: None,
                     up: false,
                     owner_uid: None,
-                    master_ifindex: Some(29),
+                    master_ifindex: Some(BRIDGE_IFINDEX),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
                 Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Other, false, false, None)),
             ),
             (
@@ -6682,20 +7331,13 @@ mod allocation_owner_acceptance {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 296,
                     up: false,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
-                    mac: None,
+                    owner_uid: ROOT_UID,
+                    master_ifindex: Some(BRIDGE_IFINDEX),
+                    mac: Some(host_mac(296)),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(296),
-                    GuestLinkKind::Tap,
-                    true,
-                    false,
-                    Some(uid),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(296), GuestLinkKind::Tap, true, false, ROOT_UID)),
             ),
             (
                 bridge_29.clone(),
@@ -6703,20 +7345,13 @@ mod allocation_owner_acceptance {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: false,
-                    owner_uid: Some(uid + 1),
-                    master_ifindex: Some(29),
-                    mac: None,
+                    owner_uid: vmm_uid,
+                    master_ifindex: Some(BRIDGE_IFINDEX),
+                    mac: Some(host_mac(295)),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact(
-                    "ovd-tp-0002",
-                    Some(295),
-                    GuestLinkKind::Tap,
-                    true,
-                    false,
-                    Some(uid + 1),
-                )),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, vmm_uid)),
             ),
             (
                 bridge_29.clone(),
@@ -6726,33 +7361,33 @@ mod allocation_owner_acceptance {
                     kind: GuestLinkKind::Tap,
                     persistent: Some(false),
                     up: false,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
+                    owner_uid: ROOT_UID,
+                    master_ifindex: Some(BRIDGE_IFINDEX),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
                 Some(tap_fact(
                     "ovd-tp-0002",
                     Some(295),
                     GuestLinkKind::Tap,
                     false,
                     false,
-                    Some(uid),
+                    ROOT_UID,
                 )),
             ),
             (
-                bridge_29,
+                bridge_29.clone(),
                 GuestNetworkAllocationTapObservation::Persistent {
                     name: "ovd-tp-0002".to_owned(),
                     ifindex: 295,
                     up: true,
-                    owner_uid: Some(uid),
-                    master_ifindex: Some(29),
-                    mac: None,
+                    owner_uid: ROOT_UID,
+                    master_ifindex: Some(BRIDGE_IFINDEX),
+                    mac: Some(host_mac(295)),
                 },
                 GuestNetworkOperation::TapObserve,
-                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, Some(uid)),
-                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, Some(uid))),
+                tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, false, ROOT_UID),
+                Some(tap_fact("ovd-tp-0002", Some(295), GuestLinkKind::Tap, true, true, ROOT_UID)),
             ),
         ];
         for (index, (final_bridge, final_tap, operation, expected, observed)) in
@@ -6762,27 +7397,10 @@ mod allocation_owner_acceptance {
             if operation == GuestNetworkOperation::TapObserve {
                 tap_observations.push(final_tap.clone());
             }
-            tap_observations.extend([GuestNetworkAllocationTapObservation::Absent {
-                name: "ovd-tp-0002".to_owned(),
-            }]);
             let io = ScriptedAllocationIo::with_observations(
                 tap_observations,
-                [
-                    GuestNetworkAllocationBridgeObservation::Present {
-                        name: "ovd-gbr0".to_owned(),
-                        ifindex: 29,
-                        kind: GuestLinkKind::Bridge,
-                    },
-                    final_bridge,
-                ],
+                [bridge_29.clone(), final_bridge],
             );
-            // The final provision-down checkpoint mismatch is the primary
-            // failure. Seed exact rollback read-backs so cleanup does not
-            // replace that source.
-            io.attachment_reads
-                .lock()
-                .push_back(GuestTcxAttachment { revision: 1, program_ids: Vec::new() });
-            io.pin_reads.lock().push_back(false);
             let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
             let plan = plan(&format!("nd295-s11-final-{index}"), Ipv4Addr::new(100, 95, 0, 2));
             let error = owner
@@ -6805,92 +7423,118 @@ mod allocation_owner_acceptance {
                     AllocationCall::PinLink,
                     AllocationCall::QueryAttachment,
                     AllocationCall::LinkPinPresent,
+                    AllocationCall::AttachFirstEgress,
+                    AllocationCall::PinEgressLink,
+                    AllocationCall::QueryEgressAttachment,
+                    AllocationCall::EgressLinkPinPresent,
                     AllocationCall::ObserveBridge,
                 ]),
-                "final case {index} reaches the final down-state bridge checkpoint without TAP-up"
+                "final case {index} reaches the step-7 bridge refresh after the egress step: {calls:?}"
             );
-            assert!(!calls.contains(&AllocationCall::SetTapUp));
             if operation == GuestNetworkOperation::TapObserve {
                 assert_eq!(
-                    calls.get(14),
+                    calls.get(18),
                     Some(&AllocationCall::ObserveTap),
-                    "final case {index} reaches the final down TAP/master checkpoint"
+                    "final case {index} reaches the step-7 TAP-down read-back"
                 );
             }
-            assert_mismatch(error, operation, expected, observed);
-            assert!(!owner.allocations.lock().contains_key(plan.alloc()));
+            assert!(!calls.contains(&AllocationCall::SetTapUp));
+            assert_mismatch(&error, operation, &expected, observed.as_ref());
+            assert_unpublished(&owner, || io.calls().len(), &plan).await;
         }
     }
 
-    /// F-28 — a post-delete read-back failure retries without querying TCX on
-    /// an interface that has already been observed absent.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// F-28, extended to the egress link: a rollback that proves the TAP
+    /// absent but fails its final guard read-back returns that cleanup error
+    /// and keeps the rollback for retry; the retry, through `teardown`, never
+    /// queries an ingress or egress TCX attachment on the removed interface,
+    /// completes, and leaves nothing to retry.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
     async fn rollback_retry_skips_attachment_query_after_tap_removal() {
-        let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
         let bridge = GuestNetworkAllocationBridgeObservation::Present {
             name: "ovd-gbr0".to_owned(),
-            ifindex: 29,
+            ifindex: BRIDGE_IFINDEX,
             kind: GuestLinkKind::Bridge,
         };
         let valid_down = GuestNetworkAllocationTapObservation::Persistent {
             name: "ovd-tp-0002".to_owned(),
             ifindex: 295,
             up: false,
-            owner_uid: Some(uid),
-            master_ifindex: Some(29),
-            mac: None,
+            owner_uid: ROOT_UID,
+            master_ifindex: Some(BRIDGE_IFINDEX),
+            mac: Some(host_mac(295)),
         };
+        // The step-7 read-back finds the TAP gone; every later TAP read sees
+        // it absent (the queue is then empty).
         let io = ScriptedAllocationIo::with_observations(
             [
                 valid_down.clone(),
                 valid_down,
                 GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
-                GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() },
             ],
             [bridge.clone(), bridge],
         );
-        io.attachment_reads
-            .lock()
-            .push_back(GuestTcxAttachment { revision: 1, program_ids: Vec::new() });
-        io.pin_reads.lock().extend([false, false]);
-        io.failures.lock().insert((AllocationCall::ObserveGuard, 2));
+        io.fail(AllocationCall::ObserveGuard, 2);
 
         let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
         let plan = plan("nd295-f28-post-delete", Ipv4Addr::new(100, 95, 0, 2));
         let error = owner
             .provision(&plan)
             .await
-            .expect_err("final guard read-back failure retains a retryable rollback");
-        assert!(matches!(
-            error,
-            GuestNetworkError::Netlink {
-                operation: GuestNetworkOperation::CleanupComplement,
-                source: NetlinkError::Connect { source },
-            } if source.raw_os_error() == Some(libc::EBUSY)
-        ));
+            .expect_err("the rollback's final guard read-back failure is returned");
+        assert!(
+            is_netlink_failure(&error, GuestNetworkOperation::CleanupComplement),
+            "the first typed cleanup error is returned, got {error:?}"
+        );
+        let first_attempt = io.calls();
+        assert!(
+            first_attempt.contains(&AllocationCall::DetachPinnedEgressLink),
+            "the rollback detaches the pinned egress link: {first_attempt:?}"
+        );
+        assert!(!first_attempt.contains(&AllocationCall::SetTapUp));
 
         let retry_start = io.calls().len();
-        owner
-            .teardown(&plan)
-            .await
-            .expect("same-owner retry converges after TAP absence is proven");
-        let retry_calls = &io.calls()[retry_start..];
-        assert!(!retry_calls.contains(&AllocationCall::QueryAttachment));
+        owner.teardown(&plan).await.expect("the same-owner retry converges after TAP absence");
+        let retry_calls = io.calls()[retry_start..].to_vec();
+        assert!(
+            !retry_calls.contains(&AllocationCall::QueryAttachment)
+                && !retry_calls.contains(&AllocationCall::QueryEgressAttachment),
+            "no TCX query on an interface already observed absent: {retry_calls:?}"
+        );
         assert!(retry_calls.contains(&AllocationCall::ObserveGuard));
-        assert!(!owner.rollback_pending.lock().contains_key(plan.alloc()));
+
+        assert_unpublished(&owner, || io.calls().len(), &plan).await;
+        let after_retry = io.calls().len();
+        owner.teardown(&plan).await.expect("no rollback remains to retry");
+        let later_calls = io.calls()[after_retry..].to_vec();
+        assert!(
+            !later_calls.contains(&AllocationCall::QueryAttachment)
+                && !later_calls.contains(&AllocationCall::QueryEgressAttachment),
+            "a completed retry leaves no rollback that reads the interface: {later_calls:?}"
+        );
     }
 
-    /// F-28 — an early failure with no TAP/ifindex never queries TCX.
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// F-28: an early failure with no TAP and no ifindex queries neither TCX
+    /// attachment point, returns the owner-built absent-TAP mismatch (owner
+    /// uid 0), and leaves nothing to retry.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
     async fn early_provision_failure_without_tap_skips_attachment_query() {
-        let uid = overdrive_core::vm::config::OVERDRIVE_VMM_UID;
         let io = ScriptedAllocationIo::with_observations(
             [GuestNetworkAllocationTapObservation::Absent { name: "ovd-tp-0002".to_owned() }],
             [],
         );
-        io.failures.lock().insert((AllocationCall::QueryAttachment, 1));
+        io.fail(AllocationCall::QueryAttachment, 1);
+        io.fail(AllocationCall::QueryEgressAttachment, 1);
         let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
         let plan = plan("nd295-f28-early", Ipv4Addr::new(100, 95, 0, 2));
         let error = owner
@@ -6898,408 +7542,2294 @@ mod allocation_owner_acceptance {
             .await
             .expect_err("an absent first TAP checkpoint refuses publication");
         assert_mismatch(
-            error,
+            &error,
             GuestNetworkOperation::TapObserve,
-            tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, Some(uid)),
+            &tap_fact("ovd-tp-0002", None, GuestLinkKind::Tap, true, false, ROOT_UID),
             None,
         );
         assert!(!io.calls().contains(&AllocationCall::QueryAttachment));
-        assert!(!owner.rollback_pending.lock().contains_key(plan.alloc()));
+        assert!(!io.calls().contains(&AllocationCall::QueryEgressAttachment));
+
+        let before_teardown = io.calls().len();
+        owner.teardown(&plan).await.expect("no rollback remains to retry");
+        assert!(
+            !io.calls()[before_teardown..].contains(&AllocationCall::QueryAttachment),
+            "the completed rollback leaves nothing that queries TCX"
+        );
     }
 
-    /// S-ND295-12 — teardown continues, returns the first source, and retries empty.
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// One egress-step or debug-mask provision fault.
+    #[derive(Debug, Clone, Copy)]
+    enum EgressOrMaskFault {
+        AttachFails,
+        PinFails,
+        QueryFails,
+        QueryShowsNoProgram,
+        PinReadFails,
+        PinAbsent,
+        MaskNonZero,
+        MaskReadFindsTapGone,
+        MaskReadFails,
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Each egress attach, pin, query, and pin read-back failure returns its
+    /// `TcxEgress*`-tagged error; a wrong egress attachment or a missing
+    /// egress pin is the owner-built mismatch; a non-zero debug mask, a mask
+    /// read that finds the TAP gone, and a sourced mask-read failure are the
+    /// `TapObserve` outcomes of D-295-R22. Each refuses publication, never
+    /// raises the TAP, and the rollback leaves no part of the attachment —
+    /// the pending or pinned egress link included.
     #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
+    async fn every_egress_and_debug_mask_provision_failure_refuses_publication() {
+        for (index, fault) in [
+            EgressOrMaskFault::AttachFails,
+            EgressOrMaskFault::PinFails,
+            EgressOrMaskFault::QueryFails,
+            EgressOrMaskFault::QueryShowsNoProgram,
+            EgressOrMaskFault::PinReadFails,
+            EgressOrMaskFault::PinAbsent,
+            EgressOrMaskFault::MaskNonZero,
+            EgressOrMaskFault::MaskReadFindsTapGone,
+            EgressOrMaskFault::MaskReadFails,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let kernel = FakeAttachmentKernel::healthy();
+            let owner = owner_over(&kernel);
+            let tap = format!("t295-em{index}");
+            let plan = scratch_plan(&format!("nd295-s11-egress-mask-{index}"), &tap, 2);
+            let ifindex = FIRST_TAP_IFINDEX;
+            match fault {
+                EgressOrMaskFault::AttachFails => {
+                    kernel.fail_once(AllocationCall::AttachFirstEgress);
+                }
+                EgressOrMaskFault::PinFails => kernel.fail_once(AllocationCall::PinEgressLink),
+                EgressOrMaskFault::QueryFails => {
+                    kernel.fail_once(AllocationCall::QueryEgressAttachment);
+                }
+                EgressOrMaskFault::QueryShowsNoProgram => {
+                    let tap = tap.clone();
+                    kernel.after_call(AllocationCall::PinEgressLink, 1, move |node| {
+                        node.tap_mut(&tap).egress.clear();
+                    });
+                }
+                EgressOrMaskFault::PinReadFails => {
+                    kernel.fail_once(AllocationCall::EgressLinkPinPresent);
+                }
+                EgressOrMaskFault::PinAbsent => {
+                    let tap = tap.clone();
+                    kernel.after_call(AllocationCall::QueryEgressAttachment, 1, move |node| {
+                        node.remove_part(AttachmentPart::EgressPin, &tap, ifindex);
+                    });
+                }
+                EgressOrMaskFault::MaskNonZero => {
+                    let tap = tap.clone();
+                    kernel.after_call(AllocationCall::CreateTap, 1, move |node| {
+                        node.tap_mut(&tap).debug_mask = 0x10;
+                    });
+                }
+                EgressOrMaskFault::MaskReadFindsTapGone => {
+                    let tap = tap.clone();
+                    kernel.after_call(AllocationCall::ObserveTap, 3, move |node| {
+                        node.remove_part(AttachmentPart::Tap, &tap, ifindex);
+                    });
+                }
+                EgressOrMaskFault::MaskReadFails => {
+                    kernel.fail_once(AllocationCall::ObserveTapDebugMsgMask);
+                }
+            }
+
+            let error = owner.provision(&plan).await.expect_err("the fault refuses publication");
+            match fault {
+                EgressOrMaskFault::AttachFails => assert!(
+                    is_tcx_failure(&error, GuestNetworkOperation::TcxEgressAttach),
+                    "{fault:?}: {error:?}"
+                ),
+                EgressOrMaskFault::PinFails | EgressOrMaskFault::PinReadFails => assert!(
+                    is_tcx_failure(&error, GuestNetworkOperation::TcxEgressLinkPin),
+                    "{fault:?}: {error:?}"
+                ),
+                EgressOrMaskFault::QueryFails => assert!(
+                    is_tcx_failure(&error, GuestNetworkOperation::TcxEgressQuery),
+                    "{fault:?}: {error:?}"
+                ),
+                EgressOrMaskFault::QueryShowsNoProgram => assert_mismatch(
+                    &error,
+                    GuestNetworkOperation::TcxEgressQuery,
+                    &attachment_fact(ifindex, Some(EGRESS_PROGRAM), TcxAttachPoint::Egress),
+                    Some(&attachment_fact(ifindex, None, TcxAttachPoint::Egress)),
+                ),
+                EgressOrMaskFault::PinAbsent => assert!(
+                    matches!(
+                        &error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TcxEgressLinkPin,
+                            expected: GuestNetworkFact::BpfLinkPin { .. },
+                            ..
+                        }
+                    ),
+                    "{fault:?}: {error:?}"
+                ),
+                EgressOrMaskFault::MaskNonZero => assert_mismatch(
+                    &error,
+                    GuestNetworkOperation::TapObserve,
+                    &GuestNetworkFact::TapDebugMsgMask { ifindex, mask: 0 },
+                    Some(&GuestNetworkFact::TapDebugMsgMask { ifindex, mask: 0x10 }),
+                ),
+                EgressOrMaskFault::MaskReadFindsTapGone => assert!(
+                    matches!(
+                        &error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TapObserve,
+                            expected: GuestNetworkFact::Tap { name, .. },
+                            observed: None,
+                        } if *name == tap
+                    ),
+                    "{fault:?}: {error:?}"
+                ),
+                EgressOrMaskFault::MaskReadFails => assert!(
+                    is_netlink_failure(&error, GuestNetworkOperation::TapObserve),
+                    "{fault:?}: {error:?}"
+                ),
+            }
+            assert!(
+                !kernel.trace_since(0).iter().any(|(call, _)| *call == AllocationCall::SetTapUp),
+                "{fault:?}: provision never raises the TAP"
+            );
+            assert!(
+                kernel.node().parts(&tap, ifindex).is_empty(),
+                "{fault:?}: the rollback leaves no attachment part: {:?}",
+                kernel.node().parts(&tap, ifindex)
+            );
+            assert_unpublished(&owner, || kernel.mark(), &plan).await;
+        }
+    }
+
+    // ---- S-ND295-12 --------------------------------------------------------
+
+    /// Two attachments leased from one pool and activated on one owner over
+    /// one fake kernel: the named one the body tears down and an unrelated
+    /// one that must stay byte-equal.
+    struct TwoAttachments {
+        kernel: Arc<FakeAttachmentKernel>,
+        owner: HostSharedGuestNetworkOwner,
+        pool: GuestAddressPool,
+        named: GuestNetworkPlan,
+        named_ifindex: u32,
+        unrelated: GuestNetworkPlan,
+        unrelated_ifindex: u32,
+    }
+
+    impl TwoAttachments {
+        async fn active() -> Self {
+            let kernel = FakeAttachmentKernel::healthy();
+            let owner = owner_over(&kernel);
+            let pool = GuestAddressPool::new(
+                "100.95.0.0/16".parse().expect("node prefix"),
+                "ovd-gbr0".to_owned(),
+                Ipv4Addr::new(100, 95, 0, 1),
+                Ipv4Addr::new(100, 95, 0, 1),
+            );
+            let named = pool
+                .assign(AllocationId::new("nd295-s12").expect("named allocation"))
+                .expect("named lease");
+            let unrelated = pool
+                .assign(AllocationId::new("nd295-s12-unrelated").expect("unrelated allocation"))
+                .expect("unrelated lease");
+            activated(&owner, &named).await;
+            activated(&owner, &unrelated).await;
+            let node = kernel.node();
+            let named_ifindex = node.taps[&named.assignment().tap].ifindex;
+            let unrelated_ifindex = node.taps[&unrelated.assignment().tap].ifindex;
+            Self { kernel, owner, pool, named, named_ifindex, unrelated, unrelated_ifindex }
+        }
+
+        fn named_parts(&self) -> AttachmentParts {
+            self.kernel.node().parts(&self.named.assignment().tap, self.named_ifindex)
+        }
+
+        fn unrelated_parts(&self) -> AttachmentParts {
+            self.kernel.node().parts(&self.unrelated.assignment().tap, self.unrelated_ifindex)
+        }
+
+        fn names_unrelated(&self, mark: usize) -> bool {
+            let unrelated = tap_of(&self.unrelated);
+            self.kernel.trace_since(mark).iter().any(|(_, tap)| *tap == unrelated)
+        }
+    }
+
+    /// The typed error a single failure of `call` during teardown carries.
+    fn assert_teardown_leaf_error(error: &GuestNetworkError, call: AllocationCall) {
+        let tcx = |operation| (operation, true);
+        let netlink = |operation| (operation, false);
+        let (operation, is_tcx) = match call {
+            AllocationCall::RemoveEndpoint => tcx(GuestNetworkOperation::EndpointDelete),
+            AllocationCall::DetachPinnedLink => tcx(GuestNetworkOperation::TcxDetach),
+            AllocationCall::DetachPinnedEgressLink => tcx(GuestNetworkOperation::TcxEgressDetach),
+            AllocationCall::ReadEndpoint => tcx(GuestNetworkOperation::EndpointMapObserve),
+            AllocationCall::QueryAttachment => tcx(GuestNetworkOperation::TcxQuery),
+            AllocationCall::LinkPinPresent => tcx(GuestNetworkOperation::TcxLinkPin),
+            AllocationCall::QueryEgressAttachment => tcx(GuestNetworkOperation::TcxEgressQuery),
+            AllocationCall::EgressLinkPinPresent => tcx(GuestNetworkOperation::TcxEgressLinkPin),
+            AllocationCall::SetTapDown => netlink(GuestNetworkOperation::TapSetDown),
+            AllocationCall::ObserveTap => netlink(GuestNetworkOperation::TapObserve),
+            AllocationCall::DeleteTap => netlink(GuestNetworkOperation::TapDelete),
+            AllocationCall::DeleteGuard => netlink(GuestNetworkOperation::GuardMemberDelete),
+            AllocationCall::ObserveGuard => netlink(GuestNetworkOperation::CleanupComplement),
+            other => panic!("teardown reached a leaf outside the D12A teardown set: {other:?}"),
+        };
+        let matched = if is_tcx {
+            is_tcx_failure(error, operation)
+        } else {
+            is_netlink_failure(error, operation)
+        };
+        assert!(matched, "a failed {call:?} returns its {operation:?} source, got {error:?}");
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-12 — Teardown leaves nothing behind and converges on parts already gone
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A healthy teardown mutates in exactly the order endpoint delete ->
+    /// ingress detach -> egress detach -> TAP down (read back before delete)
+    /// -> `RTM_DELLINK` -> guard-member delete, then reads the complement back,
+    /// and leaves the named attachment empty and the unrelated one byte-equal.
+    /// A failure of any single leaf of that teardown returns that leaf's typed
+    /// error while every other teardown call still runs; the owner keeps the
+    /// allocation, and a retry reaches the empty complement. Both the
+    /// provisioned-down and the active phase tear down.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-12)"]
     async fn every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement()
     {
-        let pool = GuestAddressPool::new(
-            "100.95.0.0/16".parse().expect("node prefix"),
-            "ovd-gbr0".to_owned(),
-            Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
-        );
-        let named = pool
-            .assign(AllocationId::new("nd295-s12").expect("named allocation"))
-            .expect("named lease");
-        let unrelated = pool
-            .assign(AllocationId::new("nd295-s12-unrelated").expect("unrelated allocation"))
-            .expect("unrelated lease");
-        // Separate dual-failure example: the later TAP failure must never replace
-        // the genuine first endpoint-deletion source.
-        let io = ScriptedAllocationIo::for_teardown([
-            AllocationCall::RemoveEndpoint,
-            AllocationCall::DeleteTap,
-        ]);
-        let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
-        let named_state = HostGuestNetworkAllocationState {
-            tap: "ovd-tp-0002".to_owned(),
-            ifindex: 295,
-            program_id: 2_950,
-            phase: HostGuestNetworkAllocationPhase::Active,
-        };
-        let unrelated_state = HostGuestNetworkAllocationState {
-            tap: "ovd-tp-0003".to_owned(),
-            ifindex: 296,
-            program_id: 2_950,
-            phase: HostGuestNetworkAllocationPhase::Active,
-        };
-        owner.allocations.lock().insert(named.alloc().clone(), named_state.clone());
-        owner.allocations.lock().insert(unrelated.alloc().clone(), unrelated_state.clone());
-        let leases_before = pool.snapshot();
-        let unrelated_plan_before =
-            leases_before.get(unrelated.alloc()).expect("unrelated lease present").clone();
-        let unrelated_facts_before = exposed_attachment_facts(&unrelated, &unrelated_state);
-
-        let error = owner
-            .teardown(&named)
+        let healthy_fixture = TwoAttachments::active().await;
+        let named_tap = tap_of(&healthy_fixture.named);
+        let unrelated_before = healthy_fixture.unrelated_parts();
+        let unrelated_lease =
+            healthy_fixture.pool.snapshot()[healthy_fixture.unrelated.alloc()].clone();
+        let mark = healthy_fixture.kernel.mark();
+        healthy_fixture
+            .owner
+            .teardown(&healthy_fixture.named)
             .await
-            .expect_err("primary and later cleanup failures retain the first exact source");
-        assert!(matches!(
-            error,
-            GuestNetworkError::Tcx {
-                operation: GuestNetworkOperation::EndpointDelete,
-                source: GuestTcxError::Io { source },
-            } if source.raw_os_error() == Some(libc::EIO)
-        ));
-        let first_attempt = io.calls();
-        let endpoint_failure = first_attempt
-            .iter()
-            .position(|call| *call == AllocationCall::RemoveEndpoint)
-            .expect("primary endpoint deletion attempted");
-        let later_failure = first_attempt
-            .iter()
-            .position(|call| *call == AllocationCall::DeleteTap)
-            .expect("later TAP deletion attempted");
-        assert!(endpoint_failure < later_failure);
-        assert!(first_attempt.contains(&AllocationCall::DeleteGuard));
-        assert!(
-            first_attempt.ends_with(&[AllocationCall::ObserveTap, AllocationCall::ObserveGuard,])
-        );
-        assert_eq!(owner.allocations.lock().get(named.alloc()).cloned(), Some(named_state.clone()));
-        assert_eq!(
-            owner.allocations.lock().get(unrelated.alloc()).cloned(),
-            Some(unrelated_state.clone())
-        );
-        assert_eq!(pool.snapshot(), leases_before, "the same named lease remains held on failure");
+            .expect("a healthy teardown reaches the empty complement");
+        let healthy = healthy_fixture.kernel.trace_since(mark);
 
-        io.clear_failures();
-        io.reset_teardown_observations();
-        let retry_start = io.calls().len();
-        owner
-            .teardown(&named)
-            .await
-            .expect("the same retained owner/allocation retries to an exact empty complement");
-        let retry_calls = &io.calls()[retry_start..];
+        let mutations = healthy
+            .iter()
+            .filter(|(call, _)| MUTATIONS.contains(call))
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(
-            retry_calls,
+            mutations,
             [
                 AllocationCall::RemoveEndpoint,
                 AllocationCall::DetachPinnedLink,
-                AllocationCall::ReadEndpoint,
-                AllocationCall::QueryAttachment,
-                AllocationCall::LinkPinPresent,
+                AllocationCall::DetachPinnedEgressLink,
                 AllocationCall::SetTapDown,
-                AllocationCall::ObserveTap,
                 AllocationCall::DeleteTap,
                 AllocationCall::DeleteGuard,
-                AllocationCall::ObserveTap,
-                AllocationCall::ObserveGuard,
-            ],
-            "named empty complement is endpoint -> link/pin -> TAP-down -> guarded delete -> member delete -> final read-back"
+            ]
+            .map(|call| (call, named_tap.clone()))
+            .to_vec(),
+            "teardown mutation order: endpoint -> ingress -> egress -> TAP down -> TAP delete -> guard member"
         );
-        assert!(!owner.allocations.lock().contains_key(named.alloc()));
-        assert_eq!(
-            io.remaining_teardown_observations(),
-            (0, 0, 0, 0),
-            "retry consumes the exact TAP/endpoint/attachment/pin empty-complement facts"
+        let position = |wanted: AllocationCall| {
+            healthy.iter().position(|(call, _)| *call == wanted).expect("healthy teardown call")
+        };
+        let set_down = position(AllocationCall::SetTapDown);
+        let delete = position(AllocationCall::DeleteTap);
+        let guard_delete = position(AllocationCall::DeleteGuard);
+        assert!(
+            healthy[set_down..delete]
+                .iter()
+                .any(|entry| *entry == (AllocationCall::ObserveTap, named_tap.clone())),
+            "the TAP is read back down before RTM_DELLINK: {healthy:?}"
         );
-        assert_eq!(
-            owner.allocations.lock().get(unrelated.alloc()).cloned(),
-            Some(unrelated_state.clone())
+        let complement = &healthy[guard_delete..];
+        assert!(
+            complement.contains(&(AllocationCall::ObserveTap, named_tap.clone()))
+                && complement.contains(&(AllocationCall::ObserveGuard, None)),
+            "the TAP and guard complement are read back after the last delete: {healthy:?}"
         );
+        assert!(healthy_fixture.named_parts().is_empty(), "the named complement is empty");
+        assert_eq!(healthy_fixture.unrelated_parts(), unrelated_before, "unrelated is byte-equal");
+        assert!(!healthy_fixture.names_unrelated(mark), "teardown never names the unrelated TAP");
         assert_eq!(
-            pool.snapshot().get(unrelated.alloc()),
-            Some(&unrelated_plan_before),
-            "the unrelated attachment lease remains byte-equal"
-        );
-        assert_eq!(
-            exposed_attachment_facts(
-                &unrelated,
-                &owner
-                    .allocations
-                    .lock()
-                    .get(unrelated.alloc())
-                    .cloned()
-                    .expect("unrelated publication remains present"),
-            ),
-            unrelated_facts_before,
-            "the unrelated attachment's exposed facts remain byte-equal"
-        );
-        assert_eq!(
-            io.guard_expectations().last(),
-            Some(&BTreeSet::from([unrelated.assignment().tap.clone()])),
-            "final guard read-back is the exact unrelated-TAP complement"
+            healthy_fixture.kernel.guard_expectations().last(),
+            Some(&BTreeSet::from([healthy_fixture.unrelated.assignment().tap.clone()])),
+            "the final guard read-back expects exactly the unrelated TAP"
         );
 
-        let calls_before_repeat = io.calls().len();
-        owner
-            .teardown(&named)
+        // The caller releases the lease only after `Ok`; the unrelated lease is untouched.
+        healthy_fixture.pool.release(healthy_fixture.named.alloc());
+        assert_eq!(
+            healthy_fixture.pool.snapshot(),
+            BTreeMap::from([(healthy_fixture.unrelated.alloc().clone(), unrelated_lease)])
+        );
+
+        let repeat = healthy_fixture.kernel.mark();
+        healthy_fixture
+            .owner
+            .teardown(&healthy_fixture.named)
             .await
-            .expect("repeating teardown after the named complement is empty is idempotent");
-        assert_eq!(io.calls().len(), calls_before_repeat);
+            .expect("a repeat is idempotent");
+        let never = scratch_plan("nd295-s12-never", "t295-s12n", 99);
+        healthy_fixture.owner.teardown(&never).await.expect("an unheld allocation is idempotent");
+        assert!(
+            healthy_fixture.kernel.calls_since(repeat).iter().all(|call| !call.wrote),
+            "neither a repeat nor an unheld teardown writes"
+        );
+        assert_eq!(healthy_fixture.unrelated_parts(), unrelated_before);
 
-        pool.release(named.alloc());
-        assert!(!pool.snapshot().contains_key(named.alloc()));
-        assert_eq!(pool.snapshot().get(unrelated.alloc()), Some(&unrelated_plan_before));
-
-        let absent = plan("nd295-s12-never-published", Ipv4Addr::new(100, 95, 0, 99));
-        let calls_before_absent = io.calls().len();
-        owner.teardown(&absent).await.expect("teardown of an unpublished allocation is idempotent");
-        owner
-            .teardown(&absent)
-            .await
-            .expect("repeated teardown of an unpublished allocation remains idempotent");
-        assert_eq!(io.calls().len(), calls_before_absent);
-        assert_eq!(
-            owner.allocations.lock().get(unrelated.alloc()).cloned(),
-            Some(unrelated_state.clone())
+        // A provisioned-down attachment tears down to the same empty complement.
+        let down = scratch_plan("nd295-s12-down", "t295-s12d", 40);
+        provisioned(&healthy_fixture.owner, &down).await;
+        let down_ifindex = healthy_fixture.kernel.node().taps[&down.assignment().tap].ifindex;
+        healthy_fixture.owner.teardown(&down).await.expect("a provisioned-down teardown");
+        assert!(
+            healthy_fixture.kernel.node().parts(&down.assignment().tap, down_ifindex).is_empty()
         );
 
-        for phase in [
-            HostGuestNetworkAllocationPhase::ProvisionedDown,
-            HostGuestNetworkAllocationPhase::Active,
-            HostGuestNetworkAllocationPhase::QuiescedActive,
-        ] {
-            let io = ScriptedAllocationIo::for_teardown(std::iter::empty::<AllocationCall>());
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
-            let phase_plan = plan(
-                &format!("nd295-s12-phase-{phase:?}"),
-                Ipv4Addr::new(100, 95, 2, phase as u8 + 2),
-            );
-            owner.allocations.lock().insert(
-                phase_plan.alloc().clone(),
-                HostGuestNetworkAllocationState {
-                    tap: phase_plan.assignment().tap.clone(),
-                    ifindex: 295,
-                    program_id: 2_950,
-                    phase,
-                },
-            );
-            owner
-                .teardown(&phase_plan)
+        // One failure of each call the healthy teardown made.
+        for (index, (call, _)) in healthy.iter().enumerate() {
+            let occurrence = healthy[..=index].iter().filter(|(prior, _)| prior == call).count();
+            let fixture = TwoAttachments::active().await;
+            let unrelated_before = fixture.unrelated_parts();
+            let mark = fixture.kernel.mark();
+            fixture.kernel.fail_nth(*call, occurrence);
+
+            let error = fixture
+                .owner
+                .teardown(&fixture.named)
                 .await
-                .expect("teardown converges from every retained allocation phase");
-            assert_eq!(io.calls(), teardown_calls());
-            assert!(!owner.allocations.lock().contains_key(phase_plan.alloc()));
-        }
-
-        // Exhaustive single-failure table: each accepted cleanup leaf retains
-        // its exact operation/source while all later cleanup calls still run.
-        let failure_rows = [
-            (
-                AllocationCall::RemoveEndpoint,
-                1,
-                GuestNetworkOperation::EndpointDelete,
-                CleanupFailureKind::Tcx,
-            ),
-            (
-                AllocationCall::DetachPinnedLink,
-                1,
-                GuestNetworkOperation::TcxDetach,
-                CleanupFailureKind::Tcx,
-            ),
-            (
-                AllocationCall::ReadEndpoint,
-                1,
-                GuestNetworkOperation::EndpointMapObserve,
-                CleanupFailureKind::Tcx,
-            ),
-            (
-                AllocationCall::QueryAttachment,
-                1,
-                GuestNetworkOperation::TcxQuery,
-                CleanupFailureKind::Tcx,
-            ),
-            (
-                AllocationCall::LinkPinPresent,
-                1,
-                GuestNetworkOperation::TcxLinkPin,
-                CleanupFailureKind::Tcx,
-            ),
-            (
-                AllocationCall::SetTapDown,
-                1,
-                GuestNetworkOperation::TapSetDown,
-                CleanupFailureKind::Netlink,
-            ),
-            (
-                AllocationCall::ObserveTap,
-                1,
-                GuestNetworkOperation::TapObserve,
-                CleanupFailureKind::Netlink,
-            ),
-            (
-                AllocationCall::DeleteTap,
-                1,
-                GuestNetworkOperation::TapDelete,
-                CleanupFailureKind::Netlink,
-            ),
-            (
-                AllocationCall::DeleteGuard,
-                1,
-                GuestNetworkOperation::GuardMemberDelete,
-                CleanupFailureKind::Netlink,
-            ),
-            (
-                AllocationCall::ObserveTap,
-                2,
-                GuestNetworkOperation::TapObserve,
-                CleanupFailureKind::Netlink,
-            ),
-            (
-                AllocationCall::ObserveGuard,
-                1,
-                GuestNetworkOperation::CleanupComplement,
-                CleanupFailureKind::Netlink,
-            ),
-        ];
-        for (index, (failing_leaf, occurrence, operation, kind)) in
-            failure_rows.into_iter().enumerate()
-        {
-            let io = ScriptedAllocationIo::with_failure_occurrence(failing_leaf, occurrence);
-            let owner = HostSharedGuestNetworkOwner::with_allocation_io(io.clone());
-            let failing_plan = plan(
-                &format!("nd295-s12-leaf-{index}"),
-                Ipv4Addr::new(100, 95, 1, u8::try_from(index + 2).expect("small table index")),
+                .expect_err("a leaf failure is returned");
+            assert_teardown_leaf_error(&error, *call);
+            assert_eq!(
+                fixture.kernel.trace_since(mark),
+                healthy,
+                "cleanup continues through every teardown call after {call:?} #{occurrence}"
             );
-            let state = HostGuestNetworkAllocationState {
-                tap: failing_plan.assignment().tap.clone(),
-                ifindex: 295,
-                program_id: 2_950,
-                phase: HostGuestNetworkAllocationPhase::Active,
-            };
-            owner.allocations.lock().insert(failing_plan.alloc().clone(), state.clone());
+            assert_eq!(fixture.unrelated_parts(), unrelated_before);
 
-            let error = owner
-                .teardown(&failing_plan)
+            fixture.kernel.clear_faults();
+            fixture
+                .owner
+                .teardown(&fixture.named)
                 .await
-                .expect_err("each typed cleanup leaf failure remains visible");
-            assert_cleanup_leaf_error(error, operation, kind);
-            assert_eq!(
-                io.calls(),
-                teardown_calls(),
-                "cleanup continues through the final guard observation after {failing_leaf:?} occurrence {occurrence}"
+                .expect("the retained allocation retries to the empty complement");
+            assert!(
+                fixture.named_parts().is_empty(),
+                "retry after {call:?} #{occurrence} empties the complement: {:?}",
+                fixture.named_parts()
             );
-            assert_eq!(
-                owner.allocations.lock().get(failing_plan.alloc()).cloned(),
-                Some(state),
-                "a cleanup failure retains the same allocation state for retry"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::doc_markdown, clippy::expect_used)]
-mod pool_acceptance {
-    use super::*;
-    use overdrive_core::dataplane::GUEST_BRIDGE_MAC;
-    use proptest::prelude::*;
-
-    fn pool() -> GuestAddressPool {
-        GuestAddressPool {
-            node_prefix: "100.95.0.0/16".parse().expect("node prefix"),
-            bridge: "ovd-gbr0".to_owned(),
-            gateway: "100.95.0.1".parse().expect("gateway"),
-            dns: "100.95.0.1".parse().expect("DNS"),
-            held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState {
-                plans: BTreeMap::new(),
-                addresses: BTreeSet::new(),
-                next_candidate: u32::from(Ipv4Addr::new(100, 95, 0, 0)).saturating_add(1),
-            })),
+            assert_eq!(fixture.unrelated_parts(), unrelated_before);
+            assert!(!fixture.names_unrelated(mark));
         }
     }
 
-    proptest! {
-        /// CONTRACT_SHAPE: bounded-change.
-        #[test]
-        fn assignment_replay_release_and_reuse_match_the_smallest_free_model(
-            operations in prop::collection::vec((any::<bool>(), 0_u16..512), 1..256),
-        ) {
-            let pool = pool();
-            let mut model = BTreeMap::<AllocationId, GuestNetworkPlan>::new();
-
-            for (assign, key) in operations {
-                let alloc = AllocationId::new(&format!("nd295-{key:04x}"))
-                    .expect("generated allocation id");
-                if assign {
-                    let plan = pool.assign(alloc.clone()).expect("below-cap assignment");
-                    if let Some(existing) = model.get(&alloc) {
-                        prop_assert_eq!(&plan, existing, "replay is byte-equal");
-                    } else {
-                        let used = model
-                            .values()
-                            .map(|plan| plan.assignment.address)
-                            .collect::<std::collections::BTreeSet<_>>();
-                        let expected_host = (2_u32..=u16::MAX.into())
-                            .find(|host| {
-                                let octets = host.to_be_bytes();
-                                !used.contains(&Ipv4Addr::new(100, 95, octets[2], octets[3]))
-                            })
-                            .expect("model has one free address");
-                        let octets = expected_host.to_be_bytes();
-                        prop_assert_eq!(
-                            plan.assignment.address,
-                            Ipv4Addr::new(100, 95, octets[2], octets[3])
-                        );
-                        let expected_tap = format!("ovd-tp-{expected_host:04x}");
-                        prop_assert_eq!(plan.assignment.tap.as_str(), expected_tap.as_str());
-                        prop_assert_eq!(
-                            plan.assignment.mac,
-                            [0x02, 0x00, 100, 95, octets[2], octets[3]]
-                        );
-                        prop_assert_ne!(plan.assignment.mac, GUEST_BRIDGE_MAC);
-                        model.insert(alloc.clone(), plan);
-                    }
-                } else {
-                    pool.release(&alloc);
-                    model.remove(&alloc);
-                    pool.release(&alloc);
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-12 — Teardown leaves nothing behind and converges on parts already gone
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// With any one part of the named attachment already gone — its TAP, an
+    /// ingress or egress attachment, an ingress or egress pin, its endpoint
+    /// entry, or its guard member — and with all of them gone together,
+    /// teardown returns `Ok`, the absent part is counted removed without a
+    /// write, an absent TAP is never set down or deleted and no attachment
+    /// point is queried on it, the complement ends empty, and the unrelated
+    /// attachment is byte-equal and never named.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-12)"]
+    async fn teardown_converges_on_every_absent_part_singly_and_together() {
+        let rows = EVERY_PART
+            .iter()
+            .map(|part| vec![*part])
+            .chain(std::iter::once(EVERY_PART.to_vec()))
+            .collect::<Vec<_>>();
+        for absent in rows {
+            let fixture = TwoAttachments::active().await;
+            let tap = fixture.named.assignment().tap.clone();
+            let unrelated_before = fixture.unrelated_parts();
+            fixture.kernel.with_node(|node| {
+                for part in &absent {
+                    node.remove_part(*part, &tap, fixture.named_ifindex);
                 }
-                prop_assert_eq!(pool.snapshot(), model.clone());
+            });
+            let mark = fixture.kernel.mark();
+
+            fixture.owner.teardown(&fixture.named).await.unwrap_or_else(|error| {
+                panic!("{absent:?} absent: teardown converges, got {error:?}")
+            });
+
+            let calls = fixture.kernel.calls_since(mark);
+            let wrote =
+                |wanted: AllocationCall| calls.iter().any(|call| call.call == wanted && call.wrote);
+            let called = |wanted: AllocationCall| calls.iter().any(|call| call.call == wanted);
+            for part in &absent {
+                match part {
+                    AttachmentPart::Tap => {
+                        assert!(
+                            !called(AllocationCall::SetTapDown)
+                                && !called(AllocationCall::DeleteTap),
+                            "{absent:?}: an absent TAP is never set down or deleted: {calls:?}"
+                        );
+                        assert!(
+                            !called(AllocationCall::QueryAttachment)
+                                && !called(AllocationCall::QueryEgressAttachment),
+                            "{absent:?}: no attachment point is queried on an absent TAP: {calls:?}"
+                        );
+                    }
+                    AttachmentPart::EndpointEntry => {
+                        assert!(!wrote(AllocationCall::RemoveEndpoint));
+                    }
+                    AttachmentPart::GuardMember => assert!(!wrote(AllocationCall::DeleteGuard)),
+                    AttachmentPart::IngressPin => assert!(!wrote(AllocationCall::DetachPinnedLink)),
+                    AttachmentPart::EgressPin => {
+                        assert!(!wrote(AllocationCall::DetachPinnedEgressLink));
+                    }
+                    AttachmentPart::IngressAttachment | AttachmentPart::EgressAttachment => {}
+                }
+            }
+            if absent.len() == EVERY_PART.len() {
+                assert!(
+                    calls.iter().all(|call| !call.wrote),
+                    "with every part gone, teardown writes nothing: {calls:?}"
+                );
+            }
+            assert!(
+                fixture.named_parts().is_empty(),
+                "{absent:?}: the complement ends empty: {:?}",
+                fixture.named_parts()
+            );
+            assert_eq!(
+                fixture.unrelated_parts(),
+                unrelated_before,
+                "{absent:?}: unrelated is byte-equal"
+            );
+            assert!(!fixture.names_unrelated(mark), "{absent:?}: the unrelated TAP is never named");
+
+            let repeat = fixture.kernel.mark();
+            fixture.owner.teardown(&fixture.named).await.expect("a repeat is idempotent");
+            assert!(fixture.kernel.calls_since(repeat).iter().all(|call| !call.wrote));
+        }
+    }
+
+    // ---- S-ND295-50 --------------------------------------------------------
+
+    /// One active and one provisioned-down attachment on one owner over one
+    /// fake kernel: `active` holds ifindex 295, `down` holds 296.
+    struct AuditFixture {
+        kernel: Arc<FakeAttachmentKernel>,
+        owner: HostSharedGuestNetworkOwner,
+        active: GuestNetworkPlan,
+        down: GuestNetworkPlan,
+    }
+
+    impl AuditFixture {
+        async fn new(prefix: &str) -> Self {
+            let kernel = FakeAttachmentKernel::healthy();
+            let owner = owner_over(&kernel);
+            let active = scratch_plan(&format!("{prefix}-active"), "t295-aa", 2);
+            let down = scratch_plan(&format!("{prefix}-down"), "t295-ad", 3);
+            activated(&owner, &active).await;
+            provisioned(&owner, &down).await;
+            Self { kernel, owner, active, down }
+        }
+
+        fn managed_taps(&self) -> [Option<String>; 2] {
+            [tap_of(&self.active), tap_of(&self.down)]
+        }
+
+        /// Calls since `mark` that read one managed allocation's own parts.
+        fn per_allocation_reads_since(&self, mark: usize) -> Vec<(AllocationCall, Option<String>)> {
+            let managed = self.managed_taps();
+            self.kernel
+                .trace_since(mark)
+                .into_iter()
+                .filter(|(call, tap)| PER_ALLOCATION_READS.contains(call) && managed.contains(tap))
+                .collect()
+        }
+
+        async fn audit(
+            &self,
+        ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
+            self.owner.audit_shared().await
+        }
+    }
+
+    const ACTIVE_IFINDEX: u32 = FIRST_TAP_IFINDEX;
+    const DOWN_IFINDEX: u32 = FIRST_TAP_IFINDEX + 1;
+
+    /// One node-level part the audit checks before any per-allocation part.
+    #[derive(Debug, Clone, Copy)]
+    enum NodeFault {
+        BridgeAbsent,
+        BridgeMacChanged,
+        BridgeDown,
+        BridgeGatewayLost,
+        GuardTableAbsent,
+        GuardRuleMissing,
+        GuardMemberForUnmanagedTap,
+        GuardReadFails,
+        TcxProgramUnloaded,
+        EndpointMapReplaced,
+        CounterMapReplaced,
+        EndpointMapPinRemoved,
+        CounterMapPinRemoved,
+        UnmanagedEndpointEntry,
+        DebugMaskDumpFails,
+    }
+
+    impl NodeFault {
+        const ALL: [Self; 15] = [
+            Self::BridgeAbsent,
+            Self::BridgeMacChanged,
+            Self::BridgeDown,
+            Self::BridgeGatewayLost,
+            Self::GuardTableAbsent,
+            Self::GuardRuleMissing,
+            Self::GuardMemberForUnmanagedTap,
+            Self::GuardReadFails,
+            Self::TcxProgramUnloaded,
+            Self::EndpointMapReplaced,
+            Self::CounterMapReplaced,
+            Self::EndpointMapPinRemoved,
+            Self::CounterMapPinRemoved,
+            Self::UnmanagedEndpointEntry,
+            Self::DebugMaskDumpFails,
+        ];
+
+        /// The matrix component the audit names for this part.
+        const fn component(self) -> SharedGuestNetworkComponent {
+            match self {
+                Self::BridgeAbsent
+                | Self::BridgeMacChanged
+                | Self::BridgeDown
+                | Self::BridgeGatewayLost
+                | Self::DebugMaskDumpFails => SharedGuestNetworkComponent::Bridge,
+                Self::GuardTableAbsent
+                | Self::GuardRuleMissing
+                | Self::GuardMemberForUnmanagedTap
+                | Self::GuardReadFails => SharedGuestNetworkComponent::BridgeGuard,
+                Self::TcxProgramUnloaded => SharedGuestNetworkComponent::TcxLink,
+                Self::EndpointMapReplaced | Self::UnmanagedEndpointEntry => {
+                    SharedGuestNetworkComponent::EndpointMap
+                }
+                Self::CounterMapReplaced => SharedGuestNetworkComponent::CounterMap,
+                Self::EndpointMapPinRemoved | Self::CounterMapPinRemoved => {
+                    SharedGuestNetworkComponent::BpffsPin
+                }
+            }
+        }
+
+        fn inject(self, kernel: &FakeAttachmentKernel) {
+            match self {
+                Self::GuardReadFails => kernel.fail_always(AllocationCall::ObserveGuard),
+                Self::DebugMaskDumpFails => {
+                    kernel.fail_always(AllocationCall::ObserveDebugMsgMasks);
+                }
+                node_fault => kernel.with_node(|node| match node_fault {
+                    Self::BridgeAbsent => node.bridge = None,
+                    Self::BridgeMacChanged => {
+                        node.bridge.as_mut().expect("bridge").mac = [0x02, 0xde, 0xad, 0, 0, 1];
+                    }
+                    Self::BridgeDown => node.bridge.as_mut().expect("bridge").up = false,
+                    Self::BridgeGatewayLost => {
+                        node.bridge.as_mut().expect("bridge").gateway = false;
+                    }
+                    Self::GuardTableAbsent => node.guard_table = false,
+                    Self::GuardRuleMissing => node.guard_rules_intact = false,
+                    Self::GuardMemberForUnmanagedTap => {
+                        node.guard_members.insert("t295-foreign".to_owned());
+                    }
+                    Self::TcxProgramUnloaded => node.tcx_program_loaded = false,
+                    Self::EndpointMapReplaced => node.endpoint_map_intact = false,
+                    Self::CounterMapReplaced => node.counter_map_intact = false,
+                    Self::EndpointMapPinRemoved => node.endpoint_map_pinned = false,
+                    Self::CounterMapPinRemoved => node.counter_map_pinned = false,
+                    Self::UnmanagedEndpointEntry => {
+                        node.endpoints.insert(
+                            4_242,
+                            GuestTcxEndpoint {
+                                source_ipv4: Ipv4Addr::new(100, 95, 9, 9),
+                                source_mac: [0x02, 0x00, 100, 95, 9, 9],
+                                bridge_mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                            },
+                        );
+                    }
+                    Self::GuardReadFails | Self::DebugMaskDumpFails => {
+                        unreachable!("leaf faults are armed above")
+                    }
+                }),
             }
         }
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-50 — The owner's audit tells node failures apart from one VM's damaged parts
     /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn slash_16_exhaustion_is_pool_drift_and_does_not_reuse_an_address() {
-        let pool = pool();
-        for index in 0_u32..65_533 {
-            pool.assign(
-                AllocationId::new(&format!("nd295-pool-{index:05}")).expect("allocation id"),
-            )
-            .expect("all non-reserved /16 addresses fit");
+    ///
+    /// With one allocation's own parts also damaged, each failing node-level
+    /// part — bridge identity, guard table / rules / an unmanaged member / a
+    /// failed guard read, the TCX program, endpoint and counter map identity,
+    /// their pins, an unmanaged endpoint entry, and a failed debug-mask dump —
+    /// is reported as `Err` naming its matrix component, before any
+    /// per-allocation part is read; the failed dump keeps its netlink source
+    /// under `TapObserve`. The audit writes nothing and condemns nobody: once
+    /// the node part is healthy again, the next audit names the damaged
+    /// allocation.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-50)"]
+    async fn every_node_level_audit_failure_names_its_matrix_component_first() {
+        for fault in NodeFault::ALL {
+            let fixture = AuditFixture::new("nd295-s50-node").await;
+            let active_tap = fixture.active.assignment().tap.clone();
+            fixture.kernel.with_node(|node| {
+                node.tap_mut(&active_tap).mac = Some([0xfe, 0x95, 0xde, 0xad, 0x00, 0x01]);
+            });
+            let damaged_only = fixture.kernel.node();
+            fault.inject(&fixture.kernel);
+            let with_fault = fixture.kernel.node();
+            let mark = fixture.kernel.mark();
+
+            let failure = fixture.audit().await.expect_err("a node-level failure is an Err");
+            assert_eq!(
+                failure.component,
+                fault.component(),
+                "{fault:?} names its matrix component"
+            );
+            if matches!(fault, NodeFault::DebugMaskDumpFails) {
+                assert!(
+                    is_netlink_failure(&failure.source, GuestNetworkOperation::TapObserve),
+                    "the failed dump keeps its source: {:?}",
+                    failure.source
+                );
+            }
+            assert_eq!(
+                fixture.per_allocation_reads_since(mark),
+                Vec::new(),
+                "{fault:?}: no per-allocation part is read after a node-level failure"
+            );
+            assert_eq!(
+                fixture.kernel.mutations_since(mark),
+                Vec::new(),
+                "{fault:?}: the audit writes nothing"
+            );
+            assert_eq!(fixture.kernel.node(), with_fault, "{fault:?}: the node is unchanged");
+
+            fixture.kernel.clear_faults();
+            fixture.kernel.with_node(|node| *node = damaged_only.clone());
+            let audit =
+                fixture.audit().await.expect("a healthy node reports per-allocation damage");
+            assert_eq!(
+                audit.damaged.keys().cloned().collect::<Vec<_>>(),
+                vec![fixture.active.alloc().clone()],
+                "{fault:?}: the node-level failure condemned and hid nothing"
+            );
         }
-        let before = pool.snapshot();
-        let addresses = before
-            .values()
-            .map(|plan| plan.assignment.address)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert!(!addresses.contains(&Ipv4Addr::new(100, 95, 0, 0)));
-        assert!(!addresses.contains(&Ipv4Addr::new(100, 95, 0, 1)));
-        assert!(!addresses.contains(&Ipv4Addr::new(100, 95, 255, 255)));
-        assert!(addresses.contains(&Ipv4Addr::new(100, 95, 255, 254)));
-        assert_eq!(addresses.len(), 65_533);
-        let error = pool
-            .assign(AllocationId::new("nd295-pool-overflow").expect("allocation id"))
-            .expect_err("full /16 returns typed drift without mutation");
-        assert!(matches!(
-            error,
-            GuestNetworkError::PoolExhausted { held: 65_533, capacity: 65_533 }
-        ));
-        assert_eq!(pool.snapshot(), before);
+    }
+
+    /// One per-allocation part the audit reads for an allocation it holds.
+    #[derive(Debug, Clone, Copy)]
+    enum AllocationDamage {
+        TapDeleted,
+        TapNotPersistent,
+        TapOwnerChanged,
+        HostMacChanged,
+        DebugMaskNonZero,
+        DebugMaskMissingFromDump,
+        IfindexChanged,
+        MasterLost,
+        ActiveTapFoundDown,
+        ProvisionedTapFoundUp,
+        IngressDetached,
+        IngressPinRemoved,
+        EgressDetached,
+        EgressPinRemoved,
+        EndpointValueChanged,
+        GuardMemberRemoved,
+    }
+
+    const CHANGED_HOST_MAC: [u8; 6] = [0xfe, 0x95, 0xde, 0xad, 0x00, 0x01];
+    const CHANGED_IFINDEX: u32 = 301;
+
+    impl AllocationDamage {
+        const ALL: [Self; 16] = [
+            Self::TapDeleted,
+            Self::TapNotPersistent,
+            Self::TapOwnerChanged,
+            Self::HostMacChanged,
+            Self::DebugMaskNonZero,
+            Self::DebugMaskMissingFromDump,
+            Self::IfindexChanged,
+            Self::MasterLost,
+            Self::ActiveTapFoundDown,
+            Self::ProvisionedTapFoundUp,
+            Self::IngressDetached,
+            Self::IngressPinRemoved,
+            Self::EgressDetached,
+            Self::EgressPinRemoved,
+            Self::EndpointValueChanged,
+            Self::GuardMemberRemoved,
+        ];
+
+        /// The damaged allocation: the provisioned-down one for the damage
+        /// only a down attachment can show, the active one otherwise.
+        const fn targets_down(self) -> bool {
+            matches!(self, Self::ProvisionedTapFoundUp)
+        }
+
+        /// Damage the target's parts in isolation, so exactly one check can
+        /// fail.
+        fn inject(self, node: &mut FakeNode, plan: &GuestNetworkPlan, ifindex: u32) {
+            let tap = plan.assignment().tap.as_str();
+            match self {
+                Self::TapDeleted => node.remove_part(AttachmentPart::Tap, tap, ifindex),
+                Self::TapNotPersistent => node.tap_mut(tap).persistent = false,
+                Self::TapOwnerChanged => {
+                    node.tap_mut(tap).owner_uid =
+                        Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID);
+                }
+                Self::HostMacChanged => node.tap_mut(tap).mac = Some(CHANGED_HOST_MAC),
+                Self::DebugMaskNonZero => node.tap_mut(tap).debug_mask = 0x10,
+                Self::DebugMaskMissingFromDump => {
+                    node.mask_dump_omits.insert(ifindex);
+                }
+                Self::IfindexChanged => node.tap_mut(tap).ifindex = CHANGED_IFINDEX,
+                Self::MasterLost => node.tap_mut(tap).master = None,
+                Self::ActiveTapFoundDown => node.tap_mut(tap).up = false,
+                Self::ProvisionedTapFoundUp => node.tap_mut(tap).up = true,
+                Self::IngressDetached => node.tap_mut(tap).ingress.clear(),
+                Self::IngressPinRemoved => {
+                    node.ingress_pins.remove(tap);
+                }
+                Self::EgressDetached => node.tap_mut(tap).egress.clear(),
+                Self::EgressPinRemoved => {
+                    node.egress_pins.remove(tap);
+                }
+                Self::EndpointValueChanged => {
+                    node.endpoints.get_mut(&ifindex).expect("endpoint entry").source_mac =
+                        [0x02, 0xde, 0xad, 0xbe, 0xef, 0x01];
+                }
+                Self::GuardMemberRemoved => {
+                    node.remove_part(AttachmentPart::GuardMember, tap, ifindex);
+                }
+            }
+        }
+
+        /// The first failing check the audit names for this damage.
+        fn assert_named(self, error: &GuestNetworkError, plan: &GuestNetworkPlan, ifindex: u32) {
+            let tap = plan.assignment().tap.as_str();
+            let up = !self.targets_down();
+            match self {
+                Self::TapDeleted | Self::DebugMaskMissingFromDump => assert!(
+                    matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TapObserve,
+                            expected: GuestNetworkFact::Tap { name, .. },
+                            observed: None,
+                        } if name == tap
+                    ),
+                    "{self:?}: the absent-TAP mismatch, got {error:?}"
+                ),
+                Self::TapNotPersistent => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &expected_tap(plan, ifindex, up),
+                    Some(&tap_fact(tap, Some(ifindex), GuestLinkKind::Tap, false, up, ROOT_UID)),
+                ),
+                Self::TapOwnerChanged => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &expected_tap(plan, ifindex, up),
+                    Some(&tap_fact(
+                        tap,
+                        Some(ifindex),
+                        GuestLinkKind::Tap,
+                        true,
+                        up,
+                        Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                    )),
+                ),
+                Self::HostMacChanged => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &GuestNetworkFact::TapHostMac { ifindex, mac: Some(host_mac(ifindex)) },
+                    Some(&GuestNetworkFact::TapHostMac { ifindex, mac: Some(CHANGED_HOST_MAC) }),
+                ),
+                Self::DebugMaskNonZero => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &GuestNetworkFact::TapDebugMsgMask { ifindex, mask: 0 },
+                    Some(&GuestNetworkFact::TapDebugMsgMask { ifindex, mask: 0x10 }),
+                ),
+                Self::IfindexChanged => assert!(
+                    matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TapObserve,
+                            expected: GuestNetworkFact::Tap { ifindex: expected, .. },
+                            observed: Some(GuestNetworkFact::Tap { ifindex: observed, .. }),
+                        } if *expected == Some(ifindex) && *observed == Some(CHANGED_IFINDEX)
+                    ),
+                    "{self:?}: the recorded ifindex against the live one, got {error:?}"
+                ),
+                Self::MasterLost => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &master_fact(ifindex, Some(BRIDGE_IFINDEX)),
+                    Some(&master_fact(ifindex, None)),
+                ),
+                Self::ActiveTapFoundDown | Self::ProvisionedTapFoundUp => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &expected_tap(plan, ifindex, up),
+                    Some(&tap_fact(tap, Some(ifindex), GuestLinkKind::Tap, true, !up, ROOT_UID)),
+                ),
+                Self::IngressDetached => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TcxQuery,
+                    &attachment_fact(ifindex, Some(INGRESS_PROGRAM), TcxAttachPoint::Ingress),
+                    Some(&attachment_fact(ifindex, None, TcxAttachPoint::Ingress)),
+                ),
+                Self::IngressPinRemoved => assert!(
+                    matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TcxLinkPin,
+                            expected: GuestNetworkFact::BpfLinkPin { .. },
+                            ..
+                        }
+                    ),
+                    "{self:?}: the ingress pin mismatch, got {error:?}"
+                ),
+                Self::EgressDetached => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TcxEgressQuery,
+                    &attachment_fact(ifindex, Some(EGRESS_PROGRAM), TcxAttachPoint::Egress),
+                    Some(&attachment_fact(ifindex, None, TcxAttachPoint::Egress)),
+                ),
+                Self::EgressPinRemoved => assert!(
+                    matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::TcxEgressLinkPin,
+                            expected: GuestNetworkFact::BpfLinkPin { .. },
+                            ..
+                        }
+                    ),
+                    "{self:?}: the egress pin mismatch, got {error:?}"
+                ),
+                Self::EndpointValueChanged => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::EndpointMapObserve,
+                    &endpoint_fact(ifindex, endpoint_for(plan)),
+                    Some(&endpoint_fact(
+                        ifindex,
+                        GuestTcxEndpoint {
+                            source_mac: [0x02, 0xde, 0xad, 0xbe, 0xef, 0x01],
+                            ..endpoint_for(plan)
+                        },
+                    )),
+                ),
+                Self::GuardMemberRemoved => assert!(
+                    matches!(
+                        error,
+                        GuestNetworkError::PostconditionMismatch {
+                            expected: GuestNetworkFact::BridgeGuard { member: true, .. },
+                            ..
+                        }
+                    ),
+                    "{self:?}: the missing guard member, got {error:?}"
+                ),
+            }
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-50 — The owner's audit tells node failures apart from one VM's damaged parts
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// With every node-level part healthy, each damage to one allocation's
+    /// own parts — TAP deleted, non-persistent, owner changed, host MAC
+    /// changed, debug mask non-zero or missing from the dump, ifindex
+    /// changed, master lost, administrative state against its phase, ingress
+    /// or egress attachment detached or pin removed, endpoint value changed,
+    /// guard member removed — returns `Ok` naming exactly that allocation
+    /// with its first failing check; the other allocation is not named; two
+    /// damaged allocations are both named. The audit writes nothing.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-50)"]
+    async fn every_per_allocation_damage_is_named_only_when_the_node_is_healthy() {
+        for damage in AllocationDamage::ALL {
+            let fixture = AuditFixture::new("nd295-s50-alloc").await;
+            let (target, ifindex) = if damage.targets_down() {
+                (fixture.down.clone(), DOWN_IFINDEX)
+            } else {
+                (fixture.active.clone(), ACTIVE_IFINDEX)
+            };
+            fixture.kernel.with_node(|node| damage.inject(node, &target, ifindex));
+            let damaged = fixture.kernel.node();
+            let mark = fixture.kernel.mark();
+
+            let audit = fixture.audit().await.unwrap_or_else(|failure| {
+                panic!("{damage:?}: a healthy node reports per-allocation damage, got {failure:?}")
+            });
+            assert_eq!(
+                audit.damaged.keys().cloned().collect::<Vec<_>>(),
+                vec![target.alloc().clone()],
+                "{damage:?}: exactly the damaged allocation is named"
+            );
+            damage.assert_named(&audit.damaged[target.alloc()], &target, ifindex);
+            assert_eq!(
+                fixture.kernel.mutations_since(mark),
+                Vec::new(),
+                "{damage:?}: the audit writes nothing"
+            );
+            assert_eq!(fixture.kernel.node(), damaged, "{damage:?}: the node is unchanged");
+        }
+
+        let fixture = AuditFixture::new("nd295-s50-both").await;
+        fixture.kernel.with_node(|node| {
+            AllocationDamage::HostMacChanged.inject(node, &fixture.active, ACTIVE_IFINDEX);
+            AllocationDamage::ProvisionedTapFoundUp.inject(node, &fixture.down, DOWN_IFINDEX);
+        });
+        let audit = fixture.audit().await.expect("a healthy node reports both damaged allocations");
+        assert_eq!(
+            audit.damaged.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([fixture.active.alloc().clone(), fixture.down.alloc().clone()])
+        );
+        AllocationDamage::HostMacChanged.assert_named(
+            &audit.damaged[fixture.active.alloc()],
+            &fixture.active,
+            ACTIVE_IFINDEX,
+        );
+        AllocationDamage::ProvisionedTapFoundUp.assert_named(
+            &audit.damaged[fixture.down.alloc()],
+            &fixture.down,
+            DOWN_IFINDEX,
+        );
+
+        let healthy = AuditFixture::new("nd295-s50-none").await;
+        let mark = healthy.kernel.mark();
+        let audit = healthy.audit().await.expect("a healthy node");
+        assert!(audit.damaged.is_empty(), "exact attachments are not named: {:?}", audit.damaged);
+        let reads = healthy.per_allocation_reads_since(mark);
+        for tap in healthy.managed_taps() {
+            assert!(
+                reads.contains(&(AllocationCall::ObserveTap, tap.clone())),
+                "the audit reads the TAP of every held allocation ({tap:?}): {reads:?}"
+            );
+        }
+        assert_eq!(healthy.kernel.mutations_since(mark), Vec::new());
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-50 — The owner's audit tells node failures apart from one VM's damaged parts
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// An allocation the audit names is condemned: later audits neither read
+    /// nor name it though its damage persists; quiescence does not set it
+    /// down; restore does not raise it; activation refuses it as a missing
+    /// record; teardown still removes it. An allocation quiescence could not
+    /// confirm down is excluded from later audits the same way. The healthy
+    /// allocation stays in every universe.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-50)"]
+    async fn a_condemned_allocation_leaves_every_later_audit_and_restore_universe() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let damaged = scratch_plan("nd295-s50-condemned-audit", "t295-ca", 2);
+        let healthy = scratch_plan("nd295-s50-condemned-healthy", "t295-cb", 3);
+        let unconfirmed = scratch_plan("nd295-s50-condemned-quiesce", "t295-cc", 4);
+        for plan in [&damaged, &healthy, &unconfirmed] {
+            activated(&owner, plan).await;
+        }
+        let damaged_ifindex = FIRST_TAP_IFINDEX;
+        kernel.with_node(|node| {
+            AllocationDamage::HostMacChanged.inject(node, &damaged, damaged_ifindex);
+        });
+
+        let first = owner.audit_shared().await.expect("a healthy node");
+        assert_eq!(
+            first.damaged.keys().cloned().collect::<Vec<_>>(),
+            vec![damaged.alloc().clone()]
+        );
+
+        let mark = kernel.mark();
+        let second = owner.audit_shared().await.expect("a healthy node");
+        assert!(second.damaged.is_empty(), "a condemned allocation is never named again");
+        let reads = kernel.trace_since(mark);
+        assert!(
+            !reads.iter().any(|(_, tap)| *tap == tap_of(&damaged)),
+            "a condemned allocation's parts are not read: {reads:?}"
+        );
+        assert!(reads.contains(&(AllocationCall::ObserveTap, tap_of(&healthy))));
+
+        kernel.with_node(|node| {
+            node.remove_part(
+                AttachmentPart::Tap,
+                &unconfirmed.assignment().tap,
+                FIRST_TAP_IFINDEX + 2,
+            );
+        });
+        let quiesce = kernel.mark();
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
+            vec![unconfirmed.alloc().clone()]
+        );
+        assert!(
+            !kernel.trace_since(quiesce).iter().any(|(_, tap)| *tap == tap_of(&damaged)),
+            "quiescence does not touch the audit-condemned allocation"
+        );
+
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("restore raises the quiesced allocation");
+        let raised = kernel
+            .trace_since(restore)
+            .into_iter()
+            .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+            .map(|(_, tap)| tap)
+            .collect::<Vec<_>>();
+        assert_eq!(raised, vec![tap_of(&healthy)], "restore raises only the quiesced healthy TAP");
+
+        let third = kernel.mark();
+        let audit = owner.audit_shared().await.expect("a healthy node");
+        assert!(audit.damaged.is_empty());
+        let reads = kernel.trace_since(third);
+        assert!(
+            !reads.iter().any(|(_, tap)| *tap == tap_of(&damaged) || *tap == tap_of(&unconfirmed)),
+            "neither condemned allocation is read: {reads:?}"
+        );
+        assert!(reads.contains(&(AllocationCall::ObserveTap, tap_of(&healthy))));
+
+        let refused = kernel.mark();
+        let refusal =
+            owner.activate(&damaged).await.expect_err("a condemned allocation is refused");
+        assert_refused_as_missing_record(&refusal, &damaged);
+        assert_eq!(kernel.mutations_since(refused), Vec::new());
+
+        owner.teardown(&damaged).await.expect("teardown accepts a condemned allocation");
+        assert!(kernel.node().parts(&damaged.assignment().tap, damaged_ifindex).is_empty());
+        owner.teardown(&unconfirmed).await.expect("teardown accepts a condemned allocation");
+        assert!(
+            kernel.node().parts(&unconfirmed.assignment().tap, FIRST_TAP_IFINDEX + 2).is_empty()
+        );
+    }
+
+    // ---- S-ND295-51 --------------------------------------------------------
+
+    /// One protection fact activation re-reads before it raises the TAP.
+    #[derive(Debug, Clone, Copy)]
+    enum ProtectionFault {
+        BridgeAbsent,
+        BridgeReplaced,
+        TapOwnerChanged,
+        TapAlreadyUp,
+        TapNotPersistent,
+        HostMacChanged,
+        DebugMaskNonZero,
+        DebugMaskReadFails,
+        GuardMemberRemoved,
+        EndpointValueChanged,
+        IngressDetached,
+        IngressPinRemoved,
+        EgressDetached,
+        EgressPinRemoved,
+    }
+
+    impl ProtectionFault {
+        const ALL: [Self; 14] = [
+            Self::BridgeAbsent,
+            Self::BridgeReplaced,
+            Self::TapOwnerChanged,
+            Self::TapAlreadyUp,
+            Self::TapNotPersistent,
+            Self::HostMacChanged,
+            Self::DebugMaskNonZero,
+            Self::DebugMaskReadFails,
+            Self::GuardMemberRemoved,
+            Self::EndpointValueChanged,
+            Self::IngressDetached,
+            Self::IngressPinRemoved,
+            Self::EgressDetached,
+            Self::EgressPinRemoved,
+        ];
+
+        fn inject(self, kernel: &FakeAttachmentKernel, plan: &GuestNetworkPlan, ifindex: u32) {
+            let tap = plan.assignment().tap.clone();
+            match self {
+                Self::DebugMaskReadFails => {
+                    kernel.fail_once(AllocationCall::ObserveTapDebugMsgMask);
+                }
+                Self::BridgeAbsent => kernel.with_node(|node| node.bridge = None),
+                Self::BridgeReplaced => {
+                    kernel.with_node(|node| node.bridge.as_mut().expect("bridge").ifindex = 30);
+                }
+                Self::TapOwnerChanged => kernel.with_node(|node| {
+                    AllocationDamage::TapOwnerChanged.inject(node, plan, ifindex);
+                }),
+                Self::TapAlreadyUp => kernel.with_node(|node| node.tap_mut(&tap).up = true),
+                Self::TapNotPersistent => kernel.with_node(|node| {
+                    AllocationDamage::TapNotPersistent.inject(node, plan, ifindex);
+                }),
+                Self::HostMacChanged => kernel.with_node(|node| {
+                    AllocationDamage::HostMacChanged.inject(node, plan, ifindex);
+                }),
+                Self::DebugMaskNonZero => kernel.with_node(|node| {
+                    AllocationDamage::DebugMaskNonZero.inject(node, plan, ifindex);
+                }),
+                Self::GuardMemberRemoved => kernel.with_node(|node| {
+                    AllocationDamage::GuardMemberRemoved.inject(node, plan, ifindex);
+                }),
+                Self::EndpointValueChanged => kernel.with_node(|node| {
+                    AllocationDamage::EndpointValueChanged.inject(node, plan, ifindex);
+                }),
+                Self::IngressDetached => kernel.with_node(|node| {
+                    AllocationDamage::IngressDetached.inject(node, plan, ifindex);
+                }),
+                Self::IngressPinRemoved => kernel.with_node(|node| {
+                    AllocationDamage::IngressPinRemoved.inject(node, plan, ifindex);
+                }),
+                Self::EgressDetached => kernel.with_node(|node| {
+                    AllocationDamage::EgressDetached.inject(node, plan, ifindex);
+                }),
+                Self::EgressPinRemoved => kernel.with_node(|node| {
+                    AllocationDamage::EgressPinRemoved.inject(node, plan, ifindex);
+                }),
+            }
+        }
+
+        fn assert_refused(self, error: &GuestNetworkError, plan: &GuestNetworkPlan, ifindex: u32) {
+            let tap = plan.assignment().tap.as_str();
+            match self {
+                Self::BridgeAbsent => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::BridgeObserve,
+                    &bridge_fact("ovd-gbr0", None, GuestLinkKind::Bridge),
+                    None,
+                ),
+                Self::BridgeReplaced => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &master_fact(ifindex, Some(30)),
+                    Some(&master_fact(ifindex, Some(BRIDGE_IFINDEX))),
+                ),
+                Self::TapAlreadyUp => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &expected_tap(plan, ifindex, false),
+                    Some(&tap_fact(tap, Some(ifindex), GuestLinkKind::Tap, true, true, ROOT_UID)),
+                ),
+                Self::DebugMaskReadFails => assert!(
+                    is_netlink_failure(error, GuestNetworkOperation::TapObserve),
+                    "{self:?}: the sourced mask-read failure, got {error:?}"
+                ),
+                Self::TapOwnerChanged => {
+                    AllocationDamage::TapOwnerChanged.assert_named_down(error, plan, ifindex);
+                }
+                Self::TapNotPersistent => {
+                    AllocationDamage::TapNotPersistent.assert_named_down(error, plan, ifindex);
+                }
+                Self::HostMacChanged => {
+                    AllocationDamage::HostMacChanged.assert_named(error, plan, ifindex);
+                }
+                Self::DebugMaskNonZero => {
+                    AllocationDamage::DebugMaskNonZero.assert_named(error, plan, ifindex);
+                }
+                Self::GuardMemberRemoved => {
+                    AllocationDamage::GuardMemberRemoved.assert_named(error, plan, ifindex);
+                }
+                Self::EndpointValueChanged => {
+                    AllocationDamage::EndpointValueChanged.assert_named(error, plan, ifindex);
+                }
+                Self::IngressDetached => {
+                    AllocationDamage::IngressDetached.assert_named(error, plan, ifindex);
+                }
+                Self::IngressPinRemoved => {
+                    AllocationDamage::IngressPinRemoved.assert_named(error, plan, ifindex);
+                }
+                Self::EgressDetached => {
+                    AllocationDamage::EgressDetached.assert_named(error, plan, ifindex);
+                }
+                Self::EgressPinRemoved => {
+                    AllocationDamage::EgressPinRemoved.assert_named(error, plan, ifindex);
+                }
+            }
+        }
+    }
+
+    impl AllocationDamage {
+        /// `assert_named` for a TAP identity damage on a still-down TAP.
+        fn assert_named_down(
+            self,
+            error: &GuestNetworkError,
+            plan: &GuestNetworkPlan,
+            ifindex: u32,
+        ) {
+            let tap = plan.assignment().tap.as_str();
+            let observed = match self {
+                Self::TapNotPersistent => {
+                    tap_fact(tap, Some(ifindex), GuestLinkKind::Tap, false, false, ROOT_UID)
+                }
+                Self::TapOwnerChanged => tap_fact(
+                    tap,
+                    Some(ifindex),
+                    GuestLinkKind::Tap,
+                    true,
+                    false,
+                    Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
+                ),
+                other => unreachable!("{other:?} is not a down-TAP identity damage"),
+            };
+            assert_mismatch(
+                error,
+                GuestNetworkOperation::TapObserve,
+                &expected_tap(plan, ifindex, false),
+                Some(&observed),
+            );
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Activation re-reads every protection fact — bridge and master, TAP
+    /// owner / down state / host MAC, debug mask, guard membership, endpoint,
+    /// ingress program and pin, egress program and pin — once each, then
+    /// raises the TAP once and reads the bridge and TAP back, and reports
+    /// `Raised`; a repeat is idempotent. Each protection mismatch refuses with
+    /// its pinned fact and writes nothing, leaving the attachment
+    /// activatable. A `set_link_up` failure is `TapSetUp`. A failed read-back
+    /// after the TAP went up sets it down again and returns the read-back
+    /// failure, unless that set-down itself fails, whose `TapSetDown` error
+    /// then takes precedence.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn activation_reads_every_protection_fact_before_reporting_success() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let plan = scratch_plan("nd295-s51-activate", "t295-v1", 2);
+        let tap = tap_of(&plan);
+        provisioned(&owner, &plan).await;
+        let mark = kernel.mark();
+
+        assert_eq!(
+            owner.activate(&plan).await.expect("every protection fact reads back exactly"),
+            TapActivation::Raised
+        );
+        let trace = kernel.trace_since(mark);
+        let raises = trace.iter().filter(|(call, _)| *call == AllocationCall::SetTapUp).count();
+        assert_eq!(raises, 1, "exactly one TAP-up: {trace:?}");
+        let set_up = trace
+            .iter()
+            .position(|(call, _)| *call == AllocationCall::SetTapUp)
+            .expect("one TAP-up");
+        let mut protection_reads =
+            trace[..set_up].iter().map(|(call, _)| *call).collect::<Vec<_>>();
+        protection_reads.sort_unstable();
+        let mut expected_reads = vec![
+            AllocationCall::ObserveBridge,
+            AllocationCall::ObserveTap,
+            AllocationCall::ObserveTapDebugMsgMask,
+            AllocationCall::ObserveGuard,
+            AllocationCall::ReadEndpoint,
+            AllocationCall::QueryAttachment,
+            AllocationCall::LinkPinPresent,
+            AllocationCall::QueryEgressAttachment,
+            AllocationCall::EgressLinkPinPresent,
+        ];
+        expected_reads.sort_unstable();
+        assert_eq!(
+            protection_reads, expected_reads,
+            "every protection fact is re-read once before TAP-up"
+        );
+        assert_eq!(
+            trace[set_up + 1..].to_vec(),
+            vec![(AllocationCall::ObserveBridge, tap.clone()), (AllocationCall::ObserveTap, tap)],
+            "the bridge and the TAP are read back after TAP-up"
+        );
+        assert!(
+            kernel.node().taps[&plan.assignment().tap].up,
+            "the protected TAP is administratively up"
+        );
+
+        let repeat = kernel.mark();
+        assert_eq!(
+            owner.activate(&plan).await.expect("an idempotent repeat"),
+            TapActivation::Raised
+        );
+        assert_eq!(
+            kernel.mutations_since(repeat),
+            Vec::new(),
+            "a completed activation is not raised again"
+        );
+
+        for (index, fault) in ProtectionFault::ALL.into_iter().enumerate() {
+            let kernel = FakeAttachmentKernel::healthy();
+            let owner = owner_over(&kernel);
+            let plan =
+                scratch_plan(&format!("nd295-s51-protect-{index}"), &format!("t295-p{index}"), 2);
+            provisioned(&owner, &plan).await;
+            let provisioned_node = kernel.node();
+            fault.inject(&kernel, &plan, FIRST_TAP_IFINDEX);
+            let faulted_node = kernel.node();
+            let mark = kernel.mark();
+
+            let error =
+                owner.activate(&plan).await.expect_err("a protection mismatch refuses activation");
+            fault.assert_refused(&error, &plan, FIRST_TAP_IFINDEX);
+            assert_eq!(kernel.mutations_since(mark), Vec::new(), "{fault:?}: nothing is written");
+            assert_eq!(kernel.node(), faulted_node, "{fault:?}: the node is unchanged");
+
+            kernel.clear_faults();
+            kernel.with_node(|node| *node = provisioned_node.clone());
+            assert_eq!(
+                owner.activate(&plan).await.expect("the attachment stayed activatable"),
+                TapActivation::Raised,
+                "{fault:?}"
+            );
+        }
+
+        // `set_link_up` fails.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let plan = scratch_plan("nd295-s51-set-up-fails", "t295-su", 2);
+        provisioned(&owner, &plan).await;
+        kernel.fail_once(AllocationCall::SetTapUp);
+        let error = owner.activate(&plan).await.expect_err("a failed TAP-up");
+        assert!(is_netlink_failure(&error, GuestNetworkOperation::TapSetUp), "{error:?}");
+        assert!(!kernel.node().taps[&plan.assignment().tap].up);
+        assert_eq!(owner.activate(&plan).await.expect("a retry raises"), TapActivation::Raised);
+
+        // The read-back after TAP-up fails: the TAP is set down and read back.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let plan = scratch_plan("nd295-s51-readback-fails", "t295-rb", 2);
+        let tap = tap_of(&plan);
+        provisioned(&owner, &plan).await;
+        kernel.fail_once_after(AllocationCall::SetTapUp, AllocationCall::ObserveBridge);
+        let mark = kernel.mark();
+        let error = owner.activate(&plan).await.expect_err("a failed final read-back");
+        assert!(is_netlink_failure(&error, GuestNetworkOperation::BridgeObserve), "{error:?}");
+        let trace = kernel.trace_since(mark);
+        let set_up = trace
+            .iter()
+            .position(|entry| *entry == (AllocationCall::SetTapUp, tap.clone()))
+            .expect("the TAP went up");
+        let after_up = &trace[set_up..];
+        let set_down = after_up
+            .iter()
+            .position(|entry| *entry == (AllocationCall::SetTapDown, tap.clone()))
+            .expect("the owner sets the TAP down after a failed read-back");
+        assert!(
+            after_up[set_down..].contains(&(AllocationCall::ObserveTap, tap)),
+            "the set-down is read back: {trace:?}"
+        );
+        assert!(!kernel.node().taps[&plan.assignment().tap].up, "the TAP is down again");
+        assert_eq!(
+            owner.activate(&plan).await.expect("the attachment returned to provisioned-down"),
+            TapActivation::Raised
+        );
+
+        // The set-down after a failed read-back also fails: its error wins.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let plan = scratch_plan("nd295-s51-quiesce-fails", "t295-qf", 2);
+        provisioned(&owner, &plan).await;
+        kernel.fail_once_after(AllocationCall::SetTapUp, AllocationCall::ObserveBridge);
+        kernel.fail_once_after(AllocationCall::SetTapUp, AllocationCall::SetTapDown);
+        let error = owner.activate(&plan).await.expect_err("a failed set-down");
+        assert!(is_netlink_failure(&error, GuestNetworkOperation::TapSetDown), "{error:?}");
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// While quiescence is latched, activation returns `QuiescenceLatched`
+    /// and writes nothing; after restore it raises. An allocation condemned
+    /// by quiescence or by the audit, and one the owner never held, are
+    /// refused with the source-less missing-record mismatch and nothing is
+    /// written.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn activation_under_a_latch_or_condemnation_changes_nothing() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let waiting = scratch_plan("nd295-s51-latch-waiting", "t295-l1", 2);
+        let running = scratch_plan("nd295-s51-latch-running", "t295-l2", 3);
+        provisioned(&owner, &waiting).await;
+        activated(&owner, &running).await;
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert!(quiescence.unconfirmed.is_empty());
+
+        let latched = kernel.node();
+        for attempt in 0..2 {
+            let mark = kernel.mark();
+            assert_eq!(
+                owner.activate(&waiting).await.expect("a latched activation is not a failure"),
+                TapActivation::QuiescenceLatched,
+                "attempt {attempt}"
+            );
+            assert_eq!(
+                kernel.mutations_since(mark),
+                Vec::new(),
+                "a latched activation writes nothing"
+            );
+            assert_eq!(kernel.node(), latched);
+        }
+        owner.restore_quiesced_taps().await.expect("restore clears the latch");
+        assert_eq!(
+            owner.activate(&waiting).await.expect("activation after restore"),
+            TapActivation::Raised
+        );
+
+        // Condemned by quiescence.
+        let lost = scratch_plan("nd295-s51-condemned-quiesce", "t295-l3", 4);
+        activated(&owner, &lost).await;
+        let lost_ifindex = kernel.node().taps[&lost.assignment().tap].ifindex;
+        kernel.with_node(|node| {
+            node.remove_part(AttachmentPart::Tap, &lost.assignment().tap, lost_ifindex);
+        });
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
+            vec![lost.alloc().clone()]
+        );
+        owner.restore_quiesced_taps().await.expect("restore clears the latch");
+        let before = kernel.node();
+        let mark = kernel.mark();
+        let refusal = owner.activate(&lost).await.expect_err("a condemned allocation is refused");
+        assert_refused_as_missing_record(&refusal, &lost);
+        assert_eq!(kernel.mutations_since(mark), Vec::new());
+        assert_eq!(kernel.node(), before);
+
+        // Condemned by the audit.
+        let damaged = scratch_plan("nd295-s51-condemned-audit", "t295-l4", 5);
+        provisioned(&owner, &damaged).await;
+        let damaged_ifindex = kernel.node().taps[&damaged.assignment().tap].ifindex;
+        kernel.with_node(|node| {
+            AllocationDamage::HostMacChanged.inject(node, &damaged, damaged_ifindex);
+        });
+        let audit = owner.audit_shared().await.expect("a healthy node");
+        assert_eq!(
+            audit.damaged.keys().cloned().collect::<Vec<_>>(),
+            vec![damaged.alloc().clone()]
+        );
+        let before = kernel.node();
+        let mark = kernel.mark();
+        let refusal =
+            owner.activate(&damaged).await.expect_err("a condemned allocation is refused");
+        assert_refused_as_missing_record(&refusal, &damaged);
+        assert_eq!(kernel.mutations_since(mark), Vec::new());
+        assert_eq!(kernel.node(), before);
+
+        // Never held.
+        let never = scratch_plan("nd295-s51-never-held", "t295-l5", 6);
+        let mark = kernel.mark();
+        let refusal = owner.activate(&never).await.expect_err("an unheld allocation is refused");
+        assert_refused_as_missing_record(&refusal, &never);
+        assert_eq!(
+            kernel.calls_since(mark),
+            Vec::new(),
+            "a missing record is refused before any leaf call"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Quiescence sets every active TAP down and reads it back, continuing
+    /// past a TAP that is gone (`Netlink { TapSetDown }`) and one that stays
+    /// up (`PostconditionMismatch`); it reports exactly those as unconfirmed
+    /// and condemns them, confirms the rest, and never touches a
+    /// provisioned-down TAP. A repeat while latched reports nothing and does
+    /// no I/O. Restore raises only the confirmed TAPs; condemned allocations
+    /// stay refused. Teardown accepts quiesced and condemned allocations. A
+    /// whole-call failure (no netlink socket) is `Err`: the latch is set, but
+    /// no allocation is condemned or moved.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn quiescence_reports_every_unconfirmed_tap_and_condemns_it() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let confirmed = scratch_plan("nd295-s51-q-confirmed", "t295-q1", 2);
+        let gone = scratch_plan("nd295-s51-q-gone", "t295-q2", 3);
+        let stuck = scratch_plan("nd295-s51-q-stuck", "t295-q3", 4);
+        let removed = scratch_plan("nd295-s51-q-removed", "t295-q4", 5);
+        let waiting = scratch_plan("nd295-s51-q-waiting", "t295-q5", 6);
+        for plan in [&confirmed, &gone, &stuck, &removed] {
+            activated(&owner, plan).await;
+        }
+        provisioned(&owner, &waiting).await;
+        let ifindex_of =
+            |plan: &GuestNetworkPlan| kernel.node().taps[&plan.assignment().tap].ifindex;
+        let gone_ifindex = ifindex_of(&gone);
+        let stuck_ifindex = ifindex_of(&stuck);
+        let removed_ifindex = ifindex_of(&removed);
+        kernel.with_node(|node| {
+            node.remove_part(AttachmentPart::Tap, &gone.assignment().tap, gone_ifindex);
+            node.tap_mut(&stuck.assignment().tap).admin_stuck = true;
+        });
+        let mark = kernel.mark();
+
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([gone.alloc().clone(), stuck.alloc().clone()]),
+            "exactly the TAPs that could not be confirmed down"
+        );
+        assert!(
+            matches!(
+                &quiescence.unconfirmed[gone.alloc()],
+                GuestNetworkError::Netlink {
+                    operation: GuestNetworkOperation::TapSetDown,
+                    source: NetlinkError::LinkAbsent { .. },
+                }
+            ),
+            "a gone TAP fails set-down: {:?}",
+            quiescence.unconfirmed[gone.alloc()]
+        );
+        assert!(
+            matches!(
+                &quiescence.unconfirmed[stuck.alloc()],
+                GuestNetworkError::PostconditionMismatch { .. }
+            ),
+            "a TAP read back up is unconfirmed: {:?}",
+            quiescence.unconfirmed[stuck.alloc()]
+        );
+        let node = kernel.node();
+        assert!(!node.taps[&confirmed.assignment().tap].up, "confirmed TAPs are down");
+        assert!(!node.taps[&removed.assignment().tap].up, "confirmed TAPs are down");
+        let trace = kernel.trace_since(mark);
+        assert!(
+            !trace.iter().any(|(_, tap)| *tap == tap_of(&waiting)),
+            "a provisioned-down TAP is not touched: {trace:?}"
+        );
+        for plan in [&confirmed, &gone, &stuck, &removed] {
+            assert!(
+                trace.contains(&(AllocationCall::SetTapDown, tap_of(plan))),
+                "every active TAP is set down, the pass continuing past failures: {trace:?}"
+            );
+        }
+        for plan in [&confirmed, &stuck, &removed] {
+            assert!(
+                trace.contains(&(AllocationCall::ObserveTap, tap_of(plan))),
+                "read back: {trace:?}"
+            );
+        }
+
+        let repeat = kernel.mark();
+        let again = owner.quiesce_managed_taps().await.expect("a repeat while latched");
+        assert!(again.unconfirmed.is_empty(), "a repeat reports nothing");
+        assert_eq!(kernel.calls_since(repeat), Vec::new(), "a repeat while latched does no I/O");
+        assert_eq!(
+            owner.activate(&waiting).await.expect("latched"),
+            TapActivation::QuiescenceLatched
+        );
+
+        owner.teardown(&removed).await.expect("teardown accepts a quiesced allocation");
+        assert!(kernel.node().parts(&removed.assignment().tap, removed_ifindex).is_empty());
+
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("restore raises the confirmed TAP");
+        let raised = kernel
+            .trace_since(restore)
+            .into_iter()
+            .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+            .map(|(_, tap)| tap)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            raised,
+            vec![tap_of(&confirmed)],
+            "only the confirmed, still-held TAP is raised"
+        );
+        for plan in [&gone, &stuck] {
+            let refusal =
+                owner.activate(plan).await.expect_err("an unconfirmed allocation is condemned");
+            assert_refused_as_missing_record(&refusal, plan);
+        }
+        assert_eq!(owner.activate(&waiting).await.expect("latch cleared"), TapActivation::Raised);
+
+        kernel.with_node(|node| node.tap_mut(&stuck.assignment().tap).admin_stuck = false);
+        owner
+            .teardown(&gone)
+            .await
+            .expect("teardown accepts a condemned allocation with its TAP gone");
+        owner.teardown(&stuck).await.expect("teardown accepts a condemned allocation");
+        assert!(kernel.node().parts(&gone.assignment().tap, gone_ifindex).is_empty());
+        assert!(kernel.node().parts(&stuck.assignment().tap, stuck_ifindex).is_empty());
+
+        // Whole-call failure: no netlink socket can be opened.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let first = scratch_plan("nd295-s51-q-whole-first", "t295-w1", 2);
+        let second = scratch_plan("nd295-s51-q-whole-second", "t295-w2", 3);
+        let pending = scratch_plan("nd295-s51-q-whole-pending", "t295-w3", 4);
+        activated(&owner, &first).await;
+        activated(&owner, &second).await;
+        provisioned(&owner, &pending).await;
+        kernel.fail_always(AllocationCall::SetTapDown);
+        let error =
+            owner.quiesce_managed_taps().await.expect_err("per-TAP outcomes are undetermined");
+        assert!(
+            matches!(
+                &error,
+                GuestNetworkError::Netlink { source: NetlinkError::Connect { .. }, .. }
+            ),
+            "{error:?}"
+        );
+        let node = kernel.node();
+        assert!(node.taps[&first.assignment().tap].up && node.taps[&second.assignment().tap].up);
+        assert_eq!(
+            owner.activate(&pending).await.expect("the latch is set"),
+            TapActivation::QuiescenceLatched
+        );
+        kernel.clear_faults();
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("nothing was quiesced");
+        assert_eq!(kernel.mutations_since(restore), Vec::new(), "no allocation moved to quiesced");
+        let idempotent = kernel.mark();
+        assert_eq!(owner.activate(&first).await.expect("still active"), TapActivation::Raised);
+        assert_eq!(kernel.mutations_since(idempotent), Vec::new(), "still active, not condemned");
+        assert_eq!(owner.activate(&pending).await.expect("latch cleared"), TapActivation::Raised);
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert!(
+            quiescence.unconfirmed.is_empty(),
+            "no allocation was condemned by the whole-call failure"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// With no latch, restore does no I/O. With the latch set, restore raises
+    /// each quiesced TAP in `AllocationId` order, reading each back before the
+    /// next, never raises a provisioned-down or condemned TAP, and clears the
+    /// latch last. A failure — a set-up error or a TAP that stays down — stops
+    /// the pass, keeps the latch and the remainder quiesced; a retry raises
+    /// only the remainder.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn restore_raises_only_quiesced_active_taps_in_order_and_clears_the_latch_last() {
+        struct RestoreFixture {
+            kernel: Arc<FakeAttachmentKernel>,
+            owner: HostSharedGuestNetworkOwner,
+            a: GuestNetworkPlan,
+            b: GuestNetworkPlan,
+            c: GuestNetworkPlan,
+            waiting: GuestNetworkPlan,
+        }
+        async fn restore_fixture() -> RestoreFixture {
+            let kernel = FakeAttachmentKernel::healthy();
+            let owner = owner_over(&kernel);
+            let c = scratch_plan("nd295-s51-r-c", "t295-rc", 2);
+            let a = scratch_plan("nd295-s51-r-a", "t295-ra", 3);
+            let b = scratch_plan("nd295-s51-r-b", "t295-rb", 4);
+            let waiting = scratch_plan("nd295-s51-r-d", "t295-rd", 5);
+            for plan in [&c, &a, &b] {
+                activated(&owner, plan).await;
+            }
+            provisioned(&owner, &waiting).await;
+            RestoreFixture { kernel, owner, a, b, c, waiting }
+        }
+        fn raised_since(kernel: &FakeAttachmentKernel, mark: usize) -> Vec<Option<String>> {
+            kernel
+                .trace_since(mark)
+                .into_iter()
+                .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+                .map(|(_, tap)| tap)
+                .collect()
+        }
+
+        let fixture = restore_fixture().await;
+        let condemned = scratch_plan("nd295-s51-r-e", "t295-re", 6);
+        activated(&fixture.owner, &condemned).await;
+        let mark = fixture.kernel.mark();
+        fixture.owner.restore_quiesced_taps().await.expect("no latch");
+        assert_eq!(fixture.kernel.calls_since(mark), Vec::new(), "no latch: restore does no I/O");
+
+        fixture
+            .kernel
+            .with_node(|node| node.tap_mut(&condemned.assignment().tap).admin_stuck = true);
+        let quiescence =
+            fixture.owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
+            vec![condemned.alloc().clone()]
+        );
+        fixture
+            .kernel
+            .with_node(|node| node.tap_mut(&condemned.assignment().tap).admin_stuck = false);
+
+        let mark = fixture.kernel.mark();
+        fixture.owner.restore_quiesced_taps().await.expect("every quiesced TAP comes up");
+        assert_eq!(
+            raised_since(&fixture.kernel, mark),
+            vec![tap_of(&fixture.a), tap_of(&fixture.b), tap_of(&fixture.c)],
+            "quiesced TAPs are raised in AllocationId order; provisioned-down and condemned never"
+        );
+        let trace = fixture.kernel.trace_since(mark);
+        for plan in [&fixture.a, &fixture.b, &fixture.c] {
+            let raise = trace
+                .iter()
+                .position(|entry| *entry == (AllocationCall::SetTapUp, tap_of(plan)))
+                .expect("raised");
+            let next_raise = trace[raise + 1..]
+                .iter()
+                .position(|(call, _)| *call == AllocationCall::SetTapUp)
+                .map_or(trace.len(), |offset| raise + 1 + offset);
+            assert!(
+                trace[raise..next_raise].contains(&(AllocationCall::ObserveTap, tap_of(plan))),
+                "each raised TAP is read back before the next is raised: {trace:?}"
+            );
+        }
+        let node = fixture.kernel.node();
+        for plan in [&fixture.a, &fixture.b, &fixture.c] {
+            assert!(node.taps[&plan.assignment().tap].up);
+        }
+        assert!(!node.taps[&fixture.waiting.assignment().tap].up);
+        assert_eq!(
+            fixture.owner.activate(&fixture.waiting).await.expect("the latch is cleared"),
+            TapActivation::Raised
+        );
+
+        // A set-up failure mid-list.
+        let fixture = restore_fixture().await;
+        fixture.owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        fixture.kernel.fail_once_for(AllocationCall::SetTapUp, &fixture.b.assignment().tap);
+        let mark = fixture.kernel.mark();
+        let error =
+            fixture.owner.restore_quiesced_taps().await.expect_err("the failure is returned");
+        assert!(is_netlink_failure(&error, GuestNetworkOperation::TapSetUp), "{error:?}");
+        assert_eq!(
+            raised_since(&fixture.kernel, mark),
+            vec![tap_of(&fixture.a), tap_of(&fixture.b)],
+            "the pass stops at the first failure"
+        );
+        let node = fixture.kernel.node();
+        assert!(node.taps[&fixture.a.assignment().tap].up);
+        assert!(
+            !node.taps[&fixture.b.assignment().tap].up
+                && !node.taps[&fixture.c.assignment().tap].up
+        );
+        assert_eq!(
+            fixture.owner.activate(&fixture.waiting).await.expect("the latch is kept"),
+            TapActivation::QuiescenceLatched
+        );
+        let retry = fixture.kernel.mark();
+        fixture.owner.restore_quiesced_taps().await.expect("the retry resumes the remainder");
+        assert_eq!(
+            raised_since(&fixture.kernel, retry),
+            vec![tap_of(&fixture.b), tap_of(&fixture.c)]
+        );
+        assert_eq!(
+            fixture.owner.activate(&fixture.waiting).await.expect("the latch is cleared"),
+            TapActivation::Raised
+        );
+
+        // A TAP that stays down after set-up.
+        let fixture = restore_fixture().await;
+        fixture.owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        fixture
+            .kernel
+            .with_node(|node| node.tap_mut(&fixture.a.assignment().tap).admin_stuck = true);
+        let mark = fixture.kernel.mark();
+        let error = fixture.owner.restore_quiesced_taps().await.expect_err("the read-back fails");
+        assert!(matches!(error, GuestNetworkError::PostconditionMismatch { .. }), "{error:?}");
+        assert_eq!(raised_since(&fixture.kernel, mark), vec![tap_of(&fixture.a)]);
+        assert_eq!(
+            fixture.owner.activate(&fixture.waiting).await.expect("the latch is kept"),
+            TapActivation::QuiescenceLatched
+        );
+        fixture
+            .kernel
+            .with_node(|node| node.tap_mut(&fixture.a.assignment().tap).admin_stuck = false);
+        let retry = fixture.kernel.mark();
+        fixture.owner.restore_quiesced_taps().await.expect("the retry raises every quiesced TAP");
+        assert_eq!(
+            raised_since(&fixture.kernel, retry),
+            vec![tap_of(&fixture.a), tap_of(&fixture.b), tap_of(&fixture.c)]
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    reason = "source-local lease-state tables: each expect() names the fixture precondition it establishes"
+)]
+mod pool_acceptance {
+    //! The lease-state model every pool body is compared against (D-295-R6,
+    //! R7, R8): `absent -> Admitted -> Retiring -> absent`. An Admitted replay
+    //! returns the byte-equal plan; a Retiring replay is refused as retiring;
+    //! both states count against the fixed cap until `release`; `release`
+    //! alone frees the address; `observe` and `snapshot` are read-only.
+    //!
+    //! Leases are always produced by the pool's own `assign` / `retire` /
+    //! `release`; no body writes the pool's private state.
+
+    use super::*;
+    use overdrive_core::dataplane::GUEST_BRIDGE_MAC;
+    use overdrive_core::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
+    use overdrive_core::traits::GuestAttachmentLease;
+    use proptest::prelude::*;
+    use std::sync::LazyLock;
+
+    /// The fixed admission cap as a lease count.
+    const CAP: usize = MAX_GUEST_NETWORK_ATTACHMENTS as usize;
+
+    /// Allocation-id key space of the generated operation sequences. Small, so
+    /// sequences replay, retire, and release the same allocations often.
+    const KEYS: u16 = 48;
+
+    /// Ids for the at-cap body: `CAP` leases plus one refused newcomer.
+    static CAP_IDS: LazyLock<Vec<AllocationId>> = LazyLock::new(|| {
+        (0..=CAP)
+            .map(|index| {
+                AllocationId::new(&format!("nd295-cap-{index:05}")).expect("allocation id")
+            })
+            .collect()
+    });
+
+    fn pool() -> GuestAddressPool {
+        GuestAddressPool::new(
+            "100.95.0.0/16".parse().expect("node prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        )
+    }
+
+    fn alloc(key: u16) -> AllocationId {
+        AllocationId::new(&format!("nd295-{key:04x}")).expect("generated allocation id")
+    }
+
+    /// The complete plan the pool hands out for `host` (the offset inside
+    /// `100.95.0.0/16`): today's pool constants plus the address-derived TAP
+    /// name and guest MAC.
+    fn expected_plan(alloc: &AllocationId, host: u32) -> GuestNetworkPlan {
+        let octets = host.to_be_bytes();
+        GuestNetworkPlan {
+            alloc: alloc.clone(),
+            bridge: "ovd-gbr0".to_owned(),
+            node_prefix: "100.95.0.0/16".parse().expect("node prefix"),
+            assignment: GuestNetworkAssignment {
+                address: Ipv4Addr::new(100, 95, octets[2], octets[3]),
+                tap: format!("ovd-tp-{host:04x}"),
+                mac: [0x02, 0x00, 100, 95, octets[2], octets[3]],
+                gateway: Ipv4Addr::new(100, 95, 0, 1),
+                prefix: 16,
+                dns: Ipv4Addr::new(100, 95, 0, 1),
+            },
+        }
+    }
+
+    fn host_of(plan: &GuestNetworkPlan) -> u32 {
+        u32::from(plan.assignment().address) - u32::from(Ipv4Addr::new(100, 95, 0, 0))
+    }
+
+    /// One generated pool operation.
+    #[derive(Debug, Clone, Copy)]
+    enum LeaseOp {
+        Assign(u16),
+        Retire(u16),
+        Release(u16),
+    }
+
+    fn lease_op() -> impl Strategy<Value = LeaseOp> {
+        prop_oneof![
+            3 => (0..KEYS).prop_map(LeaseOp::Assign),
+            2 => (0..KEYS).prop_map(LeaseOp::Retire),
+            1 => (0..KEYS).prop_map(LeaseOp::Release),
+        ]
+    }
+
+    /// The independent lease model: each held allocation's plan and lease.
+    #[derive(Debug, Clone, Default)]
+    struct LeaseModel {
+        leases: BTreeMap<AllocationId, (GuestNetworkPlan, GuestAttachmentLease)>,
+    }
+
+    impl LeaseModel {
+        /// Smallest free host offset: never the network (0), the gateway (1),
+        /// or an address any held lease (Admitted or Retiring) occupies.
+        fn smallest_free_host(&self) -> u32 {
+            let used = self.leases.values().map(|(plan, _)| host_of(plan)).collect::<BTreeSet<_>>();
+            (2_u32..0xffff).find(|host| !used.contains(host)).expect("model below /16 capacity")
+        }
+
+        /// Apply `op` by the lease-state contract alone (never by reading the
+        /// pool), returning the outcome the pool must report.
+        fn apply(&mut self, op: LeaseOp) -> ModelOutcome {
+            match op {
+                LeaseOp::Assign(key) => {
+                    let alloc = alloc(key);
+                    match self.leases.get(&alloc) {
+                        Some((plan, GuestAttachmentLease::Admitted)) => {
+                            ModelOutcome::Assigned(plan.clone())
+                        }
+                        Some((_, GuestAttachmentLease::Retiring)) => ModelOutcome::Retiring(alloc),
+                        None => {
+                            let plan = expected_plan(&alloc, self.smallest_free_host());
+                            self.leases
+                                .insert(alloc, (plan.clone(), GuestAttachmentLease::Admitted));
+                            ModelOutcome::Assigned(plan)
+                        }
+                    }
+                }
+                LeaseOp::Retire(key) => {
+                    let alloc = alloc(key);
+                    let transitioned = match self.leases.get_mut(&alloc) {
+                        Some((_, lease @ GuestAttachmentLease::Admitted)) => {
+                            *lease = GuestAttachmentLease::Retiring;
+                            true
+                        }
+                        Some((_, GuestAttachmentLease::Retiring)) | None => false,
+                    };
+                    ModelOutcome::Retired(transitioned)
+                }
+                LeaseOp::Release(key) => {
+                    self.leases.remove(&alloc(key));
+                    ModelOutcome::Released
+                }
+            }
+        }
+
+        fn plans(&self) -> BTreeMap<AllocationId, GuestNetworkPlan> {
+            self.leases.iter().map(|(alloc, (plan, _))| (alloc.clone(), plan.clone())).collect()
+        }
+
+        fn observation(&self, requested: &[AllocationId]) -> GuestAttachmentObservation {
+            let held = u32::try_from(self.leases.len()).expect("small model");
+            let retiring = u32::try_from(
+                self.leases
+                    .values()
+                    .filter(|(_, lease)| *lease == GuestAttachmentLease::Retiring)
+                    .count(),
+            )
+            .expect("small model");
+            GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held, retiring },
+                leases: requested
+                    .iter()
+                    .filter_map(|alloc| {
+                        self.leases.get(alloc).map(|(_, lease)| (alloc.clone(), *lease))
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    enum ModelOutcome {
+        Assigned(GuestNetworkPlan),
+        Retiring(AllocationId),
+        Retired(bool),
+        Released,
+    }
+
+    /// Drive `op` through the pool's own operations and compare its outcome
+    /// with the model's.
+    fn apply_and_compare(
+        pool: &GuestAddressPool,
+        model: &mut LeaseModel,
+        op: LeaseOp,
+    ) -> std::result::Result<(), TestCaseError> {
+        match (op, model.apply(op)) {
+            (LeaseOp::Assign(key), ModelOutcome::Assigned(expected)) => {
+                let plan = pool.assign(alloc(key));
+                prop_assert!(
+                    matches!(&plan, Ok(plan) if *plan == expected),
+                    "assign({key}) returned {plan:?}, the model expects {expected:?}"
+                );
+                if let Ok(plan) = plan {
+                    prop_assert_ne!(plan.assignment().mac, GUEST_BRIDGE_MAC);
+                }
+            }
+            (LeaseOp::Assign(key), ModelOutcome::Retiring(retiring)) => {
+                let refusal = pool.assign(alloc(key));
+                prop_assert!(
+                    matches!(&refusal, Err(GuestNetworkError::LeaseRetiring { alloc }) if *alloc == retiring),
+                    "a Retiring replay of {key} returned {refusal:?}"
+                );
+            }
+            (LeaseOp::Retire(key), ModelOutcome::Retired(expected)) => {
+                prop_assert_eq!(pool.retire(&alloc(key)), expected, "retire({}) transition", key);
+            }
+            (LeaseOp::Release(key), ModelOutcome::Released) => {
+                pool.release(&alloc(key));
+                // A release of an absent lease is a no-op.
+                pool.release(&alloc(key));
+            }
+            (op, outcome) => unreachable!("model outcome {outcome:?} does not answer {op:?}"),
+        }
+        Ok(())
+    }
+
+    fn every_key() -> Vec<AllocationId> {
+        (0..KEYS).map(alloc).collect()
+    }
+
+    proptest! {
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+        /// S-ND295-04 — Lease replay, retirement, and release change only the named allocation
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// After every generated `assign` / `retire` / `release`, the pool's
+        /// returned outcome, its `snapshot` (both lease states), and its
+        /// `observe` over every key equal the lease-state model: smallest-free
+        /// selection, a byte-equal Admitted replay, `LeaseRetiring` for a
+        /// Retiring replay, `retire` true only for Admitted -> Retiring, and
+        /// `held = Admitted + Retiring` with `retiring` exact.
+        #[test]
+        #[ignore = "pending DELIVER step 06-03 (S-ND295-04)"]
+        fn assignment_replay_release_and_reuse_match_the_smallest_free_model(
+            operations in prop::collection::vec(lease_op(), 1..256),
+        ) {
+            let pool = pool();
+            let mut model = LeaseModel::default();
+            let keys = every_key();
+            for op in operations {
+                apply_and_compare(&pool, &mut model, op)?;
+                prop_assert_eq!(pool.snapshot(), model.plans(), "snapshot after {:?}", op);
+                prop_assert_eq!(pool.observe(&keys), model.observation(&keys), "observe after {:?}", op);
+            }
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+        /// S-ND295-04 — Lease replay, retirement, and release change only the named allocation
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// Retirement happens once and never returns a lease to Admitted: a
+        /// repeated `retire` and a refused replay leave it Retiring, it still
+        /// counts in `held` and `snapshot`, and only `release` frees its
+        /// address, after which a fresh `assign` of the same allocation takes
+        /// the normal smallest-free path.
+        #[test]
+        #[ignore = "pending DELIVER step 06-03 (S-ND295-04)"]
+        fn retirement_is_monotonic_and_a_retiring_lease_still_counts(
+            admitted in 1_u16..24,
+            retire_mask in any::<u32>(),
+            repeats in 1_usize..4,
+        ) {
+            let pool = pool();
+            let held = (0..admitted).map(alloc).collect::<Vec<_>>();
+            let plans = held
+                .iter()
+                .map(|alloc| pool.assign(alloc.clone()).expect("below-cap assignment"))
+                .collect::<Vec<_>>();
+            let retiring = held
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| retire_mask & (1 << index) != 0)
+                .map(|(_, alloc)| alloc.clone())
+                .collect::<BTreeSet<_>>();
+
+            for alloc in &retiring {
+                prop_assert!(pool.retire(alloc), "Admitted -> Retiring reports the transition");
+                for _ in 0..repeats {
+                    prop_assert!(!pool.retire(alloc), "a Retiring lease never transitions again");
+                }
+            }
+            prop_assert!(!pool.retire(&alloc(KEYS + 1)), "an absent lease has no transition");
+
+            let before = pool.snapshot();
+            let observed_before = pool.observe(&held);
+            for alloc in &retiring {
+                let refusal = pool.assign(alloc.clone());
+                prop_assert!(
+                    matches!(&refusal, Err(GuestNetworkError::LeaseRetiring { alloc: refused }) if refused == alloc),
+                    "a Retiring replay is refused as retiring, got {refusal:?}"
+                );
+            }
+            prop_assert_eq!(&pool.snapshot(), &before, "refused replays change nothing");
+            prop_assert_eq!(&pool.observe(&held), &observed_before);
+
+            let expected_leases = held
+                .iter()
+                .map(|alloc| {
+                    let lease = if retiring.contains(alloc) {
+                        GuestAttachmentLease::Retiring
+                    } else {
+                        GuestAttachmentLease::Admitted
+                    };
+                    (alloc.clone(), lease)
+                })
+                .collect::<BTreeMap<_, _>>();
+            prop_assert_eq!(
+                observed_before,
+                GuestAttachmentObservation {
+                    occupancy: GuestAttachmentOccupancy {
+                        held: u32::from(admitted),
+                        retiring: u32::try_from(retiring.len()).expect("small set"),
+                    },
+                    leases: expected_leases,
+                }
+            );
+            prop_assert_eq!(
+                before,
+                held.iter().cloned().zip(plans.iter().cloned()).collect::<BTreeMap<_, _>>(),
+                "snapshot holds both states with their original plans"
+            );
+
+            if let Some(released) = retiring.iter().next().cloned() {
+                let position = held.iter().position(|alloc| *alloc == released).expect("held");
+                pool.release(&released);
+                let after_release = pool.observe(&held);
+                prop_assert_eq!(after_release.occupancy.held, u32::from(admitted) - 1);
+                prop_assert!(!after_release.leases.contains_key(&released));
+                prop_assert!(!pool.snapshot().contains_key(&released));
+                let reassigned = pool.assign(released.clone()).expect("a released id takes the normal path");
+                prop_assert_eq!(
+                    reassigned.assignment().address,
+                    plans[position].assignment().address,
+                    "only release freed that address, and it is the smallest free one"
+                );
+                prop_assert_eq!(
+                    pool.observe(std::slice::from_ref(&released)).leases.get(&released).copied(),
+                    Some(GuestAttachmentLease::Admitted)
+                );
+            }
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+        /// S-ND295-05A — Admission refuses at the cap over held leases, one pool per server
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// Held leases are counted in both states. At 16,383 held, with any
+        /// mix of Retiring among them, the next allocation is assigned the
+        /// smallest free address; at 16,384 held (again with every mix) a new
+        /// allocation is refused with `AdmissionCapReached { held, retiring,
+        /// cap: 16_384 }` and nothing changes, while an Admitted replay still
+        /// returns its plan and a Retiring replay is refused as retiring. A
+        /// held count of 16,385 cannot be produced through the pool's own
+        /// operations, because `assign` refuses at 16,384.
+        #[test]
+        #[ignore = "pending DELIVER step 06-03 (S-ND295-05A)"]
+        fn admission_refuses_at_the_cap_over_held_leases_for_every_retiring_mix(
+            retiring in prop_oneof![Just(0_usize), Just(CAP - 1), 1_usize..CAP - 1],
+            offset in 0_usize..CAP - 1,
+            retire_the_last_admitted in any::<bool>(),
+        ) {
+            let ids = &*CAP_IDS;
+            let pool = pool();
+            let below_cap = CAP - 1;
+            for id in &ids[..below_cap] {
+                pool.assign(id.clone()).expect("below-cap assignment");
+            }
+            let retired = (0..retiring)
+                .map(|step| (offset + step) % below_cap)
+                .collect::<BTreeSet<_>>();
+            for index in &retired {
+                prop_assert!(pool.retire(&ids[*index]));
+            }
+            let at_16383 = pool.observe(&[]);
+            prop_assert_eq!(
+                at_16383.occupancy,
+                GuestAttachmentOccupancy {
+                    held: MAX_GUEST_NETWORK_ATTACHMENTS - 1,
+                    retiring: u32::try_from(retiring).expect("below cap"),
+                }
+            );
+
+            let last = pool.assign(ids[below_cap].clone()).expect("16,383 held admits one more");
+            prop_assert_eq!(last, expected_plan(&ids[below_cap], u32::try_from(CAP + 1).expect("cap host")));
+            let mut retiring_at_cap = retiring;
+            if retire_the_last_admitted {
+                prop_assert!(pool.retire(&ids[below_cap]));
+                retiring_at_cap += 1;
+            }
+
+            let before = pool.snapshot();
+            let observed_before = pool.observe(&[ids[CAP].clone()]);
+            prop_assert_eq!(
+                observed_before.occupancy,
+                GuestAttachmentOccupancy {
+                    held: MAX_GUEST_NETWORK_ATTACHMENTS,
+                    retiring: u32::try_from(retiring_at_cap).expect("at cap"),
+                }
+            );
+            let refusal = pool.assign(ids[CAP].clone());
+            prop_assert!(
+                matches!(
+                    refusal,
+                    Err(GuestNetworkError::AdmissionCapReached { held, retiring, cap })
+                        if held == MAX_GUEST_NETWORK_ATTACHMENTS
+                            && usize::try_from(retiring).expect("u32 fits") == retiring_at_cap
+                            && cap == 16_384
+                ),
+                "at 16,384 held a new allocation is refused with its counts, got {refusal:?}"
+            );
+
+            let admitted_replay = (0..CAP)
+                .find(|index| {
+                    !(retired.contains(index) || (*index == below_cap && retire_the_last_admitted))
+                });
+            if let Some(index) = admitted_replay {
+                let replay = pool.assign(ids[index].clone()).expect("an Admitted replay at the cap");
+                prop_assert_eq!(Some(&replay), before.get(&ids[index]), "byte-equal replay");
+            }
+            let retiring_replay = retired
+                .iter()
+                .next()
+                .copied()
+                .or_else(|| retire_the_last_admitted.then_some(below_cap));
+            if let Some(index) = retiring_replay {
+                let replay = pool.assign(ids[index].clone());
+                prop_assert!(
+                    matches!(&replay, Err(GuestNetworkError::LeaseRetiring { alloc }) if *alloc == ids[index]),
+                    "a Retiring replay at the cap is refused as retiring, got {replay:?}"
+                );
+            }
+
+            prop_assert_eq!(pool.snapshot(), before, "no refusal or replay changes the lease map");
+            prop_assert_eq!(pool.observe(&[ids[CAP].clone()]), observed_before);
+        }
+
+        /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+        /// S-ND295-05B — Placement reads the node's held attachments, not the workload's rows
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// Over any lease map the pool's own operations produce and any
+        /// request set, `observe` returns exactly the whole map's held and
+        /// retiring counts and the lease of each requested allocation that
+        /// holds one (requested allocations without a lease and every
+        /// unrequested allocation are omitted), and it changes nothing:
+        /// `snapshot` is equal before and after and a second read is equal.
+        #[test]
+        #[ignore = "pending DELIVER step 07-03 (S-ND295-05B)"]
+        fn observe_reads_occupancy_and_requested_leases_in_one_snapshot_and_changes_nothing(
+            operations in prop::collection::vec(lease_op(), 0..128),
+            requested in prop::collection::vec(0_u16..KEYS + 16, 0..24),
+        ) {
+            let pool = pool();
+            let mut model = LeaseModel::default();
+            for op in operations {
+                apply_and_compare(&pool, &mut model, op)?;
+            }
+            let requested = requested.into_iter().map(alloc).collect::<Vec<_>>();
+
+            let before = pool.snapshot();
+            let observed = pool.observe(&requested);
+            prop_assert_eq!(&observed, &model.observation(&requested));
+            prop_assert_eq!(pool.snapshot(), before, "observe is read-only");
+            prop_assert_eq!(pool.observe(&requested), observed, "a repeated read is equal");
+        }
     }
 
     /// Outcome anchor: DISCUSS Elevator Pitch

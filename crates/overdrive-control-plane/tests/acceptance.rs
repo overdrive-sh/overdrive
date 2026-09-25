@@ -24,6 +24,9 @@
 mod acceptance {
     // netns-density-295 — control-plane-owned scratch complement contract.
     mod netns_density_guest_network;
+    // netns-density-295 S-ND295-65 — no optional switch gates protection, DNS,
+    // or supervisor composition (source scan).
+    mod required_serve_ports_source_scan;
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
     // `lo`-named `DataplaneConfig` helper for SimDataplane-override
     // fixtures (the `job_stop_*` acceptance tests boot `run_server`).

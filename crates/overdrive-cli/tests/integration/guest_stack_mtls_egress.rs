@@ -74,14 +74,15 @@ use super::vm_walking_skeleton::{
     stage_rootfs_with_extra_binaries, stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
 };
 
-const SERVICE_PORT: u16 = 18_951;
-const MESH_NAME: &str = "server.svc.overdrive.local";
-const REQUEST: &[u8] =
+pub(super) const SERVICE_PORT: u16 = 18_951;
+pub(super) const MESH_NAME: &str = "server.svc.overdrive.local";
+pub(super) const REQUEST: &[u8] =
     b"GTI_REQUEST_guest_plaintext_dial_by_name_must_be_encrypted_on_peer_wire_0201";
-const RESPONSE: &[u8] =
+pub(super) const RESPONSE: &[u8] =
     b"GTI_RESPONSE_peer_authored_distinct_reply_returns_to_guest_byte_exact_0201";
-const REQUEST2: &[u8] = b"GTI_REQUEST2_post_establishment_must_use_the_same_ktls_splice_owner_0201";
-const RESPONSE2: &[u8] =
+pub(super) const REQUEST2: &[u8] =
+    b"GTI_REQUEST2_post_establishment_must_use_the_same_ktls_splice_owner_0201";
+pub(super) const RESPONSE2: &[u8] =
     b"GTI_RESPONSE2_same_owner_returns_post_establishment_reply_byte_exact_0201";
 const NON_MESH_REQUEST: &[u8] =
     b"GTI_NON_MESH_REQUEST_plaintext_passthrough_outside_workload_subnet_0201";
@@ -92,7 +93,7 @@ const INTERCEPT_INSTALL_SUCCESS: &str = "mtls.intercept.install.success";
 const OPERATOR_MARKER: &str = "/gti-operator-action-ran";
 const OPERATOR_CONSOLE_MARKER: &str = "GTI_OPERATOR_ACTION_RAN";
 
-async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
+pub(super) async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     let tmp = tempfile::Builder::new()
         .prefix("gti-serve-")
         .tempdir_in(shared_staging_root())
@@ -371,7 +372,7 @@ async fn spawn_failure_observed_mtls_server_at(
     (handle, Arc::new(std::sync::Mutex::new(cuts)), created, boundary_observed, inner)
 }
 
-fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
+pub(super) fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathBuf {
     let src = tmp.join(format!("{name}.rs"));
     std::fs::write(&src, source).expect("write static test fixture source");
     let out = tmp.join(name);
@@ -783,7 +784,7 @@ fn main() {
     )
 }
 
-fn build_mesh_peer(tmp: &Path) -> PathBuf {
+pub(super) fn build_mesh_peer(tmp: &Path) -> PathBuf {
     let source = format!(
         r#"
 use std::io::{{Read, Write}};
@@ -816,22 +817,26 @@ fn main() {{
     build_static_binary(tmp, "gti-peer", &source)
 }
 
-fn build_mesh_guest(tmp: &Path) -> PathBuf {
+pub(super) fn build_mesh_guest(tmp: &Path) -> PathBuf {
     build_mesh_guest_with_delay(tmp, "gti-mesh-guest", 0)
 }
 
-fn build_mesh_guest_with_delay(tmp: &Path, name: &str, initial_delay_secs: u64) -> PathBuf {
+pub(super) fn build_mesh_guest_with_delay(
+    tmp: &Path,
+    name: &str,
+    initial_delay_secs: u64,
+) -> PathBuf {
     build_mesh_guest_with_timing(tmp, name, initial_delay_secs, 12)
 }
 
-fn build_mesh_guest_with_timing(
+pub(super) fn build_mesh_guest_with_timing(
     tmp: &Path,
     name: &str,
     initial_delay_secs: u64,
     authenticated_hold_secs: u64,
 ) -> PathBuf {
-    let response_len = RESPONSE.len();
-    let response2_len = RESPONSE2.len();
+    let first_reply_len = RESPONSE.len();
+    let second_reply_len = RESPONSE2.len();
     let source = format!(
         r#"
 use std::io::{{Read, Write}};
@@ -849,12 +854,12 @@ fn main() {{
                     if stream.write_all(&{REQUEST:?}).is_ok()
                         && stream.flush().is_ok()
                     {{
-                        let mut got = vec![0_u8; {response_len}];
+                        let mut got = vec![0_u8; {first_reply_len}];
                         if stream.read_exact(&mut got).is_ok() && got == {RESPONSE:?} {{
                             if stream.write_all(&{REQUEST2:?}).is_ok()
                                 && stream.flush().is_ok()
                             {{
-                                let mut got2 = vec![0_u8; {response2_len}];
+                                let mut got2 = vec![0_u8; {second_reply_len}];
                                 if stream.read_exact(&mut got2).is_ok() && got2 == {RESPONSE2:?} {{
                                     // Keep the authenticated data socket alive long enough for the
                                     // host-side exact-tuple kTLS/inode/fd oracle to inspect both directions.
@@ -923,7 +928,7 @@ fn main() {{
     build_static_binary(tmp, "gti-non-mesh-guest", &source)
 }
 
-fn service_toml(peer: &Path, kernel: &Path, rootfs: &Path) -> String {
+pub(super) fn service_toml(peer: &Path, kernel: &Path, rootfs: &Path) -> String {
     let command = toml::Value::String(peer.display().to_string()).to_string();
     let kernel = toml::Value::String(kernel.display().to_string()).to_string();
     let rootfs = toml::Value::String(rootfs.display().to_string()).to_string();
@@ -1163,7 +1168,7 @@ struct WireCapture {
     port: u16,
 }
 
-fn interface_index(iface: &str) -> u32 {
+pub(super) fn interface_index(iface: &str) -> u32 {
     let iface = std::ffi::CString::new(iface).expect("iface has no NUL");
     // SAFETY: libc retains no pointer.
     let ifindex = unsafe { libc::if_nametoindex(iface.as_ptr()) };
@@ -1171,7 +1176,7 @@ fn interface_index(iface: &str) -> u32 {
     ifindex
 }
 
-fn interface_is_administratively_up(iface: &str) -> bool {
+pub(super) fn interface_is_administratively_up(iface: &str) -> bool {
     let flags = std::fs::read_to_string(Path::new("/sys/class/net").join(iface).join("flags"))
         .unwrap_or_else(|error| panic!("read {iface} administrative flags: {error}"));
     let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)
@@ -1218,6 +1223,32 @@ impl WireCapture {
         capture
     }
 
+    /// S-ND295-01's one loss-accounted exact-ifindex capture. `SOCK_RAW`
+    /// keeps the link-layer header, so a virtio-net header delivered as frame
+    /// bytes (the E3 12-byte zero prefix) is visible rather than hidden by the
+    /// kernel's L3 datagram view. Close-on-exec keeps the capture out of every
+    /// child the in-process `serve` spawns.
+    fn start_link_layer(ifindex: u32) -> Self {
+        let fd = open_packet_socket(ifindex, libc::SOCK_RAW | libc::SOCK_CLOEXEC)
+            .expect("open the exact-ifindex link-layer AF_PACKET capture");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
+        Self { stop, handle: Some(handle), port: 0 }
+    }
+
+    /// Stop and return the batch; kernel-reported loss and a failed capture
+    /// thread are evidence the caller asserts, never a panic here.
+    fn stop_accounted(mut self) -> Result<CaptureBatch, String> {
+        self.stop.store(true, Ordering::SeqCst);
+        let handle = self.handle.take().ok_or("the capture thread was already joined")?;
+        let capture = handle.join().map_err(|payload| {
+            format!("the capture thread failed: {}", panic_evidence(payload.as_ref()))
+        })?;
+        capture_statistics_are_lossless(capture.statistics)?;
+        Ok(capture)
+    }
+
     fn stop_and_scan(
         self,
         ktls_candidates: &[KtlsSocketEvidence],
@@ -1254,9 +1285,16 @@ fn capture_statistics_are_lossless(statistics: PacketStatistics) -> Result<(), S
 }
 
 fn open_bound_packet_socket(ifindex: u32) -> std::io::Result<std::os::fd::RawFd> {
+    open_packet_socket(ifindex, libc::SOCK_DGRAM)
+}
+
+fn open_packet_socket(
+    ifindex: u32,
+    socket_type: libc::c_int,
+) -> std::io::Result<std::os::fd::RawFd> {
     // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is the
     // documented all-interface binding used by `start_all`.
-    let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_DGRAM, ETH_P_ALL.to_be()) };
+    let fd = unsafe { libc::socket(libc::AF_PACKET, socket_type, ETH_P_ALL.to_be()) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -1827,7 +1865,7 @@ fn parse_tcp_segment(
     }))
 }
 
-fn observe_shared_intercept_state() -> Result<Option<SharedIpInterceptState>, String> {
+pub(super) fn observe_shared_intercept_state() -> Result<Option<SharedIpInterceptState>, String> {
     nft::observe_shared_ip_intercept_state()
         .map_err(|error| format!("typed shared-IP state observation failed: {error}"))
 }
@@ -2750,7 +2788,7 @@ fn frozen_pre_change_render_contract(out: &WorkloadDescribeOutput) -> String {
     contract
 }
 
-async fn poll_until_issued_identity(
+pub(super) async fn poll_until_issued_identity(
     cfg: &Path,
     workload_id: &str,
     alloc_id: &str,
@@ -2903,7 +2941,7 @@ fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
     );
 }
 
-fn process_is_alive(pid: u32) -> bool {
+pub(super) fn process_is_alive(pid: u32) -> bool {
     let pid = i32::try_from(pid).expect("VMM pid fits pid_t");
     // SAFETY: signal zero performs an existence check and does not mutate the
     // process; `pid` came from the production VMM adapter.
@@ -3105,6 +3143,1026 @@ fn assert_exact_pre_ready_failure(
     );
 }
 
+// ---------------------------------------------------------------------
+// S-ND295-01 zero-frame witness (FD 10733-10763, 10835; E1, E3, E4).
+//
+// Observation only: every probe below reads production state (sysfs, procfs,
+// rtnetlink notifications, AF_PACKET) and none installs or mutates a network
+// effect. Each fallible observation returns its failure as evidence, so the
+// shared scenario never asserts on it; only the S-ND295-01 bodies do.
+// ---------------------------------------------------------------------
+
+/// The six TAP counters of the zero-frame contract, in a fixed order.
+const TAP_COUNTER_NAMES: [&str; 6] =
+    ["rx_packets", "tx_packets", "rx_bytes", "tx_bytes", "rx_dropped", "tx_dropped"];
+const ETHERNET_HEADER_LEN: usize = 14;
+const ETHERNET_MIN_FRAME_LEN: usize = 60;
+const VNET_HEADER_LEN: usize = 12;
+const ETH_P_ARP: u16 = 0x0806;
+const ETH_P_IPV6: u16 = 0x86dd;
+const ARP_IPV4_LEN: usize = 28;
+const IPV6_HEADER_LEN: usize = 40;
+const NLMSG_HEADER_LEN: usize = 16;
+const IFINFOMSG_LEN: usize = 16;
+const RTATTR_HEADER_LEN: usize = 4;
+const NLA_TYPE_MASK: u16 = 0x3fff;
+const NLMSG_NOOP: u16 = 1;
+const NLMSG_ERROR: u16 = 2;
+const NLMSG_DONE: u16 = 3;
+const NLMSG_OVERRUN: u16 = 4;
+const LINK_MONITOR_RECEIVE_BUFFER: libc::c_int = 32 * 1024 * 1024;
+const ENDPOINT_MAP_PIN: &str = "/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints";
+const TCX_LINK_PIN_DIR: &str = "/sys/fs/bpf/overdrive/mtls-endpoints/links";
+const VMM_RUN_ROOT: &str = "/run/overdrive/vm";
+const WORKLOADS_SLICE: &str = "/sys/fs/cgroup/overdrive.slice/workloads.slice";
+
+fn administratively_up(flags: u32) -> bool {
+    flags & libc::IFF_UP as u32 != 0
+}
+
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The six TAP counters in [`TAP_COUNTER_NAMES`] order.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TapCounters([u64; 6]);
+
+impl TapCounters {
+    fn all_zero(self) -> bool {
+        self.0.iter().all(|value| *value == 0)
+    }
+}
+
+/// One read of the caller TAP and its queue holders, from sysfs and procfs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TapStateSample {
+    ifindex: u32,
+    flags: u32,
+    /// Raw `tun` sysfs `owner` text; `0` is the root launcher (D-295-R4).
+    owner: String,
+    /// Raw `tun` sysfs `tun_flags` text; diagnostic only.
+    tun_flags: String,
+    counters: TapCounters,
+    /// Every process holding a `/dev/net/tun` descriptor whose `fdinfo`
+    /// `iff:` names this TAP, with those descriptor numbers.
+    queue_holders: BTreeMap<u32, BTreeSet<u32>>,
+    /// The allocation cgroup scope's `cgroup.procs` (empty before the scope
+    /// exists).
+    vmm_scope_pids: BTreeSet<u32>,
+    vmm_argv: BTreeMap<u32, Vec<String>>,
+}
+
+fn sample_tap_state(tap: &str, alloc: &AllocationId) -> Result<TapStateSample, String> {
+    let sysfs = Path::new("/sys/class/net").join(tap);
+    let read = |attribute: &str| {
+        std::fs::read_to_string(sysfs.join(attribute))
+            .map(|text| text.trim().to_owned())
+            .map_err(|error| format!("read {}/{attribute}: {error}", sysfs.display()))
+    };
+    let ifindex_text = read("ifindex")?;
+    let ifindex = ifindex_text
+        .parse::<u32>()
+        .map_err(|error| format!("decode {tap} ifindex {ifindex_text:?}: {error}"))?;
+    let flags_text = read("flags")?;
+    let flags = u32::from_str_radix(flags_text.trim_start_matches("0x"), 16)
+        .map_err(|error| format!("decode {tap} flags {flags_text:?}: {error}"))?;
+    let owner = read("owner")?;
+    let tun_flags = read("tun_flags")?;
+    let mut counters = [0_u64; 6];
+    for (slot, name) in counters.iter_mut().zip(TAP_COUNTER_NAMES) {
+        let text = read(&format!("statistics/{name}"))?;
+        *slot = text.parse().map_err(|error| format!("decode {tap} {name} {text:?}: {error}"))?;
+    }
+    let queue_holders = tap_queue_holders(tap)?;
+    let vmm_scope_pids = allocation_scope_pids(alloc)?;
+    let mut vmm_argv = BTreeMap::new();
+    for pid in &vmm_scope_pids {
+        vmm_argv.insert(*pid, process_argv(*pid)?);
+    }
+    Ok(TapStateSample {
+        ifindex,
+        flags,
+        owner,
+        tun_flags,
+        counters: TapCounters(counters),
+        queue_holders,
+        vmm_scope_pids,
+        vmm_argv,
+    })
+}
+
+fn proc_entry_vanished(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// The queue holder set of one TAP: every process holding a `/dev/net/tun`
+/// descriptor whose `/proc/<pid>/fdinfo/<fd>` `iff:` line names `tap`. A
+/// process or descriptor that disappears during the walk is skipped; any other
+/// read failure is returned, so an unreadable holder never reads as absent.
+fn tap_queue_holders(tap: &str) -> Result<BTreeMap<u32, BTreeSet<u32>>, String> {
+    let mut holders: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
+    let processes = std::fs::read_dir("/proc").map_err(|error| format!("read /proc: {error}"))?;
+    for process in processes {
+        let process = match process {
+            Ok(process) => process,
+            Err(error) if proc_entry_vanished(&error) => continue,
+            Err(error) => return Err(format!("read a /proc entry: {error}")),
+        };
+        let Ok(pid) = process.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let descriptors = match std::fs::read_dir(process.path().join("fd")) {
+            Ok(descriptors) => descriptors,
+            Err(error) if proc_entry_vanished(&error) => continue,
+            Err(error) => return Err(format!("read /proc/{pid}/fd: {error}")),
+        };
+        for descriptor in descriptors {
+            let descriptor = match descriptor {
+                Ok(descriptor) => descriptor,
+                Err(error) if proc_entry_vanished(&error) => continue,
+                Err(error) => return Err(format!("read a /proc/{pid}/fd entry: {error}")),
+            };
+            let target = match std::fs::read_link(descriptor.path()) {
+                Ok(target) => target,
+                Err(error) if proc_entry_vanished(&error) => continue,
+                Err(error) => {
+                    return Err(format!("read {}: {error}", descriptor.path().display()));
+                }
+            };
+            if target != Path::new("/dev/net/tun") {
+                continue;
+            }
+            let name = descriptor.file_name().to_string_lossy().into_owned();
+            let fd = name
+                .parse::<u32>()
+                .map_err(|error| format!("decode /proc/{pid}/fd/{name}: {error}"))?;
+            let fdinfo = match std::fs::read_to_string(process.path().join("fdinfo").join(&name)) {
+                Ok(fdinfo) => fdinfo,
+                Err(error) if proc_entry_vanished(&error) => continue,
+                Err(error) => return Err(format!("read /proc/{pid}/fdinfo/{name}: {error}")),
+            };
+            let attached = fdinfo.lines().find_map(|line| line.strip_prefix("iff:")).map(str::trim);
+            if attached == Some(tap) {
+                holders.entry(pid).or_default().insert(fd);
+            }
+        }
+    }
+    Ok(holders)
+}
+
+fn allocation_scope_pids(alloc: &AllocationId) -> Result<BTreeSet<u32>, String> {
+    let procs =
+        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
+    match std::fs::read_to_string(&procs) {
+        Ok(text) => text
+            .lines()
+            .map(|line| {
+                line.trim()
+                    .parse::<u32>()
+                    .map_err(|error| format!("decode {} line {line:?}: {error}", procs.display()))
+            })
+            .collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeSet::new()),
+        Err(error) => Err(format!("read {}: {error}", procs.display())),
+    }
+}
+
+fn process_argv(pid: u32) -> Result<Vec<String>, String> {
+    let bytes = std::fs::read(format!("/proc/{pid}/cmdline"))
+        .map_err(|error| format!("read /proc/{pid}/cmdline: {error}"))?;
+    Ok(bytes
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect())
+}
+
+/// The caller allocation and TAP the activation witness samples at the event.
+#[derive(Debug, Clone)]
+struct WitnessTarget {
+    alloc: AllocationId,
+    tap: String,
+}
+
+#[derive(Debug, Clone)]
+struct ActivationWitnessSnapshot {
+    alloc: Option<String>,
+    sampled_at: KernelRealtime,
+    /// `None` when no target was registered or the event names another
+    /// allocation.
+    tap: Option<Result<TapStateSample, String>>,
+}
+
+/// A tracing Layer that, synchronously inside the production thread that
+/// emits `mtls.intercept.install.success`, reads the caller TAP's admin state,
+/// ifindex, owner, six counters, and queue holders. The production source
+/// emits the event after `start_alloc` returns and before it awaits
+/// `activate` (FD 10345-10361), so this read is at the event and before any
+/// activation. It installs beside [`InterceptInstallTrace`], whose realtime
+/// sample stays the barrier; this Layer runs after it.
+#[derive(Clone, Default)]
+struct ActivationWitness {
+    target: Arc<Mutex<Option<WitnessTarget>>>,
+    snapshots: Arc<Mutex<Vec<ActivationWitnessSnapshot>>>,
+}
+
+impl ActivationWitness {
+    fn watch(&self, target: WitnessTarget) {
+        *lock_unpoisoned(&self.target) = Some(target);
+    }
+
+    fn snapshots(&self) -> Vec<ActivationWitnessSnapshot> {
+        lock_unpoisoned(&self.snapshots).clone()
+    }
+}
+
+impl<S> Layer<S> for ActivationWitness
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        if event.metadata().name() != INTERCEPT_INSTALL_SUCCESS {
+            return;
+        }
+        let sampled_at = KernelRealtime::now();
+        let mut visitor = InterceptInstallFieldVisitor::default();
+        event.record(&mut visitor);
+        let target = lock_unpoisoned(&self.target).clone();
+        let tap = target
+            .filter(|target| visitor.alloc.as_deref() == Some(target.alloc.as_str()))
+            .map(|target| sample_tap_state(&target.tap, &target.alloc));
+        lock_unpoisoned(&self.snapshots).push(ActivationWitnessSnapshot {
+            alloc: visitor.alloc,
+            sampled_at,
+            tap,
+        });
+    }
+}
+
+/// Install the exact-event barrier and the activation witness as this nextest
+/// process's one tracing subscriber.
+fn install_mesh_event_observers() -> (InterceptInstallTrace, ActivationWitness) {
+    let trace = InterceptInstallTrace::default();
+    let witness = ActivationWitness::default();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(trace.clone()).with(witness.clone()),
+    )
+    .expect("S-ND295-01 owns this nextest process's tracing subscriber");
+    (trace, witness)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkNoticeKind {
+    New,
+    Deleted,
+}
+
+/// One kernel `RTM_NEWLINK` / `RTM_DELLINK` notification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkNotice {
+    /// Userspace receipt time: an upper bound on when the kernel generated it.
+    received_at: KernelRealtime,
+    kind: LinkNoticeKind,
+    /// `ifi_family`: `AF_UNSPEC` for the device's own notification,
+    /// `AF_BRIDGE` for the bridge's notification about its port.
+    family: u8,
+    ifindex: u32,
+    flags: u32,
+    name: Option<String>,
+}
+
+/// An rtnetlink monitor subscribed to the link group. The subscription is
+/// bound before [`LinkMonitor::start`] returns, so it covers every link change
+/// after that point in kernel order. `ENOBUFS` (lost notifications) fails the
+/// monitor rather than yielding a partial history.
+struct LinkMonitor {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<Result<Vec<LinkNotice>, String>>>,
+}
+
+impl LinkMonitor {
+    fn start() -> Self {
+        let fd = open_link_monitor_socket()
+            .expect("open and bind the rtnetlink link-group monitor before deploy");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || monitor_links(&fd, &stop_thread));
+        Self { stop, handle: Some(handle) }
+    }
+
+    fn stop(mut self) -> Result<Vec<LinkNotice>, String> {
+        self.stop.store(true, Ordering::SeqCst);
+        let handle = self.handle.take().ok_or("the link monitor thread was already joined")?;
+        handle.join().map_err(|payload| {
+            format!("the link monitor thread failed: {}", panic_evidence(payload.as_ref()))
+        })?
+    }
+}
+
+impl Drop for LinkMonitor {
+    fn drop(&mut self) {
+        // Panic-safe fixture cleanup, as for `WireCapture`: never leave the
+        // monitor thread running past a failed oracle.
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn open_link_monitor_socket() -> std::io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd as _, FromRawFd as _};
+
+    // SAFETY: plain socket creation; the descriptor moves into `OwnedFd`.
+    let raw = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            libc::NETLINK_ROUTE,
+        )
+    };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `raw` is a fresh descriptor that nothing else owns.
+    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+    let size = LINK_MONITOR_RECEIVE_BUFFER;
+    // SAFETY: `fd` is live and the option points to one integer.
+    if unsafe {
+        libc::setsockopt(
+            fd.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUFFORCE,
+            std::ptr::from_ref(&size).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&size))
+                .expect("receive buffer option length fits socklen_t"),
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: an all-zero `sockaddr_nl` is valid; the public fields are set.
+    let mut address: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    address.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+    address.nl_groups = libc::RTMGRP_LINK as u32;
+    // SAFETY: the live sockaddr has exactly the supplied size.
+    if unsafe {
+        libc::bind(
+            fd.as_raw_fd(),
+            std::ptr::from_ref(&address).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&address))
+                .expect("sockaddr_nl length fits socklen_t"),
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(fd)
+}
+
+fn monitor_links(fd: &std::os::fd::OwnedFd, stop: &AtomicBool) -> Result<Vec<LinkNotice>, String> {
+    let mut notices = Vec::new();
+    let mut buf = vec![0_u8; 256 * 1024];
+    loop {
+        // Read the flag before receiving, so a final empty receive after it
+        // was set proves the queue is drained.
+        let stopping = stop.load(Ordering::SeqCst);
+        match receive_link_batch(fd, &mut buf)? {
+            Some((len, received_at)) => parse_link_notices(&buf[..len], received_at, &mut notices)?,
+            None if stopping => return Ok(notices),
+            None => std::thread::sleep(Duration::from_micros(200)),
+        }
+    }
+}
+
+fn receive_link_batch(
+    fd: &std::os::fd::OwnedFd,
+    buf: &mut [u8],
+) -> Result<Option<(usize, KernelRealtime)>, String> {
+    use std::os::fd::AsRawFd as _;
+
+    // SAFETY: an all-zero `sockaddr_nl` is a valid receive buffer.
+    let mut source: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    let mut source_len = libc::socklen_t::try_from(std::mem::size_of_val(&source))
+        .expect("sockaddr_nl length fits socklen_t");
+    // SAFETY: every pointer references live owned storage of the stated size.
+    let n = unsafe {
+        libc::recvfrom(
+            fd.as_raw_fd(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            libc::MSG_TRUNC,
+            std::ptr::from_mut(&mut source).cast(),
+            &raw mut source_len,
+        )
+    };
+    let received_at = KernelRealtime::now();
+    if n < 0 {
+        let error = std::io::Error::last_os_error();
+        return match error.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => Ok(None),
+            _ if error.raw_os_error() == Some(libc::ENOBUFS) => {
+                Err("the rtnetlink link monitor overran (ENOBUFS): link notifications were lost"
+                    .to_owned())
+            }
+            _ => Err(format!("the rtnetlink link monitor receive failed: {error}")),
+        };
+    }
+    let len = usize::try_from(n).expect("recvfrom length is non-negative");
+    if len > buf.len() {
+        return Err(format!("an rtnetlink datagram of {len} bytes exceeded the receive buffer"));
+    }
+    if source.nl_pid != 0 {
+        return Err(format!("an rtnetlink link notification came from port {}", source.nl_pid));
+    }
+    Ok(Some((len, received_at)))
+}
+
+fn read_ne_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
+    bytes
+        .get(offset..offset + 2)
+        .and_then(|slice| <[u8; 2]>::try_from(slice).ok())
+        .map(u16::from_ne_bytes)
+        .ok_or_else(|| format!("truncated u16 at offset {offset}"))
+}
+
+fn read_ne_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
+    bytes
+        .get(offset..offset + 4)
+        .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
+        .map(u32::from_ne_bytes)
+        .ok_or_else(|| format!("truncated u32 at offset {offset}"))
+}
+
+const fn netlink_align(len: usize) -> usize {
+    (len + 3) & !3
+}
+
+fn parse_link_notices(
+    datagram: &[u8],
+    received_at: KernelRealtime,
+    notices: &mut Vec<LinkNotice>,
+) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < datagram.len() {
+        let len = read_ne_u32(datagram, offset)? as usize;
+        let kind = read_ne_u16(datagram, offset + 4)?;
+        let end = offset.checked_add(len).ok_or("rtnetlink message length overflows")?;
+        if len < NLMSG_HEADER_LEN || end > datagram.len() {
+            return Err(format!("malformed rtnetlink message length {len} at offset {offset}"));
+        }
+        let body = &datagram[offset + NLMSG_HEADER_LEN..end];
+        match kind {
+            libc::RTM_NEWLINK => {
+                notices.push(parse_link_notice(LinkNoticeKind::New, body, received_at)?);
+            }
+            libc::RTM_DELLINK => {
+                notices.push(parse_link_notice(LinkNoticeKind::Deleted, body, received_at)?);
+            }
+            NLMSG_ERROR | NLMSG_OVERRUN => {
+                return Err(format!("rtnetlink reported message type {kind} to the link monitor"));
+            }
+            NLMSG_NOOP | NLMSG_DONE => {}
+            other => {
+                return Err(format!("unexpected rtnetlink message type {other} in the link group"));
+            }
+        }
+        offset = netlink_align(end);
+    }
+    Ok(())
+}
+
+fn parse_link_notice(
+    kind: LinkNoticeKind,
+    body: &[u8],
+    received_at: KernelRealtime,
+) -> Result<LinkNotice, String> {
+    if body.len() < IFINFOMSG_LEN {
+        return Err(format!("an rtnetlink link message carries a {}-byte ifinfomsg", body.len()));
+    }
+    let family = body[0];
+    let ifindex = read_ne_u32(body, 4)?;
+    if ifindex == 0 || ifindex > i32::MAX as u32 {
+        return Err(format!("an rtnetlink link message carries ifindex {ifindex}"));
+    }
+    let flags = read_ne_u32(body, 8)?;
+    let mut name = None;
+    let mut offset = IFINFOMSG_LEN;
+    while offset + RTATTR_HEADER_LEN <= body.len() {
+        let attribute_len = usize::from(read_ne_u16(body, offset)?);
+        let attribute_type = read_ne_u16(body, offset + 2)? & NLA_TYPE_MASK;
+        let end = offset + attribute_len;
+        if attribute_len < RTATTR_HEADER_LEN || end > body.len() {
+            return Err(format!("malformed rtnetlink attribute length {attribute_len}"));
+        }
+        if attribute_type == libc::IFLA_IFNAME {
+            let value = &body[offset + RTATTR_HEADER_LEN..end];
+            let value = value
+                .split(|byte| *byte == 0)
+                .next()
+                .unwrap_or_else(|| unreachable!("a slice split yields at least one piece"));
+            name = Some(String::from_utf8_lossy(value).into_owned());
+        }
+        offset = netlink_align(end);
+    }
+    Ok(LinkNotice { received_at, kind, family, ifindex, flags, name })
+}
+
+/// The caller TAP's administrative history in kernel order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TapAdminLifecycle {
+    /// Receipt time of the first notification carrying `IFF_UP`.
+    first_up_received_at: KernelRealtime,
+    down_notices_before_up: usize,
+    deleted: bool,
+}
+
+/// Classify the caller TAP's own (`AF_UNSPEC`) notifications; the bridge's
+/// `AF_BRIDGE` notifications about its port are a second view of the same
+/// device (and its port `RTM_DELLINK` precedes the device's own at
+/// unregistration), so they are not part of the device history. Accepted
+/// shape: one or more notifications with `IFF_UP` clear (creation onward),
+/// then one contiguous run with `IFF_UP` set (activation onward), then
+/// optionally `IFF_UP` clear again (teardown) and `RTM_DELLINK` last. A first
+/// notification that is already up, a second up run, a notification after
+/// deletion, a rename, or the name bound to another ifindex while this one
+/// lives each fail closed.
+///
+/// Together with a read of `IFF_UP` clear at the event, the single up run
+/// proves the first up transition happened strictly after that read: an
+/// earlier one would need a later down transition before the read and a later
+/// up (activation), which is a second up run.
+fn tap_admin_lifecycle(
+    notices: &[LinkNotice],
+    tap: &str,
+    ifindex: u32,
+) -> Result<TapAdminLifecycle, String> {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Phase {
+        Down,
+        Up,
+        Lowered,
+        Deleted,
+    }
+
+    let mut phase: Option<Phase> = None;
+    let mut first_up = None;
+    let mut down_notices_before_up = 0;
+    for notice in notices.iter().filter(|notice| i32::from(notice.family) == libc::AF_UNSPEC) {
+        if notice.ifindex != ifindex {
+            let live = matches!(phase, Some(Phase::Down | Phase::Up | Phase::Lowered));
+            if live && notice.kind == LinkNoticeKind::New && notice.name.as_deref() == Some(tap) {
+                return Err(format!(
+                    "the name {tap} was bound to ifindex {} while ifindex {ifindex} was live: \
+                     {notice:?}",
+                    notice.ifindex
+                ));
+            }
+            continue;
+        }
+        if phase == Some(Phase::Deleted) {
+            return Err(format!("ifindex {ifindex} notified after RTM_DELLINK: {notice:?}"));
+        }
+        if let Some(name) = notice.name.as_deref()
+            && name != tap
+        {
+            return Err(format!("ifindex {ifindex} is named {name:?}, not {tap}: {notice:?}"));
+        }
+        let up = administratively_up(notice.flags);
+        phase = Some(match (phase, notice.kind, up) {
+            (_, LinkNoticeKind::Deleted, _) => Phase::Deleted,
+            (None, LinkNoticeKind::New, true) => {
+                return Err(format!(
+                    "the first notification for {tap} already carries IFF_UP: {notice:?}"
+                ));
+            }
+            (None | Some(Phase::Down), LinkNoticeKind::New, false) => {
+                down_notices_before_up += 1;
+                Phase::Down
+            }
+            (Some(Phase::Down), LinkNoticeKind::New, true) => {
+                first_up = Some(notice.received_at);
+                Phase::Up
+            }
+            (Some(Phase::Up), LinkNoticeKind::New, true) => Phase::Up,
+            (Some(Phase::Up | Phase::Lowered), LinkNoticeKind::New, false) => Phase::Lowered,
+            (Some(Phase::Lowered), LinkNoticeKind::New, true) => {
+                return Err(format!("{tap} was raised again after being lowered: {notice:?}"));
+            }
+            (Some(Phase::Deleted), LinkNoticeKind::New, _) => {
+                unreachable!("a notification after deletion returned above")
+            }
+        });
+    }
+    let first_up_received_at = first_up.ok_or_else(|| {
+        format!("no notification for {tap} (ifindex {ifindex}) ever carried IFF_UP: {phase:?}")
+    })?;
+    Ok(TapAdminLifecycle {
+        first_up_received_at,
+        down_notices_before_up,
+        deleted: phase == Some(Phase::Deleted),
+    })
+}
+
+/// Zero caller-TAP frames at or before the event. Every frame in the exact
+/// capture must carry a kernel timestamp strictly after the event; a missing
+/// timestamp is unprovable and fails closed. Returns the post-event count.
+fn frames_strictly_after_event(
+    capture: &CaptureBatch,
+    ifindex: u32,
+    event: KernelRealtime,
+) -> Result<usize, String> {
+    let violations = capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            frame.ifindex != ifindex || frame.kernel_event_at.is_none_or(|at| at <= event)
+        })
+        .collect::<Vec<_>>();
+    if violations.is_empty() {
+        Ok(capture.frames.len())
+    } else {
+        Err(format!(
+            "{} exact-capture frames are on another ifindex, lack a kernel timestamp, or are at or \
+             before the event {event:?}: {violations:#?}",
+            violations.len()
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestFrameKind {
+    Arp,
+    Icmp,
+    Tcp,
+    Udp,
+    Ipv6,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct GuestFramePopulation {
+    arp: usize,
+    icmp: usize,
+    tcp: usize,
+    udp: usize,
+    ipv6: usize,
+}
+
+/// Decode every guest-originated frame after the event (E3). Each must carry
+/// no 12-byte zero prefix, the guest's own source MAC, and a well-formed ARP,
+/// IPv4 (ICMP, TCP, or UDP, with a valid header checksum), or IPv6 payload.
+/// Any other frame is unprovable and fails closed. The guest ARP and TCP
+/// populations must be non-empty, so the decode cannot pass vacuously.
+fn decode_post_event_guest_frames(
+    capture: &CaptureBatch,
+    ifindex: u32,
+    event: KernelRealtime,
+    guest_mac: [u8; 6],
+    guest_address: Ipv4Addr,
+) -> Result<GuestFramePopulation, String> {
+    let mut population = GuestFramePopulation::default();
+    for frame in capture
+        .frames
+        .iter()
+        .filter(|frame| frame.ifindex == ifindex && frame.packet_type != libc::PACKET_OUTGOING)
+    {
+        if frame.kernel_event_at.is_none_or(|at| at <= event) {
+            return Err(format!("a guest frame is not provably after the event: {frame:?}"));
+        }
+        let kind = decode_guest_frame(frame, guest_mac, guest_address)
+            .map_err(|error| format!("{error}; frame={frame:?}"))?;
+        let slot = match kind {
+            GuestFrameKind::Arp => &mut population.arp,
+            GuestFrameKind::Icmp => &mut population.icmp,
+            GuestFrameKind::Tcp => &mut population.tcp,
+            GuestFrameKind::Udp => &mut population.udp,
+            GuestFrameKind::Ipv6 => &mut population.ipv6,
+        };
+        *slot += 1;
+    }
+    if population.arp == 0 || population.tcp == 0 {
+        return Err(format!(
+            "the post-event guest ARP and TCP populations must both be non-empty: {population:?}"
+        ));
+    }
+    Ok(population)
+}
+
+fn decode_guest_frame(
+    frame: &CapturedFrame,
+    guest_mac: [u8; 6],
+    guest_address: Ipv4Addr,
+) -> Result<GuestFrameKind, String> {
+    if frame.truncated || frame.control_truncated || frame.bytes.len() != frame.wire_len {
+        return Err("MSG_TRUNC/MSG_CTRUNC or wire-length mismatch".to_owned());
+    }
+    let aux = frame.aux.ok_or("PACKET_AUXDATA is missing")?;
+    if usize::try_from(aux.len).ok() != Some(frame.wire_len) {
+        return Err(format!("PACKET_AUXDATA length mismatch: {aux:?}"));
+    }
+    let bytes = &frame.bytes;
+    let header = bytes.get(..ETHERNET_HEADER_LEN).ok_or("shorter than an Ethernet header")?;
+    if header[..VNET_HEADER_LEN].iter().all(|byte| *byte == 0) {
+        return Err("12-byte zero prefix: a virtio-net header was read as the MAC pair".to_owned());
+    }
+    if header[6..12] != guest_mac[..] {
+        return Err(format!(
+            "source MAC {:02x?} is not the guest MAC {guest_mac:02x?}",
+            &header[6..12]
+        ));
+    }
+    let ethertype = u16::from_be_bytes([header[12], header[13]]);
+    if ethertype != frame.protocol {
+        return Err(format!(
+            "ethertype {ethertype:#06x} disagrees with sll_protocol {:#06x}",
+            frame.protocol
+        ));
+    }
+    let payload = &bytes[ETHERNET_HEADER_LEN..];
+    let padded = bytes.len() <= ETHERNET_MIN_FRAME_LEN;
+    match ethertype {
+        ETH_P_ARP => decode_guest_arp(payload, guest_mac, guest_address),
+        ETH_P_IP => decode_guest_ipv4(payload, padded, guest_address),
+        ETH_P_IPV6 => decode_guest_ipv6(payload, padded),
+        other => Err(format!("unprovable guest ethertype {other:#06x}")),
+    }
+}
+
+fn decode_guest_arp(
+    payload: &[u8],
+    guest_mac: [u8; 6],
+    guest_address: Ipv4Addr,
+) -> Result<GuestFrameKind, String> {
+    let arp = payload.get(..ARP_IPV4_LEN).ok_or("ARP body shorter than 28 bytes")?;
+    let hardware = u16::from_be_bytes([arp[0], arp[1]]);
+    let protocol = u16::from_be_bytes([arp[2], arp[3]]);
+    let operation = u16::from_be_bytes([arp[6], arp[7]]);
+    if hardware != 1 || protocol != ETH_P_IP || arp[4] != 6 || arp[5] != 4 {
+        return Err(format!("ARP is not Ethernet/IPv4: {:02x?}", &arp[..6]));
+    }
+    if !matches!(operation, 1 | 2) {
+        return Err(format!("ARP operation {operation} is neither request nor reply"));
+    }
+    if arp[8..14] != guest_mac[..] {
+        return Err(format!("ARP sender MAC {:02x?} is not the guest MAC", &arp[8..14]));
+    }
+    let sender = Ipv4Addr::new(arp[14], arp[15], arp[16], arp[17]);
+    if sender != guest_address && sender != Ipv4Addr::UNSPECIFIED {
+        return Err(format!("ARP sender address {sender} is neither {guest_address} nor a probe"));
+    }
+    Ok(GuestFrameKind::Arp)
+}
+
+fn ipv4_header_checksum_is_valid(header: &[u8]) -> bool {
+    let mut sum = header
+        .chunks(2)
+        .map(|pair| u32::from(u16::from_be_bytes([pair[0], pair.get(1).copied().unwrap_or(0)])))
+        .sum::<u32>();
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    sum == 0xffff
+}
+
+fn decode_guest_ipv4(
+    payload: &[u8],
+    padded: bool,
+    guest_address: Ipv4Addr,
+) -> Result<GuestFrameKind, String> {
+    if payload.len() < IPV4_HEADER_LEN {
+        return Err("IPv4 packet is shorter than its fixed header".to_owned());
+    }
+    let ihl = usize::from(payload[0] & 0x0f) * 4;
+    if payload[0] >> 4 != 4 || ihl < IPV4_HEADER_LEN || ihl > payload.len() {
+        return Err(format!("invalid IPv4 version/IHL byte {:#04x}", payload[0]));
+    }
+    let total_len = usize::from(u16::from_be_bytes([payload[2], payload[3]]));
+    if total_len < ihl || total_len > payload.len() || (!padded && total_len != payload.len()) {
+        return Err(format!(
+            "IPv4 tot_len {total_len} disagrees with {} frame bytes",
+            payload.len()
+        ));
+    }
+    if u16::from_be_bytes([payload[6], payload[7]]) & 0x3fff != 0 {
+        return Err("a fragmented guest IPv4 packet is unprovable".to_owned());
+    }
+    if !ipv4_header_checksum_is_valid(&payload[..ihl]) {
+        return Err("the guest IPv4 header checksum is invalid".to_owned());
+    }
+    let source = Ipv4Addr::new(payload[12], payload[13], payload[14], payload[15]);
+    if source != guest_address {
+        return Err(format!("guest IPv4 source {source} is not {guest_address}"));
+    }
+    let l4 = &payload[ihl..total_len];
+    match payload[9] {
+        1 if l4.len() >= 8 => Ok(GuestFrameKind::Icmp),
+        6 if l4.len() >= 20
+            && (usize::from(l4[12] >> 4) * 4) >= 20
+            && (usize::from(l4[12] >> 4) * 4) <= l4.len() =>
+        {
+            Ok(GuestFrameKind::Tcp)
+        }
+        17 if l4.len() >= 8 && usize::from(u16::from_be_bytes([l4[4], l4[5]])) == l4.len() => {
+            Ok(GuestFrameKind::Udp)
+        }
+        protocol => {
+            Err(format!("unprovable or malformed guest IPv4 protocol {protocol}: {l4:02x?}"))
+        }
+    }
+}
+
+fn decode_guest_ipv6(payload: &[u8], padded: bool) -> Result<GuestFrameKind, String> {
+    let header = payload.get(..IPV6_HEADER_LEN).ok_or("IPv6 packet shorter than 40 bytes")?;
+    if header[0] >> 4 != 6 {
+        return Err(format!("invalid IPv6 version byte {:#04x}", header[0]));
+    }
+    let payload_len = usize::from(u16::from_be_bytes([header[4], header[5]]));
+    let total = IPV6_HEADER_LEN + payload_len;
+    if total > payload.len() || (!padded && total != payload.len()) {
+        return Err(format!(
+            "IPv6 payload length {payload_len} disagrees with {} bytes",
+            payload.len()
+        ));
+    }
+    Ok(GuestFrameKind::Ipv6)
+}
+
+/// One allocation's owned host resources, for the post-stop complement.
+struct AllocationFootprint {
+    alloc: AllocationId,
+    tap: String,
+    tap_ifindex: u32,
+    vmm_pids: Result<BTreeSet<u32>, String>,
+}
+
+/// Every owned resource of the footprints that is still present, or whose
+/// absence could not be read.
+fn allocation_complement_residue(
+    footprints: &[AllocationFootprint],
+    guard: &overdrive_netlink::nft::bridge::BridgeGuardSpec,
+) -> Vec<String> {
+    let mut residue = Vec::new();
+    for footprint in footprints {
+        let tap = &footprint.tap;
+        let alloc = &footprint.alloc;
+        if Path::new("/sys/class/net").join(tap).exists() {
+            residue.push(format!("TAP {tap} of {alloc} still exists"));
+        }
+        if Path::new(VMM_RUN_ROOT).join(alloc.as_str()).exists() {
+            residue.push(format!("the run directory of {alloc} still exists"));
+        }
+        if Path::new(WORKLOADS_SLICE).join(format!("{alloc}.scope")).exists() {
+            residue.push(format!("the cgroup scope of {alloc} still exists"));
+        }
+        for direction in ["ingress", "egress"] {
+            let pin = Path::new(TCX_LINK_PIN_DIR).join(format!("{tap}-{direction}"));
+            if pin.exists() {
+                residue.push(format!("the TCX {direction} link pin {} remains", pin.display()));
+            }
+        }
+        match overdrive_dataplane::guest_tcx::endpoint_present(
+            ENDPOINT_MAP_PIN,
+            footprint.tap_ifindex,
+        ) {
+            Ok(false) => {}
+            Ok(true) => residue.push(format!(
+                "the endpoint entry for ifindex {} ({tap}) remains",
+                footprint.tap_ifindex
+            )),
+            Err(error) => residue.push(format!("the endpoint map could not be read: {error}")),
+        }
+        match &footprint.vmm_pids {
+            Ok(pids) => {
+                for pid in pids.iter().filter(|pid| process_is_alive(**pid)) {
+                    residue.push(format!("VMM process {pid} of {alloc} is still alive"));
+                }
+            }
+            Err(error) => {
+                residue.push(format!("the VMM pids of {alloc} were not observed: {error}"));
+            }
+        }
+        match tap_queue_holders(tap) {
+            Ok(holders) if holders.is_empty() => {}
+            Ok(holders) => residue.push(format!("{tap} queue holders remain: {holders:?}")),
+            Err(error) => {
+                residue.push(format!("the {tap} queue holders could not be read: {error}"));
+            }
+        }
+    }
+    match overdrive_netlink::nft::bridge::observe(guard, &BTreeSet::new()) {
+        Ok(
+            overdrive_netlink::nft::bridge::BridgeGuardObservation::Absent { .. }
+            | overdrive_netlink::nft::bridge::BridgeGuardObservation::Exact { .. },
+        ) => {}
+        Ok(overdrive_netlink::nft::bridge::BridgeGuardObservation::Conflict { inventory }) => {
+            residue.push(format!("the bridge guard still holds members: {inventory:?}"));
+        }
+        Err(error) => residue.push(format!("the bridge guard could not be observed: {error}")),
+    }
+    residue
+}
+
+async fn poll_until_empty_allocation_complement(
+    footprints: &[AllocationFootprint],
+    budget: Duration,
+) -> Result<(), String> {
+    let guard = overdrive_netlink::nft::bridge::BridgeGuardSpec::new(
+        "overdrive-mtls".to_owned(),
+        "prerouting".to_owned(),
+        "managed_taps".to_owned(),
+        -300,
+        0x295a,
+        0x295b,
+    )
+    .expect("canonical shared bridge guard specification");
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let residue = allocation_complement_residue(footprints, &guard);
+        if residue.is_empty() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!("owned residue remains {budget:?} after stop: {residue:#?}"));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// S-ND295-01 evidence joined from the observations above.
+#[derive(Debug)]
+struct BornCapturedEvidence {
+    caller_alloc: AllocationId,
+    tap: String,
+    tap_ifindex: u32,
+    guest_mac: [u8; 6],
+    guest_address: Ipv4Addr,
+    /// Sampled at the VMM spawn cut: after provision, before Cloud Hypervisor.
+    pre_create: Result<TapStateSample, String>,
+    event_snapshots: Vec<ActivationWitnessSnapshot>,
+    link_notices: Result<Vec<LinkNotice>, String>,
+    link_layer: Result<CaptureBatch, String>,
+    post_stop_complement: Result<(), String>,
+}
+
+impl BornCapturedEvidence {
+    /// The caller TAP read at the exact event: exactly one witness snapshot,
+    /// for the caller allocation, sampled at or after the barrier.
+    fn at_event(&self, intercept_live_at: KernelRealtime) -> Result<&TapStateSample, String> {
+        let [snapshot] = self.event_snapshots.as_slice() else {
+            return Err(format!(
+                "expected exactly one witnessed {INTERCEPT_INSTALL_SUCCESS} event, got {:#?}",
+                self.event_snapshots
+            ));
+        };
+        if snapshot.alloc.as_deref() != Some(self.caller_alloc.as_str()) {
+            return Err(format!(
+                "the witnessed event names {:?}, not {}",
+                snapshot.alloc, self.caller_alloc
+            ));
+        }
+        if snapshot.sampled_at < intercept_live_at {
+            return Err(format!(
+                "the witness sampled at {:?}, before the barrier {intercept_live_at:?}",
+                snapshot.sampled_at
+            ));
+        }
+        match &snapshot.tap {
+            Some(Ok(state)) => Ok(state),
+            Some(Err(error)) => Err(format!("the event-time TAP read failed: {error}")),
+            None => Err("no caller TAP was registered with the witness at the event".to_owned()),
+        }
+    }
+}
+
+/// The sole Cloud Hypervisor pid in the caller's scope at the event,
+/// launched over the fd handoff (`--net fd=[3],…`, never `tap=`).
+fn cloud_hypervisor_pid(at_event: &TapStateSample) -> Result<u32, String> {
+    let pids = at_event.vmm_scope_pids.iter().copied().collect::<Vec<_>>();
+    let &[pid] = pids.as_slice() else {
+        return Err(format!(
+            "the caller scope holds {:?}, not exactly one VMM process",
+            at_event.vmm_scope_pids
+        ));
+    };
+    let argv = at_event.vmm_argv.get(&pid).ok_or("the VMM argv was not read")?;
+    let program = argv.first().map(|arg| Path::new(arg).file_name());
+    if program != Some(Some(std::ffi::OsStr::new("cloud-hypervisor"))) {
+        return Err(format!("the caller scope process {pid} is not Cloud Hypervisor: {argv:?}"));
+    }
+    let net = argv
+        .iter()
+        .position(|arg| arg == "--net")
+        .and_then(|index| argv.get(index + 1))
+        .ok_or_else(|| format!("Cloud Hypervisor {pid} has no --net argument: {argv:?}"))?;
+    if !net.starts_with("fd=[3],") || net.contains("tap=") {
+        return Err(format!(
+            "Cloud Hypervisor {pid} does not receive its TAP by descriptor handoff: {net}"
+        ));
+    }
+    Ok(pid)
+}
+
 struct MeshResult {
     service_replicas: (u32, u32),
     caller_verdict: overdrive_cli::render::JobVerdict,
@@ -3119,6 +4177,9 @@ struct MeshResult {
     guest_egress: GuestEgressAudit,
     ktls: Result<KtlsSocketEvidence, String>,
     splice: SpliceEvidence,
+    /// S-ND295-01 zero-frame witness evidence. Collected here, asserted only
+    /// by the S-ND295-01 bodies.
+    born: BornCapturedEvidence,
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
@@ -3186,6 +4247,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         service_state.snapshot.rows.into_iter().next().expect("one Running service allocation");
     let service_address =
         service_running.workload_addr.expect("Running Service carries its guest address");
+    let service_alloc =
+        AllocationId::new(&service_running.alloc_id).expect("Service allocation id parses");
+    // The Running Service's VMM pids, for the post-stop complement.
+    let service_vmm_pids = allocation_scope_pids(&service_alloc);
     let service_identity = poll_until_issued_identity(
         &cfg,
         &service_submit.workload_id,
@@ -3209,7 +4274,10 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
     // decorator below reports the exact C3 attachment and blocks the real CH
     // spawn until both guest-boundary captures and the exact-rule poller are
     // ready.
-    let intercept_events = InterceptInstallTrace::install_global();
+    let (intercept_events, activation_witness) = install_mesh_event_observers();
+    // S-ND295-01: the rtnetlink link monitor is subscribed before the caller
+    // deploy, so the caller TAP's creation notification is in its history.
+    let link_monitor = LinkMonitor::start();
     let vm_spec = write_toml(
         server_tmp.path(),
         &format!("{id}.toml"),
@@ -3250,6 +4318,13 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         !interface_is_administratively_up(&network.tap),
         "provision must publish the fully protected caller TAP down before Cloud Hypervisor attachment"
     );
+    // S-ND295-01 witness, armed before Cloud Hypervisor exists: one read of the
+    // provisioned TAP, the one exact-ifindex link-layer capture, and the
+    // event-time sampler bound to this allocation and TAP.
+    let pre_create = sample_tap_state(&network.tap, &caller_alloc);
+    let link_layer_capture = WireCapture::start_link_layer(tap_ifindex);
+    activation_witness
+        .watch(WitnessTarget { alloc: caller_alloc.clone(), tap: network.tap.clone() });
     let readiness_task = tokio::spawn(poll_until_outbound_elements_ready(
         network.tap.clone(),
         guest_address,
@@ -3318,6 +4393,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         &BTreeSet::from([bridge_ifindex, service_tap_ifindex, tap_ifindex]),
     );
     let tap_capture = tap_wire.stop();
+    let link_layer = link_layer_capture.stop_accounted();
     let pre_intercept_tap_frames = tap_capture
         .frames
         .iter()
@@ -3400,6 +4476,35 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         Duration::from_secs(30),
     )
     .await;
+    let event_snapshots = activation_witness.snapshots();
+    let caller_vmm_pids = match event_snapshots.as_slice() {
+        [ActivationWitnessSnapshot { tap: Some(Ok(state)), .. }] => {
+            Ok(state.vmm_scope_pids.clone())
+        }
+        other => Err(format!("the caller VMM pids were not witnessed at the event: {other:#?}")),
+    };
+    let post_stop_complement = poll_until_empty_allocation_complement(
+        &[
+            AllocationFootprint {
+                alloc: caller_alloc.clone(),
+                tap: network.tap.clone(),
+                tap_ifindex,
+                vmm_pids: caller_vmm_pids,
+            },
+            AllocationFootprint {
+                alloc: service_alloc,
+                tap: service_network.tap.clone(),
+                tap_ifindex: service_tap_ifindex,
+                vmm_pids: service_vmm_pids,
+            },
+        ],
+        Duration::from_secs(30),
+    )
+    .await;
+    // Stopped only after the complement poll: a TAP's sysfs directory is
+    // removed after the kernel sends its RTM_DELLINK, whereas the name lookup
+    // above can miss the name earlier, so the deletion is in the history.
+    let link_notices = link_monitor.stop();
     handle.shutdown().await.expect("clean mTLS serve shutdown");
     assert_shared_intercept_universe(
         &observe_shared_intercept_state()
@@ -3435,16 +4540,171 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         guest_egress,
         ktls,
         splice,
+        born: BornCapturedEvidence {
+            caller_alloc,
+            tap: network.tap.clone(),
+            tap_ifindex,
+            guest_mac: network.mac,
+            guest_address,
+            pre_create,
+            event_snapshots,
+            link_notices,
+            link_layer,
+            post_stop_complement,
+        },
     }
 }
 
-/// S-ND295-01 / S-GTI-01 — a real microVM resolves and dials a mesh Service by
-/// name through the production shared guest network and transparent-mTLS path.
+/// E4 and the TAP-down lifecycle of E1: the provisioned TAP is owned by uid 0,
+/// down, and held by no queue before Cloud Hypervisor exists; at the exact
+/// event the same ifindex is still down; and the kernel's link history shows
+/// one down interval from creation, then one up interval whose first
+/// notification follows the event.
 ///
+/// The production dispatch reaches the event only after READY and the
+/// accepted Running write (FD 10628), so a TAP down continuously from before
+/// Cloud Hypervisor exists until strictly after the event is down across
+/// Cloud Hypervisor creation, READY, and Running. Any missing or duplicate
+/// event, monitor overrun, or unreadable sample fails closed.
+fn assert_caller_tap_down_until_after_intercept_live(result: &MeshResult) {
+    let born = &result.born;
+    let pre = born
+        .pre_create
+        .as_ref()
+        .unwrap_or_else(|error| panic!("the pre-create TAP read failed: {error}"));
+    assert_eq!(pre.ifindex, born.tap_ifindex, "the provisioned TAP keeps its spawn-cut ifindex");
+    assert!(
+        !administratively_up(pre.flags),
+        "the provisioned TAP is down before Cloud Hypervisor exists: {pre:?}"
+    );
+    assert_eq!(pre.owner, "0", "the provisioned TAP is owned by uid 0 (D-295-R4): {pre:?}");
+    assert!(
+        pre.queue_holders.is_empty(),
+        "no process holds a queue of the provisioned TAP before Cloud Hypervisor: {pre:?}"
+    );
+    let at_event = born
+        .at_event(result.intercept_live_at)
+        .unwrap_or_else(|error| panic!("event-time TAP witness failed: {error}"));
+    assert_eq!(
+        at_event.ifindex, born.tap_ifindex,
+        "the same ifindex serves the allocation from provision through the event"
+    );
+    assert!(
+        !administratively_up(at_event.flags),
+        "the caller TAP is still down at the exact intercept-install event: {at_event:?}"
+    );
+    assert_eq!(
+        at_event.owner, "0",
+        "the caller TAP stays owned by uid 0 through READY: {at_event:?}"
+    );
+    let notices = born
+        .link_notices
+        .as_ref()
+        .unwrap_or_else(|error| panic!("the rtnetlink link history is incomplete: {error}"));
+    let lifecycle = tap_admin_lifecycle(notices, &born.tap, born.tap_ifindex)
+        .unwrap_or_else(|error| panic!("caller TAP admin history violates the contract: {error}"));
+    assert!(
+        lifecycle.down_notices_before_up > 0,
+        "the link history includes the caller TAP's down creation: {lifecycle:?}"
+    );
+    assert!(
+        lifecycle.first_up_received_at > result.intercept_live_at,
+        "the first IFF_UP notification for {} follows the event at {:?}: {lifecycle:?}",
+        born.tap,
+        result.intercept_live_at
+    );
+    assert!(lifecycle.deleted, "the caller TAP's history ends with its deletion: {lifecycle:?}");
+}
+
+/// E2's holder half for S-ND295-01: at the event the only process holding a
+/// queue of the caller TAP is its Cloud Hypervisor, which received it over the
+/// descriptor handoff; after the journey both allocations' VMM, TAP, TCX
+/// pins, endpoint entry, guard member, cgroup scope, and run directory are
+/// gone.
+fn assert_caller_queue_is_held_only_by_cloud_hypervisor(result: &MeshResult) {
+    let born = &result.born;
+    let at_event = born
+        .at_event(result.intercept_live_at)
+        .unwrap_or_else(|error| panic!("event-time TAP witness failed: {error}"));
+    let vmm = cloud_hypervisor_pid(at_event)
+        .unwrap_or_else(|error| panic!("the caller Cloud Hypervisor was not identified: {error}"));
+    assert_eq!(
+        at_event.queue_holders.keys().copied().collect::<BTreeSet<_>>(),
+        BTreeSet::from([vmm]),
+        "the caller TAP's queue holder set is exactly its Cloud Hypervisor: {at_event:?}"
+    );
+}
+
+fn assert_empty_complement_after_stop(result: &MeshResult) {
+    if let Err(residue) = &result.born.post_stop_complement {
+        panic!("stopping both workloads must leave nothing the journey owned: {residue}");
+    }
+}
+
+/// E1's zero-frame half: the exact loss-accounted capture holds no caller-TAP
+/// frame at or before the event, and all six TAP counters read zero both
+/// before Cloud Hypervisor exists and at the event, with the TAP down.
+fn assert_zero_caller_frames_through_intercept_live(result: &MeshResult) {
+    let born = &result.born;
+    let capture = born
+        .link_layer
+        .as_ref()
+        .unwrap_or_else(|error| panic!("the exact link-layer capture is not loss-free: {error}"));
+    let post_event =
+        frames_strictly_after_event(capture, born.tap_ifindex, result.intercept_live_at)
+            .unwrap_or_else(|error| panic!("a caller-TAP frame precedes protection: {error}"));
+    assert!(post_event > 0, "the exact capture observes the post-activation journey");
+    let pre = born
+        .pre_create
+        .as_ref()
+        .unwrap_or_else(|error| panic!("the pre-create TAP read failed: {error}"));
+    assert!(pre.counters.all_zero(), "all six TAP counters are zero at provision: {pre:?}");
+    let at_event = born
+        .at_event(result.intercept_live_at)
+        .unwrap_or_else(|error| panic!("event-time TAP witness failed: {error}"));
+    assert!(
+        !administratively_up(at_event.flags),
+        "the zero-frame interval is the TAP-down interval: {at_event:?}"
+    );
+    assert!(
+        at_event.counters.all_zero(),
+        "all six TAP counters ({TAP_COUNTER_NAMES:?}) read zero at the event: {at_event:?}"
+    );
+}
+
+/// E3: every guest frame after the event decodes with the guest's own MAC and
+/// no 12-byte zero prefix, over non-empty ARP and TCP populations.
+fn assert_post_event_guest_frames_are_well_formed(result: &MeshResult) {
+    let born = &result.born;
+    let capture = born
+        .link_layer
+        .as_ref()
+        .unwrap_or_else(|error| panic!("the exact link-layer capture is not loss-free: {error}"));
+    let population = decode_post_event_guest_frames(
+        capture,
+        born.tap_ifindex,
+        result.intercept_live_at,
+        born.guest_mac,
+        born.guest_address,
+    )
+    .unwrap_or_else(|error| panic!("a post-event guest frame is not well-formed: {error}"));
+    eprintln!("S-ND295-01 post-event guest frame population: {population:?}");
+}
+
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-01 — Two VM workloads reach each other by name with no frame before protection
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// Journey half through `serve` + `deploy`: the callee reports Running 1/1,
+/// the caller reports Succeeded after the byte-distinct reply by service name,
+/// both carry their per-allocation identity, and stopping both leaves nothing
+/// the journey owned. The caller TAP is down from before Cloud Hypervisor
+/// exists until after the exact intercept-install event, Cloud Hypervisor
+/// reaches READY over the descriptor handoff on a TAP owned by uid 0, and it is
+/// the TAP's only queue holder.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 10-01 (S-ND295-01)"]
 async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
     let result = run_mesh_guest_scenario("gti-mesh-roundtrip").await;
     assert_eq!(
@@ -3474,6 +4734,9 @@ async fn microvm_dials_a_mesh_peer_by_name_and_receives_the_reply() {
             "fresh production IdentityMgr composition must issue the exact per-allocation identity"
         );
     }
+    assert_caller_tap_down_until_after_intercept_live(&result);
+    assert_caller_queue_is_held_only_by_cloud_hypervisor(&result);
+    assert_empty_complement_after_stop(&result);
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -3584,13 +4847,19 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
     assert_eq!(empty.identity(), &identity);
 }
 
-/// S-ND295-01 / S-GTI-03 — the guest's plaintext request/reply uses one exact
-/// same-node TLS 1.3 kTLS/splice owner whose tuple is loopback-only.
-///
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-01 — Two VM workloads reach each other by name with no frame before protection
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// Wire half: the guest's plaintext request/reply uses one exact same-node
+/// TLS 1.3 kTLS/splice owner whose tuple is loopback-only, with plaintext
+/// confined to the guest-local leg-F/leg-S tuples (FD 145-154, retained over
+/// the descriptor handoff). Every guest frame after the intercept-install
+/// event decodes well-formed with no 12-byte zero prefix, so the virtio-net
+/// header is agreed between the queue and Cloud Hypervisor (E3).
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 10-01 (S-ND295-01)"]
 async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear() {
     let result = run_mesh_guest_scenario("gti-mesh-wire").await;
     assert_eq!(
@@ -3624,6 +4893,7 @@ async fn the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clea
     );
     require_same_socket_splice(ktls, &result.splice)
         .expect("the selected live ss inode/fd owns both production splice directions");
+    assert_post_event_guest_frames_are_well_formed(&result);
 }
 
 /// S-GTI-04 — a destination outside the workload mesh block is classified
@@ -3819,28 +5089,36 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
     handle.shutdown().await.expect("clean mTLS serve shutdown");
 }
 
-/// S-GTI-02 — the guest's first mesh connection is born intercepted.
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-01 — Two VM workloads reach each other by name with no frame before protection
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Zero-frame half: the guest's first mesh connection is born intercepted.
+/// The caller TAP is down at the exact intercept-install event, the one
+/// loss-accounted exact-ifindex link-layer capture holds no caller-TAP frame
+/// at or before that event, and all six TAP counters read zero before Cloud
+/// Hypervisor exists and at the event (FD 10727-10763).
 ///
 /// Observable universe: every AF_PACKET frame captured from before VM deploy
 /// through guest termination on the exact allocation TAP whose source is
 /// the exact guest address and whose destination is the exact mesh peer tuple,
 /// plus the exact production kTLS tuple/reverse selected from the complete
 /// same-port shared-bridge stream complement and the typed constant-program/set snapshot.
-/// Every exact-tuple packet carries its kernel event timestamp; nft readiness
-/// is a conservative `CLOCK_REALTIME` barrier sampled after the successful
-/// typed query. Missing/equal timestamps count as pre-ready. Assertions
-/// quantify over those complete captured collections; no sampled event field,
+/// Every exact-tuple packet carries its kernel event timestamp; the barrier is
+/// the `CLOCK_REALTIME` sample the tracing Layer takes synchronously on the
+/// caller's sole `mtls.intercept.install.success` event, and the typed
+/// constant-program/set snapshot is semantic state evidence with no ordering
+/// credit. Missing/equal timestamps count as pre-event. Assertions quantify
+/// over those complete captured collections; no sampled event field,
 /// userspace dequeue time, or selected unrelated socket stands in for their
 /// complement.
-///
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 10-01 (S-ND295-01)"]
 async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     let result = run_mesh_guest_scenario("gti-born-captured").await;
     let first_syn = result.guest_egress.first_syn.unwrap_or_else(|| {
@@ -3933,6 +5211,7 @@ async fn the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes() {
     assert!(record_has_bidirectional_tls13_ktls(&ktls.record));
     require_same_socket_splice(ktls, &result.splice)
         .expect("the born-captured connection uses one bidirectionally spliced kTLS fd");
+    assert_zero_caller_frames_through_intercept_live(&result);
 }
 
 /// The mapped shared-element supporting contract over the complete typed
@@ -4905,7 +6184,7 @@ async fn poll_until_fresh_allocation_reinstall_failed(
     }
 }
 
-async fn poll_until_natural_job_completion(
+pub(super) async fn poll_until_natural_job_completion(
     cfg: &Path,
     workload_id: &str,
     alloc_id: &str,

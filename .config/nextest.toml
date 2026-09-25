@@ -204,13 +204,15 @@ max-threads = 1
 filter = 'package(overdrive-sim) & binary(vm_lifecycle_latency_283_spike)'
 test-group = 'host-kernel-shared'
 
-# netns-density-295 recovery proof §3.2 fills one simulated node to the private
-# 16,384 admission cap through the production reconciler evaluation. Each
-# evaluation hydrates every node row, so the in-process fill is quadratic in
-# the cap, and the cap cannot be lowered without a production change. No
-# kernel state; widened budget only.
+# netns-density-295 recovery proof §3.2 (S-ND295-05D) fills one simulated node
+# to the fixed 16,384 attachment cap through the production reconciler
+# evaluation. Each evaluation hydrates every node row, so the in-process fill is
+# quadratic in the cap, and the cap cannot be lowered without a production
+# change. The proof lives in the `overdrive-sim` integration binary; the filter
+# names the test so it survives the move. No kernel state (the sim-composed
+# worker binds nothing), so no test group; widened budget only.
 [[profile.default.overrides]]
-filter = 'package(overdrive-sim) & binary(netns_density_node_admission)'
+filter = 'package(overdrive-sim) & binary(integration) & test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.default.overrides]]

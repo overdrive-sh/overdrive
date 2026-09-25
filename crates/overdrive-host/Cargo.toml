@@ -135,6 +135,11 @@ overdrive-testing.workspace = true
 # `overdrive-cli`/`overdrive-worker` — `overdrive-sim` is not centrally
 # declared in `[workspace.dependencies]`.
 overdrive-sim.path       = "../overdrive-sim"
+# `proptest` (dev-dep ONLY) — the D-295-R22 launch seccomp program's verdict
+# partition (S-ND295-42) is a property over every `seccomp_data` record
+# (`src/vmm/launch_seccomp.rs` tests), per `.claude/rules/testing.md`
+# § "Property-based testing (proptest)".
+proptest.workspace       = true
 
 [lints]
 workspace = true

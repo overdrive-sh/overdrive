@@ -62,6 +62,13 @@ mod integration {
     /// and GitHub issue #148 AC §1.3.
     mod workload_gc_absent_intent;
 
+    /// netns-density-295 S-ND295-05D (recovery proof §3.2, moved here) —
+    /// seeded node-wide held-attachment admission through the real
+    /// reconciler, scheduler, and action shim. Filling one node to the
+    /// 16,384 cap runs past the default-lane budget, so it lives in this
+    /// binary with a nextest timeout override for this test alone.
+    mod netns_density_node_admission;
+
     /// built-in-ca (GH #28, ADR-0063 D9 review P2) — guards the `SimCa`
     /// fixture leaf cert↔key matched-pair invariant against silent
     /// desync (parses the fixture key/cert via `rcgen` / `x509-parser`,

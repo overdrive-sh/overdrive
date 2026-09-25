@@ -589,4 +589,99 @@ mod tests {
     fn validate_accepts_empty_vec() {
         assert!(validate_reconcile_output(&[]).is_ok());
     }
+
+    fn alloc(name: &str) -> overdrive_core::id::AllocationId {
+        overdrive_core::id::AllocationId::new(name).expect("allocation id")
+    }
+
+    fn allocation_spec(name: &str) -> overdrive_core::traits::driver::AllocationSpec {
+        use overdrive_core::traits::driver::{DriverPayload, Resources, VmPayload};
+        overdrive_core::traits::driver::AllocationSpec {
+            alloc: alloc(name),
+            identity: overdrive_core::SpiffeId::new(&format!(
+                "spiffe://overdrive.local/workload/nd295/alloc/{name}"
+            ))
+            .expect("SPIFFE ID"),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+                kernel: std::path::PathBuf::from("/nd295/kernel"),
+                rootfs: std::path::PathBuf::from("/nd295/rootfs.ext4"),
+            }),
+            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
+            network: None,
+            service_ports: Vec::new(),
+        }
+    }
+
+    /// The four actions that already own an allocation's cleanup in one
+    /// evaluation (FD 3902-3904), each naming `name`.
+    fn owning_actions(name: &str) -> [(&'static str, Action); 4] {
+        [
+            (
+                "StartAllocation",
+                Action::StartAllocation {
+                    alloc_id: alloc(name),
+                    workload_id: overdrive_core::id::WorkloadId::new("nd295-workload")
+                        .expect("workload id"),
+                    node_id: overdrive_core::id::NodeId::new("nd295-node").expect("node id"),
+                    spec: allocation_spec(name),
+                    kind: overdrive_core::aggregate::WorkloadKind::Service,
+                },
+            ),
+            (
+                "RestartAllocation",
+                Action::RestartAllocation {
+                    alloc_id: alloc(name),
+                    spec: allocation_spec(&format!("{name}-successor")),
+                    kind: overdrive_core::aggregate::WorkloadKind::Service,
+                },
+            ),
+            ("StopAllocation", Action::StopAllocation { alloc_id: alloc(name), terminal: None }),
+            ("FinalizeFailed", Action::FinalizeFailed { alloc_id: alloc(name), terminal: None }),
+        ]
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-55 — Every leased, unowned, finished allocation is reclaimed from every reconcile path
+    /// CONTRACT_SHAPE: pure-function.
+    ///
+    /// A reclaim may never name an allocation another action names in the
+    /// same evaluation: `ReclaimAllocationNetwork` beside `StartAllocation`,
+    /// `RestartAllocation` (its predecessor), `StopAllocation`, or
+    /// `FinalizeFailed` for the same `alloc_id` is rejected in either order;
+    /// beside the same actions for another allocation, alone, or beside a
+    /// reclaim of another allocation, it is accepted (FD 3902-3904).
+    #[test]
+    #[ignore = "pending DELIVER step 07-02 (S-ND295-55)"]
+    fn a_reclaim_beside_another_action_for_the_same_allocation_is_rejected() {
+        let reclaim = |name: &str| Action::ReclaimAllocationNetwork { alloc_id: alloc(name) };
+        assert!(
+            validate_reconcile_output(&[reclaim("nd295-a")]).is_ok(),
+            "a reclaim alone is valid"
+        );
+        assert!(
+            validate_reconcile_output(&[reclaim("nd295-a"), reclaim("nd295-b")]).is_ok(),
+            "reclaims of distinct allocations are valid together"
+        );
+        for (kind, owning) in owning_actions("nd295-a") {
+            for actions in
+                [vec![reclaim("nd295-a"), owning.clone()], vec![owning.clone(), reclaim("nd295-a")]]
+            {
+                assert!(
+                    validate_reconcile_output(&actions).is_err(),
+                    "a reclaim beside {kind} for the same allocation is rejected"
+                );
+            }
+            for actions in
+                [vec![reclaim("nd295-b"), owning.clone()], vec![owning.clone(), reclaim("nd295-b")]]
+            {
+                assert!(
+                    validate_reconcile_output(&actions).is_ok(),
+                    "a reclaim beside {kind} for another allocation is valid"
+                );
+            }
+        }
+    }
 }

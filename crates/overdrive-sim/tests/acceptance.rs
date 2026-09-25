@@ -137,4 +137,13 @@ mod acceptance {
     // `VmReclamation::hydrate_actual` (the non-trivial observe()+supervision
     // projection the 02-03 golden pins only at EMPTY State).
     mod vm_reclamation_hydrate_actual_equivalence;
+
+    // netns-density-295 S-ND295-53 — seeded activation ordering against the
+    // EXEC gate: activation waits out a recovery or a latched quiescence and
+    // never turns it into a failure (D-295-R5).
+    mod netns_density_activation_order;
+    // netns-density-295 S-ND295-57 — seeded reclaim of leftover guest networks
+    // across restart predecessors, stopped and deleted workloads, and at the
+    // cap (D-295-R11).
+    mod netns_density_reclaim;
 }

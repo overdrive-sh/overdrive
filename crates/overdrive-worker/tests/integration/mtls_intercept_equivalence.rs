@@ -17,6 +17,7 @@
 //! |---|---|
 //! | `bind_transparent` returns a bound listener whose `local_addr()` port is NON-ZERO when `addr` carried port 0 | S-MIF-09 |
 //! | Each call returns a DISTINCT listener | S-MIF-10 |
+//! | An address still held by a live listener of the adapter is refused with `EADDRINUSE`; it binds again once its last holder drops | S-ND295-70 (held address) |
 //! | `install_*` returns a guard owning exactly what the call acquired; `Drop` never panics | S-MIF-11 |
 //! | `Drop` never panics even for a guard whose state was already released out-of-band | S-MIF-12 |
 //! | A re-install of an identical capture is idempotent-by-convergence — it does not create a duplicate | **NOT asserted — substrate, owned by `HostMtlsIntercept`'s Tier-3 suite.** |
@@ -62,18 +63,17 @@
 //! aspirational. The gap is smaller than it looks: each `HostMtlsIntercept`
 //! method is a ONE-LINE delegation with no logic of its own to diverge.
 //!
-//! ## Lane — integration, Lima + root, for two INDEPENDENT reasons
+//! ## Lane — integration, Lima + root
 //!
-//! 1. `HostMtlsIntercept` needs `CAP_NET_ADMIN` for `IP_TRANSPARENT` and real
-//!    `nft`.
-//! 2. The **sim's** `bind_transparent` `Ok` arm binds a REAL plain loopback
-//!    socket (DFS-5) — there is no way to fabricate a [`std::net::TcpListener`]
-//!    without a syscall, and returning a fabricated or `Option` listener was
-//!    rejected as production-shaped-by-simulation.
+//! `HostMtlsIntercept` needs `CAP_NET_ADMIN` for `IP_TRANSPARENT` and real
+//! `nft`. That reason holds on both sides of the DELIVER step that changes
+//! `bind_transparent`'s return type (DISTILL gap B-7): every bound leg is read
+//! through the `LegListener` bridge (`leg_listener.rs`), so each scenario keeps
+//! its assertions whichever listener type the port returns.
 //!
-//! A non-root run SKIPs (it does not fail) — **and a run that skips all four
-//! proves nothing**. Run via `cargo xtask lima run -- cargo nextest run -p
-//! overdrive-worker --features integration-tests`. NEVER `--no-run`.
+//! A non-root run SKIPs (it does not fail) — **and a run that skips every
+//! scenario proves nothing**. Run via `cargo xtask lima run -- cargo nextest run
+//! -p overdrive-worker --features integration-tests`. NEVER `--no-run`.
 //!
 //! ## Parametrisation
 //!
@@ -97,13 +97,15 @@
     reason = "Test body; skip messages + per-adapter execution evidence go to stderr; fixture preconditions and contract violations must panic with informative messages"
 )]
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::process::{Command, Stdio};
 
 use overdrive_sim::adapters::SimMtlsIntercept;
+use overdrive_worker::mtls_intercept::InterceptError;
 use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
 
 use super::inbound_tproxy_harness::{KernelStateLock, clean_shared_infra, is_root, record_uname};
+use super::leg_listener::LegListener;
 
 /// The PRODUCTION bind shape for BOTH intercept legs: loopback, port left to
 /// the kernel. `start_alloc` binds exactly this twice (leg-F then leg-C), and
@@ -133,8 +135,7 @@ enum Adapter {
     /// `setsockopt(IP_TRANSPARENT)` and real `nft`.
     Host,
     /// `SimMtlsIntercept` with **no fault armed**, so every method takes its
-    /// `Ok` arm. Its `bind_transparent` `Ok` arm still binds a real plain
-    /// loopback socket (DFS-5).
+    /// `Ok` arm.
     Sim,
 }
 
@@ -206,27 +207,25 @@ impl Drop for HostVethFixture {
     }
 }
 
-/// The port a bound listener reports, asserting the IPv4 family en route.
+/// The port a bound listener reports, read through the `LegListener` bridge.
 ///
-/// The contract says `local_addr()` reports the concrete bound address; a V6
-/// report from a `SocketAddrV4` bind would be a family divergence, so it fails
-/// loudly rather than being silently coerced.
-fn bound_ipv4_port(listener: &TcpListener, scenario: &str, adapter: &str) -> u16 {
-    match listener.local_addr().expect("a bound listener reports its local addr") {
-        SocketAddr::V4(v4) => {
-            assert_eq!(
-                *v4.ip(),
-                Ipv4Addr::LOCALHOST,
-                "[{scenario}][{adapter}] bind_transparent must report the loopback address it was \
-                 asked to bind",
-            );
-            v4.port()
-        }
-        SocketAddr::V6(v6) => panic!(
-            "[{scenario}][{adapter}] bind_transparent(127.0.0.1:0) must report an IPv4 local \
-             addr, got {v6}"
-        ),
-    }
+/// The contract says `local_addr()` reports the concrete bound address. The
+/// bridge reports a non-IPv4 address as an error, so a V6 report from a
+/// `SocketAddrV4` bind fails loudly here rather than being silently coerced.
+fn bound_ipv4_port(listener: &impl LegListener, scenario: &str, adapter: &str) -> u16 {
+    let bound = listener.bound_v4().unwrap_or_else(|error| {
+        panic!(
+            "[{scenario}][{adapter}] bind_transparent(127.0.0.1:0) must report its IPv4 local \
+             addr, got {error}"
+        )
+    });
+    assert_eq!(
+        *bound.ip(),
+        Ipv4Addr::LOCALHOST,
+        "[{scenario}][{adapter}] bind_transparent must report the loopback address it was asked \
+         to bind",
+    );
+    bound.port()
 }
 
 /// S-MIF-09 — a bound intercept leg reports the concrete port the kernel
@@ -312,6 +311,89 @@ fn two_bound_legs_never_share_a_port() {
              127.0.0.1:{second_port} (both held live)"
         );
         drop((first_leg, second_leg));
+    }
+}
+
+/// The equivalence clause S-ND295-70 adds to `bind_transparent` (feature delta
+/// § *Driven port — intercept listener*, `bind_transparent` edge cases): an
+/// address still held by a live listener of the adapter is refused with
+/// `InterceptError::TransparentListener { addr, source }` whose source is
+/// `EADDRINUSE`, and once its last holder drops, the exact address binds again
+/// and reports itself, whichever sanctioned adapter is in use. The worker's
+/// exact-address rebind (`converge_shared_owner`) depends on both halves.
+///
+/// Universe: the three `bind_transparent` results, the refusal's `addr` and
+/// errno, and the bound addresses read through `LegListener::bound_v4`.
+///
+/// Mutation targets: an adapter that hands out a second listener at a held
+/// address (a duplicate redirect target), one that refuses with a different
+/// variant or errno, and one that keeps the address after its last holder
+/// drops (a rebind the worker could never complete).
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
+    if !is_root() {
+        eprintln!(
+            "SKIP a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops: not root"
+        );
+        return;
+    }
+    record_uname("S-ND295-70-held-address");
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+
+        let holder = sut.bind_transparent(LEG_ADDR).expect("the first leg must bind");
+        let held = holder.bound_v4().expect("the holder reports its bound address");
+        assert_ne!(
+            held.port(),
+            0,
+            "[S-ND295-70][{label}] the holder's bound port must be concrete before it is re-bound",
+        );
+
+        match sut.bind_transparent(held) {
+            Err(InterceptError::TransparentListener { addr, source }) => {
+                assert_eq!(
+                    addr, held,
+                    "[S-ND295-70][{label}] the refusal must name the held address it refused",
+                );
+                assert_eq!(
+                    source.raw_os_error(),
+                    Some(libc::EADDRINUSE),
+                    "[S-ND295-70][{label}] a held address is refused with EADDRINUSE, got {source}",
+                );
+            }
+            Err(other) => panic!(
+                "[S-ND295-70][{label}] a held address must be refused with \
+                 TransparentListener(EADDRINUSE), got {other:?}"
+            ),
+            Ok(duplicate) => panic!(
+                "[S-ND295-70][{label}] a held address must never be handed out twice, got a \
+                 second listener reporting {:?}",
+                duplicate.bound_v4()
+            ),
+        }
+
+        drop(holder);
+        let rebound = sut
+            .bind_transparent(held)
+            .expect("the exact address binds again once its last holder has dropped");
+        assert_eq!(
+            rebound.bound_v4().expect("the rebound listener reports its bound address"),
+            held,
+            "[S-ND295-70][{label}] an exact non-zero bind is honoured exactly",
+        );
+
+        eprintln!(
+            "[S-ND295-70][{label}] EXECUTED — {held} refused with EADDRINUSE while held; bound \
+             again after its holder dropped"
+        );
+        drop(rebound);
     }
 }
 

@@ -641,4 +641,35 @@ mod tests {
             "FEATURES_HEADER must be nested-flagged (| not &)"
         );
     }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-49 — The platform can read every TAP's debug message level: the
+    /// pinned debug-get wire constants equal their UAPI values (FD 1330-1338).
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[expect(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
+    fn debug_message_constants_equal_the_uapi_values() {
+        // `include/uapi/linux/ethtool_netlink_generated.h`.
+        let ethtool = [
+            ("ETHTOOL_MSG_DEBUG_GET", u32::from(ETHTOOL_MSG_DEBUG_GET), 7),
+            ("ETHTOOL_A_DEBUG_HEADER", u32::from(ETHTOOL_A_DEBUG_HEADER), 1),
+            ("ETHTOOL_A_DEBUG_MSGMASK", u32::from(ETHTOOL_A_DEBUG_MSGMASK), 2),
+            ("ETHTOOL_A_HEADER_DEV_INDEX", u32::from(ETHTOOL_A_HEADER_DEV_INDEX), 1),
+            ("ETHTOOL_A_HEADER_FLAGS", u32::from(ETHTOOL_A_HEADER_FLAGS), 3),
+            ("ETHTOOL_FLAG_COMPACT_BITSETS", ETHTOOL_FLAG_COMPACT_BITSETS, 1),
+            ("ETHTOOL_A_BITSET_SIZE", u32::from(ETHTOOL_A_BITSET_SIZE), 2),
+            ("ETHTOOL_A_BITSET_VALUE", u32::from(ETHTOOL_A_BITSET_VALUE), 4),
+        ];
+        for (name, pinned, uapi) in ethtool {
+            assert_eq!(pinned, uapi, "{name} must equal its UAPI value");
+        }
+        // `include/uapi/linux/netlink.h`, cross-checked against libc's copy.
+        assert_eq!(i32::from(NLM_F_DUMP), libc::NLM_F_DUMP, "NLM_F_DUMP");
+        assert_eq!(NLM_F_DUMP, 0x300, "NLM_F_DUMP is NLM_F_ROOT | NLM_F_MATCH");
+        assert_eq!(i32::from(NLMSG_DONE), libc::NLMSG_DONE, "NLMSG_DONE");
+        assert_eq!(NLMSG_DONE, 0x3, "NLMSG_DONE");
+        // The debug-get command is not a neighbouring message the module
+        // already sends (`FEATURES_SET` is 12).
+        assert_ne!(ETHTOOL_MSG_DEBUG_GET, ETHTOOL_MSG_FEATURES_SET);
+    }
 }

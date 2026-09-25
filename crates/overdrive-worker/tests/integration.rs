@@ -154,11 +154,29 @@ mod integration {
     // sim adapter. Scope is the `Ok`-arm contract set (S-MIF-09..12); the
     // FAULT arms are deliberately NOT equivalence-tested (the host adapter
     // cannot be made to exhibit them on demand — that inability is the whole
-    // reason this port exists). Integration-lane for two independent reasons:
-    // `HostMtlsIntercept` needs CAP_NET_ADMIN for IP_TRANSPARENT and real
-    // `nft`, and the SIM's `bind_transparent` `Ok` arm binds a REAL plain
-    // loopback socket (DFS-5).
+    // reason this port exists). Integration-lane because `HostMtlsIntercept`
+    // needs CAP_NET_ADMIN for IP_TRANSPARENT and real `nft` — a reason that
+    // holds on both sides of the DELIVER step that makes the sim's listener
+    // socket-free (GH #295, gap B-7).
     mod mtls_intercept_equivalence;
+
+    // GH #295 (S-ND295-70) — the `LegListener` bridge: reads a bound intercept
+    // leg's address and accepts one connection on it, on both sides of the
+    // DELIVER step that changes `bind_transparent`'s return type (gap B-7).
+    pub mod leg_listener;
+
+    // GH #295 (S-ND295-54, S-ND295-61) — Lima-root real-nft evidence for the
+    // shared intercept program's dynamic members: convergent removal with a
+    // pre-absent member, and audit + exact repair of each deleted intercept
+    // object with live allocations, through `HostMtlsIntercept`.
+    mod shared_intercept_members;
+
+    // GH #295 — node-shared F/C listener owner lifecycle, boot member clear
+    // (S-ND295-13D), and runtime member/route/guard repair (S-ND295-61) through
+    // the accepted worker surface over a recording intercept. Integration-lane
+    // because the recording's `bind_transparent` binds REAL loopback listeners
+    // and the bodies make real client connections and prove real socket release.
+    mod netns_density_shared_owner;
 
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.

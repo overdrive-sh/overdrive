@@ -4580,3 +4580,530 @@ mod fail_closed_mtls_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::doc_markdown,
+    reason = "source-local acceptance fixtures fail immediately on a broken precondition"
+)]
+mod admission_refusal_acceptance {
+    //! S-ND295-05E — a refused admission writes nothing and says how full the
+    //! node is (FD 2723-2737).
+    //!
+    //! Source-local because the cap is reached through the pool's own
+    //! crate-private `assign` and `retire` (FD 2663-2673), and the one owner
+    //! instance is the crate-private `TestSharedOwner` (the `overdrive-sim`
+    //! owner implements a second compiled copy of this crate's traits here).
+    //! The seam fixture holds the one owner, the kept EXEC wiring, the pool,
+    //! and an unstarted worker over sim ports; DELIVER 05-01 passes them to
+    //! `AppState`'s pinned constructor, and the seam reads the gate and pool
+    //! from `state` (FD 1850-2034, 7231-7238). The refusal precedes every
+    //! intercept install, so the worker stays unstarted and binds nothing.
+    //!
+    //! # Universe
+    //!
+    //! The returned `ShimError`; the owner's journal; `SimDriver::started_specs`;
+    //! the allocation rows and lifecycle occurrences; the lifecycle event bus;
+    //! the pinned events `guest_network.{admission_refused, lease_retired,
+    //! lease_released}` (FD 2723-2744), each stamped with the owner journal
+    //! length as emitted; and the pool's own `observe` and `snapshot`.
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::net::Ipv4Addr;
+    use std::num::NonZeroU16;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::guest_network::{
+        GuestAttachmentOccupancy, GuestNetworkExecWiring, MAX_GUEST_NETWORK_ATTACHMENTS,
+    };
+    use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
+    use overdrive_core::reconcilers::{Action, TickContext};
+    use overdrive_core::traits::IdentityRead;
+    use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::{
+        AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+    };
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
+    };
+    use overdrive_core::transition_reason::TransitionReason;
+    use overdrive_sim::adapters::ca::SimCa;
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::dataplane::SimDataplane;
+    use overdrive_sim::adapters::driver::SimDriver;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+    use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
+    use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
+    use overdrive_store_local::LocalIntentStore;
+    use overdrive_worker::mtls_intercept_port::MtlsIntercept;
+    use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+    use parking_lot::Mutex;
+    use tempfile::TempDir;
+    use tokio::sync::broadcast::error::TryRecvError;
+    use tracing::field::{Field, Visit};
+    use tracing::{Event, Subscriber};
+    use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
+
+    use super::{ShimError, dispatch_with_guest_network_provisioner_for_test};
+    use crate::guest_network::{GuestAddressPool, GuestNetworkError};
+    use crate::shared_network_test_ports::{TestCallOutcome, TestOwnerCall, TestSharedOwner};
+
+    const SUCCESSOR: &str = "nd295-refused-successor";
+    const PREDECESSOR: &str = "nd295-held-00001";
+    const RETIRING: &str = "nd295-held-00000";
+
+    /// One pinned guest-network event, stamped with the owner journal length
+    /// as it was emitted.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct LeaseEvent {
+        name: &'static str,
+        fields: BTreeMap<String, String>,
+        owner_calls: usize,
+    }
+
+    #[derive(Default)]
+    struct FieldCapture(BTreeMap<String, String>);
+
+    impl Visit for FieldCapture {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_owned(), format!("{value:?}"));
+        }
+
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.0.insert(field.name().to_owned(), value.to_owned());
+        }
+
+        fn record_u64(&mut self, field: &Field, value: u64) {
+            self.0.insert(field.name().to_owned(), value.to_string());
+        }
+
+        fn record_i64(&mut self, field: &Field, value: i64) {
+            self.0.insert(field.name().to_owned(), value.to_string());
+        }
+    }
+
+    struct LeaseEventLayer {
+        owner: Arc<TestSharedOwner>,
+        events: Arc<Mutex<Vec<LeaseEvent>>>,
+    }
+
+    impl<S: Subscriber> Layer<S> for LeaseEventLayer {
+        fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+            let name = event.metadata().name();
+            if !matches!(
+                name,
+                "guest_network.admission_refused"
+                    | "guest_network.lease_retired"
+                    | "guest_network.lease_released"
+            ) {
+                return;
+            }
+            let mut fields = FieldCapture::default();
+            event.record(&mut fields);
+            let owner_calls = self.owner.journal().len();
+            self.events.lock().push(LeaseEvent { name, fields: fields.0, owner_calls });
+        }
+    }
+
+    /// The source-local seam fixture (TS § *Seam fixture*).
+    struct AdmissionFixture {
+        state: crate::AppState,
+        driver: Arc<SimDriver>,
+        /// The one owner instance: `AppState`'s owner from DELIVER 05-01 and
+        /// the seam's `provisioner`.
+        owner: Arc<TestSharedOwner>,
+        #[allow(
+            dead_code,
+            reason = "its gate reaches AppState through the pinned constructor from DELIVER 05-01"
+        )]
+        wiring: GuestNetworkExecWiring,
+        pool: Arc<GuestAddressPool>,
+        #[allow(
+            dead_code,
+            reason = "passed to AppState by the pinned constructor from DELIVER 05-01; never started"
+        )]
+        worker: Arc<MtlsInterceptWorker>,
+        events: Arc<Mutex<Vec<LeaseEvent>>>,
+        _events_guard: tracing::subscriber::DefaultGuard,
+        _tmp: TempDir,
+    }
+
+    impl AdmissionFixture {
+        async fn build() -> Self {
+            let tmp = TempDir::new().expect("tempdir");
+            let clock = Arc::new(SimClock::new());
+            let owner = Arc::new(TestSharedOwner::new());
+            let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
+            let pool = Arc::new(GuestAddressPool::new(
+                ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
+                "ovd-gbr0".to_owned(),
+                Ipv4Addr::new(100, 95, 0, 1),
+                Ipv4Addr::new(100, 95, 0, 1),
+            ));
+            let identity: Arc<dyn IdentityRead> =
+                Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
+            let enforcement: Arc<dyn MtlsEnforcement> =
+                Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+            let resolve: Arc<dyn MtlsResolve> =
+                Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
+            let worker = Arc::new(MtlsInterceptWorker::new(
+                enforcement,
+                resolve,
+                Arc::clone(&clock) as Arc<dyn Clock>,
+                Arc::new(SimMtlsIntercept::new()) as Arc<dyn MtlsIntercept>,
+            ));
+            let driver = Arc::new(SimDriver::new(DriverType::Vm));
+
+            let mut runtime =
+                crate::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+                    tmp.path(),
+                )
+                .expect("runtime");
+            runtime.register(crate::noop_heartbeat()).await.expect("register reconciler");
+            let store_path = tmp.path().join("intent.redb");
+            let store = Arc::new(LocalIntentStore::open(&store_path).expect("intent store"));
+            let obs: Arc<dyn ObservationStore> =
+                Arc::new(SimObservationStore::single_peer(node_id(), 0));
+            let allocator =
+                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            // The constructor call. Until DELIVER 05-01 cuts the pinned
+            // constructors (FD 1876-1989) it passes today's inputs; 05-01
+            // appends the worker, the owner, `wiring.gate()`, and the pool.
+            let state = crate::AppState::new(
+                store,
+                store_path,
+                obs,
+                Arc::new(runtime),
+                Arc::clone(&driver) as Arc<dyn Driver>,
+                clock,
+                Arc::new(SimDataplane::new()),
+                Arc::new(SimCa::new(Arc::new(SimEntropy::new(295)))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+                node_id(),
+                allocator,
+                crate::test_empty_listener_facts(),
+                Ipv4Addr::LOCALHOST,
+            );
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let events_guard =
+                tracing::subscriber::set_default(tracing_subscriber::registry().with(
+                    LeaseEventLayer { owner: Arc::clone(&owner), events: Arc::clone(&events) },
+                ));
+            Self {
+                state,
+                driver,
+                owner,
+                wiring,
+                pool,
+                worker,
+                events,
+                _events_guard: events_guard,
+                _tmp: tmp,
+            }
+        }
+
+        /// Fill the pool to the cap through its own `assign`, then move one
+        /// lease to Retiring through its own `retire`.
+        fn fill_to_the_cap_with_one_retiring(&self) {
+            for index in 0..MAX_GUEST_NETWORK_ATTACHMENTS {
+                self.pool
+                    .assign(alloc_id(&format!("nd295-held-{index:05}")))
+                    .expect("below the cap every assignment succeeds");
+            }
+            assert!(self.pool.retire(&alloc_id(RETIRING)), "an Admitted lease moves to Retiring");
+            assert_eq!(
+                self.pool.observe(&[]).occupancy,
+                GuestAttachmentOccupancy { held: MAX_GUEST_NETWORK_ATTACHMENTS, retiring: 1 },
+                "the precondition: the node holds the cap, one lease Retiring"
+            );
+        }
+
+        async fn dispatch(&self, action: Action) -> Result<(), ShimError> {
+            let now = Instant::now();
+            let tick = TickContext {
+                now,
+                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+                tick: 1,
+                deadline: now + Duration::from_secs(1),
+            };
+            Box::pin(dispatch_with_guest_network_provisioner_for_test(
+                vec![action],
+                &self.state,
+                &tick,
+                self.owner.as_ref(),
+            ))
+            .await
+        }
+
+        fn events_named(&self, name: &str) -> Vec<LeaseEvent> {
+            self.events.lock().iter().filter(|event| event.name == name).cloned().collect()
+        }
+
+        /// Seed the restart arm's prior-row precondition for `alloc`
+        /// (precedent `mtls_install_fail_closed.rs:676-713`).
+        async fn seed_failed_predecessor(&self, alloc: &str) {
+            let row = AllocStatusRow {
+                alloc_id: alloc_id(alloc),
+                workload_id: workload_id(),
+                node_id: node_id(),
+                state: AllocState::Failed,
+                updated_at: LogicalTimestamp { counter: 0, writer: node_id() },
+                reason: Some(TransitionReason::WorkloadCrashedImmediately {
+                    exit_code: Some(17),
+                    signal: None,
+                    stderr_tail: None,
+                }),
+                detail: None,
+                terminal: None,
+                stderr_tail: None,
+                kind: WorkloadKind::Service,
+                listeners: Vec::new(),
+                started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
+                    1_700_000_000,
+                ))),
+                workload_addr: None,
+                last_terminated: None,
+                restart_count: 0,
+            };
+            self.state
+                .obs
+                .write_alloc_lifecycle(row, TransitionSource::Reconciler)
+                .await
+                .expect("seed the Failed predecessor row");
+        }
+    }
+
+    fn node_id() -> NodeId {
+        NodeId::new("nd295-node").expect("node id")
+    }
+
+    fn workload_id() -> WorkloadId {
+        WorkloadId::new("nd295-service").expect("workload id")
+    }
+
+    fn alloc_id(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("allocation id")
+    }
+
+    fn spec(name: &str) -> AllocationSpec {
+        AllocationSpec {
+            alloc: alloc_id(name),
+            identity: SpiffeId::new(&format!(
+                "spiffe://overdrive.local/workload/nd295/alloc/{name}"
+            ))
+            .expect("SPIFFE ID"),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+                kernel: PathBuf::from("/nd295/kernel"),
+                rootfs: PathBuf::from("/nd295/rootfs.ext4"),
+            }),
+            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
+            network: None,
+            service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
+        }
+    }
+
+    fn cap_refusal() -> GuestNetworkError {
+        GuestNetworkError::AdmissionCapReached {
+            held: MAX_GUEST_NETWORK_ATTACHMENTS,
+            retiring: 1,
+            cap: MAX_GUEST_NETWORK_ATTACHMENTS,
+        }
+    }
+
+    fn assert_cap_refusal(result: Result<(), ShimError>) {
+        match result {
+            Err(ShimError::GuestNetwork(refusal)) => assert!(
+                matches!(
+                    refusal,
+                    GuestNetworkError::AdmissionCapReached { held, retiring, cap }
+                        if held == MAX_GUEST_NETWORK_ATTACHMENTS
+                            && retiring == 1
+                            && cap == MAX_GUEST_NETWORK_ATTACHMENTS
+                ),
+                "the refusal names held, retiring, and the cap ({}): {refusal:?}",
+                cap_refusal()
+            ),
+            other => panic!("expected ShimError::GuestNetwork(AdmissionCapReached), got {other:?}"),
+        }
+    }
+
+    fn assert_one_refusal_event(fixture: &AdmissionFixture) {
+        let refused = fixture.events_named("guest_network.admission_refused");
+        let expected = BTreeMap::from([
+            ("alloc".to_owned(), SUCCESSOR.to_owned()),
+            ("held".to_owned(), MAX_GUEST_NETWORK_ATTACHMENTS.to_string()),
+            ("retiring".to_owned(), "1".to_owned()),
+            ("cap".to_owned(), MAX_GUEST_NETWORK_ATTACHMENTS.to_string()),
+        ]);
+        assert_eq!(refused.len(), 1, "one operator-visible refusal: {refused:?}");
+        for (field, value) in &expected {
+            assert_eq!(
+                refused[0].fields.get(field),
+                Some(value),
+                "admission_refused carries {field}: {refused:?}"
+            );
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-05E — A refused admission writes nothing and says how full the node is
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// At 16,384 held leases, one of them Retiring, a start is refused before
+    /// any network, VMM, or protection effect: `AdmissionCapReached { held:
+    /// 16_384, retiring: 1, cap: 16_384 }`, no owner call, no driver start, no
+    /// row, no lifecycle occurrence or event, the pool unchanged, and one
+    /// `guest_network.admission_refused` event naming the allocation, held,
+    /// retiring, and the cap.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-03 (S-ND295-05E)"]
+    async fn admission_refusal_writes_nothing_and_reports_held_and_retiring() {
+        let fixture = AdmissionFixture::build().await;
+        fixture.fill_to_the_cap_with_one_retiring();
+        let pool_before = fixture.pool.snapshot();
+        let rows_before = fixture.state.obs.alloc_status_rows().await.expect("rows readable");
+        let mut lifecycle = fixture.state.lifecycle_events.subscribe();
+
+        let result = fixture
+            .dispatch(Action::StartAllocation {
+                alloc_id: alloc_id(SUCCESSOR),
+                workload_id: workload_id(),
+                node_id: node_id(),
+                spec: spec(SUCCESSOR),
+                kind: WorkloadKind::Service,
+            })
+            .await;
+
+        assert_cap_refusal(result);
+        assert!(fixture.owner.journal().is_empty(), "no network effect precedes the refusal");
+        assert!(fixture.driver.started_specs().is_empty(), "no VMM is started");
+        assert_eq!(
+            fixture.state.obs.alloc_status_rows().await.expect("rows readable"),
+            rows_before,
+            "no allocation row is written"
+        );
+        assert!(
+            fixture
+                .state
+                .obs
+                .alloc_lifecycle_occurrences(&alloc_id(SUCCESSOR))
+                .await
+                .expect("occurrences readable")
+                .is_empty(),
+            "no lifecycle occurrence is recorded"
+        );
+        assert!(matches!(lifecycle.try_recv(), Err(TryRecvError::Empty)), "no lifecycle event");
+        assert_eq!(fixture.pool.snapshot(), pool_before, "the refusal changes no lease");
+        let observed = fixture.pool.observe(&[alloc_id(SUCCESSOR)]);
+        assert_eq!(
+            observed.occupancy,
+            GuestAttachmentOccupancy { held: MAX_GUEST_NETWORK_ATTACHMENTS, retiring: 1 }
+        );
+        assert!(observed.leases.is_empty(), "the refused allocation holds no lease");
+        assert_one_refusal_event(&fixture);
+        assert!(
+            fixture.events_named("guest_network.lease_retired").is_empty()
+                && fixture.events_named("guest_network.lease_released").is_empty(),
+            "a refusal retires and releases nothing"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-05E — A refused admission writes nothing and says how full the node is
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A restart whose successor is refused at the cap still runs the
+    /// predecessor's one cleanup attempt (ADR-0106): the predecessor's
+    /// `lease_retired`, its one `Teardown`, then its `lease_released`, exactly
+    /// once each, while the successor gets no owner call, no driver start, and
+    /// no row, and the one refusal event names it.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-03 (S-ND295-05E)"]
+    async fn a_refused_restart_successor_still_cleans_up_its_predecessor_once() {
+        let fixture = AdmissionFixture::build().await;
+        fixture.fill_to_the_cap_with_one_retiring();
+        fixture.seed_failed_predecessor(PREDECESSOR).await;
+        assert!(
+            fixture.pool.snapshot().contains_key(&alloc_id(PREDECESSOR)),
+            "the predecessor holds an Admitted lease"
+        );
+
+        let result = fixture
+            .dispatch(Action::RestartAllocation {
+                alloc_id: alloc_id(PREDECESSOR),
+                spec: spec(SUCCESSOR),
+                kind: WorkloadKind::Service,
+            })
+            .await;
+
+        assert_cap_refusal(result);
+        let journal: Vec<_> = fixture.owner.journal().into_iter().map(|entry| entry.call).collect();
+        assert_eq!(
+            journal,
+            [TestOwnerCall::Teardown {
+                alloc: alloc_id(PREDECESSOR),
+                outcome: TestCallOutcome::Ok
+            }],
+            "the only owner call is the predecessor's one teardown"
+        );
+        let lease_events: Vec<_> = fixture
+            .events
+            .lock()
+            .iter()
+            .filter(|event| event.name != "guest_network.admission_refused")
+            .map(|event| (event.name, event.fields.get("alloc").cloned(), event.owner_calls))
+            .collect();
+        assert_eq!(
+            lease_events,
+            [
+                ("guest_network.lease_retired", Some(PREDECESSOR.to_owned()), 0),
+                ("guest_network.lease_released", Some(PREDECESSOR.to_owned()), 1),
+            ],
+            "retire, then the one teardown, then release — once each"
+        );
+        assert_one_refusal_event(&fixture);
+        assert!(
+            fixture
+                .driver
+                .started_specs()
+                .iter()
+                .all(|started| started.alloc != alloc_id(SUCCESSOR)),
+            "the refused successor is never started"
+        );
+        assert!(
+            fixture
+                .state
+                .obs
+                .alloc_status_row(&alloc_id(SUCCESSOR))
+                .await
+                .expect("row readable")
+                .is_none(),
+            "the refused successor has no row"
+        );
+        let observed = fixture.pool.observe(&[alloc_id(PREDECESSOR), alloc_id(SUCCESSOR)]);
+        assert_eq!(
+            observed.occupancy,
+            GuestAttachmentOccupancy { held: MAX_GUEST_NETWORK_ATTACHMENTS - 1, retiring: 1 },
+            "the predecessor's lease is released"
+        );
+        assert!(
+            observed.leases.is_empty(),
+            "neither the predecessor nor the successor holds a lease"
+        );
+        let held: BTreeSet<_> = fixture.pool.snapshot().into_keys().collect();
+        assert!(!held.contains(&alloc_id(SUCCESSOR)) && !held.contains(&alloc_id(PREDECESSOR)));
+    }
+}

@@ -47,6 +47,24 @@
 //! chain dumps. nextest runs each test in a SEPARATE PROCESS, so an
 //! in-process `serial_test` lock cannot serialise node-global kernel
 //! state — hence the file lock.
+//!
+//! # The host listener (GH #295, S-ND295-70)
+//!
+//! Four bodies at the end of this file prove the `HostMtlsIntercept`
+//! listener obligations of the feature delta § *Driven port — intercept
+//! listener (DISTILL gap B-7)*: a TPROXY-redirected outbound connection
+//! reports the destination the guest dialled as `local` and the guest's source
+//! as `peer`; a redirected inbound connection reports the virtual address as
+//! `local`; a sock-diag destroy of the listening socket ends a pending accept
+//! with an `Accept` failure; and an accepted descriptor is blocking and
+//! close-on-exec. Each binds through `HostMtlsIntercept::bind_transparent` and
+//! accepts through the `LegListener` bridge (`leg_listener.rs`), so it keeps
+//! its oracle on both sides of the DELIVER step that changes
+//! `bind_transparent`'s return type. They carry the original-destination
+//! evidence of the two helper-only bodies above
+//! (`worker_intercept_install_leg_acquire_outbound`,
+//! `worker_inbound_tproxy_redirect_recovers_orig_dst`) if that step deletes
+//! the helpers.
 
 #![allow(
     clippy::doc_markdown,
@@ -63,17 +81,23 @@ use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::os::fd::{AsRawFd as _, FromRawFd as _};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use overdrive_core::AllocationId;
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
+use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{
     InterceptPostcondition, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
     install_inbound_tproxy, install_outbound_tproxy, make_transparent_listener,
 };
-use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
+use overdrive_worker::mtls_intercept_port::{
+    HostMtlsIntercept, InterceptAcceptError, MtlsIntercept,
+};
+
+use super::leg_listener::{LegListener, accept_failure_of, accept_leg_within, spawn_accept_leg};
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state.
 ///
@@ -1413,4 +1437,476 @@ fn accept_with_timeout(
             Err(e) => return Err(e),
         }
     }
+}
+
+// ===========================================================================
+// S-ND295-70 — the host listener's obligations (GH #295, gap B-7)
+// ===========================================================================
+
+/// The workload netns of the outbound host-listener topology.
+const HOST_LISTENER_NS: &str = "nsW-hlo70";
+/// The workload-side veth (moved into [`HOST_LISTENER_NS`]).
+const HOST_LISTENER_VETH_W: &str = "vethW-hlo70";
+/// The host-side veth the outbound TPROXY rule matches.
+const HOST_LISTENER_VETH_H: &str = "vethH-hlo70";
+/// The topology's `/24` comes from overdrive-testing's `10.250.0.0/16` pool
+/// under this stable owner name; the pool is disjoint from production's
+/// `10.99.0.0/16`.
+const HOST_LISTENER_LEASE: &str = "worker-mtls-intercept-install-host-listener";
+/// The destination the guest dials on the outbound path: a host-lo `/32`
+/// disjoint from production and from every sibling fixture's backend. Nothing
+/// listens on it, so a dial the redirect does not take is refused.
+const HOST_LISTENER_OUTBOUND_DESTINATION: SocketAddrV4 =
+    SocketAddrV4::new(Ipv4Addr::new(10, 201, 70, 1), 18_770);
+/// The inbound virtual address (a registered destination and declared port).
+const HOST_LISTENER_INBOUND_VIRT: SocketAddrV4 =
+    SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 70), 18_707);
+
+/// Scrubs the node-global intercept state these bodies create — both
+/// `overdrive-mtls` families, the D15 foreign sentinel, the fwmark rule, and
+/// the table-100 local route — at construction and again on drop, so a panic
+/// mid-body leaves nothing behind.
+struct HostListenerSandbox;
+
+impl HostListenerSandbox {
+    fn fresh() -> Self {
+        clean_d15_shared_ip_fixture();
+        clean_shared_infra();
+        Self
+    }
+}
+
+impl Drop for HostListenerSandbox {
+    fn drop(&mut self) {
+        clean_d15_shared_ip_fixture();
+        clean_shared_infra();
+    }
+}
+
+/// A workload netns joined to the host by a veth pair, with the host `lo`
+/// carrying [`HOST_LISTENER_OUTBOUND_DESTINATION`], so the guest's dial to it
+/// ingresses [`HOST_LISTENER_VETH_H`] and meets PREROUTING (the
+/// `egress_tproxy_capture.rs` recipe). Torn down on drop, before the CIDR lease
+/// is released.
+struct HostListenerEgressTopology {
+    lease: TestCidrLease,
+}
+
+impl HostListenerEgressTopology {
+    fn provision() -> Self {
+        let lease = TestCidrLease::acquire(HOST_LISTENER_LEASE)
+            .expect("acquire the host-listener topology CIDR lease");
+        Self::teardown();
+        let gateway = format!("{}/{}", lease.host_gateway(), lease.prefix_len());
+        let workload = format!("{}/{}", lease.workload_addr(), lease.prefix_len());
+        let host_gateway = lease.host_gateway().to_string();
+        let destination = format!("{}/32", HOST_LISTENER_OUTBOUND_DESTINATION.ip());
+        adoption_ip(&["netns", "add", HOST_LISTENER_NS]);
+        adoption_ip(&[
+            "link",
+            "add",
+            HOST_LISTENER_VETH_W,
+            "type",
+            "veth",
+            "peer",
+            "name",
+            HOST_LISTENER_VETH_H,
+        ]);
+        adoption_ip(&["link", "set", HOST_LISTENER_VETH_W, "netns", HOST_LISTENER_NS]);
+        adoption_ip(&["addr", "add", &gateway, "dev", HOST_LISTENER_VETH_H]);
+        adoption_ip(&["link", "set", HOST_LISTENER_VETH_H, "up"]);
+        adoption_ip(&["netns", "exec", HOST_LISTENER_NS, "ip", "link", "set", "lo", "up"]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            HOST_LISTENER_NS,
+            "ip",
+            "addr",
+            "add",
+            &workload,
+            "dev",
+            HOST_LISTENER_VETH_W,
+        ]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            HOST_LISTENER_NS,
+            "ip",
+            "link",
+            "set",
+            HOST_LISTENER_VETH_W,
+            "up",
+        ]);
+        adoption_ip(&[
+            "netns",
+            "exec",
+            HOST_LISTENER_NS,
+            "ip",
+            "route",
+            "add",
+            "default",
+            "via",
+            &host_gateway,
+        ]);
+        adoption_ip(&["addr", "add", &destination, "dev", "lo"]);
+        // Host-side routing hygiene, as `egress_tproxy_capture.rs` sets it:
+        // relaxed reverse-path filtering so the diverted ingress is not dropped,
+        // and TX checksum offload off on the host veth. Each is logged, never
+        // silently discarded.
+        for (program, args) in [
+            ("sysctl", vec!["-w".to_owned(), "net.ipv4.ip_forward=1".to_owned()]),
+            (
+                "sysctl",
+                vec!["-w".to_owned(), format!("net.ipv4.conf.{HOST_LISTENER_VETH_H}.rp_filter=0")],
+            ),
+            ("sysctl", vec!["-w".to_owned(), "net.ipv4.conf.all.rp_filter=0".to_owned()]),
+            ("sysctl", vec!["-w".to_owned(), "net.ipv4.conf.lo.rp_filter=0".to_owned()]),
+            (
+                "ethtool",
+                vec![
+                    "-K".to_owned(),
+                    HOST_LISTENER_VETH_H.to_owned(),
+                    "tx".to_owned(),
+                    "off".to_owned(),
+                ],
+            ),
+        ] {
+            let status = Command::new(program)
+                .args(&args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            eprintln!("[S-ND295-70][topology] {program} {args:?} -> {status:?}");
+        }
+        Self { lease }
+    }
+
+    const fn workload_addr(&self) -> Ipv4Addr {
+        self.lease.workload_addr()
+    }
+
+    fn teardown() {
+        adoption_ip_quiet(&["link", "del", HOST_LISTENER_VETH_H]);
+        adoption_ip_quiet(&["netns", "del", HOST_LISTENER_NS]);
+        adoption_ip_quiet(&[
+            "addr",
+            "del",
+            &format!("{}/32", HOST_LISTENER_OUTBOUND_DESTINATION.ip()),
+            "dev",
+            "lo",
+        ]);
+    }
+
+    /// Dial `destination` from the workload netns, report the client's own
+    /// source port as `WL-SRC <port>`, send a marker, and hold the connection
+    /// briefly. Returns the client's exit status and output for the evidence.
+    fn dial_from_workload(destination: SocketAddrV4) -> String {
+        let script = [
+            "import socket, time".to_owned(),
+            "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)".to_owned(),
+            "s.settimeout(5)".to_owned(),
+            "try:".to_owned(),
+            format!("    s.connect(('{}',{}))", destination.ip(), destination.port()),
+            "    print('WL-SRC %d' % s.getsockname()[1], flush=True)".to_owned(),
+            "    s.sendall(b'HOST-LISTENER-OUTBOUND')".to_owned(),
+            "    time.sleep(0.5)".to_owned(),
+            "except Exception as e:".to_owned(),
+            "    print('CLIENT-FAIL:'+str(e))".to_owned(),
+        ]
+        .join("\n");
+        match Command::new("ip")
+            .args(["netns", "exec", HOST_LISTENER_NS, "python3", "-c", &script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+        {
+            Ok(output) => format!(
+                "[exit={:?}] stdout={} stderr={}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            Err(error) => format!("spawning the workload client failed: {error}"),
+        }
+    }
+}
+
+impl Drop for HostListenerEgressTopology {
+    fn drop(&mut self) {
+        Self::teardown();
+    }
+}
+
+/// The source port a [`HostListenerEgressTopology::dial_from_workload`] client
+/// reported, if it connected.
+fn reported_workload_source_port(client_output: &str) -> Option<u16> {
+    client_output
+        .split_whitespace()
+        .skip_while(|token| !token.ends_with("WL-SRC"))
+        .nth(1)
+        .and_then(|port| port.parse().ok())
+}
+
+/// The host obligation: for a TPROXY-redirected OUTBOUND connection the
+/// accepted `local` is the destination the guest dialled and `peer` is the
+/// guest's own source (feature delta § *Driven port — intercept listener*,
+/// `HostMtlsIntercept` obligations; D-TME-4). The workload dials a host-side
+/// destination through its gateway; the production `install_outbound_tproxy`
+/// rule diverts the SYN to the leg-F listener bound through
+/// `HostMtlsIntercept::bind_transparent`, and the leg is accepted through the
+/// `LegListener` bridge. The client reports its source port, so `peer` is
+/// checked exactly.
+///
+/// Mutation targets: a listener that reports its own bound address as `local`
+/// (the orig-dst lost), and one that reports the listener side or a rewritten
+/// address as `peer` (the capability source lost).
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn the_host_listener_reports_a_redirected_outbound_original_destination_as_local() {
+    assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = HostListenerSandbox::fresh();
+    let topology = HostListenerEgressTopology::provision();
+    let workload = topology.workload_addr();
+
+    let host = HostMtlsIntercept::new();
+    let leg_f = Arc::new(
+        host.bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent binds leg F"),
+    );
+    let leg_f_port = leg_f.bound_v4().expect("leg F reports its bound IPv4 address").port();
+    let guard = install_outbound_tproxy(HOST_LISTENER_VETH_H, leg_f_port)
+        .expect("the production outbound TPROXY rule installs on the host veth");
+    eprintln!(
+        "[S-ND295-70][outbound] leg F 127.0.0.1:{leg_f_port}; workload {workload}; destination \
+         {HOST_LISTENER_OUTBOUND_DESTINATION}"
+    );
+
+    let client = std::thread::spawn(|| {
+        HostListenerEgressTopology::dial_from_workload(HOST_LISTENER_OUTBOUND_DESTINATION)
+    });
+    let accepted = accept_leg_within(&leg_f, Duration::from_secs(8));
+    let client_output = client.join().expect("the workload client thread completes");
+    eprintln!("[S-ND295-70][outbound] workload client: {client_output}");
+    let (stream, peer, local) = accepted.expect(
+        "the redirected outbound dial must be accepted on leg F within 8 s; a timeout means the \
+         TPROXY divert did not deliver it",
+    );
+    eprintln!("[S-ND295-70][outbound] accepted peer={peer} local={local}");
+
+    assert_eq!(
+        local, HOST_LISTENER_OUTBOUND_DESTINATION,
+        "the accepted connection's local address is the destination the guest dialled, not leg \
+         F's bound address"
+    );
+    let source_port = reported_workload_source_port(&client_output).unwrap_or_else(|| {
+        panic!("the workload client must report its source port: {client_output}")
+    });
+    assert_eq!(
+        peer,
+        SocketAddrV4::new(workload, source_port),
+        "the accepted peer is the guest's own source address and port"
+    );
+
+    drop(stream);
+    drop(guard);
+    drop(leg_f);
+    drop(topology);
+}
+
+/// The host obligation for the INBOUND leg: a connection the owned shared
+/// program redirects to leg C reports the virtual address it was sent to as
+/// `local`, and its sender as `peer` (feature delta § *Driven port — intercept
+/// listener*, `HostMtlsIntercept` obligations; the worker uses `local` as
+/// `Routed::Inbound { orig_dst }`). Both legs are bound through
+/// `HostMtlsIntercept::bind_transparent`; `converge_shared` installs the node
+/// program at their targets and `install_inbound` registers the virtual
+/// address as a destination member, so the production shared program — not a
+/// test-installed rule — performs the divert.
+///
+/// Mutation targets: a listener that reports leg C's bound address as `local`
+/// (every inbound connection mis-routed), and one that loses the sender.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn the_host_listener_reports_a_redirected_inbound_virtual_address_as_local() {
+    assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = HostListenerSandbox::fresh();
+
+    let host = HostMtlsIntercept::new();
+    let leg_f = host
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent binds leg F");
+    let leg_c = Arc::new(
+        host.bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent binds leg C"),
+    );
+    let outbound_target = leg_f.bound_v4().expect("leg F reports its bound IPv4 address");
+    let inbound_target = leg_c.bound_v4().expect("leg C reports its bound IPv4 address");
+    let node_guard = host
+        .converge_shared(None, outbound_target, inbound_target)
+        .expect("the owned shared program installs on a clean kernel");
+    let destination = host
+        .install_inbound(HOST_LISTENER_INBOUND_VIRT, inbound_target.port())
+        .expect("the virtual address is registered as an inbound destination member");
+    eprintln!(
+        "[S-ND295-70][inbound] leg F {outbound_target}; leg C {inbound_target}; virtual address \
+         {HOST_LISTENER_INBOUND_VIRT}"
+    );
+
+    let client = std::thread::spawn(|| -> std::io::Result<(TcpStream, SocketAddrV4)> {
+        let stream = dial(HOST_LISTENER_INBOUND_VIRT, Duration::from_secs(5))?;
+        match stream.local_addr()? {
+            std::net::SocketAddr::V4(source) => Ok((stream, source)),
+            std::net::SocketAddr::V6(source) => {
+                Err(std::io::Error::other(format!("the inbound client bound IPv6 {source}")))
+            }
+        }
+    });
+    let accepted = accept_leg_within(&leg_c, Duration::from_secs(8));
+    let dialled = client.join().expect("the inbound client thread completes");
+    let (stream, peer, local) = accepted.expect(
+        "the redirected inbound dial must be accepted on leg C within 8 s; a timeout means the \
+         shared program did not divert it",
+    );
+    let (client_stream, source) =
+        dialled.expect("the inbound dial connects through the shared program's divert");
+    eprintln!("[S-ND295-70][inbound] accepted peer={peer} local={local}; client source={source}");
+
+    assert_eq!(
+        local, HOST_LISTENER_INBOUND_VIRT,
+        "the accepted connection's local address is the virtual address the sender dialled"
+    );
+    assert_eq!(peer, source, "the accepted peer is the sender's own address and port");
+
+    drop((stream, client_stream));
+    drop(destination);
+    drop(node_guard);
+    drop((leg_c, leg_f));
+}
+
+/// The host obligation for a listener the kernel has closed: when the
+/// listening socket is destroyed from outside by a sock-diag destroy of its
+/// exact tuple (`ss -K`, the S-ND295-63 stimulus), a pending accept wakes and
+/// ends with the terminal `Accept` failure within 2 s; it never waits forever
+/// (feature delta § *Driven port — intercept listener*, `accept` behaviour and
+/// `HostMtlsIntercept` obligations). The accept is first shown to be pending:
+/// no outcome arrives while nothing dials.
+///
+/// Mutation targets: an accept that ignores hang-up readiness (it waits
+/// forever), and one that reports the loss as a connection-scoped
+/// `OriginalDestination` failure (the worker would keep a dead task).
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
+fn a_destroyed_host_listener_ends_its_pending_accept_with_an_accept_failure() {
+    assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
+
+    let host = HostMtlsIntercept::new();
+    let leg = Arc::new(
+        host.bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent binds the leg"),
+    );
+    let bound = leg.bound_v4().expect("the leg reports its bound IPv4 address");
+    let pending = spawn_accept_leg(&leg).expect("start the pending accept");
+    match pending.recv_timeout(Duration::from_millis(300)) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        other => panic!("with nothing dialling, the accept must still be pending: {other:?}"),
+    }
+
+    let destroyed = Command::new("ss")
+        .args(["-K", "-t", "-l", "src", &bound.to_string()])
+        .output()
+        .expect("spawn ss -K for the listening tuple");
+    let destroyed_listing = String::from_utf8_lossy(&destroyed.stdout);
+    eprintln!(
+        "[S-ND295-70][destroy] ss -K src {bound} -> {:?}\nstdout:\n{destroyed_listing}\nstderr:\n{}",
+        destroyed.status.code(),
+        String::from_utf8_lossy(&destroyed.stderr).trim()
+    );
+    assert!(destroyed.status.success(), "ss -K must succeed for the listening tuple {bound}");
+    assert!(
+        destroyed_listing.contains(&bound.to_string()),
+        "ss -K must report destroying the listening tuple {bound}"
+    );
+
+    let outcome = pending
+        .recv_timeout(Duration::from_secs(2))
+        .expect("a destroyed listener must end the pending accept within 2 s");
+    let failure = outcome.expect_err("a destroyed listener accepts nothing");
+    assert!(
+        matches!(accept_failure_of(&failure), Some(InterceptAcceptError::Accept { .. })),
+        "the pending accept ends with the terminal Accept failure, got {failure:?}"
+    );
+}
+
+/// The host obligation for an accepted descriptor: it is in the state
+/// `std::net::TcpListener::accept` gives it today — `O_NONBLOCK` clear and
+/// `FD_CLOEXEC` set — so `HostMtlsEnforcement` and the cleartext pass-through
+/// receive the descriptor they receive today, and it never leaks into a child
+/// process (feature delta § *Driven port — intercept listener*,
+/// `HostMtlsIntercept` obligations; OBL-295-CLOEXEC).
+///
+/// Mutation targets: an accept that hands on the reactor's non-blocking
+/// descriptor, and one that accepts without close-on-exec.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn an_accepted_connection_is_blocking_and_close_on_exec() {
+    assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
+
+    let host = HostMtlsIntercept::new();
+    let leg = Arc::new(
+        host.bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent binds the leg"),
+    );
+    let bound = leg.bound_v4().expect("the leg reports its bound IPv4 address");
+    let client = std::thread::spawn(move || dial(bound, Duration::from_secs(5)));
+    let accepted = accept_leg_within(&leg, Duration::from_secs(8));
+    let client_stream = client
+        .join()
+        .expect("the client thread completes")
+        .expect("the client connects to the bound leg");
+    let (stream, peer, local) = accepted.expect("the dial is accepted within 8 s");
+    let client_source = match client_stream.local_addr().expect("the client's source address") {
+        std::net::SocketAddr::V4(source) => source,
+        other => panic!("the client bound a non-IPv4 source {other}"),
+    };
+    assert_eq!(local, bound, "a direct dial's accepted local address is the bound leg");
+    assert_eq!(peer, client_source, "the accepted peer is the client");
+
+    // SAFETY: `stream` owns a live accepted socket descriptor; F_GETFL and
+    // F_GETFD read its flags and change nothing.
+    let (status_flags, descriptor_flags) = unsafe {
+        (
+            libc::fcntl(stream.as_raw_fd(), libc::F_GETFL),
+            libc::fcntl(stream.as_raw_fd(), libc::F_GETFD),
+        )
+    };
+    assert!(status_flags >= 0, "F_GETFL: {}", std::io::Error::last_os_error());
+    assert!(descriptor_flags >= 0, "F_GETFD: {}", std::io::Error::last_os_error());
+    eprintln!(
+        "[S-ND295-70][descriptor] accepted fd {} status flags {status_flags:#x} descriptor flags \
+         {descriptor_flags:#x}",
+        stream.as_raw_fd()
+    );
+    assert_eq!(status_flags & libc::O_NONBLOCK, 0, "the accepted descriptor is blocking");
+    assert_ne!(descriptor_flags & libc::FD_CLOEXEC, 0, "the accepted descriptor is close-on-exec");
+
+    drop((stream, client_stream));
 }

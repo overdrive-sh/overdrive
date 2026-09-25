@@ -162,3 +162,261 @@ impl GuestDns for SimGuestDns {
         self.decide(SimGuestDnsServeExit::Return);
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    reason = "test contracts carry exact CONTRACT_SHAPE markers and diagnostic assertions"
+)]
+mod tests {
+    use std::net::Ipv4Addr;
+    use std::panic::AssertUnwindSafe;
+    use std::task::Poll;
+    use std::time::Duration;
+
+    use futures::FutureExt;
+    use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
+    use overdrive_core::id::NodeId;
+
+    use super::*;
+    use crate::adapters::clock::SimClock;
+    use crate::adapters::observation_store::SimObservationStore;
+
+    /// Every bounded wait: a RED body fails instead of hanging.
+    const WAIT: Duration = Duration::from_secs(2);
+
+    /// The dependencies a responder is built from. The doubles drop them.
+    fn deps() -> GuestDnsDeps {
+        GuestDnsDeps {
+            store: Arc::new(SimObservationStore::single_peer(
+                NodeId::new("node-guest-dns").expect("valid node id"),
+                0,
+            )),
+            clock: Arc::new(SimClock::new()),
+            gateway: Ipv4Addr::new(10, 99, 0, 1),
+            frontend: FrontendAddrAllocator::new(),
+        }
+    }
+
+    /// `result` is the scripted probe refusal.
+    fn assert_probe_refused(result: &Result<()>, context: &str) {
+        assert!(
+            matches!(
+                result,
+                Err(DnsResponderError::Probe { reason }) if reason == "scripted sim DNS probe refusal"
+            ),
+            "{context}: the armed probe slot refuses, got {result:?}",
+        );
+    }
+
+    /// `result` is the scripted audit refusal.
+    fn assert_audit_refused(result: &Result<()>, context: &str) {
+        assert!(
+            matches!(
+                result,
+                Err(DnsResponderError::Socket { source })
+                    if source.to_string() == "scripted sim DNS audit refusal"
+            ),
+            "{context}: the armed audit slot refuses, got {result:?}",
+        );
+    }
+
+    /// The factory's logged responder at `index` is the port object `built`.
+    fn assert_logged(factory: &SimGuestDnsFactory, index: usize, built: &Arc<dyn GuestDns>) {
+        let logged = factory.responders();
+        assert!(
+            std::ptr::addr_eq(Arc::as_ptr(&logged[index]), Arc::as_ptr(built)),
+            "build-log entry {index} is the responder the factory returned",
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands
+    /// until a fresh responder is serving.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// One standing probe slot per factory, shared by every responder it
+    /// built — before or after arming — and by no other factory's; never
+    /// consumed; the build log lists responders in build order and does not
+    /// drain (FD 4480-4489, 4498-4499).
+    #[tokio::test]
+    async fn the_probe_slot_is_shared_by_every_responder_and_is_standing() {
+        let factory = SimGuestDnsFactory::default();
+        let other_factory = SimGuestDnsFactory::default();
+        let early = factory.responder(deps());
+        let unrelated = other_factory.responder(deps());
+        early.probe().await.expect("a fresh factory's probe slot is disarmed");
+
+        factory.script_probe_failure(true);
+        let late = factory.responder(deps());
+        for call in 0..2 {
+            assert_probe_refused(
+                &early.probe().await,
+                &format!("built before arming, call {call}"),
+            );
+            assert_probe_refused(&late.probe().await, &format!("built after arming, call {call}"));
+        }
+        unrelated.probe().await.expect("another factory's responder has its own probe slot");
+
+        factory.script_probe_failure(false);
+        early.probe().await.expect("disarming reaches a responder built before arming");
+        late.probe().await.expect("disarming reaches a responder built after arming");
+        factory.script_probe_failure(true);
+        assert_probe_refused(&early.probe().await, "re-armed");
+
+        assert_eq!(factory.responders().len(), 2, "one build-log entry per responder built");
+        assert_logged(&factory, 0, &early);
+        assert_logged(&factory, 1, &late);
+        assert_eq!(factory.responders().len(), 2, "the build log is a non-draining snapshot");
+        assert_eq!(other_factory.responders().len(), 1);
+        assert_logged(&other_factory, 0, &unrelated);
+    }
+
+    /// One way to end a serve future.
+    #[derive(Debug, Clone, Copy)]
+    enum Decision {
+        EndReturn,
+        EndPanic,
+        Stop,
+    }
+
+    /// How a serve future ended.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Ending {
+        Returned,
+        Panicked,
+    }
+
+    /// Apply `decision` to one responder: `end_serve` on the double, `stop`
+    /// through the port.
+    fn decide(sim: &SimGuestDns, port: &Arc<dyn GuestDns>, decision: Decision) {
+        match decision {
+            Decision::EndReturn => sim.end_serve(SimGuestDnsServeExit::Return),
+            Decision::EndPanic => sim.end_serve(SimGuestDnsServeExit::Panic),
+            Decision::Stop => port.stop(),
+        }
+    }
+
+    /// The ending a completed serve future reports; a panic must carry the
+    /// double's scripted message.
+    fn ending_of(outcome: std::thread::Result<()>) -> Ending {
+        match outcome {
+            Ok(()) => Ending::Returned,
+            Err(payload) => {
+                assert_eq!(
+                    payload.downcast_ref::<&str>().copied(),
+                    Some("scripted sim DNS serve panic"),
+                    "a scripted serve panic carries the double's message",
+                );
+                Ending::Panicked
+            }
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands
+    /// until a fresh responder is serving.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// `serve` stays pending until `end_serve` or `stop`; `end_serve(Return)`
+    /// and `stop` make it return, `end_serve(Panic)` makes it panic; the first
+    /// call decides and later calls change nothing; an ending decided before
+    /// the first poll applies at that poll (FD 4490-4493).
+    #[tokio::test]
+    async fn serve_ends_on_the_first_end_serve_or_stop_even_before_its_first_poll() {
+        use Decision::{EndPanic, EndReturn, Stop};
+        use Ending::{Panicked, Returned};
+        // (decided before the first poll, decided while pending, ending)
+        let rows: [(&[Decision], &[Decision], Option<Ending>); 12] = [
+            (&[EndReturn], &[], Some(Returned)),
+            (&[EndPanic], &[], Some(Panicked)),
+            (&[Stop], &[], Some(Returned)),
+            (&[EndReturn, EndPanic], &[], Some(Returned)),
+            (&[EndPanic, Stop], &[], Some(Panicked)),
+            (&[Stop, EndPanic], &[], Some(Returned)),
+            (&[], &[EndReturn], Some(Returned)),
+            (&[], &[EndPanic], Some(Panicked)),
+            (&[], &[Stop], Some(Returned)),
+            (&[], &[Stop, EndPanic], Some(Returned)),
+            (&[], &[EndPanic, EndReturn], Some(Panicked)),
+            (&[], &[], None),
+        ];
+
+        for (before, pending, expected) in rows {
+            let row = format!("before first poll {before:?}, while pending {pending:?}");
+            let factory = SimGuestDnsFactory::default();
+            let port = factory.responder(deps());
+            let sim = factory.responders().pop().expect("the factory logs what it builds");
+            for decision in before {
+                decide(&sim, &port, *decision);
+            }
+
+            let mut serve = AssertUnwindSafe(Arc::clone(&port).serve()).catch_unwind();
+            let first = std::future::poll_fn(|cx| Poll::Ready(serve.poll_unpin(cx))).await;
+            let observed = if before.is_empty() {
+                assert!(first.is_pending(), "{row}: an undecided serve stays pending");
+                tokio::task::yield_now().await;
+                assert!(
+                    std::future::poll_fn(|cx| Poll::Ready(serve.poll_unpin(cx))).await.is_pending(),
+                    "{row}: it stays pending until an ending is decided",
+                );
+                for decision in pending {
+                    decide(&sim, &port, *decision);
+                }
+                if pending.is_empty() {
+                    None
+                } else {
+                    let outcome = tokio::time::timeout(WAIT, &mut serve)
+                        .await
+                        .unwrap_or_else(|_| panic!("{row}: the decision ends the pending serve"));
+                    Some(ending_of(outcome))
+                }
+            } else {
+                match first {
+                    Poll::Ready(outcome) => Some(ending_of(outcome)),
+                    Poll::Pending => {
+                        panic!("{row}: an ending decided before the first poll applies at it")
+                    }
+                }
+            };
+            assert_eq!(observed, expected, "{row}");
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands
+    /// until a fresh responder is serving.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The audit slot belongs to one responder: while armed it refuses every
+    /// audit of that responder with the scripted `Socket` error, a sibling and
+    /// a replacement built after the fault audit clean, and the audit and
+    /// probe slots do not reach each other (FD 4494-4499).
+    #[tokio::test]
+    async fn the_audit_slot_is_per_responder_so_a_replacement_audits_clean() {
+        let factory = SimGuestDnsFactory::default();
+        let sibling = factory.responder(deps());
+        let faulted = factory.responder(deps());
+        let faulted_sim = Arc::clone(&factory.responders()[1]);
+        faulted.audit().await.expect("a fresh responder audits clean");
+
+        faulted_sim.script_audit_failure(true);
+        for call in 0..2 {
+            assert_audit_refused(&faulted.audit().await, &format!("call {call}"));
+        }
+        sibling.audit().await.expect("a responder built before the fault audits clean");
+        let replacement = factory.responder(deps());
+        replacement.audit().await.expect("a replacement built after the fault audits clean");
+        faulted.probe().await.expect("an armed audit slot does not reach the probe");
+
+        factory.script_probe_failure(true);
+        replacement.audit().await.expect("an armed probe slot does not reach the audit");
+        assert_audit_refused(&faulted.audit().await, "probe armed as well");
+        factory.script_probe_failure(false);
+
+        faulted_sim.script_audit_failure(false);
+        faulted.audit().await.expect("disarming the audit slot restores a clean audit");
+        assert_logged(&factory, 1, &faulted);
+    }
+}

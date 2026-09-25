@@ -98,6 +98,10 @@ mod integration {
     /// source-pin litmus (NEVER `dig` alone, DDN-5). Root + Lima; SKIP
     /// otherwise. No Tier-2 backstop (DDN-4) — irreducibly real-kernel.
     mod dns_responder_bind;
+    /// GH #295 S-ND295-05A — a killed restart's second
+    /// `run_server_with_obs_and_driver` starts with an empty per-server
+    /// guest-attachment pool.
+    mod guest_attachment_pool_per_server;
     mod idempotent_resubmit;
     /// Regression test for the boot-time `node_health` write per
     /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
@@ -122,6 +126,10 @@ mod integration {
     /// behaviour this pins — "the tick resets while the rows do not."
     mod lww_counter_survives_restart;
 
+    /// GH #295 S-ND295-59 — `GET /v1/allocs` reports an allocation whose
+    /// network cleanup has not finished as cleanup-pending, never as a
+    /// running replica.
+    mod network_cleanup_pending_status;
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
 
@@ -166,6 +174,10 @@ mod integration {
     /// GH #295 S-ND295-00 — composed production-startup ordering and
     /// scratch-probe refusal through the accepted shared-owner port.
     mod shared_guest_network_startup;
+    /// GH #295 S-ND295-29B (recovery proof §3.3, moved from `overdrive-sim`) —
+    /// the composed server recovers every shared-network component through
+    /// its required ports.
+    mod shared_network_supervisor_recovery;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of
     /// `reconciler-memory-redb`. Action shim threads `Action.terminal`

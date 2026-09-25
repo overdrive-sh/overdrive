@@ -15,6 +15,10 @@
 //!   typed `reason`, typed `source`) — NOT the raw observation row.
 //!   Conflating the two would let a future refactor leak rkyv-archive
 //!   types into the streaming-handler context.
+//! * `ServerConfig::new` cannot be called with the KEK alone: the
+//!   `MtlsIntercept` and `GuestDnsFactory` ports are required parameters
+//!   (S-ND295-65; D-295-R16, E16), so no server is configured without
+//!   protection and DNS.
 
 #[test]
 fn compile_fail_cases() {

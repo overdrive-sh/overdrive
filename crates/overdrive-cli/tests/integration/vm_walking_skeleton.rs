@@ -210,18 +210,19 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! Every pre-#295 live scenario is GREEN and carries no `#[ignore]`. The
-//! activated GH #295 walking-skeleton body at the end is the continuing
-//! direct-host-TAP/shared-bridge production proof; the separate double-loss
-//! body remains pending until its accepted one-cut audit path exists. Every blocker this
-//! file's history above documents (vsock EAFNOSUPPORT, the terminal-row
-//! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
-//! contamination) is CLOSED.
+//! Every pre-#295 live scenario is GREEN and carries no `#[ignore]`. The GH
+//! #295 bodies (S-ND295-35's direct-host-TAP/shared-bridge topology and
+//! descriptor-3 bodies, S-ND295-37's double loss, and S-ND295-45's per-thread
+//! launch filter) are authored against the accepted correctness-recovery
+//! DESIGN and carry a reasoned `#[ignore]` naming the DELIVER step that
+//! activates each. Every blocker this file's history above documents (vsock
+//! EAFNOSUPPORT, the terminal-row misclassification, the XDP EBUSY race, and
+//! S-VM-05's cross-test contamination) is CLOSED.
 //!
-//! **Step 01-10** adds a 9th scenario, S-VM-09 (per-thread seccomp
-//! verification — the C-5 correction, see
-//! [`vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader`]'s
-//! own doc comment).
+//! **Step 01-10** added S-VM-09 (per-thread seccomp verification, the C-5
+//! correction). D-295-R22 falsifies its claim that the thread-group leader
+//! reports `SECCOMP_MODE_DISABLED`; S-ND295-45 retargets it as
+//! [`every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters`].
 //!
 //! **Step 03-07** adds a 10th scenario, S-VM-54 (DWD-25 / AC-21), and
 //! deletes the node-level artifact seam every server helper here used to
@@ -237,13 +238,14 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
-use std::net::SocketAddr;
-use std::os::fd::RawFd;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
@@ -267,6 +269,9 @@ use overdrive_sim::{SimVmm, SimVmmProbeFault};
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 // ---------------------------------------------------------------------
 // Fixture staging — real kernel/rootfs + a per-test injected guest
@@ -287,7 +292,7 @@ pub(super) fn shared_staging_root() -> PathBuf {
 /// tmpfs and the master on the xfs staging root, the clone would fail `EXDEV`
 /// and the VM boot would refuse. Co-locating `data_dir` with the masters
 /// respects the production invariant (one VM data partition holds both).
-fn server_tmp_on_staging_root() -> TempDir {
+pub(super) fn server_tmp_on_staging_root() -> TempDir {
     tempfile::Builder::new()
         .prefix("vm-serve-")
         .tempdir_in(shared_staging_root())
@@ -456,7 +461,7 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// (GH #248 / ADR-0074 trap). Current VM allocations join the
 /// `MtlsInterceptWorker` through their TAP-fed host veth; the guest-stack
 /// S-GTI-01/S-GTI-03 metal scenarios own that end-to-end behavior proof.
-async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
+pub(super) async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
@@ -587,7 +592,7 @@ async fn poll_until_state(
 ///
 /// Matches on `argv[0]`, never the `TASK_COMM_LEN`-truncated
 /// `/proc/<pid>/comm` (15 chars, shorter than the 16-char binary name).
-fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
+pub(super) fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
     let needle = run_dir.path().to_string_lossy().into_owned();
     for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
@@ -615,6 +620,114 @@ fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
         }
     }
     panic!("no live cloud-hypervisor process found whose argv references {needle}")
+}
+
+// ---------------------------------------------------------------------
+// GH #295 native observation helpers.
+// ---------------------------------------------------------------------
+
+/// The managed host TAP name the shared guest-network owner derives from a
+/// guest address (`ovd-tp-<low 16 bits, hex>`).
+fn managed_tap_name(address: Ipv4Addr) -> String {
+    let octets = address.octets();
+    format!("ovd-tp-{:04x}", u16::from_be_bytes([octets[2], octets[3]]))
+}
+
+/// The pid and NUL-joined argv of the live `cloud-hypervisor` process
+/// serving `alloc`, located by the allocation's own [`VmRunDir`] path (the
+/// same `argv[0]` rule as [`hypervisor_argv_for_alloc`]).
+fn hypervisor_process_for_alloc(alloc: &AllocationId) -> (u32, String) {
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
+    let needle = run_dir.path().to_string_lossy().into_owned();
+    for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc entry while locating allocation {alloc}: {error}"),
+        };
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let cmdline = match std::fs::read(entry.path().join("cmdline")) {
+            Ok(cmdline) => cmdline,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => panic!("read /proc/{pid}/cmdline for allocation {alloc}: {error}"),
+        };
+        let argv0 = cmdline.split(|&byte| byte == 0).next().unwrap_or(&[]);
+        let argv0 = String::from_utf8_lossy(argv0);
+        if Path::new(argv0.as_ref()).file_name() != Some(std::ffi::OsStr::new("cloud-hypervisor")) {
+            continue;
+        }
+        let argv = String::from_utf8_lossy(&cmdline).replace('\0', " ");
+        if argv.contains(&needle) {
+            return (pid, argv);
+        }
+    }
+    panic!("no live cloud-hypervisor process found whose argv references {needle}")
+}
+
+/// `true` while `pid` is still the live (non-zombie) Cloud Hypervisor
+/// process serving `alloc`. A missing pid, an empty zombie `cmdline`, or a
+/// reused pid whose argv names another run directory all read as ended.
+fn hypervisor_serves_alloc(pid: u32, alloc: &AllocationId) -> bool {
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
+    match std::fs::read(format!("/proc/{pid}/cmdline")) {
+        Ok(cmdline) => String::from_utf8_lossy(&cmdline)
+            .replace('\0', " ")
+            .contains(run_dir.path().to_string_lossy().as_ref()),
+        Err(error) if error.kind() == ErrorKind::NotFound => false,
+        Err(error) => panic!("read /proc/{pid}/cmdline for allocation {alloc}: {error}"),
+    }
+}
+
+/// The administrative (`IFF_UP`) state of a host interface from
+/// `/sys/class/net/<name>/flags`; `Ok(None)` when the interface is absent.
+/// Never panics, so the supervisor trace layer can call it from inside the
+/// emitting task.
+fn tap_admin_up(name: &str) -> std::io::Result<Option<bool>> {
+    let path = Path::new("/sys/class/net").join(name).join("flags");
+    match std::fs::read_to_string(&path) {
+        Ok(flags) => {
+            let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)
+                .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))?;
+            let up = u32::try_from(libc::IFF_UP).expect("IFF_UP is a positive flag bit");
+            Ok(Some(flags & up != 0))
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Polls `workload describe` until the workload has at least one row and
+/// every row is terminal (`Terminated` or `Failed`). A workload whose
+/// allocation was killed and restarted carries more than one row, so the
+/// first-row rule of [`poll_until_state`] cannot tell when it has settled.
+async fn poll_until_every_row_terminal(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if !out.snapshot.rows.is_empty()
+            && out
+                .snapshot
+                .rows
+                .iter()
+                .all(|row| matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed))
+        {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "every allocation row of {workload_id} reaches a terminal state within {max_wait:?}; \
+             last observed rows: {:?}",
+            out.snapshot.rows,
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -842,7 +955,7 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
 /// len 16; `comm` reads `cloud-hyperviso`, len 15). A `comm`-based exact
 /// match can never succeed against this binary name, which is why this
 /// helper previously panicked even when a real VMM was running.
-fn find_cloud_hypervisor_pid() -> u32 {
+pub(super) fn find_cloud_hypervisor_pid() -> u32 {
     for entry_result in std::fs::read_dir("/proc").expect("read /proc") {
         let entry = match entry_result {
             Ok(entry) => entry,
@@ -988,14 +1101,15 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-09 — seccomp is verified per-thread, not on the thread-group leader.
+// S-ND295-45 — every Cloud Hypervisor thread carries the launch filter
+// (retargets S-VM-09, whose leader-disabled claim D-295-R22 falsifies).
 // ---------------------------------------------------------------------
 
 /// The parsed `Seccomp:` mode from one `/proc/<pid>/task/<tid>/status`
 /// file. `0` is `SECCOMP_MODE_DISABLED` (no filter installed on that
 /// thread); a confined thread reports `2` (`SECCOMP_MODE_FILTER`, the mode
 /// `--seccomp true` installs).
-fn thread_seccomp_mode(vmm_pid: u32, tid: &str) -> u32 {
+pub(super) fn thread_seccomp_mode(vmm_pid: u32, tid: &str) -> u32 {
     let path = format!("/proc/{vmm_pid}/task/{tid}/status");
     let status = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     for line in status.lines() {
@@ -1014,7 +1128,7 @@ fn thread_seccomp_mode(vmm_pid: u32, tid: &str) -> u32 {
 /// distinctly (`vmm`, `http-server`, `vcpu0`, ...) -- all well under
 /// `TASK_COMM_LEN`'s 15-visible-character cap, unlike `cloud-hypervisor`
 /// itself (see [`find_cloud_hypervisor_pid`]'s doc comment).
-fn thread_names(vmm_pid: u32) -> std::collections::BTreeMap<String, String> {
+pub(super) fn thread_names(vmm_pid: u32) -> std::collections::BTreeMap<String, String> {
     let task_dir = format!("/proc/{vmm_pid}/task");
     let mut out = std::collections::BTreeMap::new();
     for entry in std::fs::read_dir(&task_dir).unwrap_or_else(|e| panic!("read {task_dir}: {e}")) {
@@ -1028,122 +1142,255 @@ fn thread_names(vmm_pid: u32) -> std::collections::BTreeMap<String, String> {
     out
 }
 
-/// `SECCOMP_MODE_DISABLED` — the mode a bare `/proc/<pid>/status` read
-/// (the thread-group leader) correctly reports on a properly-confined CH
-/// (C-5, spike P5 correction 2). Named so both assertions below read as
-/// "must equal the disabled mode" / "must NOT equal the disabled mode"
-/// rather than a bare magic `0`.
-const SECCOMP_MODE_DISABLED: u32 = 0;
+/// `SECCOMP_MODE_FILTER` — the `Seccomp:` mode a thread reports once at
+/// least one seccomp filter confines it.
+const SECCOMP_MODE_FILTER: u32 = 2;
 
-/// S-VM-09 -- Seccomp is verified per-thread, not on the thread-group
-/// leader. **C-5 correction** (brief.md §102 row C-5, §113; DESIGN
-/// 2026-08-11): the original Slice 01 AC read a bare `/proc/<pid>/status`,
-/// which FAILS against correct cloud-hypervisor behaviour -- spike P5
-/// measured `Seccomp: 0` on the thread-group leader of a *correctly*
-/// confined CH, because the filters are installed per-thread, after the
-/// `vmm` / `http-server` / `vcpu0` threads are spawned, never re-applied to
-/// (or inherited retroactively by) the leader's own status. A regression
-/// that dropped `--seccomp` from the argv renderer entirely would ALSO read
-/// `Seccomp: 0` on the leader -- so a leader-only check cannot distinguish
-/// "confined correctly" from "not confined at all"; this scenario is the
-/// runtime regression guard S-VM-08's argv-level assertion is paired with
-/// (S-VM-08 is the binding mutation-kill site; this is the `/proc`-level
-/// half, satisfied by CH's own default and therefore not itself proof this
-/// slice acted -- see brief.md §106 / slice-01's `[D7]` item 6).
+/// One numeric field (`NoNewPrivs:`, `Seccomp_filters:`) of
+/// `/proc/<pid>/task/<tid>/status`.
+fn thread_status_number(vmm_pid: u32, tid: &str, field: &str) -> u32 {
+    let path = format!("/proc/{vmm_pid}/task/{tid}/status");
+    let status = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    status.lines().find_map(|line| line.strip_prefix(field)).map_or_else(
+        || panic!("no {field} field found in {path}"),
+        |value| {
+            value.trim().parse::<u32>().unwrap_or_else(|e| panic!("parse {field} in {path}: {e}"))
+        },
+    )
+}
+
+/// The `Seccomp_filters` count D-295-R22 pins for one Cloud Hypervisor v53
+/// thread: CH's own filter count for that thread plus the one launch filter
+/// every thread inherits from the launch child (increment-aa control table,
+/// FD 4740 (e)). CH never filters its thread-group leader, so the leader's
+/// count is the discriminating check.
+fn expected_launch_filter_count(vmm_pid: u32, tid: &str, name: &str) -> u32 {
+    if tid == vmm_pid.to_string() {
+        1
+    } else if matches!(name, "vmm" | "http-server") {
+        2
+    } else {
+        3
+    }
+}
+
+/// Reads every thread of `vmm_pid` and asserts D-295-R22's per-thread table:
+/// `NoNewPrivs: 1`, `Seccomp: 2`, and the pinned `Seccomp_filters` count.
+/// Requires the leader, `vmm`, `http-server`, and `vcpu0` threads so each of
+/// the three filter-count classes is observed, never vacuously absent.
+fn assert_every_thread_carries_the_launch_filter(vmm_pid: u32, phase: &str) {
+    let names = thread_names(vmm_pid);
+    let leader = vmm_pid.to_string();
+    assert!(
+        names.contains_key(&leader),
+        "{phase}: the thread-group leader {leader} is listed in /proc/{vmm_pid}/task: {names:?}"
+    );
+    for required in ["vmm", "http-server", "vcpu0"] {
+        assert!(
+            names.values().any(|name| name == required),
+            "{phase}: Cloud Hypervisor runs a thread named {required}; observed threads: {names:?}"
+        );
+    }
+    let observed: BTreeMap<&String, (&String, u32, u32, u32, u32)> = names
+        .iter()
+        .map(|(tid, name)| {
+            (
+                tid,
+                (
+                    name,
+                    thread_status_number(vmm_pid, tid, "NoNewPrivs:"),
+                    thread_seccomp_mode(vmm_pid, tid),
+                    thread_status_number(vmm_pid, tid, "Seccomp_filters:"),
+                    expected_launch_filter_count(vmm_pid, tid, name),
+                ),
+            )
+        })
+        .collect();
+    let violations: Vec<_> = observed
+        .iter()
+        .filter(|(_, (_, no_new_privs, mode, filters, expected))| {
+            *no_new_privs != 1 || *mode != SECCOMP_MODE_FILTER || filters != expected
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "{phase}: every Cloud Hypervisor thread must report NoNewPrivs 1, Seccomp \
+         {SECCOMP_MODE_FILTER}, and Seccomp_filters = leader 1 / vmm and http-server 2 / \
+         every other thread 3; violations (tid -> (name, NoNewPrivs, Seccomp, Seccomp_filters, \
+         expected filters)): {violations:?}; full table: {observed:?}"
+    );
+}
+
+/// A counter of `/sys/class/net/<tap>/statistics/<counter>`.
+fn tap_statistic(tap: &str, counter: &str) -> u64 {
+    let path = Path::new("/sys/class/net").join(tap).join("statistics").join(counter);
+    let value =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    value.trim().parse::<u64>().unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+}
+
+/// Sends `count` broadcast ARP probes for `guest` onto `tap` from the host
+/// through an `AF_PACKET` socket (an ARP probe carries sender address
+/// 0.0.0.0, so it seeds no ARP cache). A frame the TAP transmits is read by
+/// the VMM's network queue, which is what `tx_packets` counts, so this is
+/// host-to-guest traffic through the Cloud Hypervisor network device.
+fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
+    const ETH_P_ARP: u16 = 0x0806;
+    let name = std::ffi::CString::new(tap).expect("TAP name has no NUL");
+    // SAFETY: `name` is a live NUL-terminated string for this call.
+    let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+    assert_ne!(ifindex, 0, "host-to-guest traffic TAP {tap} exists");
+    // SAFETY: a send-only AF_PACKET raw socket (protocol 0 registers no
+    // receive hook); ownership moves into the OwnedFd immediately.
+    let raw = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW | libc::SOCK_CLOEXEC, 0) };
+    assert!(raw >= 0, "open AF_PACKET sender: {}", std::io::Error::last_os_error());
+    // SAFETY: `raw` is a freshly created descriptor owned by nothing else.
+    let socket = unsafe { OwnedFd::from_raw_fd(raw) };
+    let source_mac = [0x02, 0x95, 0x02, 0x95, 0x00, 0x45];
+    let mut frame = Vec::with_capacity(42);
+    frame.extend_from_slice(&[0xff; 6]);
+    frame.extend_from_slice(&source_mac);
+    frame.extend_from_slice(&ETH_P_ARP.to_be_bytes());
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
+    frame.extend_from_slice(&[6, 4]);
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&source_mac);
+    frame.extend_from_slice(&[0, 0, 0, 0]);
+    frame.extend_from_slice(&[0; 6]);
+    frame.extend_from_slice(&guest.octets());
+    // SAFETY: zero is a valid initialization for sockaddr_ll before fields are populated.
+    let mut address: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+    address.sll_family = u16::try_from(libc::AF_PACKET).expect("AF_PACKET fits u16");
+    address.sll_protocol = ETH_P_ARP.to_be();
+    address.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits i32");
+    address.sll_halen = 6;
+    address.sll_addr[..6].copy_from_slice(&[0xff; 6]);
+    for _ in 0..count {
+        // SAFETY: `frame` and `address` are live, fully initialized buffers of the
+        // supplied lengths, and `socket` is an owned open descriptor.
+        let sent = unsafe {
+            libc::sendto(
+                socket.as_raw_fd(),
+                frame.as_ptr().cast(),
+                frame.len(),
+                0,
+                std::ptr::from_ref(&address).cast(),
+                libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>())
+                    .expect("sockaddr_ll length fits socklen_t"),
+            )
+        };
+        assert_eq!(
+            usize::try_from(sent).ok(),
+            Some(frame.len()),
+            "send host broadcast ARP probe on {tap}: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-45 — Every Cloud Hypervisor thread carries the launch filter under its own filters
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// E21 native (e), per-thread half (D-295-R22, FD 1446-1453 and 4740). A VM
+/// launched through `serve` and `deploy` runs with the launch seccomp filter
+/// the launch child installs before its first exec, so every thread, the
+/// thread-group leader included, reports `NoNewPrivs: 1` and `Seccomp: 2`,
+/// and each thread's `Seccomp_filters` is Cloud Hypervisor v53's own count
+/// plus one: leader 1, `vmm` and `http-server` 2, every other thread 3.
+/// D-295-R22 makes the retired S-VM-09 claim (the leader reports
+/// `SECCOMP_MODE_DISABLED`) false.
+///
+/// The table is read at READY (the allocation reports `Running` only after
+/// the guest's READY beacon) and again after traffic, as E21 (e) requires:
+/// the guest program transmits frames on its NIC and the host sends
+/// broadcast ARP probes onto the TAP, and the read repeats only once the
+/// TAP's `rx_packets` (guest to host) and `tx_packets` (host to guest, read
+/// by the VMM's queue) have both advanced. Traffic delivery itself is
+/// S-ND295-01's oracle.
+#[expect(
+    clippy::doc_markdown,
+    reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
+)]
 #[tokio::test]
 #[serial(cgroup)]
-async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
+#[ignore = "pending DELIVER step 05-02 (S-ND295-45)"]
+async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
-        .prefix("vm-ws-")
+        .prefix("nd295-s45-")
         .tempdir_in(shared_staging_root())
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
-    // A long-lived guest (never exits on its own) -- this scenario needs
-    // the real cloud-hypervisor process alive so its threads can be
-    // inspected via /proc while Running. Reuses the shared long-lived guest
-    // fixture rather than adding another inline copy of the same spin shape.
-    let spin_bin = build_spin_binary(tmp.path());
-    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinseccomp");
+    // A long-lived guest that keeps transmitting frames on its NIC, so the
+    // after-traffic read has guest-to-host traffic to wait for.
+    let traffic = build_identifiable_datagram_emitter(tmp.path(), Ipv4Addr::new(100, 95, 0, 1));
+    let rootfs =
+        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &traffic, "nd295-s45-traffic");
 
-    let (handle, server_tmp) = spawn_vm_server().await;
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
-
     let spec_path = write_toml(
         server_tmp.path(),
-        "vm-seccomp.toml",
-        &vm_job_toml("vm-seccomp", "/sbin/spinseccomp", &[], &fixture.kernel_path, &rootfs),
+        "nd295-s45.toml",
+        &vm_job_toml("nd295-s45", "/sbin/nd295-s45-traffic", &[], &fixture.kernel_path, &rootfs),
     );
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
-        .expect("deploy the [vm] spec");
+        .expect("deploy the [vm] spec through the production handler");
+    let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    let row = running.snapshot.rows.first().expect("one Running allocation row");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server-echoed alloc_id parses");
+    let guest = row.workload_addr.expect("a Running VM publishes its address");
+    let tap = managed_tap_name(guest);
+    let (vmm_pid, _) = hypervisor_process_for_alloc(&alloc);
 
-    // Poll until Running (the spin guest never exits on its own).
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    assert_every_thread_carries_the_launch_filter(vmm_pid, "at READY");
+
+    // Traffic: wait for the owner's activation to raise the TAP, then drive
+    // host-to-guest frames until both directions have crossed the VMM queue.
+    let activation_deadline = Instant::now() + Duration::from_secs(30);
+    while tap_admin_up(&tap).expect("read managed TAP flags") != Some(true) {
+        assert!(
+            Instant::now() < activation_deadline,
+            "the managed TAP {tap} is raised by activation within 30 s of Running"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let rx_before = tap_statistic(&tap, "rx_packets");
+    let tx_before = tap_statistic(&tap, "tx_packets");
+    let traffic_deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let out =
-            describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-                .await
-                .expect("workload describe must succeed while polling");
-        if out.snapshot.rows.first().is_some_and(|r| r.state == AllocStateWire::Running) {
+        send_host_broadcast_arp_probes(&tap, guest, 3);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let rx = tap_statistic(&tap, "rx_packets");
+        let tx = tap_statistic(&tap, "tx_packets");
+        if rx > rx_before && tx > tx_before {
             break;
         }
-        assert!(tokio::time::Instant::now() < deadline, "allocation must reach Running within 60s");
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    let vmm_pid = find_cloud_hypervisor_pid();
-    let names = thread_names(vmm_pid);
-
-    // The thread-group leader's OWN status (tid == pid) is NEVER used as
-    // the sole evidence -- confirm it, on its own, reports the DISABLED
-    // mode a bare `/proc/<pid>/status` read would see, and document that
-    // this alone must not fail the scenario (C-5's correction).
-    let leader_mode = thread_seccomp_mode(vmm_pid, &vmm_pid.to_string());
-    assert_eq!(
-        leader_mode, SECCOMP_MODE_DISABLED,
-        "the thread-group leader's own status is expected to report SECCOMP_MODE_DISABLED \
-         on a correctly-confined cloud-hypervisor -- this is not a failure, it documents why \
-         a bare /proc/<pid>/status read is the wrong evidence (C-5); observed threads: \
-         {names:?}"
-    );
-
-    let vmm_tid = names
-        .iter()
-        .find(|(_, name)| name.as_str() == "vmm")
-        .map_or_else(|| panic!("no thread named 'vmm' among {names:?}"), |(tid, _)| tid.clone());
-    let http_server_tid = names.iter().find(|(_, name)| name.contains("http")).map_or_else(
-        || panic!("no thread with 'http' in its name among {names:?}"),
-        |(tid, _)| tid.clone(),
-    );
-    let vcpu0_tid = names.iter().find(|(_, name)| name.contains("vcpu0")).map_or_else(
-        || panic!("no thread with 'vcpu0' in its name among {names:?}"),
-        |(tid, _)| tid.clone(),
-    );
-
-    for (label, tid) in
-        [("vmm", &vmm_tid), ("http-server", &http_server_tid), ("vcpu0", &vcpu0_tid)]
-    {
-        let mode = thread_seccomp_mode(vmm_pid, tid);
-        assert_ne!(
-            mode, SECCOMP_MODE_DISABLED,
-            "the {label} thread (tid={tid}) must report a non-default Seccomp mode; got \
-             {mode} (0 = disabled) -- observed threads: {names:?}"
+        assert!(
+            Instant::now() < traffic_deadline,
+            "guest-to-host (rx_packets {rx_before} -> {rx}) and host-to-guest (tx_packets \
+             {tx_before} -> {tx}) frames both cross {tap} within 30 s"
         );
     }
+    let (vmm_pid_after_traffic, _) = hypervisor_process_for_alloc(&alloc);
+    assert_eq!(
+        vmm_pid_after_traffic, vmm_pid,
+        "the same Cloud Hypervisor process serves the allocation after traffic"
+    );
+
+    assert_every_thread_carries_the_launch_filter(vmm_pid, "after traffic");
 
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
-        .expect("stop the long-lived spin workload before shutdown");
+        .expect("stop the long-lived guest before shutdown");
     let stopped = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
-    let stopped_row =
-        stopped.snapshot.rows.first().expect("one allocation row for the stopped workload");
     assert_eq!(
-        stopped_row.state,
+        stopped.snapshot.rows.first().expect("one allocation row for the stopped workload").state,
         AllocStateWire::Terminated,
-        "an operator stop must drive the never-self-terminating spin allocation to Terminated \
-         before this test tears down the server, got {:?}",
-        stopped_row.state,
+        "an operator stop drives the never-self-terminating guest to Terminated before shutdown"
     );
 
     handle.shutdown().await.expect("clean shutdown");
@@ -1182,7 +1429,14 @@ pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
     out
 }
 
-fn build_identifiable_datagram_emitter(tmp: &Path, target: std::net::Ipv4Addr) -> PathBuf {
+#[allow(
+    clippy::too_many_lines,
+    reason = "the emitted guest program is one inline source template; splitting the template across helpers would obscure the exact frames the native bodies count"
+)]
+pub(super) fn build_identifiable_datagram_emitter(
+    tmp: &Path,
+    target: std::net::Ipv4Addr,
+) -> PathBuf {
     let src = tmp.join("shared-guest-network-emitter.rs");
     let target = target.octets();
     std::fs::write(
@@ -1330,10 +1584,10 @@ fn main() {{
     out
 }
 
-struct PacketCapture(RawFd);
+pub(super) struct PacketCapture(RawFd);
 
 impl PacketCapture {
-    fn open(interface: &str) -> Self {
+    pub(super) fn open(interface: &str) -> Self {
         const ETH_P_ALL: u16 = 0x0003;
         let name = std::ffi::CString::new(interface).expect("interface has no NUL");
         // SAFETY: `name` is a live NUL-terminated string for this call.
@@ -1370,7 +1624,7 @@ impl PacketCapture {
         Self(fd)
     }
 
-    fn drain_identifiable(&self) -> usize {
+    pub(super) fn drain_identifiable(&self) -> usize {
         const NEEDLE: &[u8] = b"ND295-S37-IDENTIFIABLE";
         let mut matched = 0;
         loop {
@@ -1403,7 +1657,7 @@ impl Drop for PacketCapture {
     }
 }
 
-fn guard_default_drop_packets(observation: &BridgeGuardObservation) -> u64 {
+pub(super) fn guard_default_drop_packets(observation: &BridgeGuardObservation) -> u64 {
     let inventory = match observation {
         BridgeGuardObservation::Absent { inventory }
         | BridgeGuardObservation::Exact { inventory }
@@ -1441,7 +1695,7 @@ fn guard_default_drop_packets(observation: &BridgeGuardObservation) -> u64 {
 /// `true` regardless of whether a real VMM process remained, silently
 /// masking the deadline-arm cleanup leak this file's own module doc
 /// documents (01-08 review remediation).
-fn no_cloud_hypervisor_process_running() -> bool {
+pub(super) fn no_cloud_hypervisor_process_running() -> bool {
     let entries = std::fs::read_dir("/proc").expect("read /proc");
     for entry_result in entries {
         let entry = match entry_result {
@@ -2441,17 +2695,25 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
     handle.shutdown().await.expect("clean shutdown");
 }
 
-/// S-ND295-01 / S-ND295-35 — two VM allocations launch directly on host TAPs
-/// attached to one shared bridge, with no per-workload network namespace
-/// wrapper.
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH
+/// S-ND295-35 — Each VMM holds exactly its own TAP queue and nothing of the server
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// Topology half (E2/E4 native, D-295-R1 to R4). Two VM allocations launch
+/// in the host network namespace on IP-derived host TAPs attached to one
+/// shared bridge, with no per-workload namespace, veth, or /30. Each Cloud
+/// Hypervisor receives its TAP only as the inherited queue at descriptor 3:
+/// its argv carries `--net fd=[3],mac=<mac>,offload_tso=off,offload_ufo=off,
+/// offload_csum=off` and no `tap=` (FD 635-636). Stop removes every owned
+/// part, and release returns the first address to the pool. The descriptor
+/// facts are [`each_vmm_holds_only_its_own_tap_queue_at_descriptor_three`].
 #[expect(
     clippy::doc_markdown,
     reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
 )]
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER step 10-01 (S-ND295-35)"]
 async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2572,8 +2834,15 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
             octets[0], octets[1], octets[2], octets[3]
         );
         assert!(
-            argv.contains(&format!("--net tap={tap},mac={mac}")),
-            "Cloud Hypervisor receives only the assigned host TAP and IPv4-derived MAC: {argv}"
+            argv.contains(&format!(
+                "--net fd=[3],mac={mac},offload_tso=off,offload_ufo=off,offload_csum=off"
+            )),
+            "Cloud Hypervisor receives its TAP only as the inherited queue at descriptor 3, \
+             with the IPv4-derived MAC and offloads off: {argv}"
+        );
+        assert!(
+            !argv.contains("tap="),
+            "Cloud Hypervisor is never given a TAP name to open itself: {argv}"
         );
         assert!(!argv.contains("ip netns exec"), "direct-TAP launch has no namespace wrapper");
         assert!(
@@ -2697,9 +2966,472 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
     handle.shutdown().await.expect("clean shutdown");
 }
 
-/// S-ND295-37 — simultaneous external TCX-link and bridge-guard loss has the
-/// accepted bounded exposure and quiescence envelope.
+/// The child descriptor number D-295-R3 maps the VMM's TAP queue to
+/// (`VMM_TAP_QUEUE_FD` is crate-private in `overdrive-host`, FD 629).
+const VMM_TAP_QUEUE_DESCRIPTOR: RawFd = 3;
+
+/// One open descriptor of a process, as `/proc/<pid>/fd` and
+/// `/proc/<pid>/fdinfo` report it.
+#[derive(Debug)]
+struct DescriptorFact {
+    /// The `readlink` target (`socket:[N]`, `pipe:[N]`, `/dev/net/tun`, a path).
+    target: String,
+    /// The octal `flags:` field (the open file description's status flags).
+    flags: libc::c_int,
+    /// The `iff:` field, present only for an attached TUN/TAP queue.
+    tun_iff: Option<String>,
+}
+
+/// The complete descriptor table of the process at `process` (`/proc/<pid>`
+/// or `/proc/self`). A descriptor closed between the directory read and its
+/// `readlink`/`fdinfo` read is skipped; every other read failure panics.
+fn descriptor_table(process: &Path) -> BTreeMap<RawFd, DescriptorFact> {
+    let fd_dir = process.join("fd");
+    let mut table = BTreeMap::new();
+    for entry_result in
+        std::fs::read_dir(&fd_dir).unwrap_or_else(|e| panic!("read {}: {e}", fd_dir.display()))
+    {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => panic!("read {} entry: {error}", fd_dir.display()),
+        };
+        let Ok(fd) = entry.file_name().to_string_lossy().parse::<RawFd>() else { continue };
+        let target = match std::fs::read_link(entry.path()) {
+            Ok(target) => target.to_string_lossy().into_owned(),
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => panic!("readlink {}: {error}", entry.path().display()),
+        };
+        let info_path = process.join("fdinfo").join(fd.to_string());
+        let info = match std::fs::read_to_string(&info_path) {
+            Ok(info) => info,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => panic!("read {}: {error}", info_path.display()),
+        };
+        let flags = info.lines().find_map(|line| line.strip_prefix("flags:")).map_or_else(
+            || panic!("no flags field in {}", info_path.display()),
+            |value| {
+                libc::c_int::from_str_radix(value.trim(), 8)
+                    .unwrap_or_else(|e| panic!("parse flags in {}: {e}", info_path.display()))
+            },
+        );
+        let tun_iff = info
+            .lines()
+            .find_map(|line| line.strip_prefix("iff:"))
+            .map(|value| value.trim().to_owned());
+        table.insert(fd, DescriptorFact { target, flags, tun_iff });
+    }
+    table
+}
+
+/// The kernel-object identity of a socket or pipe descriptor (`socket:[N]`,
+/// `pipe:[N]`, one inode per socket or pipe). The in-process server and a
+/// VMM hold the same object exactly when these strings are equal; that is
+/// the comparison E2 names, which is why the VMM's stderr pipe (the VMM holds
+/// its write end, the server its read end) is the one sanctioned overlap.
+fn shared_kernel_object(target: &str) -> Option<&str> {
+    (target.starts_with("socket:[") || target.starts_with("pipe:[")).then_some(target)
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH
+/// S-ND295-35 — Each VMM holds exactly its own TAP queue and nothing of the server
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// Descriptor half (E2 native, D-295-R2/R3, FD 628-665 and 875-892). Two VM
+/// allocations are deployed back to back, so the second launch overlaps the
+/// first (the contrast E2 names). With both guests Running:
+///
+/// - each VMM's descriptor 3 is its own TAP's queue (`iff:<tap>` in
+///   `fdinfo`) opened `O_RDWR|O_NONBLOCK`, and no other descriptor of that
+///   VMM is a TUN queue, so neither VMM holds the other's queue;
+/// - the socket and pipe objects each VMM holds overlap the in-process
+///   server's (this test process) in exactly that VMM's stderr pipe;
+/// - the server holds no TUN queue after launch;
+/// - each argv names descriptor 3 as its `--net fd=[3]` and no `tap=`.
+#[expect(
+    clippy::doc_markdown,
+    reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
+)]
+#[tokio::test]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER step 10-01 (S-ND295-35)"]
+async fn each_vmm_holds_only_its_own_tap_queue_at_descriptor_three() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("nd295-s35-fd-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the native-metal staging filesystem");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
+    let cfg = config_path(server_tmp.path());
+
+    // Both deploys are submitted before either is polled, so the second
+    // Cloud Hypervisor launch overlaps the first.
+    let mut workload_ids = Vec::new();
+    for id in ["nd295-fd-a", "nd295-fd-b"] {
+        let spec = write_toml(
+            server_tmp.path(),
+            &format!("{id}.toml"),
+            &vm_job_toml(id, "/sbin/spin", &[], &fixture.kernel_path, &rootfs),
+        );
+        let output = deploy(DeployArgs { spec, config_path: cfg.clone() })
+            .await
+            .expect("deploy VM through the production handler");
+        workload_ids.push(output.workload_id);
+    }
+    let mut vmms = Vec::new();
+    for workload_id in &workload_ids {
+        let running = poll_until_running(&cfg, workload_id, Duration::from_secs(90)).await;
+        let row = running.snapshot.rows.first().expect("one Running allocation row");
+        let alloc = AllocationId::new(&row.alloc_id).expect("allocation id parses");
+        let address = row.workload_addr.expect("a Running VM publishes its guest address");
+        let (pid, argv) = hypervisor_process_for_alloc(&alloc);
+        vmms.push((managed_tap_name(address), address, pid, argv));
+    }
+    assert_ne!(vmms[0].0, vmms[1].0, "each allocation owns a distinct TAP");
+    assert_ne!(vmms[0].2, vmms[1].2, "each allocation runs its own Cloud Hypervisor process");
+
+    let server = descriptor_table(Path::new("/proc/self"));
+    let server_queues: BTreeMap<&RawFd, &Option<String>> = server
+        .iter()
+        .filter(|(_, fact)| fact.tun_iff.is_some())
+        .map(|(fd, fact)| (fd, &fact.tun_iff))
+        .collect();
+    assert!(
+        server_queues.is_empty(),
+        "the in-process server holds no TAP queue after launch; held queues: {server_queues:?}"
+    );
+    let server_objects: BTreeSet<&str> =
+        server.values().filter_map(|fact| shared_kernel_object(&fact.target)).collect();
+
+    for (tap, address, pid, argv) in &vmms {
+        let table = descriptor_table(&PathBuf::from(format!("/proc/{pid}")));
+        let queue = table.get(&VMM_TAP_QUEUE_DESCRIPTOR).unwrap_or_else(|| {
+            panic!("Cloud Hypervisor {pid} holds descriptor 3; descriptor table: {table:?}")
+        });
+        assert_eq!(
+            queue.tun_iff.as_deref(),
+            Some(tap.as_str()),
+            "Cloud Hypervisor {pid}'s descriptor 3 is the queue of its own TAP {tap}: {queue:?}"
+        );
+        assert_eq!(
+            queue.flags & libc::O_ACCMODE,
+            libc::O_RDWR,
+            "the queue at descriptor 3 is open read-write: {queue:?}"
+        );
+        assert_ne!(
+            queue.flags & libc::O_NONBLOCK,
+            0,
+            "the queue at descriptor 3 is open non-blocking: {queue:?}"
+        );
+        let queues: BTreeMap<RawFd, &str> = table
+            .iter()
+            .filter_map(|(fd, fact)| fact.tun_iff.as_deref().map(|iff| (*fd, iff)))
+            .collect();
+        assert_eq!(
+            queues,
+            BTreeMap::from([(VMM_TAP_QUEUE_DESCRIPTOR, tap.as_str())]),
+            "Cloud Hypervisor {pid}'s only TAP queue is its own, at descriptor 3"
+        );
+
+        let stderr = table
+            .get(&2)
+            .and_then(|fact| fact.target.starts_with("pipe:[").then_some(fact.target.as_str()))
+            .unwrap_or_else(|| {
+                panic!("Cloud Hypervisor {pid}'s stderr is a pipe; descriptor table: {table:?}")
+            });
+        let shared: BTreeSet<&str> = table
+            .values()
+            .filter_map(|fact| shared_kernel_object(&fact.target))
+            .filter(|object| server_objects.contains(object))
+            .collect();
+        assert_eq!(
+            shared,
+            BTreeSet::from([stderr]),
+            "Cloud Hypervisor {pid} shares no socket or pipe with the in-process server except \
+             its stderr pipe, whose read end the server holds; descriptor table: {table:?}"
+        );
+
+        let octets = address.octets();
+        let mac = format!(
+            "02:00:{:02x}:{:02x}:{:02x}:{:02x}",
+            octets[0], octets[1], octets[2], octets[3]
+        );
+        assert!(
+            argv.contains(&format!("--net fd=[3],mac={mac},")),
+            "Cloud Hypervisor {pid}'s network device is the queue at descriptor 3: {argv}"
+        );
+        assert!(!argv.contains("tap="), "Cloud Hypervisor {pid} is given no TAP name: {argv}");
+    }
+
+    for workload_id in &workload_ids {
+        stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("stop the exact VM workload");
+        let terminal = poll_until_terminal(&cfg, workload_id, Duration::from_secs(30)).await;
+        assert_eq!(
+            terminal.snapshot.rows.first().expect("terminal allocation row").state,
+            AllocStateWire::Terminated,
+        );
+    }
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-ND295-37 — a simultaneous external loss of one TAP's link and the
+// bridge guard is bounded and visible.
+// ---------------------------------------------------------------------
+
+/// Supervisor evidence the accepted DESIGN names: detection, retry,
+/// per-VM kill, reopen, and fail-stop (D-295-R13/R14, FD 4219-4260;
+/// RUN-295-B observations, FD 10027-10029).
+const SHARED_OWNER_UNHEALTHY: &str = "guest_network.shared_owner_unhealthy";
+const SHARED_OWNER_RETRY: &str = "guest_network.shared_owner_retry";
+const SHARED_OWNER_VM_KILLED: &str = "guest_network.shared_owner_vm_killed";
+const SHARED_OWNER_RECOVERED: &str = "guest_network.shared_owner_recovered";
+const SHARED_OWNER_FAIL_STOP: &str = "guest_network.shared_owner_fail_stop";
+const SUPERVISOR_EVENTS: [&str; 5] = [
+    SHARED_OWNER_UNHEALTHY,
+    SHARED_OWNER_RETRY,
+    SHARED_OWNER_VM_KILLED,
+    SHARED_OWNER_RECOVERED,
+    SHARED_OWNER_FAIL_STOP,
+];
+
+/// The sink guest's address: the first lease, and the destination the
+/// identifiable emitter's frames carry.
+const DOUBLE_LOSS_SINK_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 2);
+/// The emitter guest's address: the second lease, and the source identity
+/// its frames are compiled with (see [`build_identifiable_datagram_emitter`]).
+const DOUBLE_LOSS_EMITTER_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 3);
+
+/// The production shared bridge guard specification.
+fn canonical_bridge_guard() -> BridgeGuardSpec {
+    BridgeGuardSpec::new(
+        "overdrive-mtls".to_owned(),
+        "prerouting".to_owned(),
+        "managed_taps".to_owned(),
+        -300,
+        0x295a,
+        0x295b,
+    )
+    .expect("canonical production bridge guard specification")
+}
+
+/// The managed (`ovd-tp-`) ports enslaved to `bridge`.
+fn managed_bridge_ports(bridge: &str) -> BTreeSet<String> {
+    let brif = Path::new("/sys/class/net").join(bridge).join("brif");
+    std::fs::read_dir(&brif)
+        .unwrap_or_else(|e| panic!("read {}: {e}", brif.display()))
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|e| panic!("read {} entry: {e}", brif.display()))
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|port| port.starts_with("ovd-tp-"))
+        .collect()
+}
+
+/// Like [`PacketCapture::drain_identifiable`], but for a capture bound to a
+/// managed TAP, which quiescence sets down and restore raises again: the
+/// kernel reports `ENETDOWN` once on a packet socket whose device goes down
+/// and resumes delivery when it comes back up, so that one error is consumed
+/// here. The shared bridge itself is never set down, so its capture keeps
+/// [`PacketCapture::drain_identifiable`].
+fn drain_identifiable_across_link_state(capture: &PacketCapture) -> usize {
+    const NEEDLE: &[u8] = b"ND295-S37-IDENTIFIABLE";
+    let mut matched = 0;
+    loop {
+        let mut frame = [0_u8; 2048];
+        // SAFETY: frame is a live writable buffer and capture.0 is the capture's owned socket fd.
+        let read = unsafe {
+            libc::recv(capture.0, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
+        };
+        if read > 0 {
+            let length = usize::try_from(read).expect("positive recv length");
+            matched += usize::from(frame[..length].windows(NEEDLE.len()).any(|w| w == NEEDLE));
+            continue;
+        }
+        if read == 0 {
+            return matched;
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == ErrorKind::WouldBlock {
+            return matched;
+        }
+        if error.raw_os_error() == Some(libc::ENETDOWN) {
+            continue;
+        }
+        panic!("capture recv failed: {error}");
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// One captured supervisor event plus the kernel state read at the instant
+/// it was emitted.
+#[derive(Debug, Clone)]
+struct SupervisorEvent {
+    name: &'static str,
+    at: Instant,
+    fields: BTreeMap<String, String>,
+    /// `IFF_UP` of every watched managed TAP at emission.
+    managed_taps_up: BTreeMap<String, Result<Option<bool>, String>>,
+    /// Whether the bridge guard table exists at emission.
+    guard_present: Option<Result<bool, String>>,
+}
+
+#[derive(Default)]
+struct SupervisorFieldVisitor {
+    fields: BTreeMap<String, String>,
+}
+
+impl Visit for SupervisorFieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.fields
+            .insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+#[derive(Default)]
+struct SupervisorProbe {
+    managed_taps: Vec<String>,
+    guard: Option<BridgeGuardSpec>,
+}
+
+/// A tracing layer that records the supervisor's events and, synchronously
+/// inside the emitting task, the managed TAPs' administrative state and the
+/// guard's presence. Reading kernel state at emission is what makes "the
+/// event precedes TAP-down" and "the kill follows the guard repair"
+/// orderings rather than polling races. The probes never panic.
+#[derive(Clone, Default)]
+struct SupervisorTrace {
+    events: Arc<Mutex<Vec<SupervisorEvent>>>,
+    probe: Arc<Mutex<SupervisorProbe>>,
+}
+
+impl SupervisorTrace {
+    fn install_global() -> Self {
+        let trace = Self::default();
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(trace.clone()))
+            .expect("S-ND295-37 owns this nextest process's tracing subscriber");
+        trace
+    }
+
+    fn watch(&self, managed_taps: &BTreeSet<String>, guard: BridgeGuardSpec) {
+        let mut probe = lock(&self.probe);
+        probe.managed_taps = managed_taps.iter().cloned().collect();
+        probe.guard = Some(guard);
+    }
+
+    fn events(&self) -> Vec<SupervisorEvent> {
+        lock(&self.events).clone()
+    }
+
+    /// Every captured event named `name`, with its capture position.
+    fn indexed(&self, name: &str) -> Vec<(usize, SupervisorEvent)> {
+        self.events().into_iter().enumerate().filter(|(_, event)| event.name == name).collect()
+    }
+
+    fn render(&self) -> String {
+        self.events()
+            .iter()
+            .enumerate()
+            .map(|(index, event)| {
+                format!(
+                    "  #{index} {} fields={:?} managed_taps_up={:?} guard_present={:?}",
+                    event.name, event.fields, event.managed_taps_up, event.guard_present
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl<S: Subscriber> Layer<S> for SupervisorTrace {
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        let Some(name) =
+            SUPERVISOR_EVENTS.into_iter().find(|name| *name == event.metadata().name())
+        else {
+            return;
+        };
+        let at = Instant::now();
+        let mut visitor = SupervisorFieldVisitor::default();
+        event.record(&mut visitor);
+        let (managed_taps, guard) = {
+            let probe = lock(&self.probe);
+            (probe.managed_taps.clone(), probe.guard.clone())
+        };
+        let managed_taps_up = managed_taps
+            .into_iter()
+            .map(|tap| {
+                let up = tap_admin_up(&tap).map_err(|error| error.to_string());
+                (tap, up)
+            })
+            .collect();
+        let guard_present = guard.map(|spec| {
+            observe_bridge_guard(&spec, &BTreeSet::new())
+                .map(|observation| !matches!(observation, BridgeGuardObservation::Absent { .. }))
+                .map_err(|error| format!("{error:?}"))
+        });
+        lock(&self.events).push(SupervisorEvent {
+            name,
+            at,
+            fields: visitor.fields,
+            managed_taps_up,
+            guard_present,
+        });
+    }
+}
+
+/// `true` when a captured `alloc` field names `alloc`, whether the event
+/// renders it with `Display` or `Debug`.
+fn field_names_alloc(value: Option<&String>, alloc: &AllocationId) -> bool {
+    value.is_some_and(|value| value == alloc.as_str() || *value == format!("{alloc:?}"))
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-37 — A simultaneous external loss of a TAP's link and the guard is bounded and visible
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// E11 native (double loss), G5/r2, D-295-R13/R14 with review finding H1
+/// (FD 4183-4345, 6143-6154). A managed guest emits identifiable frames. An
+/// external actor deletes the bridge guard and that guest's TAP ingress link
+/// back to back. The ingress link is a per-allocation part, so the guard is
+/// the first failing node-level component:
+///
+/// - detection emits one `guest_network.shared_owner_unhealthy` with
+///   component `BridgeGuard`, read while every managed TAP is still up (the
+///   event, which follows the EXEC close, precedes quiescence), and every
+///   managed TAP reads down within one second of the deletion;
+/// - no identifiable guest frame reaches the peer TAP or ordinary host-bridge
+///   forwarding after quiescence; frames seen before it are the accepted
+///   exposure and are only reported, never called fail-closed;
+/// - after the guard is repaired, the recovery attempt kills the damaged
+///   allocation alone (`guest_network.shared_owner_vm_killed`, cause
+///   `attachment_damaged`, read with the guard present), restores the
+///   undamaged TAP, and reopens (`guest_network.shared_owner_recovered`);
+///   the damaged VMM ends, the sink VMM keeps running, and a new VM job runs
+///   its command to completion.
+///
+/// Fault order: the audit instants are not externally observable, so the
+/// deletions land at an arbitrary phase of the one-second audit. The guard
+/// goes first: an audit between the two deletions then detects the guard
+/// alone and quiesces, and the link loss surfaces in the recovery attempt,
+/// the same observable sequence. The reverse order would let such an audit
+/// kill the emitter for its link while EXEC stays open, before any
+/// node-level loss exists.
 #[allow(
     clippy::doc_markdown,
     clippy::print_stderr,
@@ -2708,8 +3440,9 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step for GH #295 real shared-owner audit and D6/D9 host bindings"]
+#[ignore = "pending DELIVER step 10-02 (S-ND295-37)"]
 async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second() {
+    let trace = SupervisorTrace::install_global();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision native-metal VM fixture");
     let tmp = tempfile::Builder::new()
@@ -2717,11 +3450,12 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
         .tempdir_in(shared_staging_root())
         .expect("native-metal test tempdir");
     let sink = build_spin_binary(tmp.path());
-    let emitter = build_identifiable_datagram_emitter(tmp.path(), "100.95.0.2".parse().unwrap());
+    let emitter = build_identifiable_datagram_emitter(tmp.path(), DOUBLE_LOSS_SINK_ADDRESS);
+    let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binaries(
         tmp.path(),
         &fixture,
-        &[(&sink, "nd295-sink"), (&emitter, "nd295-emitter")],
+        &[(&sink, "nd295-sink"), (&emitter, "nd295-emitter"), (&exit0, "nd295-exit0")],
     );
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
@@ -2743,7 +3477,12 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
     let sink_running =
         poll_until_running(&cfg, &sink_submit.workload_id, Duration::from_secs(90)).await;
     let sink_row = sink_running.snapshot.rows.first().expect("one sink allocation");
-    assert_eq!(sink_row.workload_addr, Some("100.95.0.2".parse().unwrap()));
+    assert_eq!(
+        sink_row.workload_addr,
+        Some(DOUBLE_LOSS_SINK_ADDRESS),
+        "precondition: the sink holds the address the emitter's frames target"
+    );
+    let sink_alloc = AllocationId::new(&sink_row.alloc_id).expect("sink allocation id parses");
 
     let emitter_spec = write_toml(
         server_tmp.path(),
@@ -2762,13 +3501,19 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
     let emitter_running =
         poll_until_running(&cfg, &emitter_submit.workload_id, Duration::from_secs(90)).await;
     let emitter_row = emitter_running.snapshot.rows.first().expect("one emitter allocation");
-    let emitter_addr = emitter_row.workload_addr.expect("emitter guest address");
-    let tap_for = |address: std::net::Ipv4Addr| {
-        let octets = address.octets();
-        format!("ovd-tp-{:04x}", u16::from_be_bytes([octets[2], octets[3]]))
-    };
-    let sink_tap = tap_for(sink_row.workload_addr.expect("sink guest address"));
-    let emitter_tap = tap_for(emitter_addr);
+    assert_eq!(
+        emitter_row.workload_addr,
+        Some(DOUBLE_LOSS_EMITTER_ADDRESS),
+        "precondition: the emitter holds the source identity its frames are compiled with"
+    );
+    let emitter_alloc =
+        AllocationId::new(&emitter_row.alloc_id).expect("emitter allocation id parses");
+
+    let sink_tap = managed_tap_name(DOUBLE_LOSS_SINK_ADDRESS);
+    let emitter_tap = managed_tap_name(DOUBLE_LOSS_EMITTER_ADDRESS);
+    let managed_taps = BTreeSet::from([sink_tap.clone(), emitter_tap.clone()]);
+    let (sink_pid, _) = hypervisor_process_for_alloc(&sink_alloc);
+    let (emitter_pid, _) = hypervisor_process_for_alloc(&emitter_alloc);
     let emitter_ifindex = {
         let name = std::ffi::CString::new(emitter_tap.as_str()).expect("TAP name has no NUL");
         // SAFETY: name is a live C string for the duration of the lookup.
@@ -2782,7 +3527,7 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
     let link_pin = pin_root.join(format!("links/{emitter_tap}-ingress"));
     let attach_point = TcxAttachPoint::Ingress;
     let before = query_attachment(&emitter_tap, attach_point).expect("query owned TCX attachment");
-    assert!(!before.program_ids.is_empty());
+    assert!(!before.program_ids.is_empty(), "precondition: the emitter TAP's ingress link is live");
     assert!(endpoint_present(&endpoint_pin, emitter_ifindex).expect("query endpoint entry"));
 
     let negative_counters = [
@@ -2810,20 +3555,14 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
         "real malformed, source-MAC-spoofed, source-IP/ARP-spoofed, and direct-bypass frames each reach TCX and increment only their negative partition",
     );
 
-    let guard = BridgeGuardSpec::new(
-        "overdrive-mtls".to_owned(),
-        "prerouting".to_owned(),
-        "managed_taps".to_owned(),
-        -300,
-        0x295a,
-        0x295b,
-    )
-    .expect("canonical production bridge guard specification");
-    let expected_members = BTreeSet::from([sink_tap.clone(), emitter_tap.clone()]);
-    assert!(matches!(
-        observe_bridge_guard(&guard, &expected_members).expect("healthy guard observation"),
-        BridgeGuardObservation::Exact { .. }
-    ));
+    let guard = canonical_bridge_guard();
+    assert!(
+        matches!(
+            observe_bridge_guard(&guard, &managed_taps).expect("healthy guard observation"),
+            BridgeGuardObservation::Exact { .. }
+        ),
+        "precondition: the bridge guard holds exactly the two managed TAPs"
+    );
     let bridge = std::fs::read_link(Path::new("/sys/class/net").join(&sink_tap).join("master"))
         .expect("sink TAP retains the production shared-bridge master");
     let bridge_name = bridge
@@ -2831,10 +3570,22 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
         .and_then(std::ffi::OsStr::to_str)
         .expect("shared-bridge master has a UTF-8 interface name")
         .to_owned();
+    assert_eq!(
+        managed_bridge_ports(&bridge_name),
+        managed_taps,
+        "precondition: the two TAPs are every managed port of the shared bridge"
+    );
+    for tap in &managed_taps {
+        assert_eq!(
+            tap_admin_up(tap).expect("read managed TAP flags"),
+            Some(true),
+            "precondition: the managed TAP {tap} is activated"
+        );
+    }
     let peer_capture = PacketCapture::open(&sink_tap);
     let host_capture = PacketCapture::open(&bridge_name);
     assert_eq!(
-        peer_capture.drain_identifiable(),
+        drain_identifiable_across_link_state(&peer_capture),
         0,
         "healthy TCX blocks direct guest UDP bypass at the peer TAP"
     );
@@ -2843,135 +3594,260 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
         0,
         "healthy TCX blocks direct guest UDP bypass at the shared host bridge"
     );
+    trace.watch(&managed_taps, canonical_bridge_guard());
+    assert!(
+        trace.events().is_empty(),
+        "precondition: the supervisor audits the running node with no unhealthy, kill, \
+         recovery, or fail-stop event before the fault\n{}",
+        trace.render()
+    );
 
+    // The fault: two back-to-back external losses (see the fault-order note).
+    let deletion_started = Instant::now();
+    let guard_deleted =
+        delete_owned_guard(&guard, &managed_taps).expect("typed exact-owned guard deletion");
     detach_pinned_link(&link_pin).expect("external actor detaches the exact owned TCX link");
-    let detached = query_attachment(&emitter_tap, attach_point).expect("query after detach");
-    assert!(detached.program_ids.is_empty(), "the injected first loss is exact link absence");
+    assert!(
+        matches!(guard_deleted, BridgeGuardDeleteOutcome::Deleted { .. }),
+        "the first injected loss deletes the exact owned bridge guard: {guard_deleted:?}"
+    );
+    assert!(
+        query_attachment(&emitter_tap, attach_point)
+            .expect("query after detach")
+            .program_ids
+            .is_empty(),
+        "the second injected loss is exact ingress-link absence"
+    );
     assert!(
         endpoint_present(&endpoint_pin, emitter_ifindex).expect("endpoint remains queryable"),
-        "endpoint map remains present, so no third loss is injected"
-    );
-    let classifier_at_detach =
-        read_counter(&counter_pin, GuestTcxCounter::DirectBypassDrop).expect("counter at detach");
-    let guard_before = guard_default_drop_packets(
-        &observe_bridge_guard(&guard, &expected_members).expect("guard counter baseline"),
-    );
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            let current = observe_bridge_guard(&guard, &expected_members)
-                .expect("guard-only observation after link loss");
-            if guard_default_drop_packets(&current) > guard_before {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the independent bridge guard passively counts and drops identifiable frames");
-    assert_eq!(
-        peer_capture.drain_identifiable(),
-        0,
-        "single TCX loss remains fail-closed at the peer TAP"
-    );
-    assert_eq!(
-        host_capture.drain_identifiable(),
-        0,
-        "single TCX loss remains fail-closed at the host bridge"
-    );
-    assert_eq!(
-        read_counter(&counter_pin, GuestTcxCounter::DirectBypassDrop)
-            .expect("classifier counter after detached interval"),
-        classifier_at_detach,
-        "a detached classifier cannot author the guard-only evidence"
+        "the endpoint map entry remains, so exactly two losses are injected"
     );
 
-    // Establish the complete, non-vacuous host-observation cut immediately
-    // before the typed guard deletion. The retained supervisor body separately
-    // pins this cut to its one-second audit cadence; this native body owns the
-    // real kernel state and deletion-to-quiescence duration.
-    let attachment_at_second_loss =
-        query_attachment(&emitter_tap, attach_point).expect("query at second-loss cut");
-    assert!(
-        attachment_at_second_loss.program_ids.is_empty(),
-        "the first injected loss remains exact TCX absence"
-    );
-    let guard_at_second_loss =
-        observe_bridge_guard(&guard, &expected_members).expect("guard at second-loss cut");
-    assert!(matches!(guard_at_second_loss, BridgeGuardObservation::Exact { .. }));
-    assert!(
-        guard_default_drop_packets(&guard_at_second_loss) > guard_before,
-        "the live guard counter fixes a non-vacuous audit position before its deletion"
-    );
-    assert!(
-        endpoint_present(&endpoint_pin, emitter_ifindex).expect("endpoint at second-loss cut"),
-        "the endpoint remains present; the fixture injects exactly two losses"
-    );
-    let client = overdrive_netlink::Client::new().expect("open typed host-netlink client");
-    assert_eq!(
-        client.observe_link(&emitter_tap).await.expect("observe TAP at second-loss cut"),
-        Some(true),
-        "the managed TAP is administratively up immediately before the second loss"
-    );
-    assert_eq!(
-        peer_capture.drain_identifiable(),
-        0,
-        "the still-present guard prevents escape to the peer at the second-loss cut"
-    );
-    assert_eq!(
-        host_capture.drain_identifiable(),
-        0,
-        "the still-present guard prevents escape to the host bridge at the second-loss cut"
-    );
-
-    let deletion_started = Instant::now();
-    assert!(matches!(
-        delete_owned_guard(&guard, &expected_members).expect("typed exact-owned guard deletion"),
-        BridgeGuardDeleteOutcome::Deleted { .. }
-    ));
+    // Every managed TAP reads down within one second of the deletion.
     let mut exposure_frames = 0;
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            exposure_frames += peer_capture.drain_identifiable();
-            exposure_frames += host_capture.drain_identifiable();
-            if client.observe_link(&emitter_tap).await.expect("observe managed TAP") == Some(false)
+    let mut first_down: BTreeMap<&String, Duration> = BTreeMap::new();
+    loop {
+        exposure_frames += drain_identifiable_across_link_state(&peer_capture);
+        exposure_frames += host_capture.drain_identifiable();
+        for tap in &managed_taps {
+            if !first_down.contains_key(tap)
+                && tap_admin_up(tap).expect("read managed TAP flags") == Some(false)
             {
-                break;
+                first_down.insert(tap, deletion_started.elapsed());
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    })
-    .await
-    .expect("the next one-second audit closes the exposure by quiescing the TAP");
-    assert!(deletion_started.elapsed() <= Duration::from_secs(1));
+        if first_down.len() == managed_taps.len() {
+            break;
+        }
+        assert!(
+            deletion_started.elapsed() < Duration::from_secs(1),
+            "every managed TAP reads down within 1 s of the deletion; down so far: \
+             {first_down:?}\nsupervisor events:\n{}",
+            trace.render()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    exposure_frames += drain_identifiable_across_link_state(&peer_capture);
+    exposure_frames += host_capture.drain_identifiable();
+    assert!(
+        first_down.values().all(|elapsed| *elapsed <= Duration::from_secs(1)),
+        "every managed TAP reads down within 1 s of the deletion: {first_down:?}"
+    );
     eprintln!(
-        "S-ND295-37 accepted exposure observed {exposure_frames} identifiable frame(s) before TAP quiescence; no fail-closed claim is made for that interval"
+        "S-ND295-37 managed TAPs read down at {first_down:?} after the deletion; the accepted \
+         exposure observed {exposure_frames} identifiable frame(s) before quiescence; no \
+         fail-closed claim is made for that interval"
     );
-    let _ = peer_capture.drain_identifiable();
-    let _ = host_capture.drain_identifiable();
-    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let unhealthy = trace.indexed(SHARED_OWNER_UNHEALTHY);
     assert_eq!(
-        peer_capture.drain_identifiable(),
-        0,
-        "after quiescence no identifiable guest frame reaches the peer TAP"
+        unhealthy.len(),
+        1,
+        "detection emits exactly one unhealthy event\n{}",
+        trace.render()
+    );
+    let (unhealthy_index, unhealthy_event) = &unhealthy[0];
+    assert_eq!(
+        unhealthy_event.fields.get("component").map(String::as_str),
+        Some("BridgeGuard"),
+        "the per-TAP ingress link is per-allocation damage, so the guard is the first failing \
+         node-level component\n{}",
+        trace.render()
+    );
+    assert!(unhealthy_event.at >= deletion_started, "detection follows the fault");
+    assert_eq!(
+        unhealthy_event.managed_taps_up,
+        managed_taps.iter().map(|tap| (tap.clone(), Ok(Some(true)))).collect(),
+        "the unhealthy event is emitted before any managed TAP is quiesced"
+    );
+
+    // Recovery: after the guard is repaired, the damaged allocation is killed
+    // alone, the undamaged TAP is restored, and admission reopens.
+    let mut post_quiescence_frames = 0;
+    let recovery_deadline = Instant::now() + Duration::from_secs(10);
+    let (killed_index, recovered_index) = loop {
+        post_quiescence_frames += drain_identifiable_across_link_state(&peer_capture);
+        post_quiescence_frames += host_capture.drain_identifiable();
+        assert!(
+            trace.indexed(SHARED_OWNER_FAIL_STOP).is_empty(),
+            "a repairable guard loss never fail-stops the node\n{}",
+            trace.render()
+        );
+        let reopened = trace.indexed(SHARED_OWNER_VM_KILLED).first().and_then(|(killed, _)| {
+            trace
+                .indexed(SHARED_OWNER_RECOVERED)
+                .into_iter()
+                .find(|(recovered, _)| recovered > killed)
+                .map(|(recovered, _)| (*killed, recovered))
+        });
+        if let Some(indices) = reopened {
+            break indices;
+        }
+        assert!(
+            Instant::now() < recovery_deadline,
+            "the supervisor kills the damaged allocation and reopens within its five-second \
+             recovery window\n{}",
+            trace.render()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let killed = trace.indexed(SHARED_OWNER_VM_KILLED);
+    assert_eq!(killed.len(), 1, "exactly one VM is killed\n{}", trace.render());
+    let (_, killed_event) = &killed[0];
+    assert!(killed_index > *unhealthy_index, "the kill follows detection\n{}", trace.render());
+    assert!(
+        field_names_alloc(killed_event.fields.get("alloc"), &emitter_alloc),
+        "the kill names the damaged emitter allocation {emitter_alloc}\n{}",
+        trace.render()
     );
     assert_eq!(
-        host_capture.drain_identifiable(),
-        0,
-        "after quiescence no identifiable guest frame reaches ordinary host-bridge forwarding"
+        killed_event.fields.get("cause").map(String::as_str),
+        Some("attachment_damaged"),
+        "the kill cause is per-allocation attachment damage\n{}",
+        trace.render()
+    );
+    assert_eq!(
+        killed_event.guard_present,
+        Some(Ok(true)),
+        "the kill follows the guard repair\n{}",
+        trace.render()
+    );
+    let events = trace.events();
+    let recovered_event = &events[recovered_index];
+    assert_eq!(
+        recovered_event.managed_taps_up.get(&sink_tap),
+        Some(&Ok(Some(true))),
+        "reopen follows the restore of the undamaged sink TAP\n{}",
+        trace.render()
+    );
+    assert!(
+        !matches!(recovered_event.managed_taps_up.get(&emitter_tap), Some(Ok(Some(true)))),
+        "the killed allocation's TAP is never raised again\n{}",
+        trace.render()
+    );
+
+    let kill_deadline = Instant::now() + Duration::from_secs(10);
+    while hypervisor_serves_alloc(emitter_pid, &emitter_alloc) {
+        post_quiescence_frames += drain_identifiable_across_link_state(&peer_capture);
+        post_quiescence_frames += host_capture.drain_identifiable();
+        assert!(
+            Instant::now() < kill_deadline,
+            "the damaged allocation's Cloud Hypervisor process {emitter_pid} ends after its kill"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        hypervisor_serves_alloc(sink_pid, &sink_alloc),
+        "the sink's Cloud Hypervisor process {sink_pid} keeps running"
+    );
+    let sink_now =
+        describe(DescribeArgs { id: sink_submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("describe the sink workload after recovery");
+    assert_eq!(
+        sink_now
+            .snapshot
+            .rows
+            .iter()
+            .find(|row| row.alloc_id == sink_alloc.as_str())
+            .map(|row| row.state),
+        Some(AllocStateWire::Running),
+        "the undamaged sink allocation stays Running through the recovery"
+    );
+    let repaired_guard = observe_bridge_guard(&guard, &BTreeSet::new()).expect("observe guard");
+    assert!(
+        !matches!(repaired_guard, BridgeGuardObservation::Absent { .. }),
+        "the recovery repaired the bridge guard"
+    );
+    // Panics unless the repaired guard carries its one owned default-drop rule.
+    let repaired_default_drop_packets = guard_default_drop_packets(&repaired_guard);
+    eprintln!(
+        "S-ND295-37 the repaired guard carries its owned default-drop rule \
+         ({repaired_default_drop_packets} packet(s) counted since the repair)"
+    );
+
+    // Admission is open again: a new VM job's command runs to completion.
+    let reopen_spec = write_toml(
+        server_tmp.path(),
+        "shared-guest-network-reopen.toml",
+        &vm_job_toml(
+            "shared-guest-network-reopen",
+            "/sbin/nd295-exit0",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let reopen_submit = deploy(DeployArgs { spec: reopen_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy a new VM job after recovery");
+    let reopen_terminal =
+        poll_until_terminal(&cfg, &reopen_submit.workload_id, Duration::from_secs(90)).await;
+    assert_eq!(
+        reopen_terminal.snapshot.rows.first().expect("one reopen allocation").state,
+        AllocStateWire::Terminated,
+        "a VM job admitted after the reopen runs its command to a clean exit"
+    );
+    post_quiescence_frames += drain_identifiable_across_link_state(&peer_capture);
+    post_quiescence_frames += host_capture.drain_identifiable();
+    assert_eq!(
+        post_quiescence_frames, 0,
+        "after quiescence no identifiable guest frame reaches the peer TAP or ordinary \
+         host-bridge forwarding, through recovery and after it"
+    );
+    assert_eq!(
+        (
+            trace.indexed(SHARED_OWNER_UNHEALTHY).len(),
+            trace.indexed(SHARED_OWNER_VM_KILLED).len(),
+            trace.indexed(SHARED_OWNER_FAIL_STOP).len(),
+        ),
+        (1, 1, 0),
+        "the double loss yields one detection and one kill, and the node never fail-stops\n{}",
+        trace.render()
     );
 
     for workload_id in [&emitter_submit.workload_id, &sink_submit.workload_id] {
         stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
             .await
             .expect("stop the exact native-metal workload");
-        let terminal = poll_until_terminal(&cfg, workload_id, Duration::from_secs(30)).await;
-        assert_eq!(
-            terminal.snapshot.rows.first().expect("one terminal row").state,
-            AllocStateWire::Terminated
-        );
+        poll_until_every_row_terminal(&cfg, workload_id, Duration::from_secs(60)).await;
     }
-    assert!(!endpoint_present(&endpoint_pin, emitter_ifindex).expect("post-stop endpoint query"));
-    assert!(!link_pin.exists(), "post-stop teardown removes the exact TCX pin");
+    let complement_deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let emitter_endpoint =
+            endpoint_present(&endpoint_pin, emitter_ifindex).expect("post-stop endpoint query");
+        let remaining = managed_bridge_ports(&bridge_name);
+        if !emitter_endpoint && !link_pin.exists() && remaining.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < complement_deadline,
+            "teardown removes the emitter endpoint entry ({emitter_endpoint}), its link pin \
+             ({}), and every managed TAP (remaining: {remaining:?})",
+            link_pin.exists()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert!(!Path::new("/sys/class/net").join(&emitter_tap).exists());
     assert!(!Path::new("/sys/class/net").join(&sink_tap).exists());
     handle.shutdown().await.expect("clean shutdown after complete owned cleanup");

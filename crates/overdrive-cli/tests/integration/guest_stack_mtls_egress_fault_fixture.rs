@@ -1866,7 +1866,7 @@ fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
         }
     }
 
-    let fib_before = (before.fib_rules.clone(), before.fib_routes.clone());
+    let fib_before = (before.fib_rules, before.fib_routes);
     let expected_exprs = nft::mark_accept_exemption_exprs(MTLS_LEG_S_DIAL_MARK);
     let mut transaction = Vec::with_capacity(26);
     for chain in [PREROUTING, OUTPUT] {

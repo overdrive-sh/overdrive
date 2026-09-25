@@ -4,6 +4,25 @@
 //! workload/admission request enters through the public HTTPS API. `nix` and
 //! `overdrive-netlink` provide typed host observations; product application
 //! internals are never called to submit or mutate workload state.
+//!
+//! # Composition (D-295-R16)
+//!
+//! [`DirectHandlerHarness::start`] composes
+//! `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept,
+//! guest_dns), obs, driver, vm_host_state, shared_guest_network,
+//! guest_network_exec, vm_cgroups)` with the required protection and DNS ports
+//! supplied as `SimMtlsIntercept` and `SimGuestDnsFactory`, the caller's
+//! `SimSharedGuestNetworkOwner`, and `vm_cgroups` as a `CgroupManager` over a
+//! `SimCgroupFs`, so no in-process case writes a real `cgroup.kill`.
+//!
+//! # In-process observation (`test-scenarios.md` § *In-process observation*)
+//!
+//! The harness keeps `wiring.gate()` and `wiring.supervisor()` before moving the
+//! wiring into the handler. A scenario advances the injected clock in
+//! [`OBSERVATION_STEP`]s; after each step the harness polls
+//! `handle.shutdown_requested()` and `gate.claim_release()` exactly once and
+//! drops each future, and reads `recovery_progress()` and `is_boot_closed()`
+//! directly. No observation future is held across a step or awaited.
 
 #![allow(
     clippy::expect_used,
@@ -13,19 +32,26 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::net::SocketAddr;
 use std::os::unix::fs::FileTypeExt as _;
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context as TaskContext, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use overdrive_control_plane::guest_network::GuestNetworkOperation;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
-use overdrive_core::guest_network::ServeShutdownRequest;
+use overdrive_core::guest_network::{
+    GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring, ServeShutdownRequest,
+    SharedGuestNetworkFailStop, SharedGuestNetworkRecovery,
+};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -37,6 +63,159 @@ use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry::LookupSpan;
+
+/// ADR-0124's accepted shared-network recovery cadence, stated as that
+/// contract and measured on the injected clock.
+///
+/// The control plane's `SHARED_NETWORK_*` constants are private items of its
+/// crate root; the in-process lane never names them and none is widened for it
+/// (FD 4109-4145). The E18-derived call bounds are not part of this contract.
+pub mod accepted_cadence {
+    use std::time::Duration;
+
+    /// One full audit of the shared-network owners starts every period.
+    pub const AUDIT_PERIOD: Duration = Duration::from_secs(1);
+    /// One recovery attempt runs every period while recovering.
+    pub const ATTEMPT_PERIOD: Duration = Duration::from_millis(250);
+    /// The bounded recovery window after detection.
+    pub const RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
+    /// The attempt budget inside the recovery window.
+    pub const RECOVERY_ATTEMPTS: u32 = 20;
+}
+
+/// Injected-time step between in-process observations. It divides the accepted
+/// attempt and audit periods, so every supervisor wake lands on a step.
+pub const OBSERVATION_STEP: Duration = Duration::from_millis(50);
+
+/// Host-scheduling settle after each injected-clock step, so the woken
+/// production tasks run before the observation. It is integration-host
+/// scheduling, never a simulated measurement: every oracle is stated in
+/// injected time.
+const STEP_SETTLE: Duration = Duration::from_millis(10);
+
+async fn settle_after_step() {
+    tokio::time::sleep(STEP_SETTLE).await;
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Poll `future` exactly once with a no-op waker and drop it.
+///
+/// This is the `FutureExt::now_or_never` discipline, written over `std` so the
+/// harness adds no dependency.
+fn now_or_never<F: Future>(future: F) -> Option<F::Output> {
+    let mut future = pin!(future);
+    match future.as_mut().poll(&mut TaskContext::from_waker(Waker::noop())) {
+        Poll::Ready(output) => Some(output),
+        Poll::Pending => None,
+    }
+}
+
+/// Guest-command admission as one non-blocking `claim_release()` poll reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    /// The poll is pending: the gate is `BootClosed` or `Recovering`.
+    Closed,
+    /// The poll granted a claim, which the harness dropped at once.
+    Open,
+    /// The poll returned `None`: the gate is `FailStop`.
+    FailStop,
+}
+
+/// One observation of a live handler.
+#[derive(Debug, Clone)]
+pub struct StepObservation {
+    /// Injected time since the trajectory began; zero outside a trajectory.
+    pub at: Duration,
+    /// The typed request `ServerHandle::shutdown_requested` returned on this
+    /// poll. A request is returned once; later polls do not repeat it.
+    pub request: Option<ServeShutdownRequest>,
+    /// Guest-command admission.
+    pub admission: Admission,
+    /// `recovery_progress()`: `Some` only while recovering.
+    pub recovery: Option<SharedGuestNetworkRecovery>,
+    /// `is_boot_closed()`.
+    pub boot_closed: bool,
+}
+
+impl StepObservation {
+    /// The fail-stop receipt this observation received, if any.
+    #[must_use]
+    pub fn fail_stop(&self) -> Option<&SharedGuestNetworkFailStop> {
+        self.request.as_ref().map(|ServeShutdownRequest::SharedGuestNetwork(fail_stop)| fail_stop)
+    }
+}
+
+/// The observations one stepped run of the injected clock produced, in order.
+#[derive(Debug, Clone, Default)]
+pub struct Trajectory {
+    pub observations: Vec<StepObservation>,
+}
+
+impl Trajectory {
+    /// The first observation satisfying `predicate`.
+    #[must_use]
+    pub fn first<P>(&self, predicate: P) -> Option<&StepObservation>
+    where
+        P: FnMut(&&StepObservation) -> bool,
+    {
+        self.observations.iter().find(predicate)
+    }
+
+    /// Every fail-stop receipt received during the trajectory.
+    #[must_use]
+    pub fn fail_stops(&self) -> Vec<&SharedGuestNetworkFailStop> {
+        self.observations.iter().filter_map(StepObservation::fail_stop).collect()
+    }
+
+    /// Whether admission opened again after it had left `Open`.
+    #[must_use]
+    pub fn reopened_after_closing(&self) -> bool {
+        self.observations
+            .iter()
+            .skip_while(|observation| observation.admission == Admission::Open)
+            .any(|observation| observation.admission == Admission::Open)
+    }
+}
+
+/// What a freshly constructed handler had completed when its HTTPS API first
+/// became reachable, captured before any request is sent to it.
+#[derive(Debug, Clone)]
+pub struct BootEvidence {
+    /// Admission, recovery, and request state at that moment.
+    pub observation: StepObservation,
+    /// The handler's shared-owner port calls so far, in call order.
+    pub owner_calls: Vec<GuestNetworkOperation>,
+    /// `guest_network.shared_owner_boot_phase` `(phase, transition)` pairs the
+    /// handler emitted, in emission order.
+    pub boot_phases: Vec<(String, String)>,
+}
+
+/// Append-only, timestamped diagnostic history shared by a harness and every
+/// handler it starts.
+#[derive(Clone)]
+struct Diagnostics {
+    started: Instant,
+    entries: Arc<Mutex<Vec<String>>>,
+}
+
+impl Diagnostics {
+    fn new() -> Self {
+        Self { started: Instant::now(), entries: Arc::new(Mutex::new(Vec::new())) }
+    }
+
+    fn record(&self, phase: &str, observation: &str) {
+        self.entries.lock().expect("diagnostic history lock").push(format!(
+            "elapsed_ms={} phase={phase} observation={observation}",
+            self.started.elapsed().as_millis()
+        ));
+    }
+
+    fn history(&self) -> Vec<String> {
+        self.entries.lock().expect("diagnostic history lock").clone()
+    }
+}
 
 /// One structured tracing event retained append-only for the conformance run.
 #[derive(Debug, Clone, Default)]
@@ -83,6 +262,18 @@ impl TraceHistory {
     #[must_use]
     pub fn snapshot(&self) -> Vec<TraceEvent> {
         self.inner.lock().expect("trace history lock").clone()
+    }
+
+    /// A cursor at the current end of the history, for [`Self::since`].
+    #[must_use]
+    pub fn mark(&self) -> usize {
+        self.inner.lock().expect("trace history lock").len()
+    }
+
+    /// Every event recorded after `mark`, in record order.
+    #[must_use]
+    pub fn since(&self, mark: usize) -> Vec<TraceEvent> {
+        self.inner.lock().expect("trace history lock").iter().skip(mark).cloned().collect()
     }
 }
 
@@ -369,8 +560,7 @@ pub struct DirectHandlerHarness {
     data_dir: PathBuf,
     config_dir: PathBuf,
     sequence: AtomicU64,
-    started: Instant,
-    diagnostics: Mutex<Vec<String>>,
+    diagnostics: Diagnostics,
 }
 
 impl DirectHandlerHarness {
@@ -386,23 +576,46 @@ impl DirectHandlerHarness {
             data_dir,
             config_dir,
             sequence: AtomicU64::new(0),
-            started: Instant::now(),
-            diagnostics: Mutex::new(Vec::new()),
+            diagnostics: Diagnostics::new(),
         }
     }
 
     /// Append one non-destructive diagnostic observation for this run.
     pub fn record(&self, phase: &str, observation: &str) {
-        self.diagnostics.lock().expect("diagnostic history lock").push(format!(
-            "elapsed_ms={} phase={phase} observation={observation}",
-            self.started.elapsed().as_millis()
-        ));
+        self.diagnostics.record(phase, observation);
     }
 
     /// Snapshot the append-only diagnostic history without consuming it.
     #[must_use]
     pub fn diagnostic_history(&self) -> Vec<String> {
-        self.diagnostics.lock().expect("diagnostic history lock").clone()
+        self.diagnostics.history()
+    }
+
+    /// Construct a fresh handler over this harness's retained data and config
+    /// roots and capture, before any request reaches it, what it completed
+    /// while booting: its admission state, its shared-owner port calls, and the
+    /// boot phases it emitted into `trace`.
+    pub async fn start_fresh(
+        &self,
+        owner: Arc<SimSharedGuestNetworkOwner>,
+        trace: &TraceHistory,
+    ) -> (DirectHandlerInstance, BootEvidence) {
+        let mark = trace.mark();
+        let mut instance = self.start(owner).await;
+        let observation = instance.observe();
+        let owner_calls = instance.owner().calls();
+        let boot_phases = trace
+            .since(mark)
+            .into_iter()
+            .filter(|event| event.name == "guest_network.shared_owner_boot_phase")
+            .map(|event| {
+                let field = |name: &str| event.fields.get(name).cloned().unwrap_or_default();
+                (field("phase"), field("transition"))
+            })
+            .collect();
+        let evidence = BootEvidence { observation, owner_calls, boot_phases };
+        self.record("fresh_handler_boot_evidence", &format!("{evidence:?}"));
+        (instance, evidence)
     }
 
     pub async fn start(&self, owner: Arc<SimSharedGuestNetworkOwner>) -> DirectHandlerInstance {
@@ -433,7 +646,11 @@ impl DirectHandlerHarness {
             sequence,
         ));
         let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-        let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock_port);
+        // The wiring moves into the handler; its paired gate and supervisor
+        // capabilities are kept first for the in-process observations.
+        let wiring = GuestNetworkExecWiring::new(clock_port);
+        let gate = wiring.gate();
+        let supervisor = wiring.supervisor();
         let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
             owner.clone();
         let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
@@ -455,7 +672,17 @@ impl DirectHandlerHarness {
         let trust_path = self.config_dir.join(".overdrive/config");
         let api = PublicApi::from_trust_config(&trust_path).expect("load server trust triple");
         self.record("handler_start_complete", &format!("sequence={sequence} address={address}"));
-        DirectHandlerInstance { handle: Some(handle), api, owner, clock, address }
+        DirectHandlerInstance {
+            handle: Some(handle),
+            api,
+            owner,
+            clock,
+            address,
+            gate,
+            supervisor,
+            sequence,
+            diagnostics: self.diagnostics.clone(),
+        }
     }
 }
 
@@ -472,6 +699,10 @@ pub struct DirectHandlerInstance {
     owner: Arc<SimSharedGuestNetworkOwner>,
     clock: Arc<SimClock>,
     address: SocketAddr,
+    gate: Arc<GuestNetworkExecGate>,
+    supervisor: Arc<GuestNetworkExecSupervisor>,
+    sequence: u64,
+    diagnostics: Diagnostics,
 }
 
 impl DirectHandlerInstance {
@@ -495,8 +726,61 @@ impl DirectHandlerInstance {
         self.address
     }
 
+    /// Await the typed request. Unlike [`Self::observe`] this holds the
+    /// observation future across clock steps.
     pub async fn shutdown_requested(&mut self) -> ServeShutdownRequest {
         self.handle.as_mut().expect("live server handle").shutdown_requested().await
+    }
+
+    /// Observe the handler once without advancing the clock.
+    ///
+    /// The request is polled before the gate: the supervisor writes `FailStop`
+    /// before it sends, so a received request is never paired with an earlier
+    /// gate reading.
+    pub fn observe(&mut self) -> StepObservation {
+        let request =
+            now_or_never(self.handle.as_mut().expect("live server handle").shutdown_requested());
+        let admission = match now_or_never(self.gate.claim_release()) {
+            Some(Some(claim)) => {
+                drop(claim);
+                Admission::Open
+            }
+            Some(None) => Admission::FailStop,
+            None => Admission::Closed,
+        };
+        StepObservation {
+            at: Duration::ZERO,
+            request,
+            admission,
+            recovery: self.supervisor.recovery_progress(),
+            boot_closed: self.supervisor.is_boot_closed(),
+        }
+    }
+
+    /// Advance the injected clock in [`OBSERVATION_STEP`]s for at most
+    /// `horizon`, observing once after each step, and stop after the first
+    /// observation `done` accepts. Every observation is appended to the
+    /// diagnostic history.
+    pub async fn step_until<F>(&mut self, horizon: Duration, mut done: F) -> Trajectory
+    where
+        F: FnMut(&StepObservation) -> bool + Send,
+    {
+        let mut trajectory = Trajectory::default();
+        let mut at = Duration::ZERO;
+        while at < horizon {
+            self.clock.tick(OBSERVATION_STEP);
+            at += OBSERVATION_STEP;
+            settle_after_step().await;
+            let observation = StepObservation { at, ..self.observe() };
+            self.diagnostics
+                .record("step_observation", &format!("sequence={} {observation:?}", self.sequence));
+            let finished = done(&observation);
+            trajectory.observations.push(observation);
+            if finished {
+                break;
+            }
+        }
+        trajectory
     }
 
     /// Drive the injected production clock while observing admission only

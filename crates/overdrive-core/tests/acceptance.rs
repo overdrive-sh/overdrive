@@ -352,4 +352,7 @@ mod acceptance {
     // DELIVER removes one reasoned pending marker per implementation step.
     mod netns_density_exec_gate;
     mod netns_density_placement_cap;
+    // netns-density-295 S-ND295-58 (D-295-R20) — the cleanup-pending
+    // projection over the lease × row-state table.
+    mod netns_density_cleanup_pending;
 }

@@ -26,14 +26,21 @@ const COMPONENTS: [SharedGuestNetworkComponent; 12] = [
     SharedGuestNetworkComponent::Supervisor,
 ];
 
-const CAUSES: [SharedGuestNetworkFailStopCause; 6] = [
+/// Every fail-stop cause in declaration order (FD 4348-4358). The gate is
+/// cause-agnostic, so the two D-295-R14 causes are closed exactly like the
+/// original six.
+const CAUSES: [SharedGuestNetworkFailStopCause; 8] = [
     SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+    SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined,
+    SharedGuestNetworkFailStopCause::VmKillFailed,
     SharedGuestNetworkFailStopCause::SupervisorReturned,
     SharedGuestNetworkFailStopCause::SupervisorFailed,
     SharedGuestNetworkFailStopCause::SupervisorPanicked,
     SharedGuestNetworkFailStopCause::SupervisorCancelled,
     SharedGuestNetworkFailStopCause::RequestChannelClosed,
 ];
+// The generated `FailStop(index)` range below indexes `CAUSES`.
+const _: () = assert!(CAUSES.len() == 8);
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
@@ -58,7 +65,7 @@ fn operation_strategy() -> impl Strategy<Value = Operation> {
         Just(Operation::OpenAfterBoot),
         (0_u8..12).prop_map(Operation::BeginRecovery),
         prop::option::of(0_u8..12).prop_map(Operation::CompleteAttempt),
-        (0_u8..6).prop_map(Operation::FailStop),
+        (0_u8..8).prop_map(Operation::FailStop),
         Just(Operation::Claim),
         Just(Operation::DropClaim),
     ]
@@ -276,7 +283,9 @@ proptest! {
     }
 }
 
-/// Outcome anchor: DISCUSS Elevator Pitch
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-27 — One guest-command gate; every fail-stop cause, the two
+/// D-295-R14 causes included, closes it and the first request wins.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_fail_stop_cause_is_closed_and_first_request_wins() {

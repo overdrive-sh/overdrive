@@ -2289,6 +2289,7 @@ dependencies = [
  "overdrive-sim",
  "overdrive-testing",
  "parking_lot",
+ "proptest",
  "rand 0.8.6",
  "rcgen",
  "ring",

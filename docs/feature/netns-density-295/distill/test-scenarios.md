@@ -1178,11 +1178,11 @@ AND a clear that commits after a refused boot publishes nothing
 |---|---|
 | Discharges | E10; G1/r2, G1/r4; D-295-R12 (FD 3930-3934), `MtlsSharedOwnerError::BootMemberClear` |
 | Contract shape | bounded-change |
-| Lane | pure (worker acceptance over a recording `MtlsIntercept`) |
+| Lane | integration (worker integration binary over a recording `MtlsIntercept` whose `bind_transparent` binds real loopback listeners; no root) |
 | Driving port | `MtlsInterceptWorker::start_shared_owner` |
 | Fault stimulus | the recording intercept's `converge_allocation_elements` fails, or returns non-empty members |
 | Oracle | call order `converge_allocation_elements(∅)` first; `Err(BootMemberClear { source })`, component `IpSets`; no listener task, guard, or publication |
-| Rust home | NEW `crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs::{a_fresh_owner_clears_stale_members_before_reading_the_program, a_failed_member_clear_refuses_startup_without_publication}` |
+| Rust home | NEW `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs::{a_fresh_owner_clears_stale_members_before_reading_the_program, a_failed_member_clear_refuses_startup_without_publication}` |
 | Disposition / step | NEW — 08-02 |
 
 #### S-ND295-14 .. S-ND295-18 — Restart preserves protection while refreshing listener targets; refuses ambiguous state; rolls back source-honestly
@@ -1217,12 +1217,12 @@ AND the prior node guard is handed over, not dropped, so the recorded targets su
 |---|---|
 | Discharges | E13 (sim + Lima); E11 policy-route-only case (worker half); D-295-R15 (FD 3133-3260), R18 guard presence (conditional) |
 | Contract shape | bounded-change |
-| Lane | pure (worker acceptance over a recording `MtlsIntercept`) + lima-kernel (real nft and routing through `HostMtlsIntercept`) |
+| Lane | integration (worker integration binary over a recording `MtlsIntercept` that binds real loopback listeners; no root) + lima-kernel (real nft and routing through `HostMtlsIntercept`) |
 | Driving port | `MtlsInterceptWorker::{audit_shared_owner, converge_shared_owner}`; `MtlsIntercept::{observe_shared_state, converge_allocation_elements}`; `Client::local_route_present` |
 | Fault stimulus | sim: the recording intercept's state loses a member / `policy_route=false` / `intercept_mark_guard=false` / program absent / program with a different target; Lima: real `nft delete element`, `nft delete table ip overdrive-mtls`, `ip rule del fwmark 0x1 lookup 100`, `ip route del local 0.0.0.0/0 dev lo table 100`, `nft delete table ip overdrive-mtls-guard` |
 | Oracle | audit errors: member mismatch → `MemberMismatch { expected, observed }` (`component() == IpSets`); route/guard/program → `Intercept` (`IpRules`); repair: absent program → `converge_shared(None, F, C)`; equal identity → no program write; different identity → `PostconditionMismatch` without write (S19-A); then `converge_allocation_elements(registry_expected)` and a clean audit; guard handover: the prior guard's `Drop` never runs, recorded targets intact, a later `install_outbound` succeeds; `MtlsSharedOwnerError::component()` mapping table equals FD 3251-3258 |
 | Seed / isolation | table + example; `host-kernel-shared` for Lima |
-| Rust home | NEW `crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs::{member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member, policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished, a_differently_targeted_program_is_never_rewritten}`; NEW `crates/overdrive-worker/src/mtls_intercept_worker.rs::tests::every_shared_owner_error_reports_its_one_component`; NEW `crates/overdrive-worker/tests/integration/shared_intercept_members.rs::{each_deleted_intercept_object_is_restored_exactly_with_live_allocations, the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations}` (the second is R18-conditional) (the route and guard cases exercise `Client::local_route_present` and the two guard effects through `HostMtlsIntercept::observe_shared_state`) |
+| Rust home | NEW `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs::{member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member, policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished, a_differently_targeted_program_is_never_rewritten}`; NEW `crates/overdrive-worker/src/mtls_intercept_worker.rs::tests::every_shared_owner_error_reports_its_one_component`; NEW `crates/overdrive-worker/tests/integration/shared_intercept_members.rs::{each_deleted_intercept_object_is_restored_exactly_with_live_allocations, the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations}` (the second is R18-conditional) (the route and guard cases exercise `Client::local_route_present` and the two guard effects through `HostMtlsIntercept::observe_shared_state`) |
 | Disposition / step | NEW — 08-03 (the R18-conditional body and guard assertions are removed by 08-01 if R18 is withdrawn) |
 
 #### S-ND295-62 — Intercept-marked guest TCP is dropped even without the program table
@@ -1329,7 +1329,7 @@ worker obtains and stops its listeners, not these contracts (FD 3702-3718).
 | Field | Value |
 |---|---|
 | Discharges | G2/r4 (late success cannot resurrect a terminal); G5/r5 (listener loss) |
-| Rust home | `crates/overdrive-worker/tests/acceptance/netns_density_shared_owner.rs` (nine bodies), `crates/overdrive-worker/src/mtls_intercept_worker.rs::{shared_listener_task_owner_acceptance, capability_registry_acceptance, tests}::*`, native `crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::{two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops, real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle}` |
+| Rust home | `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs` (ten bodies; moved from `tests/acceptance/`, integration lane), `crates/overdrive-worker/src/mtls_intercept_worker.rs::{shared_listener_task_owner_acceptance, capability_registry_acceptance, tests}::*`, native `crates/overdrive-worker/tests/integration/outbound_enforce_substrate_splice.rs::{two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops, real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle}` |
 | Disposition / step | RETAINED — active. Every test double implementing `MtlsIntercept` gains faithful implementations of the three new methods (mechanical fallout). The nine acceptance bodies keep their assertions and their real client connections: from the B-7 step `RecordingSharedIntercept` returns a `LoopbackInterceptListener`. The worker's `tests::*` bodies that drive the per-allocation listener branch are deleted by the step that deletes the branch; each surviving contract is carried as § *Intercept listener and stop-error test support* tabulates (shared-allocation twins pending `05-01`). `crates/overdrive-reconcilers/src/workload_lifecycle.rs::service_projection_keeps_first_tcp_order_deduplicates_tcp_and_excludes_udp` (S-ND295-21, stepless marker) is run once: if GREEN its stale marker is removed; if RED it is re-marked `pending DELIVER step 07-01 (S-ND295-21)` |
 
 #### S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled
@@ -1768,10 +1768,10 @@ Other dispositions that phase B must apply:
 | S-ND295-13A | bounded-change | seeded-in-process | RETARGETED | 08-02 |
 | S-ND295-13B | bounded-change | in-process | AUTHORED | 08-02 |
 | S-ND295-13C | bounded-change | native | RETARGETED (proof §3.5) | 08-02 |
-| S-ND295-13D | bounded-change | pure | NEW | 08-02 |
+| S-ND295-13D | bounded-change | integration (real loopback sockets) | NEW | 08-02 |
 | S-ND295-14..18 | bounded-change | pure + lima-kernel | RETAINED (2 superseded DELETED) | active |
 | S-ND295-19 | bounded-change | seeded-sim | RETARGETED (S19-B) | 09-01 |
-| S-ND295-20..26, 31A, 31B | bounded-change | pure + lima-kernel + native | RETAINED | active |
+| S-ND295-20..26, 31A, 31B | bounded-change | pure + integration (real loopback sockets) + lima-kernel + native | RETAINED | active |
 | S-ND295-27, 28 | bounded-change | pure (PBT) + VmDriver schedules | RETAINED (one body's cause table extended) | active |
 | S-ND295-29A | bounded-change | seeded-sim | NEW | 09-01 |
 | S-ND295-29B | bounded-change | in-process | RETARGETED + MOVED (proof §3.3) | 09-01 |
@@ -1806,7 +1806,7 @@ Other dispositions that phase B must apply:
 | S-ND295-58 | pure-function | pure | NEW | 07-04 |
 | S-ND295-59 | bounded-change | in-process | NEW | 07-04 |
 | S-ND295-60 | pure-function | pure | NEW | 07-04 |
-| S-ND295-61 | bounded-change | pure + lima-kernel | NEW | 08-03 |
+| S-ND295-61 | bounded-change | pure + integration (real loopback sockets) + lima-kernel | NEW | 08-03 |
 | S-ND295-62 | bounded-change | native | NEW | 08-01 |
 | S-ND295-63 | bounded-change | native | NEW | 08-01 |
 | S-ND295-64 | bounded-change | native | NEW | 08-01 |
@@ -2170,16 +2170,20 @@ shared by its test modules:
   attempt that is provably in flight; and `node_guard_drops(&self) -> usize`,
   counting drops of the guards `converge_shared` returned.
 
-**Worker acceptance support**
-(`overdrive-worker/tests/acceptance/netns_density_shared_owner.rs`).
+**Worker shared-owner support**
+(`overdrive-worker/tests/integration/netns_density_shared_owner.rs`).
 `LoopbackInterceptListener` implements `InterceptListener` over a plain
 loopback `tokio::net::TcpListener` bound at the requested address: `local_addr`
 reads the socket; `accept` is tokio's cancel-safe accept, returning the accepted
 stream as a blocking `OwnedFd`, the peer, and `getsockname` as `local`; and
 `lose()` shuts the listening socket down, so a pending or later `accept`
-returns `Accept`. It exists so the nine RETAINED S-ND295-20..26 bodies keep
+returns `Accept`. It exists so the ten RETAINED S-ND295-20..26 bodies keep
 their oracles — real client connections from allocation source addresses, and
-real socket release — unchanged. The file keeps its current lane.
+real socket release — unchanged. Because those bodies bind real sockets and make
+real connections, the file lives in the `overdrive-worker` integration binary
+(`.claude/rules/testing.md` § "Integration vs unit gating"); phase B moved it
+there from `tests/acceptance/` with no assertion change (lane decision settled
+2026-09-25).
 
 **`LegListener` bridge.** A test-local trait with `fn bound_v4(&self) ->
 std::io::Result<SocketAddrV4>` and a blocking `fn accept_leg(&self) ->
@@ -2202,7 +2206,7 @@ FD 3737-3749). Each returns an `InterceptListener` once the B-7 step lands:
 |---|---|---|---|
 | `TestSharedIntercept` | `overdrive-worker/src/mtls_intercept_worker.rs` (source-local) | faithful new trait methods; the support above | returns `TestInterceptListener` (line 2) |
 | `S19Intercept` | `overdrive-control-plane/src/lib.rs` (source-local) | delegates `bind_transparent` to an inner `SimMtlsIntercept`, exposed as `sim()`, and records the bound address through `LegListener::bound_v4` | none |
-| `RecordingSharedIntercept` | `overdrive-worker/tests/acceptance/netns_density_shared_owner.rs` | unchanged listener | returns `LoopbackInterceptListener` (line 3) |
+| `RecordingSharedIntercept` | `overdrive-worker/tests/integration/netns_density_shared_owner.rs` | unchanged listener | returns `LoopbackInterceptListener` (line 3) |
 | `ActivationBarrierIntercept` | same file | delegates to `RecordingSharedIntercept`, as today | none |
 | `ElementFaultIntercept` | `overdrive-control-plane/tests/integration/shared_element_cleanup_failure.rs` | delegates to its `SimMtlsIntercept`, as today | none |
 | `RetirementBarrierIntercept` | `overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs` | delegates to its `SimMtlsIntercept`, as today | none |

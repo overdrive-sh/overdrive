@@ -167,6 +167,8 @@ use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
+use super::leg_listener::LegListener;
+
 // ============================================================================
 // topology constants (mirror the increment-b egress spike + the 05-01/05-02 harness)
 // ============================================================================
@@ -1710,10 +1712,7 @@ impl MetalSharedIntercept {
 impl MtlsIntercept for MetalSharedIntercept {
     fn bind_transparent(&self, address: SocketAddrV4) -> InterceptResult<TcpListener> {
         let listener = self.inner.bind_transparent(address)?;
-        let bound = match listener.local_addr().expect("bound shared-listener address") {
-            std::net::SocketAddr::V4(bound) => bound,
-            std::net::SocketAddr::V6(_) => panic!("shared listener is IPv4"),
-        };
+        let bound = listener.bound_v4().expect("bound shared-listener IPv4 address");
         self.binds.fetch_add(1, Ordering::SeqCst);
         self.addresses.lock().push(bound);
         Ok(listener)

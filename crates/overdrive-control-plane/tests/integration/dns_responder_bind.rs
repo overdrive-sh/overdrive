@@ -31,6 +31,10 @@
 //!   `health.startup.refused` event whose `reason` is `dns.responder.probe` —
 //!   killing the "delete the `return Err(DnsResponderBoot)`" + "flatten the
 //!   reason mapping" mutants the `probe()`-level tests cannot reach.
+//! - **S-ND295-34 (GH #295, D-295-R16)** — the production `GuestDns` port,
+//!   built through `HostGuestDnsFactory::responder(deps)`: `audit` reads back
+//!   the socket identities `probe` recorded without mutating them, and fails
+//!   once the responder's socket is gone.
 //!
 //! Root + Lima (the `:53` bind needs CAP_NET_BIND_SERVICE / root; the
 //! composition-root test additionally needs the real `EbpfDataplane` XDP attach
@@ -48,6 +52,7 @@
               DDN-5/ipi_spec_dst/SO_REUSEADDR are the ADR-0072 contract vocabulary"
 )]
 
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -58,6 +63,9 @@ use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::serialize::binary::BinEncodable;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::responder::{DnsResponder, DnsResponderError};
+use overdrive_control_plane::dns_responder::{
+    GuestDns, GuestDnsDeps, GuestDnsFactory, HostGuestDnsFactory,
+};
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
@@ -385,6 +393,128 @@ async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
     );
 
     dns.probe().await.expect("shared-gateway fallback binds one exact socket");
+}
+
+// ---------------------------------------------------------------------------
+// S-ND295-34 — the GuestDns audit reads back its socket and fails after loss
+// ---------------------------------------------------------------------------
+
+/// The UDP `:53` sockets this process holds, as `(bound address, socket
+/// inode)`: the `/proc/net/udp` entries on port 53 whose inode is one of this
+/// process's open socket descriptors. A read-only kernel-state observation.
+fn our_udp53_sockets() -> BTreeSet<(Ipv4Addr, u64)> {
+    let ours: BTreeSet<u64> = std::fs::read_dir("/proc/self/fd")
+        .expect("read /proc/self/fd")
+        .filter_map(|entry| std::fs::read_link(entry.ok()?.path()).ok())
+        .filter_map(|target| {
+            let target = target.to_string_lossy().into_owned();
+            target.strip_prefix("socket:[")?.strip_suffix(']')?.parse().ok()
+        })
+        .collect();
+    std::fs::read_to_string("/proc/net/udp")
+        .expect("read /proc/net/udp")
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let (address, port) = fields.get(1)?.split_once(':')?;
+            let inode: u64 = fields.get(9)?.parse().ok()?;
+            let port = u16::from_str_radix(port, 16).ok()?;
+            let address = Ipv4Addr::from(u32::from_str_radix(address, 16).ok()?.to_ne_bytes());
+            (port == 53 && ours.contains(&inode)).then_some((address, inode))
+        })
+        .collect()
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED; OUT-ND295-SHARED-SWITCH
+/// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands until a fresh responder is serving
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The production responder, built through `HostGuestDnsFactory::responder`,
+/// audits clean after `probe` and while serving; its audits leave the bound
+/// `:53` socket identity unchanged and the served socket still answers; once
+/// the responder's socket is gone the audit fails.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-34)"]
+async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
+    if !is_root() {
+        eprintln!("SKIP the_responder_audit_reads_back_its_socket_and_fails_after_loss: not root");
+        return;
+    }
+    record_kernel();
+
+    // GIVEN a responder built by the production factory over a resolvable name.
+    let store = fresh_store();
+    let frontend = FrontendAddrAllocator::new();
+    let job = MeshServiceName::new("server.svc.overdrive.local").expect("valid mesh name");
+    let f = frontend.assign(&job).expect("assign F");
+    store
+        .write(ObservationWrite::ServiceBackend(job_backend_row(
+            1,
+            "server",
+            SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 8080),
+        )))
+        .await
+        .expect("write backend row");
+    let dns: Arc<dyn GuestDns> = HostGuestDnsFactory.responder(GuestDnsDeps {
+        store: Arc::clone(&store) as Arc<dyn ObservationStore>,
+        clock: Arc::new(SimClock::new()),
+        gateway: Ipv4Addr::new(100, 95, 0, 1),
+        frontend,
+    });
+    assert!(our_udp53_sockets().is_empty(), "precondition: this process holds no :53 socket");
+    dns.probe().await.expect("probe binds :53 and List-seeds");
+    let recorded = our_udp53_sockets();
+    assert_eq!(recorded.len(), 1, "probe binds exactly one :53 socket: {recorded:?}");
+    let (bound, _) = *recorded.first().expect("the recorded socket");
+
+    // WHEN it is audited after probe and while serving, THEN each audit reads
+    // back the recorded socket and changes nothing.
+    dns.audit().await.expect("audit of a freshly probed responder reads back its socket");
+    let serve = tokio::spawn(Arc::clone(&dns).serve());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    dns.audit().await.expect("audit of a serving responder reads back its socket");
+    dns.audit().await.expect("a repeated audit reads back the same socket");
+    assert_eq!(our_udp53_sockets(), recorded, "an audit binds, closes, or replaces no socket");
+
+    // The served socket still answers after the audits.
+    let dst = SocketAddrV4::new(
+        if bound.is_unspecified() { Ipv4Addr::new(127, 0, 0, 2) } else { bound },
+        53,
+    );
+    let reply = tokio::task::spawn_blocking(move || {
+        let client =
+            UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).expect("bind client");
+        client.set_read_timeout(Some(Duration::from_secs(3))).expect("set timeout");
+        client.send_to(&encode_a_query("server"), dst).expect("send A query");
+        let mut buf = [0u8; 1500];
+        let (n, _) = client.recv_from(&mut buf).expect("the serving responder answers");
+        buf[..n].to_vec()
+    })
+    .await
+    .expect("client exchange task");
+    let answered: Vec<Ipv4Addr> = Message::from_vec(&reply)
+        .expect("decode reply")
+        .answers
+        .iter()
+        .filter_map(|record| match &record.data {
+            hickory_proto::rr::RData::A(a) => Some(a.0),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(answered, vec![f], "the audited responder still answers the stable frontend F");
+
+    // WHEN the responder's socket is lost: its serve loop ends and releases it.
+    dns.stop();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .expect("the serve loop ends within its poll window")
+        .expect("the serve task joins");
+    assert!(our_udp53_sockets().is_empty(), "the responder's :53 socket is gone");
+
+    // THEN the audit fails.
+    let error = dns.audit().await.expect_err("the audit fails after the socket is lost");
+    eprintln!("dns_responder_bind: audit after socket loss: {error}");
 }
 
 /// An `ObservationStore` whose `all_service_backends_rows` always errors (the

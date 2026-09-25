@@ -32,9 +32,6 @@ mod acceptance {
     // projection and VmDriver hook delegation. Test-only RED scaffolds;
     // production API remains exactly the accepted ADR-0090 shape.
     mod service_kind_vm_workloads;
-    // GH #295 — node-shared F/C listener owner lifecycle through the accepted
-    // worker surface and standing SimMtlsIntercept outcomes.
-    mod netns_density_shared_owner;
     // GH #295 (S-ND295-28) — deterministic real-`VmDriver` EXEC-release
     // schedules through the gate-coupled seven-arg constructor: recovery
     // waits without taking the pending EXEC, claim-before-detection

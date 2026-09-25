@@ -19,22 +19,51 @@
 //! All tests run the server in a Tokio task and invoke reqwest against
 //! it — real sockets, real TLS handshake, real HTTP parsing. This is
 //! Tier 3 real-network integration per `.claude/rules/testing.md`.
+//!
+//! The graceful-shutdown failure body (GH #295 S-ND295-54) boots the
+//! `run_server_with_obs_and_driver` composition instead, so its fault can
+//! enter through the required `ServerConfig.mtls_intercept` port.
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
-use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
-use overdrive_host::RealCgroupFs;
-use overdrive_sim::adapters::{
-    SimIdentityRead, SimMtlsEnforcement, SimMtlsIntercept, SimMtlsResolve,
+use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, SubmitWorkloadRequest};
+use overdrive_control_plane::dns_responder::GuestDnsFactory;
+use overdrive_control_plane::{
+    ServerConfig, ServerHandle, run_server, run_server_with_obs_and_driver,
 };
-use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
+use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::guest_network::GuestNetworkExecWiring;
+use overdrive_core::id::NodeId;
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_host::RealCgroupFs;
+use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::dataplane::SimDataplane;
+use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
+use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::vm_host_state::SimVmHostState;
+use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+use overdrive_worker::cgroup_manager::CgroupManager;
+use overdrive_worker::mtls_intercept::{
+    InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
+    InterceptSet, NetlinkError, Result as InterceptResult,
+};
+use overdrive_worker::mtls_intercept_port::{
+    InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+};
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptStopError;
+use parking_lot::Mutex;
 use reqwest::Version;
 use tempfile::TempDir;
+
+use super::workload_lifecycle::wait::advance_and_settle;
 
 /// Build a reqwest client that trusts the CA whose PEM lives in the
 /// trust triple written by `run_server` during boot.
@@ -121,46 +150,253 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     (handle, bound, tmp, ca_pem)
 }
 
-fn shutdown_failure_worker() -> Arc<MtlsInterceptWorker> {
-    let identities: Arc<dyn IdentityRead> =
-        Arc::new(SimIdentityRead::new(std::collections::BTreeMap::new(), None));
-    let enforcement: Arc<dyn MtlsEnforcement> =
-        Arc::new(SimMtlsEnforcement::new(identities, MtlsLimits::default()));
-    let resolve: Arc<dyn MtlsResolve> =
-        Arc::new(SimMtlsResolve::new(std::collections::BTreeMap::new(), MtlsResolution::NonMesh));
-    Arc::new(MtlsInterceptWorker::new(
-        enforcement,
-        resolve,
-        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-        Arc::new(SimMtlsIntercept::new()),
-    ))
+// -------------------------------------------------------------------
+// S-ND295-54 — graceful shutdown returns the worker's typed teardown failure
+// -------------------------------------------------------------------
+
+/// The `InterceptError` the armed removal fault returns for `source_addr`.
+fn injected_removal_error(source_addr: Ipv4Addr) -> InterceptError {
+    InterceptError::NftElementUpdateFailed {
+        set: InterceptSet::ManagedGuestIps,
+        operation: InterceptElementOperation::Delete,
+        key: InterceptElementKey::Address(source_addr),
+        source: NetlinkError::nft(
+            "shared-element-remove",
+            std::io::Error::from_raw_os_error(libc::EBUSY),
+        ),
+    }
 }
 
-/// CONTRACT_SHAPE: bounded-change (graceful server shutdown returns typed diagnostics from a sealed one-shot owner).
+/// Test-local `MtlsIntercept` (the required `ServerConfig.mtls_intercept`)
+/// delegating to an inner `SimMtlsIntercept`; `remove_allocation_elements`
+/// fails with [`injected_removal_error`] while armed and records each source.
+struct RemovalFaultIntercept {
+    sim: SimMtlsIntercept,
+    armed: AtomicBool,
+    removals: Mutex<Vec<Ipv4Addr>>,
+}
+
+impl MtlsIntercept for RemovalFaultIntercept {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
+        self.sim.bind_transparent(addr)
+    }
+
+    fn converge_shared(
+        &self,
+        prior: Option<&InterceptPostcondition>,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.sim.converge_shared(prior, leg_f, leg_c)
+    }
+
+    fn observe_shared(&self) -> InterceptResult<Option<InterceptPostcondition>> {
+        self.sim.observe_shared()
+    }
+
+    fn install_outbound(
+        &self,
+        source_addr: Ipv4Addr,
+        agent_leg_f_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.sim.install_outbound(source_addr, agent_leg_f_port)
+    }
+
+    fn install_inbound(
+        &self,
+        virt: SocketAddrV4,
+        agent_leg_c_port: u16,
+    ) -> InterceptResult<Box<dyn InterceptGuard>> {
+        self.sim.install_inbound(virt, agent_leg_c_port)
+    }
+
+    fn observe_shared_state(&self) -> InterceptResult<Option<InterceptState>> {
+        self.sim.observe_shared_state()
+    }
+
+    fn converge_allocation_elements(
+        &self,
+        expected: &InterceptMembers,
+    ) -> InterceptResult<Option<InterceptState>> {
+        self.sim.converge_allocation_elements(expected)
+    }
+
+    fn remove_allocation_elements(
+        &self,
+        source_addr: Ipv4Addr,
+        destinations: &[SocketAddrV4],
+    ) -> InterceptResult<InterceptState> {
+        self.removals.lock().push(source_addr);
+        if self.armed.load(Ordering::SeqCst) {
+            return Err(injected_removal_error(source_addr));
+        }
+        self.sim.remove_allocation_elements(source_addr, destinations)
+    }
+}
+
+/// Whether `error`'s source chain carries an `io::Error` with `errno`.
+fn chain_carries_errno(error: &(dyn std::error::Error + 'static), errno: i32) -> bool {
+    let mut current = Some(error);
+    while let Some(link) = current {
+        if link.downcast_ref::<std::io::Error>().and_then(std::io::Error::raw_os_error)
+            == Some(errno)
+        {
+            return true;
+        }
+        current = link.source();
+    }
+    false
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-54 — Protection removal is convergent and its failures are typed
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Graceful server shutdown returns the worker's typed teardown failure with
+/// no retry capability: a live allocation whose protection members cannot be
+/// removed during the owner shutdown surfaces as exactly one
+/// `MtlsInterceptStopError::ElementRemoval { alloc_id, source }` naming that
+/// allocation, whose `&*source` is the `InterceptError` the required intercept
+/// port returned. The fault enters through `ServerConfig.mtls_intercept`; the
+/// server is composed by `run_server_with_obs_and_driver`, and the workload is
+/// deployed through the public API.
 #[allow(
     clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    clippy::too_many_lines,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
+              the body is one boot-deploy-fault-shutdown narrative"
 )]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
 async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
-    let (mut handle, _bound, _tmp, _ca_pem) = spawn_server().await;
-    let worker = shutdown_failure_worker();
-    worker.inject_owner_shutdown_failure_for_test();
-    handle.replace_mtls_worker_for_test(Arc::clone(&worker));
+    const TICK: Duration = Duration::from_millis(100);
 
-    let failure = handle
-        .shutdown(Duration::from_secs(2))
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
+    let clock = Arc::new(SimClock::new());
+    let clock_port: Arc<dyn Clock> = clock.clone();
+    let intercept = Arc::new(RemovalFaultIntercept {
+        sim: SimMtlsIntercept::new(),
+        armed: AtomicBool::new(false),
+        removals: Mutex::new(Vec::new()),
+    });
+    let intercept_port: Arc<dyn MtlsIntercept> = intercept.clone();
+    let guest_dns: Arc<dyn GuestDnsFactory> = Arc::new(SimGuestDnsFactory::default());
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
+        tick_cadence: TICK,
+        clock: Arc::clone(&clock_port),
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
+        dataplane_override: Some(Arc::new(SimDataplane::new())),
+        ..ServerConfig::new(Arc::new(SimKek::for_boot()), intercept_port, guest_dns)
+    };
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
+    let driver_port: Arc<dyn Driver> = driver.clone();
+    let handle = run_server_with_obs_and_driver(
+        config,
+        obs,
+        driver_port,
+        Arc::new(SimVmHostState::new()),
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        GuestNetworkExecWiring::new(Arc::clone(&clock_port)),
+        CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
+    )
+    .await
+    .expect("production boot");
+    let bound = handle.local_addr().await.expect("bound addr");
+    let client = client_trusting(&read_ca_from_trust_triple(&operator_config_dir));
+    let base = format!("https://localhost:{}", bound.port());
+
+    // GIVEN one live allocation deployed through the public API.
+    let spec = SubmitSpecInput::Job(JobSpecInput {
+        id: "shutdown-job".to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        driver: DriverInput::Vm(VmInput {
+            command: "/bin/sleep".to_owned(),
+            args: vec!["3600".to_owned()],
+            kernel: "/kernel".to_owned(),
+            rootfs: "/rootfs".to_owned(),
+        }),
+    });
+    let submitted = client
+        .post(format!("{base}/v1/workloads"))
+        .json(&SubmitWorkloadRequest { spec })
+        .send()
         .await
-        .expect_err("typed worker teardown failure reaches the server caller");
-    assert_eq!(failure.teardown_failure().failures.len(), 1);
-    assert_eq!(
-        worker
-            .shutdown_owner()
+        .expect("POST /v1/workloads");
+    assert!(submitted.status().is_success(), "submit: {submitted:?}");
+    let mut deployed = None;
+    for _ in 0..300 {
+        let listing: AllocStatusResponse = client
+            .get(format!("{base}/v1/allocs?job=shutdown-job"))
+            .send()
             .await
-            .expect_err("one-shot owner retains the original diagnostic")
-            .failures
-            .len(),
-        1
+            .expect("GET /v1/allocs")
+            .json()
+            .await
+            .expect("AllocStatusResponse body");
+        if let [row] = listing.rows.as_slice()
+            && row.state == AllocStateWire::Running
+        {
+            deployed = Some(row.alloc_id.clone());
+            break;
+        }
+        advance_and_settle(&clock, TICK).await;
+    }
+    let deployed = deployed.expect("the deployed allocation reaches Running");
+    let guest_address = driver
+        .started_specs()
+        .into_iter()
+        .find(|spec| spec.alloc.as_str() == deployed)
+        .and_then(|spec| spec.network)
+        .map(|network| network.address)
+        .expect("the deployed allocation received its guest-network assignment");
+
+    // WHEN its protection members cannot be removed and the server shuts down.
+    intercept.armed.store(true, Ordering::SeqCst);
+    let mut shutdown = std::pin::pin!(handle.shutdown(Duration::from_secs(2)));
+    let result = loop {
+        tokio::select! {
+            biased;
+            result = &mut shutdown => break result,
+            () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
+        }
+    };
+
+    // THEN graceful shutdown returns exactly the worker's typed failure.
+    let failure = result.expect_err("typed worker teardown failure reaches the server caller");
+    let failures = &failure.teardown_failure().failures;
+    assert_eq!(failures.len(), 1, "exactly one allocation-scoped failure: {failures:?}");
+    let MtlsInterceptStopError::ElementRemoval { alloc_id, source } = &failures[0] else {
+        panic!("expected ElementRemoval, got {:?}", failures[0]);
+    };
+    assert_eq!(alloc_id.as_str(), deployed, "the failure names the deployed allocation");
+    let cause: &InterceptError = source;
+    assert!(
+        matches!(
+            cause,
+            InterceptError::NftElementUpdateFailed {
+                set: InterceptSet::ManagedGuestIps,
+                operation: InterceptElementOperation::Delete,
+                key: InterceptElementKey::Address(address),
+                ..
+            } if *address == guest_address
+        ),
+        "`&*source` is the InterceptError the intercept port returned: {cause:?}"
+    );
+    assert_eq!(cause.to_string(), injected_removal_error(guest_address).to_string());
+    assert!(chain_carries_errno(cause, libc::EBUSY), "the injected cause is retained: {cause:?}");
+    assert!(
+        intercept.removals.lock().contains(&guest_address),
+        "the owner shutdown asked the port to remove the allocation's members"
     );
 }
 

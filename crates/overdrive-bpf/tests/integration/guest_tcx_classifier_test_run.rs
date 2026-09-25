@@ -45,8 +45,8 @@ unsafe impl Pod for Endpoint {}
 
 /// Host copy of Linux UAPI `struct __sk_buff` used only as
 /// `BPF_PROG_TEST_RUN` context. Pointer-valued union arms are represented by
-/// their ABI-sized `u64`; this test writes only `ingress_ifindex` and reads
-/// `mark`.
+/// their ABI-sized `u64`; these tests write only `ingress_ifindex` (ingress
+/// classifier) or `ifindex` (egress classifier) and read `mark`.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct SkBuffContext {
@@ -109,13 +109,36 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 fn test_run(program: &ProgramFd, input: &[u8], ingress_ifindex: u32) -> std::io::Result<RunResult> {
-    let mut output = vec![0_u8; input.len().max(64)];
-    // SAFETY: the kernel ABI structs are POD and zero initialization is the
+    // SAFETY: the kernel ABI struct is POD and zero initialization is the
     // canonical construction used by aya/libbpf before fields are populated.
     let mut input_ctx: SkBuffContext = unsafe { std::mem::zeroed() };
+    input_ctx.ingress_ifindex = ingress_ifindex;
+    run_with_context(program, input, &input_ctx)
+}
+
+/// `BPF_PROG_TEST_RUN` for an egress classifier: the program reads
+/// `__sk_buff.ifindex`, which the kernel resolves from the context's
+/// `ifindex` to a live device in the caller's namespace (`ENODEV` when no
+/// such device exists; values up to 1 select the namespace loopback).
+fn test_run_at_egress(
+    program: &ProgramFd,
+    input: &[u8],
+    egress_ifindex: u32,
+) -> std::io::Result<RunResult> {
+    // SAFETY: same POD construction as `test_run`.
+    let mut input_ctx: SkBuffContext = unsafe { std::mem::zeroed() };
+    input_ctx.ifindex = egress_ifindex;
+    run_with_context(program, input, &input_ctx)
+}
+
+fn run_with_context(
+    program: &ProgramFd,
+    input: &[u8],
+    input_ctx: &SkBuffContext,
+) -> std::io::Result<RunResult> {
+    let mut output = vec![0_u8; input.len().max(64)];
     // SAFETY: same POD construction; the kernel fills this output context.
     let mut output_ctx: SkBuffContext = unsafe { std::mem::zeroed() };
-    input_ctx.ingress_ifindex = ingress_ifindex;
     // SAFETY: `bpf_attr` is a C union with no destructor.
     let mut attr: bpf_attr = unsafe { std::mem::zeroed() };
     // SAFETY: only the `test` union arm is written and later read.
@@ -125,7 +148,7 @@ fn test_run(program: &ProgramFd, input: &[u8], ingress_ifindex: u32) -> std::io:
     test.data_size_in = u32::try_from(input.len()).expect("test frame length fits u32");
     test.data_out = output.as_mut_ptr() as u64;
     test.data_size_out = u32::try_from(output.len()).expect("output length fits u32");
-    test.ctx_in = std::ptr::from_ref(&input_ctx) as u64;
+    test.ctx_in = std::ptr::from_ref(input_ctx) as u64;
     test.ctx_size_in = u32::try_from(std::mem::size_of::<SkBuffContext>()).expect("ctx size");
     test.ctx_out = std::ptr::from_mut(&mut output_ctx) as u64;
     test.ctx_size_out = u32::try_from(std::mem::size_of::<SkBuffContext>()).expect("ctx size");
@@ -417,6 +440,279 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
         (Err(primary), Ok(())) => std::panic::resume_unwind(primary),
         (Err(primary), Err(cleanup)) => panic!(
             "classifier body failed: {}; remove isolated bpffs pin directory also failed: {cleanup}",
+            panic_message(primary.as_ref())
+        ),
+    }
+}
+
+/// The network namespace's loopback device. `BPF_PROG_TEST_RUN` resolves a
+/// context `ifindex` greater than 1 to a live device (`ENODEV` otherwise) and
+/// selects the loopback for 1, so the egress body keys the registered
+/// endpoint on the loopback: the classifier observes exactly the keyed
+/// egress ifindex without this Tier-2 binary creating a node-global TAP.
+const LOOPBACK_IFINDEX: u32 = 1;
+/// The ninth counter slot, `GuestTcxCounter::EgressDestinationDrop`.
+const EGRESS_DESTINATION_DROP: u32 = 8;
+/// The shared counter array's slot count once the egress slot exists.
+const COUNTER_SLOTS: u32 = 9;
+
+/// Endpoint-map state for one egress row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EgressEndpoints {
+    /// The egressing device registers `SOURCE_MAC`; another TAP registers
+    /// `PEER_MAC`.
+    Registered,
+    /// Only another TAP is registered; the egressing device has no entry.
+    OtherTapOnly,
+    /// No endpoint entry at all.
+    Empty,
+}
+
+/// Which delivery class a destination MAC belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EgressDestination {
+    /// Unicast to the egressing device's registered guest MAC.
+    RegisteredGuest,
+    /// Unicast to any other MAC.
+    ForeignUnicast,
+    /// Broadcast or multicast (I/G bit set).
+    Group,
+}
+
+/// A host-to-guest IPv4/UDP frame from the gateway to the guest, addressed
+/// at layer 2 to `destination_mac`.
+fn egress_frame(destination_mac: [u8; 6]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(42);
+    frame.extend_from_slice(&destination_mac);
+    frame.extend_from_slice(&BRIDGE_MAC);
+    frame.extend_from_slice(&[0x08, 0x00]);
+    frame.extend_from_slice(&[0x45, 0, 0, 28, 0, 0, 0, 0, 64, 17, 0, 0]);
+    frame.extend_from_slice(&GATEWAY_IP);
+    frame.extend_from_slice(&SOURCE_IP);
+    frame.extend_from_slice(&[0x13, 0x88, 0x13, 0x89, 0, 8, 0, 0]);
+    frame
+}
+
+/// The gateway's broadcast ARP request for the guest's address.
+fn egress_arp_broadcast() -> Vec<u8> {
+    let mut frame = Vec::with_capacity(42);
+    frame.extend_from_slice(&[0xff; 6]);
+    frame.extend_from_slice(&BRIDGE_MAC);
+    frame.extend_from_slice(&[0x08, 0x06]);
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
+    frame.push(6);
+    frame.push(4);
+    frame.extend_from_slice(&1_u16.to_be_bytes());
+    frame.extend_from_slice(&BRIDGE_MAC);
+    frame.extend_from_slice(&GATEWAY_IP);
+    frame.extend_from_slice(&[0_u8; 6]);
+    frame.extend_from_slice(&SOURCE_IP);
+    frame
+}
+
+const fn endpoint_record(source_ip: [u8; 4], source_mac: [u8; 6]) -> Endpoint {
+    Endpoint {
+        source_ip: u32::from_be_bytes(source_ip),
+        source_mac,
+        source_pad: [0; 2],
+        bridge_mac: BRIDGE_MAC,
+        bridge_pad: [0; 2],
+    }
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-47 — A TAP delivers unicast only to its registered guest.
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// D-295-R21 verdict table (feature delta § *Driven port — TAP egress
+/// guest-MAC delivery*): every group frame is delivered with or without an
+/// endpoint entry; unicast is delivered only to the egressing device's
+/// registered `source_mac`; every other unicast, including every unicast
+/// when the device has no entry, is dropped and counted once in
+/// `EgressDestinationDrop` (slot 8). Slots 0-7 never move.
+#[allow(clippy::too_many_lines, reason = "one closed egress verdict table is audited intact")]
+#[test]
+#[serial(env)]
+#[ignore = "pending DELIVER step 06-01 (S-ND295-47)"]
+fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
+    assert_eq!(
+        std::fs::read_to_string("/sys/class/net/lo/ifindex")
+            .expect("read the loopback ifindex")
+            .trim(),
+        LOOPBACK_IFINDEX.to_string(),
+        "the keyed egress device is the namespace loopback"
+    );
+    let artifact = super::bpf_artifact::path();
+    let pin_dir = std::path::PathBuf::from(format!(
+        "/sys/fs/bpf/overdrive-test-guest-tcx-egress-{}",
+        std::process::id()
+    ));
+    remove_pin_dir(&pin_dir).expect("remove stale isolated bpffs pin directory");
+    std::fs::create_dir_all(&pin_dir).expect("create isolated bpffs pin directory");
+    let primary = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::xdp_pass_test_run::pre_pin_service_map(&pin_dir);
+        let mut bpf = EbpfLoader::new()
+            .map_pin_path(&pin_dir)
+            .allow_unsupported_maps()
+            .load_file(&artifact)
+            .unwrap_or_else(|error| panic!("load {}: {error}", artifact.display()));
+        let program_fd = {
+            let program: &mut SchedClassifier = bpf
+                .program_mut("gh295c_egress")
+                .expect("production egress guest-MAC classifier")
+                .try_into()
+                .expect("program is SCHED_CLS");
+            program.load().expect("load egress guest-MAC classifier");
+            program.fd().expect("classifier fd").try_clone().expect("clone classifier fd")
+        };
+        let mut endpoints: HashMap<_, u32, Endpoint> =
+            HashMap::try_from(bpf.take_map("ENDPOINTS").expect("production endpoint map"))
+                .expect("typed endpoint map");
+        let mut counters: Array<_, u64> =
+            Array::try_from(bpf.take_map("COUNTERS").expect("production counter map"))
+                .expect("typed counter array");
+
+        let registered_unicast = egress_frame(SOURCE_MAC);
+        let destinations = [
+            (
+                "registered guest unicast",
+                registered_unicast.clone(),
+                EgressDestination::RegisteredGuest,
+            ),
+            (
+                "registered guest unicast, bare Ethernet header",
+                registered_unicast[..14].to_vec(),
+                EgressDestination::RegisteredGuest,
+            ),
+            (
+                "another TAP's guest unicast",
+                egress_frame(PEER_MAC),
+                EgressDestination::ForeignUnicast,
+            ),
+            ("bridge MAC unicast", egress_frame(BRIDGE_MAC), EgressDestination::ForeignUnicast),
+            (
+                "foreign unicast, bare Ethernet header",
+                egress_frame(PEER_MAC)[..14].to_vec(),
+                EgressDestination::ForeignUnicast,
+            ),
+            ("broadcast ARP request", egress_arp_broadcast(), EgressDestination::Group),
+            (
+                "IPv4 multicast",
+                egress_frame([0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb]),
+                EgressDestination::Group,
+            ),
+            (
+                "IPv6 multicast",
+                egress_frame([0x33, 0x33, 0x00, 0x00, 0x00, 0x01]),
+                EgressDestination::Group,
+            ),
+            (
+                "group bit set on the registered guest MAC",
+                egress_frame([
+                    SOURCE_MAC[0] | 0x01,
+                    SOURCE_MAC[1],
+                    SOURCE_MAC[2],
+                    SOURCE_MAC[3],
+                    SOURCE_MAC[4],
+                    SOURCE_MAC[5],
+                ]),
+                EgressDestination::Group,
+            ),
+        ];
+
+        let reset = |endpoints: &mut HashMap<_, u32, Endpoint>,
+                     counters: &mut Array<_, u64>,
+                     state: EgressEndpoints| {
+            for key in [LOOPBACK_IFINDEX, IFINDEX] {
+                match endpoints.remove(&key) {
+                    Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
+                    Err(error) => panic!("clear endpoint {key}: {error}"),
+                }
+            }
+            if state == EgressEndpoints::Registered {
+                endpoints
+                    .insert(LOOPBACK_IFINDEX, endpoint_record(SOURCE_IP, SOURCE_MAC), 0)
+                    .expect("register the egressing device's guest");
+            }
+            if state != EgressEndpoints::Empty {
+                endpoints
+                    .insert(IFINDEX, endpoint_record(PEER_IP, PEER_MAC), 0)
+                    .expect("register another TAP's guest");
+            }
+            for slot in 0..counters.len() {
+                counters.set(slot, 0, 0).expect("reset classifier counter");
+            }
+        };
+        let snapshot = |counters: &Array<_, u64>| -> Vec<u64> {
+            (0..counters.len())
+                .map(|slot| counters.get(&slot, 0).expect("read classifier counter"))
+                .collect()
+        };
+
+        // Verdicts first, row by row; the counter oracle for every row is
+        // asserted afterwards against its retained snapshot.
+        let mut counted = Vec::new();
+        for state in
+            [EgressEndpoints::Registered, EgressEndpoints::OtherTapOnly, EgressEndpoints::Empty]
+        {
+            for (destination_name, frame, destination) in &destinations {
+                let name = format!("{state:?} / {destination_name}");
+                reset(&mut endpoints, &mut counters, state);
+                let delivered = match destination {
+                    EgressDestination::Group => true,
+                    EgressDestination::RegisteredGuest => state == EgressEndpoints::Registered,
+                    EgressDestination::ForeignUnicast => false,
+                };
+                let result = test_run_at_egress(&program_fd, frame, LOOPBACK_IFINDEX)
+                    .unwrap_or_else(|error| panic!("{name} BPF_PROG_TEST_RUN: {error}"));
+                assert_eq!(
+                    result.action,
+                    if delivered { TC_ACT_OK } else { TC_ACT_SHOT },
+                    "{name} verdict"
+                );
+                counted.push((name, u64::from(!delivered), snapshot(&counters)));
+            }
+        }
+        for (name, drop_delta, slots) in counted {
+            assert_eq!(
+                slots.len(),
+                COUNTER_SLOTS as usize,
+                "{name}: the counter array has nine slots"
+            );
+            for (slot, value) in slots.iter().enumerate() {
+                let expected =
+                    if slot == EGRESS_DESTINATION_DROP as usize { drop_delta } else { 0 };
+                assert_eq!(*value, expected, "{name}: counter slot {slot}");
+            }
+        }
+
+        // A frame shorter than an Ethernet header cannot reach the program
+        // through BPF_PROG_TEST_RUN: the kernel refuses a skb test input below
+        // ETH_HLEN with EINVAL before the classifier runs, so no verdict or
+        // counter can be observed for it at this tier.
+        for length in 0..14 {
+            reset(&mut endpoints, &mut counters, EgressEndpoints::Registered);
+            let refused =
+                test_run_at_egress(&program_fd, &registered_unicast[..length], LOOPBACK_IFINDEX)
+                    .err()
+                    .unwrap_or_else(|| {
+                        panic!("a {length}-byte frame is refused before the program runs")
+                    });
+            assert_eq!(refused.raw_os_error(), Some(libc::EINVAL), "{length}-byte frame refusal");
+            assert!(
+                snapshot(&counters).iter().all(|value| *value == 0),
+                "{length}-byte frame refusal moves no counter"
+            );
+        }
+    }));
+    let cleanup = remove_pin_dir(&pin_dir);
+    match (primary, cleanup) {
+        (Ok(()), Ok(())) => {}
+        (Ok(()), Err(cleanup)) => panic!("remove isolated bpffs pin directory: {cleanup}"),
+        (Err(primary), Ok(())) => std::panic::resume_unwind(primary),
+        (Err(primary), Err(cleanup)) => panic!(
+            "egress classifier body failed: {}; remove isolated bpffs pin directory also failed: {cleanup}",
             panic_message(primary.as_ref())
         ),
     }

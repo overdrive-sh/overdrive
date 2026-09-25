@@ -159,4 +159,13 @@ mod integration {
     mod serve_killed_restart_boot_clear;
     mod serve_lifetime_fail_stop;
     mod serve_lifetime_support;
+
+    // netns-density-295 native-metal fault evidence (real guests through
+    // `serve` + `deploy`, `kvm-tests`):
+    //   * S-ND295-30B / 66 / 67 / 69 — per-VM kill scope, absent-part
+    //     teardown, host-side MAC hijack, and in-place program repair;
+    //   * S-ND295-62 / 63 / 64 — intercept-marked and absent-listener guest
+    //     TCP fails closed, and the TIME_WAIT side door with both controls.
+    mod intercept_mark_fail_closed;
+    mod shared_network_native_faults;
 }

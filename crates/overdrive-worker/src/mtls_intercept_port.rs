@@ -1980,220 +1980,61 @@ mod shared_program_rollback_acceptance {
         }
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The source-local half of `remove_allocation_elements` (FD 2931-2954):
+    /// a batch naming a duplicate or zero-port destination is refused before
+    /// any I/O, removes none of the requested members, and leaves every
+    /// process-local element token untouched ("On `Err` the tokens are
+    /// untouched"). The pinned private seam carries only the program's
+    /// observe/replace (FD 3179-3182), so the deletion of exactly the present
+    /// requested members is observed on a real kernel by
+    /// `tests/integration/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`.
     #[test]
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one finite table keeps the five disjoint source-honest rollback dispositions together"
-    )]
-    #[ignore = "superseded by D15 stateful shared-IP evidence"]
-    fn replacement_and_every_rollback_disposition_preserve_exact_identity_and_source() {
-        let requested = program(20_000);
-        let wrong_replacement = program(20_100);
-
-        // Clean first boot: successful rollback must restore absence, not a
-        // fabricated empty program.
-        {
-            let io = Arc::new(ScriptedIo::new(
-                vec![Ok(None), Ok(Some(wrong_replacement.clone())), Ok(None)],
-                vec![Ok(()), Ok(())],
-            ));
+    #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    fn remove_allocation_elements_deletes_only_present_requested_members() {
+        let source_addr = Ipv4Addr::new(100, 95, 0, 2);
+        let requested = SocketAddrV4::new(source_addr, 8443);
+        let zero_port = SocketAddrV4::new(source_addr, 0);
+        for (label, destinations) in [
+            ("duplicate destination", vec![requested, requested]),
+            ("zero-port destination", vec![zero_port]),
+            ("zero-port destination beside a valid one", vec![requested, zero_port]),
+        ] {
+            let io = Arc::new(ScriptedIo::new(Vec::new(), Vec::new()));
             let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("replacement mismatch refuses startup after exact rollback");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedReplacementMismatchRolledBack {
-                    prior: None,
-                    requested: ref actual,
-                    replacement_observed: Some(ref observed),
-                } if actual == &requested && observed == &wrong_replacement
-            ));
+            // Precondition: the allocation's element tokens are live in the
+            // host registry, as its two installs leave them.
+            host.elements.counts.lock().extend([
+                (
+                    SharedElementKey::Address {
+                        set: SharedElementSet::ManagedGuestIps,
+                        address: source_addr,
+                    },
+                    1,
+                ),
+                (
+                    SharedElementKey::Address {
+                        set: SharedElementSet::OutboundSources,
+                        address: source_addr,
+                    },
+                    1,
+                ),
+                (SharedElementKey::Destination(requested), 1),
+            ]);
+            let tokens_before = host.elements.counts.lock().clone();
+
+            let refused = host.remove_allocation_elements(source_addr, &destinations);
+
+            assert!(refused.is_err(), "{label}: the batch is refused, not partially applied");
+            assert_eq!(io.calls(), [], "{label}: refused before any program observation or write");
             assert_eq!(
-                io.calls(),
-                [
-                    Call::Observe,
-                    Call::ReplacePresent,
-                    Call::Observe,
-                    Call::RestoreAbsent,
-                    Call::Observe
-                ]
+                *host.elements.counts.lock(),
+                tokens_before,
+                "{label}: on Err every element token is untouched"
             );
-        }
-
-        let prior = program(19_000);
-
-        // Atomic replacement rejection preserves the exact prior and retains
-        // the real netlink source without attempting rollback.
-        {
-            let io = Arc::new(ScriptedIo::new(
-                vec![Ok(Some(prior.clone()))],
-                vec![Err(netlink_error("replace", libc::EBUSY))],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("replacement rejection refuses startup");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedReplaceFailed {
-                    prior: Some(ref actual_prior),
-                    requested: ref actual_requested,
-                    source: NetlinkError::Nft { .. },
-                } if actual_prior == &prior && actual_requested == &requested
-            ));
-            assert_eq!(io.calls(), [Call::Observe, Call::ReplacePresent]);
-        }
-
-        // Rollback write failure names RestorePrior and retains the direct
-        // netlink source plus prior/requested/replacement observations.
-        {
-            let io = Arc::new(ScriptedIo::new(
-                vec![Ok(Some(prior.clone())), Ok(Some(wrong_replacement.clone()))],
-                vec![Ok(()), Err(netlink_error("restore-prior", libc::EIO))],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io);
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("rollback write failure refuses startup");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedRollbackFailed {
-                    operation: InterceptSharedRollbackOperation::RestorePrior,
-                    source: NetlinkError::Nft { .. },
-                    ..
-                }
-            ));
-        }
-
-        // Rollback read failure names ReadBackPrior and retains its own real
-        // source rather than fabricating a semantic mismatch.
-        {
-            let io = Arc::new(ScriptedIo::new(
-                vec![
-                    Ok(Some(prior.clone())),
-                    Ok(Some(wrong_replacement.clone())),
-                    Err(netlink_error("read-back-prior", libc::EIO)),
-                ],
-                vec![Ok(()), Ok(())],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io);
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("rollback read failure refuses startup");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedRollbackFailed {
-                    operation: InterceptSharedRollbackOperation::ReadBackPrior,
-                    source: NetlinkError::Nft { .. },
-                    ..
-                }
-            ));
-        }
-
-        // Successful rollback I/O with the wrong identity is the source-less
-        // semantic mismatch variant and retains both observations.
-        {
-            let wrong_rollback = program(18_000);
-            let io = Arc::new(ScriptedIo::new(
-                vec![
-                    Ok(Some(prior.clone())),
-                    Ok(Some(wrong_replacement.clone())),
-                    Ok(Some(wrong_rollback.clone())),
-                ],
-                vec![Ok(()), Ok(())],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io);
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("wrong rollback identity refuses startup without a fake source");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedRollbackPostconditionMismatch {
-                    prior: Some(ref actual_prior),
-                    requested: ref actual_requested,
-                    replacement_observed: Some(ref replacement),
-                    rollback_observed: Some(ref rollback),
-                    ..
-                } if actual_prior == &prior
-                    && actual_requested == &requested
-                    && replacement == &wrong_replacement
-                    && rollback == &wrong_rollback
-            ));
-        }
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    #[ignore = "superseded by D15 stateful shared-IP evidence"]
-    fn fresh_replace_exact_prior_rollback_and_idempotent_reapply_are_complete() {
-        let requested = program(20_000);
-
-        // Fresh absence installs and reads back the exact requested identity.
-        {
-            let io = Arc::new(ScriptedIo::new(
-                vec![Ok(None), Ok(Some(requested.clone()))],
-                vec![Ok(())],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            let guard = host
-                .replace_shared_program_for_boot(requested.clone())
-                .expect("fresh shared program replacement succeeds");
-            assert_eq!(io.calls(), [Call::Observe, Call::ReplacePresent, Call::Observe]);
-            drop(guard);
-        }
-
-        // A mismatched replacement restores an exact present prior and returns
-        // the source-less rolled-back disposition.
-        {
-            let prior = program(19_000);
-            let wrong = program(21_000);
-            let io = Arc::new(ScriptedIo::new(
-                vec![Ok(Some(prior.clone())), Ok(Some(wrong.clone())), Ok(Some(prior.clone()))],
-                vec![Ok(()), Ok(())],
-            ));
-            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            let error = host
-                .replace_shared_program_for_boot(requested.clone())
-                .err()
-                .expect("wrong replacement is rolled back to the exact prior");
-            assert!(matches!(
-                error,
-                InterceptError::NftSharedReplacementMismatchRolledBack {
-                    prior: Some(actual_prior),
-                    requested: actual_requested,
-                    replacement_observed: Some(actual_wrong),
-                } if actual_prior == prior
-                    && actual_requested == requested
-                    && actual_wrong == wrong
-            ));
-            assert_eq!(
-                io.calls(),
-                [
-                    Call::Observe,
-                    Call::ReplacePresent,
-                    Call::Observe,
-                    Call::RestorePresent,
-                    Call::Observe
-                ]
-            );
-        }
-
-        // Reapplying an already exact identity adopts it without rewriting.
-        {
-            let io = Arc::new(ScriptedIo::new(vec![Ok(Some(requested.clone()))], Vec::new()));
-            let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            let guard = host
-                .replace_shared_program_for_boot(requested)
-                .expect("exact prior identity is an idempotent adoption");
-            assert_eq!(io.calls(), [Call::Observe]);
-            drop(guard);
         }
     }
 

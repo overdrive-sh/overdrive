@@ -387,6 +387,7 @@ pub fn test_wiring(
 mod tests {
     use super::*;
     use crate::adapters::clock::SimClock;
+    use futures::FutureExt;
     use overdrive_control_plane::guest_network::{GuestNetworkFact, GuestNetworkProbeStage};
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -470,24 +471,45 @@ mod tests {
         assert_eq!(owner.calls(), first_snapshot, "call snapshots are ordered and non-draining");
     }
 
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The standing non-audit slots (sweep, converge, restore), the standing
+    /// quiescence outcome `Fail`, and the Bridge audit slot each refuse every
+    /// call while armed, with the exact mapped operation and a fresh
+    /// `"scripted sim owner refusal"` source; each disarms independently, the
+    /// default quiescence outcome is full quiescence, and every call is
+    /// recorded once in call order (FD 6705-6760).
     #[tokio::test]
     async fn standing_owner_controls_preserve_exact_operation_semantics() {
+        use GuestNetworkOperation::{
+            BridgeConverge, BridgeObserve, CleanupComplement, TapSetDown, TapSetUp,
+        };
         let owner = SimSharedGuestNetworkOwner::default();
         owner.script_sweep_failure(true);
         owner.script_converge_failure(true);
         owner.script_audit_failure(true);
         owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
+        owner.script_restore_failure(true);
 
-        for (result, operation) in [
-            (owner.sweep_stale().await, GuestNetworkOperation::CleanupComplement),
-            (owner.converge_shared().await, GuestNetworkOperation::BridgeConverge),
-            (owner.quiesce_managed_taps().await.map(|_| ()), GuestNetworkOperation::TapSetDown),
-        ] {
-            assert!(matches!(
-                result,
-                Err(GuestNetworkError::Io { operation: actual, .. }) if actual == operation
-            ));
+        for call in 0..2 {
+            for (result, operation) in [
+                (owner.sweep_stale().await, CleanupComplement),
+                (owner.converge_shared().await, BridgeConverge),
+                (owner.quiesce_managed_taps().await.map(|_| ()), TapSetDown),
+                (owner.restore_quiesced_taps().await, TapSetUp),
+            ] {
+                assert!(
+                    matches!(
+                        &result,
+                        Err(GuestNetworkError::Io { operation: actual, source })
+                            if *actual == operation
+                                && source.to_string() == "scripted sim owner refusal"
+                    ),
+                    "standing {operation:?} refusal on call {call}, got {result:?}",
+                );
+            }
         }
         let audit = owner.audit_shared().await.expect_err("Bridge audit slot refuses");
         assert_eq!(audit.component, SharedGuestNetworkComponent::Bridge);
@@ -498,25 +520,131 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(
-            owner.calls(),
-            [
-                GuestNetworkOperation::CleanupComplement,
-                GuestNetworkOperation::BridgeConverge,
-                GuestNetworkOperation::TapSetDown,
-                GuestNetworkOperation::BridgeObserve,
-            ]
-        );
+        let armed = [CleanupComplement, BridgeConverge, TapSetDown, TapSetUp];
+        assert_eq!(owner.calls(), [&armed[..], &armed[..], &[BridgeObserve][..]].concat());
 
         owner.script_sweep_failure(false);
         owner.script_converge_failure(false);
         owner.script_audit_failure(false);
         owner.script_quiesce_outcome(SimQuiesceOutcome::default());
+        owner.script_restore_failure(false);
         owner.sweep_stale().await.expect("sweep slot disarms independently");
         owner.converge_shared().await.expect("converge slot disarms independently");
-        owner.audit_shared().await.expect("audit slot disarms independently");
-        owner.quiesce_managed_taps().await.expect("quiesce slot disarms independently");
-        assert_eq!(owner.calls().len(), 8, "successful calls append after failed calls");
+        let healthy = owner.audit_shared().await.expect("audit slot disarms independently");
+        assert!(healthy.damaged.is_empty(), "no damage is scripted");
+        let quiesced = owner.quiesce_managed_taps().await.expect("quiesce outcome resets");
+        assert!(quiesced.unconfirmed.is_empty(), "the default outcome is full quiescence");
+        owner.restore_quiesced_taps().await.expect("restore slot disarms independently");
+        assert_eq!(
+            owner.calls(),
+            [
+                &armed[..],
+                &armed[..],
+                &[
+                    BridgeObserve,
+                    CleanupComplement,
+                    BridgeConverge,
+                    BridgeObserve,
+                    TapSetDown,
+                    TapSetUp
+                ][..],
+            ]
+            .concat(),
+            "successful calls append after failed calls, each recorded once",
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Each `SimQuiesceOutcome` gives its pinned result: `Unconfirmed(set)`
+    /// names each not-yet-condemned member with a fresh `Io { TapSetDown }`
+    /// (empty is full quiescence), `Fail` refuses, `Hang` never resolves.
+    /// Every allocation a quiescence or audit result names is condemned and
+    /// never named again by either operation (FD 2142-2165, 6705-6718).
+    #[tokio::test]
+    async fn scripted_quiescence_outcomes_condemn_each_named_allocation_once() {
+        use GuestNetworkOperation::{BridgeObserve, TapObserve, TapSetDown};
+        let owner = SimSharedGuestNetworkOwner::default();
+
+        let full = owner.quiesce_managed_taps().await.expect("the default outcome succeeds");
+        assert!(full.unconfirmed.is_empty(), "the default Unconfirmed(∅) is full quiescence");
+
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["a", "b"])));
+        let first = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&first.unconfirmed, &allocs(&["a", "b"]), TapSetDown);
+        let repeat = owner.quiesce_managed_taps().await.expect("the outcome is standing");
+        assert_named(&repeat.unconfirmed, &allocs(&[]), TapSetDown);
+
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["b", "c"])));
+        let overlap = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&overlap.unconfirmed, &allocs(&["c"]), TapSetDown);
+
+        owner.script_audit_damage(allocs(&["a", "c", "d"]));
+        let audit = owner.audit_shared().await.expect("no node-level audit slot is armed");
+        assert_named(&audit.damaged, &allocs(&["d"]), TapObserve);
+        let reaudit = owner.audit_shared().await.expect("the damage set is standing");
+        assert_named(&reaudit.damaged, &allocs(&[]), TapObserve);
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["d"])));
+        let after_audit = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&after_audit.unconfirmed, &allocs(&[]), TapSetDown);
+
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
+        let failed = owner.quiesce_managed_taps().await;
+        assert!(
+            matches!(&failed, Err(GuestNetworkError::Io { operation: TapSetDown, .. })),
+            "Fail refuses with Io {{ TapSetDown }}, got {failed:?}",
+        );
+
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Hang);
+        let mut hung = owner.quiesce_managed_taps();
+        for poll in 0..2 {
+            assert!(hung.as_mut().now_or_never().is_none(), "Hang never resolves (poll {poll})");
+            tokio::task::yield_now().await;
+        }
+        drop(hung);
+
+        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["e"])));
+        let fresh = owner.quiesce_managed_taps().await.expect("Unconfirmed is an Ok outcome");
+        assert_named(&fresh.unconfirmed, &allocs(&["e"]), TapSetDown);
+
+        assert_eq!(
+            owner.calls(),
+            [
+                TapSetDown,
+                TapSetDown,
+                TapSetDown,
+                TapSetDown,
+                BridgeObserve,
+                BridgeObserve,
+                TapSetDown,
+                TapSetDown,
+                TapSetDown,
+                TapSetDown,
+            ],
+            "every quiescence records TapSetDown and every audit BridgeObserve, hung call included",
+        );
+    }
+
+    /// The allocation ids `names`, as the set a scripted outcome takes.
+    fn allocs(names: &[&str]) -> BTreeSet<AllocationId> {
+        names.iter().map(|name| AllocationId::new(name).expect("valid allocation id")).collect()
+    }
+
+    /// `named` names exactly `expected`, each with a fresh `Io { operation }`.
+    fn assert_named(
+        named: &BTreeMap<AllocationId, GuestNetworkError>,
+        expected: &BTreeSet<AllocationId>,
+        operation: GuestNetworkOperation,
+    ) {
+        assert_eq!(named.keys().cloned().collect::<BTreeSet<_>>(), *expected);
+        for (alloc, error) in named {
+            assert!(
+                matches!(error, GuestNetworkError::Io { operation: actual, .. } if *actual == operation),
+                "{alloc} is named with Io {{ {operation:?} }}, got {error:?}",
+            );
+        }
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -584,7 +712,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step for paired BootClosed EXEC state"]
     fn test_wiring_returns_one_owner_port_and_one_boot_closed_exec_pair() {
         let (owner, wiring) = test_wiring(Arc::new(SimClock::new()));
         assert!(wiring.supervisor().is_boot_closed());

@@ -1,17 +1,22 @@
 //! Tier-3 EGRESS capture walking proof (step 03-03) — the egress half of the
-//! ADR-0071 § Enforcement Tier-3 obligations (a)+(b), composing two production
-//! functions that ALREADY landed (03-01 / 03-02) on the live kernel:
+//! ADR-0071 § Enforcement Tier-3 obligations (a)+(b), composing production
+//! surfaces on the live kernel:
 //!
 //!   - `install_outbound_tproxy(host_veth, leg_f_port)` (03-01) — appends an
 //!     `iifname <host_veth> meta l4proto tcp tproxy to 127.0.0.1:<leg_f>` rule to
 //!     the shared `overdrive-mtls` PREROUTING chain (after the F5 exemption) and
 //!     ensures the shared fwmark rule / local route / table idempotently.
-//!   - `accept_outbound_leg(leg_f_listener, alloc, _peer)` (03-02) — recovers the
-//!     workload's dialed orig-dst via `getsockname` on the TPROXY-intercepted
-//!     leg-F socket; builds `Routed::Outbound { peer }` from the RECOVERED addr.
-//!   - `make_transparent_listener(addr)` — leg-F MUST be `IP_TRANSPARENT` because
-//!     TPROXY delivers packets whose dst is the orig-dst (NOT leg-F's bound addr);
-//!     a non-transparent socket cannot receive them.
+//!   - `HostMtlsIntercept::bind_transparent(addr)` — the `MtlsIntercept` port's
+//!     leg-F listener. Leg-F MUST be `IP_TRANSPARENT` because TPROXY delivers
+//!     packets whose dst is the orig-dst (NOT leg-F's bound addr); a
+//!     non-transparent socket cannot receive them.
+//!   - the port listener's accept, read through the `LegListener` bridge
+//!     (`leg_listener.rs`, GH #295 S-ND295-70) — the accepted connection's local
+//!     address is the workload's dialed orig-dst (`getsockname` on the
+//!     TPROXY-intercepted leg-F socket). Before the DELIVER step that changes
+//!     `bind_transparent`'s return type (gap B-7) the bridge reaches the
+//!     production outbound accept helper; after it, the host listener's
+//!     `accept`. The body is the same on both sides.
 //!
 //! NO new production code — this step is test-only, composing the above on a
 //! REAL kernel through the real netns + veth + nft + ip-rule topology proven by
@@ -33,14 +38,14 @@
 //!                 leg-F IP_TRANSPARENT 127.0.0.1:<legF>
 //!                 real backend 10.200.0.1:18777    (host lo)
 //!
-//! Port-to-port: every assertion enters through the `mtls_intercept` module's
-//! public driving-port fns (`install_outbound_tproxy` / `accept_outbound_leg` /
-//! `make_transparent_listener`) and asserts at the kernel/socket boundary:
-//! `getsockname` orig-dst recovery, the accepted-socket peer, and which listener
-//! (leg-F vs the real backend) received the connection. Litmus:
-//!   - gut `accept_outbound_leg`'s body → the `getsockname == dialed-dst`
-//!     assertion goes RED (the orig-dst is recovered by production code, not the
-//!     fixture);
+//! Port-to-port: every assertion enters through public production surfaces
+//! (`install_outbound_tproxy`, and the `MtlsIntercept` port's
+//! `bind_transparent` listener and its accept) and asserts at the kernel/socket
+//! boundary: `getsockname` orig-dst recovery, the accepted-socket peer, and which
+//! listener (leg-F vs the real backend) received the connection. Litmus:
+//!   - gut the port listener's accept-side orig-dst recovery (the accepted
+//!     connection's `local`) → the `getsockname == dialed-dst` assertion goes RED
+//!     (the orig-dst is recovered by production code, not the fixture);
 //!   - remove the `iifname` rule append in `install_outbound_tproxy` → the
 //!     redirect assertion goes RED (the without-TPROXY control proves this — the
 //!     workload reaches the backend directly instead of leg-F).
@@ -76,13 +81,15 @@ use std::io::Read as _;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_testing::cidr_lease::TestCidrLease;
-use overdrive_worker::mtls_intercept::{
-    accept_outbound_and_recover_orig_dst, install_outbound_tproxy, make_transparent_listener,
-};
+use overdrive_worker::mtls_intercept::install_outbound_tproxy;
+use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
+
+use super::leg_listener::{LegListener, accept_leg_within};
 
 // ---- topology constants (mirror the increment-b spike recipe) ----
 const NS_W: &str = "nsW-egr0303";
@@ -436,52 +443,10 @@ fn dial_with_so_mark(
     Ok(stream)
 }
 
-/// Bound a blocking `accept()` on `listener` to `timeout` by setting
-/// `SO_RCVTIMEO` on the listener socket. On Linux, `SO_RCVTIMEO` applies to
-/// `accept(2)` — a `listen`ing socket with the timeout set returns
-/// `EAGAIN`/`EWOULDBLOCK` after `timeout` with no incoming connection. This lets
-/// the PRODUCTION `accept_outbound_leg`'s internal blocking `leg_f.accept()`
-/// (mtls_intercept.rs) return a clean error after a bounded wait instead of
-/// hanging forever to nextest's 120 s slow-timeout SIGKILL (which reads
-/// identically to "VM hung / infra broke" per debugging.md § 11). The happy path
-/// (a connection arrives in well under `timeout`) is unaffected; only the
-/// silent-redirect-failure path clean-fails. The production API is UNCHANGED —
-/// this is a test-side socket-option tweak applied before handing `&leg_f` to
-/// the production fn.
-///
-/// If `SO_RCVTIMEO`-on-listener does not reliably bound `accept()` on this
-/// kernel, the bound is best-effort and the production accept may still block;
-/// the diagnostic `.expect()` messages at the call sites document the
-/// hang-on-failure shape so a future failure is still diagnosable.
-fn bound_listener_accept(listener: &TcpListener, timeout: Duration) {
-    let tv = libc::timeval {
-        tv_sec: timeout.as_secs() as libc::time_t,
-        tv_usec: libc::suseconds_t::from(timeout.subsec_micros()),
-    };
-    // SAFETY: listener owns a live socket fd; SO_RCVTIMEO takes a `timeval` of
-    // the size passed. A non-zero return is a best-effort failure (the bound is
-    // not load-bearing for correctness — only for the diagnostic failure shape),
-    // so we log rather than panic.
-    let rc = unsafe {
-        libc::setsockopt(
-            listener.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVTIMEO,
-            std::ptr::from_ref(&tv).cast(),
-            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        eprintln!(
-            "[03-03] warn: SO_RCVTIMEO on leg-F listener failed ({}); production accept may \
-             hang to slow-timeout on a silent redirect failure",
-            std::io::Error::last_os_error()
-        );
-    }
-}
-
 /// THE deliverable (ADR-0071 Tier-3 (a) + (b)): compose `install_outbound_tproxy`
-/// + `accept_outbound_leg` + `make_transparent_listener` on the REAL kernel.
+/// with the `MtlsIntercept` port's leg-F listener
+/// (`HostMtlsIntercept::bind_transparent`) and its accept (through
+/// `LegListener::accept_leg`) on the REAL kernel.
 ///
 /// Proves, in order:
 ///   AC4 (without-TPROXY control): with NO egress rule, the workload's
@@ -489,8 +454,8 @@ fn bound_listener_accept(listener: &TcpListener, timeout: Duration) {
 ///        "fired" from "passed through" (debugging.md §5/§11).
 ///   AC1 (with-TPROXY redirect + getsockname recovery): `install_outbound_tproxy`
 ///        appends the `iifname <host_veth>` rule; the workload's `connect` is
-///        redirected to the leg-F IP_TRANSPARENT listener; `accept_outbound_leg`
-///        recovers orig-dst via getsockname == the dialed (ip,port).
+///        redirected to the leg-F IP_TRANSPARENT listener; the port listener's
+///        accept recovers orig-dst via getsockname == the dialed (ip,port).
 ///   AC2-a (agent HOST dial reaches the backend — by TOPOLOGY, NOT the F5
 ///        exemption): the agent's HOST-netns dial carrying
 ///        `SO_MARK = MTLS_LEG_S_DIAL_MARK` reaches the REAL backend directly
@@ -568,17 +533,17 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // redirect to leg-F + getsockname orig-dst recovery.
     // ----------------------------------------------------------------
     // leg-F MUST be IP_TRANSPARENT (TPROXY delivers orig-dst-addressed packets).
-    // FORWARD-NOTE (04-01): make_transparent_listener's rustdoc
-    // (mtls_intercept.rs:127) still says "inbound leg-C", but the fn is
-    // direction-agnostic and 03-03 exercises it here for leg-F (egress). 04-01
-    // wires both legs and touches that file — broaden the rustdoc there to cover
-    // leg-C (inbound) / leg-F (egress). (Test-only step: cannot touch src/ here.)
-    let leg_f = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-F");
-    let leg_f_port = match leg_f.local_addr().expect("leg-F local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-F addr, got {other}"),
-    };
+    // It is bound through the `MtlsIntercept` port, whose host adapter owns the
+    // transparent socket; the bound leg is read and accepted through the
+    // `LegListener` bridge so this body is unchanged when the port's listener
+    // type changes (gap B-7).
+    let intercept = HostMtlsIntercept::new();
+    let leg_f = Arc::new(
+        intercept
+            .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent leg-F"),
+    );
+    let leg_f_port = leg_f.bound_v4().expect("leg-F bound IPv4 address").port();
 
     // The driving port under test: install the egress rule matching
     // `iifname VETH_H` → redirect ALL the workload's egress TCP to leg-F.
@@ -600,22 +565,18 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
 
     let redirect_client = std::thread::spawn(move || run_client_in_netns(backend, None));
 
-    // accept_outbound_and_recover_orig_dst drives the production getsockname
-    // recovery on the TPROXY-intercepted leg-F socket and returns the recovered
-    // orig-dst (the resolve consumer that classifies it is 04-02's default-lane
-    // DST job — here we prove the kernel-side capture + getsockname recovery).
-    // Bound the PRODUCTION accept's internal blocking accept(): if the redirect
-    // silently failed (the dial landed on the fallback backend instead of
-    // leg-F), this returns a clean error after 8 s instead of hanging to the
-    // 120 s slow-timeout SIGKILL.
-    bound_listener_accept(&leg_f, Duration::from_secs(8));
-    let (leg, got) = accept_outbound_and_recover_orig_dst(&leg_f).expect(
-        "accept_outbound_and_recover_orig_dst must recover orig-dst from the TPROXY redirect. A \
-             clean error here (EAGAIN/timeout after 8 s) means the redirect did NOT deliver to \
-             leg-F — egress capture did not fire (the dial reached the fallback backend instead). \
-             If this HANGS instead of clean-failing, SO_RCVTIMEO did not bound the production \
-             accept on this kernel; treat a 120 s slow-timeout SIGKILL as the same \
-             redirect-did-not-fire signal.",
+    // The port listener's accept drives the production getsockname recovery on
+    // the TPROXY-intercepted leg-F socket: the accepted connection's `local` is
+    // the recovered orig-dst (the resolve consumer that classifies it is 04-02's
+    // default-lane DST job — here we prove the kernel-side capture +
+    // getsockname recovery). The wait is bounded: if the redirect silently
+    // failed (the dial landed on the fallback backend instead of leg-F), the
+    // accept reports a clean timeout after 8 s instead of hanging to the 120 s
+    // slow-timeout SIGKILL.
+    let (leg, _peer, got) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
+        "the port listener's accept must recover orig-dst from the TPROXY redirect. A timeout \
+         here (no connection within 8 s) means the redirect did NOT deliver to leg-F — egress \
+         capture did not fire (the dial reached the fallback backend instead).",
     );
 
     // AC1: the redirect fired (leg-F accepted, NOT the fallback backend) AND
@@ -717,15 +678,11 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // ----------------------------------------------------------------
     let selfexempt_client =
         std::thread::spawn(move || run_client_in_netns(backend, Some(MTLS_LEG_S_DIAL_MARK)));
-    // Bound the production accept again (the SO_RCVTIMEO set above persists on the
-    // listener fd; re-apply defensively in case a prior accept reset it).
-    bound_listener_accept(&leg_f, Duration::from_secs(8));
-    let (leg2, got2) = accept_outbound_and_recover_orig_dst(&leg_f).expect(
+    // The same bounded accept through the port listener.
+    let (leg2, _peer2, got2) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
         "self-exempt-impossible: a workload's SO_MARK-stamped dial must STILL be captured to \
-         leg-F (the mark does not cross the netns boundary). A clean error here (EAGAIN/timeout \
-         after 8 s) means the workload self-exempted — a security hole. If this HANGS instead, \
-         SO_RCVTIMEO did not bound the production accept on this kernel; a 120 s slow-timeout \
-         SIGKILL is the same self-exempt-leaked signal.",
+         leg-F (the mark does not cross the netns boundary). A timeout here (no connection \
+         within 8 s) means the workload self-exempted — a security hole.",
     );
     eprintln!(
         "[03-03][AC2-b self-exempt-impossible] workload marked dial STILL captured; getsockname = {got2}"

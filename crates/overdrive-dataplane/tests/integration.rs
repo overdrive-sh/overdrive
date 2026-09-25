@@ -25,8 +25,14 @@ mod integration {
     /// a retry after a partial failure (forward removed, reverse survived)
     /// purges the stale reverse entry. Caller-supplied backend.
     mod deregister_retry_safety;
-    /// netns-density-295 S-ND295-00 — Lima real-kernel D12 inventory,
-    /// retained unpinned objects, and exact-path ownership/schema evidence.
+    /// netns-density-295 S-ND295-48 (D-295-R21) — Lima real-kernel lifecycle
+    /// of the egress guest-MAC classifier: load, attach at TCX egress, pin
+    /// beside the ingress link, query, detach, ninth counter slot.
+    mod guest_tcx_egress_lifecycle;
+    /// netns-density-295 S-ND295-00 / S-ND295-48 — Lima real-kernel D12
+    /// inventory (both receipted classifier programs), retained unpinned
+    /// objects, and exact-path ownership/schema evidence. Owns the scratch
+    /// TAP / pin-root fixture the egress lifecycle reuses.
     mod guest_tcx_inventory;
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.

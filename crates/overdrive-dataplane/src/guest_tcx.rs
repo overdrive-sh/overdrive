@@ -1889,8 +1889,12 @@ mod tests {
         }
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-48 — The egress drop counter is the ninth private slot, and the
+    /// counter schema accepts exactly nine slots (eight becomes `Unsupported`).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
+    #[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
     fn semantic_counter_vocabulary_maps_to_the_exact_private_array_slots() {
         let cases = [
             (GuestTcxCounter::GatewayHostPass, 0),
@@ -1901,9 +1905,57 @@ mod tests {
             (GuestTcxCounter::DirectBypassDrop, 5),
             (GuestTcxCounter::ArpPass, 6),
             (GuestTcxCounter::MalformedDrop, 7),
+            (GuestTcxCounter::EgressDestinationDrop, 8),
         ];
         for (counter, expected) in cases {
-            assert_eq!(counter_index(counter), expected);
+            assert_eq!(counter_index(counter), expected, "{counter:?} private slot");
+        }
+
+        // `CounterSlots` denotes exactly nine entries: nine is the one
+        // accepted capacity, and the former eight-slot array (and every other
+        // count) is an opaque `Unsupported` property.
+        assert_eq!(accepted_counter_capacity(), 9, "CounterSlots denotes exactly nine entries");
+        assert_eq!(
+            project_map_schema(&counter_map_with_capacity(18, 9)).capacity,
+            GuestTcxMapCapacity::CounterSlots
+        );
+        for rejected in [8, 10] {
+            let capacity = project_map_schema(&counter_map_with_capacity(18, rejected)).capacity;
+            assert!(
+                matches!(capacity, GuestTcxMapCapacity::Unsupported(_)),
+                "{rejected} counter slots must be Unsupported, observed {capacity:?}"
+            );
+        }
+
+        // Nine distinct slots, each inside the nine-entry array: the
+        // vocabulary is a bijection onto the accepted counter array.
+        let slots: BTreeSet<u32> =
+            cases.iter().map(|(counter, _)| counter_index(*counter)).collect();
+        assert_eq!(slots.len(), cases.len(), "every counter owns a distinct slot");
+        assert!(
+            slots.iter().all(|slot| *slot < accepted_counter_capacity()),
+            "every counter slot lies inside the accepted counter array"
+        );
+    }
+
+    /// The one counter-array capacity the production schema projection
+    /// accepts as `CounterSlots`. The exact value is pinned by
+    /// `semantic_counter_vocabulary_maps_to_the_exact_private_array_slots`;
+    /// every other source-local schema table derives its valid and
+    /// wrong-capacity rows from it, so the tables move with the counter
+    /// array (D-295-R21). Panics unless exactly one capacity in a closed
+    /// probe range is accepted, so an accept-any projection cannot hide
+    /// behind the derivation.
+    fn accepted_counter_capacity() -> u32 {
+        let accepted: Vec<u32> = (0..=64)
+            .filter(|max_entries| {
+                project_map_schema(&counter_map_with_capacity(0, *max_entries)).capacity
+                    == GuestTcxMapCapacity::CounterSlots
+            })
+            .collect();
+        match accepted.as_slice() {
+            [capacity] => *capacity,
+            other => panic!("the counter schema accepts exactly one capacity; accepted {other:?}"),
         }
     }
 
@@ -2195,14 +2247,8 @@ mod tests {
             max_entries: 65_536,
             name: b"ENDPOINTS".to_vec(),
         };
-        let counter = RawGuestTcxMapObservation {
-            id: 18,
-            kind: aya::maps::MapType::Array,
-            key_size: 4,
-            value_size: 8,
-            max_entries: 8,
-            name: b"COUNTERS".to_vec(),
-        };
+        let counter_slots = accepted_counter_capacity();
+        let counter = counter_map_with_capacity(18, counter_slots);
         let mut wrong_kind = endpoint.clone();
         wrong_kind.kind = aya::maps::MapType::Array;
         let mut unsupported_kind = endpoint.clone();
@@ -2232,9 +2278,9 @@ mod tests {
         let mut wrong_counter_value_b = counter.clone();
         wrong_counter_value_b.value_size = 10;
         let mut wrong_counter_capacity_a = counter.clone();
-        wrong_counter_capacity_a.max_entries = 7;
+        wrong_counter_capacity_a.max_entries = counter_slots - 1;
         let mut wrong_counter_capacity_b = counter.clone();
-        wrong_counter_capacity_b.max_entries = 9;
+        wrong_counter_capacity_b.max_entries = counter_slots + 1;
 
         let endpoint_schema = project_map_schema(&endpoint);
         let counter_schema = project_map_schema(&counter);
@@ -2418,12 +2464,16 @@ mod tests {
     }
 
     fn counter_map(id: u32) -> RawGuestTcxMapObservation {
+        counter_map_with_capacity(id, accepted_counter_capacity())
+    }
+
+    fn counter_map_with_capacity(id: u32, max_entries: u32) -> RawGuestTcxMapObservation {
         RawGuestTcxMapObservation {
             id,
             kind: aya::maps::MapType::Array,
             key_size: 4,
             value_size: 8,
-            max_entries: 8,
+            max_entries,
             name: b"COUNTERS".to_vec(),
         }
     }
@@ -2670,21 +2720,35 @@ mod tests {
         }
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-48 — An absent real interface or pin keeps its operation's
+    /// own sourced failure family at both TCX attach points and for the
+    /// egress drop counter; absence is never a fabricated success.
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Real bpffs and TCX syscalls, so the body runs only in the
+    /// `integration-tests` lane (Lima root).
+    #[cfg(feature = "integration-tests")]
     #[test]
-    #[ignore = "pending DELIVER step 02-01: typed aya query/open error projection is outside the ten non-waived bodies"]
+    #[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
     fn absent_real_objects_preserve_the_operation_specific_source_family() {
         let missing = format!("/sys/fs/bpf/overdrive/absent-{}", std::process::id());
-        assert!(matches!(
-            query_attachment("overdrive-absent-interface", TcxAttachPoint::Ingress),
-            Err(GuestTcxError::Program { .. })
-        ));
+        for attach_point in [TcxAttachPoint::Ingress, TcxAttachPoint::Egress] {
+            let observed = query_attachment("overdrive-absent-interface", attach_point);
+            assert!(
+                matches!(&observed, Err(GuestTcxError::Program { .. })),
+                "{attach_point:?} query of an absent interface keeps the program source: {observed:?}"
+            );
+        }
         assert!(matches!(detach_pinned_link(&missing), Err(GuestTcxError::Link { .. })));
         assert!(matches!(endpoint_present(&missing, 1), Err(GuestTcxError::Map { .. })));
         assert!(matches!(remove_endpoint(&missing, 1), Err(GuestTcxError::Map { .. })));
-        assert!(matches!(
-            read_counter(&missing, GuestTcxCounter::MalformedDrop),
-            Err(GuestTcxError::Map { .. })
-        ));
+        for counter in [GuestTcxCounter::MalformedDrop, GuestTcxCounter::EgressDestinationDrop] {
+            let observed = read_counter(&missing, counter);
+            assert!(
+                matches!(&observed, Err(GuestTcxError::Map { .. })),
+                "{counter:?} read of an absent counter pin keeps the map source: {observed:?}"
+            );
+        }
     }
 }

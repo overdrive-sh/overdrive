@@ -25,9 +25,11 @@
 //! ## What this AT proves (the single-source consistency oracle)
 //!
 //!   1. **Capture + recover** — the netns workload's `connect(B)` ingresses
-//!      vethH → PREROUTING → egress nft-TPROXY redirect → leg-F (IP_TRANSPARENT)
-//!      → the PRODUCTION `accept_outbound_and_recover_orig_dst` recovers orig_dst
-//!      via `getsockname`. The recovered orig_dst == **B** (the known
+//!      vethH → PREROUTING → egress nft-TPROXY redirect → leg-F (IP_TRANSPARENT,
+//!      bound through the `MtlsIntercept` port, `HostMtlsIntercept::bind_transparent`)
+//!      → the port listener's accept (read through the `LegListener` bridge,
+//!      `leg_listener.rs`) recovers orig_dst via `getsockname` as the accepted
+//!      connection's `local`. The recovered orig_dst == **B** (the known
 //!      `service_backends` addr the workload dialed; a wrong recovery would
 //!      classify the wrong arm). This is the 03-03 / 05-01 capture half, reused.
 //!   2. **Resolve recognizes the SAME addr** — feed the `getsockname`-recovered
@@ -109,14 +111,16 @@
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
 use overdrive_sim::adapters::SimMtlsResolve;
 use overdrive_testing::cidr_lease::TestCidrLease;
-use overdrive_worker::mtls_intercept::{
-    accept_outbound_and_recover_orig_dst, install_outbound_tproxy, make_transparent_listener,
-};
+use overdrive_worker::mtls_intercept::install_outbound_tproxy;
+use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
+
+use super::leg_listener::{LegListener, accept_leg_within};
 
 // ============================================================================
 // topology constants (mirror the increment-b egress spike + egress_tproxy_capture)
@@ -425,39 +429,6 @@ except Exception as e:
     }
 }
 
-/// Bound a blocking `accept()` on `listener` to `timeout` via `SO_RCVTIMEO` so
-/// the PRODUCTION `accept_outbound_and_recover_orig_dst`'s internal blocking
-/// accept returns a clean error after a bounded wait instead of hanging to
-/// nextest's 120 s slow-timeout SIGKILL on a silent redirect failure (mirrors
-/// `egress_tproxy_capture.rs::bound_listener_accept`). The production API is
-/// UNCHANGED — this is a test-side socket option applied before handing the
-/// listener to the production fn.
-fn bound_listener_accept(listener: &TcpListener, timeout: Duration) {
-    let tv = libc::timeval {
-        tv_sec: timeout.as_secs() as libc::time_t,
-        tv_usec: libc::suseconds_t::from(timeout.subsec_micros()),
-    };
-    // SAFETY: listener owns a live socket fd; SO_RCVTIMEO takes a `timeval` of the
-    // size passed. A non-zero return is a best-effort failure (the bound is not
-    // load-bearing for correctness, only the diagnostic failure shape).
-    let rc = unsafe {
-        libc::setsockopt(
-            listener.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVTIMEO,
-            std::ptr::from_ref(&tv).cast(),
-            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        eprintln!(
-            "[05-02] warn: SO_RCVTIMEO on leg-F listener failed ({}); production accept may \
-             hang to slow-timeout on a silent redirect failure",
-            std::io::Error::last_os_error()
-        );
-    }
-}
-
 /// Run the async `resolve` on a fresh current-thread runtime — the `#[test]` body
 /// is sync and cannot `.await` (mirrors the sim crate's `block_on` shape).
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -544,16 +515,20 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
 
     // ----------------------------------------------------------------
     // Oracle 1 (capture + recover): install the egress nft-TPROXY rule, the
-    // workload dials B (DNS stubbed), the PRODUCTION accept recovers orig_dst via
-    // getsockname. The recovered orig_dst MUST equal B.
+    // workload dials B (DNS stubbed), the port listener's accept recovers orig_dst
+    // via getsockname. The recovered orig_dst MUST equal B.
     // ----------------------------------------------------------------
     // leg-F MUST be IP_TRANSPARENT (TPROXY delivers orig-dst-addressed packets).
-    let leg_f = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-F");
-    let leg_f_port = match leg_f.local_addr().expect("leg-F local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-F addr, got {other}"),
-    };
+    // It is bound through the `MtlsIntercept` port and read/accepted through the
+    // `LegListener` bridge, so this body is unchanged when the port's listener
+    // type changes (gap B-7).
+    let intercept = HostMtlsIntercept::new();
+    let leg_f = Arc::new(
+        intercept
+            .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("HostMtlsIntercept::bind_transparent leg-F"),
+    );
+    let leg_f_port = leg_f.bound_v4().expect("leg-F bound IPv4 address").port();
 
     let guard = install_outbound_tproxy(VETH_H, leg_f_port)
         .expect("install_outbound_tproxy must append the iifname egress rule + shared infra");
@@ -574,16 +549,14 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     // step). Its egress ingresses vethH → PREROUTING → egress TPROXY → leg-F.
     let client = std::thread::spawn(move || run_client_in_netns(b, WL_MARKER));
 
-    // Drive the PRODUCTION getsockname recovery on the TPROXY-intercepted leg-F
-    // socket. Bound the internal blocking accept so a silent redirect failure
-    // clean-fails after 8 s instead of hanging to the 120 s slow-timeout SIGKILL.
-    bound_listener_accept(&leg_f, Duration::from_secs(8));
-    let (leg, recovered) = accept_outbound_and_recover_orig_dst(&leg_f).expect(
-        "accept_outbound_and_recover_orig_dst must recover orig_dst from the TPROXY redirect. A \
-         clean error here (EAGAIN/timeout after 8 s) means the redirect did NOT deliver to leg-F \
-         — egress capture did not fire (the dial reached the real backend instead). If this HANGS \
-         instead, SO_RCVTIMEO did not bound the production accept on this kernel; treat a 120 s \
-         slow-timeout SIGKILL as the same redirect-did-not-fire signal.",
+    // Drive the production getsockname recovery on the TPROXY-intercepted leg-F
+    // socket through the port listener's accept. The wait is bounded so a silent
+    // redirect failure clean-fails after 8 s instead of hanging to the 120 s
+    // slow-timeout SIGKILL.
+    let (leg, _peer, recovered) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
+        "the port listener's accept must recover orig_dst from the TPROXY redirect. A timeout \
+         here (no connection within 8 s) means the redirect did NOT deliver to leg-F — egress \
+         capture did not fire (the dial reached the real backend instead).",
     );
 
     // Oracle 1: the redirect fired (leg-F accepted, NOT the real backend) AND the

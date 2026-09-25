@@ -56,8 +56,20 @@
 //!
 //! The real owners run unmodified: `MtlsInterceptWorker` (capability registry,
 //! retirement, drain, stop fence) and the action shim's `StopAllocation` arm
-//! (driver stop → mTLS stop → guest-network teardown → address release →
-//! terminal row). No kernel state is touched.
+//! (driver stop → lease retirement → mTLS stop → guest-network teardown →
+//! lease release → terminal row). No kernel state is touched.
+//!
+//! # Accepted contract (S-ND295-07B; D-295-R10, R7, R20; FD 3018-3063)
+//!
+//! The stop fails with `ShimError::MtlsStop(MtlsInterceptStopError::ElementRemoval
+//! { alloc_id, source })`, `&*source` being exactly the `InterceptError` the
+//! element model injected; the lease stays Retiring (`guest_network.lease_retired`
+//! with no `lease_released`, FD 2741-2744 — the pool is crate-private); the row
+//! stays `Running`; a retried stop calls `remove_allocation_elements` again, and
+//! only then do teardown and `lease_released` follow and the row becomes
+//! `Terminated`. The bodies build `AppState` through the file's seam fixture
+//! (`test-scenarios.md` § *Seam fixture*): one owner instance, one EXEC wiring
+//! opened by its paired supervisor, one pool, one worker over the injected port.
 //!
 //! # Preserving the original failure independently of any cleanup API
 //!
@@ -71,12 +83,12 @@
 //!
 //! # Universe (port-exposed observables only)
 //!
-//! `StopAllocation` dispatch outcome and its `Debug` chain; the lower element
+//! `StopAllocation` dispatch outcome and its typed error; the lower element
 //! effect log and set membership of the injected driven port; the worker's
 //! `alloc_stop_converged_for_test`; `MtlsInterceptWorker::start_alloc` result
-//! for a same-address successor; the guest-network driven port's recorded
-//! `provision` / `teardown` calls and assigned addresses; the allocation's
-//! current `AllocStatusRow.state`.
+//! for a same-address successor; one ordered log of the guest-network driven
+//! port's recorded `provision` / `teardown` calls (with assigned addresses)
+//! and the pinned lease events; the allocation's current `AllocStatusRow.state`.
 //!
 //! # Placement
 //!
@@ -108,10 +120,15 @@ use overdrive_control_plane::action_shim::{
     ShimError, dispatch_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::guest_network::{
-    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
+    GuestAddressPool, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
+    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
+    TapQuiescence,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::guest_network::{
+    GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
+};
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
@@ -124,15 +141,23 @@ use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::mtls_intercept::InterceptPostcondition;
+use overdrive_worker::mtls_intercept::{
+    InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
+    InterceptSet,
+};
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
-use overdrive_worker::mtls_intercept_worker::{MtlsInterceptInstallError, MtlsInterceptWorker};
+use overdrive_worker::mtls_intercept_worker::{
+    MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
+};
 use parking_lot::Mutex;
 use tempfile::TempDir;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 // ---------------------------------------------------------------------------
 // Injected driven port: node-shared set membership with a lower cleanup fault.
@@ -471,7 +496,7 @@ impl ElementFaultIntercept {
 }
 
 // ---------------------------------------------------------------------------
-// Guest-network driven port: records every awaited effect and its address.
+// Guest-network owner and lease events: one ordered, append-only log.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -481,39 +506,121 @@ struct NetworkCall {
     assignment: GuestNetworkAssignment,
 }
 
-#[derive(Default)]
-struct RecordingGuestNetwork {
-    calls: Mutex<Vec<NetworkCall>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeaseEvent {
+    Retired,
+    Released,
 }
 
-impl RecordingGuestNetwork {
-    fn record(&self, operation: GuestNetworkOperation, plan: &GuestNetworkPlan) {
-        self.calls.lock().push(NetworkCall {
-            operation,
-            alloc: plan.alloc().clone(),
-            assignment: plan.assignment().clone(),
-        });
-    }
-
-    fn calls(&self) -> Vec<NetworkCall> {
-        self.calls.lock().clone()
-    }
-
-    fn provisioned(&self, alloc: &AllocationId) -> Option<GuestNetworkAssignment> {
-        self.calls
-            .lock()
-            .iter()
-            .find(|call| call.operation == GuestNetworkOperation::TapCreate && &call.alloc == alloc)
-            .map(|call| call.assignment.clone())
-    }
+/// One entry of the ordered log the owner and the lease-event layer share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Observed {
+    Network(NetworkCall),
+    Lease { event: LeaseEvent, alloc: String },
 }
 
-fn teardowns(calls: &[NetworkCall], alloc: &AllocationId) -> Vec<Ipv4Addr> {
-    calls
+type Log = Arc<Mutex<Vec<Observed>>>;
+
+fn network_calls(log: &[Observed]) -> Vec<NetworkCall> {
+    log.iter()
+        .filter_map(|entry| match entry {
+            Observed::Network(call) => Some(call.clone()),
+            Observed::Lease { .. } => None,
+        })
+        .collect()
+}
+
+fn teardowns(log: &[Observed], alloc: &AllocationId) -> Vec<Ipv4Addr> {
+    network_calls(log)
         .iter()
         .filter(|call| call.operation == GuestNetworkOperation::TapDelete && &call.alloc == alloc)
         .map(|call| call.assignment.address)
         .collect()
+}
+
+fn lease_events(log: &[Observed], alloc: &AllocationId) -> Vec<LeaseEvent> {
+    log.iter()
+        .filter_map(|entry| match entry {
+            Observed::Lease { event, alloc: named } if named == alloc.as_str() => Some(*event),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The index in `log` of the first entry satisfying `matches`.
+fn first_index(log: &[Observed], matches: impl Fn(&Observed) -> bool) -> Option<usize> {
+    log.iter().position(matches)
+}
+
+#[derive(Default)]
+struct EventFields(BTreeMap<String, String>);
+
+impl tracing::field::Visit for EventFields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+/// Records the pinned lease events (`guest_network.lease_retired` /
+/// `lease_released`, FD 2741-2744) into the shared log.
+#[derive(Clone)]
+struct LeaseLayer(Log);
+
+impl<S> Layer<S> for LeaseLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        let mut fields = EventFields::default();
+        event.record(&mut fields);
+        let name = fields
+            .0
+            .get("event")
+            .or_else(|| fields.0.get("name"))
+            .cloned()
+            .unwrap_or_else(|| event.metadata().name().to_owned());
+        let lease = match name.as_str() {
+            "guest_network.lease_retired" => LeaseEvent::Retired,
+            "guest_network.lease_released" => LeaseEvent::Released,
+            _ => return,
+        };
+        if let Some(alloc) = fields.0.get("alloc") {
+            self.0.lock().push(Observed::Lease { event: lease, alloc: alloc.clone() });
+        }
+    }
+}
+
+/// The one owner instance: records every allocation effect with its assigned
+/// address, and delegates every port method to the pinned
+/// `SimSharedGuestNetworkOwner`.
+struct RecordingGuestNetwork {
+    inner: SimSharedGuestNetworkOwner,
+    log: Log,
+}
+
+impl RecordingGuestNetwork {
+    fn record(&self, operation: GuestNetworkOperation, plan: &GuestNetworkPlan) {
+        self.log.lock().push(Observed::Network(NetworkCall {
+            operation,
+            alloc: plan.alloc().clone(),
+            assignment: plan.assignment().clone(),
+        }));
+    }
+
+    fn log(&self) -> Vec<Observed> {
+        self.log.lock().clone()
+    }
+
+    fn provisioned(&self, alloc: &AllocationId) -> Option<GuestNetworkAssignment> {
+        network_calls(&self.log())
+            .into_iter()
+            .find(|call| call.operation == GuestNetworkOperation::TapCreate && &call.alloc == alloc)
+            .map(|call| call.assignment)
+    }
 }
 
 #[async_trait::async_trait]
@@ -523,17 +630,15 @@ impl GuestNetworkProvisioner for RecordingGuestNetwork {
         plan: &GuestNetworkPlan,
     ) -> overdrive_control_plane::guest_network::Result<()> {
         self.record(GuestNetworkOperation::TapCreate, plan);
-        Ok(())
+        self.inner.provision(plan).await
     }
 
     async fn activate(
         &self,
         plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<
-        overdrive_control_plane::guest_network::TapActivation,
-    > {
+    ) -> overdrive_control_plane::guest_network::Result<TapActivation> {
         self.record(GuestNetworkOperation::TapSetUp, plan);
-        Ok(overdrive_control_plane::guest_network::TapActivation::Raised)
+        self.inner.activate(plan).await
     }
 
     async fn teardown(
@@ -541,7 +646,36 @@ impl GuestNetworkProvisioner for RecordingGuestNetwork {
         plan: &GuestNetworkPlan,
     ) -> overdrive_control_plane::guest_network::Result<()> {
         self.record(GuestNetworkOperation::TapDelete, plan);
-        Ok(())
+        self.inner.teardown(plan).await
+    }
+}
+
+#[async_trait::async_trait]
+impl SharedGuestNetworkOwner for RecordingGuestNetwork {
+    async fn probe_startup(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.probe_startup().await
+    }
+
+    async fn sweep_stale(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.sweep_stale().await
+    }
+
+    async fn converge_shared(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.converge_shared().await
+    }
+
+    async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
+        self.inner.audit_shared().await
+    }
+
+    async fn quiesce_managed_taps(
+        &self,
+    ) -> overdrive_control_plane::guest_network::Result<TapQuiescence> {
+        self.inner.quiesce_managed_taps().await
+    }
+
+    async fn restore_quiesced_taps(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.restore_quiesced_taps().await
     }
 }
 
@@ -630,12 +764,26 @@ fn allocation_members(address: Ipv4Addr) -> BTreeSet<SetMember> {
     members
 }
 
+/// The seam fixture (`test-scenarios.md` § *Seam fixture*): one owner
+/// instance, one EXEC wiring over the fixture clock, one pool from
+/// `GuestAddressPool::new`, and one worker over the injected port.
+///
+/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD 1876-1989),
+/// `AppState::new` takes today's inputs and the owner reaches dispatch only as
+/// the seam's `provisioner`; the gate and pool are held here. 05-01 changes only
+/// the constructor call in [`Harness::boot`]: it passes `worker`, `network`,
+/// `wiring.gate()`, and `guest_pool` to `AppState::new`, so `AppState`'s owner
+/// and the seam's provisioner are the one instance.
 struct Harness {
     _tmp: TempDir,
     state: Arc<overdrive_control_plane::AppState>,
     worker: Arc<MtlsInterceptWorker>,
     model: Arc<ElementModel>,
     network: Arc<RecordingGuestNetwork>,
+    _supervisor: Arc<GuestNetworkExecSupervisor>,
+    _exec_gate: Arc<GuestNetworkExecGate>,
+    _guest_pool: Arc<GuestAddressPool>,
+    _trace: tracing::subscriber::DefaultGuard,
     ticks: AtomicU64,
 }
 
@@ -646,12 +794,26 @@ impl Harness {
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
         let obs =
             Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+        let log: Log = Arc::new(Mutex::new(Vec::new()));
+        let trace = tracing::subscriber::set_default(
+            tracing_subscriber::registry().with(LeaseLayer(Arc::clone(&log))),
+        );
+        let clock = Arc::new(SimClock::new());
+        let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as _);
         let model = Arc::new(ElementModel::default());
         let worker = build_worker(Arc::new(ElementFaultIntercept {
             program: SimMtlsIntercept::new(),
             model: Arc::clone(&model),
         }));
         worker.start_shared_owner().await.expect("boot-composed shared listener owner is healthy");
+        let network =
+            Arc::new(RecordingGuestNetwork { inner: SimSharedGuestNetworkOwner::default(), log });
+        let guest_pool = Arc::new(GuestAddressPool::new(
+            ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        ));
         let mut runtime =
             overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
                 tmp.path(),
@@ -667,7 +829,7 @@ impl Harness {
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
             Arc::new(runtime),
             Arc::new(SimDriver::new(DriverType::Vm)) as Arc<dyn Driver>,
-            Arc::new(SimClock::new()),
+            clock,
             Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
             Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
                 overdrive_sim::adapters::entropy::SimEntropy::new(34),
@@ -681,12 +843,18 @@ impl Harness {
             Ipv4Addr::LOCALHOST,
         );
         state.mtls_worker = Some(Arc::clone(&worker));
+        let supervisor = wiring.supervisor();
+        assert!(supervisor.open_after_boot(), "the fixture's gate leaves BootClosed once");
         Self {
             _tmp: tmp,
             state: Arc::new(state),
             worker,
             model,
-            network: Arc::new(RecordingGuestNetwork::default()),
+            network,
+            _supervisor: supervisor,
+            _exec_gate: wiring.gate(),
+            _guest_pool: guest_pool,
+            _trace: trace,
             ticks: AtomicU64::new(0),
         }
     }
@@ -759,6 +927,32 @@ fn union_of(attempts: &[&CleanupAttempt]) -> BTreeSet<SetMember> {
     attempts.iter().flat_map(|attempt| attempt.members.iter().copied()).collect()
 }
 
+/// Guard id 0 names `ElementFaultIntercept::remove_allocation_elements`, the
+/// port's convergent removal; element guards carry ids from 1.
+const PORT_REMOVAL: u64 = 0;
+
+/// `cause` is exactly the `InterceptError` `ElementFaultIntercept` builds for
+/// `fault` when removing the allocation at `address`.
+fn is_injected_removal_cause(
+    cause: &InterceptError,
+    address: Ipv4Addr,
+    fault: LowerCleanupFault,
+) -> bool {
+    let expected_cause = fault.cause();
+    matches!(
+        cause,
+        InterceptError::NftElementUpdateFailed {
+            set: InterceptSet::ManagedGuestIps,
+            operation: InterceptElementOperation::Delete,
+            key: InterceptElementKey::Address(key),
+            source: overdrive_worker::mtls_intercept::NetlinkError::Nft {
+                op: "shared-element-remove",
+                source,
+            },
+        } if *key == address && source.to_string() == expected_cause
+    )
+}
+
 /// Drive one allocation through a real start, inject `fault` on the lower
 /// element cleanup, stop it through the real `StopAllocation` owner path,
 /// probe capability and address retention, then retry with the fault cleared.
@@ -781,13 +975,12 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
         "setup: exactly the predecessor's 2 + P elements are installed"
     );
     assert_eq!(harness.row_state(&alloc).await, Some(AllocState::Running), "setup: Running");
-    let own_guards: BTreeSet<u64> = harness.model.installs().iter().map(|i| i.guard).collect();
 
     // WHEN the lower element deletion (or its read-back) fails during the
     // allocation's normal stop.
     harness.model.arm(fault);
     let attempts_mark = harness.model.attempts().len();
-    let calls_mark = harness.network.calls().len();
+    let log_mark = harness.network.log().len();
     let stop =
         harness.dispatch(Action::StopAllocation { alloc_id: alloc.clone(), terminal: None }).await;
 
@@ -795,8 +988,9 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     let stop_attempts: Vec<&CleanupAttempt> = attempts[attempts_mark..].iter().collect();
     let members_after_stop = harness.model.members();
     let converged_after_stop = harness.worker.alloc_stop_converged_for_test(&alloc);
-    let calls = harness.network.calls();
-    let stop_teardowns = teardowns(&calls[calls_mark..], &alloc);
+    let log = harness.network.log();
+    let stop_teardowns = teardowns(&log[log_mark..], &alloc);
+    let stop_leases = lease_events(&log[log_mark..], &alloc);
     let row_after_stop = harness.row_state(&alloc).await;
 
     // Same-address successor registration on the worker's real start path.
@@ -814,18 +1008,28 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     // same stop.
     harness.model.disarm();
     let retry_attempts_mark = harness.model.attempts().len();
-    let retry_calls_mark = harness.network.calls().len();
+    let retry_log_mark = harness.network.log().len();
     let retry =
         harness.dispatch(Action::StopAllocation { alloc_id: alloc.clone(), terminal: None }).await;
     let attempts = harness.model.attempts();
-    let retry_attempts: Vec<&CleanupAttempt> = attempts[retry_attempts_mark..]
+    let retry_removals: Vec<&CleanupAttempt> = attempts[retry_attempts_mark..]
         .iter()
-        .filter(|attempt| own_guards.contains(&attempt.guard))
+        .filter(|attempt| attempt.guard == PORT_REMOVAL)
         .collect();
     let members_after_retry = harness.model.members();
     let converged_after_retry = harness.worker.alloc_stop_converged_for_test(&alloc);
-    let calls = harness.network.calls();
-    let retry_teardowns = teardowns(&calls[retry_calls_mark..], &alloc);
+    let log = harness.network.log();
+    let retry_log = &log[retry_log_mark..];
+    let retry_teardowns = teardowns(retry_log, &alloc);
+    let retry_leases = lease_events(retry_log, &alloc);
+    let teardown_at = first_index(retry_log, |entry| {
+        matches!(entry, Observed::Network(call)
+            if call.operation == GuestNetworkOperation::TapDelete && call.alloc == alloc)
+    });
+    let released_at = first_index(retry_log, |entry| {
+        matches!(entry, Observed::Lease { event: LeaseEvent::Released, alloc: named }
+            if named == alloc.as_str())
+    });
     let row_after_retry = harness.row_state(&alloc).await;
 
     // ---- evaluate the complete declared universe ----
@@ -851,18 +1055,32 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
         members_after_stop == own_members,
     );
 
-    // Contract: the failure surfaces to the stop owner.
+    // Contract: the failure surfaces to the stop owner as the typed
+    // element-removal failure of the stopping allocation, carrying the
+    // injected cause itself.
+    let removal_cause = match &stop {
+        Err(ShimError::MtlsStop(MtlsInterceptStopError::ElementRemoval { alloc_id, source }))
+            if *alloc_id == alloc =>
+        {
+            Some(&**source)
+        }
+        _ => None,
+    };
     report.check(
-        "the allocation stop reports failure instead of success",
-        "Err(..) naming the allocation".to_owned(),
+        "the allocation stop fails with MtlsStop(ElementRemoval) for the stopping allocation",
+        format!("Err(MtlsStop(ElementRemoval {{ alloc_id: {alloc}, .. }}))"),
         format!("{stop:?}"),
-        matches!(&stop, Err(error) if format!("{error:?}").contains(alloc.as_str())),
+        removal_cause.is_some(),
     );
     report.check(
-        "the surfaced failure retains the original lower cause (not replaced or fabricated)",
-        format!("Err chain containing {:?}", fault.cause()),
-        format!("{stop:?}"),
-        matches!(&stop, Err(error) if format!("{error:?}").contains(fault.cause())),
+        "&*source is exactly the InterceptError the element model injected",
+        format!(
+            "NftElementUpdateFailed {{ ManagedGuestIps, Delete, Address({address}), \
+             Nft {{ shared-element-remove, {:?} }} }}",
+            fault.cause()
+        ),
+        format!("{removal_cause:?}"),
+        removal_cause.is_some_and(|cause| is_injected_removal_cause(cause, address, fault)),
     );
 
     // Contract: retirement ownership (the capability) is retained.
@@ -898,6 +1116,12 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
         fresh_address.is_some_and(|fresh| fresh != address),
     );
     report.check(
+        "the lease stays Retiring: lease_retired is recorded and lease_released is not",
+        format!("[{:?}]", LeaseEvent::Retired),
+        format!("{stop_leases:?}"),
+        stop_leases == vec![LeaseEvent::Retired],
+    );
+    report.check(
         "the durable allocation row is not written terminal before cleanup converges",
         "Some(Running)".to_owned(),
         format!("{row_after_stop:?}"),
@@ -912,11 +1136,12 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
         retry.is_ok(),
     );
     report.check(
-        "the retried stop re-runs the removal of every predecessor element and it succeeds",
-        format!("Removed {own_members:?} by the predecessor's own element tokens"),
-        format!("{retry_attempts:?}"),
-        union_of(&retry_attempts) == own_members
-            && retry_attempts.iter().all(|attempt| attempt.outcome == CleanupOutcome::Removed),
+        "the retried stop calls remove_allocation_elements again, for every predecessor element, and it succeeds",
+        format!("port removal (guard {PORT_REMOVAL}) Removed {own_members:?}"),
+        format!("{retry_removals:?}"),
+        !retry_removals.is_empty()
+            && union_of(&retry_removals) == own_members
+            && retry_removals.iter().all(|attempt| attempt.outcome == CleanupOutcome::Removed),
     );
     report.check(
         "after the retry none of the predecessor's elements remain installed",
@@ -937,6 +1162,16 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
         retry_teardowns == vec![address],
     );
     report.check(
+        "after the retry, teardown precedes lease_released, which is recorded once",
+        "TapDelete index < lease_released index; exactly one lease_released".to_owned(),
+        format!(
+            "teardown at {teardown_at:?}, released at {released_at:?}; leases {retry_leases:?}"
+        ),
+        teardown_at.is_some()
+            && teardown_at < released_at
+            && retry_leases.iter().filter(|event| **event == LeaseEvent::Released).count() == 1,
+    );
+    report.check(
         "after the retry the allocation row is terminal (ordering is pinned by the non-terminal-before-cleanup entry)",
         "Some(Terminated)".to_owned(),
         format!("{row_after_retry:?}"),
@@ -952,9 +1187,14 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     for install in harness.model.installs() {
         eprintln!("  {install:?}");
     }
-    eprintln!("---- guest-network driven-port calls (append-only) ----");
-    for call in harness.network.calls() {
-        eprintln!("  {:?} {} {}", call.operation, call.alloc, call.assignment.address);
+    eprintln!("---- guest-network owner calls and lease events (append-only) ----");
+    for entry in harness.network.log() {
+        match entry {
+            Observed::Network(call) => {
+                eprintln!("  {:?} {} {}", call.operation, call.alloc, call.assignment.address);
+            }
+            Observed::Lease { event, alloc } => eprintln!("  lease {event:?} {alloc}"),
+        }
     }
     eprintln!("---- universe verdicts ({fault:?}) ----\n{}", report.render());
 
@@ -966,27 +1206,31 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     );
 }
 
-/// §3.4 — a rejected lower element deletion during normal allocation stop.
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED (cleanup half).
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-07B — A failed protection cleanup keeps the allocation retiring until a retry succeeds
+/// Proof §3.4, the deletion batch rejected during normal allocation stop.
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
+#[ignore = "pending DELIVER step 07-01 (S-ND295-07B)"]
 async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::DeletionRejected)).await;
 }
 
-/// §3.4 — an acknowledged deletion whose post-commit read-back fails (and is
-/// restored to the pre-state) during normal allocation stop.
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED (cleanup half).
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-07B — A failed protection cleanup keeps the allocation retiring until a retry succeeds
+/// Proof §3.4, an acknowledged deletion whose post-commit read-back fails
+/// (and is restored to the pre-state) during normal allocation stop.
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
+#[ignore = "pending DELIVER step 07-01 (S-ND295-07B)"]
 async fn shared_element_cleanup_failure_readback_failed_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::ReadBackFailed)).await;
 }
