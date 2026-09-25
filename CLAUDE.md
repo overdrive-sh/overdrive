@@ -20,11 +20,28 @@ never reach for the nearest mechanism that compiles. A subagent that
 grades itself on "tests green" will invent surface; that is the failure
 mode this rule exists to prevent.
 
+**Scope — interface contracts, not internal structure.** The line is
+nWave's: *architecture owns WHAT, the crafter owns HOW*. The design pins
+**interface contracts**: the public and cross-crate API (pub types, traits
+and their methods, variants of public enums, port and composition-root
+signatures), wire and persisted formats, config and CLI surface,
+ownership, lifecycle and state meanings, invariants, and the error
+taxonomy an owner branches on. It does **not** pin internal structure:
+private functions and their parameters, module-private types and
+visibility, or how internal state is threaded. The crafter decides those,
+and the DELIVER reviewer checks them against the contract. Test-support
+surface (fixtures, test-local port implementations, sim scripting used
+only by tests) is DISTILL's to shape, not DESIGN's. A gap in internal
+structure or test support is **not** a blocker and is never routed back
+to DESIGN; a review finding about internal structure is a note for the
+DELIVER reviewer, not a DESIGN finding.
+
 This binds three roles:
 
-- **Crafters**: build only the API the design names. If you need a
-  primitive the design doesn't specify, return a blocker — do not add a
-  public method/type/variant on your own initiative.
+- **Crafters**: build only the API the design names. If you need an
+  interface-contract primitive the design doesn't specify, return a
+  blocker — do not add a public method/type/variant on your own
+  initiative.
 - **Orchestrators dispatching crafters**: point the crafter at the
   authoritative design (the ADR / feature-delta / roadmap step) and
   forbid inventing API. Do **not** pre-explore the codebase or restate

@@ -68,16 +68,20 @@ Route design content to its owner:
 | Content | Authoritative home |
 |---|---|
 | One architectural choice, alternatives, consequences | One ADR |
-| Exact implementation-facing API/port contract pinned by DESIGN | `docs/feature/{feature-id}/feature-delta.md` under the relevant DESIGN `[REF]` component, driving-port, or driven-port section |
+| Exact interface contract (API/port) pinned by DESIGN | `docs/feature/{feature-id}/feature-delta.md` under the relevant DESIGN `[REF]` component, driving-port, or driven-port section |
 | Current high-level architecture and decision links | `docs/product/architecture/brief.md` |
 | C4 diagrams and detailed relationships | `docs/product/architecture/c4-diagrams.md` |
 | Executable acceptance scenarios and test obligations | DISTILL artifacts |
 | Implementation order, files and quality gates | DELIVER roadmap/artifacts |
 
 Moving Rust signatures out of an ADR does not permit leaving them unspecified:
-DESIGN pins exact implementation-facing contracts in `feature-delta.md`, and
-the ADR links to that contract. Never duplicate the same normative signature
-in both places.
+DESIGN pins the exact **interface contracts** in `feature-delta.md` — public
+and cross-crate API and port signatures, wire and persisted formats,
+ownership, and invariants — and the ADR links to that contract. Never
+duplicate the same normative signature in both places. Internal structure
+(private functions, module-private types and visibility, internal state
+threading) is not part of the contract: the crafter decides it, per
+CLAUDE.md § "Implement to the design".
 
 Before creating or extending an ADR, state its decision in one sentence and
 ask whether any clause could be adopted or superseded independently. If so,

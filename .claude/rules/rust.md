@@ -778,14 +778,19 @@ path structurally impossible.
     `Stable` stop startup supervision while readiness and liveness keep
     ticking (ADR-0080 § D4). Handles are detached; nothing is collected.
   - **Blocking task → cooperative flag first, `abort()` as backstop
-    only.** `MtlsInterceptWorker::stop_alloc`
-    (`crates/overdrive-worker/src/mtls_intercept_worker.rs`) stores
-    `stop = true`, which the accept loops observe between 200 ms poll
-    slices, *then* aborts. The comment there states the reason plainly:
-    `abort` alone cannot interrupt a blocking `accept()`. The DNS
-    responder shutdown (`crates/overdrive-control-plane/src/lib.rs`) has
-    the same shape — `responder.stop()` is the mechanism, `abort()` is
-    "belt-and-braces".
+    only.** The DNS responder shutdown (`DnsServeTaskOwner` in
+    `crates/overdrive-control-plane/src/lib.rs`) calls
+    `responder.stop()`, which sets the `AtomicBool` the serve loop
+    observes between bounded receive slices, waits a bounded interval
+    for the task to return, and only then calls `abort()` as
+    "belt-and-braces": `abort` alone cannot interrupt a blocking
+    `recv()`.
+
+  Prefer removing the blocking call over managing it. An async,
+  cancel-safe `accept()` / `recv()` makes cancelling the future the stop,
+  so the task needs neither a flag nor `abort()` and becomes the fully
+  async shape above. Keep the flag-plus-backstop shape only where the
+  blocking call cannot be made async.
 
   **Symptom during review:** a `.abort()` with no accompanying flag or
   token, on a task that does blocking I/O. It reads as shutdown and is
