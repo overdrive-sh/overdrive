@@ -29,6 +29,12 @@ use overdrive_core::scheduler::{PlacementError, schedule};
 use overdrive_core::traits::driver::Resources;
 
 use super::scheduler_common::{make_alloc_running, make_job, make_node, res};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
+
+/// Zero held guest-attachment occupancy: these scenarios exercise CPU/memory
+/// placement, not the attachment cap (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 #[test]
 fn scheduler_subtracts_running_allocs_from_capacity() {
@@ -45,7 +51,7 @@ fn scheduler_subtracts_running_allocs_from_capacity() {
     let job = make_job("payments", res(4000, 4 * 1024 * 1024 * 1024));
 
     // When schedule is called
-    let result = schedule(&nodes, &job.resources, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
 
     // Then the result is Err(NoCapacity) because the running alloc
     // consumed 4000 mCPU; only 2000 mCPU remain, but 4000 are needed.
@@ -75,7 +81,7 @@ fn scheduler_reports_needed_and_max_free_on_memory_exhaustion() {
     let job = make_job("memhog", res(1000, 8 * 1024 * 1024 * 1024));
 
     // When schedule is called
-    let result = schedule(&nodes, &job.resources, &[]);
+    let result = schedule(&nodes, &job.resources, &[], NO_GUEST_ATTACHMENTS);
 
     // Then the result is Err(NoCapacity) and both fields are populated
     let Err(PlacementError::NoCapacity { needed, max_free }) = result else {
@@ -99,7 +105,7 @@ fn scheduler_handles_zero_capacity_without_underflow() {
     let job = make_job("normal", res(1000, 1024 * 1024 * 1024));
 
     // When schedule is called — must NOT panic from arithmetic underflow
-    let result = schedule(&nodes, &job.resources, &[]);
+    let result = schedule(&nodes, &job.resources, &[], NO_GUEST_ATTACHMENTS);
 
     // Then the result is Err(NoCapacity { ... })
     assert!(

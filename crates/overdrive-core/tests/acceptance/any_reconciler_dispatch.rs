@@ -31,8 +31,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
@@ -113,6 +115,10 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
@@ -125,6 +131,10 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
         overdrive_reconcilers::WorkloadLifecycleView::default(),

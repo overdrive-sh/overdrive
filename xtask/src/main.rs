@@ -30,6 +30,16 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// OBL-295-CLOEXEC gate (D-295-R3, ADR-0129) — reject any first-party
+    /// call in the `overdrive serve` closure that creates an inheritable
+    /// descriptor. See `xtask/src/cloexec_lint.rs`.
+    CloexecLint {
+        /// Path to the workspace `Cargo.toml` to scan. Defaults to the
+        /// enclosing workspace root (cwd-relative).
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
+    },
+
     /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
     /// the `overdrive-cli` resolved dependency graph. Scoped to
     /// non-dev dependencies; test-only YAML is out of scope.
@@ -330,6 +340,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     match Args::parse().cmd {
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
+        Task::CloexecLint { manifest_path } => xtask::cloexec_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
         Task::BpfClippy => bpf_clippy(),

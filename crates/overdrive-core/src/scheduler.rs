@@ -18,9 +18,10 @@
 //!
 //! # Determinism contract
 //!
-//! For any fixed `(nodes, needed, current_allocs)` input, two successive
-//! calls return equal `Result<NodeId, PlacementError>`. The proptest
-//! in `tests/acceptance/scheduler_determinism.rs` defends the contract.
+//! For any fixed `(nodes, needed, current_allocs, guest_attachments)` input,
+//! two successive calls return equal `Result<NodeId, PlacementError>`. The
+//! proptest in `tests/acceptance/scheduler_determinism.rs` defends the
+//! contract.
 //!
 //! Iteration of `nodes` is by `BTreeMap`'s `Ord` on `NodeId` —
 //! deterministic across `BTreeMap` insertion permutations and across
@@ -42,12 +43,10 @@
 use std::collections::BTreeMap;
 
 use crate::aggregate::Node;
+use crate::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
 use crate::id::NodeId;
 use crate::traits::driver::Resources;
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
-
-/// Private fixed admission boundary for active guest-network attachments.
-const MAX_GUEST_NETWORK_ATTACHMENTS: usize = 16_384;
 
 /// First-fit placement decision. Pure synchronous function over
 /// deterministic inputs.
@@ -78,12 +77,18 @@ const MAX_GUEST_NETWORK_ATTACHMENTS: usize = 16_384;
 ///
 /// Returns [`PlacementError::NoHealthyNode`] when the input map is
 /// empty.
+///
+/// `guest_attachments` is the node's held guest-attachment occupancy read
+/// through the hydration read-port (D-295-R8, ADR-0134).
 #[must_use = "scheduler placement decisions must be acted on"]
 pub fn schedule(
     nodes: &BTreeMap<NodeId, Node>,
     needed: &Resources,
     current_allocs: &[AllocStatusRow],
+    guest_attachments: GuestAttachmentOccupancy,
 ) -> Result<NodeId, PlacementError> {
+    // RED scaffold (D-295-R8): consumed in DELIVER step 07-03.
+    let _ = guest_attachments;
     // Empty-set guard. Phase-1 single-node never produces this branch
     // operationally; the variant exists so the pure function has a
     // total signature (proptest exercises it via `arb_node_map` lower
@@ -109,7 +114,7 @@ pub fn schedule(
             .iter()
             .filter(|alloc| alloc.node_id == *node_id && alloc.state == AllocState::Running)
             .count();
-        if active_allocations >= MAX_GUEST_NETWORK_ATTACHMENTS {
+        if active_allocations >= MAX_GUEST_NETWORK_ATTACHMENTS as usize {
             continue;
         }
 

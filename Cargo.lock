@@ -2285,6 +2285,7 @@ dependencies = [
  "libc",
  "linux-keyutils",
  "overdrive-core",
+ "overdrive-netlink",
  "overdrive-sim",
  "overdrive-testing",
  "parking_lot",

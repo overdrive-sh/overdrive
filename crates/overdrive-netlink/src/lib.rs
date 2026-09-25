@@ -26,8 +26,8 @@ pub mod runtime;
 pub mod setns;
 
 pub use client::{
-    Client, ObservedLinkIdentity, ObservedLinkKind, PersistentTapIdentity, TapLinkState,
-    create_persistent_tap, set_persistent_tap_owner,
+    Client, ObservedLinkIdentity, ObservedLinkKind, PersistentTapIdentity, TapLinkState, TapQueue,
+    TapQueueError, attach_tap_queue, create_persistent_tap, set_persistent_tap_owner,
 };
 pub use error::{NetlinkError, errno_is_idempotent};
 pub use runtime::{block_on_host_netlink, block_on_netlink};

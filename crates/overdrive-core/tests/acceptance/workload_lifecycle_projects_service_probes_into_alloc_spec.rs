@@ -35,9 +35,11 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::aggregate::{DriverInput, ResourcesInput, Service};
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::TransitionReason;
@@ -178,6 +180,10 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
         service_spec_digest: None,
         probe_descriptors: descriptors.clone(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -190,6 +196,10 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -258,6 +268,10 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
         // reconciler doesn't synthesise anything else.
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("job"),
@@ -270,6 +284,10 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -324,6 +342,10 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
         service_spec_digest: None,
         probe_descriptors: descriptors.clone(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -336,6 +358,10 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     // Budget remaining + no prior failure timestamp → restart fires
     // immediately on this tick.
@@ -421,6 +447,10 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         service_spec_digest: None,
         probe_descriptors: projected,
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -433,6 +463,10 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

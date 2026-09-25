@@ -14,7 +14,7 @@
 //! `provision` awaits each op before returning).
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
@@ -245,6 +245,137 @@ pub fn set_persistent_tap_owner(_name: &str, _owner_uid: u32) -> Result<(), Netl
             "persistent TAP ownership is supported only on Linux",
         ),
     ))
+}
+
+/// One queue attached to an existing single-queue persistent TAP, opened for
+/// handoff to exactly one VMM launch. Dropping it closes the queue.
+///
+/// Created only by [`attach_tap_queue`] (D-295-R2, ADR-0128).
+#[derive(Debug)]
+pub struct TapQueue {
+    fd: OwnedFd,
+    name: String,
+}
+
+impl TapQueue {
+    /// The persistent TAP this queue is attached to.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Borrow the queue descriptor.
+    #[must_use]
+    pub fn as_fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+
+    /// Release the queue descriptor to the caller, which then owns its close.
+    #[must_use]
+    pub fn into_owned_fd(self) -> OwnedFd {
+        self.fd
+    }
+}
+
+/// Failure to attach a queue to a persistent TAP ([`attach_tap_queue`]).
+#[derive(Debug, thiserror::Error)]
+pub enum TapQueueError {
+    /// Opening `/dev/net/tun` failed.
+    #[error("opening /dev/net/tun to attach TAP {name} failed")]
+    Open {
+        /// The TAP the attach targeted.
+        name: String,
+        /// The originating I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// `TUNSETIFF` refused the attach (for example `EBUSY` from an attached
+    /// queue, or `EPERM` from a caller that neither owns the TAP nor holds
+    /// `CAP_NET_ADMIN`).
+    #[error("attaching a queue to TAP {name} failed")]
+    Attach {
+        /// The TAP the attach targeted.
+        name: String,
+        /// The originating I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Reading back the attached queue's flags (`TUNGETIFF`) failed.
+    #[error("reading back TAP {name} queue flags failed")]
+    FlagsReadBack {
+        /// The TAP the attach targeted.
+        name: String,
+        /// The originating I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The attached queue's flags are not exactly the persistent single-queue
+    /// vnet-header TAP flags.
+    #[error(
+        "TAP {name} queue flags {observed:#06x} are not the persistent single-queue vnet-header TAP flags"
+    )]
+    Flags {
+        /// The TAP the attach targeted.
+        name: String,
+        /// The observed `TUNGETIFF` flags.
+        observed: u16,
+    },
+    /// Reading back the TAP's administrative state (`SIOCGIFFLAGS`) failed.
+    #[error("reading back TAP {name} administrative state failed")]
+    AdminStateReadBack {
+        /// The TAP the attach targeted.
+        name: String,
+        /// The originating I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The TAP was administratively up at queue attach.
+    #[error("TAP {name} was administratively up at queue attach")]
+    NotDown {
+        /// The TAP the attach targeted.
+        name: String,
+    },
+}
+
+/// Attach one queue to the existing single-queue persistent TAP `name` for
+/// handoff to exactly one VMM launch (D-295-R2, ADR-0128).
+///
+/// # Preconditions
+///
+/// The shared guest-network owner has created `name` as a persistent
+/// single-queue TAP that holds no queue and is administratively down.
+///
+/// # Effect
+///
+/// Opens `/dev/net/tun` with `O_RDWR|O_NONBLOCK|O_CLOEXEC` and issues
+/// `TUNSETIFF` with exactly `IFF_TAP|IFF_NO_PI|IFF_VNET_HDR`, never
+/// `IFF_MULTI_QUEUE`.
+///
+/// # Postconditions
+///
+/// Checked before return; each failure closes the descriptor.
+///
+/// 1. `TUNGETIFF` equals exactly `IFF_TAP|IFF_NO_PI|IFF_VNET_HDR|IFF_PERSIST`
+///    (`0x5802`), otherwise [`TapQueueError::Flags`]. A missing `IFF_PERSIST`
+///    means the attach created a fresh non-persistent device, which closing
+///    destroys.
+/// 2. `SIOCGIFFLAGS` on `name` reports `IFF_UP` clear, otherwise
+///    [`TapQueueError::NotDown`].
+///
+/// # Edge cases
+///
+/// `EBUSY` from an already-attached queue maps to [`TapQueueError::Attach`], as
+/// does an absent name without `CAP_NET_ADMIN`, and `EPERM` from a caller that
+/// is neither the TAP's owner (uid 0) nor holding `CAP_NET_ADMIN`. The helper
+/// never creates, persists, renames, raises, lowers, or deletes a TAP.
+///
+/// # Errors
+///
+/// One [`TapQueueError`] variant per failed stage or violated postcondition.
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-03")]
+pub fn attach_tap_queue(name: &str) -> Result<TapQueue, TapQueueError> {
+    let _ = name;
+    todo!("RED scaffold: D-295-R2 attach_tap_queue — DELIVER step 05-03")
 }
 
 /// `ip netns add <name>` via rtnetlink's [`NetworkNamespace::add`].
@@ -918,6 +1049,22 @@ impl Client {
             .execute()
             .await
             .map_err(|err| NetlinkError::route("local-add", err))
+    }
+
+    /// True exactly when routing table `table` holds a `local 0.0.0.0/0`
+    /// route whose output interface is `oif`.
+    ///
+    /// A pure read: the routing table is unchanged. The read-back companion of
+    /// [`Self::add_local_route`] (D-295-R15).
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError`] on a route-dump failure.
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-03")]
+    #[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 08-03")]
+    pub async fn local_route_present(&self, table: u32, oif: &str) -> Result<bool, NetlinkError> {
+        let _ = (table, oif);
+        todo!("RED scaffold: D-295-R15 local_route_present — DELIVER step 08-03")
     }
 
     /// Delete the unique local-default route through `oif` in `table`.

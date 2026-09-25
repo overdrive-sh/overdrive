@@ -39,8 +39,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_reconcilers::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
@@ -139,6 +141,10 @@ fn placement_actions(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: wid,
@@ -151,6 +157,10 @@ fn placement_actions(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

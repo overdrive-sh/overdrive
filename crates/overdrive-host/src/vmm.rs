@@ -28,7 +28,7 @@
 //! `EOPNOTSUPP`/`EXDEV` with no error (P4: 0.015s/+0MiB vs 3.970s/+4096MiB).
 //! [`rustix::fs::ioctl_ficlone`] is a SAFE wrapper (the `unsafe` is
 //! encapsulated inside `rustix`), which is what lets this crate call it
-//! under its crate-wide `#![forbid(unsafe_code)]`.
+//! with no `unsafe` block under its crate-wide `#![deny(unsafe_code)]`.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -52,6 +52,8 @@ use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, Command};
 use tokio::sync::{Notify, oneshot, watch};
 
+mod launch_seccomp;
+
 /// Default probe target for §D5 scenario 1 (VM image directory reflink
 /// capability) — overridable via [`CloudHypervisorVmm::with_image_dir`].
 const DEFAULT_IMAGE_DIR: &str = "/srv/vm";
@@ -73,6 +75,10 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 /// § "Production code is not shaped by simulation").
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
 const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
+/// The Cloud Hypervisor child's descriptor for the per-launch TAP queue
+/// (`--net fd=[3]`, D-295-R1/R2/R3; ADR-0127, ADR-0128, ADR-0129).
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-03")]
+pub(crate) const VMM_TAP_QUEUE_FD: std::os::fd::RawFd = 3;
 
 #[async_trait]
 trait VmmProbeSubstrate: Send + Sync {
@@ -82,6 +88,10 @@ trait VmmProbeSubstrate: Send + Sync {
         binary: PathBuf,
     ) -> std::result::Result<(), VmmProbeError>;
     async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()>;
+    /// Prove at boot that the kernel accepts the exact VMM launch seccomp
+    /// program and that an exec proceeds under it (D-295-R22, ADR-0143).
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
+    async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError>;
 }
@@ -103,6 +113,11 @@ impl VmmProbeSubstrate for RealVmmProbeSubstrate {
 
     async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
         Command::new(tool).arg("--version").output().await.map(|_| ())
+    }
+
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-02")]
+    async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError> {
+        todo!("RED scaffold: D-295-R22 check_launch_seccomp — DELIVER step 05-02")
     }
 
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
@@ -282,6 +297,24 @@ impl CloudHypervisorVmm {
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
     }
+}
+
+/// The single audited launch hook (ADR-0129, ADR-0143): registers one
+/// `pre_exec` closure that, in the forked child, (1) marks every descriptor
+/// at or above `first_closed` close-on-exec, (2) sets `no_new_privs`, and
+/// (3) loads `filter`, returning the first step's `io::Error` on failure.
+/// The crate's only production `#[allow(unsafe_code)]`.
+#[allow(unsafe_code)]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
+#[allow(clippy::needless_pass_by_value, reason = "RED scaffold — DELIVER step 05-02")]
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-02")]
+fn register_launch_child_hook(
+    cmd: &mut tokio::process::Command,
+    first_closed: std::os::fd::RawFd,
+    filter: launch_seccomp::VmmLaunchSeccompFilter,
+) {
+    let _ = (cmd, first_closed, filter);
+    todo!("RED scaffold: D-295-R22 register_launch_child_hook — DELIVER step 05-02")
 }
 
 fn network_launch_prefix(
@@ -796,9 +829,9 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
 
 /// §(c) consequence 1 — every VMM launch tool (`prlimit`, `setpriv`, and the
 /// mesh namespace launcher `ip`) resolves on `PATH`. The hypervisor is spawned
-/// THROUGH them (the resolution honouring `overdrive-host`'s
-/// `#![forbid(unsafe_code)]`), so `argv[0]` is `ip` for a mesh VM and
-/// `prlimit` otherwise. An unavailable launch tool must refuse the node at
+/// THROUGH them (the resolution needs no `unsafe` block under
+/// `overdrive-host`'s `#![deny(unsafe_code)]`), so `argv[0]` is `ip` for a
+/// mesh VM and `prlimit` otherwise. An unavailable launch tool must refuse the node at
 /// boot (wire → probe → use), never surface later as a misclassified
 /// `HypervisorAbsent`. A
 /// successful spawn of `<tool> --version` (any exit status) proves the tool is
@@ -913,6 +946,10 @@ mod tests {
             {
                 return Err(io::Error::new(kind, format!("injected {kind:?}")));
             }
+            Ok(())
+        }
+
+        async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError> {
             Ok(())
         }
 

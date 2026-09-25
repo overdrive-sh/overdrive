@@ -95,6 +95,16 @@ pub enum SharedGuestNetworkComponent {
 pub enum SharedGuestNetworkFailStopCause {
     /// The bounded recovery deadline elapsed.
     RecoveryDeadlineExceeded,
+    /// The set of TAPs that failed to go down cannot be determined, so the
+    /// whole workloads slice was killed (D-295-R14).
+    ///
+    /// RED scaffold (D-295-R14): constructed in DELIVER step 09-01.
+    TapQuiescenceUndetermined,
+    /// A per-VM kill write for a known allocation failed other than with an
+    /// absent scope, so the whole workloads slice was killed (D-295-R14).
+    ///
+    /// RED scaffold (D-295-R14): constructed in DELIVER step 09-01.
+    VmKillFailed,
     /// The supervisor returned without a fail-stop request.
     SupervisorReturned,
     /// The supervisor returned a typed failure.
@@ -136,6 +146,21 @@ pub struct SharedGuestNetworkFailStop {
 pub enum ServeShutdownRequest {
     /// Shared guest-network ownership could not be recovered.
     SharedGuestNetwork(SharedGuestNetworkFailStop),
+}
+
+/// Fixed placeholder cap on held guest-network attachments per node. It has no
+/// capacity basis and promises no density; real per-node capacity is GH #299
+/// and GH #261. Enforced at ADR-0132's linearization point.
+pub const MAX_GUEST_NETWORK_ATTACHMENTS: u32 = 16_384;
+
+/// One consistent reading of node guest-attachment occupancy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestAttachmentOccupancy {
+    /// Admitted plus Retiring leases (ADR-0133). Compared against the cap.
+    pub held: u32,
+    /// The Retiring subset of `held`: attachments whose cleanup has begun and
+    /// not finished. Reported so a stuck cleanup is visible.
+    pub retiring: u32,
 }
 
 impl GuestNetworkExecWiring {

@@ -53,6 +53,12 @@ use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::AllocState;
 
 use super::scheduler_common::{make_alloc_running, make_job, make_node, nid, res};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
+
+/// Zero held guest-attachment occupancy: these scenarios exercise CPU/memory
+/// placement, not the attachment cap (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 // ---------------------------------------------------------------------------
 // `&&` -> `||` in free_capacity
@@ -104,7 +110,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         restart_count: 0,
     }];
 
-    let result = schedule(&nodes, &job.resources, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
 
     assert_eq!(
         result,
@@ -125,7 +131,7 @@ fn free_capacity_includes_running_allocs_on_same_node() {
     let job = make_job("payments", res(1_000, 1024 * 1024 * 1024));
     let allocs = vec![make_alloc_running("alloc-running-0", "other", "local")];
 
-    let result = schedule(&nodes, &job.resources, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
 
     let Err(PlacementError::NoCapacity { max_free, .. }) = result else {
         panic!("expected NoCapacity, got {result:?}");
@@ -168,7 +174,7 @@ fn no_capacity_max_free_reflects_largest_per_component_across_nodes() {
     nodes.insert(c.id.clone(), c);
 
     let job = make_job("memhog", res(5_000, 10 * 1024 * 1024 * 1024));
-    let result = schedule(&nodes, &job.resources, &[]);
+    let result = schedule(&nodes, &job.resources, &[], NO_GUEST_ATTACHMENTS);
 
     let Err(PlacementError::NoCapacity { max_free, needed }) = result else {
         panic!("expected NoCapacity, got {result:?}");

@@ -36,8 +36,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{
@@ -172,6 +174,10 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -184,6 +190,10 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
@@ -192,6 +202,8 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -240,6 +252,10 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -252,6 +268,10 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -293,6 +313,10 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -305,6 +329,10 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -352,6 +380,10 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -364,6 +396,10 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let mut restart_counts = BTreeMap::new();
     // Budget remaining: attempts < ceiling.
@@ -373,6 +409,8 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -454,6 +492,7 @@ proptest! {
                     service_spec_digest: None,
                     probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 }, leases: BTreeMap::new() },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -466,6 +505,7 @@ proptest! {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 }, leases: BTreeMap::new() },
         };
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(aid("alloc-payments-0"), attempts);
@@ -474,7 +514,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new(), observed_generation: 0 };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new(), observed_generation: 0, reclaim_attempts: BTreeMap::new(), reclaim_emitted_at: BTreeMap::new() };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the
@@ -632,7 +672,10 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // `TerminalCondition`. Makes no terminal claim by construction
         // — same bucket as every other action above.
         | Action::ReclaimAllocation { .. }
-        | Action::DiscardStrandedArtifacts { .. } => None,
+        | Action::DiscardStrandedArtifacts { .. }
+        // netns-density-295 (D-295-R11): the row-neutral network reclaim
+        // carries `alloc_id` only and writes no row — no terminal claim.
+        | Action::ReclaimAllocationNetwork { .. } => None,
     }
 }
 
@@ -662,6 +705,10 @@ fn states_with_actual_allocs(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -674,6 +721,10 @@ fn states_with_actual_allocs(
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     (desired, actual)
 }
@@ -688,6 +739,8 @@ fn view_at_ceiling(alloc: &str) -> WorkloadLifecycleView {
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     }
 }
 

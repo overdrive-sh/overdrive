@@ -26,7 +26,9 @@ use crate::traits::driver::DriverRegistry;
 use crate::traits::intent_store::IntentStore;
 use crate::traits::observation_store::ObservationStore;
 use crate::traits::vm_host_state::VmHostState;
-use crate::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
+use crate::traits::{
+    GuestAttachmentView, HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet,
+};
 
 /// The borrow-bundle a reconciler's `hydrate_desired` / `hydrate_actual` reads
 /// its facts through (ADR-0086 D5).
@@ -42,6 +44,8 @@ use crate::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet
 /// * [`ListenerFacts`] / [`ServiceVipView`] / [`WorkflowLiveSet`] /
 ///   [`HeldSvidView`] — the four NEW narrow read-ports (ADR-0086 D5) that make
 ///   the previously-concrete hydration surfaces DST-injectable.
+/// * [`GuestAttachmentView`] — the fifth read-port (D-295-R8, ADR-0134): node
+///   guest-attachment occupancy and per-allocation leases.
 /// * `node_id` / `host_ipv4` / `intent_redb_path` — plain data threaded in (not
 ///   traits).
 ///
@@ -67,6 +71,9 @@ pub struct HydrationContext<'a> {
     pub workflow_live_set: &'a dyn WorkflowLiveSet,
     /// Global node-held SVID snapshot read port (ADR-0086 D5).
     pub held_svid_view: &'a dyn HeldSvidView,
+    /// Node guest-attachment occupancy read port (D-295-R8, ADR-0134).
+    // RED scaffold (D-295-R8): consumed in DELIVER step 07-03.
+    pub guest_attachments: &'a dyn GuestAttachmentView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
     /// The local host IPv4 (plain data).

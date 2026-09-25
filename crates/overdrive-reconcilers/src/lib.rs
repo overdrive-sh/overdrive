@@ -105,6 +105,12 @@ const _: fn(ResyncScope, &NodeId) -> Vec<TargetResource> = resolve_scope;
 
 /// Sum of every `desired`/`actual` shape consumed by a registered reconciler.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a per-tick hydration projection held by value once per evaluation; boxing the \
+              WorkloadLifecycle variant would change every construction site for no allocation \
+              benefit (D-295-R8 grew it by the guest-attachment observation)"
+)]
 pub enum AnyState {
     /// `State = ()` variant for Phase 1 reconcilers that do not
     /// dereference their projection (`NoopHeartbeat`).

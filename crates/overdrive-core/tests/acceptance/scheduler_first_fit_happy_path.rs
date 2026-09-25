@@ -13,6 +13,12 @@ use std::collections::BTreeMap;
 use overdrive_core::scheduler::schedule;
 
 use super::scheduler_common::{make_job, make_node, nid, res};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
+
+/// Zero held guest-attachment occupancy: these scenarios exercise CPU/memory
+/// placement, not the attachment cap (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 #[test]
 fn scheduler_picks_local_node_when_capacity_fits() {
@@ -25,7 +31,7 @@ fn scheduler_picks_local_node_when_capacity_fits() {
     let job = make_job("payments", res(500, 1024 * 1024 * 1024));
 
     // When schedule is called with no running allocations
-    let result = schedule(&nodes, &job.resources, &[]);
+    let result = schedule(&nodes, &job.resources, &[], NO_GUEST_ATTACHMENTS);
 
     // Then the result is Ok(local)
     assert_eq!(result, Ok(nid("local")));

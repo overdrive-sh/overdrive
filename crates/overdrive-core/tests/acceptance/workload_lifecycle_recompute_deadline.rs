@@ -48,8 +48,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_reconcilers::{
@@ -165,6 +167,10 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -177,6 +183,10 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     (desired, actual)
 }
@@ -213,6 +223,8 @@ fn recomputes_deadline_at_window_boundary() {
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
@@ -305,6 +317,8 @@ fn restart_survival_idempotence() {
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);

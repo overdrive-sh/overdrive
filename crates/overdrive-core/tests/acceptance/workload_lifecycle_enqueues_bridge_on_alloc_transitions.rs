@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, ContentHash, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TargetResource, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
@@ -186,6 +188,10 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -198,6 +204,10 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -240,6 +250,10 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -252,6 +266,10 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -294,6 +312,10 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -306,6 +328,10 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -350,6 +376,10 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -362,6 +392,10 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
 
     let mut view = WorkloadLifecycleView::default();
@@ -413,6 +447,10 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -425,6 +463,10 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -493,6 +535,10 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -505,6 +551,10 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -543,6 +593,10 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -555,6 +609,10 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();

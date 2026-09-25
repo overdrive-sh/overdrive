@@ -671,6 +671,18 @@ pub enum Action {
         /// Target allocation.
         alloc_id: AllocationId,
     },
+
+    /// Reclaim the guest-network and intercept residue of a Failed or Terminated
+    /// allocation whose cleanup no other action owns. Writes no allocation row and
+    /// emits no lifecycle event.
+    ///
+    /// D-295-R11 (ADR-0136). RED scaffold: emitted by `WorkloadLifecycle` from
+    /// DELIVER step 07-03 and dispatched by the action shim from DELIVER step
+    /// 07-02.
+    ReclaimAllocationNetwork {
+        /// Target allocation.
+        alloc_id: AllocationId,
+    },
 }
 
 // `WorkflowStart` is the concrete shape defined in `crate::workflow`

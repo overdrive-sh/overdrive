@@ -47,8 +47,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
@@ -205,6 +207,10 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("absent"),
@@ -217,6 +223,10 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -271,6 +281,10 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -283,6 +297,10 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -332,6 +350,10 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -344,6 +366,10 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -403,6 +429,10 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -415,6 +445,10 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -446,6 +480,10 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -458,6 +496,10 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -573,6 +615,10 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -585,6 +631,10 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), attempts);
@@ -593,6 +643,8 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -698,6 +750,10 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -710,6 +766,10 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), seen_at);
@@ -721,6 +781,8 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
     let tick = fresh_tick(Instant::now(), now_unix);
 
@@ -772,6 +834,10 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -784,6 +850,10 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     // view is empty — fresh failure, no prior restart bookkeeping.
     let view = WorkloadLifecycleView::default();
@@ -855,6 +925,10 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -867,6 +941,10 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
 
     // Tick 1: fresh failure. Capture next_view as the input to tick 2.
@@ -945,6 +1023,10 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -957,6 +1039,10 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
 
     // Tick 1: fresh failure.
@@ -1075,6 +1161,10 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -1087,6 +1177,10 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
 
     // Seed the view: restart_counts < CEILING (so
@@ -1103,6 +1197,8 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
         observed_generation: 0,
+        reclaim_attempts: BTreeMap::new(),
+        reclaim_emitted_at: BTreeMap::new(),
     };
     let tick = tick_at_unix(now, now_unix, 0);
 
@@ -1170,6 +1266,10 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -1182,6 +1282,10 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+            leases: BTreeMap::new(),
+        },
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -1267,6 +1371,10 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1279,6 +1387,10 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1339,6 +1451,10 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1351,6 +1467,10 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
 
         // Seed the view: a stale `last_failure_seen_at` carried over
@@ -1369,6 +1489,8 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             last_failure_seen_at,
             released_for_deletion: BTreeSet::new(),
             observed_generation: 0,
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
         };
         let tick = tick_at_unix(now, now_unix, 0);
 
@@ -1420,6 +1542,10 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1432,6 +1558,10 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
 
         let now = Instant::now();
@@ -1443,6 +1573,8 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             last_failure_seen_at,
             released_for_deletion: BTreeSet::new(),
             observed_generation: 0,
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
         };
         let tick = tick_at_unix(now, now_unix, 0);
 
@@ -1494,6 +1626,10 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("absent"),
@@ -1506,6 +1642,10 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1608,6 +1748,10 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1620,6 +1764,10 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1684,6 +1832,10 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1696,6 +1848,10 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1741,6 +1897,10 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1753,6 +1913,10 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1799,6 +1963,10 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1811,6 +1979,10 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -1954,6 +2126,10 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -1966,6 +2142,10 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -2072,6 +2252,10 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -2084,6 +2268,10 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =
@@ -2161,6 +2349,10 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -2173,6 +2365,10 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
         let tick =

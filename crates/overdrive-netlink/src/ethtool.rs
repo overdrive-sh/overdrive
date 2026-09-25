@@ -46,6 +46,12 @@ const CTRL_ATTR_FAMILY_NAME: u16 = 2;
 const NLM_F_REQUEST: u16 = 0x01;
 const NLM_F_ACK: u16 = 0x04;
 const NLMSG_ERROR: u16 = 0x02;
+/// `NLM_F_DUMP` (`NLM_F_ROOT | NLM_F_MATCH`, `include/uapi/linux/netlink.h`).
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const NLM_F_DUMP: u16 = 0x300;
+/// `NLMSG_DONE` (`include/uapi/linux/netlink.h`) — ends a dump.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const NLMSG_DONE: u16 = 0x3;
 const NLA_F_NESTED: u16 = 0x8000;
 
 /// `ETHTOOL_MSG_FEATURES_SET`. **12 / `0x0c`, NOT `0x0a`** (which is
@@ -57,6 +63,33 @@ const ETHTOOL_A_HEADER_DEV_NAME: u16 = 2;
 const ETHTOOL_A_BITSET_BITS: u16 = 3;
 const ETHTOOL_A_BITSET_BITS_BIT: u16 = 1;
 const ETHTOOL_A_BITSET_BIT_NAME: u16 = 2;
+
+// ---- ethtool debug message mask (D-295-R22 read-back; pinned from
+// `include/uapi/linux/ethtool_netlink_generated.h`) ---------------------------
+/// `ETHTOOL_MSG_DEBUG_GET`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_MSG_DEBUG_GET: u8 = 7;
+/// `ETHTOOL_A_DEBUG_HEADER`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_DEBUG_HEADER: u16 = 1;
+/// `ETHTOOL_A_DEBUG_MSGMASK`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_DEBUG_MSGMASK: u16 = 2;
+/// `ETHTOOL_A_HEADER_FLAGS`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_HEADER_FLAGS: u16 = 3;
+/// `ETHTOOL_FLAG_COMPACT_BITSETS`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_FLAG_COMPACT_BITSETS: u32 = 1;
+/// `ETHTOOL_A_BITSET_SIZE`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_BITSET_SIZE: u16 = 2;
+/// `ETHTOOL_A_BITSET_VALUE`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_BITSET_VALUE: u16 = 4;
+/// `ETHTOOL_A_HEADER_DEV_INDEX`.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
+const ETHTOOL_A_HEADER_DEV_INDEX: u16 = 1;
 /// `ETHTOOL_A_BITSET_BIT_VALUE` — present ⇒ target value 1 (on). We NEVER
 /// emit it (the "off" invariant); named here only so the encoder test can
 /// assert its **absence**, hence `#[cfg(test)]`.
@@ -200,6 +233,49 @@ pub async fn disable_tx_offload(iface: &str) -> Result<(), NetlinkError> {
 pub async fn tx_offload_on(iface: &str) -> Result<bool, NetlinkError> {
     let (active, changeable) = feature_snapshot(iface).await?;
     Ok(any_tx_checksum_active(&active, &changeable))
+}
+
+/// Read `iface`'s ethtool debug message mask.
+///
+/// One `ETHTOOL_MSG_DEBUG_GET` request with `ETHTOOL_A_HEADER_FLAGS =
+/// ETHTOOL_FLAG_COMPACT_BITSETS`, decoding the first `ETHTOOL_A_BITSET_VALUE`
+/// word of the compact `ETHTOOL_A_DEBUG_MSGMASK` bitset. For a tun/tap device
+/// this is the device's `msg_enable` (`tun_get_msglevel`), which `TUNSETDEBUG`
+/// sets and which is 0 on a freshly created TAP.
+///
+/// # Errors
+///
+/// [`NetlinkError::Ethtool`] with `op` `"debug-get-socket"`,
+/// `"resolve-family"`, `"debug-get"` (a kernel NACK, errno preserved),
+/// `"debug-get-decode"` (a reply without the mask), or
+/// `"debug-blocking-join"` (a `spawn_blocking` join failure). No read failure
+/// is absorbed into a default mask.
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+#[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 06-01")]
+pub async fn debug_msg_mask(iface: &str) -> Result<u32, NetlinkError> {
+    let _ = iface;
+    todo!("RED scaffold: D-295-R22 debug_msg_mask — DELIVER step 06-01")
+}
+
+/// Every host-namespace netdev's ethtool debug message mask, keyed by ifindex.
+///
+/// The key is `ETHTOOL_A_HEADER_DEV_INDEX`, from one `ETHTOOL_MSG_DEBUG_GET`
+/// request with `NLM_F_DUMP`, read until `NLMSG_DONE`. A device without
+/// `get_msglevel` is absent from the map: the kernel skips its
+/// `-EOPNOTSUPP` (`net/ethtool/netlink.c:657`).
+///
+/// # Errors
+///
+/// [`NetlinkError::Ethtool`] with `op` `"debug-get-socket"`,
+/// `"resolve-family"`, `"debug-get"` (a kernel NACK, errno preserved),
+/// `"debug-get-decode"` (a reply without the mask or the device index),
+/// `"debug-dump"` (a dump NACK or a multipart read failure), or
+/// `"debug-blocking-join"` (a `spawn_blocking` join failure). No read failure
+/// is absorbed into a default mask.
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+#[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 06-01")]
+pub async fn debug_msg_masks() -> Result<BTreeMap<u32, u32>, NetlinkError> {
+    todo!("RED scaffold: D-295-R22 debug_msg_masks — DELIVER step 06-01")
 }
 
 /// `FEATURES_GET` via the `ethtool` crate: `(active-state map, changeable

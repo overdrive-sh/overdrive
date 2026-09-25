@@ -126,3 +126,14 @@ pub fn gh295c_endpoint(mut ctx: TcContext) -> i32 {
     bump(DIRECT_BYPASS_DROP);
     TC_ACT_SHOT
 }
+
+/// TCX egress guest-MAC classifier (D-295-R21, ADR-0142).
+///
+/// RED scaffold: passes every frame. DELIVER step 06-01 replaces the body
+/// with the egress verdict table — deliver unicast only for the egressing
+/// TAP's registered guest MAC, every group frame always — and its
+/// `EgressDestinationDrop` counter slot.
+#[classifier]
+pub fn gh295c_egress(_ctx: TcContext) -> i32 {
+    TC_ACT_OK
+}

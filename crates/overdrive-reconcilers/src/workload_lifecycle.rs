@@ -11,8 +11,10 @@ use overdrive_core::aggregate::{
     IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
     WorkloadKind,
 };
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
+use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, VmPayload};
 use overdrive_core::traits::intent_store::TxnOp;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
@@ -505,6 +507,7 @@ async fn hydrate_workload_lifecycle_desired(
         service_spec_digest,
         probe_descriptors,
         service_ports,
+        guest_attachments: unobserved_guest_attachments(),
     })
 }
 
@@ -540,7 +543,19 @@ async fn hydrate_workload_lifecycle_actual(
         service_spec_digest,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
+        guest_attachments: unobserved_guest_attachments(),
     })
+}
+
+/// The guest-attachment observation hydration supplies until the read-port
+/// read lands.
+// RED scaffold (D-295-R8): consumed in DELIVER step 07-03, which replaces this
+// with `ctx.guest_attachments.observe(<this workload's row allocation ids>)`.
+const fn unobserved_guest_attachments() -> GuestAttachmentObservation {
+    GuestAttachmentObservation {
+        occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+        leases: BTreeMap::new(),
+    }
 }
 
 /// GAP-9 — name of the `ServiceLifecycleReconciler`.
@@ -1076,6 +1091,7 @@ impl WorkloadLifecycle {
                     &desired.nodes,
                     &job.resources,
                     &owned_allocs,
+                    actual.guest_attachments.occupancy,
                 );
                 placement.map_or_else(
                     |_placement_error| {
@@ -1695,6 +1711,11 @@ pub struct WorkloadLifecycleState {
     /// at the IDENTICAL site/shape as [`Self::probe_descriptors`] so the
     /// inbound-TPROXY install (step 03-01) receives the declared port set.
     pub service_ports: Vec<std::num::NonZeroU16>,
+    /// Node guest-attachment occupancy plus the leases of this workload's row
+    /// allocations, read as one snapshot through the hydration read-port
+    /// (D-295-R8, ADR-0134). Placement passes its `occupancy` to the
+    /// scheduler.
+    pub guest_attachments: GuestAttachmentObservation,
 }
 
 /// Project the operator-declared probe descriptors of a
@@ -1863,6 +1884,17 @@ pub struct WorkloadLifecycleView {
     /// (per § "Reconciler I/O → Schema evolution").
     #[serde(default)]
     pub observed_generation: u64,
+    /// Network-reclaim attempts per allocation (D-295-R11). Persisted input
+    /// of the reclaim backoff; the deadline is recomputed every tick from
+    /// this and [`Self::reclaim_emitted_at`] against the live backoff policy.
+    // RED scaffold (D-295-R11): consumed in DELIVER step 07-02.
+    #[serde(default)]
+    pub reclaim_attempts: BTreeMap<AllocationId, u32>,
+    /// Wall-clock time the last `ReclaimAllocationNetwork` was emitted per
+    /// allocation (D-295-R11). Persisted input of the reclaim backoff.
+    // RED scaffold (D-295-R11): consumed in DELIVER step 07-02.
+    #[serde(default)]
+    pub reclaim_emitted_at: BTreeMap<AllocationId, UnixInstant>,
 }
 
 #[cfg(test)]
@@ -2084,6 +2116,9 @@ mod service_vip_release_emission_tests {
     use overdrive_core::reconcilers::Action;
     use overdrive_core::traits::driver::Resources;
 
+    use overdrive_core::guest_network::GuestAttachmentOccupancy;
+    use overdrive_core::traits::GuestAttachmentObservation;
+
     use super::{WorkloadLifecycleState, WorkloadLifecycleView, service_vip_release_emission};
 
     fn wid(s: &str) -> WorkloadId {
@@ -2142,6 +2177,10 @@ mod service_vip_release_emission_tests {
             service_spec_digest: Some(digest),
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         }
     }
 
@@ -2241,6 +2280,10 @@ mod service_vip_release_emission_tests {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let view = WorkloadLifecycleView::default();
 
@@ -2269,6 +2312,8 @@ mod service_vip_release_emission_tests {
             last_failure_seen_at: BTreeMap::new(),
             released_for_deletion: released,
             observed_generation: 0,
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
         };
 
         let release = service_vip_release_emission(&desired, &view);
@@ -2537,8 +2582,10 @@ mod eligibility_tests {
 
     use super::{WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView};
     use overdrive_core::aggregate::{Job, Vm, WorkloadDriver, WorkloadKind};
+    use overdrive_core::guest_network::GuestAttachmentOccupancy;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::{Reconciler, TickContext};
+    use overdrive_core::traits::GuestAttachmentObservation;
     use overdrive_core::traits::driver::Resources;
     use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
     use overdrive_core::wall_clock::UnixInstant;
@@ -2591,6 +2638,10 @@ mod eligibility_tests {
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
             service_ports: Vec::new(),
+            guest_attachments: GuestAttachmentObservation {
+                occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
+                leases: BTreeMap::new(),
+            },
         };
         let actual = WorkloadLifecycleState {
             workload_id: workload_id.clone(),
@@ -2606,6 +2657,8 @@ mod eligibility_tests {
             )]),
             released_for_deletion: BTreeSet::new(),
             observed_generation: 0,
+            reclaim_attempts: BTreeMap::new(),
+            reclaim_emitted_at: BTreeMap::new(),
         };
         let tick = TickContext {
             now: Instant::now(),

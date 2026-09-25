@@ -28,6 +28,12 @@ use overdrive_core::id::NodeId;
 use overdrive_core::scheduler::schedule;
 
 use super::scheduler_common::{arb_allocs_for_nodes, arb_job, arb_node_map};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
+
+/// Zero held guest-attachment occupancy: these scenarios exercise CPU/memory
+/// placement, not the attachment cap (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 proptest! {
     /// Scenario 1.2 — calling `schedule` twice on the same input
@@ -40,8 +46,8 @@ proptest! {
             (Just(nodes), arb_job(), allocs)
         })
     ) {
-        let first = schedule(&nodes, &job.resources, &allocs);
-        let second = schedule(&nodes, &job.resources, &allocs);
+        let first = schedule(&nodes, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
+        let second = schedule(&nodes, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
         prop_assert_eq!(
             first,
             second,
@@ -73,8 +79,8 @@ proptest! {
             nodes_reversed.insert(k, v);
         }
 
-        let r_orig = schedule(&nodes_orig, &job.resources, &allocs);
-        let r_rev = schedule(&nodes_reversed, &job.resources, &allocs);
+        let r_orig = schedule(&nodes_orig, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
+        let r_rev = schedule(&nodes_reversed, &job.resources, &allocs, NO_GUEST_ATTACHMENTS);
         prop_assert_eq!(
             r_orig,
             r_rev,

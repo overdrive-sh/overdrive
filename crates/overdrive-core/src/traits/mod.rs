@@ -24,6 +24,11 @@ pub mod clock;
 pub mod dataplane;
 pub mod driver;
 pub mod entropy;
+// netns-density-295 (D-295-R8, ADR-0134). The fifth hydration read-port: one
+// consistent guest-attachment occupancy snapshot plus per-allocation leases.
+// Contract in core; the production view over the server's guest-address pool
+// lives in control-plane and `SimGuestAttachmentView` in `overdrive-sim`.
+pub mod guest_attachment_view;
 // reconcilers-own-hydration (ADR-0086 D5). The four narrow driven read-ports
 // the reconciler hydration boundary reads. Contracts live in core; production
 // impls live UP (`ListenerFactStore` / `WorkflowEngine` / `IdentityMgr` in
@@ -77,6 +82,9 @@ pub use clock::Clock;
 pub use dataplane::Dataplane;
 pub use driver::{Driver, DriverType};
 pub use entropy::Entropy;
+pub use guest_attachment_view::{
+    GuestAttachmentLease, GuestAttachmentObservation, GuestAttachmentView,
+};
 pub use held_svid_view::HeldSvidView;
 pub use identity_read::IdentityRead;
 pub use intent_store::IntentStore;

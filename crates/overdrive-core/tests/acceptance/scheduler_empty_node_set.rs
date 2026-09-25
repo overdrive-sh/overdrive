@@ -15,6 +15,12 @@ use overdrive_core::id::NodeId;
 use overdrive_core::scheduler::{PlacementError, schedule};
 
 use super::scheduler_common::{make_job, res};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
+
+/// Zero held guest-attachment occupancy: these scenarios exercise CPU/memory
+/// placement, not the attachment cap (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 #[test]
 fn scheduler_returns_no_healthy_node_for_empty_input() {
@@ -25,7 +31,7 @@ fn scheduler_returns_no_healthy_node_for_empty_input() {
     let job = make_job("anything", res(100, 1024));
 
     // When schedule is called
-    let result = schedule(&nodes, &job.resources, &[]);
+    let result = schedule(&nodes, &job.resources, &[], NO_GUEST_ATTACHMENTS);
 
     // Then the result is Err(NoHealthyNode)
     assert_eq!(result, Err(PlacementError::NoHealthyNode));

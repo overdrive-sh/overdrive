@@ -7,10 +7,17 @@ use std::time::Duration;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::Node;
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::scheduler::{PlacementError, schedule};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+
+/// Zero held guest-attachment occupancy: until DELIVER step 07-03
+/// (S-ND295-05B) the scheduler still enforces the cap over Running rows, which
+/// is the boundary this body exercises (D-295-R8).
+const NO_GUEST_ATTACHMENTS: GuestAttachmentOccupancy =
+    GuestAttachmentOccupancy { held: 0, retiring: 0 };
 
 fn row(index: usize, node: &NodeId) -> AllocStatusRow {
     AllocStatusRow {
@@ -51,7 +58,12 @@ fn fixed_attachment_cap_returns_no_capacity_before_pool_assignment() {
             },
         )]);
         let allocations = (0..active).map(|index| row(index, &node_id)).collect::<Vec<_>>();
-        let result = schedule(&nodes, &Resources { cpu_milli: 0, memory_bytes: 0 }, &allocations);
+        let result = schedule(
+            &nodes,
+            &Resources { cpu_milli: 0, memory_bytes: 0 },
+            &allocations,
+            NO_GUEST_ATTACHMENTS,
+        );
 
         if admitted {
             assert_eq!(result.expect("below cap continues"), node_id);

@@ -411,6 +411,59 @@ pub enum VmmError {
     /// originating I/O error without reinterpretation.
     #[error("VMM I/O: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Attaching the per-launch TAP queue for `tap` failed at `stage`
+    /// (D-295-R2, ADR-0128). Carries the originating I/O error.
+    ///
+    /// RED scaffold: constructed in DELIVER step 05-03.
+    #[error("VMM TAP queue attach for {tap} failed at {stage:?}")]
+    TapQueue {
+        /// The persistent TAP the queue was attached to.
+        tap: String,
+        /// The attach stage that failed.
+        stage: TapQueueStage,
+        /// The originating I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The attached TAP queue for `tap` violated a checked postcondition
+    /// (D-295-R2, ADR-0128).
+    ///
+    /// RED scaffold: constructed in DELIVER step 05-03.
+    #[error("VMM TAP queue postcondition for {tap} failed: {violation:?}")]
+    TapQueuePostcondition {
+        /// The persistent TAP the queue was attached to.
+        tap: String,
+        /// The postcondition the attached queue violated.
+        violation: TapQueueViolation,
+    },
+}
+
+/// The stage of a per-launch TAP queue attach that failed (D-295-R2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapQueueStage {
+    /// Opening `/dev/net/tun`.
+    Open,
+    /// `TUNSETIFF` on the persistent TAP.
+    Attach,
+    /// Reading back the queue flags (`TUNGETIFF`).
+    FlagsReadBack,
+    /// Reading back the TAP's administrative state (`SIOCGIFFLAGS`).
+    AdminStateReadBack,
+}
+
+/// A checked postcondition an attached TAP queue violated (D-295-R2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapQueueViolation {
+    /// The queue flags are not the persistent single-queue vnet-header TAP
+    /// flags.
+    Flags {
+        /// The observed `TUNGETIFF` flags.
+        observed: u16,
+    },
+    /// The TAP was administratively up at queue attach.
+    NotDown,
 }
 
 impl VmmError {
@@ -461,6 +514,35 @@ pub enum VmmProbeError {
         launch_tool_failure_description(.source)
     )]
     LaunchToolUnavailable { tool: String, source: std::io::Error },
+
+    /// No VMM launch seccomp program exists for this target architecture
+    /// (D-295-R22, ADR-0143).
+    #[error("no VMM launch seccomp program for target architecture {target_arch}")]
+    LaunchSeccompUnsupportedArch {
+        /// `std::env::consts::ARCH` of the running build.
+        target_arch: &'static str,
+    },
+
+    /// Spawning a launch tool under the VMM launch seccomp filter failed: the
+    /// kernel refused the filter, or a launch-hook step failed (D-295-R22).
+    #[error("VMM launch seccomp filter could not be installed: {source}")]
+    LaunchSeccompInstall {
+        /// The spawn error carrying the child's errno.
+        source: std::io::Error,
+    },
+
+    /// A launch tool spawned under the VMM launch seccomp filter did not exit
+    /// successfully; a foreign-ABI kill ends it with `SIGSYS` (D-295-R22).
+    #[error(
+        "launch tool under the VMM launch seccomp filter ended with exit code \
+         {exit_code:?}, signal {signal:?}"
+    )]
+    LaunchSeccompProbeExit {
+        /// The tool's exit code, when it exited.
+        exit_code: Option<i32>,
+        /// The signal that ended the tool, when it was killed.
+        signal: Option<u8>,
+    },
 }
 
 fn launch_tool_failure_description(source: &std::io::Error) -> &'static str {
@@ -504,5 +586,23 @@ impl VmmProbeError {
     #[must_use]
     pub fn launch_tool_unavailable(tool: impl Into<String>, source: std::io::Error) -> Self {
         Self::LaunchToolUnavailable { tool: tool.into(), source }
+    }
+
+    /// [`VmmProbeError::LaunchSeccompUnsupportedArch`] for `target_arch`.
+    #[must_use]
+    pub const fn launch_seccomp_unsupported_arch(target_arch: &'static str) -> Self {
+        Self::LaunchSeccompUnsupportedArch { target_arch }
+    }
+
+    /// [`VmmProbeError::LaunchSeccompInstall`] carrying the spawn error.
+    #[must_use]
+    pub const fn launch_seccomp_install(source: std::io::Error) -> Self {
+        Self::LaunchSeccompInstall { source }
+    }
+
+    /// [`VmmProbeError::LaunchSeccompProbeExit`] for the tool's exit status.
+    #[must_use]
+    pub const fn launch_seccomp_probe_exit(exit_code: Option<i32>, signal: Option<u8>) -> Self {
+        Self::LaunchSeccompProbeExit { exit_code, signal }
     }
 }

@@ -3041,6 +3041,63 @@ pub fn clear_shared_ip_intercept_elements_atomically(
     shared_ip::clear_elements(expected_program)
 }
 
+/// The complete dynamic member set of the node-shared IPv4 intercept program:
+/// a declarative whole-state target for
+/// [`converge_shared_ip_intercept_members_atomically`] (D-295-R12, R15).
+#[doc(hidden)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SharedIpInterceptMembers {
+    /// Managed guest source addresses.
+    pub managed_guest_ips: BTreeSet<Ipv4Addr>,
+    /// Outbound-intercepted guest source addresses.
+    pub outbound_sources: BTreeSet<Ipv4Addr>,
+    /// Inbound-intercepted destinations.
+    pub inbound_destinations: BTreeSet<SocketAddrV4>,
+}
+
+/// Converge all three member sets to exactly `expected` in one atomic batch:
+/// insert missing members and delete unexpected ones, against the program
+/// `expected_program` (D-295-R12, R15).
+///
+/// Requires a read-back equal to `expected` with the program and the foreign
+/// complement unchanged; a batch rejection preserves the pre-state.
+#[doc(hidden)]
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]
+pub fn converge_shared_ip_intercept_members_atomically(
+    expected_program: &SharedIpInterceptIdentity,
+    expected: &SharedIpInterceptMembers,
+) -> Result<SharedIpInterceptState, NetlinkError> {
+    let _ = (expected_program, expected);
+    todo!(
+        "RED scaffold: D-295-R12 converge_shared_ip_intercept_members_atomically — DELIVER step 08-02"
+    )
+}
+
+/// Observe the intercept-owned guard table `ip overdrive-mtls-guard`
+/// (D-295-R18, provisional: removed by DELIVER step 08-01 if R18 is withdrawn).
+///
+/// Returns `Ok(true)` exactly when the table, its `prerouting` chain, and its
+/// single drop rule match the guard identity; `Ok(false)` when the table is
+/// absent. A partial, duplicate, malformed, or foreign-conflicting table is a
+/// typed error.
+#[doc(hidden)]
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-01")]
+pub fn observe_intercept_mark_guard() -> Result<bool, NetlinkError> {
+    todo!("RED scaffold: D-295-R18 observe_intercept_mark_guard — DELIVER step 08-01")
+}
+
+/// Create whatever is missing of the intercept-owned guard table in one atomic
+/// batch, then require [`observe_intercept_mark_guard`] to return `true`
+/// (D-295-R18, provisional: removed by DELIVER step 08-01 if R18 is withdrawn).
+///
+/// Never rewrites a present non-matching rule; that case returns the typed
+/// error.
+#[doc(hidden)]
+#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-01")]
+pub fn converge_intercept_mark_guard() -> Result<(), NetlinkError> {
+    todo!("RED scaffold: D-295-R18 converge_intercept_mark_guard — DELIVER step 08-01")
+}
+
 /// Private semantic IPv4 shared-intercept adapter used by the worker's
 /// module-private `SharedInterceptProgramIo` seam.
 mod shared_ip {
@@ -5686,6 +5743,7 @@ pub mod bridge {
 
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
+        #[allow(clippy::print_stderr, reason = "the root-required skip notice is the only output")]
         fn observe_and_delete_preserve_order_duplicates_foreign_children_and_full_conflicts() {
             // This is a real-kernel adapter test; the source-local lane is
             // also runnable in isolation, so establish the exact production

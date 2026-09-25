@@ -53,12 +53,13 @@
 //! [`KEK_LEN`] raw bytes is used verbatim, so an operator who provisions raw
 //! 256-bit key material gets it byte-for-byte.
 //!
-//! # `#![forbid(unsafe_code)]`
+//! # `#![deny(unsafe_code)]`
 //!
 //! This module is unsafe-free. The kernel-keyring syscalls go through
 //! `linux-keyutils`, a pure-Rust crate whose `unsafe` is internal — the
-//! consumer surface is entirely safe, so the crate-level
-//! `#![forbid(unsafe_code)]` (see `lib.rs`) is preserved.
+//! consumer surface is entirely safe, so this module needs no
+//! `#[allow(unsafe_code)]` under the crate-level `#![deny(unsafe_code)]`
+//! (see `lib.rs`).
 //!
 //! Note on transient buffers: the raw delivery buffer (the credential / dev
 //! passphrase bytes read off the file / env) and the per-call `keyctl` read

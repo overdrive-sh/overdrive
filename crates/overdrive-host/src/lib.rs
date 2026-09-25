@@ -18,7 +18,10 @@
 //! and adds host impls for `Dataplane`, `Driver`, `IntentStore`,
 //! `ObservationStore`, and `Llm`.
 
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: the audited VMM launch hook
+// (`vmm::register_launch_child_hook`, ADR-0129 / ADR-0143) carries the crate's
+// only production `#[allow(unsafe_code)]`.
+#![deny(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod ca;

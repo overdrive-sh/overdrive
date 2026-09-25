@@ -51,9 +51,9 @@ rand.workspace           = true
 # rootfs clone calls `rustix::fs::ioctl_ficlone`, a SAFE wrapper around the
 # FICLONE ioctl (ADR-0082 §D5 self-application: the ioctl directly, never
 # `cp --reflink=auto`, which silently degrades to a full copy on
-# EOPNOTSUPP/EXDEV). Safe under this crate's `#![forbid(unsafe_code)]`
-# because rustix encapsulates the `unsafe` internally — same shape as the
-# `linux-keyutils` precedent below.
+# EOPNOTSUPP/EXDEV). Needs no `unsafe` block under this crate's
+# `#![deny(unsafe_code)]` because rustix encapsulates the `unsafe`
+# internally — same shape as the `linux-keyutils` precedent below.
 rustix.workspace         = true
 # `parking_lot` — `CloudHypervisorVmm` tracks live spawned processes (for
 # `terminate`'s pid-keyed lookup) behind a short-critical-section
@@ -75,8 +75,23 @@ ring                     = { workspace = true }
 # Linux kernel session keyring (`add_key` user-type key; read back via
 # `keyctl` search+read) per ADR-0063 D3, so the persistent holder across
 # the process lifetime is kernel space, not the process heap. Pure-Rust
-# safe wrapper — preserves the crate's `#![forbid(unsafe_code)]`.
+# safe wrapper — needs no `#[allow(unsafe_code)]` under the crate's
+# `#![deny(unsafe_code)]`.
 linux-keyutils.workspace = true
+# `libc` — the D-295-R22 VMM launch seccomp program (ADR-0143): the
+# `sock_filter` / `sock_fprog` / `seccomp_data` types, the `BPF_*` and
+# `SECCOMP_RET_*` codes, and the thirteen denied ioctl request numbers; and
+# the three raw syscalls of the audited launch hook
+# `register_launch_child_hook`, the crate's only production
+# `#[allow(unsafe_code)]` (ADR-0129). The FICLONE call still goes through the
+# safe `rustix` wrapper above.
+libc.workspace           = true
+# `overdrive-netlink` — `attach_tap_queue` (D-295-R2, ADR-0128):
+# `CloudHypervisorVmm::create` attaches the per-launch TAP queue it hands to
+# Cloud Hypervisor at descriptor 3. Path dependency, as every other
+# `overdrive-netlink` consumer declares it (`overdrive-netlink` is not in
+# `[workspace.dependencies]`).
+overdrive-netlink.path   = "../overdrive-netlink"
 tokio.workspace          = true
 # `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
 # the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /
@@ -113,12 +128,6 @@ serial_test.workspace    = true
 # hand-staging their own. `overdrive-host` is the first crate besides
 # `overdrive-testing` itself to consume this fixture.
 overdrive-testing.workspace = true
-# `libc` (dev-dep ONLY) — the `vmm_ficlone_per_launch` negative-path test
-# asserts on the exact FICLONE errno (`EOPNOTSUPP` / `EXDEV`) `VmmError::Io`
-# carries; naming the real constants avoids a bare magic number. Production
-# code never names `libc` — the FICLONE call itself goes through the safe
-# `rustix` wrapper above.
-libc.workspace           = true
 # `overdrive-sim` (dev-dep ONLY) — `vmm_equivalence.rs` drives `SimVmm`
 # through the SAME call sequence as the production `CloudHypervisorVmm`
 # (S-VM-90, ADR-0082 §D6). Path dep, mirroring the existing

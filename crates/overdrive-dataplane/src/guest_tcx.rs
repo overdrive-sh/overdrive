@@ -43,6 +43,10 @@ pub enum GuestTcxCounter {
     DirectBypassDrop,
     ArpPass,
     MalformedDrop,
+    /// A frame the TAP would egress to its guest, dropped because its
+    /// destination is not provably the TAP's registered guest MAC: a foreign
+    /// unicast destination, an endpoint-map miss, or an unreadable header.
+    EgressDestinationDrop,
 }
 
 /// Semantic TC verdict returned by the fixed startup TCP probe.
@@ -130,6 +134,8 @@ pub enum GuestTcxObject {
     EndpointMap,
     CounterMap,
     Classifier,
+    /// The TCX egress guest-MAC classifier (D-295-R21).
+    EgressClassifier,
 }
 
 /// Endpoint value crossing the control-plane/dataplane boundary.
@@ -237,6 +243,9 @@ const fn counter_index(counter: GuestTcxCounter) -> u32 {
         GuestTcxCounter::DirectBypassDrop => 5,
         GuestTcxCounter::ArpPass => 6,
         GuestTcxCounter::MalformedDrop => 7,
+        // The shared counter array grows to nine slots in DELIVER step 06-01;
+        // until then this slot is outside the loaded eight-entry array.
+        GuestTcxCounter::EgressDestinationDrop => 8,
     }
 }
 
@@ -1291,6 +1300,17 @@ impl GuestTcxProgram {
             attach_type: TCX_INGRESS_ATTACH_TYPE,
             inventory: self.inventory.clone(),
         })
+    }
+
+    /// Attach the node's egress guest-MAC classifier to `interface` at TCX
+    /// egress with first ordering. Sibling of `attach_first_ingress`; the
+    /// returned link's `program_id()` is the egress classifier's id and its
+    /// attachment type is TCX egress.
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
+    #[allow(clippy::needless_pass_by_ref_mut, reason = "RED scaffold — DELIVER step 06-01")]
+    pub fn attach_first_egress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
+        let _ = interface;
+        todo!("RED scaffold: D-295-R21 attach_first_egress — DELIVER step 06-01")
     }
 }
 
