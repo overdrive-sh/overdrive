@@ -11,12 +11,14 @@ process's exit status, is driven through a production port by a test.
 It targets the accepted replacement DESIGN
 (`feature-delta.md` § *Correctness-Recovery Replacement DESIGN — ACCEPTED
 2026-09-24*, decisions D-295-R1 to D-295-R22, ADR-0127 to ADR-0143), not the
-current implementation. Citations `FD <n>` are line numbers in
-`docs/feature/netns-density-295/feature-delta.md` after the 2026-09-25 DESIGN
-pins of DISTILL gaps B-1 to B-7 and N-1 (§ *DESIGN gaps — pinned*). Where an
+current implementation. A citation `FD § "<heading>"` names the section of
+`docs/feature/netns-density-295/feature-delta.md` under that exact heading,
+optionally followed by a locator within the section; it cites the DESIGN as it
+stands after the 2026-09-25 DESIGN pins of DISTILL gaps B-1 to B-7 and N-1
+(§ *DESIGN gaps — pinned*). Where an
 earlier DESIGN contract (C-295-*, D-295-DISTILL-*, RUN-295-B, …) sits beside a
 *PROPOSED/PENDING D-295-Rn* marker, the marker's accepted contract governs
-(FD 255-261).
+(FD § "Wave: DESIGN / [REF] Correctness-Recovery Replacement DESIGN — ACCEPTED 2026-09-24" (the in-line marker rule)).
 
 ## Binding rules applied
 
@@ -31,7 +33,7 @@ earlier DESIGN contract (C-295-*, D-295-DISTILL-*, RUN-295-B, …) sits beside a
   `overdrive-control-plane`. The source-local lanes use `overdrive-sim`
   adapters only for ports declared in `overdrive-core` or `overdrive-worker`,
   and the crate-private test-local ports of § *Test-local control-plane ports*
-  for the three ports `overdrive-control-plane` declares (FD 4675-4705). Every
+  for the three ports `overdrive-control-plane` declares (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim lane and its test-local ports)). Every
   seeded body prints its seed on every verdict.
 - Real guests run only on native x86_64 metal (`cargo xtask metal run --`).
   The Lima VM on this host is aarch64 and runs no Cloud Hypervisor. The
@@ -51,16 +53,16 @@ earlier DESIGN contract (C-295-*, D-295-DISTILL-*, RUN-295-B, …) sits beside a
 
 ## Scope and out-of-scope
 
-- In scope: the seven correctness gaps (FD 441-452) and every accepted
-  decision R1-R22 with its evidence row E1-E21 (FD 4718-4740) and gate cell
-  G-295-0..5 (FD 10546-10560).
-- Out of scope (FD 5076-5094): node-wide CPU/memory accounting (GH #261);
+- In scope: the seven correctness gaps (FD § "[REF] Invalidation register (charter §2)" (the seven-gap table)) and every accepted
+  decision R1-R22 with its evidence row E1-E21 (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (rows E1 to E21)) and gate cell
+  G-295-0..5 (FD § "Required boundary scenarios per gate").
+- Out of scope (FD § "[REF] Out-of-scope items and their issues (user rulings of 2026-09-24)"): node-wide CPU/memory accounting (GH #261);
   derived or configurable per-node guest-network capacity (GH #299); operator
   restart of a stopped Job (GH #301); aarch64 microVM launch (GH #302). No
   scenario below manufactures those outcomes. GH #234 is superseded when #295
-  lands; GH #197 stays open (FD 362-375).
+  lands; GH #197 stays open (FD § "[REF] Charter, rulings, and evidence" (the GitHub context)).
 - CAP-295-A is attachment-only; 16,384 is a fixed placeholder cap, not a
-  density promise (FD 300-313).
+  density promise (FD § "[REF] Charter, rulings, and evidence" (user ruling 1 of 2026-09-24, D-295-R7)).
 
 ## Journey and outcome trace
 
@@ -79,9 +81,9 @@ earlier DESIGN contract (C-295-*, D-295-DISTILL-*, RUN-295-B, …) sits beside a
 | Lane | Meaning | Runner |
 |---|---|---|
 | **pure** | default-lane, no I/O; table or proptest | `cargo xtask lima run -- cargo nextest run -p <crate> …` (Lima is only the Linux toolchain) |
-| **seeded-sim** | in-process logic over simulated adapters with printed seeds, no `run_server` (FD 4675-4705). The supervisor lanes are source-local in `overdrive-control-plane/src/lib.rs`: `overdrive-sim` adapters for ports declared in `overdrive-core` or `overdrive-worker`, and the crate's test-local ports (§ *Test-local control-plane ports*) for the three it declares. A worker over `SimMtlsIntercept`, or over a test-local intercept that delegates binding to it, binds no socket and runs no accept thread when its shared owner starts (FD 3646-3663, 3720-3735), so starting it gates no body; a seeded body leaves the default lane only for another `testing.md` reason (S-ND295-05D: its wall-clock budget) | Lima runner (the Linux toolchain); seeds via the scenario's env var or proptest |
-| **seeded-in-process** | seeded schedule that drives `run_server*`; because R16 always composes the real `HostMtlsEnforcement` kTLS probe (FD 4392-4399), it needs Lima root and `integration-tests` | `cargo xtask lima run -- … --features integration-tests` |
-| **in-process** | Lima root, real `run_server`/handler composition with sim or real injected ports (FD 4706-4713) | Lima runner, `integration-tests` |
+| **seeded-sim** | in-process logic over simulated adapters with printed seeds, no `run_server` (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim lane and its test-local ports)). The supervisor lanes are source-local in `overdrive-control-plane/src/lib.rs`: `overdrive-sim` adapters for ports declared in `overdrive-core` or `overdrive-worker`, and the crate's test-local ports (§ *Test-local control-plane ports*) for the three it declares. A worker over `SimMtlsIntercept`, or over a test-local intercept that delegates binding to it, binds no socket and runs no accept thread when its shared owner starts (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract; the effect on D-295-R16, E16, and lane classification)), so starting it gates no body; a seeded body leaves the default lane only for another `testing.md` reason (S-ND295-05D: its wall-clock budget) | Lima runner (the Linux toolchain); seeds via the scenario's env var or proptest |
+| **seeded-in-process** | seeded schedule that drives `run_server*`; because R16 always composes the real `HostMtlsEnforcement` kTLS probe (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (`compose_mtls` is deleted)), it needs Lima root and `integration-tests` | `cargo xtask lima run -- … --features integration-tests` |
+| **in-process** | Lima root, real `run_server`/handler composition with sim or real injected ports (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the in-process lane)) | Lima runner, `integration-tests` |
 | **lima-kernel** | Lima root real kernel objects (TAP, nft, netlink, seccomp) without a guest VM | Lima runner, `integration-tests`; x86_64-only cases on an x86_64 build |
 | **tier2** | `BPF_PROG_TEST_RUN` program partition | `cargo xtask bpf-unit` / `overdrive-bpf` integration binary |
 | **xtask-integration** | the `xtask` integration binary: a gate run over a real or temporary Cargo workspace (`cargo metadata`, a subprocess) | `cargo xtask lima run -- cargo nextest run -p xtask --features integration-tests` |
@@ -144,7 +146,7 @@ AND an allocation whose cleanup has not finished is shown as cleanup-pending, ne
 ## Technical verification contracts
 
 Each contract carries a field table. **Discharges** names the evidence row(s),
-gate cell(s) (`G<n>/r<row>` = G-295-n, boundary row n of FD 10546-10560), and
+gate cell(s) (`G<n>/r<row>` = G-295-n, boundary row n of FD § "Required boundary scenarios per gate"), and
 decision(s). **Disposition** is RETAINED (contract unchanged, body kept),
 RETARGETED (body rewritten to the accepted contract), NEW, or DELETED. **Step**
 is the DELIVER step that activates the body (see § *DELIVER re-roadmap input*
@@ -174,7 +176,7 @@ AND stopping both workloads leaves nothing the example owned
 | Lane | native |
 | Driving port | in-process `serve::run_with_kek` + public `deploy` handler (no binary spawn) |
 | Fault stimulus | none (healthy journey) |
-| Oracle | (1) a netlink `RTM_NEWLINK` monitor on the caller TAP's ifindex, started before deploy, shows `IFF_UP` clear from CH process creation through READY and the Running row, and the first `IFF_UP` notification strictly after the realtime `mtls.intercept.install.success` event (tracing Layer, `CLOCK_REALTIME` in `on_event`, FD 10345-10361) for the exact allocation; (2) one loss-accounted exact-ifindex AF_PACKET capture: zero caller-TAP frames with timestamp `<=` the event, and every later guest ARP/ICMP/TCP frame decodes with no 12-byte zero prefix (vnet header correct, E3); (3) all six TAP counters read 0 at the event bracket; (4) the queue holder set of the caller TAP equals the Cloud Hypervisor pid (`/proc/<pid>/fdinfo` `iff:`); (5) retained kTLS/splice leg-B evidence (FD 145-154): one `ss` TLS 1.3 tuple/inode/sole fd with bidirectional splice, loopback-only leg-B, plaintext only on leg-F/leg-S tuples, no direct bypass; (6) empty VMM/TAP/TCX/nft-member/cgroup/run-dir complement after stop. Any missing/duplicate event, lossy capture, or unprovable frame fails closed. |
+| Oracle | (1) a netlink `RTM_NEWLINK` monitor on the caller TAP's ifindex, started before deploy, shows `IFF_UP` clear from CH process creation through READY and the Running row, and the first `IFF_UP` notification strictly after the realtime `mtls.intercept.install.success` event (tracing Layer, `CLOCK_REALTIME` in `on_event`, FD § "Gate G-295-2 — existing guest command release, narrowed to the new switch" (the S-ND295-01 intercept-live timing receipt)) for the exact allocation; (2) one loss-accounted exact-ifindex AF_PACKET capture: zero caller-TAP frames with timestamp `<=` the event, and every later guest ARP/ICMP/TCP frame decodes with no 12-byte zero prefix (vnet header correct, E3); (3) all six TAP counters read 0 at the event bracket; (4) the queue holder set of the caller TAP equals the Cloud Hypervisor pid (`/proc/<pid>/fdinfo` `iff:`); (5) retained kTLS/splice leg-B evidence (FD § "Feature Delta — `netns-density-295`" (the D-295-DELIVER-04-01 kTLS/splice evidence-boundary paragraph)): one `ss` TLS 1.3 tuple/inode/sole fd with bidirectional splice, loopback-only leg-B, plaintext only on leg-F/leg-S tuples, no direct bypass; (6) empty VMM/TAP/TCX/nft-member/cgroup/run-dir complement after stop. Any missing/duplicate event, lossy capture, or unprovable frame fails closed. |
 | Seed / isolation | example-based; whole `overdrive-cli` integration binary is `host-kernel-shared` (`.config/nextest.toml`) |
 | Rust home | `crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs::{microvm_dials_a_mesh_peer_by_name_and_receives_the_reply, the_guests_mesh_traffic_travels_the_peer_wire_as_mtls_never_in_the_clear, the_guests_first_mesh_dial_is_born_intercepted_no_cleartext_escapes}` |
 | Disposition / step | RETARGETED (pre-event oracle is now zero frames with the TAP down; the down-through-READY check runs over fd handoff) — 10-01 |
@@ -218,7 +220,7 @@ AND the attach never raises, lowers, renames, persists, or deletes the TAP
 
 | Field | Value |
 |---|---|
-| Discharges | E2 Lima; G4/r1, G4/r2, G4/r3; D-295-R2 (FD 557-607) |
+| Discharges | E2 Lima; G4/r1, G4/r2, G4/r3; D-295-R2 (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the `overdrive-netlink` TUN helper and the `attach_tap_queue` contract)) |
 | Contract shape | bounded-change |
 | Lane | lima-kernel (no KVM needed) |
 | Driving port | `overdrive_netlink::attach_tap_queue(name)` (the owner-side port the VMM adapter consumes) |
@@ -241,7 +243,7 @@ AND the owner's own provision records the TAP owner as root
 
 | Field | Value |
 |---|---|
-| Discharges | E4 Lima + in-process; G4/r5; D-295-R4 (FD 609-625) |
+| Discharges | E4 Lima + in-process; G4/r5; D-295-R4 (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the creator owner, D-295-R4)) |
 | Contract shape | bounded-change |
 | Lane | lima-kernel (attach) + pure (owner expectation, carried by S-ND295-11) |
 | Driving port | `create_persistent_tap(name, 0)` then `attach_tap_queue` from a forked child that sets uid/gid 4200 and clears every capability |
@@ -296,7 +298,7 @@ AND a hook step that fails turns into a launch error, never a silent launch
 
 | Field | Value |
 |---|---|
-| Discharges | E2 Lima; G4/r1, G4/r2; D-295-R3 (FD 641-655, 1153-1185) |
+| Discharges | E2 Lima; G4/r1, G4/r2; D-295-R3 (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the in-child close, D-295-R3); FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (`register_launch_child_hook` and its three child steps)) |
 | Contract shape | bounded-change |
 | Lane | lima-kernel, x86_64 build only (the hook takes a `VmmLaunchSeccompFilter`, which exists only on x86_64) |
 | Driving port | private `register_launch_child_hook(&mut cmd, first_closed, filter)` on a re-exec of the crate's own test binary |
@@ -320,7 +322,7 @@ AND any foreign architecture or 32-bit-pointer syscall ends the process
 
 | Field | Value |
 |---|---|
-| Discharges | E21 pure; G4/r1; D-295-R22 (FD 999-1052, 1096-1151) |
+| Discharges | E21 pure; G4/r1; D-295-R22 (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the deny-list; the exact program)) |
 | Contract shape | pure-function |
 | Lane | pure (x86_64 build; on other targets the module pins the unsupported return, see S-ND295-44) |
 | Driving port | `VmmLaunchSeccompFilter::for_target()` + a pure classic-BPF evaluator over `program()` in the test module |
@@ -344,7 +346,7 @@ AND a 32-bit-pointer or i386 syscall ends the process
 
 | Field | Value |
 |---|---|
-| Discharges | E21 Lima-root and native (f); G4/r1, G4/r5 (TUNSETOWNER refused); D-295-R22 (FD 1416-1473) |
+| Discharges | E21 Lima-root and native (f); G4/r1, G4/r5 (TUNSETOWNER refused); D-295-R22 (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the testability boundary)) |
 | Contract shape | bounded-change |
 | Lane | lima-kernel on an x86_64 build (CI x86_64 Lima runner) and native (f) on metal (`cargo xtask metal run -- cargo nextest run -p overdrive-host --features integration-tests -E 'test(/launch_seccomp_kernel/)'`) |
 | Driving port | private `register_launch_child_hook` with the production program; the probe's `check_launch_seccomp` |
@@ -368,9 +370,9 @@ AND the probe runs its stages in the order reflink, hypervisor, prlimit, setpriv
 
 | Field | Value |
 |---|---|
-| Discharges | E21 pure/aarch64 (ruling 10, GH #302); G4/r2; D-295-R22 (FD 1054-1083, 1187-1239) |
+| Discharges | E21 pure/aarch64 (ruling 10, GH #302); G4/r2; D-295-R22 (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (refusal on every other target; the `create` additions)) |
 | Contract shape | pure-function (mapping, order) / bounded-change (create refusal) |
-| Lane | pure + aarch64 Lima build for the refusal arm (the only authority, FD 5145-5150) |
+| Lane | pure + aarch64 Lima build for the refusal arm (the only authority, FD § "[REF] Required downstream changes (not edited by DESIGN)" (the `distill/test-scenarios.md` item: the aarch64 lane is the refusal cases' authority)) |
 | Driving port | `VmmLaunchSeccompFilter::for_target`; `CloudHypervisorVmm::create`; `Vmm::probe` over the private `VmmProbeSubstrate` test substrate |
 | Fault stimulus | the compiled target; injected substrate stage failures |
 | Oracle | aarch64: `for_target()` → `LaunchSeccompUnsupportedArch { target_arch: "aarch64" }`; `create` → `VmmError::ConfinementUnavailable { control: Seccomp, detail }` naming aarch64 with no rootfs clone and no queue attached (scratch TAP attach still succeeds afterwards); `check_launch_seccomp` returns `VmmProbeError::LaunchSeccompUnsupportedArch`. All targets: the stage order and each `LaunchSeccomp*` mapping (install spawn error → `LaunchSeccompInstall`, non-success incl. `SIGSYS` → `LaunchSeccompProbeExit { exit_code, signal }`) |
@@ -391,7 +393,7 @@ AND each thread carries exactly one more filter than the hypervisor installs its
 
 | Field | Value |
 |---|---|
-| Discharges | E21 native (e) per-thread half (traffic half is S-ND295-01); G4/r1; D-295-R22 (FD 1446-1453, 4740) |
+| Discharges | E21 native (e) per-thread half (traffic half is S-ND295-01); G4/r1; D-295-R22 (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the testability boundary's architecture gating); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E21 row)) |
 | Contract shape | bounded-change |
 | Lane | native |
 | Driving port | `serve::run_with_kek` + `deploy` |
@@ -416,12 +418,12 @@ AND a source file the gate cannot read or parse fails the scan instead of being 
 
 | Field | Value |
 |---|---|
-| Discharges | E19 (FD 4738); obligation OBL-295-CLOEXEC (FD 717-770) |
+| Discharges | E19 (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E19 row)); obligation OBL-295-CLOEXEC (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (obligation OBL-295-CLOEXEC)) |
 | Contract shape | pure-function |
 | Lane | pure (`scan_source` and `render_violation` over planted sources, source-local) + xtask integration (`scan_workspace` over the real workspace and over a temporary fixture workspace; it runs `cargo metadata`, a subprocess, so it is gated behind `xtask/integration-tests` like the existing `xtask/tests/integration/` bodies) |
-| Driving port | `xtask::cloexec_lint::{scan_source, scan_workspace, render_violation}` with `CloexecViolation { file, line, column, call, rule }` and `CloexecRule::{MissingFlag, AlwaysInheritable, UnresolvedFlag}`, exactly as pinned (FD 772-847); `run` and `Task::CloexecLint` (`cargo xtask cloexec-lint`) are the operator entry and are not called by the bodies |
-| Fault stimulus | planted sources: one per row of the call-family table (FD 752-763), plus an `fcntl` with `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s; s(..)` rename, a `nix` and a `rustix` wrapper with and without its flag, a wrapper with no flags argument, a flag held in a variable, a `// cloexec-lint: ok <reason>` marker on the call line, one on the line above, and one two lines above, and the same violation inside a `#[cfg(test)]` item; a source that does not parse; a fixture workspace (temporary directory) whose `overdrive-cli` package has one unparseable `src/**/*.rs` file, one with a violation under `src/bin/`, and one under the crate-root `bin/`; a fixture workspace with no `overdrive-cli` package |
-| Oracle | `scan_source`: the exact `(line, column, call, rule)` set per planted source in source order, `call` spelled `<root crate>::<final segment>` after the rename (`libc::socket`); `MissingFlag` for a present-but-unflagged argument, `AlwaysInheritable` for `accept`/`pipe`/`dup`/`dup2`/`inotify_init`/`epoll_create`/`F_DUPFD` and flagless wrappers, `UnresolvedFlag` for the variable; the marker suppresses only its own line (same line or the line immediately above; two lines above does not); the `#[cfg(test)]` violation is not reported; an unparseable source is `Err`, never `Ok(vec![])`. `render_violation` names the file, line, column, call, and rule. `scan_workspace`: over the real workspace `Ok(vec![])` once the eight site fixes land (FD 724-732); over the fixture workspace `Err` naming the unparseable file (fail-closed, unlike `dst_lint`), the `src/bin/` and crate-root `bin/` violations not reported; with no `overdrive-cli` package `Err` |
+| Driving port | `xtask::cloexec_lint::{scan_source, scan_workspace, render_violation}` with `CloexecViolation { file, line, column, call, rule }` and `CloexecRule::{MissingFlag, AlwaysInheritable, UnresolvedFlag}`, exactly as pinned (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the gate entry point)); `run` and `Task::CloexecLint` (`cargo xtask cloexec-lint`) are the operator entry and are not called by the bodies |
+| Fault stimulus | planted sources: one per row of the call-family table (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the source gate's call-family table)), plus an `fcntl` with `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s; s(..)` rename, a `nix` and a `rustix` wrapper with and without its flag, a wrapper with no flags argument, a flag held in a variable, a `// cloexec-lint: ok <reason>` marker on the call line, one on the line above, and one two lines above, and the same violation inside a `#[cfg(test)]` item; a source that does not parse; a fixture workspace (temporary directory) whose `overdrive-cli` package has one unparseable `src/**/*.rs` file, one with a violation under `src/bin/`, and one under the crate-root `bin/`; a fixture workspace with no `overdrive-cli` package |
+| Oracle | `scan_source`: the exact `(line, column, call, rule)` set per planted source in source order, `call` spelled `<root crate>::<final segment>` after the rename (`libc::socket`); `MissingFlag` for a present-but-unflagged argument, `AlwaysInheritable` for `accept`/`pipe`/`dup`/`dup2`/`inotify_init`/`epoll_create`/`F_DUPFD` and flagless wrappers, `UnresolvedFlag` for the variable; the marker suppresses only its own line (same line or the line immediately above; two lines above does not); the `#[cfg(test)]` violation is not reported; an unparseable source is `Err`, never `Ok(vec![])`. `render_violation` names the file, line, column, call, and rule. `scan_workspace`: over the real workspace `Ok(vec![])` once the eight site fixes land (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the OBL-295-CLOEXEC eight-site table)); over the fixture workspace `Err` naming the unparseable file (fail-closed, unlike `dst_lint`), the `src/bin/` and crate-root `bin/` violations not reported; with no `overdrive-cli` package `Err` |
 | Seed / isolation | finite tables; fixture workspaces in `tempfile::TempDir` |
 | Rust home | NEW `xtask/src/cloexec_lint.rs::tests::{every_rejected_call_family_is_reported_with_its_rule, renamed_imports_and_nix_or_rustix_wrappers_are_resolved_to_their_call, an_unresolved_flag_argument_is_rejected, the_exemption_marker_suppresses_only_its_own_line, cfg_test_items_are_not_scanned, an_unparseable_source_is_an_error_not_a_clean_file, a_rendered_violation_names_its_site_call_and_rule}`; NEW `xtask/tests/integration/cloexec_lint_workspace.rs::{the_serve_closure_creates_no_inheritable_descriptor, an_unparseable_serve_source_fails_the_scan_instead_of_being_skipped, auxiliary_binaries_outside_the_serve_closure_are_not_scanned, a_workspace_without_the_cli_package_is_an_error}` (registered in `xtask/tests/integration.rs`) |
 | Disposition / step | NEW — 05-04. The pure bodies are RED at the phase-B `todo!` scaffold of the pinned module; the real-workspace body is RED until the eight site fixes land |
@@ -445,7 +447,7 @@ AND every scratch resource is removed before the refusal is reported
 | Contract shape | bounded-change |
 | Lane | pure (dataplane projection/validator/owner-order tables) + lima-kernel (ordinary boot) |
 | Driving port | `run_server` boot; private D5/D14A owner algorithm |
-| Oracle | unchanged (FD 11671 ff. D14/D14A); the scratch probe still attaches only the ingress classifier and its eight-counter probe array (FD 2354-2360) |
+| Oracle | unchanged (FD § "D-295-DISTILL-14 — source-honest startup packet-probe boundary"; FD § "D-295-DISTILL-14A — private semantic validation and deterministic boot observation"); the scratch probe still attaches only the ingress classifier and its eight-counter probe array (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the counter slot)) |
 | Rust home | dataplane `guest_tcx::tests::{startup_tcp_probe_projects_semantics_and_all_eight_counter_pairs_without_raw_abi, every_locked_aya_map_kind_projects_to_exact_or_opaque_semantics, wrong_valid_map_properties_remain_opaque_and_schema_mismatch_is_source_less, capture_failure_keeps_an_observation_identity_and_only_the_first_genuine_source, a_unique_unreceipted_candidate_is_ambiguous_and_never_an_owned_count, every_receipted_family_returns_one_and_clean_families_return_exact_zero}`; control-plane `guest_network::scratch_probe_acceptance::{exercise_transport_and_semantic_failures_are_distinct_for_every_probe_stage, every_cleanup_or_inventory_failure_is_aggregated_after_the_remaining_cleanup, every_observed_residue_family_returns_incomplete_with_the_owner_built_complement, primary_and_first_cleanup_failure_are_both_preserved_without_nested_aggregate}`, `guest_network::scratch_probe_packet_acceptance::{every_d14_semantic_mismatch_and_lower_source_reaches_the_production_validator, classifier_runs_precede_close_and_each_stage_is_fresh}`; integration `shared_guest_network_startup::{ordinary_probe_faults_refuse_before_convergence_or_publication, cleanup_failure_refuses_and_preserves_primary_cleanup_and_observed_residue, production_host_owner_boots_only_after_real_shared_identity_is_exact, production_startup_exercises_classifier_and_detached_guard_before_admission}` |
 | Disposition / step | RETAINED — active. The two ignored superseded bodies `scratch_probe_acceptance::{healthy_probe_uses_the_exact_setup_probe_cleanup_and_inventory_order, every_setup_or_probe_failure_preserves_primary_and_still_runs_complete_cleanup}` are DELETED (superseded by D14A). The real-kernel inventory layer is S-ND295-48. |
 
@@ -466,9 +468,9 @@ AND the lease stays held until cleanup completes
 | Discharges | E5 seeded (start-failure ordering releases last); G2/r2; D-295-R7 |
 | Contract shape | bounded-change |
 | Lane | pure (control-plane acceptance over `SimSharedGuestNetworkOwner`; the refusal precedes every intercept install, so the fixture leaves the worker's shared owner unstarted and binds no socket, § *Seam fixture*) |
-| Driving port | `action_shim::dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` — the accepted C-295-B signature; the EXEC gate and the pool are read from `state` (FD 7231-7238, 1850-1861) |
+| Driving port | `action_shim::dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` — the accepted C-295-B signature; the EXEC gate and the pool are read from `state` (FD § "C-295-B — network provisioner boundary" (the helpers read the EXEC gate and the pool from `state`); FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim)) |
 | Fault stimulus | `SimSharedGuestNetworkOwner::script_provision_failure(true)` on the one owner instance the fixture passes to `AppState` and to the seam |
-| Oracle | unchanged; plus, from the pinned lease events (FD 2741-2744) captured by a test-local tracing Layer that stamps each event with the owner's `calls().len()`: `guest_network.lease_retired { alloc }` precedes the `TapDelete` teardown call and `guest_network.lease_released { alloc }` follows its success (the pool's operations are crate-private, FD 2663-2673, so an external body observes lease state only through these events) |
+| Oracle | unchanged; plus, from the pinned lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)) captured by a test-local tracing Layer that stamps each event with the owner's `calls().len()`: `guest_network.lease_retired { alloc }` precedes the `TapDelete` teardown call and `guest_network.lease_released { alloc }` follows its success (the pool's operations are crate-private, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations), so an external body observes lease state only through these events) |
 | Rust home | `crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs::provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause` |
 | Disposition / step | RETARGETED (seam fixture; retire-then-release event assertion) — 06-03 |
 
@@ -477,7 +479,7 @@ AND the lease stays held until cleanup completes
 `@property @tier2 @real-io @error @contract-shape:bounded-change`
 
 Contracts unchanged (C-295-0, ADR-0115). The shared `COUNTERS` array grows to
-nine slots (FD 2354-2360); the ingress program never touches slot 8.
+nine slots (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the counter slot)); the ingress program never touches slot 8.
 
 | Field | Value |
 |---|---|
@@ -507,7 +509,7 @@ load time), so it needs no runtime row here.
 
 | Field | Value |
 |---|---|
-| Discharges | E12 (h) Tier-2 partition (FD 2507); D-295-R21 verdict table (FD 2212-2226) |
+| Discharges | E12 (h) Tier-2 partition (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the evidence lane's Tier-2 verdict partition)); D-295-R21 verdict table (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the total egress verdict table)) |
 | Contract shape | bounded-change |
 | Lane | tier2 |
 | Driving port | the embedded `gh295c_egress` classifier via `BPF_PROG_TEST_RUN`, `__sk_buff.ifindex` set to the keyed TAP |
@@ -531,7 +533,7 @@ AND the ownership inventory counts both receipted programs and still reports zer
 
 | Field | Value |
 |---|---|
-| Discharges | E12 (g) prerequisite; D-295-R21 dataplane contract (FD 2300-2381) |
+| Discharges | E12 (g) prerequisite; D-295-R21 dataplane contract (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the exact implementation-facing contract)) |
 | Contract shape | bounded-change |
 | Lane | pure (counter vocabulary, object/error projection) + lima-kernel (attach/pin/query/detach, inventory) |
 | Driving port | `GuestTcxProgram::attach_first_egress(interface)`, `GuestTcxLink::pin/detach`, `query_attachment(interface, TcxAttachPoint::Egress)`, `read_counter(pin, GuestTcxCounter::EgressDestinationDrop)` |
@@ -554,12 +556,12 @@ AND a vanished device and a failed exchange are reported with their original cau
 
 | Field | Value |
 |---|---|
-| Discharges | E12 (g) debug-mask prerequisite; D-295-R22 read-back (FD 1294-1354) |
+| Discharges | E12 (g) debug-mask prerequisite; D-295-R22 read-back (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the audit read-back of the TAP debug message mask)) |
 | Contract shape | bounded-change |
 | Lane | pure (pinned constants only; the encoder and decoder are private and unpinned) + lima-kernel (the exchanges, the dump keying, and the error operation labels) |
 | Driving port | `overdrive_netlink::ethtool::{debug_msg_mask(iface), debug_msg_masks()}` (plain `pub`) |
 | Fault stimulus | a real `TUNSETDEBUG` on the scratch TAP's queue (test-only raw ioctl with a `SAFETY` comment); an absent interface (`ENODEV`) |
-| Oracle | pure: each pinned constant equals its UAPI value (FD 1330-1338); Lima: fresh TAP → `Ok(0)`; after `TUNSETDEBUG(n)` → `Ok(n)` and the dump maps the TAP's ifindex to `n`; absent → `Err` carrying `ENODEV` under operation `"debug-get"` (FD 1339-1347), never `Ok(0)` |
+| Oracle | pure: each pinned constant equals its UAPI value (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the debug-mask read-back's pinned constants)); Lima: fresh TAP → `Ok(0)`; after `TUNSETDEBUG(n)` → `Ok(n)` and the dump maps the TAP's ifindex to `n`; absent → `Err` carrying `ENODEV` under operation `"debug-get"` (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the debug-mask read-back's errors)), never `Ok(0)` |
 | Seed / isolation | table + example; scratch TAP outside `ovd-tp-`; `host-kernel-shared` |
 | Rust home | NEW `crates/overdrive-netlink/src/ethtool.rs::tests::debug_message_constants_equal_the_uapi_values`; NEW `crates/overdrive-netlink/tests/integration/tap_debug_msg_mask.rs::{a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump, an_absent_device_is_reported_with_its_original_cause}` |
 | Disposition / step | NEW — 06-01 |
@@ -579,7 +581,7 @@ AND no step raises the TAP, and any incompatible identity refuses without publis
 
 | Field | Value |
 |---|---|
-| Discharges | E1 in-process (provision-down); E4 in-process (owner `Some(0)`); G3/r1 precondition; D-295-R4, R5, R21, R22 (FD 1700-1727, 2484-2488) |
+| Discharges | E1 in-process (provision-down); E4 in-process (owner `Some(0)`); G3/r1 precondition; D-295-R4, R5, R21, R22 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `provision` read-backs); FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the allocation step order)) |
 | Contract shape | bounded-change |
 | Lane | pure (source-local D12A tables) + lima-kernel (ordinary production composition) |
 | Driving port | `GuestNetworkProvisioner::provision` on the private host owner through D12A leaves (source-local); `serve` → action shim → `provision` with an injected recording VMM (Lima) |
@@ -604,7 +606,7 @@ AND the unrelated attachment is unchanged
 
 | Field | Value |
 |---|---|
-| Discharges | E5 in-process + native (S-ND295-66); G2/r2 (retry-retaining); D-295-R5 teardown (FD 1769-1789), R21 (egress detach after ingress) |
+| Discharges | E5 in-process + native (S-ND295-66); G2/r2 (retry-retaining); D-295-R5 teardown (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (teardown converges on absence)), R21 (egress detach after ingress) |
 | Contract shape | bounded-change |
 | Lane | pure (source-local D12A tables) + lima-kernel |
 | Driving port | `GuestNetworkProvisioner::teardown` |
@@ -629,7 +631,7 @@ AND the audit changes nothing
 
 | Field | Value |
 |---|---|
-| Discharges | E11 prerequisite, E12 (g) owner half; G5/r2, G5/r3; D-295-R14/H1 (FD 1580-1599, 1677-1695), R21 (host MAC, egress parts), R22 (mask 0; failed dump is `Bridge`, FD 1399-1408) |
+| Discharges | E11 prerequisite, E12 (g) owner half; G5/r2, G5/r3; D-295-R14/H1 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (node-level versus per-allocation parts; the `audit_shared` contract and when `Condemned` takes effect)), R21 (host MAC, egress parts), R22 (mask 0; failed dump is `Bridge`, FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (a failed audit dump is a node-level failure)) |
 | Contract shape | bounded-change |
 | Lane | pure (source-local over scripted D12A leaves and scratch I/O) |
 | Driving port | `SharedGuestNetworkOwner::audit_shared` |
@@ -688,7 +690,7 @@ AND every other lease is unchanged
 
 | Field | Value |
 |---|---|
-| Discharges | E6 in-process pure properties; G0/r1, G0/r4; D-295-R6, R7 (FD 2664-2701) |
+| Discharges | E6 in-process pure properties; G0/r1, G0/r4; D-295-R6, R7 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the pool operations)) |
 | Contract shape | bounded-change |
 | Lane | pure (proptest over operation sequences against a model) |
 | Driving port | `GuestAddressPool::{assign, retire, release, snapshot, observe}` (crate-private, source-local) |
@@ -696,7 +698,7 @@ AND every other lease is unchanged
 | Oracle | model equality after every step: smallest-free selection, `LeaseRetiring { alloc }`, `retire` true only for Admitted→Retiring, `observe` reports `held = Admitted + Retiring` and `retiring` exactly, `snapshot` includes both states |
 | Seed / isolation | proptest (seed printed on failure, `PROPTEST_REPLAY`) |
 | Rust home | `crates/overdrive-control-plane/src/guest_network.rs::pool_acceptance::assignment_replay_release_and_reuse_match_the_smallest_free_model` (RETARGETED to the lease-state model); NEW `…::pool_acceptance::retirement_is_monotonic_and_a_retiring_lease_still_counts` |
-| Disposition / step | RETARGETED + NEW — 06-03. `pool_acceptance::slash_16_exhaustion_is_pool_drift_and_does_not_reuse_an_address` is DELETED: under R6 the cap refuses at 16,384 held, so `/16` exhaustion through `assign` is unreachable (FD 2685-2686); `below_cap_pool_exhaustion_is_typed_drift_and_preserves_state` (small constructed prefix) is RETAINED as the drift witness |
+| Disposition / step | RETARGETED + NEW — 06-03. `pool_acceptance::slash_16_exhaustion_is_pool_drift_and_does_not_reuse_an_address` is DELETED: under R6 the cap refuses at 16,384 held, so `/16` exhaustion through `assign` is unreachable (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (`assign`: `PoolExhausted` is unreachable below the cap)); `below_cap_pool_exhaustion_is_typed_drift_and_preserves_state` (small constructed prefix) is RETAINED as the drift witness |
 
 #### S-ND295-05A — Admission refuses at the cap over held leases, one pool per server
 
@@ -714,7 +716,7 @@ AND a server restarted after being killed starts with no leases
 | Discharges | E6 in-process, E7 pool (`PoolExhausted` unreachable below the cap); G0/r1, G0/r2, G0/r5; D-295-R6, R7 |
 | Contract shape | bounded-change |
 | Lane | pure (proptest over held/retiring mixes around the boundary) + in-process (killed-mode restart) |
-| Driving port | `GuestAddressPool::assign` (source-local); in-process: `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD 9533-9559) with `SimGuestDnsFactory`, a `SimDriver`, one `SimSharedGuestNetworkOwner`, and `vm_cgroups = CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))`; `ServerHandle::kill_for_test`, then a second `run_server_with_obs_and_driver` on the same roots, then a deploy through the public handler |
+| Driving port | `GuestAddressPool::assign` (source-local); in-process: `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with `SimGuestDnsFactory`, a `SimDriver`, one `SimSharedGuestNetworkOwner`, and `vm_cgroups = CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))`; `ServerHandle::kill_for_test`, then a second `run_server_with_obs_and_driver` on the same roots, then a deploy through the public handler |
 | Fault stimulus | generated mixes; killed-mode restart |
 | Oracle | `AdmissionCapReached { held, retiring, cap: 16_384 }` with state unchanged; the first assignment after the killed restart is the smallest free address (`100.95.0.2`), read from the guest-network assignment in the spec the `SimDriver` received (`SimDriver::started_specs()`, the C-295-A handoff) |
 | Seed / isolation | proptest; in-process body in the `host-kernel-shared` control-plane integration binary |
@@ -736,9 +738,9 @@ AND a refused restart successor still runs its predecessor's one cleanup attempt
 
 | Field | Value |
 |---|---|
-| Discharges | E7; G0/r2; D-295-R6, R7 refusal projection (FD 2723-2737) |
+| Discharges | E7; G0/r2; D-295-R6, R7 refusal projection (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection)) |
 | Contract shape | bounded-change |
-| Lane | pure, source-local. The pool's operations are crate-private (FD 2663-2673), so the cap can be reached by the pool's own `assign` only inside `overdrive-control-plane`; a source-local body therefore uses the test-local owner (§ *Test-local control-plane ports*). The refusal precedes every intercept install, so the fixture's worker (over `SimMtlsEnforcement`, `SimMtlsResolve`, `SimMtlsIntercept`) stays unstarted and binds no socket |
+| Lane | pure, source-local. The pool's operations are crate-private (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations)), so the cap can be reached by the pool's own `assign` only inside `overdrive-control-plane`; a source-local body therefore uses the test-local owner (§ *Test-local control-plane ports*). The refusal precedes every intercept install, so the fixture's worker (over `SimMtlsEnforcement`, `SimMtlsResolve`, `SimMtlsIntercept`) stays unstarted and binds no socket |
 | Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` with `StartAllocation` / `RestartAllocation`, over a source-local seam fixture (§ *Seam fixture*): `SimDriver`, `SimObservationStore`, the test-local owner passed to `AppState` and to the seam |
 | Fault stimulus | the fixture's pool reaches 16,384 held through its own `assign`, one of them moved to Retiring through `retire`; for the restart case the predecessor holds one of the Admitted leases and its Failed row is seeded as the restart arm's prior-row precondition (precedent `mtls_install_fail_closed.rs:676-713`) |
 | Oracle | `ShimError::GuestNetwork(AdmissionCapReached { held: 16_384, retiring: 1, cap: 16_384 })`; the test-local owner's journal has no entry for the refused allocation; `SimDriver::started_specs()` unchanged; no row and no lifecycle event for it; `guest_network.admission_refused { alloc, held: 16_384, retiring: 1, cap: 16_384 }` captured once; restart: the predecessor's `lease_retired`, its `Teardown` journal entry, then its `lease_released`, exactly once each |
@@ -760,12 +762,12 @@ AND the read-port returns occupancy and the requested leases from one snapshot o
 
 | Field | Value |
 |---|---|
-| Discharges | E6, E7; G0/r3; D-295-R8 (FD 2552-2623, 2757-2771) |
+| Discharges | E6, E7; G0/r3; D-295-R8 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the core read-port contract; placement: `schedule`)) |
 | Contract shape | pure-function (placement) / bounded-change (read-port equivalence) |
 | Lane | pure |
-| Driving port | `overdrive_core::scheduler::schedule(nodes, needed, current_allocs, guest_attachments)`; `GuestAddressPool::observe`, source-local (the pool's operations are crate-private, FD 2663-2673; the production `GuestAttachmentView` is a private delegate over `state.guest_pool`, FD 2575-2577, 2642-2644, and is exercised end to end through runtime hydration in S-ND295-05D) |
+| Driving port | `overdrive_core::scheduler::schedule(nodes, needed, current_allocs, guest_attachments)`; `GuestAddressPool::observe`, source-local (the pool's operations are crate-private, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations); the production `GuestAttachmentView` is a private delegate over `state.guest_pool`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the `HydrationContext` field; one pool per server: the production `GuestAttachmentView`), and is exercised end to end through runtime hydration in S-ND295-05D) |
 | Fault stimulus | none |
-| Oracle | `NoCapacity` iff `held >= MAX_GUEST_NETWORK_ATTACHMENTS`, independent of `current_allocs`; CPU/memory outcomes identical to the pre-change table; `observe(allocs)` returns exactly the held and retiring counts of the whole map and the lease of each requested allocation that holds one, omits requested allocations without a lease and every unrequested allocation, and leaves the pool unchanged (`snapshot()` equal before and after) — the Contract Shape the DESIGN assigns to the read-port (FD 10828) |
+| Oracle | `NoCapacity` iff `held >= MAX_GUEST_NETWORK_ATTACHMENTS`, independent of `current_allocs`; CPU/memory outcomes identical to the pre-change table; `observe(allocs)` returns exactly the held and retiring counts of the whole map and the lease of each requested allocation that holds one, omits requested allocations without a lease and every unrequested allocation, and leaves the pool unchanged (`snapshot()` equal before and after) — the Contract Shape the DESIGN assigns to the read-port (FD § "Effect isolation and Contract Shape classification" (the `GuestAttachmentView` row)) |
 | Seed / isolation | proptest over `held` and row counts; proptest over lease maps and request sets |
 | Rust home | `crates/overdrive-core/tests/acceptance/netns_density_placement_cap.rs::fixed_attachment_cap_returns_no_capacity_before_pool_assignment` RETARGETED and renamed `placement_refuses_exactly_when_held_attachments_reach_the_cap`; NEW `crates/overdrive-control-plane/src/guest_network.rs::pool_acceptance::observe_reads_occupancy_and_requested_leases_in_one_snapshot_and_changes_nothing` |
 | Disposition / step | RETARGETED + NEW — 07-03 |
@@ -785,12 +787,12 @@ AND a restart refused by a race consumes no restart budget and never reuses the 
 
 | Field | Value |
 |---|---|
-| Discharges | E7; G0/r1, G0/r2, G0/r4; D-295-R7, R8, R11 (FD 2778-2824, 3787-3799) |
+| Discharges | E7; G0/r1, G0/r2, G0/r4; D-295-R7, R8, R11 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (restart gating and at-cap recreate ordering); FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the emission: a pending restart owns its predecessor)) |
 | Contract shape | pure-function |
 | Lane | pure (`WorkloadLifecycle::reconcile` table + proptest over occupancy and backoff) |
 | Driving port | `WorkloadLifecycle::reconcile(desired, actual, view, tick)` with `State.guest_attachments` |
 | Fault stimulus | none |
-| Oracle | exact action vectors per table row (FD 2782-2787); View after a simulated raced refusal: `restart_counts[predecessor]` and `last_failure_seen_at[predecessor]` unchanged, successor id reserved |
+| Oracle | exact action vectors per table row (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the restart-gating table)); View after a simulated raced refusal: `restart_counts[predecessor]` and `last_failure_seen_at[predecessor]` unchanged, successor id reserved |
 | Seed / isolation | table + proptest |
 | Rust home | NEW `crates/overdrive-reconcilers/src/workload_lifecycle.rs::restart_gating_acceptance::{a_due_restart_counts_its_predecessor_and_reclaims_it_first_at_the_cap, a_restart_that_is_not_yet_due_emits_nothing_at_any_occupancy, a_raced_restart_refusal_consumes_no_restart_budget}` |
 | Disposition / step | NEW — 07-03 |
@@ -812,10 +814,10 @@ AND at the cap a crash replacement reclaims its predecessor before the successor
 |---|---|
 | Discharges | E6 seeded, E7 seeded; G0/r1, G0/r2, G0/r4; D-295-R6, R7, R8, R11; proof §3.2 |
 | Contract shape | bounded-change |
-| Lane | seeded-sim (`overdrive-sim` integration binary: filling one node to 16,384 is quadratic in the cap and runs past the 60 s default-lane budget, which is why it carries the nextest timeout override; the started worker binds nothing, FD 3720-3735) |
-| Driving port | `run_convergence_tick_with_guest_network_provisioner_for_test` + `dispatch_with_guest_network_provisioner_for_test` (accepted C-295-B signatures) over a seam fixture (§ *Seam fixture*) with `SimDriver`, `SimObservationStore`, `SimViewStore`, `SimClock`, `SimCa`, `SimDataplane`, a started worker over `SimMtlsEnforcement`, `SimMtlsResolve`, and `SimMtlsIntercept`, and `SimSharedGuestNetworkOwner` behind the test-local `LeaseLedger` decorator. `LeaseLedger` implements both `GuestNetworkProvisioner` and `SharedGuestNetworkOwner` by delegation; its one instance is the `AppState` owner and the seams' `provisioner`. The fixture's EXEC wiring is opened with `open_after_boot()` before the first dispatch (FD 2021-2031). Placement and restart gating hydrate through the production `GuestAttachmentView` over `state.guest_pool`, so this body is also the end-to-end check of that view |
+| Lane | seeded-sim (`overdrive-sim` integration binary: filling one node to 16,384 is quadratic in the cap and runs past the 60 s default-lane budget, which is why it carries the nextest timeout override; the started worker binds nothing, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)) |
+| Driving port | `run_convergence_tick_with_guest_network_provisioner_for_test` + `dispatch_with_guest_network_provisioner_for_test` (accepted C-295-B signatures) over a seam fixture (§ *Seam fixture*) with `SimDriver`, `SimObservationStore`, `SimViewStore`, `SimClock`, `SimCa`, `SimDataplane`, a started worker over `SimMtlsEnforcement`, `SimMtlsResolve`, and `SimMtlsIntercept`, and `SimSharedGuestNetworkOwner` behind the test-local `LeaseLedger` decorator. `LeaseLedger` implements both `GuestNetworkProvisioner` and `SharedGuestNetworkOwner` by delegation; its one instance is the `AppState` owner and the seams' `provisioner`. The fixture's EXEC wiring is opened with `open_after_boot()` before the first dispatch (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the gate state outside `run_server*`)). Placement and restart gating hydrate through the production `GuestAttachmentView` over `state.guest_pool`, so this body is also the end-to-end check of that view |
 | Fault stimulus | `SimDriver::inject_exit_after(.., Crashed)`; seeded parking of one `provision` call |
-| Oracle | NA-1, NA-2, NA-4a, NA-4b, NA-G over the **held** population, counted at every `provision` the ledger sees as provisions minus `guest_network.lease_released` events (the pool's own counts are crate-private, FD 2663-2673); NA-OVERLAP (was OBS-OVERLAP) asserts the retiring-plus-replacement peak `<=` 16,384; NA-5, NA-4a-L, NA-4b-L liveness; NA-RECREATE: at the cap the predecessor's `lease_released` precedes the successor's `provision` |
+| Oracle | NA-1, NA-2, NA-4a, NA-4b, NA-G over the **held** population, counted at every `provision` the ledger sees as provisions minus `guest_network.lease_released` events (the pool's own counts are crate-private, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations)); NA-OVERLAP (was OBS-OVERLAP) asserts the retiring-plus-replacement peak `<=` 16,384; NA-5, NA-4a-L, NA-4b-L liveness; NA-RECREATE: at the cap the predecessor's `lease_released` precedes the successor's `provision` |
 | Seed / isolation | `OVERDRIVE_ND295_ADMISSION_SEED` (defaults `186055177052160001`, `295032`), printed with every verdict; no kernel object is created; nextest override widens the timeout for this test only |
 | Rust home | `crates/overdrive-sim/tests/integration/netns_density_node_admission.rs::node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads` (MOVED from `crates/overdrive-sim/tests/netns_density_node_admission.rs`) |
 | Disposition / step | RETARGETED + MOVED — 07-03 |
@@ -838,7 +840,7 @@ AND restore raises only activation-complete TAPs in order and clears the latch l
 
 | Field | Value |
 |---|---|
-| Discharges | E1 in-process; G3/r1, G3/r2, G3/r4, G3/r5; G5/r1; D-295-R5 (FD 1640-1675, 1729-1767, 2056-2141) |
+| Discharges | E1 in-process; G3/r1, G3/r2, G3/r4, G3/r5; G5/r1; D-295-R5 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `quiesce_managed_taps` and `restore_quiesced_taps` contracts; `activate`; the private owner state)) |
 | Contract shape | bounded-change |
 | Lane | pure (source-local over D12A leaves) |
 | Driving port | `GuestNetworkProvisioner::activate`, `SharedGuestNetworkOwner::{quiesce_managed_taps, restore_quiesced_taps}` on the private host owner |
@@ -862,11 +864,11 @@ AND no command is ever released after an activation failure
 
 | Field | Value |
 |---|---|
-| Discharges | E1 in-process; G2/r1, G2/r2, G2/r3, G3/r2; D-295-R5, R7 (FD 1791-1806, 2037-2054) |
+| Discharges | E1 in-process; G2/r1, G2/r2, G2/r3, G3/r2; D-295-R5, R7 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order; the activation failure projection)) |
 | Contract shape | bounded-change |
 | Lane | in-process (control-plane integration: real worker over sim enforcement with its shared owner started, real VM-driver release path, the owner at the driven port) |
-| Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` with `StartAllocation` and `RestartAllocation`, over a seam fixture whose EXEC wiring is opened with `open_after_boot()` before dispatch; the gate and pool come from `state` (FD 7231-7238, 2021-2031) |
-| Fault stimulus | a test-local owner implementing `GuestNetworkProvisioner` and `SharedGuestNetworkOwner` whose `activate` returns a typed error, passed as the one owner instance to `AppState` and to the seam; or the `SimSharedGuestNetworkOwner`'s source-less `PostconditionMismatch` for an allocation it condemned after the test drove `script_audit_damage({A})` and one `audit_shared` call, which condemns A without setting the latch (FD 6708-6718) |
+| Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` with `StartAllocation` and `RestartAllocation`, over a seam fixture whose EXEC wiring is opened with `open_after_boot()` before dispatch; the gate and pool come from `state` (FD § "C-295-B — network provisioner boundary" (the helpers read the EXEC gate and the pool from `state`); FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the gate state outside `run_server*`)) |
+| Fault stimulus | a test-local owner implementing `GuestNetworkProvisioner` and `SharedGuestNetworkOwner` whose `activate` returns a typed error, passed as the one owner instance to `AppState` and to the seam; or the `SimSharedGuestNetworkOwner`'s source-less `PostconditionMismatch` for an allocation it condemned after the test drove `script_audit_damage({A})` and one `audit_shared` call, which condemns A without setting the latch (FD § "Public deterministic shared-owner simulation API" (`script_audit_damage`, the condemned set, and `activate`)) |
 | Oracle | order journal `start_alloc → event → activate → release_for_exit_emission → on_alloc_running`; failure: `driver.stop`, `lease_retired`, `stop_alloc`, teardown, `lease_released`, then a Failed row `WorkloadNetnsProvisionFailed { stage: "guest_network_activate" }`; zero EXEC release; driver-stop failure keeps its typed error primary and withholds cleanup |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | `crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs::{tap_activation_occurs_after_intercept_success_and_before_exec_release, tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running}` (RETARGETED); NEW `…::activation_of_a_condemned_allocation_takes_the_failure_projection` |
@@ -887,12 +889,12 @@ AND none of these writes a Failed row or advances the restart budget
 
 | Field | Value |
 |---|---|
-| Discharges | E1 seeded; G3/r2, G3/r3, G3/r4; D-295-R5 (FD 1808-1849) |
+| Discharges | E1 seeded; G3/r2, G3/r3, G3/r4; D-295-R5 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (waiting on the EXEC gate, the latch invariant, and no Failed row for an observed recovery)) |
 | Contract shape | bounded-change |
-| Lane | seeded-sim (`overdrive-sim` acceptance binary, default lane; the started worker binds nothing, FD 3720-3735) |
-| Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` over a seam fixture whose `AppState` carries `wiring.gate()` of a real `GuestNetworkExecWiring` over `SimClock` (FD 1875-1940); the test keeps `wiring.supervisor()` and calls `open_after_boot` / `begin_recovery` / `complete_attempt` / `fail_stop` on it, and `quiesce_managed_taps` / `restore_quiesced_taps` on the `SimSharedGuestNetworkOwner`, at seeded instants while the dispatch future is parked; the worker's shared owner is started |
+| Lane | seeded-sim (`overdrive-sim` acceptance binary, default lane; the started worker binds nothing, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)) |
+| Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` over a seam fixture whose `AppState` carries `wiring.gate()` of a real `GuestNetworkExecWiring` over `SimClock` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)); the test keeps `wiring.supervisor()` and calls `open_after_boot` / `begin_recovery` / `complete_attempt` / `fail_stop` on it, and `quiesce_managed_taps` / `restore_quiesced_taps` on the `SimSharedGuestNetworkOwner`, at seeded instants while the dispatch future is parked; the worker's shared owner is started |
 | Fault stimulus | seeded interleavings of gate transitions and the sim owner's latch |
-| Oracle | activation count from the sim owner's `calls()`: the sim records `TapSetUp` both for a raised activation and for every restore call, successful or not (FD 2150-2151, 6716-6720, 6775-6780), and records nothing for a latched activation. No supervisor runs in this lane, so the test is the only caller of `quiesce_managed_taps` and `restore_quiesced_taps`; it brackets each of its own calls with `calls().len()`, and every `TapSetUp` outside those brackets is an activation. Exactly one such entry appears, after reopen. `guest_network.activation_withheld { alloc, reason: "fail_stop" }` at fail-stop with zero EXEC release and no row; `WorkloadLifecycleView.restart_counts` unchanged |
+| Oracle | activation count from the sim owner's `calls()`: the sim records `TapSetUp` both for a raised activation and for every restore call, successful or not (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter's restore rule); FD § "Public deterministic shared-owner simulation API" (`activate`, and `restore_quiesced_taps` recording `TapSetUp`; the call journal)), and records nothing for a latched activation. No supervisor runs in this lane, so the test is the only caller of `quiesce_managed_taps` and `restore_quiesced_taps`; it brackets each of its own calls with `calls().len()`, and every `TapSetUp` outside those brackets is an activation. Exactly one such entry appears, after reopen. `guest_network.activation_withheld { alloc, reason: "fail_stop" }` at fail-stop with zero EXEC release and no row; `WorkloadLifecycleView.restart_counts` unchanged |
 | Seed / isolation | `OVERDRIVE_ND295_ACTIVATION_SEEDS` (default fixed list), printed per verdict |
 | Rust home | NEW `crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs::{activation_during_recovery_runs_once_after_reopen_without_a_failed_row, a_latched_activation_retries_after_reopen, fail_stop_withholds_activation_and_the_command}`; sim-owner surface self-tests NEW `crates/overdrive-sim/src/adapters/guest_network.rs::tests::scripted_quiescence_outcomes_condemn_each_named_allocation_once` and `…::tests::standing_owner_controls_preserve_exact_operation_semantics` (RETARGETED: `script_quiesce_outcome` replaces `script_quiesce_failure`); test-local-owner self-tests NEW `crates/overdrive-control-plane/src/shared_network_test_ports.rs::tests::{activate_reports_raised_latched_or_condemned, restore_failure_slot_keeps_the_latch}` — re-homed out of `overdrive-sim` because `activate` needs a `GuestNetworkPlan`, which is control-plane-private with no cross-crate constructor, and the `overdrive-sim`↔`overdrive-control-plane` dependency cycle makes only `TestSharedOwner` (not `SimSharedGuestNetworkOwner`) usable in a source-local lane; these are active (the double is fully implemented) and are the only coverage of the failed-restore-keeps-the-latch path (item 7) |
 | Disposition / step | NEW + RETARGETED — 06-04 |
@@ -912,12 +914,12 @@ AND no successor receives that address before the predecessor's complement is em
 
 | Field | Value |
 |---|---|
-| Discharges | E8 (ordering half); G2/r2; D-295-R7, R10 (FD 2713-2722, 2999-3018) |
+| Discharges | E8 (ordering half); G2/r2; D-295-R7, R10 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the retirement points); FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's `element_effects` mutex)) |
 | Contract shape | bounded-change |
-| Lane | pure (control-plane acceptance over `SimSharedGuestNetworkOwner`, as S-ND295-06). The predecessor's start reaches intercept install, so the fixture's worker shared owner is started; over the recording intercept, which delegates binding to `SimMtlsIntercept`, it binds nothing (FD 3720-3735) |
+| Lane | pure (control-plane acceptance over `SimSharedGuestNetworkOwner`, as S-ND295-06). The predecessor's start reaches intercept install, so the fixture's worker shared owner is started; over the recording intercept, which delegates binding to `SimMtlsIntercept`, it binds nothing (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)) |
 | Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` with `StartAllocation` and `StopAllocation`, over a seam fixture with one `SimSharedGuestNetworkOwner` passed to `AppState` and to the seam |
 | Fault stimulus | `script_teardown_failure(true)` then disarm |
-| Oracle | one ordered trace from a test-local tracing Layer that records the lease events (FD 2741-2744) and samples, at each, the `SimDriver` stop count, the owner's `calls().len()`, and the element removals seen by a test-local recording `MtlsIntercept` over `SimMtlsIntercept`: `driver.stop → lease_retired → element removal → teardown → lease_released`; while teardown fails there is `lease_retired` and no `lease_released`, and an unrelated start is assigned a different address (`SimDriver::started_specs()`); after the retry `lease_released`, and the next start receives the predecessor's address |
+| Oracle | one ordered trace from a test-local tracing Layer that records the lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)) and samples, at each, the `SimDriver` stop count, the owner's `calls().len()`, and the element removals seen by a test-local recording `MtlsIntercept` over `SimMtlsIntercept`: `driver.stop → lease_retired → element removal → teardown → lease_released`; while teardown fails there is `lease_retired` and no `lease_released`, and an unrelated start is assigned a different address (`SimDriver::started_specs()`); after the retry `lease_released`, and the next start receives the predecessor's address |
 | Rust home | `crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs::teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse` |
 | Disposition / step | RETARGETED — 07-01 |
 
@@ -936,12 +938,12 @@ AND a retried stop re-runs the removal, and only then tears down, releases, and 
 
 | Field | Value |
 |---|---|
-| Discharges | E8 in-process; G2/r2; D-295-R10, R7, R20 (row stays Running, FD 4591) ; proof §3.4 |
+| Discharges | E8 in-process; G2/r2; D-295-R10, R7, R20 (row stays Running, FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the cleanup-pending table's Retiring row)) ; proof §3.4 |
 | Contract shape | bounded-change |
 | Lane | in-process (control-plane integration) |
 | Driving port | the real `MtlsInterceptWorker` (shared owner started) + the `StopAllocation` arm through `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)`, over a seam fixture whose one owner instance is `AppState`'s owner and the seam's `provisioner` |
 | Fault stimulus | test-local `ElementFaultIntercept` implementing `MtlsIntercept`; its `remove_allocation_elements` routes to the append-only `ElementModel::remove` (batch rejected; acknowledged-then-read-back-failed) |
-| Oracle | the ten assertions of the proof, retargeted: `Err(ShimError::MtlsStop(MtlsInterceptStopError::ElementRemoval { alloc_id, source }))` with `alloc_id` the stopping allocation and `&*source` the `InterceptError` the `ElementModel` injected, matched by variant and cause (FD 3018-3063); `alloc_stop_converged_for_test == false`; successor `start_alloc` refused; no `TapDelete`; the lease stays Retiring — `guest_network.lease_retired { alloc }` captured and no `lease_released` (FD 2741-2744; the pool is crate-private); row `Running`; retried stop calls `remove_allocation_elements` again; after retry no predecessor member remains, teardown then `lease_released` follow, row `Terminated` |
+| Oracle | the ten assertions of the proof, retargeted: `Err(ShimError::MtlsStop(MtlsInterceptStopError::ElementRemoval { alloc_id, source }))` with `alloc_id` the stopping allocation and `&*source` the `InterceptError` the `ElementModel` injected, matched by variant and cause (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's typed stop error)); `alloc_stop_converged_for_test == false`; successor `start_alloc` refused; no `TapDelete`; the lease stays Retiring — `guest_network.lease_retired { alloc }` captured and no `lease_released` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events); the pool is crate-private); row `Running`; retried stop calls `remove_allocation_elements` again; after retry no predecessor member remains, teardown then `lease_released` follow, row `Terminated` |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | `crates/overdrive-control-plane/tests/integration/shared_element_cleanup_failure.rs::{shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address, shared_element_cleanup_failure_readback_failed_retains_retirement_and_address}` |
 | Disposition / step | RETARGETED (lands in place) — 07-01 |
@@ -964,14 +966,14 @@ AND a stop that arrives after the owner began shutting down starts nothing and r
 
 | Field | Value |
 |---|---|
-| Discharges | E8 Lima + seeded (worker half); D-295-R10 (FD 2931-2954, 2972-3131); B-6 stop-error shape and caller rules 1, 3, and 4 (FD 3018-3104) |
+| Discharges | E8 Lima + seeded (worker half); D-295-R10 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (`remove_allocation_elements`; the netlink and worker contracts)); B-6 stop-error shape and caller rules 1, 3, and 4 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's typed stop error and what each caller receives)) |
 | Contract shape | bounded-change |
 | Lane | pure (worker source-local over the private seam and registry) + lima-kernel (real nft through `HostMtlsIntercept`) |
 | Driving port | `MtlsIntercept::remove_allocation_elements(source, destinations)`; `MtlsInterceptLifecycle::stop_alloc` and `MtlsInterceptWorker::shutdown_owner` on the worker |
 | Fault stimulus | duplicate or zero-port destinations; a recorded identity unequal to the observed program; real pre-absent member; scripted batch rejection and post-commit read-back failure; in the worker bodies, `TestSharedIntercept::{script_removal_failures, hold_removals}` and a failing test `MtlsEnforcement::teardown` (§ *Intercept listener and stop-error test support*) |
 | Oracle | pre-I/O refusal for invalid destinations; typed refusal without mutation on identity mismatch; `Ok(InterceptState)` without the requested members and with every other member, the program, and the foreign complement unchanged; rejection preserves pre-state; read-back failure performs one inverse transition and returns a source retaining both causes. Typed stop errors: `MtlsInterceptStopError::HandleTeardown { alloc_id, failures }` holds one `HandleTeardownFailure { connection, source }` per failed connection in teardown order, with `&*source` the injected `MtlsEnforcementError`; `ElementRemoval { alloc_id, source }` has `&*source` the scripted `InterceptError`. B-6 caller rules, each asserted here and nowhere else: **rule 1** — two `stop_alloc(a)` calls joined on one attempt whose removal fails (the second issued while the first attempt's removal is held) receive equal errors (same variant, same `alloc_id`) whose source `Arc`s are `Arc::ptr_eq`, and that attempt called `remove_allocation_elements` once; **rule 3** — after that `Err`, two simultaneous `stop_alloc(a)` calls begin exactly one new attempt (`removal_calls()` rises by one, not two) and both receive its result, never the superseded error; **rule 4** — with `a`'s failed attempt retained, `b` active, and removals held so the owner shutdown's teardown of `b` is in flight, `stop_alloc(a)` runs no removal or teardown of its own, returns after the owner shutdown with an error equal to the shutdown result's entry for `a` (pointer-equal source), and `stop_alloc(b)` returns `Ok(())` because `b`'s teardown by the owner shutdown succeeded |
 | Seed / isolation | table + example; the worker bodies are source-local default-lane; `overdrive-worker` integration binary is `host-kernel-shared` |
-| Rust home | NEW `crates/overdrive-worker/src/mtls_intercept_port.rs::shared_program_rollback_acceptance::remove_allocation_elements_deletes_only_present_requested_members`; NEW `crates/overdrive-worker/src/mtls_intercept_worker.rs::tests::element_removal_failure_keeps_the_retiring_record_until_a_retry_converges`; `…::tests::allocation_stop_surfaces_teardown_failure_and_retry_converges` (RETARGETED to typed per-connection failures, and onto a shared allocation because the per-allocation record it registers today is deleted with B-7's step); NEW `…::tests::{callers_joined_on_one_failed_stop_receive_equal_failures_with_shared_sources, the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers, a_stop_after_owner_shutdown_began_starts_nothing_and_returns_its_shutdown_entry}` (B-6 rules 1, 3, 4); NEW `crates/overdrive-worker/tests/integration/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`; `crates/overdrive-control-plane/tests/integration/server_lifecycle.rs::graceful_shutdown_propagates_worker_failure_without_a_retry_capability` (RETARGETED: `ServerHandle::replace_mtls_worker_for_test` and `MtlsInterceptWorker::inject_owner_shutdown_failure_for_test` are deleted with the worker's `owner_shutdown_failures` field, FD 2008-2020. The body boots `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` whose `mtls_intercept` is a test-local `MtlsIntercept` over `SimMtlsIntercept` with an armable `remove_allocation_elements` fault, a `SimDriver`, the sim owner, `SimGuestDnsFactory`, and `vm_cgroups` over `SimCgroupFs`; deploys one workload through the API; arms the fault; calls `ServerHandle::shutdown`. Oracle: `Err`, and `teardown_failure().failures` is exactly one `MtlsInterceptStopError::ElementRemoval { alloc_id, source }` with `alloc_id` the deployed allocation and `&*source` the injected `InterceptError`) |
+| Rust home | NEW `crates/overdrive-worker/src/mtls_intercept_port.rs::shared_program_rollback_acceptance::remove_allocation_elements_deletes_only_present_requested_members`; NEW `crates/overdrive-worker/src/mtls_intercept_worker.rs::tests::element_removal_failure_keeps_the_retiring_record_until_a_retry_converges`; `…::tests::allocation_stop_surfaces_teardown_failure_and_retry_converges` (RETARGETED to typed per-connection failures, and onto a shared allocation because the per-allocation record it registers today is deleted with B-7's step); NEW `…::tests::{callers_joined_on_one_failed_stop_receive_equal_failures_with_shared_sources, the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers, a_stop_after_owner_shutdown_began_starts_nothing_and_returns_its_shutdown_entry}` (B-6 rules 1, 3, 4); NEW `crates/overdrive-worker/tests/integration/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`; `crates/overdrive-control-plane/tests/integration/server_lifecycle.rs::graceful_shutdown_propagates_worker_failure_without_a_retry_capability` (RETARGETED: `ServerHandle::replace_mtls_worker_for_test` and `MtlsInterceptWorker::inject_owner_shutdown_failure_for_test` are deleted with the worker's `owner_shutdown_failures` field, FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `ServerHandle` owner fields: the deleted test overrides). The body boots `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` whose `mtls_intercept` is a test-local `MtlsIntercept` over `SimMtlsIntercept` with an armable `remove_allocation_elements` fault, a `SimDriver`, the sim owner, `SimGuestDnsFactory`, and `vm_cgroups` over `SimCgroupFs`; deploys one workload through the API; arms the fault; calls `ServerHandle::shutdown`. Oracle: `Err`, and `teardown_failure().failures` is exactly one `MtlsInterceptStopError::ElementRemoval { alloc_id, source }` with `alloc_id` the deployed allocation and `&*source` the injected `InterceptError`) |
 | Disposition / step | NEW + RETARGETED — 07-01 (the `server_lifecycle` body needs the required `ServerConfig.mtls_intercept` of 05-01 and the typed `ElementRemoval` of 07-01) |
 
 #### S-ND295-55 — Every leased, unowned, finished allocation is reclaimed from every reconcile path
@@ -989,7 +991,7 @@ AND a reclaim may never name an allocation another action names in the same eval
 
 | Field | Value |
 |---|---|
-| Discharges | E9 pure; G0/r3; D-295-R11 (FD 3779-3822, 3840-3855, 3902-3904) |
+| Discharges | E9 pure; G0/r3; D-295-R11 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the emission; the reclaim retry memory; the validator)) |
 | Contract shape | pure-function |
 | Lane | pure |
 | Driving port | `WorkloadLifecycle::reconcile`; `validate_reconcile_output` |
@@ -1014,11 +1016,11 @@ AND a failing step keeps the lease and returns a typed error, while parts alread
 
 | Field | Value |
 |---|---|
-| Discharges | E9 in-process; D-295-R11 shim arm (FD 3885-3900) |
+| Discharges | E9 in-process; D-295-R11 shim arm (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the shim arm)) |
 | Contract shape | bounded-change |
-| Lane | pure (control-plane acceptance over the seam fixture, as S-ND295-06). The seam uses the `AppState` worker (R16), not a private lifecycle implementation, and the precondition start reaches intercept install, so the worker's shared owner is started; it binds nothing (FD 3720-3735) |
+| Lane | pure (control-plane acceptance over the seam fixture, as S-ND295-06). The seam uses the `AppState` worker (R16), not a private lifecycle implementation, and the precondition start reaches intercept install, so the worker's shared owner is started; it binds nothing (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)) |
 | Driving port | `dispatch_with_guest_network_provisioner_for_test(actions, state, tick, provisioner)` with `Action::ReclaimAllocationNetwork`, over a seam fixture whose one test-local owner (implementing `GuestNetworkProvisioner` and `SharedGuestNetworkOwner`) is `AppState`'s owner and the seam's `provisioner` |
-| Fault stimulus | precondition through the production path: an allocation whose `activate` fails (the test-local owner's scripted typed error) while its teardown is scripted to fail, so the shim writes its Failed row and keeps its lease Retiring (FD 2036-2053); then, for the failing-step case, the teardown slot left armed or an element-removal fault on the worker's test-local `MtlsIntercept` |
+| Fault stimulus | precondition through the production path: an allocation whose `activate` fails (the test-local owner's scripted typed error) while its teardown is scripted to fail, so the shim writes its Failed row and keeps its lease Retiring (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the activation failure projection)); then, for the failing-step case, the teardown slot left armed or an element-removal fault on the worker's test-local `MtlsIntercept` |
 | Oracle | step trace (lease events plus sampled `SimDriver` stop count, owner journal, and element removals, as in S-ND295-07): retire (a no-op on an already-Retiring lease) → VMM confirmed gone (`driver.stop` `NotFound` counts) → element removal → teardown → `lease_released`; no `AllocStatusRow` write and no lifecycle event during the reclaim; a reclaim for an allocation without a lease → `Ok(())` with no owner, driver, or intercept call; a failing step → its typed `ShimError` — `GuestNetwork(Io { TapDelete })`, or `MtlsStop(MtlsInterceptStopError::ElementRemoval { alloc_id, source })` with `&*source` the injected `InterceptError` — with `lease_retired` and no `lease_released` |
 | Rust home | NEW `crates/overdrive-control-plane/tests/acceptance/netns_density_guest_network.rs::{reclaim_cleans_a_leased_finished_allocation_without_a_row, reclaim_without_a_lease_does_nothing, a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt}` |
 | Disposition / step | NEW — 07-02 |
@@ -1062,7 +1064,7 @@ AND it is not pending without a lease or for an admitted lease on a live allocat
 
 | Field | Value |
 |---|---|
-| Discharges | E20 pure; G5/r3 (gates nothing); D-295-R20 (FD 4575-4591) |
+| Discharges | E20 pure; G5/r3 (gates nothing); D-295-R20 (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the observed fact it derives from)) |
 | Contract shape | pure-function |
 | Lane | pure |
 | Driving port | `GuestAttachmentLease::cleanup_pending(self, row_state)` |
@@ -1084,10 +1086,10 @@ AND a crashed allocation awaiting cleanup and one being reclaimed are also repor
 
 | Field | Value |
 |---|---|
-| Discharges | E20 in-process; D-295-R20 server projection (FD 4625-4648) |
+| Discharges | E20 in-process; D-295-R20 server projection (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the server projection)) |
 | Contract shape | bounded-change |
 | Lane | in-process (control-plane integration, `run_server` + HTTPS API) |
-| Driving port | `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` (`guest_dns` = `SimGuestDnsFactory`), a `SimDriver`, the sim owner, and `vm_cgroups` = `CgroupManager` over `SimCgroupFs` (FD 9533-9559); `GET /v1/allocs` through the public API |
+| Driving port | `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` (`guest_dns` = `SimGuestDnsFactory`), a `SimDriver`, the sim owner, and `vm_cgroups` = `CgroupManager` over `SimCgroupFs` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)); `GET /v1/allocs` through the public API |
 | Fault stimulus | `ServerConfig.mtls_intercept` = a test-local `MtlsIntercept` whose `remove_allocation_elements` fails until disarmed; `SimDriver::inject_exit_after(.., Crashed)` |
 | Oracle | `network_cleanup_pending: true` with `state: Running` and excluded from `replicas_running`; after disarm and retry: `Terminated`, `false`; crashed row (`Failed`, Admitted lease) → `true` |
 | Seed / isolation | example; `host-kernel-shared` |
@@ -1107,7 +1109,7 @@ AND every non-pending allocation renders exactly as before
 
 | Field | Value |
 |---|---|
-| Discharges | E20 CLI; D-295-R20 rendering (FD 4650-4661) |
+| Discharges | E20 CLI; D-295-R20 rendering (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the CLI rendering)) |
 | Contract shape | pure-function |
 | Lane | pure |
 | Driving port | `render::workload_describe` (the one live renderer) |
@@ -1131,10 +1133,10 @@ AND admission opens only after all of that is read back
 
 | Field | Value |
 |---|---|
-| Discharges | E10 seeded (extended); G1/r1; D-295-R12 (FD 3918-3950) |
+| Discharges | E10 seeded (extended); G1/r1; D-295-R12 (FD § "[REF] Boot ordering (D-295-R12) — ACCEPTED 2026-09-24" (the boot sequence)) |
 | Contract shape | bounded-change |
-| Lane | seeded-in-process (drives `run_server_with_obs_and_driver`, D-295-DISTILL-13's selected boundary, FD 12639; R16 composes the real enforcement probe, so the module gains `integration-tests` gating) |
-| Driving port | `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` (`guest_dns` = `SimGuestDnsFactory`), one `SimVmHostState`, `SimSharedGuestNetworkOwner::with_sweep_host_state`, a test-local recording `MtlsIntercept` whose every call snapshots the sim owner's `calls().len()` and `supervisor.is_boot_closed()`, and the final `vm_cgroups` = `CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))` (FD 9533-9559). The test keeps `wiring.supervisor()` before the `GuestNetworkExecWiring` moves into the call |
+| Lane | seeded-in-process (drives `run_server_with_obs_and_driver`, D-295-DISTILL-13's selected boundary, FD § "D-295-DISTILL-13 — production-composed S-ND295-13 boot-order boundary" (the selected shape); R16 composes the real enforcement probe, so the module gains `integration-tests` gating) |
+| Driving port | `run_server_with_obs_and_driver` with `ServerConfig::new(kek, mtls_intercept, guest_dns)` (`guest_dns` = `SimGuestDnsFactory`), one `SimVmHostState`, `SimSharedGuestNetworkOwner::with_sweep_host_state`, a test-local recording `MtlsIntercept` whose every call snapshots the sim owner's `calls().len()` and `supervisor.is_boot_closed()`, and the final `vm_cgroups` = `CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)). The test keeps `wiring.supervisor()` before the `GuestNetworkExecWiring` moves into the call |
 | Fault stimulus | seeded prior-VM residue (scopes, run dirs, clones); the recording intercept starts with seeded non-empty members |
 | Oracle | existing sweep-snapshot assertions, plus the relative order sweep-call index ≺ `converge_allocation_elements(∅)` ≺ `observe_shared` ≺ `converge_shared(prior, F, C)` ≺ `observe_shared_state` (zero members) ≺ `open_after_boot`: every recorded intercept call sees `is_boot_closed() == true`, and the gate leaves BootClosed only after the last of them |
 | Seed / isolation | proptest `seed in any::<u64>()`, printed |
@@ -1147,7 +1149,7 @@ AND admission opens only after all of that is read back
 
 | Field | Value |
 |---|---|
-| Discharges | E10 telemetry (GREEN operational evidence, D-295-DISTILL-13 FD 12649-12671) |
+| Discharges | E10 telemetry (GREEN operational evidence, FD § "D-295-DISTILL-13 — production-composed S-ND295-13 boot-order boundary" (the boot-phase telemetry events)) |
 | Lane | in-process |
 | Oracle | exactly `vm_reclamation/started`, `vm_reclamation/completed`, `stale_sweep/started`, `stale_sweep/completed` of `guest_network.shared_owner_boot_phase`, in that order, captured by a tracing Layer across ordinary `run_server` |
 | Rust home | `crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs::production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts` (placeholder AUTHORED) |
@@ -1171,7 +1173,7 @@ AND it boots instead of refusing, adopts nothing from the dead server, and admit
 | Lane | native |
 | Driving port | `serve::run_with_kek` under `ServeLifetime` with the killed-mode signal (`ServeSignal::Kill` → `ServerHandle::kill_for_test`), then a second `serve::run_with_kek` on the same roots; `deploy` handler |
 | Fault stimulus | killed mode (no graceful cleanup; the worker is dropped on a capability-less thread) |
-| Oracle | V0 boot two returns `Ok`; V1 CH pids dead and scope gone before any boot-two nft batch; V2 exactly one boot-two batch deletes exactly the three stale members with no program mutation before it; V3 `observe_shared_ip_intercept_state` shows zero members after it; V4 the constant program in the R19 order plus the policy route (and, if R18 stands, the guard table) converge after it; V5 admission opens; V6 no stale member survives; plus the first new lease is `100.95.0.2` and the old TAP, links, pins, endpoint entry, and guard member are absent before admission (absorbs the deleted placeholder `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`). `nft monitor` ordering is the kernel oracle; `EbpfDataplane`'s destructor still runs in killed mode (FD 3951-3953). |
+| Oracle | V0 boot two returns `Ok`; V1 CH pids dead and scope gone before any boot-two nft batch; V2 exactly one boot-two batch deletes exactly the three stale members with no program mutation before it; V3 `observe_shared_ip_intercept_state` shows zero members after it; V4 the constant program in the R19 order plus the policy route (and, if R18 stands, the guard table) converge after it; V5 admission opens; V6 no stale member survives; plus the first new lease is `100.95.0.2` and the old TAP, links, pins, endpoint entry, and guard member are absent before admission (absorbs the deleted placeholder `native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance`). `nft monitor` ordering is the kernel oracle; `EbpfDataplane`'s destructor still runs in killed mode (FD § "[REF] Boot ordering (D-295-R12) — ACCEPTED 2026-09-24" (the native-lane note on `EbpfDataplane`'s destructor)). |
 | Seed / isolation | example; `host-kernel-shared`; timeout override retained |
 | Rust home | `crates/overdrive-cli/tests/integration/serve_killed_restart_boot_clear.rs::a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits` |
 | Disposition / step | RETARGETED (lands in place) — 08-02 |
@@ -1190,7 +1192,7 @@ AND a clear that commits after a refused boot publishes nothing
 
 | Field | Value |
 |---|---|
-| Discharges | E10; G1/r2, G1/r4; D-295-R12 (FD 3930-3934), `MtlsSharedOwnerError::BootMemberClear` |
+| Discharges | E10; G1/r2, G1/r4; D-295-R12 (FD § "[REF] Boot ordering (D-295-R12) — ACCEPTED 2026-09-24" (the boot member clear)), `MtlsSharedOwnerError::BootMemberClear` |
 | Contract shape | bounded-change |
 | Lane | integration (worker integration binary over a recording `MtlsIntercept` whose `bind_transparent` binds real loopback listeners; no root) |
 | Driving port | `MtlsInterceptWorker::start_shared_owner` |
@@ -1229,12 +1231,12 @@ AND the prior node guard is handed over, not dropped, so the recorded targets su
 
 | Field | Value |
 |---|---|
-| Discharges | E13 (sim + Lima); E11 policy-route-only case (worker half); D-295-R15 (FD 3133-3260), R18 guard presence (conditional) |
+| Discharges | E13 (sim + Lima); E11 policy-route-only case (worker half); D-295-R15 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime member audit and repair contract, R15)), R18 guard presence (conditional) |
 | Contract shape | bounded-change |
 | Lane | integration (worker integration binary over a recording `MtlsIntercept` that binds real loopback listeners; no root) + lima-kernel (real nft and routing through `HostMtlsIntercept`) |
 | Driving port | `MtlsInterceptWorker::{audit_shared_owner, converge_shared_owner}`; `MtlsIntercept::{observe_shared_state, converge_allocation_elements}`; `Client::local_route_present` |
 | Fault stimulus | sim: the recording intercept's state loses a member / `policy_route=false` / `intercept_mark_guard=false` / program absent / program with a different target; Lima: real `nft delete element`, `nft delete table ip overdrive-mtls`, `ip rule del fwmark 0x1 lookup 100`, `ip route del local 0.0.0.0/0 dev lo table 100`, `nft delete table ip overdrive-mtls-guard` |
-| Oracle | audit errors: member mismatch → `MemberMismatch { expected, observed }` (`component() == IpSets`); route/guard/program → `Intercept` (`IpRules`); repair: absent program → `converge_shared(None, F, C)`; equal identity → no program write; different identity → `PostconditionMismatch` without write (S19-A); then `converge_allocation_elements(registry_expected)` and a clean audit; guard handover: the prior guard's `Drop` never runs, recorded targets intact, a later `install_outbound` succeeds; `MtlsSharedOwnerError::component()` mapping table equals FD 3251-3258 |
+| Oracle | audit errors: member mismatch → `MemberMismatch { expected, observed }` (`component() == IpSets`); route/guard/program → `Intercept` (`IpRules`); repair: absent program → `converge_shared(None, F, C)`; equal identity → no program write; different identity → `PostconditionMismatch` without write (S19-A); then `converge_allocation_elements(registry_expected)` and a clean audit; guard handover: the prior guard's `Drop` never runs, recorded targets intact, a later `install_outbound` succeeds; `MtlsSharedOwnerError::component()` mapping table equals FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the new worker error variants) |
 | Seed / isolation | table + example; `host-kernel-shared` for Lima |
 | Rust home | NEW `crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs::{member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member, policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished, a_differently_targeted_program_is_never_rewritten}`; NEW `crates/overdrive-worker/src/mtls_intercept_worker.rs::tests::every_shared_owner_error_reports_its_one_component`; NEW `crates/overdrive-worker/tests/integration/shared_intercept_members.rs::{each_deleted_intercept_object_is_restored_exactly_with_live_allocations, the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations}` (the second is R18-conditional) (the route and guard cases exercise `Client::local_route_present` and the two guard effects through `HostMtlsIntercept::observe_shared_state`) |
 | Disposition / step | NEW — 08-03 (the R18-conditional body and guard assertions are removed by 08-01 if R18 is withdrawn) |
@@ -1252,7 +1254,7 @@ AND deleting only the guard table still leaves the intercept program catching or
 
 | Field | Value |
 |---|---|
-| Discharges | E14 (a), (b), guard-only deletion; D-295-R18 (conditional on this native RED, FD 3477-3490) |
+| Discharges | E14 (a), (b), guard-only deletion; D-295-R18 (conditional on this native RED, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts)) |
 | Contract shape | bounded-change |
 | Lane | native (RED first, then GREEN) |
 | Driving port | `serve::run_with_kek` + `deploy` with a probe guest image that emits scripted SYNs |
@@ -1260,7 +1262,7 @@ AND deleting only the guard table still leaves the intercept program catching or
 | Oracle | peer-TAP capture: zero forwarded intercept-marked frames; host listener on `0.0.0.0:<port>` accepts nothing and no SYN-ACK reaches the guest. **Healthy baseline (before any fault, the guard's non-interference control):** with both tables present, leg F listening, and `observe_intercept_mark_guard()` returning `Ok(true)`, each R18 guest SYN (to the peer's address, the bridge gateway, and another host address, at a wildcard host listener's port) receives a SYN-ACK and that listener accepts nothing — the intercept answered and the guard dropped nothing; the guard rule carries no counter (`observe_intercept_mark_guard` is a bool presence read). **Per-run SYN-entered-host check (every R18 GREEN case and the guard-only case):** the probe SYN is captured on its sender's TAP while that TAP reads back administratively up, `GuestTcxCounter::Intercept` rises by at least the SYNs sent, and the bridge guard's default-drop counter is unchanged; a run whose TAP was already quiesced (e.g. an `IpRules` loss quiesced the managed TAPs) is void, not GREEN |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | NEW `crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs::{marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program, the_intercept_program_still_catches_marked_tcp_without_the_guard_table}` |
-| Disposition / step | NEW — 08-01 (the RED run decides R18: if neither table-loss path reproduces, R18 is withdrawn and its conditional parts are removed, FD 3487-3490) |
+| Disposition / step | NEW — 08-01 (the RED run decides R18: if neither table-loss path reproduces, R18 is withdrawn and its conditional parts are removed, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts' withdrawal rule)) |
 
 #### S-ND295-63 — Guest TCP to an absent listener fails closed
 
@@ -1299,12 +1301,12 @@ AND a stale-sequence probe on a host-only path is answered with a bare ACK and a
 
 | Field | Value |
 |---|---|
-| Discharges | E14 (e) with negative then positive control (FD 3363-3412, 4733); G5/r5 |
+| Discharges | E14 (e) with negative then positive control (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `TIME_WAIT` side door); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E14 row)); G5/r5 |
 | Contract shape | bounded-change |
 | Lane | native |
 | Driving port | as S-ND295-62; controls use a test-owned veth peer namespace under `overdrive_testing::cidr_lease::TestCidrLease` |
 | Fault stimulus | leg-F closure; separately killed-mode `serve` |
-| Oracle | negative control: bare ACK, no SYN-ACK, entry survives; positive control (after `tcp_invalid_ratelimit`): SYN-ACK; guest case: recorded outcome. **A reproduced SYN-ACK is not absorbed: it routes to the user (FD 3403-3412).** |
+| Oracle | negative control: bare ACK, no SYN-ACK, entry survives; positive control (after `tcp_invalid_ratelimit`): SYN-ACK; guest case: recorded outcome. **A reproduced SYN-ACK is not absorbed: it routes to the user (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `TIME_WAIT` side door's routing to the user)).** |
 | Seed / isolation | example; `host-kernel-shared`; named CIDR lease |
 | Rust home | NEW `crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs::a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_controls` |
 | Disposition / step | NEW — 08-01 |
@@ -1323,7 +1325,7 @@ AND at five seconds exactly one typed program-rules deadline fail-stop is reques
 
 | Field | Value |
 |---|---|
-| Discharges | E11 seeded (S19 journal, FD 4360-4370); G5/r2; D-295-R13 |
+| Discharges | E11 seeded (S19 journal, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the S19 consequence)); G5/r2; D-295-R13 |
 | Contract shape | bounded-change |
 | Lane | seeded-sim (source-local supervisor, default lane: the worker's `S19Intercept` delegates binding to an inner `SimMtlsIntercept`, so the started worker binds nothing) + pure (S19-A adapter layer, RETAINED) |
 | Driving port | private `SharedNetworkSupervisorHandle::run_shared_network_supervisor(ports, exec, clock, request_tx, shutdown)` with the ports of § *Test-local control-plane ports*: the test-local owner (it replaces the file-local `S19SharedOwner`, `lib.rs:1819-1888`, which is deleted so the owner double is defined once), the test-local `GuestDns`/`GuestDnsFactory`, a worker over `SimMtlsEnforcement` and `SimMtlsResolve`, and `vm_kill` over `CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))` |
@@ -1338,7 +1340,7 @@ AND at five seconds exactly one typed program-rules deadline fail-stop is reques
 Contracts unchanged (C-295-L, D-295-DISTILL-7/11). Normal stop now removes
 members through the awaited `remove_allocation_elements` (S-ND295-54); the
 observable complements these bodies assert are unchanged. B-7 changes how the
-worker obtains and stops its listeners, not these contracts (FD 3702-3718).
+worker obtains and stops its listeners, not these contracts (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on R13 to R15 and the listener-loss audit)).
 
 **Pass-through relay stop obligations (C-295-L pin, 2026-09-25, feature delta
 § "Why a stop ends its pass-through relays").** The live twin
@@ -1376,7 +1378,7 @@ AND on the host every accepted connection reports the address its peer originall
 
 | Field | Value |
 |---|---|
-| Discharges | B-7 port contract (FD 3492-3766): `bind_transparent` (FD 3554-3572), `local_addr` (FD 3574-3578), `accept` and cancel safety (FD 3580-3614), host obligations (FD 3616-3644), sim contract (FD 3646-3663), the worker's guarantees (C-295-L, FD 3665-3679), and the lane consequence (FD 3720-3735); G5/r5 (listener loss) |
+| Discharges | B-7 port contract (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25"): `bind_transparent` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`bind_transparent` behaviour)), `local_addr` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::local_addr` behaviour)), `accept` and cancel safety (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::accept` behaviour)), host obligations (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `HostMtlsIntercept` obligations)), sim contract (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract)), the worker's guarantees (C-295-L, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (what the worker's use of it guarantees)), and the lane consequence (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)); G5/r5 (listener loss) |
 | Contract shape | bounded-change |
 | Lane | pure (sim self-tests; worker source-local bodies over `TestInterceptListener`) + lima-kernel (the port equivalence harness and the host-listener obligations, root) |
 | Driving port | `MtlsIntercept::bind_transparent` → `InterceptListener::{local_addr, accept}` on `SimMtlsIntercept` and `HostMtlsIntercept`; the worker's `start_shared_owner`, `wait_shared_owner_failure`, `audit_shared_owner`, `converge_shared_owner`, `shutdown_owner`, and the drop of its last `Arc`, over `TestSharedIntercept` |
@@ -1390,9 +1392,9 @@ AND on the host every accepted connection reports the address its peer originall
 
 #### S-ND295-27 / S-ND295-28 — One guest-command gate; recovery never leaks or wrongly releases a command
 
-Contracts unchanged (EXEC-close linearization, FD 9407-9492). The fail-stop
+Contracts unchanged (EXEC-close linearization, FD § "EXEC-close linearization"). The fail-stop
 cause vocabulary gains `TapQuiescenceUndetermined` and `VmKillFailed`
-(FD 4348-4358).
+(FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the core addition)).
 
 | Field | Value |
 |---|---|
@@ -1416,11 +1418,11 @@ AND while quiescence is latched the gate is never open
 
 | Field | Value |
 |---|---|
-| Discharges | E11 seeded (all 12 components and task classes, IpRules-only and IpSets-only quiesce-repair-restore-reopen, policy-route-only with guard handover, double failure with no early restore, activation in flight during a kernel-path detection, latch invariant L9); E17 seeded (DNS loss closes EXEC and recovers through a fresh responder); G5/r1, G5/r2, G5/r4, G5/r5; D-295-R13, R14, R15, R16 (FD 3960-4370, 1824-1840) |
+| Discharges | E11 seeded (all 12 components and task classes, IpRules-only and IpSets-only quiesce-repair-restore-reopen, policy-route-only with guard handover, double failure with no early restore, activation in flight during a kernel-path detection, latch invariant L9); E17 seeded (DNS loss closes EXEC and recovers through a fresh responder); G5/r1, G5/r2, G5/r4, G5/r5; D-295-R13, R14, R15, R16 (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)"; FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the latch invariant, L9)) |
 | Contract shape | bounded-change |
 | Lane | seeded-sim (source-local, default lane; the started worker over `S19Intercept` binds nothing, § *Intercept listener and stop-error test support*) |
-| Driving port | private `run_shared_network_supervisor(ports, exec, clock, request_tx, shutdown)` with `SharedNetworkSupervisorPorts { shared_guest_network: the test-local owner, mtls_worker: MtlsInterceptWorker over SimMtlsEnforcement + SimMtlsResolve + the test-local stateful S19Intercept, dns: DnsServeTaskOwner over the test-local GuestDns, dns_factory: the test-local GuestDnsFactory, dns_deps: SimObservationStore / SimClock / gateway / frontend, vm_kill: VmKillCapability::new(CgroupManager::new(<root>, Arc::new(fs.clone()))) over one SimCgroupFs }`, `GuestNetworkExecWiring` over `SimClock` whose `gate()` and `supervisor()` the test keeps (FD 4675-4705, 4088-4107; § *Test-local control-plane ports*) |
-| Fault stimulus | the test-local owner's standing component slots and damage set; intercept state loss (program/member/route/guard); listener task end — `S19Intercept::sim().script_accept(leg, SimAcceptScript::ListenerLost { errno: libc::EINVAL })` at the leg address the worker recorded, so the worker's accept task ends with `InterceptAcceptError::Accept` on a socket-free listener and the classifier reports `TaskFailed { leg, source }` (FD 3588-3593, 3658-3662); repair releases that listener and rebinds the recorded address; the test-local `GuestDns` serve exit (return, panic, pending); the test-local owner's hanging or panicking audit |
+| Driving port | private `run_shared_network_supervisor(ports, exec, clock, request_tx, shutdown)` with `SharedNetworkSupervisorPorts { shared_guest_network: the test-local owner, mtls_worker: MtlsInterceptWorker over SimMtlsEnforcement + SimMtlsResolve + the test-local stateful S19Intercept, dns: DnsServeTaskOwner over the test-local GuestDns, dns_factory: the test-local GuestDnsFactory, dns_deps: SimObservationStore / SimClock / gateway / frontend, vm_kill: VmKillCapability::new(CgroupManager::new(<root>, Arc::new(fs.clone()))) over one SimCgroupFs }`, `GuestNetworkExecWiring` over `SimClock` whose `gate()` and `supervisor()` the test keeps (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim lane and its test-local ports); FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the seeded and in-process lanes' kill capability); § *Test-local control-plane ports*) |
+| Fault stimulus | the test-local owner's standing component slots and damage set; intercept state loss (program/member/route/guard); listener task end — `S19Intercept::sim().script_accept(leg, SimAcceptScript::ListenerLost { errno: libc::EINVAL })` at the leg address the worker recorded, so the worker's accept task ends with `InterceptAcceptError::Accept` on a socket-free listener and the classifier reports `TaskFailed { leg, source }` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`accept`'s `Err(Accept { source })` outcome; the `SimMtlsIntercept` scripting surface)); repair releases that listener and rebinds the recorded address; the test-local `GuestDns` serve exit (return, panic, pending); the test-local owner's hanging or panicking audit |
 | Oracle | per cell: `begin_recovery(first component in D8 order)` precedes `guest_network.shared_owner_unhealthy { component, cause ∈ {audit_mismatch, task_exit, audit_timeout} }`; the test-local owner's journal shows exactly one `Quiesce` for kernel-path cells and none for LegF/LegC/Dns; attempts at 250 ms counted after converge + full audit; `Restore` only after a clean audit; single reopen; deadline → one request with exact component/attempts/elapsed. L9 on every schedule, read from the owner's own latch (`latched()`, set by `quiesce_managed_taps` and cleared only by a successful `restore_quiesced_taps`), never re-derived from a journal: at every observation point, `latched()` implies `supervisor.recovery_progress().is_some()` or a received fail-stop request, and `gate.claim_release().now_or_never()` yields no claim |
 | Seed / isolation | finite matrix × `OVERDRIVE_SUPERVISOR_SEEDS` (defaults `0x2953300000000001`, `0x295330005eed0002`), seed and cell printed on every verdict; deterministic `SimClock` with pending-poll synchronization |
 | Rust home | NEW `crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance::{every_component_loss_is_detected_and_recovered_through_its_owner, kernel_path_components_quiesce_and_listener_or_dns_loss_never_does, a_worker_only_repair_still_restores_quiesced_taps_and_reopens, a_policy_route_loss_is_repaired_with_live_members_and_the_guard_is_relinquished, a_double_failure_raises_no_tap_before_every_owner_is_repaired, an_activation_in_flight_waits_for_reopen_and_raises_once, dns_task_loss_closes_new_commands_and_recovers_through_a_fresh_responder, the_gate_is_never_open_while_quiescence_is_latched}` |
@@ -1443,9 +1445,9 @@ AND a TAP that cannot be confirmed down stops only its VM, while an undetermined
 | Discharges | E11 in-process (proof §3.3 C0-C8, C6 re-targeted to the per-TAP kill scope), E17 in-process; G5/r1-r5; D-295-R13, R14, R16 |
 | Contract shape | bounded-change |
 | Lane | in-process (Lima root; the real enforcement probe runs) |
-| Driving port | `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD 9533-9559) with a `SimDriver`, the `SimSharedGuestNetworkOwner` (or a test-local hanging or panicking owner for those cells), `guest_dns` = `SimGuestDnsFactory`, and `vm_cgroups` = `CgroupManager::new(<root>, Arc::new(fs.clone()))` over one `SimCgroupFs` (FD 4088-4107). Admission, progress, and requests are observed as § *In-process observation* states |
-| Fault stimulus | `SimSharedGuestNetworkOwner` slots (`script_component_audit_failure`, `script_quiesce_outcome`, `script_audit_damage`, `script_restore_failure`); `ServerConfig.mtls_intercept` = test-local stateful intercept; `SimGuestDnsFactory::script_probe_failure`, `SimGuestDns::end_serve(Return / Panic)`, `SimGuestDns::script_audit_failure` (FD 4444-4500); test-local hanging and panicking audit owners. Before a C6 fault the test deploys allocation A through the API and creates the workloads slice and A's scope directory, with every ancestor, through `CgroupFs::create_dir` on the same `SimCgroupFs`: a kill write under a missing parent returns `NotFound`, which counts as an absent scope (FD 4096-4107) |
-| Oracle | The cadence values asserted are ADR-0124's accepted contract — the 1 s audit period, the 250 ms attempt period, the 5 s recovery deadline, 20 attempts — written as that contract, never as the private constants, and measured on the injected clock (FD 4123-4145). C0 healthy; C1 one audit per owner per 1 s audit period; C2 each of the 11 node-level components detected within one audit period of the fault, admission closed (a hung-audit cell: detection within 5 s of injected time after the fault, because the E18-derived call bound is private); C3 quiescence per component; C4 exact-owner repair on the 250 ms cadence, single reopen; C5 one typed fail-stop at the 5 s deadline or the 20th attempt, and every recovery outcome within the 5 s window after detection; C6a unconfirmed `{A}` → `guest_network.shared_owner_vm_killed { alloc: A, cause: "quiescence_unconfirmed" }`, the `SimCgroupFs` snapshot holds `1\n` at A's scope `cgroup.kill` and no entry at the workloads-slice `cgroup.kill`, recovery continues and reopens; C6b `Fail`/`Hang` → one request `TapQuiescenceUndetermined` through `ServerHandle::shutdown_requested`, and when it is received the snapshot holds `1\n` at `<root>/overdrive.slice/workloads.slice/cgroup.kill`; C6c audit damage while Open → A killed (its scope write in the snapshot), admission stays open; C7a healed owner after fail-stop cannot reopen; C7b in-flight read-back after the deadline cannot reopen; C8 supervisor task loss → immediate fail-stop with the latest snapshot |
+| Driving port | `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with a `SimDriver`, the `SimSharedGuestNetworkOwner` (or a test-local hanging or panicking owner for those cells), `guest_dns` = `SimGuestDnsFactory`, and `vm_cgroups` = `CgroupManager::new(<root>, Arc::new(fs.clone()))` over one `SimCgroupFs` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the seeded and in-process lanes' kill capability)). Admission, progress, and requests are observed as § *In-process observation* states |
+| Fault stimulus | `SimSharedGuestNetworkOwner` slots (`script_component_audit_failure`, `script_quiesce_outcome`, `script_audit_damage`, `script_restore_failure`); `ServerConfig.mtls_intercept` = test-local stateful intercept; `SimGuestDnsFactory::script_probe_failure`, `SimGuestDns::end_serve(Return / Panic)`, `SimGuestDns::script_audit_failure` (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` and `SimGuestDnsFactory` doubles)); test-local hanging and panicking audit owners. Before a C6 fault the test deploys allocation A through the API and creates the workloads slice and A's scope directory, with every ancestor, through `CgroupFs::create_dir` on the same `SimCgroupFs`: a kill write under a missing parent returns `NotFound`, which counts as an absent scope (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle)) |
+| Oracle | The cadence values asserted are ADR-0124's accepted contract — the 1 s audit period, the 250 ms attempt period, the 5 s recovery deadline, 20 attempts — written as that contract, never as the private constants, and measured on the injected clock (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (how the in-process lane bounds time without naming them)). C0 healthy; C1 one audit per owner per 1 s audit period; C2 each of the 11 node-level components detected within one audit period of the fault, admission closed (a hung-audit cell: detection within 5 s of injected time after the fault, because the E18-derived call bound is private); C3 quiescence per component; C4 exact-owner repair on the 250 ms cadence, single reopen; C5 one typed fail-stop at the 5 s deadline or the 20th attempt, and every recovery outcome within the 5 s window after detection; C6a unconfirmed `{A}` → `guest_network.shared_owner_vm_killed { alloc: A, cause: "quiescence_unconfirmed" }`, the `SimCgroupFs` snapshot holds `1\n` at A's scope `cgroup.kill` and no entry at the workloads-slice `cgroup.kill`, recovery continues and reopens; C6b `Fail`/`Hang` → one request `TapQuiescenceUndetermined` through `ServerHandle::shutdown_requested`, and when it is received the snapshot holds `1\n` at `<root>/overdrive.slice/workloads.slice/cgroup.kill`; C6c audit damage while Open → A killed (its scope write in the snapshot), admission stays open; C7a healed owner after fail-stop cannot reopen; C7b in-flight read-back after the deadline cannot reopen; C8 supervisor task loss → immediate fail-stop with the latest snapshot |
 | Seed / isolation | `OVERDRIVE_SUPERVISOR_PROOF_SEEDS`, printed per cell; control-plane integration binary is `host-kernel-shared` |
 | Rust home | `crates/overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs` — the ten bodies MOVED from `crates/overdrive-sim/tests/shared_network_supervisor_recovery_proof.rs`: `healthy_owner_keeps_admission_open_without_recovery_effects`, `healthy_node_audits_the_shared_owner_every_second`, `every_component_loss_is_detected_within_one_audit_and_closes_admission`, `kernel_path_loss_quiesces_once_before_repair_and_listener_or_dns_loss_never_does`, `repair_runs_through_the_owning_component_on_the_attempt_cadence_and_reopens_once`, `unrepaired_loss_fail_stops_with_one_typed_request_at_the_deadline`, `unconfirmed_quiescence_kills_affected_vms_before_repair_and_fail_stops` (RETARGETED and renamed `unconfirmed_quiescence_kills_only_the_affected_vm_and_recovery_reopens`), `healed_owner_after_fail_stop_cannot_reopen_admission`, `in_flight_success_after_the_deadline_cannot_reopen_admission`, `supervisor_task_loss_is_observed_immediately_and_fail_stops_with_the_latest_snapshot`; NEW `undetermined_quiescence_fails_the_node_with_one_typed_request`, `audit_damage_while_open_kills_only_that_vm_and_keeps_admission_open` |
 | Disposition / step | RETARGETED + MOVED + NEW — 09-01 |
@@ -1465,11 +1467,11 @@ AND a stopped VM is never audited or restored again, and recovery continues for 
 
 | Field | Value |
 |---|---|
-| Discharges | E12 seeded (a)-(g); G5/r2, G5/r3; D-295-R14 (FD 4252-4294), user rulings 2 and 8 |
+| Discharges | E12 seeded (a)-(g); G5/r2, G5/r3; D-295-R14 (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the kill scope)), user rulings 2 and 8 |
 | Contract shape | bounded-change |
 | Lane | seeded-sim (source-local, default lane; as S-ND295-29A) |
 | Driving port | as S-ND295-29A |
-| Fault stimulus | the test-local owner's quiescence outcome (`Unconfirmed({A})`, `Fail`, `Hang`) and damage set `{A}` for each per-allocation part class (a TAP deleted; ingress/egress attachment or pin removed; endpoint; guard member; raised while `ProvisionedDown`; owner or persistence; host MAC; debug mask). Every case first creates the workloads slice and each reported allocation's scope directory, with every ancestor, through `CgroupFs::create_dir` on the one `SimCgroupFs`. (c) `SimCgroupFs::inject_error(SimOp::Write, <A's scope>/cgroup.kill, ErrorKind::Other)`; (d) A's scope directory is not created, so the kill write under a missing parent returns `NotFound`, the absent scope a concurrent stop leaves (FD 4096-4107) |
+| Fault stimulus | the test-local owner's quiescence outcome (`Unconfirmed({A})`, `Fail`, `Hang`) and damage set `{A}` for each per-allocation part class (a TAP deleted; ingress/egress attachment or pin removed; endpoint; guard member; raised while `ProvisionedDown`; owner or persistence; host MAC; debug mask). Every case first creates the workloads slice and each reported allocation's scope directory, with every ancestor, through `CgroupFs::create_dir` on the one `SimCgroupFs`. (c) `SimCgroupFs::inject_error(SimOp::Write, <A's scope>/cgroup.kill, ErrorKind::Other)`; (d) A's scope directory is not created, so the kill write under a missing parent returns `NotFound`, the absent scope a concurrent stop leaves (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle)) |
 | Oracle | `SimCgroupFs::snapshot()` holds the last payload per path, not an ordered log, so each assertion names its observation point. (a),(e),(f),(g): `1\n` at A's scope `cgroup.kill` and no entry at the workloads-slice `cgroup.kill`; (d): no entry at either, and A counts as killed; (b) and (c): `1\n` at the slice `cgroup.kill` in the snapshot taken when the `TapQuiescenceUndetermined` / `VmKillFailed` request is received. Ordering: the test-local owner stores the snapshot taken at the start of each owner call in its journal, and the first owner call after a report already holds every reported allocation's kill write. `shared_owner_vm_killed { alloc, cause }` per kill; EXEC stays Open for damage found while Open; a killed allocation is never in a later audit's damage set or a later restore; recovery reopens after (a), (d), (e) |
 | Seed / isolation | as S-ND295-29A |
 | Rust home | NEW `crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance::{an_unconfirmed_tap_stops_only_its_vm_and_recovery_reopens, an_undetermined_quiescence_stops_every_workload_vm_then_fails_the_node, a_failed_per_vm_stop_stops_every_workload_vm_then_fails_the_node, an_already_removed_scope_counts_as_stopped, every_damaged_per_vm_part_stops_only_that_vm_while_admission_stays_open, a_killed_vm_leaves_every_later_audit_and_restore}` |
@@ -1489,14 +1491,14 @@ AND an abnormal supervisor exit writes fail-stop before the typed request is ret
 
 | Field | Value |
 |---|---|
-| Discharges | E11 bounded calls; G5/r2, G5/r4; D-295-R13 (FD 4201-4214, 4323-4346), D-295-DISTILL-8 exit table |
+| Discharges | E11 bounded calls; G5/r2, G5/r4; D-295-R13 (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the full-audit call bound; the recovery attempt)), D-295-DISTILL-8 exit table |
 | Contract shape | bounded-change |
 | Lane | seeded-sim (source-local, default lane; as S-ND295-29A) |
 | Driving port | as S-ND295-29A; `ServerHandle` exit classification |
 | Fault stimulus | the test-local owner scripted to hang in `audit_shared`; its quiescence outcome `Hang` |
-| Oracle | `shared_owner_unhealthy { cause: audit_timeout }` exactly `SHARED_NETWORK_AUDIT_CALL_BOUND` after the audit began, on the injected clock; a quiesce call still pending at `SHARED_NETWORK_QUIESCE_CALL_BOUND` yields `TapQuiescenceUndetermined`; a call pending at the recovery deadline is abandoned and its attempt is not counted. These bodies are source-local, so they reach both private constants through `super::` by name, never by literal (FD 4118-4122); a value change never edits them. The existing actual-Tokio exit matrix |
+| Oracle | `shared_owner_unhealthy { cause: audit_timeout }` exactly `SHARED_NETWORK_AUDIT_CALL_BOUND` after the audit began, on the injected clock; a quiesce call still pending at `SHARED_NETWORK_QUIESCE_CALL_BOUND` yields `TapQuiescenceUndetermined`; a call pending at the recovery deadline is abandoned and its attempt is not counted. These bodies are source-local, so they reach both private constants through `super::` by name, never by literal (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the constants' home and visibility)); a value change never edits them. The existing actual-Tokio exit matrix |
 | Rust home | NEW `crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance::{a_hung_audit_is_a_timeout_failure_of_its_owner, a_call_pending_at_the_deadline_is_abandoned_uncounted}`; `…::{actual_tokio_exit_matrix_fail_stops_before_returning_the_exact_snapshot, explicit_request_is_returned_unchanged_and_intentional_shutdown_is_not_failure}` RETAINED |
-| Disposition / step | NEW + RETAINED — 09-01. Step 09-01 introduces the constants and, as the later of the capture and constants steps, sets both call bounds from the M-ND295-E18 receipt captured at 08-04 (re-capturing if the receipt is gone) and records them in their rustdoc (FD 4146-4173) |
+| Disposition / step | NEW + RETAINED — 09-01. Step 09-01 introduces the constants and, as the later of the capture and constants steps, sets both call bounds from the M-ND295-E18 receipt captured at 08-04 (re-capturing if the receipt is gone) and records them in their rustdoc (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the values before E18 through the one record home)) |
 
 #### S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands until a fresh responder is serving
 
@@ -1504,7 +1506,7 @@ AND an abnormal supervisor exit writes fail-stop before the typed request is ret
 
 | Field | Value |
 |---|---|
-| Discharges | E17 (seeded in S-ND295-29A, in-process in S-ND295-29B, native real bind here); D-295-R16 `GuestDns` port (FD 4401-4443) and its sim doubles (FD 4444-4502) |
+| Discharges | E17 (seeded in S-ND295-29A, in-process in S-ND295-29B, native real bind here); D-295-R16 `GuestDns` port (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `GuestDns` and `GuestDnsFactory` ports)) and its sim doubles (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` and `SimGuestDnsFactory` doubles)) |
 | Contract shape | bounded-change |
 | Lane | lima-kernel / native real `:53` bind; source-local DNS task-owner bodies |
 | Driving port | `HostGuestDnsFactory::responder(deps)` → `GuestDns::{probe, serve, audit, stop}`; `DnsServeTaskOwner` |
@@ -1525,7 +1527,7 @@ AND no optional field or parameter can switch off protection, DNS, or supervisor
 
 | Field | Value |
 |---|---|
-| Discharges | E16 (FD 4735); D-295-R16 (FD 4372-4399); the `AppState` and `ServerHandle` owner contract (FD 1876-2034) |
+| Discharges | E16 (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E16 row)); D-295-R16 (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (`ServerConfig` and the composition changes)); the `AppState` and `ServerHandle` owner contract (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors and the `ServerHandle` owner fields)) |
 | Contract shape | pure-function |
 | Lane | pure (trybuild + source scan) |
 | Driving port | `ServerConfig::new(kek, mtls_intercept, guest_dns)`; source of `overdrive-control-plane/src/{lib.rs,action_shim/mod.rs}` and `overdrive-worker/src/mtls_intercept_worker.rs` |
@@ -1551,7 +1553,7 @@ port is driven in-process with injected signals and clock.
 
 | Field | Value |
 |---|---|
-| Discharges | E15 in-process + metal; D-295-R17 (FD 4505-4559); proof §3.6 |
+| Discharges | E15 in-process + metal; D-295-R17 (FD § "[REF] Serve lifetime port (D-295-R17) — AS BUILT, USER-APPROVED 2026-09-23"); proof §3.6 |
 | Contract shape | bounded-change |
 | Lane | native (in-process `serve`, injected signals, recording `SimClock`; the fault is real kernel state) |
 | Driving port | `ServeLifetime::new(signals, clock).run(handle)` over `serve::run_with_kek` |
@@ -1583,7 +1585,7 @@ covers through its drained and abandoned cases.
 | Discharges | E11/E15 cross-owner conformance; G5/r2; D-295-R14, R16, R17 |
 | Contract shape | bounded-change |
 | Lane | in-process (`tests/conformance`, exported handler + HTTPS API only) |
-| Driving port | `DirectHandlerHarness` (`tests/conformance/src/lib.rs`) over `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD 9533-9559), with `SimMtlsIntercept`, `SimGuestDnsFactory`, the `SimSharedGuestNetworkOwner`, and `vm_cgroups` over `SimCgroupFs`; the request is observed as § *In-process observation* states |
+| Driving port | `DirectHandlerHarness` (`tests/conformance/src/lib.rs`) over `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network, guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)), with `SimMtlsIntercept`, `SimGuestDnsFactory`, the `SimSharedGuestNetworkOwner`, and `vm_cgroups` over `SimCgroupFs`; the request is observed as § *In-process observation* states |
 | Fault stimulus | `SimSharedGuestNetworkOwner` standing `Bridge` component failure plus `script_converge_failure(true)`; `script_quiesce_outcome(Fail)` |
 | Oracle | typed `ServeShutdownRequest::SharedGuestNetwork { cause: RecoveryDeadlineExceeded / TapQuiescenceUndetermined }` via `ServerHandle::shutdown_requested`; fresh handler admits over HTTPS only after boot |
 | Seed / isolation | example; the conformance binary is `host-kernel-shared` |
@@ -1605,7 +1607,7 @@ AND the stopped VM's cleanup completes and its lease is released
 
 | Field | Value |
 |---|---|
-| Discharges | E12 native (e), (f), (g) and the per-TAP set-down failure (realized as case (e)); the real per-VM `cgroup.kill` effect the whole-call branch relies on (FD 4772-4779); G5/r2, G5/r3; D-295-R14 |
+| Discharges | E12 native (e), (f), (g) and the per-TAP set-down failure (realized as case (e)); the real per-VM `cgroup.kill` effect the whole-call branch relies on (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E12 whole-call branch: the native lane's per-VM `cgroup.kill`)); G5/r2, G5/r3; D-295-R14 |
 | Contract shape | bounded-change |
 | Lane | native |
 | Driving port | `serve::run_with_kek` + `deploy`; a guest image that delays READY for (f) |
@@ -1613,7 +1615,7 @@ AND the stopped VM's cleanup completes and its lease is released
 | Oracle | `shared_owner_vm_killed { alloc, cause }` for exactly that allocation; its CH pid ends; other VMs keep serving (byte-distinct exchange after the fault); (e) recovery reopens; (f)/(g) admission stays open; its start/lifecycle proceeds through the existing VMM-exit path; teardown converges on absence; lease released (`lease_released`) |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | NEW `crates/overdrive-cli/tests/integration/shared_network_native_faults.rs::{a_tap_lost_during_quiescence_stops_only_its_vm_and_the_node_recovers, a_booting_vms_deleted_tap_stops_only_that_vm, a_removed_ingress_link_egress_link_or_guard_member_stops_only_that_vm}` |
-| Disposition / step | NEW — 10-02. There is no native whole-call case, by DESIGN: E12's native lane proves per-VM kill writes only, and the whole-call slice kill is proven by the seeded S-ND295-30A (b) and the in-process S-ND295-29B C6b (FD 4742-4779) |
+| Disposition / step | NEW — 10-02. There is no native whole-call case, by DESIGN: E12's native lane proves per-VM kill writes only, and the whole-call slice kill is proven by the seeded S-ND295-30A (b) and the in-process S-ND295-29B C6b (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E12 whole-call branch)) |
 
 #### S-ND295-37 — A simultaneous external loss of a TAP's link and the guard is bounded and visible
 
@@ -1652,7 +1654,7 @@ AND a launch that fails for a missing kernel leaves the TAP deleted with no hold
 
 | Field | Value |
 |---|---|
-| Discharges | E5 native; G4/r2, G4/r5; D-295-R5 teardown (FD 1769-1789) |
+| Discharges | E5 native; G4/r2, G4/r5; D-295-R5 teardown (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (teardown converges on absence)) |
 | Contract shape | bounded-change |
 | Lane | native |
 | Driving port | `serve` + `deploy` + `workload stop` handler |
@@ -1677,7 +1679,7 @@ AND after A's cleanup the poisoned entry is gone, V answers the host again, and 
 
 | Field | Value |
 |---|---|
-| Discharges | E12 (h); D-295-R21 (FD 2168-2507), R14; pre-control RED oracle = increment-z (`spike/findings-mac-fdb-isolation.md` STEPs 4-6) |
+| Discharges | E12 (h); D-295-R21 (FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24"), R14; pre-control RED oracle = increment-z (`spike/findings-mac-fdb-isolation.md` STEPs 4-6) |
 | Contract shape | bounded-change |
 | Lane | native |
 | Driving port | `serve` + `deploy` |
@@ -1721,7 +1723,7 @@ must stay green over fd handoff.
 | Field | Value |
 |---|---|
 | Discharges | G2/r3, G4/r4 (a spawn completing after stop is reaped by the existing VMM owner — existing VM lifecycle bodies) |
-| Fixture fallout | Every retained caller of `run_server_with_obs_and_driver(s)` (the inventory at FD 9526) passes the final `vm_cgroups`: `CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))`, or, where the caller composes a real `VmDriver`, a manager over the same root and `CgroupFs` it gives that driver (FD 4075-4087). Every retained `AppState` fixture passes the worker, owner, gate, and pool of § *Seam fixture* once DELIVER 05-01 cuts the constructors. Neither changes an assertion |
+| Fixture fallout | Every retained caller of `run_server_with_obs_and_driver(s)` (the fallout inventory, FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` row)) passes the final `vm_cgroups`: `CgroupManager::new(<root>, Arc::new(SimCgroupFs::new()))`, or, where the caller composes a real `VmDriver`, a manager over the same root and `CgroupFs` it gives that driver (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `vm_cgroups` parameter)). Every retained `AppState` fixture passes the worker, owner, gate, and pool of § *Seam fixture* once DELIVER 05-01 cuts the constructors. Neither changes an assertion |
 | Disposition / step | RETAINED — verified at 10-04 |
 
 ## Recovery proof tests — landing decisions
@@ -1734,7 +1736,7 @@ diagnostic tools, and every other proof is purely in-process.
 | Proof | Current file | Landing | Lane | Re-targeting | Marker / step | Seeds | Group | Reason |
 |---|---|---|---|---|---|---|---|---|
 | §3.2 node-wide admission | `crates/overdrive-sim/tests/netns_density_node_admission.rs` | MOVE to `crates/overdrive-sim/tests/integration/netns_density_node_admission.rs`, registered in `tests/integration.rs` | seeded-sim | S-ND295-05D: held (Admitted + Retiring) population; OBS-OVERLAP becomes the NA-OVERLAP assertion; NA-RECREATE added; per-server pool; one `LeaseLedger` owner instance for `AppState` and the seams; a started worker over `SimMtlsEnforcement`, `SimMtlsResolve`, and `SimMtlsIntercept` | `pending DELIVER step 07-03 (S-ND295-05D)` | `OVERDRIVE_ND295_ADMISSION_SEED`, defaults `186055177052160001`, `295032` | none (no kernel object; the sim-composed worker binds nothing); timeout override retargeted to `package(overdrive-sim) & binary(integration) & test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)` | User ruling 2 keeps seeded proofs in `overdrive-sim`. Its own-binary rationale (the process-global pool) disappears under R6, and `testing.md` places integration-shaped tests under `tests/integration/`; joining `binary(integration)` also puts it in the CI integration lane |
-| §3.3 supervisor | `crates/overdrive-sim/tests/shared_network_supervisor_recovery_proof.rs` | MOVE to `crates/overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs` (registered in the control-plane `tests/integration.rs`) | in-process | S-ND295-29B: required ports inject the intercept and DNS faults (`SimGuestDnsFactory`); the final `vm_cgroups` is a `CgroupManager` over one `SimCgroupFs`; C6 split into C6a per-TAP kill with recovery, C6b undetermined → `TapQuiescenceUndetermined`, C6c damage while Open, each with its snapshot oracle; ADR-0124's cadence asserted as contract, never the private constants | `pending DELIVER step 09-01 (S-ND295-29B)` | `OVERDRIVE_SUPERVISOR_PROOF_SEEDS`, defaults `0x2953300000000001`, `0x295330005eed0002` | whole control-plane integration binary is `host-kernel-shared` | It boots `run_server_with_obs_and_driver`, so it is the in-process lane, not seeded-sim (FD 4675-4713); after R16 it needs Lima root for the real enforcement probe; the contract's owner is the control-plane supervisor, and `testing.md` keeps single-owner behaviour in the owning crate's integration suite, not in the adapter-sim crate |
+| §3.3 supervisor | `crates/overdrive-sim/tests/shared_network_supervisor_recovery_proof.rs` | MOVE to `crates/overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs` (registered in the control-plane `tests/integration.rs`) | in-process | S-ND295-29B: required ports inject the intercept and DNS faults (`SimGuestDnsFactory`); the final `vm_cgroups` is a `CgroupManager` over one `SimCgroupFs`; C6 split into C6a per-TAP kill with recovery, C6b undetermined → `TapQuiescenceUndetermined`, C6c damage while Open, each with its snapshot oracle; ADR-0124's cadence asserted as contract, never the private constants | `pending DELIVER step 09-01 (S-ND295-29B)` | `OVERDRIVE_SUPERVISOR_PROOF_SEEDS`, defaults `0x2953300000000001`, `0x295330005eed0002` | whole control-plane integration binary is `host-kernel-shared` | It boots `run_server_with_obs_and_driver`, so it is the in-process lane, not seeded-sim (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim and in-process lanes)); after R16 it needs Lima root for the real enforcement probe; the contract's owner is the control-plane supervisor, and `testing.md` keeps single-owner behaviour in the owning crate's integration suite, not in the adapter-sim crate |
 | §3.4 element cleanup | `crates/overdrive-control-plane/tests/integration/shared_element_cleanup_failure.rs` | IN PLACE | in-process | S-ND295-07B: removal through `remove_allocation_elements`; typed `ElementRemoval`; lease Retiring; row Running; retry converges | `pending DELIVER step 07-01 (S-ND295-07B)` | none (deterministic) | control-plane integration, `host-kernel-shared` | Correct owner and lane already |
 | §3.5 killed-mode boot clear | `crates/overdrive-cli/tests/integration/serve_killed_restart_boot_clear.rs` | IN PLACE | native | S-ND295-13C: R12 order oracles V0-V6 in the R19/R18 program shape; absorbs the first-lease and complement obligations of the deleted native placeholder; no reference to the deleted clear adapter | `pending DELIVER step 08-02 (S-ND295-13C)` | example | `overdrive-cli` integration, `host-kernel-shared`; timeout override retained | `overdrive-cli` owns `serve` + `deploy`; production-faithful residue needs killed mode and a real guest |
 | §3.6 CLI fail-stop | `crates/overdrive-cli/tests/integration/serve_lifetime_fail_stop.rs` | IN PLACE | native (in-process `serve`) | S-ND295-68: the fault becomes an owned rule rewritten to a wrong target, because whole-table deletion is repaired under R15 | none — active and GREEN on the built serve lifetime port; must stay GREEN through 08-03 and is re-verified at 09-02 | example | `host-kernel-shared` | Built port (D-295-R17); only the fault needs re-targeting to stay a fail-stop after R15 |
@@ -1753,7 +1755,7 @@ superseded contract is removed, not salvaged).
 | `overdrive-worker/src/mtls_intercept_port.rs::shared_program_rollback_acceptance::replacement_and_every_rollback_disposition_preserve_exact_identity_and_source` | ignored "superseded by D15 stateful shared-IP evidence" |
 | `…::shared_program_rollback_acceptance::fresh_replace_exact_prior_rollback_and_idempotent_reapply_are_complete` | same |
 | `overdrive-control-plane/tests/integration/shared_guest_network_startup.rs::native_prior_vmm_reclamation_precedes_full_attachment_sweep_and_first_lease_acceptance` | placeholder `panic!` body; its obligations move into the production-faithful §3.5 killed-mode proof (S-ND295-13C) |
-| `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs::unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop` | defends the superseded kill-all-then-fail-stop contract (Changed Assumption 16, FD 4867-4875) |
+| `tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs::unconfirmed_tap_quiescence_stops_the_affected_vm_and_requests_fail_stop` | defends the superseded kill-all-then-fail-stop contract (Changed Assumption 16, FD § "[REF] Changed Assumptions" (item 16)) |
 | `crates/overdrive-sim/tests/netns_density_node_admission.rs`, `crates/overdrive-sim/tests/shared_network_supervisor_recovery_proof.rs` | moved (see above) |
 
 Other dispositions that phase B must apply:
@@ -1776,7 +1778,7 @@ Other dispositions that phase B must apply:
   bodies, and the sim lifecycle's stop error — is applied as § *Intercept
   listener and stop-error test support* states.
 - `clear_shared_ip_intercept_elements_atomically` has no test; DELIVER step
-  08-02 deletes it (FD 2974-2977). Phase B does not delete production code.
+  08-02 deletes it (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the netlink contract: `clear_shared_ip_intercept_elements_atomically` deleted)). Phase B does not delete production code.
 
 ## Scenario-to-test matrix
 
@@ -1900,7 +1902,7 @@ for its wall-clock budget. No verification expectation.
 | E20 cleanup-pending | S-ND295-58, 60 | S-ND295-59 | — | — |
 | E21 launch filter | S-ND295-42, 44 | — | S-ND295-41, 43 | S-ND295-43 (f), 45, 01 |
 
-## Gate boundary coverage (G-295-0..5 × FD 10546-10560)
+## Gate boundary coverage (G-295-0..5 × FD § "Required boundary scenarios per gate")
 
 | Row | G-295-0 | G-295-1 | G-295-2 | G-295-3 | G-295-4 | G-295-5 |
 |---|---|---|---|---|---|---|
@@ -1922,7 +1924,7 @@ port.
 |---|---|---|---|---|
 | B-ND295-T1-BASE | benchmark receipt | N=16,384 Job-shaped attachments, M=0; exact inventories (now including the egress program, egress link, egress pin, and the ninth counter slot); held and retiring counts; memory/update samples; sweep and empty complement | `target/benchmarks/netns-density-295/T1-BASE/` via `crates/overdrive-control-plane/bin/netns_density_benchmark.rs` | 10-05 |
 | B-ND295-T1-PORT4 | benchmark receipt | N=16,384 Service-shaped attachments with TCP 8080/8081/8443/9000; as T1-BASE plus 65,536 destinations | `target/benchmarks/netns-density-295/T1-PORT4/` | 10-05 |
-| M-ND295-E18 | measurement receipt (a benchmark under `testing.md` § "Classify external execution before writing it") | At T1-BASE and T1-PORT4 with every attachment activated through the owner: full-audit latency per owner; `quiesce_managed_taps` / `restore_quiesced_taps` wall time and the time the last TAP reads back down; the worker member audit's `element_effects` hold time. It feeds the rules `SHARED_NETWORK_AUDIT_CALL_BOUND = max(1 s, 4 × L)` and `SHARED_NETWORK_QUIESCE_CALL_BOUND = max(1 s, 4 × Q)` at T1-PORT4, rounded up to a whole millisecond; tests that a bound plus one attempt fits the 5 s window; restates the double-loss exposure; and decides R15's mutex choice (> 100 ms reopens it). A full audit > 1 s at T1-PORT4, or a window misfit, goes to the user (FD 4202-4213, 4295-4321). **Record.** The values have one record home: the rustdoc beside each value — the two bound constants and the worker's `element_effects` field — naming the rule, receipt id M-ND295-E18, a host description, `uname -r`, the Cloud Hypervisor version, and the measured SHA (FD 4156-4173). Neither this table nor any DISTILL or DELIVER document records the values. The raw samples and the method are retained as a committed benchmark report at `docs/research/benchmarks/netns-density-295-m-nd295-e18/`, outside `docs/feature/**` (which finalize archives). The host is described by CPU model, kernel, and Cloud Hypervisor version, never by the metal target address (`OVERDRIVE_METAL_TARGET` is operator configuration) | raw output `target/benchmarks/netns-density-295/E18/` via the same benchmark binary (not committed); the committed report above | captured at 08-04; 09-01, the later of the capture step and the step that introduces the constants, sets both bounds from the 08-04 receipt, re-capturing if that receipt is gone, and writes the rustdoc record and the report in the same commit (FD 4146-4155) |
+| M-ND295-E18 | measurement receipt (a benchmark under `testing.md` § "Classify external execution before writing it") | At T1-BASE and T1-PORT4 with every attachment activated through the owner: full-audit latency per owner; `quiesce_managed_taps` / `restore_quiesced_taps` wall time and the time the last TAP reads back down; the worker member audit's `element_effects` hold time. It feeds the rules `SHARED_NETWORK_AUDIT_CALL_BOUND = max(1 s, 4 × L)` and `SHARED_NETWORK_QUIESCE_CALL_BOUND = max(1 s, 4 × Q)` at T1-PORT4, rounded up to a whole millisecond; tests that a bound plus one attempt fits the 5 s window; restates the double-loss exposure; and decides R15's mutex choice (> 100 ms reopens it). A full audit > 1 s at T1-PORT4, or a window misfit, goes to the user (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the full-audit call bound; quiescence and restore latency at density)). **Record.** The values have one record home: the rustdoc beside each value — the two bound constants and the worker's `element_effects` field — naming the rule, receipt id M-ND295-E18, a host description, `uname -r`, the Cloud Hypervisor version, and the measured SHA (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the one record home)). Neither this table nor any DISTILL or DELIVER document records the values. The raw samples and the method are retained as a committed benchmark report at `docs/research/benchmarks/netns-density-295-m-nd295-e18/`, outside `docs/feature/**` (which finalize archives). The host is described by CPU model, kernel, and Cloud Hypervisor version, never by the metal target address (`OVERDRIVE_METAL_TARGET` is operator configuration) | raw output `target/benchmarks/netns-density-295/E18/` via the same benchmark binary (not committed); the committed report above | captured at 08-04; 09-01, the later of the capture step and the step that introduces the constants, sets both bounds from the 08-04 receipt, re-capturing if that receipt is gone, and writes the rustdoc record and the report in the same commit (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the values before E18 and which step sets them)) |
 | E20 cleanup-pending | test only | Decision: no verification expectation. No production-faithful black-box fault holds network cleanup pending for a bounded, observable interval without a test hook. A deleted program table is repaired within the recovery window and the stop is retried; a crashed VMM's predecessor cleanup runs after the one-second restart backoff; a per-allocation teardown failure cannot be induced from outside the process without a hook. A capture would be a race, not a deliberate contrasting case. The operator surface is fully exercised by S-ND295-59 (the same handler over the HTTPS API) and S-ND295-60 (the one live renderer). | — | — |
 
 No benchmark or receipt carries a threshold DISTILL invented.
@@ -1946,19 +1948,19 @@ No benchmark or receipt carries a threshold DISTILL invented.
 - A fixture establishes a scenario's preconditions and never authors the
   outcome its oracle observes. A precondition comes from the owner that
   produces it: a lease from the pool's own `assign`/`retire` (source-local only,
-  FD 2663-2673), a gate state from the paired `GuestNetworkExecSupervisor`
-  (FD 2021-2031), a restart predecessor's prior row from the precedent seed the
+  FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations)), a gate state from the paired `GuestNetworkExecSupervisor`
+  (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the gate state outside `run_server*`)), a restart predecessor's prior row from the precedent seed the
   restart arm reads (`mtls_install_fail_closed.rs:676-713`). No fixture authors
   a row, lease, gate transition, kill, or request that its scenario's oracle
   observes.
 - The six `SHARED_NETWORK_*` constants are private items of the
-  `overdrive-control-plane` crate root (FD 4109-4122). Source-local tests
+  `overdrive-control-plane` crate root (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the private constants)). Source-local tests
   (S-ND295-19, 29A, 30A, 32) reach them through `super::` by name, never by
   literal, so a value that M-ND295-E18 sets never edits a test. Tests outside
   the crate's source cannot name them and none is widened for them: they assert
   ADR-0124's accepted cadence (1 s audit period, 250 ms attempt period, 5 s
   deadline, 20 attempts) as that contract and bound their waits as
-  § *In-process observation* states (FD 4123-4145).
+  § *In-process observation* states (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (how the in-process lane bounds time without naming them)).
 
 ### Seam fixture (B-1, M4, L6)
 
@@ -1966,7 +1968,7 @@ Every body that drives `dispatch_with_guest_network_provisioner_for_test` or
 `run_convergence_tick_with_guest_network_provisioner_for_test` builds its
 `AppState` through one fixture helper per test file. The two seams keep their
 accepted C-295-B signatures and read the EXEC gate and the pool from `state`
-(FD 7231-7238). The helper owns:
+(FD § "C-295-B — network provisioner boundary" (the helpers read the EXEC gate and the pool from `state`)). The helper owns:
 
 - **one owner instance**: in `overdrive-control-plane`'s `tests/` suites and
   in `overdrive-sim`, `Arc<SimSharedGuestNetworkOwner>` or a test-local type
@@ -1974,23 +1976,22 @@ accepted C-295-B signatures and read the EXEC gate and the pool from `state`
   (a delegating decorator such as S-ND295-05D's `LeaseLedger`, or the owner of
   S-ND295-52 and 56 whose `activate` returns a scripted error); in source-local
   bodies, the `TestSharedOwner` of § *Test-local control-plane ports*
-  (FD 1965-1975);
+  (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (why each is a parameter: `shared_guest_network`));
 - **one `GuestNetworkExecWiring`** over the fixture clock, keeping `gate()` and
   `supervisor()`. The gate starts BootClosed and only the supervisor moves it.
   A body whose dispatch reaches `claim_release` (activation, or
   `release_for_exit_emission`) first calls `supervisor.open_after_boot()`, or
   moves the gate to Recovering or FailStop to exercise the wait and withhold
-  branches (FD 2021-2031);
+  branches (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the gate state outside `run_server*`));
 - **one `Arc<GuestAddressPool>`** from the doc-hidden `GuestAddressPool::new`
-  with today's pool constants, passed only to `AppState` (FD 1990-1998,
-  2646-2662);
+  with today's pool constants, passed only to `AppState` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the composition roots); FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (one pool per server: the pool as an `AppState` constructor parameter));
 - **one `Arc<MtlsInterceptWorker>`** over `SimMtlsEnforcement`,
   `SimMtlsResolve`, and `SimMtlsIntercept` or a test-local `MtlsIntercept`
   whose `bind_transparent` delegates to an inner `SimMtlsIntercept`
-  (FD 1956-1964; § *Intercept listener and stop-error test support*). No
+  (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (why each is a parameter: `mtls_worker`); § *Intercept listener and stop-error test support*). No
   fixture substitutes a no-op worker.
 
-DELIVER 05-01 cuts the pinned constructors (FD 1876-1989). From then on the
+DELIVER 05-01 cuts the pinned constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)). From then on the
 helper passes the worker, owner, gate, and pool to `AppState::new` or
 `new_with_workflow_engine`; until then it passes today's inputs and keeps the
 rest for its bodies, every one of which is pending a step at or after 05-01. The
@@ -2004,20 +2005,20 @@ helper is the only line of each file that changes with the constructors.
 - **Worker state and lane.** A body whose dispatch reaches intercept install
   first starts the worker's shared owner (`start_shared_owner`). Over the
   fixture's worker, that binds no socket and runs no accept thread
-  (FD 3646-3663), so the body keeps the lane its other properties give it
-  (FD 3720-3735). A body whose contract ends before any install (a refusal at
+  (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract)), so the body keeps the lane its other properties give it
+  (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)). A body whose contract ends before any install (a refusal at
   `assign` or `provision`) may leave the shared owner unstarted: its cleanup's
   `stop_alloc` of an allocation the worker never registered returns `Ok`
-  (`mtls_intercept_worker.rs:2895-2903`; B-6 caller rule 2, FD 3086-3087). The
+  (`mtls_intercept_worker.rs:2895-2903`; B-6 caller rule 2, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives, rule 2)). The
   source-local supervisor bodies (S-ND295-19, 29A, 30A, 32) start the worker's
   shared owner in the default lane, as the existing
   `shared_network_task_owner_acceptance` module already does.
 - **Lease observation.** The pool's operations are crate-private
-  (FD 2663-2673). A body outside the crate's source observes lease state through
+  (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the control-plane-private pool operations)). A body outside the crate's source observes lease state through
   the pinned events `guest_network.lease_retired { alloc }`,
   `guest_network.lease_released { alloc }`, and
   `guest_network.admission_refused { alloc, held, retiring, cap }`
-  (FD 2723-2744), captured by a test-local tracing Layer, and observes assigned
+  (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)), captured by a test-local tracing Layer, and observes assigned
   addresses through the guest-network assignment in `SimDriver::started_specs()`
   (the C-295-A handoff). Only source-local bodies call `assign`, `retire`,
   `observe`, or `snapshot`.
@@ -2026,9 +2027,9 @@ helper is the only line of each file that changes with the constructors.
 
 In the in-process lane the server runs `run_server_with_obs_and_driver(s)` and
 the test advances the injected clock (`ServerConfig.clock`, a `SimClock`) in
-steps (FD 4123-4145).
+steps (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (how the in-process lane bounds time without naming them)).
 
-- `GuestNetworkExecWiring` is taken by value (FD 9533-9559). The test keeps
+- `GuestNetworkExecWiring` is taken by value (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)). The test keeps
   `wiring.gate()` and `wiring.supervisor()` before moving the wiring into the
   call (`overdrive-core/src/guest_network.rs:162-172`).
 - After each clock step the test polls each waiting observation exactly once
@@ -2045,14 +2046,14 @@ steps (FD 4123-4145).
 - No observation future is held across a step, and none is awaited.
 - Horizons: detection within one audit period (1 s) of a non-hung fault, and
   within 5 s of injected time for a hung audit; every recovery outcome within
-  the 5 s window after detection (FD 4123-4145).
+  the 5 s window after detection (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (how the in-process lane bounds time without naming them)).
 
 ### Test-local control-plane ports (B-4 as pinned, L8)
 
 `overdrive-sim` depends on `overdrive-control-plane`, which dev-depends on
 `overdrive-sim`, so in the control-plane crate's own source-local tests the sim
 types implement a second compiled copy of the control-plane traits and do not
-coerce to `Arc<dyn crate::…>` (FD 4695-4705). Source-local bodies therefore use
+coerce to `Arc<dyn crate::…>` (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim lane: why the `overdrive-sim` owner and DNS types cannot serve source-locally)). Source-local bodies therefore use
 test-local implementations of the three ports the crate declares, defined once
 in the crate-private module `crates/overdrive-control-plane/src/shared_network_test_ports.rs`
 (`#[cfg(test)] mod shared_network_test_ports;` in `lib.rs`). It replaces the
@@ -2062,7 +2063,7 @@ source-local tests call it.
 
 - **`TestSharedOwner`** implements `GuestNetworkProvisioner` and
   `SharedGuestNetworkOwner` and models the parts of `SimSharedGuestNetworkOwner`'s
-  pinned contract the cells use (FD 2142-2165, 6632-6709): standing refusal
+  pinned contract the cells use (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter); FD § "Public deterministic shared-owner simulation API" (the pinned surface as the replacement DESIGN changes it)): standing refusal
   slots for provision, teardown, converge, and restore; one standing slot per
   node-level component for `audit_shared`; a standing damage set; a standing
   quiescence outcome (`Unconfirmed(set)`, `Fail`, or `Hang`); an audit that
@@ -2080,42 +2081,40 @@ source-local tests call it.
     (`Unconfirmed(set)`, `Failed`, or `Hung`), and `Restore` (`Ok` or `Failed`).
     When built over a `SimCgroupFs` clone, each entry also carries the
     `snapshot()` taken as the call began, which is the E12 ordering observation
-    point (FD 4096-4102). `latched()` and `condemned()` read the latch and the
+    point (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle)). `latched()` and `condemned()` read the latch and the
     condemned set directly.
-  - **Latch invariant (L8).** The E11 latch invariant (FD 4730) reads
+  - **Latch invariant (L8).** The E11 latch invariant (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E11 row)) reads
     `latched()` — the bit `activate` itself consults — and never re-derives a
     latch from a call log. A log cannot derive it soundly: the pinned sim owner
     records `TapSetUp` for activations and for restores that fail as well as
-    succeed (FD 2150-2151, 6716-6720, 6775-6780). The journal still names
+    succeed (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter's restore rule); FD § "Public deterministic shared-owner simulation API" (`activate`, and `restore_quiesced_taps` recording `TapSetUp`; the call journal)). The journal still names
     each restore's outcome, so an ordering oracle can tell a failed restore
     from a successful one.
 - **`TestGuestDnsFactory`** and **`TestGuestDns`** implement
   `GuestDnsFactory` and `GuestDns` with the pinned `SimGuestDnsFactory` /
-  `SimGuestDns` semantics (FD 4444-4500): a standing probe-refusal slot shared
+  `SimGuestDns` semantics (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` and `SimGuestDnsFactory` doubles)): a standing probe-refusal slot shared
   by every responder the factory built, a build log, a per-responder standing
   audit-refusal slot, and a `serve` that stays pending until `end_serve(Return)`,
   `end_serve(Panic)`, or `stop`.
 
 `SimSharedGuestNetworkOwner`, `SimGuestDns`, `SimGuestDnsFactory`, and
 `SimGuestAttachmentView` serve `overdrive-control-plane`'s `tests/` suites and
-other crates, with exactly their pinned API (FD 6632-6709, 4444-4500,
-2578-2622).
+other crates, with exactly their pinned API (FD § "Public deterministic shared-owner simulation API" (the pinned surface as the replacement DESIGN changes it); FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` and `SimGuestDnsFactory` doubles); FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (`SimGuestAttachmentView`)).
 
 ### Intercept listener and stop-error test support (B-6, B-7)
 
 This is test-support surface decided here, not production API. B-7 leaves the
-sim listener's scripting names to DISTILL (FD 3658-3663), and B-6 leaves the
-sim lifecycle's variant mapping to DISTILL (FD 5291-5296).
+sim listener's scripting names to DISTILL (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` scripting surface)), and B-6 leaves the
+sim lifecycle's variant mapping to DISTILL (FD § "[REF] Required downstream changes (not edited by DESIGN)" (the consequences of pins B-6 and B-7: the sim lifecycle)).
 
 **When the port changes.** B-7's port change — `bind_transparent`'s return
 type, the host listener, the worker's accept tasks, and the deletion of
 `start_alloc`'s per-allocation listener branch — lands in the DELIVER step
-that carries B-7, no later than 05-01 (FD 5297-5299). Phase B does not change
+that carries B-7, no later than 05-01 (FD § "[REF] Required downstream changes (not edited by DESIGN)" (the consequences of pins B-6 and B-7: DELIVER)). Phase B does not change
 `bind_transparent`: adopting the new return type needs the host listener and
-the worker's accept tasks, which are B-7's production work (FD 3616-3644,
-3681-3700), and phase B changes no production behaviour. Phase B adds
+the worker's accept tasks, which are B-7's production work (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `HostMtlsIntercept` obligations; the notes for DELIVER review)), and phase B changes no production behaviour. Phase B adds
 `InterceptListener`, `InterceptAccepted`, and `InterceptAcceptError` exactly as
-pinned (FD 3522-3552), unused by production, so the test support below
+pinned (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned contract)), unused by production, so the test support below
 implements the listener trait from phase B on. Every phase-B test compiles on
 both sides of the change: a test-local intercept delegates `bind_transparent`
 to an inner adapter, and test code that reads a bound listener goes through
@@ -2136,7 +2135,7 @@ lines and no test body:
    deleted, having no caller.
 
 **`SimMtlsIntercept` listener surface** (`overdrive-sim`, fixture class F;
-the contract is FD 3646-3663):
+the contract is FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract)):
 
 ```rust
 // overdrive_sim::adapters::mtls_intercept, re-exported beside SimMtlsIntercept
@@ -2240,7 +2239,7 @@ current-thread runtime it builds. One copy lives in
 `bound_v4`-only copy for `S19Intercept`.
 
 **Test-local intercept doubles** (`grep -rn 'impl MtlsIntercept for' crates/`;
-FD 3737-3749). Each returns an `InterceptListener` once the B-7 step lands:
+FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on every existing `impl MtlsIntercept`)). Each returns an `InterceptListener` once the B-7 step lands:
 
 | Double | File | Phase B | At the B-7 step |
 |---|---|---|---|
@@ -2256,7 +2255,7 @@ The new test-local intercepts of S-ND295-07, 54 (the `server_lifecycle` body),
 and 56 wrap a `SimMtlsIntercept` and delegate `bind_transparent` to it.
 
 **Worker bodies that drive the per-allocation listener branch.** The B-7 step
-deletes that branch together with the bodies that drive it (FD 3694-3700).
+deletes that branch together with the bodies that drive it (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the notes for DELIVER review: the per-allocation listener branch)).
 Their contracts stay covered:
 
 | Body today (`mtls_intercept_worker.rs::tests`) | Carried after the step by |
@@ -2275,7 +2274,7 @@ their assertions; the module's lane statement names one reason, that
 `HostMtlsIntercept` needs `CAP_NET_ADMIN` and real `nft`, which holds on both
 sides of the change. S-ND295-70 adds the held-address clause.
 
-**Original-destination evidence** (FD 3639-3644). Whether the host listener
+**Original-destination evidence** (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `HostMtlsIntercept` obligations: original-destination evidence)). Whether the host listener
 reuses `accept_outbound_and_recover_orig_dst` and `accept_inbound_leg` is the
 crafter's choice, so no test that must outlive the B-7 step calls them
 directly:
@@ -2354,19 +2353,19 @@ the scenarios above follow the pins.
 
 | ID | Gap as returned | Pin (FD) | What changed here |
 |---|---|---|---|
-| B-1 | How `AppState`'s two public constructors obtain the pinned `mtls_worker` (R16), `guest_network_exec` (R5), and `guest_pool` (R6), and which gate state a fixture starts in | **PINNED** — both constructors take the worker, the shared owner, the gate, and the pool as required parameters (FD 1876-2034); the two test-gated seams keep their C-295-B signatures and read the gate and pool from `state` (FD 1850-1861, 7231-7238); a fixture's gate stays BootClosed until the fixture's paired supervisor moves it (FD 2021-2031); `ServerHandle`'s owner fields lose their `Option`, and `replace_mtls_worker_for_test` and `inject_owner_shutdown_failure_for_test` are deleted (FD 1999-2020) | Seam calls drop `exec_gate`/`guest_pool` (S-ND295-06, 05E, 07, 52, 53, 56); § *Seam fixture*; S-ND295-65 scans the owner, both `ServerHandle` owner fields, and after-boot replacement; the `server_lifecycle` shutdown body is retargeted to an `ElementRemoval` injected through `ServerConfig.mtls_intercept` (S-ND295-54) |
-| B-2 | No production-faithful native stimulus for E12's whole-call quiescence failure | **PINNED** — E12's native lane proves per-VM kill writes only; the whole-call slice kill is proven by the seeded and in-process cells through a `SimCgroupFs` snapshot; `run_server_with_obs_and_driver(s)` take a final `vm_cgroups: CgroupManager` (FD 4074-4107, 4742-4779, 9533-9559) | S-ND295-30B carries no native whole-call case; S-ND295-29B C6a/C6b and 30A assert snapshot writes; 05A, 13A, 29B, 33, 36, 59 pass `vm_cgroups` |
-| B-3 | E19 named "an `xtask` check" without an entry point | **PINNED** — `xtask::cloexec_lint::{scan_source, scan_workspace, render_violation, run}`, `CloexecRule`, `CloexecViolation`, `Task::CloexecLint` / `cargo xtask cloexec-lint`; `scan_workspace` fails closed on an unreadable or unparseable file; the obligation's site table has eight sites (FD 717-847) | S-ND295-46 bodies authored against the pinned entry point, with the unparseable-file case |
-| B-4 | `SimGuestAttachmentView`, `SimGuestDnsFactory`, and `SimGuestDns` named without scripting signatures | **PINNED** — exact sim surfaces (FD 2578-2622, 4444-4502); source-local supervisor lanes use crate-private test-local ports because of the `overdrive-sim` ↔ `overdrive-control-plane` dependency cycle (FD 4675-4705) | § *Test-local control-plane ports*; in-process and `tests/` bodies use the pinned sim types |
-| B-5 | Home of the E18-derived call bounds | **PINNED** — one record home, the rustdoc beside each value; the later of the capture step and the constants step (09-01 in this plan) sets and records the values; source-local tests name the constants, in-process tests assert ADR-0124's contract (FD 4109-4173, 5207-5219) | The DISTILL bounds table is withdrawn; the M-ND295-E18 receipt row and S-ND295-29B, 32 follow the pin |
-| B-6 | How `stop_alloc` and `shutdown_owner` return R10's typed stop error, whose sources are not `Clone`, to every concurrent or later caller | **PINNED** — `MtlsInterceptStopError` and `HandleTeardownFailure` are `Clone`, holding each typed source as `Arc<InterceptError>` / `Arc<MtlsEnforcementError>`; a caller reaches the cause through the field (`&*source`); callers joined on one attempt receive clones with pointer-equal sources, a later caller after `Err` begins exactly one atomically claimed retry, and after owner shutdown `stop_alloc` begins nothing and returns that allocation's shutdown entry or `Ok`; `MtlsInterceptOwnerShutdownError`, `ShimError::MtlsStop`, and `PriorTeardown` are unchanged (FD 3018-3130) | S-ND295-07B, 54 (the `server_lifecycle` body included), and 56's `a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt` assert the variant and reach the cause through `&*source`; S-ND295-54 owns the oracles for caller rules 1, 3, and 4; the sim lifecycle returns `HandleTeardown` (§ *Intercept listener and stop-error test support*) |
-| B-7 | `MtlsIntercept::bind_transparent` returns a bound `std::net::TcpListener`, so a worker composed over the sim binds real sockets and runs accept threads, and under R16 every test that dispatches a start or runs a convergence tick would be integration-lane | **PINNED** — `bind_transparent` returns `Arc<dyn InterceptListener>` (`local_addr`; cancel-safe `async fn accept() -> Result<InterceptAccepted, InterceptAcceptError>`); `SimMtlsIntercept` opens no socket, descriptor, thread, or timer, and its `accept` stays pending until a test scripts an outcome; production keeps today's `IP_TRANSPARENT` socket; an accept task stops by cancellation; the worker is no reason to gate a test; the step that lands it, no later than 05-01, deletes the per-allocation listener branch (FD 3492-3766, 5250-5317) | Lanes of S-ND295-05D, 07, 19, 29A, 30A, 32, 53, 56, and 57 re-decided; S-ND295-29A's listener loss is a scripted `ListenerLost`; § *Intercept listener and stop-error test support*; NEW S-ND295-70 |
-| N-1 (note) | The read-port's module path | **PINNED** — `overdrive_core::traits::guest_attachment_view`, re-exported from `overdrive_core::traits`; `HydrationContext` stays in `overdrive_core::reconcilers::hydration` (FD 2543-2551) | Phase-B scaffolds use the pinned path |
-| N-2 (note) | R16 makes every `run_server*` boot run the real `HostMtlsEnforcement` kTLS probe, so the S-ND295-13 seeded invariant becomes Lima-root in-process | FD 4391-4396, 12639 | S-ND295-13A keeps its boundary and seed and gains `integration-tests` gating |
-| N-3 (note) | D-295-R22 falsifies the S-VM-09 assertion that the CH thread-group leader reports `SECCOMP_MODE_DISABLED` (`vm_walking_skeleton.rs:1102-1105`) | FD 4740 (e) | The body is re-targeted as S-ND295-45 |
+| B-1 | How `AppState`'s two public constructors obtain the pinned `mtls_worker` (R16), `guest_network_exec` (R5), and `guest_pool` (R6), and which gate state a fixture starts in | **PINNED** — both constructors take the worker, the shared owner, the gate, and the pool as required parameters (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors and the `ServerHandle` owner fields)); the two test-gated seams keep their C-295-B signatures and read the gate and pool from `state` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim); FD § "C-295-B — network provisioner boundary" (the helpers read the EXEC gate and the pool from `state`)); a fixture's gate stays BootClosed until the fixture's paired supervisor moves it (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the gate state outside `run_server*`)); `ServerHandle`'s owner fields lose their `Option`, and `replace_mtls_worker_for_test` and `inject_owner_shutdown_failure_for_test` are deleted (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `ServerHandle` owner fields)) | Seam calls drop `exec_gate`/`guest_pool` (S-ND295-06, 05E, 07, 52, 53, 56); § *Seam fixture*; S-ND295-65 scans the owner, both `ServerHandle` owner fields, and after-boot replacement; the `server_lifecycle` shutdown body is retargeted to an `ElementRemoval` injected through `ServerConfig.mtls_intercept` (S-ND295-54) |
+| B-2 | No production-faithful native stimulus for E12's whole-call quiescence failure | **PINNED** — E12's native lane proves per-VM kill writes only; the whole-call slice kill is proven by the seeded and in-process cells through a `SimCgroupFs` snapshot; `run_server_with_obs_and_driver(s)` take a final `vm_cgroups: CgroupManager` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (where the capability's `CgroupManager` comes from); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E12 whole-call branch); FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) | S-ND295-30B carries no native whole-call case; S-ND295-29B C6a/C6b and 30A assert snapshot writes; 05A, 13A, 29B, 33, 36, 59 pass `vm_cgroups` |
+| B-3 | E19 named "an `xtask` check" without an entry point | **PINNED** — `xtask::cloexec_lint::{scan_source, scan_workspace, render_violation, run}`, `CloexecRule`, `CloexecViolation`, `Task::CloexecLint` / `cargo xtask cloexec-lint`; `scan_workspace` fails closed on an unreadable or unparseable file; the obligation's site table has eight sites (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (obligation OBL-295-CLOEXEC, its source gate, and the gate entry point)) | S-ND295-46 bodies authored against the pinned entry point, with the unparseable-file case |
+| B-4 | `SimGuestAttachmentView`, `SimGuestDnsFactory`, and `SimGuestDns` named without scripting signatures | **PINNED** — exact sim surfaces (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (`SimGuestAttachmentView`); FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` and `SimGuestDnsFactory` doubles)); source-local supervisor lanes use crate-private test-local ports because of the `overdrive-sim` ↔ `overdrive-control-plane` dependency cycle (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the seeded-sim lane and its test-local ports)) | § *Test-local control-plane ports*; in-process and `tests/` bodies use the pinned sim types |
+| B-5 | Home of the E18-derived call bounds | **PINNED** — one record home, the rustdoc beside each value; the later of the capture step and the constants step (09-01 in this plan) sets and records the values; source-local tests name the constants, in-process tests assert ADR-0124's contract (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the private constants and the E18-derived bounds' record home); FD § "[REF] Required downstream changes (not edited by DESIGN)" (the E18-derived bounds, B-5)) | The DISTILL bounds table is withdrawn; the M-ND295-E18 receipt row and S-ND295-29B, 32 follow the pin |
+| B-6 | How `stop_alloc` and `shutdown_owner` return R10's typed stop error, whose sources are not `Clone`, to every concurrent or later caller | **PINNED** — `MtlsInterceptStopError` and `HandleTeardownFailure` are `Clone`, holding each typed source as `Arc<InterceptError>` / `Arc<MtlsEnforcementError>`; a caller reaches the cause through the field (`&*source`); callers joined on one attempt receive clones with pointer-equal sources, a later caller after `Err` begins exactly one atomically claimed retry, and after owner shutdown `stop_alloc` begins nothing and returns that allocation's shutdown entry or `Ok`; `MtlsInterceptOwnerShutdownError`, `ShimError::MtlsStop`, and `PriorTeardown` are unchanged (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's typed stop error, DISTILL gap B-6)) | S-ND295-07B, 54 (the `server_lifecycle` body included), and 56's `a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt` assert the variant and reach the cause through `&*source`; S-ND295-54 owns the oracles for caller rules 1, 3, and 4; the sim lifecycle returns `HandleTeardown` (§ *Intercept listener and stop-error test support*) |
+| B-7 | `MtlsIntercept::bind_transparent` returns a bound `std::net::TcpListener`, so a worker composed over the sim binds real sockets and runs accept threads, and under R16 every test that dispatches a start or runs a convergence tick would be integration-lane | **PINNED** — `bind_transparent` returns `Arc<dyn InterceptListener>` (`local_addr`; cancel-safe `async fn accept() -> Result<InterceptAccepted, InterceptAcceptError>`); `SimMtlsIntercept` opens no socket, descriptor, thread, or timer, and its `accept` stays pending until a test scripts an outcome; production keeps today's `IP_TRANSPARENT` socket; an accept task stops by cancellation; the worker is no reason to gate a test; the step that lands it, no later than 05-01, deletes the per-allocation listener branch (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25"; FD § "[REF] Required downstream changes (not edited by DESIGN)" (the consequences of pins B-6 and B-7)) | Lanes of S-ND295-05D, 07, 19, 29A, 30A, 32, 53, 56, and 57 re-decided; S-ND295-29A's listener loss is a scripted `ListenerLost`; § *Intercept listener and stop-error test support*; NEW S-ND295-70 |
+| N-1 (note) | The read-port's module path | **PINNED** — `overdrive_core::traits::guest_attachment_view`, re-exported from `overdrive_core::traits`; `HydrationContext` stays in `overdrive_core::reconcilers::hydration` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the core read-port's module path)) | Phase-B scaffolds use the pinned path |
+| N-2 (note) | R16 makes every `run_server*` boot run the real `HostMtlsEnforcement` kTLS probe, so the S-ND295-13 seeded invariant becomes Lima-root in-process | FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (`compose_mtls` is deleted); FD § "D-295-DISTILL-13 — production-composed S-ND295-13 boot-order boundary" (the selected shape) | S-ND295-13A keeps its boundary and seed and gains `integration-tests` gating |
+| N-3 (note) | D-295-R22 falsifies the S-VM-09 assertion that the CH thread-group leader reports `SECCOMP_MODE_DISABLED` (`vm_walking_skeleton.rs:1102-1105`) | FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E21 row, case (e)) | The body is re-targeted as S-ND295-45 |
 
 **Consequence for DELIVER 05-01.** Once `AppState` requires a worker, a
 fixture whose dispatch reaches intercept install starts the worker's shared
 owner. B-7 lands no later than 05-01, so over `SimMtlsIntercept` that owner
 binds nothing, and every existing `AppState` fixture keeps its lane with no
-assertion change (FD 3720-3735, 5250-5254).
+assertion change (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification); FD § "[REF] Required downstream changes (not edited by DESIGN)" (the consequences of pins B-6 and B-7: the lane move withdrawn)).

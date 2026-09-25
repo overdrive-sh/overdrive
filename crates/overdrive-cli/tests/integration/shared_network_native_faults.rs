@@ -1135,7 +1135,6 @@ async fn a_stop_converges_when_attachment_parts_are_already_gone() {
 /// Hypervisor queue holder for the allocation.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02 (S-ND295-66)"]
 async fn a_launch_that_fails_leaves_no_tap_and_no_queue_holder() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision native VM fixture");

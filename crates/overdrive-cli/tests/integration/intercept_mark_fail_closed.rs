@@ -370,7 +370,10 @@ fn guard_drop_packets() -> u64 {
     text.split("\"packets\":")
         .skip(1)
         .filter_map(|tail| {
-            tail.trim_start().split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse::<u64>().ok())
+            tail.trim_start()
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
         })
         .sum()
 }
@@ -452,8 +455,7 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
         .expect("native tempdir");
     let peer = build_mesh_peer(tmp.path());
     let probe = build_syn_probe_guest(tmp.path());
-    let peer_rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
+    let peer_rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
     let probe_rootfs =
         stage_rootfs_with_extra_binary(tmp.path(), &fixture, &probe, "nd295-syn-probe");
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
@@ -470,7 +472,8 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
         .expect("deploy the mesh peer service");
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest = deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest =
+        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
     assert!(
         observe_shared_intercept_state().is_ok_and(|state| state.is_some()),
         "the intercept program is installed before the fault"
@@ -537,7 +540,8 @@ async fn the_intercept_program_still_catches_marked_tcp_without_the_guard_table(
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest = deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest =
+        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
 
     let intercept_before = intercept_counter();
     let guard_before = guard_drop_packets();
@@ -577,7 +581,11 @@ fn leg_f_port() -> u16 {
         .args(["-j", "list", "table", "ip", INTERCEPT_TABLE])
         .output()
         .expect("run nft list for the intercept table");
-    assert!(output.status.success(), "nft list overdrive-mtls: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "nft list overdrive-mtls: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let text = String::from_utf8_lossy(&output.stdout);
     // The prerouting TPROXY expression carries `"tproxy":{...,"port":N}`; the
     // outbound (leg-F) rule is the only TPROXY to a loopback port.
@@ -619,7 +627,8 @@ async fn outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally() {
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest = deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest =
+        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
 
     let leg_f = leg_f_port();
     let intercept_before = intercept_counter();
@@ -673,7 +682,8 @@ async fn outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives() {
     let cfg = config_path(server_tmp.path());
 
     let listener = WildcardListener::bind(HOST_WILDCARD_PORT);
-    let guest = deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
+    let guest =
+        deploy_probe_guest(&cfg, server_tmp.path(), &fixture.kernel_path, &probe_rootfs).await;
 
     let intercept_before = intercept_counter();
     let guard_before = guard_drop_packets();
@@ -770,7 +780,10 @@ async fn inbound_tcp_to_a_closed_listener_is_dropped() {
 async fn a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_controls() {
     let lease = TestCidrLease::acquire("nd295-64-time-wait")
         .expect("acquire a named CIDR for the TIME_WAIT controls");
-    let peer_ns = format!("nd295-64-{}", std::process::id());
+    // The namespace name also prefixes the veth ends (`<ns>-h`, `<ns>-p`),
+    // which must fit IFNAMSIZ (15 visible bytes): "nd64-" + a pid of at most
+    // 7 digits (pid_max 4194304) + "-h" is at most 14.
+    let peer_ns = format!("nd64-{}", std::process::id());
     let topology = TimeWaitTopology::provision(&lease, &peer_ns);
 
     // Establish one connection host-listener <- peer, then close the host's
@@ -783,7 +796,8 @@ async fn a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_contro
     // survives.
     let negative = topology.probe_reconnect(tuple, ReconnectSeq::StaleIsn);
     assert_eq!(
-        negative, ReconnectReply::BareAck,
+        negative,
+        ReconnectReply::BareAck,
         "the stale-ISN probe gets a bare ACK and no SYN-ACK; the substate and sequence gates hold"
     );
 
@@ -792,7 +806,8 @@ async fn a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_contro
     tokio::time::sleep(Duration::from_secs(1)).await;
     let positive = topology.probe_reconnect(tuple, ReconnectSeq::NewerSeq);
     assert_eq!(
-        positive, ReconnectReply::SynAck,
+        positive,
+        ReconnectReply::SynAck,
         "the newer-sequence probe reopens the TIME_WAIT entry with a SYN-ACK"
     );
 
@@ -832,14 +847,30 @@ enum ReconnectSeq {
 const PEER_SRC_PORT: u16 = 51_000;
 
 /// A raw-TCP SYN crafter host binary: `argv = [src_ip, src_port, dst_ip,
-/// dst_port, seq, with_ts]`, sends exactly one crafted SYN through
+/// dst_port, seq, tsval|none]`, sends exactly one crafted SYN through
 /// `AF_INET`/`SOCK_RAW`/`IP_HDRINCL`, computing the IP and TCP checksums. Run
 /// in the peer namespace via `ip netns exec`, it lets the controls choose the
 /// sequence number (stale vs newer) and the timestamp option a normal stack
 /// cannot.
 fn build_raw_syn_crafter(tmp: &Path) -> PathBuf {
+    // Built by bare `rustc` (`build_static_binary`), which links no crates:
+    // the four libc symbols and the x86_64 Linux constants the crafter needs
+    // are declared here, and `std` already links the C library.
     let source = r#"
 use std::net::Ipv4Addr;
+const AF_INET: i32 = 2;
+const SOCK_RAW: i32 = 3;
+const IPPROTO_IP: i32 = 0;
+const IPPROTO_TCP: i32 = 6;
+const IP_HDRINCL: i32 = 3;
+#[repr(C)]
+struct SockaddrIn { sin_family: u16, sin_port: u16, sin_addr: u32, sin_zero: [u8; 8] }
+extern "C" {
+    fn socket(domain: i32, kind: i32, protocol: i32) -> i32;
+    fn setsockopt(fd: i32, level: i32, name: i32, value: *const u8, len: u32) -> i32;
+    fn sendto(fd: i32, buf: *const u8, len: usize, flags: i32, addr: *const SockaddrIn, addr_len: u32) -> isize;
+    fn close(fd: i32) -> i32;
+}
 fn csum(bytes: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     let mut i = 0;
@@ -855,8 +886,8 @@ fn main() {
     let dst: Ipv4Addr = a[3].parse().unwrap();
     let dport: u16 = a[4].parse().unwrap();
     let seq: u32 = a[5].parse().unwrap();
-    let with_ts: bool = a[6] == "1";
-    let tcp_len = if with_ts { 32 } else { 20 };
+    let tsval: Option<u32> = if a[6] == "none" { None } else { Some(a[6].parse().unwrap()) };
+    let tcp_len = if tsval.is_some() { 32 } else { 20 };
     // TCP header (+ optional timestamp option).
     let mut tcp = vec![0u8; tcp_len];
     tcp[0..2].copy_from_slice(&sport.to_be_bytes());
@@ -865,10 +896,11 @@ fn main() {
     tcp[12] = ((tcp_len / 4) as u8) << 4; // data offset
     tcp[13] = 0x02; // SYN
     tcp[14..16].copy_from_slice(&64240u16.to_be_bytes()); // window
-    if with_ts {
+    if let Some(tsval) = tsval {
         tcp[20] = 8; tcp[21] = 10; // TS option kind=8 len=10
-        tcp[22..26].copy_from_slice(&1u32.to_be_bytes());
-        tcp[26] = 1; tcp[27] = 1; tcp[28] = 0; tcp[29] = 0; // nops/end pad
+        tcp[22..26].copy_from_slice(&tsval.to_be_bytes()); // TSval
+        // TSecr (26..30) stays 0 on a SYN; two NOPs pad the header to 32.
+        tcp[30] = 1; tcp[31] = 1;
     }
     // TCP checksum over the pseudo-header + TCP.
     let mut pseudo = Vec::new();
@@ -891,19 +923,22 @@ fn main() {
     let mut packet = ip; packet.extend_from_slice(&tcp);
     // SAFETY: a raw IPv4 TCP socket with IP_HDRINCL; single sendto.
     unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_TCP);
+        let fd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         assert!(fd >= 0, "raw socket");
-        let one: libc::c_int = 1;
-        libc::setsockopt(fd, libc::IPPROTO_IP, libc::IP_HDRINCL,
-            std::ptr::from_ref(&one).cast(), std::mem::size_of::<libc::c_int>() as u32);
-        let mut addr: libc::sockaddr_in = std::mem::zeroed();
-        addr.sin_family = libc::AF_INET as u16;
-        addr.sin_port = dport.to_be();
-        addr.sin_addr.s_addr = u32::from_ne_bytes(dst.octets());
-        let sent = libc::sendto(fd, packet.as_ptr().cast(), packet.len(), 0,
-            std::ptr::from_ref(&addr).cast(), std::mem::size_of::<libc::sockaddr_in>() as u32);
+        let one: i32 = 1;
+        let set = setsockopt(fd, IPPROTO_IP, IP_HDRINCL,
+            std::ptr::from_ref(&one).cast(), std::mem::size_of::<i32>() as u32);
+        assert!(set == 0, "IP_HDRINCL");
+        let addr = SockaddrIn {
+            sin_family: AF_INET as u16,
+            sin_port: dport.to_be(),
+            sin_addr: u32::from_ne_bytes(dst.octets()),
+            sin_zero: [0; 8],
+        };
+        let sent = sendto(fd, packet.as_ptr(), packet.len(), 0,
+            std::ptr::from_ref(&addr), std::mem::size_of::<SockaddrIn>() as u32);
         assert!(sent >= 0, "sendto");
-        libc::close(fd);
+        close(fd);
     }
 }
 "#;
@@ -913,7 +948,34 @@ fn main() {
 /// Capture the TCP flags of the first frame `from_port → to_port` on `iface`
 /// within `window`; `None` when nothing replied. Used to classify the
 /// TIME_WAIT reply (SYN-ACK vs bare ACK vs none).
-fn capture_first_tcp_flags(iface: &str, from_port: u16, to_port: u16, window: Duration) -> Option<u8> {
+fn capture_first_tcp_flags(
+    iface: &str,
+    from_port: u16,
+    to_port: u16,
+    window: Duration,
+) -> Option<u8> {
+    capture_first_tcp_segment(iface, from_port, to_port, window, |_| true)
+        .map(|segment| segment.flags)
+}
+
+/// The fields of one captured TCP segment the TIME_WAIT controls read.
+#[derive(Debug, Clone, Copy)]
+struct TcpSegment {
+    flags: u8,
+    seq: u32,
+    /// The TSval of the segment's timestamp option, when it carries one.
+    tsval: Option<u32>,
+}
+
+/// Capture the first TCP segment `from_port → to_port` on `iface` that
+/// `wanted` accepts, within `window`; `None` when none arrived.
+fn capture_first_tcp_segment(
+    iface: &str,
+    from_port: u16,
+    to_port: u16,
+    window: Duration,
+    wanted: impl Fn(&TcpSegment) -> bool,
+) -> Option<TcpSegment> {
     const ETH_P_ALL: u16 = 0x0003;
     let name = std::ffi::CString::new(iface).expect("iface has no NUL");
     // SAFETY: live NUL-terminated string.
@@ -935,8 +997,11 @@ fn capture_first_tcp_flags(iface: &str, from_port: u16, to_port: u16, window: Du
     address.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits i32");
     // SAFETY: fully-initialised sockaddr_ll.
     let bound = unsafe {
-        libc::bind(fd, std::ptr::from_ref(&address).cast(),
-            libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>()).unwrap())
+        libc::bind(
+            fd,
+            std::ptr::from_ref(&address).cast(),
+            libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>()).unwrap(),
+        )
     };
     assert_eq!(bound, 0, "bind reply capture: {}", std::io::Error::last_os_error());
     let deadline = Instant::now() + window;
@@ -944,16 +1009,17 @@ fn capture_first_tcp_flags(iface: &str, from_port: u16, to_port: u16, window: Du
     while Instant::now() < deadline {
         let mut frame = [0_u8; 2048];
         // SAFETY: live buffer; owned fd.
-        let read = unsafe {
-            libc::recv(fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
-        };
+        let read =
+            unsafe { libc::recv(fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT) };
         if read <= 0 {
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
         let length = usize::try_from(read).unwrap();
-        if let Some(flags) = tcp_flags_between(&frame[..length], from_port, to_port) {
-            result = Some(flags);
+        if let Some(segment) = tcp_segment_between(&frame[..length], from_port, to_port)
+            && wanted(&segment)
+        {
+            result = Some(segment);
             break;
         }
     }
@@ -962,9 +1028,10 @@ fn capture_first_tcp_flags(iface: &str, from_port: u16, to_port: u16, window: Du
     result
 }
 
-/// The TCP flags byte of an Ethernet/IPv4/TCP frame whose source port is
-/// `from_port` and destination port `to_port`, else `None`.
-fn tcp_flags_between(frame: &[u8], from_port: u16, to_port: u16) -> Option<u8> {
+/// The flags, sequence number, and timestamp TSval of an Ethernet/IPv4/TCP
+/// frame whose source port is `from_port` and destination port `to_port`,
+/// else `None`.
+fn tcp_segment_between(frame: &[u8], from_port: u16, to_port: u16) -> Option<TcpSegment> {
     if frame.len() < 14 + 20 + 20 || u16::from_be_bytes([frame[12], frame[13]]) != 0x0800 {
         return None;
     }
@@ -975,7 +1042,94 @@ fn tcp_flags_between(frame: &[u8], from_port: u16, to_port: u16) -> Option<u8> {
     let tcp = &frame[14 + ihl..];
     let src = u16::from_be_bytes([tcp[0], tcp[1]]);
     let dst = u16::from_be_bytes([tcp[2], tcp[3]]);
-    (src == from_port && dst == to_port).then_some(tcp[13])
+    if src != from_port || dst != to_port {
+        return None;
+    }
+    let seq = u32::from_be_bytes([tcp[4], tcp[5], tcp[6], tcp[7]]);
+    let data_offset = usize::from(tcp[12] >> 4) * 4;
+    let options = tcp.get(20..data_offset.min(tcp.len())).unwrap_or(&[]);
+    let mut tsval = None;
+    let mut at = 0;
+    while at < options.len() {
+        match options[at] {
+            0 => break,
+            1 => at += 1,
+            kind => {
+                let Some(&length) = options.get(at + 1) else { break };
+                let length = usize::from(length);
+                if length < 2 || at + length > options.len() {
+                    break;
+                }
+                if kind == 8 && length == 10 {
+                    tsval = Some(u32::from_be_bytes([
+                        options[at + 2],
+                        options[at + 3],
+                        options[at + 4],
+                        options[at + 5],
+                    ]));
+                }
+                at += length;
+            }
+        }
+    }
+    Some(TcpSegment { flags: tcp[13], seq, tsval })
+}
+
+/// A peer client host binary: `argv = [src_ip, src_port, dst_ip, dst_port]`.
+/// It binds the exact source 4-tuple end, connects, writes one byte, waits
+/// 300 ms so the host listener closes its accepted socket first, then closes.
+/// Built by bare `rustc`, so it declares the libc symbols it calls.
+fn build_peer_client(tmp: &Path) -> PathBuf {
+    let source = r#"
+use std::net::Ipv4Addr;
+const AF_INET: i32 = 2;
+const SOCK_STREAM: i32 = 1;
+const SOL_SOCKET: i32 = 1;
+const SO_REUSEADDR: i32 = 2;
+#[repr(C)]
+struct SockaddrIn { sin_family: u16, sin_port: u16, sin_addr: u32, sin_zero: [u8; 8] }
+extern "C" {
+    fn socket(domain: i32, kind: i32, protocol: i32) -> i32;
+    fn setsockopt(fd: i32, level: i32, name: i32, value: *const u8, len: u32) -> i32;
+    fn bind(fd: i32, addr: *const SockaddrIn, len: u32) -> i32;
+    fn connect(fd: i32, addr: *const SockaddrIn, len: u32) -> i32;
+    fn write(fd: i32, buf: *const u8, len: usize) -> isize;
+    fn close(fd: i32) -> i32;
+}
+fn addr(ip: Ipv4Addr, port: u16) -> SockaddrIn {
+    SockaddrIn { sin_family: AF_INET as u16, sin_port: port.to_be(), sin_addr: u32::from_ne_bytes(ip.octets()), sin_zero: [0; 8] }
+}
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let src = addr(a[1].parse().unwrap(), a[2].parse().unwrap());
+    let dst = addr(a[3].parse().unwrap(), a[4].parse().unwrap());
+    let len = std::mem::size_of::<SockaddrIn>() as u32;
+    // SAFETY: one owned TCP socket; every pointer is to a live local.
+    unsafe {
+        let fd = socket(AF_INET, SOCK_STREAM, 0);
+        assert!(fd >= 0, "socket");
+        let one: i32 = 1;
+        assert!(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, std::ptr::from_ref(&one).cast(), 4) == 0, "SO_REUSEADDR");
+        assert!(bind(fd, &src, len) == 0, "bind the fixed source port");
+        assert!(connect(fd, &dst, len) == 0, "connect");
+        assert!(write(fd, b"x".as_ptr(), 1) == 1, "write");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(close(fd) == 0, "close");
+    }
+}
+"#;
+    build_static_binary(tmp, "nd64-peer-client", source)
+}
+
+/// The host's `TIME_WAIT` entry for the peer 4-tuple, as learned from the
+/// peer's FIN on the wire: the entry's `rcv_nxt` is that FIN's sequence plus
+/// one, and its `ts_recent` is that FIN's TSval.
+#[derive(Debug, Clone, Copy)]
+struct TimeWaitEntry {
+    peer: SocketAddrV4,
+    host: SocketAddrV4,
+    rcv_nxt: u32,
+    peer_tsval: Option<u32>,
 }
 
 /// A test-owned veth peer namespace + a host listener, on a `TestCidrLease`
@@ -986,6 +1140,7 @@ struct TimeWaitTopology {
     workload_addr: Ipv4Addr,
     host_port: u16,
     crafter: PathBuf,
+    peer_client: PathBuf,
     _tmp: tempfile::TempDir,
     _host_listener: WildcardListener,
 }
@@ -997,6 +1152,7 @@ impl TimeWaitTopology {
             .tempdir_in(shared_staging_root())
             .expect("crafter tempdir");
         let crafter = build_raw_syn_crafter(tmp.path());
+        let peer_client = build_peer_client(tmp.path());
         // Build the veth pair + peer namespace + host route on the leased CIDR.
         run(["ip", "netns", "add", peer_ns]);
         let host_if = format!("{peer_ns}-h");
@@ -1005,7 +1161,16 @@ impl TimeWaitTopology {
         run(["ip", "link", "set", &peer_if, "netns", peer_ns]);
         run(["ip", "addr", "add", &format!("{}/24", lease.host_gateway()), "dev", &host_if]);
         run(["ip", "link", "set", &host_if, "up"]);
-        run(["ip", "-n", peer_ns, "addr", "add", &format!("{}/24", lease.workload_addr()), "dev", &peer_if]);
+        run([
+            "ip",
+            "-n",
+            peer_ns,
+            "addr",
+            "add",
+            &format!("{}/24", lease.workload_addr()),
+            "dev",
+            &peer_if,
+        ]);
         run(["ip", "-n", peer_ns, "link", "set", &peer_if, "up"]);
         run(["ip", "-n", peer_ns, "link", "set", "lo", "up"]);
         Self {
@@ -1014,6 +1179,7 @@ impl TimeWaitTopology {
             workload_addr: lease.workload_addr(),
             host_port: HOST_WILDCARD_PORT + 1,
             crafter,
+            peer_client,
             _tmp: tmp,
             _host_listener: WildcardListener::bind(HOST_WILDCARD_PORT + 1),
         }
@@ -1021,43 +1187,67 @@ impl TimeWaitTopology {
 
     /// Establish one connection from the peer namespace to the host listener,
     /// close the host's accepted socket first and the peer second, so the host
-    /// holds the true `TIME_WAIT` substate. Returns the peer 4-tuple.
-    fn establish_and_leave_host_in_time_wait(&self) -> (SocketAddrV4, SocketAddrV4) {
-        let peer_src = SocketAddrV4::new(self.workload_addr, PEER_SRC_PORT);
-        let host_dst = SocketAddrV4::new(self.host_gateway, self.host_port);
+    /// holds the true `TIME_WAIT` substate. Returns that entry, with the
+    /// `rcv_nxt` and `ts_recent` read from the peer's FIN on the host veth.
+    fn establish_and_leave_host_in_time_wait(&self) -> TimeWaitEntry {
+        let peer = SocketAddrV4::new(self.workload_addr, PEER_SRC_PORT);
+        let host = SocketAddrV4::new(self.host_gateway, self.host_port);
+        // The peer's FIN is the last segment it sends; capture it concurrently.
+        let iface = format!("{}-h", self.peer_ns);
+        let fin = std::thread::spawn(move || {
+            capture_first_tcp_segment(
+                &iface,
+                PEER_SRC_PORT,
+                host.port(),
+                Duration::from_secs(3),
+                |segment| segment.flags & 0x01 != 0,
+            )
+        });
+        std::thread::sleep(Duration::from_millis(50));
         // The peer client binds the fixed source port and dials the host
         // listener; the WildcardListener closes its accepted socket first, then
         // this client closes (peer close second), leaving the host in TIME_WAIT.
         let status = Command::new("ip")
             .args([
-                "netns", "exec", &self.peer_ns, "bash", "-c",
-                &format!(
-                    "exec 3<>/dev/tcp/{}/{}; printf x >&3; sleep 0.3; exec 3>&-",
-                    self.host_gateway, self.host_port
-                ),
+                "netns",
+                "exec",
+                &self.peer_ns,
+                &self.peer_client.to_string_lossy(),
+                &peer.ip().to_string(),
+                &peer.port().to_string(),
+                &host.ip().to_string(),
+                &host.port().to_string(),
             ])
             .status()
             .expect("peer-namespace client dials the host listener");
         assert!(status.success(), "the peer namespace establishes and closes the connection");
-        // Let the host's accepted socket close first so the host holds TIME_WAIT.
+        let fin = fin
+            .join()
+            .expect("peer FIN capture thread")
+            .expect("the peer's FIN reaches the host veth");
+        // Let the final ACK settle so the host holds TIME_WAIT.
         std::thread::sleep(Duration::from_millis(500));
-        (peer_src, host_dst)
+        TimeWaitEntry { peer, host, rcv_nxt: fin.seq.wrapping_add(1), peer_tsval: fin.tsval }
     }
 
     /// Send one crafted reconnect SYN from the peer 4-tuple with the given
     /// sequence shape, and classify the host reply captured on the host veth.
-    fn probe_reconnect(
-        &self,
-        tuple: (SocketAddrV4, SocketAddrV4),
-        seq: ReconnectSeq,
-    ) -> ReconnectReply {
-        let (src, dst) = tuple;
-        let (seq_num, with_ts) = match seq {
+    fn probe_reconnect(&self, entry: TimeWaitEntry, seq: ReconnectSeq) -> ReconnectReply {
+        let (src, dst) = (entry.peer, entry.host);
+        // Sequence comparisons are modulo 2^32, so "below" and "above" are
+        // offsets from the entry's own rcv_nxt, well inside a half window.
+        let (seq_num, tsval) = match seq {
             // Stale ISN below the old rcv_nxt, no timestamp option.
-            ReconnectSeq::StaleIsn => ("1000", "0"),
-            // A sequence above the old rcv_nxt, with a fresh timestamp.
-            ReconnectSeq::NewerSeq => ("4000000000", "1"),
+            ReconnectSeq::StaleIsn => (entry.rcv_nxt.wrapping_sub(100_000), None),
+            // A sequence above the old rcv_nxt, with a timestamp newer than
+            // the entry's ts_recent so PAWS accepts it.
+            ReconnectSeq::NewerSeq => (
+                entry.rcv_nxt.wrapping_add(100_000),
+                entry.peer_tsval.map(|tsval| tsval.wrapping_add(1_000)),
+            ),
         };
+        let seq_num = seq_num.to_string();
+        let tsval = tsval.map_or_else(|| "none".to_owned(), |tsval| tsval.to_string());
         // Capture the host reply (host_port → peer_src_port) concurrently.
         let iface = format!("{}-h", self.peer_ns);
         let from = dst.port();
@@ -1068,11 +1258,16 @@ impl TimeWaitTopology {
         std::thread::sleep(Duration::from_millis(50));
         let sent = Command::new("ip")
             .args([
-                "netns", "exec", &self.peer_ns,
+                "netns",
+                "exec",
+                &self.peer_ns,
                 &self.crafter.to_string_lossy(),
-                &src.ip().to_string(), &src.port().to_string(),
-                &dst.ip().to_string(), &dst.port().to_string(),
-                seq_num, with_ts,
+                &src.ip().to_string(),
+                &src.port().to_string(),
+                &dst.ip().to_string(),
+                &dst.port().to_string(),
+                &seq_num,
+                &tsval,
             ])
             .status()
             .expect("run the raw SYN crafter in the peer namespace");

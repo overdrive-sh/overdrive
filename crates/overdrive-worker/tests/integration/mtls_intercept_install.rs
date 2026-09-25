@@ -1810,7 +1810,6 @@ fn the_host_listener_reports_a_redirected_inbound_virtual_address_as_local() {
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
 fn a_destroyed_host_listener_ends_its_pending_accept_with_an_accept_failure() {
     assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
 

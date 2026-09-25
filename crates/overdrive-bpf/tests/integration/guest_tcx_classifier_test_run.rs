@@ -493,6 +493,22 @@ fn egress_frame(destination_mac: [u8; 6]) -> Vec<u8> {
     frame
 }
 
+/// A frame that is only an Ethernet header, so a verdict can rest on nothing
+/// but the destination MAC.
+///
+/// The EtherType is the IEEE local-experimental 0x88b5, not IPv4: the kernel
+/// refuses a `BPF_PROG_TEST_RUN` skb whose EtherType is IPv4 but which is
+/// shorter than an Ethernet header plus a 20-byte IPv4 header, with `EINVAL`
+/// before the classifier runs (observed on 7.0.0-31-generic), while it runs a
+/// 14-byte header of any other EtherType.
+fn bare_ethernet_header(destination_mac: [u8; 6]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(14);
+    frame.extend_from_slice(&destination_mac);
+    frame.extend_from_slice(&BRIDGE_MAC);
+    frame.extend_from_slice(&0x88b5_u16.to_be_bytes());
+    frame
+}
+
 /// The gateway's broadcast ARP request for the guest's address.
 fn egress_arp_broadcast() -> Vec<u8> {
     let mut frame = Vec::with_capacity(42);
@@ -573,16 +589,15 @@ fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
             Array::try_from(bpf.take_map("COUNTERS").expect("production counter map"))
                 .expect("typed counter array");
 
-        let registered_unicast = egress_frame(SOURCE_MAC);
         let destinations = [
             (
                 "registered guest unicast",
-                registered_unicast.clone(),
+                egress_frame(SOURCE_MAC),
                 EgressDestination::RegisteredGuest,
             ),
             (
                 "registered guest unicast, bare Ethernet header",
-                registered_unicast[..14].to_vec(),
+                bare_ethernet_header(SOURCE_MAC),
                 EgressDestination::RegisteredGuest,
             ),
             (
@@ -593,7 +608,7 @@ fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
             ("bridge MAC unicast", egress_frame(BRIDGE_MAC), EgressDestination::ForeignUnicast),
             (
                 "foreign unicast, bare Ethernet header",
-                egress_frame(PEER_MAC)[..14].to_vec(),
+                bare_ethernet_header(PEER_MAC),
                 EgressDestination::ForeignUnicast,
             ),
             ("broadcast ARP request", egress_arp_broadcast(), EgressDestination::Group),
@@ -625,8 +640,13 @@ fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
                      counters: &mut Array<_, u64>,
                      state: EgressEndpoints| {
             for key in [LOOPBACK_IFINDEX, IFINDEX] {
+                // aya 0.13 reports deleting an absent key as the raw
+                // `bpf_map_delete_elem` syscall error `ENOENT`, not as
+                // `KeyNotFound`; both mean the slot is already clear.
                 match endpoints.remove(&key) {
                     Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
+                    Err(aya::maps::MapError::SyscallError(error))
+                        if error.io_error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => panic!("clear endpoint {key}: {error}"),
                 }
             }

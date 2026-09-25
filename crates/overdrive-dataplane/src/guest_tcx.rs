@@ -2730,7 +2730,6 @@ mod tests {
     /// `integration-tests` lane (Lima root).
     #[cfg(feature = "integration-tests")]
     #[test]
-    #[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
     fn absent_real_objects_preserve_the_operation_specific_source_family() {
         let missing = format!("/sys/fs/bpf/overdrive/absent-{}", std::process::id());
         for attach_point in [TcxAttachPoint::Ingress, TcxAttachPoint::Egress] {

@@ -425,7 +425,7 @@ mod tests {
         assert_eq!(libc::SYS_ioctl, i64::from(NR_IOCTL_X86_64), "x86_64 ioctl is syscall 16");
 
         let program = production_program();
-        assert!(program.len() <= usize::from(u16::MAX), "sock_fprog.len is a u16");
+        assert!(u16::try_from(program.len()).is_ok(), "sock_fprog.len is a u16");
 
         let ld_abs = cbpf::LD | cbpf::SIZE_W | cbpf::MODE_ABS;
         let jeq = cbpf::JMP | cbpf::JEQ | cbpf::SRC_K;

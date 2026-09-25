@@ -1556,10 +1556,15 @@ mod launch_seccomp_kernel {
     #[cfg(target_arch = "x86_64")]
     impl ChildRun {
         /// The `k=v` fields of every report record of `kind`.
+        ///
+        /// A record is matched wherever its tag appears on a line, not only
+        /// at the line start: under `--nocapture` libtest prints the child
+        /// role's `test <name> ... ` prefix without a newline, so the first
+        /// record the child prints shares that line.
         fn records(&self, kind: &str) -> Vec<std::collections::BTreeMap<String, String>> {
             String::from_utf8_lossy(&self.output.stdout)
                 .lines()
-                .filter_map(|line| line.strip_prefix(REPORT))
+                .filter_map(|line| line.find(REPORT).map(|at| &line[at + REPORT.len()..]))
                 .filter_map(|record| {
                     let mut tokens = record.split_whitespace();
                     if tokens.next() != Some(kind) {
