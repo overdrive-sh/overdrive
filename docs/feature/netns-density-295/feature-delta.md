@@ -359,6 +359,21 @@ Prior art for every VMM, networking, kernel, and process choice is in
     aarch64 included, is refused, fail-closed. Proving and enabling aarch64 is
     [GH #302](https://github.com/overdrive-sh/overdrive/issues/302).
 
+**User ruling of 2026-09-25 — recorded as approved:**
+
+1. **No Cloud Hypervisor version gating.** In the user's words: "don't bother
+   with versioning… there'll be no version mismatch. This will be running on
+   our own appliance OS with preinstalled dependencies." No startup probe or
+   launch step parses, compares, or gates on the Cloud Hypervisor version.
+   The existing capability stage captures `--version` output only as
+   diagnostic text. No typed error, probe stage, or evidence case exists to
+   enforce a version. Where this DESIGN names Cloud Hypervisor v53.0, it names
+   the build the native evidence ran and the source audit read. A change to the shipped Cloud Hypervisor
+   build is an image rebuild. It triggers OBL-295-SECCOMP-REVERIFY, a review
+   obligation, not a runtime check. A denied request still fails closed
+   (§ *Driven port — VMM launch seccomp filter (D-295-R22)*). Kernel version
+   stays out of scope.
+
 **GitHub context (recorded; DESIGN takes no GitHub action):**
 
 - [GH #197](https://github.com/overdrive-sh/overdrive/issues/197) stays open.
@@ -872,11 +887,13 @@ The host adapter maps each `TapQueueError` one-for-one:
 `VmDriver` routes these through its existing create-failure start rejection.
 No `DriverError`, `TransitionReason`, or row field is added.
 
-**`Vmm::probe` (Earned Trust).** `CloudHypervisorVmm::probe` additionally
-requires the configured binary's `--version` to report Cloud Hypervisor v53.0
-or later, the version whose `fd=` import behaviour is proven. It refuses
-otherwise with the existing typed probe error. Behavioural proof of the handoff
-is Tier-3 native-metal evidence:
+**`Vmm::probe` (Earned Trust).** `CloudHypervisorVmm::probe` gains no Cloud
+Hypervisor version check (user ruling of 2026-09-25). Its existing
+`cloud-hypervisor` stage stays a capability check (`--landlock` in `--help`,
+the Landlock LSM present; `probe_cloud_hypervisor_capable`, `vmm.rs:801-828`),
+which reads `--version` only as diagnostic text. The `fd=` import was proven
+on v53.0 (tag commit `9ed824d6`), the build the evidence ran. Behavioural proof
+of the handoff is Tier-3 native-metal evidence:
 
 - READY with the TAP down;
 - zero frames and counters;
@@ -1496,10 +1513,12 @@ A shape that needs a denied request, such as `host_mac=`, which needs
 list edit. The renderer's existing exact-argv assertion is the tripwire that
 makes a launch-shape change visible in review.
 
-The probe accepts Cloud Hypervisor v53.0 or later. A later, unaudited version
-that issues a denied request fails closed: the request returns `EPERM`, or
-Cloud Hypervisor's stricter action applies, and the operation fails. It can
-never bypass the filter.
+This obligation is a review step, not a runtime check. No probe or launch step
+gates on the Cloud Hypervisor version (user ruling of 2026-09-25): the
+appliance ships one build, and changing it is an image rebuild that triggers
+the two checks above. A build that issues a denied request fails closed. The request
+returns `EPERM`, or Cloud Hypervisor's stricter action applies, and the
+operation fails. It can never bypass the filter.
 
 **Evidence lane.** E21 in § *Evidence-lane matrix*.
 
@@ -3473,6 +3492,39 @@ pub fn converge_intercept_mark_guard() -> Result<(), NetlinkError>;
   batch, then requires `observe` to return `true`. It never rewrites a present
   non-matching rule; that case returns the typed error.
 
+**No counter on the guard rule; E14's healthy baseline is the non-interference
+evidence.** The rule above is the whole rule: it carries no `counter`
+expression, and the observe signature stays `Result<bool, NetlinkError>`. The
+property a counter would show is that the guard never fires on healthy traffic.
+The pinned contract already gives an observation that proves it:
+
+- Every validated guest TCP flow carries `0x295a` (§ *C-295-0*). In the owned
+  prerouting chain, rule 1 TPROXYs intercept-marked TCP from a registered
+  source and replaces the mark with `0x1` (`nft.rs:753-759`). Rule 2 drops any
+  other intercept-marked TCP (`nft.rs:761-766`). Both run at mangle priority,
+  before the guard's filter priority 0.
+- With the program present, the only intercept-marked TCP a healthy node carries
+  is therefore registered-source outbound TCP, and it reaches the guard carrying
+  `0x1`. A guard match on that one class would drop its SYN. E14's healthy
+  baseline sends that class to every destination kind the R18 cases use, and
+  the SYN-ACK it receives shows the guard dropped nothing.
+- The GREEN's drop is attributed to the guard in two ways. First, by the
+  RED/GREEN difference: the guard table is the only change on the R18 path
+  between the two runs. Second, by E14's in-run ingress witness. Each probe SYN
+  is captured on its sender's TAP while that TAP reads back up. The TCX
+  `Intercept` counter counts it, and the bridge guard's default-drop counter
+  does not change. That places the drop in IP prerouting, where only the guard
+  remains once the program is absent. The witness keeps the attribution valid
+  after the `IpRules` audit and quiescence land, when a deleted program also
+  quiesces the TAPs within about a second. The guard-only deletion case shows
+  that the program alone still catches or drops.
+
+A counter would add a rule expression, a counter-value-tolerant identity match,
+and a counter read to the observe signature. It would prove nothing the
+baseline does not, on a decision that is withdrawn if its RED does not
+reproduce. It is not added. *(Pinned 2026-09-25 on evidence, under the user's
+ruling that technical decisions are settled on evidence.)*
+
 **Conditional parts, and the shape if a RED does not reproduce:**
 
 | Part | Shape without R18 | Shape without R19 |
@@ -3689,6 +3741,11 @@ listener.
   stop (`.claude/rules/rust.md` § "Concurrency & async").
 - The per-connection dispatch that calls `Handle::block_on` for
   `MtlsResolve::resolve` (`:3385`, `:3452`) awaits it instead.
+- C-295-L's pass-through bullet holds only if a relay can never escape its
+  generation's stop. One shape registers the relay under its capability before
+  the classifying claim is released, so the stop's claim wait closes the set.
+  The shared dispatch today releases the claim and detaches the relay
+  (`:3563-3567`).
 - `await_pending_connection`, its 200 ms slices, and the shared owner's
   `stop: AtomicBool` are replaced by the cancellation.
 - The per-allocation listener branch of `start_alloc` (`:2604-2743`) is
@@ -3901,6 +3958,81 @@ with its killed VMM, completes and releases the lease.
 **Validator.** `validate_reconcile_output` rejects `ReclaimAllocationNetwork`
 when the same tick also names that `alloc_id` in `StartAllocation`,
 `RestartAllocation`, `StopAllocation`, or `FinalizeFailed`.
+
+The violation is a second variant of the public `ReconcilerOutputViolation`
+(`overdrive_control_plane::action_shim::validate`, `pub mod` at
+`action_shim/mod.rs:236`; the enum at `action_shim/validate.rs:134-176`). Its
+existing variant names the conflicting routes with a typed companion enum
+(`WriteRoute`, `validate.rs:114-125`, rendered with `{:?}`). The new variant
+follows that style:
+
+```rust
+// overdrive_control_plane::action_shim::validate
+
+/// The allocation action a `ReclaimAllocationNetwork` conflicted with in one
+/// `reconcile()` return: the other action names the same `alloc_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReclaimConflictAction {
+    /// `Action::StartAllocation` for the same `alloc_id`.
+    StartAllocation,
+    /// `Action::RestartAllocation` whose `alloc_id` (the predecessor) is the
+    /// same allocation.
+    RestartAllocation,
+    /// `Action::StopAllocation` for the same `alloc_id`.
+    StopAllocation,
+    /// `Action::FinalizeFailed` for the same `alloc_id`.
+    FinalizeFailed,
+}
+
+pub enum ReconcilerOutputViolation {
+    // `ConflictingServiceWrites` unchanged
+    /// A `ReclaimAllocationNetwork` and another allocation action name the
+    /// same allocation in one `reconcile()` return (D-295-R11).
+    #[error("conflicting allocation reclaim at alloc={alloc_id}: {other:?} names the same allocation")]
+    ConflictingAllocationReclaim {
+        /// The allocation both actions name.
+        alloc_id: AllocationId,
+        /// The action that names it beside the reclaim.
+        other: ReclaimConflictAction,
+    },
+}
+```
+
+The enum keeps its derives (`Debug, Clone, thiserror::Error`), and
+`validate_reconcile_output`'s signature is unchanged. Its error contract:
+
+- **The rule's key** is each action's `alloc_id` field. For
+  `RestartAllocation` that is the predecessor, never the successor in
+  `spec.alloc`.
+- **The closed set.** Only a reclaim beside one of the four actions above for
+  the same `alloc_id` is this violation, in either emission order. A reclaim
+  alone, reclaims of distinct allocations, a reclaim beside any action for a
+  different allocation, and a reclaim beside any other action kind are not.
+- **First conflict wins across both rules.** Walking the actions in emission
+  order, the function returns the violation for the first action that
+  completes a conflicting pair under either rule, as it does today for service
+  writes. Which action of a reclaim conflict came first is not reported: the
+  pair is a violation in either order, and the dispatch response is the same.
+- **Surfacing.** The existing caller behaviour applies unchanged: the tick
+  skips dispatch, persists the View, and retries, and the
+  `reconciler.output.invariant_violation` tracing event carries the violation
+  (`violation = ?violation`, `reconciler_runtime.rs:1337-1345`). No
+  `reconcile_conflict` observation row is written for this variant. That row
+  is keyed on a service-LB slot, `(service_id, vip, port, proto)`
+  (`ReconcileConflictRowV1`, `overdrive-core/src/traits/observation_store.rs:1599`),
+  and this violation has none. Carrying it would need a new persisted row
+  version, and a placeholder slot would be a sentinel (`.claude/rules/rust.md`
+  § "Sum types over sentinels"). No HTTP handler or CLI command reads
+  `reconcile_conflict` rows, so the tracing event is the only operator-visible
+  channel for either variant, and what an operator sees is unchanged. The
+  row's meaning, service-LB write conflicts, is unchanged too. The module
+  rustdoc (`validate.rs:72-92`) and `surface_reconcile_conflict`'s rustdoc and
+  comments (`reconciler_runtime.rs:1236-1264`) describe two channels for every
+  violation. They become untrue for this variant and are a review item for the
+  step that lands the variant.
+
+*(Pinned 2026-09-25 on evidence, under the user's ruling that technical
+decisions are settled on evidence.)*
 
 **Wakeup.** Row-backed (`interests() → [AllocStatus]`), with the router's 30 s
 relist as backstop, plus `next_evaluation_at` for the reclaim backoff. There is
@@ -4730,14 +4862,14 @@ No test spawns the `overdrive` binary.
 | E11 | Supervisor component matrix (R13, R14, R16) and the latch invariant (L9) | Source-local, all 12 components and task classes, printed seeds. Includes: an `IpRules`-only and an `IpSets`-only loss that quiesce, repair, restore, and reopen; a policy-route-only loss detected as `IpRules` and repaired through `converge_shared` with live members, in which the prior node guard is relinquished and not dropped (host targets survive, and a later `install_outbound` succeeds); a double failure (shared-owner component plus `IpRules`) in which no TAP comes up before the worker repair and full audit pass; an activation in flight when a kernel-path detection latches quiescence, which waits and then raises exactly once after reopen. **Invariant, every schedule:** whenever the test-local owner's latch is set (derived from its call journal: a quiescence `TapSetDown` not yet followed by a successful restore), the supervisor capability reports Recovering (`recovery_progress().is_some()`) or FailStop has been requested; the gate is never Open | Proof §3.3 through `run_server_with_obs_and_driver(s)` and the required ports: C0–C8 GREEN, with C6 re-targeted to the per-TAP kill scope | S-ND295-37 (double loss); one native `IpRules` table-deletion case | — |
 | E12 | Per-VM kill scope (R14, user rulings 2 and 8; review finding H1) | Sim `CgroupFs` records writes; the owner call journal shows no owner call between a report and its kill writes. Cases: (a) `unconfirmed = {A}`: exactly A's scope `cgroup.kill` is written, no slice kill, recovery continues and reopens; (b) the quiescence call returns `Err` or hangs past its bound: the workloads-slice `cgroup.kill` is written before the `TapQuiescenceUndetermined` request; (c) a per-VM kill write fails with an I/O error other than `NotFound`: slice kill, then `VmKillFailed`; (d) a per-VM kill write returns `NotFound` (the scope was removed by a concurrent stop or exit watcher): counted as confirmed, no slice kill, recovery reopens; (e) `unconfirmed = {A}` because A's TAP was deleted: A is killed, is never reported by later audits, and recovery reopens for the rest; (f) a `ProvisionedDown` allocation whose TAP vanished is reported damaged by the audit while Open: only its VM is killed, EXEC stays Open, its start is rejected through the VMM-exit path, teardown converges on absence, and the lease is released; (g) audit damage while Open for each per-allocation part (TAP deleted, TCX ingress attachment detached, ingress link pin removed, **TCX egress attachment detached, egress link pin removed**, endpoint entry deleted, guard member removed, TAP raised while `ProvisionedDown`, owner uid or persistence changed, **host-side MAC changed**, **debug message mask non-zero** (D-295-R22)): only that VM is killed, EXEC stays Open, and no fail-stop occurs | Through `run_server_with_obs_and_driver(s)` with the required ports, the sim owner, and a `CgroupManager` over `SimCgroupFs` (proof §3.3, C6 re-targeted to the per-TAP kill scope): `Unconfirmed({A})` emits `guest_network.shared_owner_vm_killed` for A alone, the snapshot holds A's scope `cgroup.kill` write and no workloads-slice write, and recovery reopens; audit damage while Open kills only that VM and EXEC stays Open; quiescence `Fail` and quiescence `Hang` each end in exactly one `TapQuiescenceUndetermined` request through `ServerHandle::shutdown_requested`, with the workloads-slice `cgroup.kill` write in the snapshot when it is received | Native cases through `serve` + `deploy`: an injected per-TAP set-down failure kills only that VM and the node recovers; (e) deleting one `Active` TAP during an unrelated `IpRules` fault kills only that VM and recovery reopens; (f) deleting the TAP of an allocation held `ProvisionedDown` (a guest image that delays READY) kills only that VM; (g) out-of-band detach of one TAP's TCX ingress link, separately of its TCX egress link, and separately removal of one guard member, kills only that VM with EXEC open; **(h) R5-H1 host-side-MAC hijack (D-295-R21). Pre-control RED oracle: the increment-z native reproduction (`spike/findings-mac-fdb-isolation.md` STEPs 4–6: uid 4200 with `CapEff=0`, holding only its own queue fd, moved the victim's guest MAC to its port as `LOCAL\|STATIC` and read the victim's host-to-guest frames from that fd; the unknown-unicast flood also reached it). The production composition always has the control, so no uncontrolled production run is rebuilt. Production-composed GREEN through `serve` + `deploy`, with two `Active` allocations, attacker A and victim V: a process running as uid 4200 with no capabilities, holding a duplicate of A's queue descriptor, sets A's host-side MAC to V's guest MAC with `SIOCSIFHWADDR` (this test process is not launched through the VMM adapter, so it runs outside the D-295-R22 launch filter and models a change the filter does not see; the prevention itself is E21); the test then sends host-originated unicast to V's guest MAC. Oracles: (1) A's TAP transmits zero frames addressed to V (exact-ifindex capture on A's TAP plus a read on the held queue descriptor; this is the primary oracle), and the node-wide `EgressDestinationDrop` slot, which every TAP's egress program shares, rises by at least the frames sent; (2) positive controls: host unicast to A's own guest MAC still reaches A's guest, and a host broadcast reaches every guest; (3) while the entry is poisoned (after the change, before A's teardown), V receives no host unicast (exact-ifindex capture on V's TAP); (4) the next audit reports A's host-side MAC as per-allocation damage (`TapHostMac`) and kills only A's VM; EXEC stays Open, and V and every other allocation are untouched; A's teardown is then performed by its ordinary lifecycle cleanup (its restart's predecessor cleanup after the one-second restart backoff, or FinalizeFailed or R11 reclaim), with no test-installed effect, and the kill→teardown interval is recorded; (5) after A's teardown returns its empty complement, `bridge fdb show` lists V's MAC on no port except V's own, a host→V ICMP echo sent then is answered (whether the host first re-resolves V by broadcast ARP or sends straight into the empty FDB entry, only V's egress classifier admits a unicast to V's MAC), and V's reply re-learns V's MAC as a learned, non-permanent entry on V's port. Bounds: (4) within one audit period (1 s, subject to E18) of the change; (5) the echo answered and the re-learned entry observed within 1 s of teardown's complement read-back**. No native case exercises the whole-call branch (see *E12 whole-call branch* below) | — |
 | E13 | Member, policy-route, and guard audit and repair (R15, F18, H2) | Sim intercept; the worker hands over the guard without dropping the prior one | Lima real nft and routing, **with live allocations** (non-empty dynamic sets): delete one member, the whole table, the fwmark rule, the table-100 route, or the guard table; detection within 1 s; repair restores exactly the deleted object; after every repair the recorded targets are intact and a new allocation installs its elements | — | — |
-| E14 | Intercept-marked TCP fails closed (R18, R19) | — | — | Native RED first, then GREEN, with the bridge guard intact. The pre-test value of host `net.ipv4.ip_forward` is recorded; oracle (a) runs with forwarding enabled as a declared environment precondition. **R18** (`table ip overdrive-mtls` deleted): (a) forwarding: a peer-TAP capture shows zero forwarded intercept-marked frames for a guest SYN to the peer's address; (b) host-local: a guest SYN to the bridge gateway address, and one to another host interface address, at the port of a host listener bound to `0.0.0.0`, gets no SYN-ACK, and that listener accepts nothing. **R19** (program present, listener absent; outbound rule 1 → rule 2): (c) with the leg-F listener closed and the TAP up, and (d) in killed mode with Cloud Hypervisor alive and the TAP up, a guest SYN to the gateway address and one to an external address outside every managed and registered set, each at the port of a host listener bound to `0.0.0.0`, get no SYN-ACK and that listener accepts nothing. An inbound control (leg C closed; SYN to a registered destination) is dropped by rule 4 under both orders. **`TIME_WAIT` side door (L3, preconditions per research A2):** (e) complete one leg-F connection from guest source port P to destination D:p, and make the **guest complete its own close** so the entry is in the true `TIME_WAIT` substate (a `FIN_WAIT2` substate answers the SYN with RST), then close leg F (and, separately, kill `serve` in killed mode — which closes every leg-F socket at once, opening the door per flow for ~60 s), and within the `TIME_WAIT` interval send a guest SYN from P to D:p **carrying a sequence number above the old `rcv_nxt` (or a newer `TSval`)** with a host listener bound to `0.0.0.0:p`: record whether it gets a SYN-ACK. Two controls run first and do not depend on the door. Both target one `TIME_WAIT` entry held by a host listener on a path the TPROXY program does not handle (for example a test-owned veth peer namespace under the `TestCidrLease` discipline, connecting to a host listener bound to `0.0.0.0:p`): the listener's accepted socket closes first, then the peer closes, so the host side holds the true `TIME_WAIT` substate. **Negative control (first):** the probe generator sends, from the same peer 4-tuple, a SYN with a stale ISN and no timestamp option (or a TSval no newer than the entry's), and gets a bare ACK (`TCP_TW_ACK`, research A2) and no SYN-ACK, proving the substate and sequence gates; the entry survives. **Positive control (second; review defect D9):** after an interval longer than `tcp_invalid_ratelimit`, the same generator sends a SYN with a sequence number above the old `rcv_nxt`, meets the sequence precondition, and receives the SYN-ACK (a reopen consumes the entry, which is why it runs second). Only then does (e) run against the guest's leg-F entry. The healthy control shows the guard rule's counter at zero. A further fault deletes only the guard table and shows the intercept program still catches or drops. | — |
+| E14 | Intercept-marked TCP fails closed (R18, R19) | — | — | Native RED first, then GREEN, with the bridge guard intact. The pre-test value of host `net.ipv4.ip_forward` is recorded; oracle (a) runs with forwarding enabled as a declared environment precondition. **R18** (`table ip overdrive-mtls` deleted): (a) forwarding: a peer-TAP capture shows zero forwarded intercept-marked frames for a guest SYN to the peer's address; (b) host-local: a guest SYN to the bridge gateway address, and one to another host interface address, at the port of a host listener bound to `0.0.0.0`, gets no SYN-ACK, and that listener accepts nothing. **R19** (program present, listener absent; outbound rule 1 → rule 2): (c) with the leg-F listener closed and the TAP up, and (d) in killed mode with Cloud Hypervisor alive and the TAP up, a guest SYN to the gateway address and one to an external address outside every managed and registered set, each at the port of a host listener bound to `0.0.0.0`, get no SYN-ACK and that listener accepts nothing. An inbound control (leg C closed; SYN to a registered destination) is dropped by rule 4 under both orders. **`TIME_WAIT` side door (L3, preconditions per research A2):** (e) complete one leg-F connection from guest source port P to destination D:p, and make the **guest complete its own close** so the entry is in the true `TIME_WAIT` substate (a `FIN_WAIT2` substate answers the SYN with RST), then close leg F (and, separately, kill `serve` in killed mode — which closes every leg-F socket at once, opening the door per flow for ~60 s), and within the `TIME_WAIT` interval send a guest SYN from P to D:p **carrying a sequence number above the old `rcv_nxt` (or a newer `TSval`)** with a host listener bound to `0.0.0.0:p`: record whether it gets a SYN-ACK. Two controls run first and do not depend on the door. Both target one `TIME_WAIT` entry held by a host listener on a path the TPROXY program does not handle (for example a test-owned veth peer namespace under the `TestCidrLease` discipline, connecting to a host listener bound to `0.0.0.0:p`): the listener's accepted socket closes first, then the peer closes, so the host side holds the true `TIME_WAIT` substate. **Negative control (first):** the probe generator sends, from the same peer 4-tuple, a SYN with a stale ISN and no timestamp option (or a TSval no newer than the entry's), and gets a bare ACK (`TCP_TW_ACK`, research A2) and no SYN-ACK, proving the substate and sequence gates; the entry survives. **Positive control (second; review defect D9):** after an interval longer than `tcp_invalid_ratelimit`, the same generator sends a SYN with a sequence number above the old `rcv_nxt`, meets the sequence precondition, and receives the SYN-ACK (a reopen consumes the entry, which is why it runs second). Only then does (e) run against the guest's leg-F entry. **Healthy baseline (the guard's non-interference control), before any fault:** with both tables present, leg F listening, and the guard table read back present (`observe_intercept_mark_guard` returns `Ok(true)`), each guest SYN of the R18 cases (to the peer's address, to the bridge gateway address, and to another host interface address, at the port of a host listener bound to `0.0.0.0`) receives a SYN-ACK, and that host listener accepts nothing: the intercept answered it and the guard dropped nothing on the healthy path. The guard rule carries no counter (§ *R18-B contract*). A further fault deletes only the guard table and shows the intercept program still catches or drops. **In-run ingress witness (every R18 GREEN case and the guard-only case):** each probe SYN appears in an exact-ifindex capture on its sender's TAP, which reads back administratively up when the SYN is sent; the node-wide TCX `Intercept` counter (`GuestTcxCounter::Intercept`) rises by at least the SYNs sent; and the bridge guard's default-drop counter does not change. A run in which the TAP was already quiesced (the `IpRules` loss quiesces managed TAPs) is void, not GREEN. | — |
 | E15 | The CLI consumes fail-stop (R17) | — | `serve_lifetime_fail_stop` (in-process `serve`, injected signals and clock): the internal request beats a ready SIGINT or SIGTERM; the 10 s bound is measured on the injected clock; `exit_code()==1`; drained and abandoned cases | The same test runs on metal, because its real fault needs the kernel | — |
 | E16 | Required ports (R16) | — | Compile-time check plus a source scan: no `Option` field or parameter gates mTLS, DNS, shared guest-network, or supervisor composition, including `AppState.mtls_worker`, `AppState.shared_guest_network`, `ServerHandle.mtls_worker_owner` and `mtls_resolve_owner`, and the action-shim lifecycle parameters; no method replaces a composed worker after boot | — | — |
 | E17 | DNS loss closes EXEC | Source-local supervisor over a test-local `GuestDns` and `GuestDnsFactory` | Through `run_server_with_obs_and_driver(s)` with the sim DNS factory | S-ND295-34 real bind | — |
 | E18 | Audit, quiescence, and restore latency and element-mutex hold at the placeholder population (F7) | — | — | At T1-BASE and T1-PORT4, with every attachment activated through the owner: full-audit latency per owner; `quiesce_managed_taps` and `restore_quiesced_taps` wall time and the time the last TAP reads back down; and the worker member audit's `element_effects` hold time. These pin `SHARED_NETWORK_AUDIT_CALL_BOUND` and `SHARED_NETWORK_QUIESCE_CALL_BOUND`, test the recovery-window fit, restate the double-loss exposure, and decide R15's mutex choice. | — |
 | E19 | Creation-time close-on-exec (obligation OBL-295-CLOEXEC, L2) | — | The `xtask` source gate over every first-party `serve` crate: zero raw descriptor-creating calls without the close-on-exec flag; one planted violation per row of the gate's call table (including an `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s` rename, and a `nix`/`rustix` wrapper) fails it; an unparseable file fails the scan rather than being skipped | — | — |
 | E20 | Cleanup-pending status (R20, user ruling 6) | Pure predicate: `cleanup_pending` over every lease × row-state pair matches the table in § *Operator status* | In-process through `run_server` and the HTTP API, with an `MtlsIntercept` element-removal fault: a `StopAllocation` whose cleanup fails leaves the row `Running` and `GET /v1/allocs` reports `network_cleanup_pending: true`, excluded from `replicas_running`; after the retry converges the row is `Terminated` and the field is false. A crashed allocation (Failed row, Admitted lease) and a reclaim in progress report true. CLI live-path render tests (`render::workload_describe`): a pending row renders `CleanupPending` plus the lifecycle detail line and never `Running`, in both the Service and Job tables; every non-pending row renders byte-identically | — | — |
-| E21 | VMM launch seccomp filter (R22, ADR-0143): every Cloud Hypervisor thread carries it, each denied request returns `EPERM`, every other ABI route fails closed, and CH still boots and passes traffic | — | **Pure, default lane (no I/O).** On an x86_64 build, the program `VmmLaunchSeccompFilter::for_target` builds, evaluated over synthetic `seccomp_data`, yields this verdict partition. (a) Each of the 13 requests as `ioctl` `args[1]` → `ERRNO\|EPERM`, including with `args[1]`'s upper 32 bits set. (b) The six `fd=`-path requests, a read-only request, and a non-`ioctl` syscall carrying a denied value in `args[1]` → `ALLOW`. (c) A foreign audit architecture → `KILL_PROCESS`. (d) `nr = 0x4000_0000 + 514` (x32 `ioctl`), `0x4000_0000 + 16`, and any other `nr ≥ 0x4000_0000` except `-1` → `KILL_PROCESS`; `nr = -1` → `ALLOW`. Also: the 13 derived values equal the increment-aa numbers; the composed audit value and the x32 bit are pinned; `VMM_LAUNCH_DENIED_IOCTLS` is exactly the table. Source-local mapping tables: an unsupported-architecture value maps to `ConfinementUnavailable { control: Seccomp }`, and each probe cause maps to its `LaunchSeccomp*` variant. On any other build target (an aarch64 build, such as an Apple Silicon Lima VM) the arm with no program is the compiled arm: `for_target` returns `LaunchSeccompUnsupportedArch` naming the architecture, and `create`'s filter-first refusal on that arm can be executed there (ruling 10; GH #302). On an x86_64 build that arm is reviewed, not executed. **Lima root (real kernel; the source-local `launch_seccomp_kernel` module of § *Testability boundary*).** On an x86_64 VM, a process launched through `register_launch_child_hook` with the production program (a re-exec of the crate's test binary) holds an attached queue of a scratch persistent TAP at descriptor 3. Each of the 13 requests returns `EPERM` from its main thread and from three threads created after exec. None of the six `fd=`-path requests returns `EPERM`. `/proc/self/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`. The descriptor table is exactly 0–3. The probe's `check_launch_seccomp` passes. On any other architecture, such as an Apple Silicon Lima VM, `check_launch_seccomp` returns `LaunchSeccompUnsupportedArch` naming it, and the production-program cases are proven on metal by (f). | **x86_64 native metal, production launcher, through `serve` + `deploy`:** (e) CH reaches READY and passes bidirectional traffic (S-ND295-01 and E3 run with the filter in force). At READY and again after traffic, every thread in `/proc/<ch>/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`, and each thread's `Seccomp_filters` equals CH v53's own count for that thread plus 1: leader 1, `vmm` and `http-server` 2, every other thread 3 (increment-aa control table, pinned to CH v53 by OBL-295-SECCOMP-REVERIFY). The leader's count is the discriminating check, because CH's own filters never cover it; worker coverage follows from it together with kernel inheritance. (f) The whole Lima-root block repeated on metal, plus the fail-closed ABI routes under the production program. The block is the `EPERM` cases, the per-thread `NoNewPrivs`/`Seccomp` reads, the exact 0–3 descriptor table, and a passing `check_launch_seccomp`. The fail-closed ABI routes are: an x32 `syscall(0x4000_0000 + 514, …)` ends the process with `SIGSYS`, and so does an i386 `int 0x80` `ioctl` where the kernel provides the i386 entry. (g) OBL-295-SECCOMP-REVERIFY: the source audit and (e) on every Cloud Hypervisor version or `--net` launch-shape change. There is no aarch64 case: aarch64 microVM launches are refused (user ruling 10), and proving the filter and enabling them is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302). | — |
+| E21 | VMM launch seccomp filter (R22, ADR-0143): every Cloud Hypervisor thread carries it, each denied request returns `EPERM`, every other ABI route fails closed, and CH still boots and passes traffic | — | **Pure, default lane (no I/O).** On an x86_64 build, the program `VmmLaunchSeccompFilter::for_target` builds, evaluated over synthetic `seccomp_data`, yields this verdict partition. (a) Each of the 13 requests as `ioctl` `args[1]` → `ERRNO\|EPERM`, including with `args[1]`'s upper 32 bits set. (b) The six `fd=`-path requests, a read-only request, and a non-`ioctl` syscall carrying a denied value in `args[1]` → `ALLOW`. (c) A foreign audit architecture → `KILL_PROCESS`. (d) `nr = 0x4000_0000 + 514` (x32 `ioctl`), `0x4000_0000 + 16`, and any other `nr ≥ 0x4000_0000` except `-1` → `KILL_PROCESS`; `nr = -1` → `ALLOW`. Also: the 13 derived values equal the increment-aa numbers; the composed audit value and the x32 bit are pinned; `VMM_LAUNCH_DENIED_IOCTLS` is exactly the table. Source-local mapping tables: an unsupported-architecture value maps to `ConfinementUnavailable { control: Seccomp }`, and each probe cause maps to its `LaunchSeccomp*` variant. On any other build target (an aarch64 build, such as an Apple Silicon Lima VM) the arm with no program is the compiled arm: `for_target` returns `LaunchSeccompUnsupportedArch` naming the architecture, and `create`'s filter-first refusal on that arm can be executed there (ruling 10; GH #302). On an x86_64 build that arm is reviewed, not executed. **Lima root (real kernel; the source-local `launch_seccomp_kernel` module of § *Testability boundary*).** On an x86_64 VM, a process launched through `register_launch_child_hook` with the production program (a re-exec of the crate's test binary) holds an attached queue of a scratch persistent TAP at descriptor 3. Each of the 13 requests returns `EPERM` from its main thread and from three threads created after exec. None of the six `fd=`-path requests returns `EPERM`. `/proc/self/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`. The descriptor table is exactly 0–3. The probe's `check_launch_seccomp` passes. On any other architecture, such as an Apple Silicon Lima VM, `check_launch_seccomp` returns `LaunchSeccompUnsupportedArch` naming it, and the production-program cases are proven on metal by (f). | **x86_64 native metal, production launcher, through `serve` + `deploy`:** (e) CH reaches READY and passes bidirectional traffic (S-ND295-01 and E3 run with the filter in force). At READY and again after traffic, every thread in `/proc/<ch>/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`, and each thread's `Seccomp_filters` equals the shipped Cloud Hypervisor build's own count for that thread plus 1: leader 1, `vmm` and `http-server` 2, every other thread 3 (the increment-aa control table, measured on the audited v53.0 build; OBL-295-SECCOMP-REVERIFY re-measures it when the shipped build changes). The leader's count is the discriminating check, because CH's own filters never cover it; worker coverage follows from it together with kernel inheritance. (f) The whole Lima-root block repeated on metal, plus the fail-closed ABI routes under the production program. The block is the `EPERM` cases, the per-thread `NoNewPrivs`/`Seccomp` reads, the exact 0–3 descriptor table, and a passing `check_launch_seccomp`. The fail-closed ABI routes are: an x32 `syscall(0x4000_0000 + 514, …)` ends the process with `SIGSYS`, and so does an i386 `int 0x80` `ioctl` where the kernel provides the i386 entry. (g) OBL-295-SECCOMP-REVERIFY: the source audit and (e) on any of that obligation's triggers (a change to the shipped Cloud Hypervisor build, to the `--net` launch shape, or to the Cloud Hypervisor net-device paths the platform uses). It is a review obligation; no runtime version check exists (user ruling of 2026-09-25). There is no aarch64 case: aarch64 microVM launches are refused (user ruling 10), and proving the filter and enabling them is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302). | — |
 
 **E12 whole-call branch.** When the owner cannot determine per-TAP outcomes
 (quiescence returns `Err`, or the call misses
@@ -5321,6 +5453,52 @@ DESIGN created no issue. No other deferral is proposed.
     accept tasks are async and stop by cancellation, and that citation is
     stale. The DNS responder precedent stays. DESIGN does not edit
     rule files.
+- **Consequences of the 2026-09-25 user ruling (no Cloud Hypervisor version
+  gate) and the pins of the same date (reclaim validator variant, E14 healthy
+  baseline, shared pass-through relay stop), for DISTILL and DELIVER:**
+  - *Version gate removed.* S-ND295-40 loses its "refuses a Cloud Hypervisor
+    older than v53" clause, its "probe refuses a reported version below 53.0"
+    oracle, and the `cloud_hypervisor_older_than_v53_is_refused_by_the_probe`
+    entry in its Rust home (`distill/test-scenarios.md:264`, `:274`, `:276`).
+    No committed body carries that name. The DISTILL re-roadmap row 05-03 loses
+    "CH ≥ v53 probe floor". S-ND295-45's oracle wording follows E21 (e): the
+    audited build's counts, re-measured by OBL-295-SECCOMP-REVERIFY
+    (`test-scenarios.md:392`).
+  - *Reclaim validator (S-ND295-55, 07-02/07-03).* The committed body
+    `a_reclaim_beside_another_action_for_the_same_allocation_is_rejected`
+    (`action_shim/validate.rs:656-686`) can assert the exact
+    `ConflictingAllocationReclaim { alloc_id, other }` for each of the four
+    kinds in both orders, in place of `is_err()`. Adding the variant makes
+    today's exhaustive single-variant destructures refutable: the `match` at
+    `validate.rs:438-454` and the irrefutable `let`s at
+    `tests/integration/reconcile_output_validator.rs:182`, `:208`, and `:252`
+    no longer compile. Those bodies are DISTILL's to adjust. The production
+    destructure in `surface_reconcile_conflict`
+    (`reconciler_runtime.rs:1265-1272`) follows the pinned surfacing rule.
+  - *E14 healthy baseline (S-ND295-62).* The oracle "healthy control: guard
+    rule counter 0" (`test-scenarios.md:1246`) becomes the healthy baseline
+    that E14 now states. The GREEN and guard-only oracles gain E14's in-run
+    ingress witness, and a run whose TAP was already quiesced is void. The
+    native body is not yet authored
+    (`crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs` is
+    a stub). The scaffolded `observe_intercept_mark_guard() -> Result<bool,
+    NetlinkError>` (`overdrive-netlink/src/nft.rs:3085`) is unchanged.
+  - *Pass-through relays (S-ND295-20, 05-01).* The twin
+    `shared_allocation_stop_joins_a_passthrough_child`
+    (`mtls_intercept_worker.rs:7178-7229`) asserts one case of what C-295-L now
+    states: stop closes both legs of a relay established before the stop
+    began. It stands as written, but it does not cover two clauses of the pin,
+    and S-ND295-20 gains an obligation for each. One is a relay whose
+    connection is classified while the stop's claim wait is in progress: stop
+    returns only after both of its legs are closed, and no relay of that
+    generation remains. The other is `shutdown_owner` with a live relay. An
+    implementation that ends relays before the claim wait, or registers a relay
+    after releasing its claim, passes the twin and fails the first. The
+    mechanics are DISTILL's. The shared dispatch's detach (`:3563-3567`) is the
+    review item named in C-295-L.
+  - *FD line references.* This change adds text above several cited spans, so
+    FD line citations in `distill/` and the DISTILL sections that point below
+    § *Charter, rulings, and evidence* shift; DISTILL re-anchors them.
 - **`.claude/rules/reconcilers.md`** § "Deferred Bar-2 promotions" names
   GH #234 as the home of the shared inbound-TPROXY routing infrastructure. When
   #295 lands that bullet becomes stale (GH #234 is superseded and closes), and
@@ -5400,7 +5578,7 @@ concurrent-flow capacity claim.
 | **Reproduced named-TAP activation fact (native run `f1a15668`, CH v53.0 tag / peeled commit `9ed824d6d08df3e96f7d5f50795d9449ac99f431`)** | With the production TAP deliberately left down, the accepted direct `--net tap=<name>,mac=<mac>` path failed before READY: `Cannot create virtio-net device` → `Failed to open taps` → `SIOCSIFFLAGS (35092)` → `EPERM`. CH v53's named path calls `open_tap`, which always calls `tap.enable()`; `Tap::enable` issues `SIOCSIFFLAGS` unless `IFF_UP` is already set. Linux v6.18 requires `CAP_NET_ADMIN` for that ioctl, and CH's own build guide requires that capability to set TAPs up. | Down-through-READY is impossible **through the named-TAP path** under the accepted confinement. It says nothing about CH's separate `--net fd=` branch (`from_tap_fds`), which never calls `open_tap`/`enable`. *(The earlier conclusion here, that fd handoff was "unnecessary and rejected", is SUPERSEDED by the next row and D-295-R1.)* |
 | **Native fd-handoff spikes (2026-09-23; `.context/netns-density-295-fd-tap-spike-findings.md`, `spike/findings-persistent-fd-tap.md`)** | Native metal, kernel 7.0.0-29, CH v53.0, production `prlimit`/`setpriv`/seccomp/landlock/cgroup chain. One inherited queue fd (`--net fd=[50]`) reached the real guest `READY` beacon with the TAP administratively down, zero exact-ifindex frames, and all six counters at zero. CH never raised the TAP, and the launcher's copy could close after exec. The owner activated after interception was live, and every captured frame followed the barrier. The persistent-TAP lifecycle had an exact empty complement. Two conditions held: the attach must request `IFF_VNET_HDR`, and the TAP must be down at every attach. | Proves the mechanism **accepted** (2026-09-24) in D-295-R1 to R5. It does not prove multiqueue, a TAP owned by uid 0 (R4), `command-fds` mapping to descriptor 3 with `O_NONBLOCK` (R3), or the in-child close-on-exec hook; each is an evidence obligation in the evidence-lane matrix. Kernel version is out of scope (user ruling). The spikes were discarded from promotion (user, 2026-09-23). |
 | **Native MAC/FDB isolation spike, increment-z (2026-09-24; `spike/findings-mac-fdb-isolation.md`)** | Native metal, kernel `7.0.0-29`. An attacker running as uid 4200 with `CapEff=0` (no `CAP_NET_ADMIN`), holding only its own TAP's queue fd, set its TAP's host-side MAC to another guest's MAC with `SIOCSIFHWADDR` (`ioctl_rc=0`). The bridge moved the victim's MAC to the attacker's port as `LOCAL\|STATIC`, and the attacker read the victim's host-to-guest frames from its own fd: **the steal reproduced**. Host unknown-unicast to a never-learned MAC reached the attacker with no MAC change: **the flood leak reproduced**. An nft bridge `output` (`NF_BR_LOCAL_OUT`) destination-MAC gate, keyed on `oifname` and delivering only the TAP's registered guest MAC, blocked both, with broadcast still delivered; its drop counters show every flooded copy dropped at each non-target port. `bridge link set … flood off` closed the flood variant independently, with broadcast preserved. The explicit bridge MAC held: the attacker's port-MAC change did not move it (ADR-0126). The gate does not revert the stuck `LOCAL\|STATIC` FDB entry. The spike was discarded from promotion with its files kept. | It does not prove the TCX-egress form of the gate (ADR-0142's chosen form), nor the host-side-MAC audit, the per-VM kill, or the teardown-and-re-learn restoration. E12 (h) proves those natively through `serve` + `deploy`. The findings' "Design implications" 2 and 3 quote the revision-4 ADR-0142 text, which adopted `flood off`; that adoption is superseded (D5), and the evidence itself is unchanged. |
-| **Native TAP-ioctl seccomp spike, increment-aa (2026-09-24; `spike/findings-tap-ioctl-seccomp.md`)** | Native x86_64 metal, `systemd-detect-virt=none`, kernel `7.0.0-29-generic`, Cloud Hypervisor v53.0 at tag commit `9ed824d6`. A source audit at that commit found the `fd=` path's exact ioctl set (`TUNGETIFF`, `TUNSETIFF` with `EEXIST` accepted, `TUNSETVNETHDRSZ`, `SIOCGIFMTU`, `SIOCSIFMTU` only with `mtu=`, `TUNSETOFFLOAD`), disjoint from the 13-request deny-list. A classic-BPF filter (arch check → kill; `ioctl` `args[1]` low word in the deny-list → `ERRNO(EPERM)`; default allow), installed in the single-threaded child after `PR_SET_NO_NEW_PRIVS` and before the first exec: survived `prlimit` → `setpriv` → CH; every one of CH's 11 threads, the leader included (0 filters in the control), gained exactly one filter; CH's own `--seccomp true` filters stacked on top; CH reached READY and passed ICMP in both directions with zero pre-activation frames; each of the 13 requests returned `EPERM` in a filtered main thread and three later-created threads; the no-filter control returned no `EPERM`. The probe was discarded from promotion with its files kept. | It does not prove the production program's x32 prologue (not in the probe), the production hook and probe stage, or a live CH thread issuing a denied request (the `EPERM` observations are in a helper under the same filter; the CH per-thread filter counts come from `/proc`). E21 proves those. It is x86_64 evidence only; no aarch64 program exists, and aarch64 microVM launches are refused (user ruling 10; GH #302). Numbers and BPF are pinned to the x86_64 ABI; a CH upgrade or `--net` launch-shape change needs the same audit and native case (OBL-295-SECCOMP-REVERIFY). Kernel version is out of scope (user ruling). |
+| **Native TAP-ioctl seccomp spike, increment-aa (2026-09-24; `spike/findings-tap-ioctl-seccomp.md`)** | Native x86_64 metal, `systemd-detect-virt=none`, kernel `7.0.0-29-generic`, Cloud Hypervisor v53.0 at tag commit `9ed824d6`. A source audit at that commit found the `fd=` path's exact ioctl set (`TUNGETIFF`, `TUNSETIFF` with `EEXIST` accepted, `TUNSETVNETHDRSZ`, `SIOCGIFMTU`, `SIOCSIFMTU` only with `mtu=`, `TUNSETOFFLOAD`), disjoint from the 13-request deny-list. A classic-BPF filter (arch check → kill; `ioctl` `args[1]` low word in the deny-list → `ERRNO(EPERM)`; default allow), installed in the single-threaded child after `PR_SET_NO_NEW_PRIVS` and before the first exec: survived `prlimit` → `setpriv` → CH; every one of CH's 11 threads, the leader included (0 filters in the control), gained exactly one filter; CH's own `--seccomp true` filters stacked on top; CH reached READY and passed ICMP in both directions with zero pre-activation frames; each of the 13 requests returned `EPERM` in a filtered main thread and three later-created threads; the no-filter control returned no `EPERM`. The probe was discarded from promotion with its files kept. | It does not prove the production program's x32 prologue (not in the probe), the production hook and probe stage, or a live CH thread issuing a denied request (the `EPERM` observations are in a helper under the same filter; the CH per-thread filter counts come from `/proc`). E21 proves those. It is x86_64 evidence only; no aarch64 program exists, and aarch64 microVM launches are refused (user ruling 10; GH #302). Numbers and BPF are pinned to the x86_64 ABI; any OBL-295-SECCOMP-REVERIFY trigger (the shipped Cloud Hypervisor build, the `--net` launch shape, or the net-device paths the platform uses) needs the same audit and native case (a review obligation, not a runtime version check). Kernel version is out of scope (user ruling). |
 | **Accepted by system design review iteration 5 on 2026-09-16** | D-295-1 through D-295-6, A2, B1, C1 as amended by PORT-295-C, C-295-E, F1, ERR-295-A, GEN-295-A, CAP-295-A, and RUN-295-B. | System-design acceptance is not DELIVER authority. |
 | **Reproduced correctness-recovery production facts (2026-09-23; `recovery/proof-findings.md`)** | These are §3.2 to §3.6. Placement admitted 16,385 attachments across workloads: in-flight, crash replacement, and operator resume were all uncounted. The runtime supervisor never audited the shared switch, and it skipped nft while allocations were live. Stop returned `Ok` after an element-removal failure, and the address was reassigned. Restart after process loss refused on stale members, because no boot clear ran. The CLI ignored the typed fail-stop until the serve lifetime port. | These are **current production defects**, not accepted behaviour. D-295-R6 to R19, accepted 2026-09-24, correct them once delivered. |
 | **Withdrawn: D-295-DELIVER-04-01 v2 (2026-09-23, uncommitted)** | *"Keep the already-protected TAP up for CH named attachment/READY. Before the exact mTLS success event, admit only correlated validated ARP replies and correlated zero-payload TCP resets…"* | **WITHDRAWN.** It weakened ADR-0088's zero-frame outcome, which the recovery charter forbids. The zero-frame outcome is restored and the fd-handoff replacement is accepted (D-295-R1 to R5, 2026-09-24). The post-event `2 + P`, TLS 1.3/kTLS/splice, and no-cleartext evidence is unchanged. |
@@ -8192,10 +8370,64 @@ allocation never receives or can drop that guard.
   generation are gone before successor registration. Existing release-last
   cleanup keeps the address unavailable until the predecessor's owned network
   and enforcement effects are gone.
+- A cleartext pass-through relay, which serves a leg-F connection that
+  `MtlsResolve` classifies `NonMesh`, belongs to the capability whose claim
+  classified that connection: that exact allocation and generation. When
+  `stop_alloc` returns, with either result, every relay of the retired
+  generation has ended and both of its connections are closed. That includes a
+  relay whose connection was classified while the stop's claim wait was in
+  progress. Stop ends each relay and awaits its end. It does not wait for a
+  relay to finish on its own, so an upstream that holds its connection open
+  cannot hold the stop. Ending a relay has no failure outcome:
+  `MtlsInterceptStopError` gains no variant, a relay that ended by panic has
+  closed its connections too, and a retry attempt (B-6 rule 3) finds no relay
+  left. Relays of other allocations stay live, as do both shared listeners.
+  When `shutdown_owner` returns, every relay of every allocation has ended.
 - Boot adopts no allocation capability: existing VMM reclamation runs before
   stale network sweep; the node listener registry begins empty and receives
   registrations only through a new allocation's normal post-Running,
   pre-command-release intercept install.
+
+**Why a stop ends its pass-through relays.** The pass-through bullet above
+makes explicit what the accepted contracts already require. It changes no
+accepted meaning:
+
+- **The operative stop contract.** C-295-L carries into the shared owner "the
+  accepted exact-generation retirement". That stop contract (#222 R3,
+  `docs/feature/guest-stack-transparent-mtls-intercept/feature-delta.md:1186-1192`)
+  says stop "awaits every registered accept/resolve/enforce/pass-through
+  child". The per-allocation path implements it today. It registers each relay
+  in the allocation's task owner (`mtls_intercept_worker.rs:3499-3505`), and
+  stop aborts and joins that owner (`:3031`, `:2108-2132`). The live test
+  `allocation_stop_joins_a_passthrough_child` (`:6040-6099`) checks it.
+- **Owner shutdown.** F-03 below states "No task/socket or allocation guard is
+  detached", and `shutdown_owner`'s rustdoc promises that "every
+  accept/enforce/pass-through child has ended" (`:3153-3154`).
+- **Address reuse.** The address stays unavailable "until the predecessor's
+  owned network and enforcement effects are gone". A relay's leg-F socket is
+  keyed to the predecessor's guest address. A relay that outlived stop would
+  still hold that socket after the address is released last (R10) and
+  reassigned. A successor segment on the same 4-tuple would then reach the
+  predecessor's relay through TPROXY's established-socket lookup. That would
+  carry a successor's traffic in a predecessor's connection, the
+  cross-generation attribution the capability bullets above forbid.
+
+**What an operator observes** is the operative per-allocation behaviour. Every
+shim arm attempts the driver stop before the intercept stop runs
+(`action_shim/mod.rs:652-666`, `:743-749`, `:1742-1750`, `:1777-1785`,
+`:2522-2555`, `:3198-3210`), or the workload has already exited (the
+exit-observer terminal arm, `:2153-2154`). The stop at `:2526` is best-effort,
+and the arms at `:651` and `:742` stop only when a handle exists, that is, when
+a VM was started. The relay
+therefore carries no further guest traffic after stop. An external upstream
+sees its connection closed at stop rather than at a TCP timeout.
+
+**Contrary code, a review item for the step that lands shared stop (05-01,
+S-ND295-20).** `handle_shared_outbound` drops the claim and then drops the
+relay's `JoinHandle`, which detaches the relay (`mtls_intercept_worker.rs:3563-3567`).
+
+*(Pinned 2026-09-25 on evidence, under the user's ruling that technical
+decisions are settled on evidence.)*
 
 #### F-03 worker-owned shared-listener lifecycle — approved remediation
 
@@ -10128,11 +10360,11 @@ and one leg C for Overdrive's current TCP mTLS path.
 | Fixed placeholder admission cap | No new substrate dependency exists. *(Superseded-pending by D-295-R6 to R8: the boundary moves to `assign` over held leases, with held 16,383 admitting and 16,384 refusing with `AdmissionCapReached`, and placement returning `NoCapacity` advisorily.)* Below-cap pool exhaustion projects only typed infrastructure drift + degraded health. No `network_ports` field or second scheduler resource is probed because #295 creates none. |
 | DNS bind/index/source-pin | Existing `DnsResponder::probe()` proves bind + List seed. The approved gateway replacement narrows fallback from N addresses to one; Tier-3 `getaddrinfo` remains the source-pin proof. No BPF DNS probe is added because DNS stays with its userspace semantic owner. |
 | cgroup v2 resource ownership | Existing cgroup preflight, `CgroupFs::probe`, and VMM/cgroup production evidence. Reuse; networking does not move this boundary. |
-| VMM substrate | Existing `Vmm::probe()`. It must be amended only to remove `ip` as a netns-launch prerequisite after direct host-TAP launch; no duplicate VMM probe is added. *(PROPOSED D-295-R2.)* The probe also requires Cloud Hypervisor v53.0 or later, the version whose `--net fd=` import is proven. Native metal proves the handoff behaviour: READY with the TAP down, zero frames, a queue holder set equal to the CH pid, a Cloud Hypervisor descriptor table holding exactly standard I/O and its own queue at descriptor 3 with the production flags, and well-formed post-activation L2. The probe does not boot a scratch VM. *(D-295-R22: the probe also runs the `launch-seccomp` stage after `setpriv`; on every target but x86_64 that stage fails, so no microVM driver is composed there. Ruling 10; GH #302.)* |
+| VMM substrate | Existing `Vmm::probe()`. It must be amended only to remove `ip` as a netns-launch prerequisite after direct host-TAP launch; no duplicate VMM probe is added. *(PROPOSED D-295-R2.)* The probe checks no Cloud Hypervisor version (user ruling of 2026-09-25). Native metal proves the handoff behaviour: READY with the TAP down, zero frames, a queue holder set equal to the CH pid, a Cloud Hypervisor descriptor table holding exactly standard I/O and its own queue at descriptor 3 with the production flags, and well-formed post-activation L2. The probe does not boot a scratch VM. *(D-295-R22: the probe also runs the `launch-seccomp` stage after `setpriv`; on every target but x86_64 that stage fails, so no microVM driver is composed there. Ruling 10; GH #302.)* |
 | TAP queue attach (PROPOSED D-295-R2) | `attach_tap_queue` self-verifies each attach: exact flags `0x5802`, including persistence, and administratively down, else typed refusal. Lima-root tests cover the flags, `NotDown`, `EBUSY`, and refusal of a non-persistent creation, without KVM. |
 | Descriptor inheritance (PROPOSED D-295-R3) | Three orthogonal layers: the in-child `close_range` hook (structural; a failure fails the spawn), the creation-time close-on-exec source gate (static), and the native complete-descriptor-table scan (behavioural). A leak through one layer is caught by at least one other. |
 | TAP owner (PROPOSED D-295-R4) | The owner's TAP identity read-back expects owner uid 0 at provision and activation. Lima root proves that an attach as uid 4200 without `CAP_NET_ADMIN` gets `EPERM`. |
-| VMM launch seccomp filter (D-295-R22) | Three orthogonal layers. **Type and lint:** registering a `pre_exec` hook is `unsafe`, and under `deny(unsafe_code)` the crate's one allowed production function, `register_launch_child_hook`, takes a built filter by value, so no production hook can be registered without a program; `create` builds it before any effect, and a launch that registered no hook at all is caught by the behavioural layer. **Boot probe:** `check_launch_seccomp` spawns `prlimit --version` through the same hook with the same program, so a kernel that refuses the filter, or a wrong audit-architecture constant (the tool dies with `SIGSYS`), fails `Vmm::probe` with a typed `LaunchSeccomp*` error, and the node composes no microVM driver (ADR-0083 §D3c). On every target but x86_64 the stage fails the same way with `LaunchSeccompUnsupportedArch` (ruling 10; GH #302). **Behaviour:** E21's native case reads every Cloud Hypervisor thread's `Seccomp`/`Seccomp_filters` at READY and after traffic, and the production-program `EPERM` and fail-closed ABI cases run on the real kernel. Self-application: OBL-295-SECCOMP-REVERIFY repeats the source audit and E21 on every Cloud Hypervisor version or launch-shape change. |
+| VMM launch seccomp filter (D-295-R22) | Three orthogonal layers. **Type and lint:** registering a `pre_exec` hook is `unsafe`, and under `deny(unsafe_code)` the crate's one allowed production function, `register_launch_child_hook`, takes a built filter by value, so no production hook can be registered without a program; `create` builds it before any effect, and a launch that registered no hook at all is caught by the behavioural layer. **Boot probe:** `check_launch_seccomp` spawns `prlimit --version` through the same hook with the same program, so a kernel that refuses the filter, or a wrong audit-architecture constant (the tool dies with `SIGSYS`), fails `Vmm::probe` with a typed `LaunchSeccomp*` error, and the node composes no microVM driver (ADR-0083 §D3c). On every target but x86_64 the stage fails the same way with `LaunchSeccompUnsupportedArch` (ruling 10; GH #302). **Behaviour:** E21's native case reads every Cloud Hypervisor thread's `Seccomp`/`Seccomp_filters` at READY and after traffic, and the production-program `EPERM` and fail-closed ABI cases run on the real kernel. Self-application: OBL-295-SECCOMP-REVERIFY repeats the source audit and E21 on any of its triggers (the shipped Cloud Hypervisor build, the `--net` launch shape, or the net-device paths the platform uses), as a review obligation (no runtime version check, user ruling of 2026-09-25). |
 | TAP debug message mask (D-295-R22, ADR-0130 read-back set) | Read at provision and activation with a single `ETHTOOL_MSG_DEBUG_GET`, and once per audit pass with one dump; expected 0. A Lima-root adapter test reads 0 from a freshly created persistent TAP, through both forms, and the changed value after a test-side `TUNSETDEBUG` issued outside the launch filter. |
 | Node-wide admission (PROPOSED D-295-R6 to R8) | In-process deterministic state, so there is no substrate to probe. Evidence is pool property tests plus the seeded §3.2 proof, re-targeted to held-population semantics. |
 | Intercept-mark fail-closure (PROPOSED D-295-R18, R19) | Native metal only, RED first. R18: delete the IP program with a live allocation; no forwarded intercept-marked frame, and no host wildcard listener accepts a guest SYN. R19: with the program present and the listener absent (leg-F closed; killed mode with Cloud Hypervisor alive), no host wildcard listener accepts a guest SYN. The audit reads back the program order, the policy route, and the guard table every second. |
@@ -10627,7 +10859,7 @@ create two sources of truth.
 | `AppState::net_slot_allocator` plus action-shim C3 parameters | **REPLACE in the single cut** | Hold the internal guest-address pool through the one shared-network owner; route every start/restart/stop through its inherited async `overdrive_control_plane::guest_network::GuestNetworkProvisioner`. The control-plane-owned doc-hidden plan/provisioner/owner traits exist only so `overdrive-sim` can substitute that same driven owner through the accepted high-level seams. There is no core error mirror, slot/adopt compatibility path, split provisioner/shared owner, or simulation-owned action owner. |
 | `action_shim::dispatch*` start/restart/stop arms | **EXTEND existing orchestration owner; PROPOSED D-295-R5/R6/R7/R11** | Accepted: enforce cap-before-assignment; sequence lease/provision → VMM READY → accepted Running → exact-generation intercept registration → EXEC; reverse owned effects and release the lease last. PROPOSED: `assign` over the per-server pool is the admission linearization point, with a refusal that writes no row; a below-cap restart admits its successor first and retires the predecessor at the start of its cleanup attempt; the shim waits on the EXEC gate during recovery and then awaits activation between the success event and EXEC; leases retire at the defined cleanup points and count until released; a new row-neutral `ReclaimAllocationNetwork` arm is added. Existing lifecycle rows are unchanged. |
 | `AllocationSpec` / `VmNetworkAttachment` in `overdrive-core` | **USE accepted replacement values** | Carry one all-or-none assignment into `VmDriver`; pass only TAP+MAC into the VMM configuration. No bridge, generation, listener, TCX, nft, or capability state crosses this handoff. |
-| `CloudHypervisorVmm` in `overdrive-host` | **EXTEND adapter, narrow prerequisites; queue-fd handoff PROPOSED D-295-R1 to R3** | Launch directly in the host namespace, removing `ip netns exec` and the `ip` launch-tool prerequisite. PROPOSED: attach one `IFF_VNET_HDR` queue to the down persistent TAP by name, verifying the flags and the down state; map it to child fd 3 via `command-fds` and mark every other descriptor close-on-exec in the child; render `--net fd=[3],mac=…`; close the parent copy after spawn, before any await. Cloud Hypervisor never opens or raises the TAP, so there is no capability grant and no hotplug. Existing confinement, cgroup, clone, reaper, and VMM probe ownership remains; the probe gains a CH ≥ v53.0 version check. ACCEPTED D-295-R22: the same child hook loads the launch seccomp filter after the close, on every launch, so every CH thread is denied the TAP-mutating ioctls; the probe gains a `launch-seccomp` stage. The filter exists for x86_64 only, so no microVM starts on any other target (ruling 10; GH #302). |
+| `CloudHypervisorVmm` in `overdrive-host` | **EXTEND adapter, narrow prerequisites; queue-fd handoff PROPOSED D-295-R1 to R3** | Launch directly in the host namespace, removing `ip netns exec` and the `ip` launch-tool prerequisite. PROPOSED: attach one `IFF_VNET_HDR` queue to the down persistent TAP by name, verifying the flags and the down state; map it to child fd 3 via `command-fds` and mark every other descriptor close-on-exec in the child; render `--net fd=[3],mac=…`; close the parent copy after spawn, before any await. Cloud Hypervisor never opens or raises the TAP, so there is no capability grant and no hotplug. Existing confinement, cgroup, clone, reaper, and VMM probe ownership remains; the probe gains no Cloud Hypervisor version check (user ruling of 2026-09-25). ACCEPTED D-295-R22: the same child hook loads the launch seccomp filter after the close, on every launch, so every CH thread is denied the TAP-mutating ioctls; the probe gains a `launch-seccomp` stage. The filter exists for x86_64 only, so no microVM starts on any other target (ruling 10; GH #302). |
 | `veth_provisioner` host-effect seam plus `overdrive-netlink` | **REPLACE topology; EXTEND adapter mechanisms — D-295-DISTILL-9 approved** | The control-plane owner plans and orders one bridge/TAP attachment. `overdrive-netlink` performs typed bridge/TAP/MAC/master/address/up/down effects; its unchanged IPv4 nft APIs and new semantic bridge-guard module share one private family-aware codec. It gains no workload policy, raw builder, port trait, or subprocess path. |
 | `overdrive-bpf` and `overdrive-dataplane::guest_tcx` | **EXTEND existing BPF homes — D-295-DISTILL-6/12** | Add the SCHED_CLS classifier/maps, D12's exact opaque stateful production lifecycle, and D6's exact typed query/detach/endpoint/counter functions used by the shared-switch owner and S-ND295-37 external actor. Dataplane owns loader/link/adopted handles, semantic projection, private ABI, sorted query results, and every raw aya source; control-plane sees neither raw type nor layout. The existing XDP/cgroup-BPF Service dataplane remains separate. |
 | `MtlsIntercept` + `MtlsInterceptWorker` in `overdrive-worker` | **EXTEND existing intercept owner — F-03/D-295-DISTILL-7 approved** | Keep the four mandatory constructor dependencies and public methods. The module-private `CapabilityRegistry` owns checked generation, Pending reservations, atomic activation, RAII claims, publication fence, Retiring wait/drain/complete, and address-reuse exclusion. Continue calling unchanged `MtlsEnforcement`, `MtlsResolve`, `IdentityRead`, and intercept ports. |
