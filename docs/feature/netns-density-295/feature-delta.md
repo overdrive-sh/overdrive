@@ -2950,7 +2950,9 @@ the read-back is new.
 
 1. Rejects duplicate or zero-port destinations before any I/O.
 2. Requires the host registry's recorded identity to equal the observed
-   program; otherwise it is a typed refusal with no mutation.
+   program; otherwise it is a typed refusal with no mutation. With no recorded
+   identity at all, the refusal is `SharedProgramNotConverged` (§ *Driven port
+   — intercept element precondition (DISTILL gap B-8)*).
 3. Deletes, in one atomic batch, exactly those members of the requested set
    that are currently present. The requested set is `{managed(source),
    outbound(source)} ∪ {inbound(d)}`.
@@ -3820,6 +3822,214 @@ Alternatives compared on evidence:
 (`.claude/rules/rust.md`, "Async effects require async APIs").
 
 *(Pinned 2026-09-25 on evidence (DISTILL gap B-7), under the user's ruling
+that technical decisions are settled on evidence.)*
+
+### [REF] Driven port — intercept element precondition (DISTILL gap B-8) — pinned 2026-09-26
+
+**The defect, from the code and the native run.** DISTILL's phase-C run
+(`distill/red-classification.md`, phase C, blocker 4, command C-14) found the
+two active S-ND295-70 equivalence bodies
+`both_installs_hand_back_a_guard_that_releases_cleanly` and
+`re_installing_the_same_capture_converges_and_both_guards_release_cleanly`
+failing on the host adapter only
+(`mtls_intercept_equivalence.rs:436`, `:502`). The adapters diverge on the
+same call sequence:
+
+- `HostMtlsIntercept` holds a recorded program: the program identity and the
+  two listener target ports. Only a successful `converge_shared` records it
+  (`mtls_intercept_port.rs:1055-1056`), and the `Drop` of any node guard clears
+  it (`:80-92`). With nothing recorded, `install_outbound` refuses with
+  `NftRuleInstallFailed { op: "shared-owner-required", source }`, whose source
+  is a constructed `NetlinkError` wrapping `NotConnected` (`:1066-1086`). The
+  shared helpers repeat the check under a second op string,
+  `"shared-element-owner"` (`:661-674`, `:686-698`).
+- With nothing recorded, `HostMtlsIntercept::install_inbound` falls back to
+  `install_inbound_tproxy` (`:1088-1098`). That is the retired per-allocation
+  rule installer, which C-295-C and ADR-0125 forbid. This fallback is its only
+  production caller.
+- `SimMtlsIntercept::install_outbound` and `install_inbound` check neither the
+  recorded program nor the passed leg port. They record members whatever came
+  before (`overdrive-sim/src/adapters/mtls_intercept.rs:650-684`).
+  `SimMtlsIntercept::remove_allocation_elements` does refuse without a program,
+  with a copy of the constructed source (`:496-509`, `:724-726`, `:743`).
+- The trait rustdoc states no such precondition (`mtls_intercept_port.rs:324-413`).
+  Its install error list names four variants of the retired per-rule installer
+  (`NftRuleInstallFailed`, `NftHandleRecoveryFailed`, `IpRuleAddFailed`,
+  `IpRouteLocalAddFailed`, `:341-350`). It omits the two the host returns,
+  `SharedListenerPortMismatch` and `NftElementUpdateFailed`.
+
+The refusal is observable through the trait, so it is contract, not substrate
+(`.claude/rules/development.md` § "Trait definitions specify behavior";
+ADR-0076 §1a). The sim also falls short of D15's rule that it "implements the
+same observable target identity and fault partitions" (§ *C-295-C*).
+
+No production path reaches the refusal under this pin, so this is a contract
+gap, not a production failure:
+
+- `start_shared_owner` converges before it publishes the owner
+  (`mtls_intercept_worker.rs:2421-2471`).
+- `start_shared_allocation` refuses with `SharedOwner` before any install when
+  no owner is published (`:2819-2830`), and passes the owner's recorded ports
+  (`:2856-2866`).
+- The per-allocation branch of `start_alloc` never installs. It runs only when
+  `spec.network` is `None` (`:2672-2674`), and its install loop requires
+  `Some` (`:2794`).
+- The worker never drops a published node guard. It relinquishes it at
+  shutdown (`:3213-3216`) and at runtime handover (R15).
+- Today only boot calls `converge_shared`. R15's runtime repair adds runtime
+  calls, and the failure clause below keeps the record across a failed one.
+  That is R15's stated intent: "the host's recorded targets and program stay
+  intact".
+- R16 composes the worker in every `serve`.
+
+Today the host withdraws the record when a `converge_shared` fails after it has
+acquired the program: its guard drops on the error return
+(`mtls_intercept_port.rs:1052-1054`, `:80-92`). Only boot reaches that path
+today, and at boot no record exists yet, so no shipped behaviour changes.
+
+**Pinned contract.**
+
+*The recorded program.* An adapter holds a recorded program from the moment a
+`converge_shared(prior, leg_f, leg_c)` call on it returns `Ok(guard)`. The
+recorded targets are `leg_f.port()` and `leg_c.port()`.
+
+- A later successful `converge_shared` replaces the record.
+- A `converge_shared` that returns `Err` leaves the record exactly as it was
+  before the call, whatever the error.
+- A failing call that adopted, without writing, a program equal to the record
+  it started with deletes nothing, because that program belongs to the
+  published owner's guard (R15). A failing call that created or replaced a
+  program, or adopted one while the adapter held no record (a fresh boot),
+  removes it conditionally, as D15 states for a failed startup.
+- The `Drop` of a node guard that `converge_shared` returned withdraws the
+  record, whichever convergence returned the guard.
+- A guard whose `Drop` never runs (the worker's sealed relinquish,
+  `std::mem::forget`) never withdraws it. This is why R15 relinquishes a
+  superseded guard rather than dropping it.
+- `HostMtlsIntercept` clones share one record.
+
+*Guard ordering.* The caller drops a node guard only after every element guard
+from the same adapter has been dropped or relinquished. Relinquishing a node
+guard never affects the record and is unconstrained: R15's handover
+relinquishes one while element guards are live. The worker drops a node guard
+only for an unpublished owner, which holds no element guard (D15). If a
+caller breaks the rule:
+
+- each later element-guard `Drop` still never panics and never errors;
+- it never removes a member another live guard holds;
+- which of that guard's members remain is not specified;
+- the next member convergence (R12's boot clear, R15's
+  `converge_allocation_elements`) restores the expected set.
+
+*Which methods require it:*
+
+| Method | Requires a recorded program | Without one |
+|---|---|---|
+| `bind_transparent` | No | unchanged (B-7) |
+| `converge_shared` | No; it establishes the record | unchanged (D15) |
+| `observe_shared`, `observe_shared_state` | No; both are observations of the owned kernel state | unchanged (D15, R10) |
+| `install_outbound` | Yes | `SharedProgramNotConverged` |
+| `install_inbound` | Yes | `SharedProgramNotConverged` |
+| `remove_allocation_elements` | Yes | `SharedProgramNotConverged`, after argument validation |
+| `converge_allocation_elements` | No. With no record it takes R10's fresh-process branch; R12 boot step 6.2 calls it before step 6.5's `converge_shared`. | unchanged (R10, R12) |
+
+*Ordered refusal partition of `install_outbound(source_addr, leg_f_port)` and
+`install_inbound(virt, leg_c_port)`* (leg F and leg C respectively):
+
+1. No recorded program: `SharedProgramNotConverged`.
+2. The passed port differs from the recorded target of that leg:
+   `SharedListenerPortMismatch { leg, expected, actual }`, where `expected` is
+   the recorded port and `actual` the passed one (PORT-295-C: "every install
+   verifies its passed port equals that target"; ADR-0125).
+3. The lower element effect fails: the insert, its mandatory read-back, or a
+   kernel-observed partial group (DESIGN-02-03: "A partial kernel group is a
+   conflict"). The error is `NftElementUpdateFailed { set, operation, key,
+   source }`, carrying the real lower `NetlinkError`.
+
+These three are the complete `Err` partition of both methods on every
+adapter:
+
+- The four retired-installer variants are not install errors. The routing
+  prerequisites belong to `converge_shared`, and no per-allocation rule
+  exists.
+- A process-local partial token group cannot occur, because a group's tokens
+  are acquired and released together. It has no place in the partition.
+- Refusals 1 and 2 perform no I/O, acquire nothing, and change no
+  process-local element token.
+
+*Ordered refusal partition of `remove_allocation_elements(source_addr,
+destinations)`:*
+
+1. A duplicate or zero-port destination: R10's argument refusal, unchanged.
+2. No recorded program: `SharedProgramNotConverged`.
+3. A recorded identity that differs from the observed program: R10's typed
+   refusal, unchanged.
+4. Batch or read-back failure: R10's errors, unchanged.
+
+Refusals 1 to 3 perform no mutation and leave every element token untouched.
+
+*One added `InterceptError` variant* (`overdrive_worker::mtls_intercept`):
+
+```rust
+#[error("shared mTLS intercept program has not been converged by this process; allocation intercept elements cannot be installed or removed")]
+SharedProgramNotConverged,
+```
+
+It is source-less because no lower operation ran, as with
+`PostconditionMismatch`. It replaces the host's constructed-source refusals
+(three sites: `:661-674`, `:686-698`, `:1076-1085`) and the sim's copies. The
+worker's error mapping needs no new arm:
+
+- It reaches `MtlsInterceptInstallError::OutboundTproxyInstall` for an
+  outbound install and `Inbound` for an inbound one.
+- It reaches `MtlsInterceptStopError::ElementRemoval { source }` for a removal.
+- `stage()` strings are unchanged.
+
+*Simulation adapter.* `SimMtlsIntercept` holds the same record and enforces
+the same partitions, in the same order:
+
+- A successful `converge_shared` records the two target ports. A scripted
+  `converge_shared` fault leaves the record as it was, as the host's `Err`
+  does. The `Drop` of its node guard withdraws the record.
+- `install_*` check the record, then the passed port, and only then an armed
+  install fault, which stands for refusal 3. A scripted fault therefore never
+  produces an error the host could not return in that state. Refusal 3's
+  scripted shape is DISTILL's test support.
+- `remove_allocation_elements` returns `SharedProgramNotConverged` after
+  argument validation.
+- One sim instance models one process. A harness that simulates a restart on
+  the same instance keeps the earlier record, as
+  `overdrive-sim/src/invariants/netns_density_boot_order.rs:155-163` does.
+  There the carried-over record equals the seeded program, so R12 step 6.2's
+  `converge_allocation_elements` has the same outcome as on a fresh process.
+  Step 6.5's `converge_shared` then replaces the record before any install or
+  removal.
+
+This pin does not change what a node guard's `Drop` does to the owned program;
+that is D15's conditional delete. D15's sim contract (§ *C-295-C*: the sim
+"implements the same observable target identity") owns the remaining
+difference. The sim's node guard deletes nothing, so after a node-guard drop
+with no members, the host's `observe_shared` returns `None` and its
+`converge_allocation_elements` returns `Ok(None)`, while the sim's still
+report the program.
+
+**Lifecycle Gate Ownership.** Not applicable. The refusal is a port
+precondition that the worker's existing owner-publication check already
+implies (`start_shared_allocation`, `mtls_intercept_worker.rs:2819-2830`). No
+lifecycle state gains, loses, or moves a gate.
+
+**Alternatives compared on evidence:**
+
+| Alternative | Why rejected |
+|---|---|
+| Keep the refusal host-only and document it as a `HostMtlsIntercept` substrate note | The same call sequence returns `Ok` on one adapter and `Err` on the other, so the trait can observe it. A contract that one adapter breaks is a contract gap (ADR-0076 §1a). |
+| Reuse `NftRuleInstallFailed { op, source }` | No netlink operation ran, so the source would be fabricated (PORT-295-C and ADR-0125 forbid it). The code already spells the op two ways (`shared-owner-required`, `shared-element-owner`), so a caller could branch only on a string. |
+| Reuse `ChainAbsent` | It reports a kernel observation: `nft list chain` found no table. This refusal is process-local. The kernel may hold a retained program while the adapter has recorded none, as at a fresh boot before R12 step 6.5. |
+| Reuse `PostconditionMismatch { expected, observed }` | There is no expected identity to report. One would have to be fabricated. |
+| Make the precondition unrepresentable: `converge_shared` returns a handle that carries the element methods | Changes four accepted C-295-C/R10 signatures and every `MtlsIntercept` implementation. The worker's sealed relinquish forgets the guard, so the handle would need a second owner. The state is unreachable in production, so a typed refusal suffices. |
+| Keep `install_inbound`'s fallback to the per-rule installer | C-295-C and ADR-0125 forbid it. |
+
+*(Pinned 2026-09-26 on evidence (DISTILL gap B-8), under the user's ruling
 that technical decisions are settled on evidence.)*
 
 ### [REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24
@@ -5166,6 +5376,35 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     intercept listener (DISTILL gap B-7)* (pinned 2026-09-25): the simulation
     listener binds nothing, and a sim-composed worker does not force a test
     into the integration lane. ADR-0076 states the amendment explicitly.
+37. **`MtlsIntercept` install preconditions and error surface (the trait
+    rustdoc).** The trait says (`mtls_intercept_port.rs:329-331`, `:341-350`):
+    *"`agent_leg_f_port` is the NON-ZERO bound port of a live leg-F listener
+    obtained from `bind_transparent`"*, and *"Any install failure surfaces as
+    one of the decomposed nft/ip install errors —
+    `InterceptError::NftRuleInstallFailed` (op-keyed, errno-carrying),
+    `InterceptError::NftHandleRecoveryFailed`, or the shared-routing-infra
+    `InterceptError::IpRuleAddFailed` / `InterceptError::IpRouteLocalAddFailed`."*
+    (rustdoc links removed).
+    `install_inbound` states the same.
+    DESIGN-02-03 says: *"`HostMtlsIntercept` maps insert/delete/read-back
+    stages to the already-approved `NftElementUpdateFailed` vocabulary and adds
+    no error variant."*
+    Replaced by § *Driven port — intercept element precondition (DISTILL gap
+    B-8)* (pinned 2026-09-26):
+    - Both installs, and `remove_allocation_elements`, require the program a
+      successful `converge_shared` recorded.
+    - Dropping a node guard withdraws the record. A `converge_shared` that
+      returns `Err` leaves the record as it was.
+    - An install's passed port must equal that leg's recorded target.
+    - An install's complete ordered error partition is
+      `SharedProgramNotConverged`, then `SharedListenerPortMismatch`, then
+      `NftElementUpdateFailed`.
+    - DESIGN-02-03's sentence still holds for the insert, delete, and
+      read-back stages. The one added variant is the precondition refusal,
+      which is not a stage.
+    ADR-0076 § 1a lists what the trait states; its Rev 11 amendment adds the
+    precondition and the node guard's effect on the record. ADR-0125 leaves
+    exact error vocabularies to this feature delta, so it needs no amendment.
 
 ### [REF] Reuse Analysis — replacement delta
 
@@ -5185,6 +5424,7 @@ Each superseded contract is quoted verbatim, followed by its replacement.
 | Placement input | The four ADR-0086 read-ports | **CREATE** one narrow read-port. No existing port exposes lease state. |
 | Cleanup retry for leased Failed/Terminated allocations no other action owns | `StopAllocation` and `FinalizeFailed` replay; `vm-reclamation` | **CREATE** one row-neutral action, computed on every reconcile path. The existing actions would rewrite rows, and `vm-reclamation` owns VMM residue, not lease residue. |
 | Grouped element release | Netlink `delete_shared_ip_intercept_elements_atomically`; `SharedElementGuard::drop` | **EXTEND** the `MtlsIntercept` port over the existing netlink effect, with convergent semantics. |
+| Element-method refusal when no program is recorded (B-8) | `NftRuleInstallFailed`, `ChainAbsent`, `PostconditionMismatch`; the host's constructed-source refusals (`mtls_intercept_port.rs:661-674`, `:686-698`, `:1076-1085`) | **CREATE** one source-less `InterceptError` variant. Each existing variant either needs a fabricated source or identity, or reports a kernel observation rather than process-local state. |
 | Intercept listener a simulation can implement without a socket (B-7) | `std::net::TcpListener` from `bind_transparent`; `tokio::net::TcpListener`; the existing `make_transparent_listener`, `accept_outbound_and_recover_orig_dst`, and `accept_inbound_leg` (`mtls_intercept.rs:333`, `:1093-1136`) | **CREATE** one port-owned `InterceptListener` trait with its accepted-connection value and two-variant error; the host implementation reuses `make_transparent_listener` for the socket. Both listener types are rejected: each exists only as a bound kernel socket. The two accept helpers are the host's substrate, not a boundary a simulation can implement. |
 | Stop-error fan-out to many callers (B-6) | Today's `Clone` stored result (`mtls_intercept_worker.rs:1884-1927`) | **REUSE** the stored-result-and-clone mechanism; the two typed leaf sources are held in `Arc` so the R10 enum stays `Clone`. |
 | Boot and runtime member convergence | Netlink `clear_shared_ip_intercept_elements_atomically`, which has zero callers | **REPLACE** it with a declarative converge-to-expected, and delete clear. |
@@ -5499,6 +5739,148 @@ DESIGN created no issue. No other deferral is proposed.
   - *FD line references.* This change adds text above several cited spans, so
     FD line citations in `distill/` and the DISTILL sections that point below
     § *Charter, rulings, and evidence* shift; DISTILL re-anchors them.
+- **Consequences of the 2026-09-26 pin B-8 (element precondition) for DISTILL
+  and DELIVER:**
+  - *DELIVER, host.* The step that lands the pin changes both adapters
+    together, no later than 05-01 (S-ND295-70's step). Two clauses land
+    later: the removal clause with `remove_allocation_elements` at 07-01, and
+    the failed-converge clause no later than the step that adds R15's runtime
+    `converge_shared` call. The work:
+    - adds `InterceptError::SharedProgramNotConverged` and returns it from
+      every host check for a missing record (`mtls_intercept_port.rs:1071-1085`,
+      `:661-674`, `:686-698`);
+    - keeps the record across a `converge_shared` that returns `Err`. Today a
+      failure after the program is acquired drops the call's own guard, and
+      that guard's `Drop` clears the record (`:1052-1054`, `:80-92`). A
+      failing call that adopted the recorded program without writing deletes
+      nothing. Every other failing call keeps D15's conditional cleanup;
+    - removes the process-local partial-group arm from the install partition
+      (`:712-731`). It constructs a `NetlinkError`, although no netlink
+      operation ran, and the state it checks cannot occur;
+    - deletes `install_inbound`'s fallback to `install_inbound_tproxy`
+      (`:1093-1097`). That function then has no production caller and leaves
+      with its tests in the #222 single cut (Changed Assumption 23), as
+      `install_outbound_tproxy` already has none;
+    - updates the trait rustdoc of `install_outbound`, `install_inbound`, and
+      `remove_allocation_elements` with the precondition and the ordered
+      partitions. The retired-installer variants leave the install error
+      lists (`:341-350`);
+    - updates the stale adjacent docs: the module doc's "allocation methods
+      delegate to the existing `crate::mtls_intercept` free functions"
+      (`:10-13`); `InterceptGuard`'s "acquires one `nft` rule … removes that
+      rule by handle" (`:57-60`); the `OutboundTproxyInstall` and `Inbound`
+      rustdoc naming the retired installers and variants
+      (`mtls_intercept_worker.rs:169-180`, `:198-212`); and the `stage()`
+      catch-all comment (`:861-866`). The constructed-source "empty element
+      group" arm (`mtls_intercept_port.rs:744-747`) is internal structure for
+      the DELIVER reviewer.
+  - *DELIVER, sim (same step).* `SimMtlsIntercept`:
+    - records the converged ports. A scripted `converge_shared` fault leaves
+      the record as it was;
+    - withdraws the record when a node guard drops, so its module doc's "the
+      guard is inert" (`overdrive-sim/src/adapters/mtls_intercept.rs:30`)
+      changes;
+    - checks the record, then the port, then the armed fault in `install_*`
+      (`:650-684`). This makes stale the module doc's "each method's outcome
+      is a pure function of its armed fault" (`:43-44`) and the type doc's
+      "`install_*` ⇔ any variant" pairing (`:125-139`);
+    - returns the new variant from `remove_allocation_elements`, retiring
+      `program_not_published` at all three uses (`:496-509`, `:724-726`,
+      `:743`).
+  - *DISTILL, equivalence harness*
+    (`overdrive-worker/tests/integration/mtls_intercept_equivalence.rs`).
+    - The two failing bodies, `both_installs_…` (`:415-450`) and
+      `re_installing_…` (`:480-518`), take the production call sequence. For
+      each adapter:
+      1. sweep, then `prior = observe_shared()`;
+      2. bind F and C at port 0;
+      3. `converge_shared(prior, F, C)`;
+      4. install with `F.port()` and `C.port()`;
+      5. drop the allocation guards, then the node guard, then the listeners.
+         The allocation guards drop first because the host node guard's
+         `Drop` is a conditional delete that refuses non-empty sets.
+    - S-MIF-12 converges once and installs twice. The C-14 failure is the
+      missing converge, so the retargeted bodies are expected to pass today on
+      both adapters. The host's converge-then-install path already passes in
+      the classification run: `install_inbound` in
+      `mtls_intercept_install.rs::the_host_listener_reports_a_redirected_inbound_virtual_address_as_local`,
+      and both installs through `MetalSharedIntercept` in
+      `outbound_enforce_substrate_splice.rs`.
+    - Two clauses are added on both adapters. The first is the pre-converge
+      refusal: on a fresh adapter with bound legs, `install_outbound` and
+      `install_inbound` each return `SharedProgramNotConverged`, and on the
+      host the owned tables are unchanged. The second is the port mismatch: on
+      a converged adapter, an install with a port other than the recorded one
+      returns `SharedListenerPortMismatch { leg, expected, actual }`. Both are
+      RED until the landing step: the host returns `NftRuleInstallFailed` for
+      outbound and installs a per-virt rule for inbound, and the sim returns
+      `Ok`. Each carries a reasoned pending marker naming that step.
+    - The module's clause table (`:14-24`) gains the two clauses. Its
+      statement that each host method is a one-line delegation (`:62-64`) no
+      longer holds.
+    - `HostVethFixture`'s veth no longer serves `install_outbound`, which is
+      keyed by source address. Its sweep (`clean_shared_infra`,
+      `inbound_tproxy_harness.rs:107-122`) removes the fwmark rule, the local
+      route, and `ip overdrive-mtls`, and must also remove the R18 guard table
+      once R18 lands.
+  - *DISTILL, sim self-tests that install without converging*
+    (`overdrive-sim/src/adapters/mtls_intercept.rs::tests`). Each converges
+    first, with legs at the ports it installs with (4001 and 4002 today), or
+    it fails once the sim enforces the pin:
+    - active `armed_fault_surfaces_as_the_real_substrate_error` (its install
+      rows through `drive_expecting_err`, `:889-910`, `:985-995`);
+    - active `clear_faults_disarms_every_slot_and_is_idempotent`
+      (`:1043-1063`);
+    - active `arming_one_slot_leaves_the_others_on_their_success_arms`
+      (`:1090-1120`);
+    - pending `an_install_fault_leaves_bind_on_its_success_arm`
+      (`:1593-1611`). Its install rows would otherwise pass on the
+      precondition refusal instead of the armed fault.
+    - Their install fault rows script shapes the pinned install partition does
+      not contain: `NftRuleInstall` and `IpRuleAdd`, and `TransparentListener`
+      on `install_inbound` (`:877-881`). The element-update shape the sim
+      scripts instead is DISTILL's test support.
+    - The sim's ordering needs a self-test that tells the outcomes apart. With
+      an install fault armed, a call before any converge returns
+      `SharedProgramNotConverged`. After a converge, a call with the wrong
+      port returns `SharedListenerPortMismatch`, not the armed fault.
+    - The failed-converge clause needs a sim self-test: converge, then arm a
+      `converge_shared` fault and take its `Err`. `install_outbound` at the
+      recorded port still returns `Ok`, and removal is not refused for want of
+      a record. On the host, the post-acquisition failure comes only from the
+      real fwmark-rule and local-route ensures, which the private seam does
+      not cover. No deterministic real-kernel stimulus for it is known, so the
+      host's evidence lane is DISTILL's to name, or to record as unavailable.
+  - *DISTILL, removal bodies.*
+    - Row 2 of `shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`
+      (`:454-469`) removes through a fresh `HostMtlsIntercept`. That is now
+      the precondition case, not the recorded-versus-observed case its comment
+      names. It asserts only `is_err()` and unchanged tables, so it stays
+      valid, and can assert `SharedProgramNotConverged`. R10's
+      recorded-versus-observed branch loses its only row and needs its own: a
+      converged adapter whose kernel program was replaced out of band.
+    - `mtls_intercept_port.rs::shared_program_rollback_acceptance::remove_allocation_elements_deletes_only_present_requested_members`
+      (`:1995-2039`) runs on an unconverged host. Argument validation comes
+      first, so its oracle stays valid. It asserts only `is_err()`, which both
+      refusals satisfy. To pin the order it asserts that the error is not
+      `SharedProgramNotConverged`.
+  - *Test-local doubles.* These model the same refusal with constructed
+    `NftRuleInstallFailed` sources, or skip the record check. Aligning them is
+    DISTILL's choice:
+    - `S19Intercept` (`overdrive-control-plane/src/lib.rs:2361-2394`,
+      `:2422-2445`);
+    - `TestSharedIntercept::program_not_published`
+      (`mtls_intercept_worker.rs:4511-4522`);
+    - `RecordingSharedIntercept`
+      (`overdrive-worker/tests/integration/netns_density_shared_owner.rs:732-750`,
+      `:765`, `:820`), with the shared constructed-source helper at `:552`;
+    - `ActivationBarrierIntercept` (`netns_density_shared_owner.rs:1117-1216`);
+    - `ElementFaultIntercept`
+      (`overdrive-control-plane/tests/integration/shared_element_cleanup_failure.rs:416-457`).
+  - No other body calls an element method before converging. Every worker
+    path converges in `start_shared_owner` first, and the boot-order invariant
+    converges before it seeds members
+    (`overdrive-sim/src/invariants/netns_density_boot_order.rs:155-163`).
 - **`.claude/rules/reconcilers.md`** § "Deferred Bar-2 promotions" names
   GH #234 as the home of the shared inbound-TPROXY routing infrastructure. When
   #295 lands that bullet becomes stale (GH #234 is superseded and closes), and
@@ -7841,7 +8223,11 @@ simulation adapter binds no socket (§ *Driven port — intercept listener
 `observe_shared` and `converge_shared`'s pre-check see the program identity
 whether or not dynamic members exist, while every program write keeps refusing
 non-empty sets. See § *Driven port — intercept element release, member
-convergence, boot clear*.
+convergence, boot clear*. `install_outbound`, `install_inbound`, and
+`remove_allocation_elements` require the program recorded by a successful
+`converge_shared`, and refuse without it with `SharedProgramNotConverged`
+(§ *Driven port — intercept element precondition (DISTILL gap B-8)*, which
+also pins each install's complete ordered error partition).
 
 The `Ipv4Addr` parameter above is the already-accepted public contract, not a
 compatibility choice. The live pre-cut `install_outbound(&str, ...)` signature
@@ -9498,6 +9884,11 @@ PostconditionMismatch {
     observed: Option<InterceptPostcondition>,
 },
 ```
+
+The closed vocabulary also contains the source-less
+`SharedProgramNotConverged`. `install_outbound`, `install_inbound`, and
+`remove_allocation_elements` return it when no program is recorded
+(§ *Driven port — intercept element precondition (DISTILL gap B-8)*).
 
 Semantic mismatch contributes no fabricated source and remains structured; an
 outcome may still retain a genuine lower source from an earlier desired read.

@@ -7,7 +7,9 @@ applied in place, mandated by ADR-0077 § D6); amended 2026-09-01 by
 ADR-0089 §7 for the action-shim allocation-lifecycle boundary only; amended
 2026-09-16 by the user-authorized GH #295 solution-review F-03 remediation for
 node-shared listener ownership only; amended 2026-09-25 by the GH #295
-interface-contract pin B-7 for the listener type only (Rev 10).
+interface-contract pin B-7 for the listener type only (Rev 10); amended
+2026-09-26 by the GH #295 interface-contract pin B-8 for the allocation element
+methods' precondition only (Rev 11).
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -156,6 +158,28 @@ the accepted-descriptor state it has today. The port itself stays synchronous
 unbounded wait for I/O. Exact signatures and behaviour are single-sourced in
 the #295 feature delta (§ *Driven port — intercept listener (DISTILL gap
 B-7)*).
+
+**Rev 11 changes** (2026-09-26, GH #295 interface-contract pin B-8, settled on
+evidence under the user's ruling that technical decisions are settled on
+evidence): the allocation element methods gain a precondition.
+
+- `install_outbound`, `install_inbound`, and `remove_allocation_elements`
+  require the program that a successful node-global converge recorded on the
+  same adapter. Without it they refuse with one source-less typed error.
+- The record is withdrawn when a node guard is dropped. A failed converge
+  leaves it as it was.
+- An install's passed listener port must equal the recorded target of its leg.
+
+The reason: without the record, the host adapter refused outbound installs
+and fell back to the retired per-rule installer for inbound ones, while the
+simulation adapter installed regardless. The equivalence harness observed that
+divergence, and the trait did not state it.
+
+One statement below is superseded: § 1a's list of what the trait states now
+also includes this precondition and the node guard's effect on the adapter's
+record. Exact signatures, the error variant, and the ordered error partitions
+are single-sourced in the #295 feature delta (§ *Driven port — intercept
+element precondition (DISTILL gap B-8)*).
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -366,7 +390,10 @@ identical F/C targets and returns one guard owning only shared objects; audit is
 read-only; allocation installs return guards owning only their declared
 elements; guard `Drop` neither panics nor errors; and nothing acquired by a
 failing call outlives it. *(Rev 10: the listener is the port's
-`InterceptListener`; see Status.)*
+`InterceptListener`; see Status.)* *(Rev 11: the element methods also require
+the program a successful converge recorded on the same adapter. A dropped node
+guard withdraws that record, a failed converge leaves it as it was, and an
+install's listener port must equal its leg's recorded target; see Status.)*
 
 This matters because the simulation adapter binds a plain listener and appends
 no rule, **both by necessity** (§ Decision 5, § Decision 2). *(Rev 10: the
