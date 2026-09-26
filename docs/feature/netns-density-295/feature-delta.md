@@ -1630,7 +1630,11 @@ surface is added. A mismatch is reported through the one fact R21 adds (exact
 shape in § *Driven port — TAP egress guest-MAC delivery*). A changed host-side
 MAC is per-allocation damage, handled by R14 exactly like an owner-uid or
 persistence change: only that VM is killed, and its lifecycle tears it down.
-The audit does not repair the MAC in place. This detection complements the
+The audit does not repair the MAC in place. The recorded MAC is the address
+the kernel assigned when the TAP was created, and it stays unchanged for the
+TAP's lifetime on a healthy host: the owner never writes a TAP's address, and
+the host's link manager is excluded by REQ-295-LINKMAC (§ *Managed-link
+address from creation, and the host link-address policy*). This detection complements the
 structural delivery control in D-295-R21 / ADR-0142. Under D-295-R22 the VMM
 cannot issue `SIOCSIFHWADDR` at all, so the read-back detects a change made
 through a gap in the launch filter or by another process. The same check reads
@@ -1779,7 +1783,9 @@ D-295-R5 adds no new operation, fact, or error variant. `TapActivation`,
 `TapQuiescence`, and `SharedGuestNetworkAudit` are the only new value types on
 this port. D-295-R21 adds exactly one fact variant, `GuestNetworkFact::TapHostMac`
 (§ *Driven port — TAP egress guest-MAC delivery*), which `activate` and the
-audit use for a host-side MAC mismatch. D-295-R22 adds exactly one more,
+audit use for a host-side MAC mismatch. The startup probe uses it for its
+scratch TAP (§ *Managed-link address from creation, and the host link-address
+policy*). D-295-R22 adds exactly one more,
 `GuestNetworkFact::TapDebugMsgMask`, which provision, `activate`, and the audit
 use for a non-zero debug message mask (§ *Driven port — VMM launch seccomp
 filter*).
@@ -2276,6 +2282,10 @@ netlink `IFLA_ADDRESS` set marks the device `NET_ADDR_SET`
 (`net/core/dev.c:10055`), which makes `br_stp_recalculate_bridge_id` return
 early (`br_stp_if.c:269`) and `NETDEV_PRE_CHANGEADDR` on a port a no-op
 (`br.c:79-80`). No new control is needed for it; this DESIGN records the fact.
+The bridge carries `NET_ADDR_SET` from its creation, because it is created with
+its address (§ *Managed-link address from creation, and the host link-address
+policy*). No interval exists in which its address is unset, so this argument
+does not depend on the reassert at each membership change.
 
 **Prevention at the source is D-295-R22, beside this control (research
 addendum 2 B4.4; user ruling 9).** The launch seccomp filter (ADR-0143) denies
@@ -2462,7 +2472,8 @@ pub enum GuestNetworkOperation {
 // public
 pub enum GuestNetworkFact {
     // every existing variant unchanged, plus:
-    /// A TAP's host-side MAC: expected is the MAC recorded at provision,
+    /// A TAP's host-side MAC: expected is the MAC recorded at provision (for
+    /// the startup probe's scratch TAP, the MAC read at its creation),
     /// observed is the live one.
     TapHostMac { ifindex: u32, mac: Option<[u8; 6]> },
 }
@@ -3902,11 +3913,41 @@ recorded targets are `leg_f.port()` and `leg_c.port()`.
   program, or adopted one while the adapter held no record (a fresh boot),
   removes it conditionally, as D15 states for a failed startup.
 - The `Drop` of a node guard that `converge_shared` returned withdraws the
-  record, whichever convergence returned the guard.
+  record, whichever convergence returned the guard. Its effect on the owned
+  program is D15's conditional delete, on every adapter: it removes the
+  program only when the program still equals the identity that guard's
+  convergence established and all three member sets are empty (the host's
+  strict observation refuses non-empty sets, `nft.rs:3746-3751`).
 - A guard whose `Drop` never runs (the worker's sealed relinquish,
   `std::mem::forget`) never withdraws it. This is why R15 relinquishes a
   superseded guard rather than dropping it.
 - `HostMtlsIntercept` clones share one record.
+
+*Consistency with recovery (R13, R15; E11, E13).* The two failure clauses
+above follow from R15, and neither changes what the accepted recovery contract
+lets an operator observe:
+
+- R15's runtime repair calls `converge_shared` only at the recorded targets,
+  and a failed attempt is followed by another until the recovery deadline
+  (R13, R14). R15 states that the published owner's program and the host's
+  recorded targets stay intact. Keeping the record across a failed attempt
+  keeps every install and removal in between checked against that program. A
+  withdrawn record would refuse them all with `SharedProgramNotConverged` while
+  the published guard still holds the program.
+- R15's equal-identity branch writes no program, so a failing attempt on that
+  branch has changed none. With live members the strict delete refuses
+  anyway, so the clause matters for a repair that runs with no allocation.
+  There, deleting the program would turn a policy-route or guard-table loss
+  into a program loss and move the next attempt to the Absent branch,
+  contrary to E13 (the repair restores exactly the deleted object). It would
+  also leave an unrecovered deadline's fail-stop without the constant program
+  that D15's sealed shutdown keeps for the next boot.
+- A failing Absent-branch attempt removes the program it created, by D15's
+  conditional delete. The table's deletion took its sets with it, so the next
+  attempt observes absence and creates the program again.
+- E11 ("host targets survive, and a later `install_outbound` succeeds") and
+  E13 ("the recorded targets are intact") therefore hold after every failed
+  attempt, not only after the successful one.
 
 *Guard ordering.* The caller drops a node guard only after every element guard
 from the same adapter has been dropped or relinquished. Relinquishing a node
@@ -3986,11 +4027,53 @@ worker's error mapping needs no new arm:
 - `stage()` strings are unchanged.
 
 *Simulation adapter.* `SimMtlsIntercept` holds the same record and enforces
-the same partitions, in the same order:
+the same partitions, in the same order. It also models the owned program's
+presence and identity with the host's transitions, so that after the same
+call sequence `observe_shared`, `observe_shared_state`, and
+`converge_allocation_elements` report what the host's report. This is D15's
+rule that the sim "implements the same observable target identity and fault
+partitions" (§ *C-295-C*). It writes no nft state. The armed
+`converge_shared` fault stands only for the host's failures before any write:
+the observation, as `NftRuleInstallFailed { op: "observe-shared" }`, and
+likewise refuses without effect. The sim does not model the host's failures
+after a write (the replacement read-back, rollback, and the route ensures).
+On the host those remove a program the call created or replaced; D15 proves
+them source-locally.
 
-- A successful `converge_shared` records the two target ports. A scripted
-  `converge_shared` fault leaves the record as it was, as the host's `Err`
-  does. The `Drop` of its node guard withdraws the record.
+- `converge_shared(prior, leg_f, leg_c)` takes the host's order
+  (`mtls_intercept_port.rs:1038-1057`):
+  1. Either port is zero: `NftRuleInstallFailed { op: "shared-ip-expected",
+     source }`, with the host's source shape, `NetlinkError::nft(
+     "shared-ip-identity", ..)` of kind `InvalidData` (`nft.rs:3179-3185`).
+  2. An armed `converge_shared` fault: its error.
+  3. The modeled program differs from `prior`: `PostconditionMismatch {
+     expected, observed }`. `expected` is `prior`, or the requested identity
+     when `prior` is `None`; `observed` is the modeled program.
+  4. The modeled program equals the requested identity: it is adopted and
+     nothing is written.
+  5. A modeled program is present, differs from the requested identity, and
+     any member exists: `NftSharedReplaceFailed { prior, requested, source }`,
+     where `prior` is the modeled program and the source has the host's
+     strict-observation shape, `NetlinkError::nft("shared-ip-observe", ..)` of
+     kind `InvalidData` (`nft.rs:3981`, `:3746-3751`, `:3322-3324`). R15: "no program
+     create or target replacement can ever run over live members".
+  6. Otherwise the modeled program becomes the requested identity.
+
+  After 4 or 6 the call records the two target ports and returns a node guard
+  that carries the requested identity. Refusals 1, 2, 3, and 5 change no
+  modeled state and leave the record as it was. On the host, each of them
+  occurs before any write.
+  1 is pure validation, carried with the host's existing D15 shape
+  (S-ND295-15); 2 stands for the observation; 3 mutates nothing; and 5 is
+  refused by the netlink adapter's strict observation before it sends any
+  batch.
+- The `Drop` of its node guard withdraws the record, and removes the modeled
+  program only when the program equals the guard's identity and all three
+  member sets are empty. Otherwise it removes nothing. It never panics and
+  touches no element token.
+- `observe_shared`, `observe_shared_state`, and `converge_allocation_elements`
+  read the modeled program, so each returns `Ok(None)` once a node guard's
+  `Drop` has removed it.
 - `install_*` check the record, then the passed port, and only then an armed
   install fault, which stands for refusal 3. A scripted fault therefore never
   produces an error the host could not return in that state. Refusal 3's
@@ -4005,13 +4088,12 @@ the same partitions, in the same order:
   Step 6.5's `converge_shared` then replaces the record before any install or
   removal.
 
-This pin does not change what a node guard's `Drop` does to the owned program;
-that is D15's conditional delete. D15's sim contract (§ *C-295-C*: the sim
-"implements the same observable target identity") owns the remaining
-difference. The sim's node guard deletes nothing, so after a node-guard drop
-with no members, the host's `observe_shared` returns `None` and its
-`converge_allocation_elements` returns `Ok(None)`, while the sim's still
-report the program.
+On the host, what a node guard's `Drop` does to the owned program is D15's
+conditional delete, unchanged by this pin. After a node guard drops with no
+members, both adapters' `observe_shared` return `Ok(None)`, their
+`observe_shared_state` return `Ok(None)`, and their
+`converge_allocation_elements` return `Ok(None)`. With members, both keep the
+program.
 
 **Lifecycle Gate Ownership.** Not applicable. The refusal is a port
 precondition that the worker's existing owner-publication check already
@@ -4031,6 +4113,274 @@ lifecycle state gains, loses, or moves a gate.
 
 *(Pinned 2026-09-26 on evidence (DISTILL gap B-8), under the user's ruling
 that technical decisions are settled on evidence.)*
+
+### [REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26
+
+**The defect** (`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`,
+root cause A). `converge_shared` creates `ovd-gbr0` with no address and then
+sets `GUEST_BRIDGE_MAC` (`guest_network.rs:3977-3979`). `Client::ensure_bridge`
+builds `LinkBridge::new(name)`, which carries no `IFLA_ADDRESS` and creates the
+link up (`client.rs:450-460`; rtnetlink 0.23 `link/bridge.rs:38-40`).
+
+- The kernel registers the bridge with a random address (`NET_ADDR_RANDOM`)
+  and emits its add uevent inside `register_netdevice`, before the creator's
+  `RTM_NEWLINK` is acknowledged.
+- systemd-udevd applies the default `99-default.link`
+  (`MACAddressPolicy=persistent`). It reads `addr_assign_type` when it
+  processes that event, finds `NET_ADDR_RANDOM`, and writes its persistent
+  MAC.
+- On Lima (kernel 7.0.0-31, systemd 259) that write landed 0.19 ms after the
+  owner's set, so the read-back (`guest_network.rs:4015-4031`) refused boot.
+  This happened in 6 of the 9 fresh-host boots that reached the check, and in
+  3 of 6 at `81ea7d47`. It has been latent since step 02-01. A boot that
+  adopts an existing bridge gets no add event and passes.
+- The refusal could not name its cause. Both facts were `BridgeLinkIdentity`,
+  which carries no MAC and no up state.
+
+TAPs have the same exposure without a refusal today. A TAP cannot be born
+with an address: `tun_net_init` assigns a random one, and rtnetlink creation
+of a tun is refused (upstream v7.0 `drivers/net/tun.c:1332`, `:2283`). udev
+rewrote the probe TAP 3.6 ms after its creation. The RCA predicts, for 06-02
+to confirm, that once `provision` records the host-side MAC (D-295-R21), a
+rewrite landing after the record reads as `TapHostMac` damage and R14 kills a
+healthy VM.
+
+**The invariant: one writer per managed-link address.** The managed links are
+the node bridge `ovd-gbr0`, the startup probe's scratch bridge
+`ovd-gbr-probe`, every guest TAP `ovd-tp-<4hex>`, and the probe's scratch TAP
+`ovd-tp-probe`.
+
+- A bridge the owner creates carries `GUEST_BRIDGE_MAC` from the moment it
+  exists, and an adopted bridge is converged to it. The shared owner is its
+  only writer (C-295-0).
+- A TAP's host-side address is the one the kernel assigns when `TUNSETIFF`
+  creates it. Nothing writes it afterwards:
+  - the owner never sets a TAP's address;
+  - D-295-R22 denies Cloud Hypervisor `SIOCSIFHWADDR`;
+  - the platform requirement below excludes the host's link-configuration
+    daemon.
+
+  The MAC that `provision` records is therefore the TAP's address from
+  creation to deletion. On a healthy host, `activate` and every audit compare
+  it against a value nothing changes.
+
+**Bridge creation contract** (`overdrive_netlink::Client`,
+`crates/overdrive-netlink/src/client.rs`):
+
+```rust
+impl Client {
+    /// Create the host bridge `name`, administratively down, with link-layer
+    /// address `mac` from creation; or adopt the link already named `name`
+    /// without writing to it.
+    pub async fn ensure_bridge(&self, name: &str, mac: [u8; 6]) -> Result<(), NetlinkError>;
+}
+```
+
+- *Precondition.* `mac` is a unicast Ethernet address. Every production
+  caller passes `GUEST_BRIDGE_MAC`, a locally administered unicast address.
+  `ensure_bridge` does not validate `mac`. For any other value, the kernel's
+  handling decides the outcome: a create refusal (`op: "add-bridge"`), or a
+  later refusal when the link is set up.
+- *No link named `name`* (`RTM_GETLINK` reports `ENODEV`). One `RTM_NEWLINK`
+  carries the name, link kind `bridge`, `IFLA_ADDRESS = mac`, and `IFF_UP`
+  clear. `Ok(())` means the bridge exists, down, with address `mac`, and its
+  `addr_assign_type` has been `NET_ADDR_SET` since registration. Its add
+  uevent therefore never shows a kernel-random address. The evidence:
+  - `rtnl_create_link` applies `IFLA_ADDRESS` and sets `NET_ADDR_SET` before
+    `register_netdevice` (upstream v7.0 `net/core/rtnetlink.c:3698-3701`);
+    `br_dev_newlink` applies the same address to the bridge id
+    (`net/bridge/br_netlink.c:1569-1573`).
+  - udev's `net_setup_link` skips an address the device reports as set by
+    userspace (systemd v259 `src/udev/net/link-config.c:605-606`). RCA run 1
+    logged it: "MAC address on the device already set by userspace".
+  - A `NET_ADDR_SET` bridge keeps its address when ports are added and removed
+    (`br_stp_recalculate_bridge_id` returns early,
+    `net/bridge/br_stp_if.c:263-265`).
+  - RCA P8: `addr_assign_type` read 3 at the first observation after creation
+    in 10 of 10 trials, and every final MAC was `02:01:00:00:00:01`.
+- *A link named `name` exists, of any kind.* `Ok(())` with no write. The
+  caller's read-back decides.
+- *Errors.* An `RTM_GETLINK` failure other than `ENODEV` is
+  `NetlinkError::Link { op: "get", .. }`, as today. A refused create is
+  `NetlinkError::Link { op: "add-bridge", .. }`. That includes `EEXIST` when
+  another creator took the name between the observation and the create:
+  `ensure_bridge` never adopts a link it did not observe.
+
+**The two callers.** `converge_shared` (`guest_network.rs:3977`) and the
+startup probe's `ConvergeBridge` arm (`:1170`) pass `GUEST_BRIDGE_MAC`. Their
+sequences are otherwise unchanged (`:3974-4061`, `:1168-1178`).
+
+- `converge_shared` keeps its read-back and its refusal.
+- The probe arm has no read-back. Creation makes its scratch bridge immune.
+- `set_link_mac` keeps its signature and its place in both sequences:
+  - it converges an adopted bridge, such as one an earlier boot left with
+    another address;
+  - it is C-295-0's runtime repair write;
+  - on a bridge `ensure_bridge` has just created, it writes the same value.
+
+**The refusal names its cause.** A bridge identity mismatch reports
+`GuestNetworkFact::Bridge` as both expected and observed. This applies to the
+read-back in `converge_shared` and to the bridge check in `audit_shared`
+(`guest_network.rs:4205-4225`).
+
+- *Expected:* `GUEST_BRIDGE_MAC`, up, and gateway `100.95.0.1/16`.
+- *Observed:* the read-back's kind, ifindex, MAC, and up state. The gateway is
+  `Some` when `observe_addr` finds the prefix, else `None`. The owner reads the
+  gateway before it compares, so no observed field is assumed.
+- A read-back that carries no 6-byte address is reported with the same
+  expected `Bridge` fact and an observed `BridgeLinkIdentity` holding its
+  kind.
+- For an absent bridge, `converge_shared`'s expected fact stays
+  `BridgeLinkIdentity`, and the audit's stays `Bridge`, as today.
+
+No variant or field is added (ERR-295-A). The refusal keeps its variant and
+operation; only its facts change.
+
+**Platform requirement REQ-295-LINKMAC: no host process other than `overdrive
+serve` writes a managed link's address.** The invariant covers every host link
+manager. The pinned mechanism is for systemd-udevd, which is the writer the
+RCA observed. A host where another link manager (systemd-networkd,
+NetworkManager) matches managed names violates the requirement as well. A
+host that runs systemd-udevd carries this file, named
+`05-overdrive-managed-links.link`, in its `systemd/network` configuration:
+
+```ini
+[Match]
+OriginalName=ovd-gbr* ovd-tp-*
+
+[Link]
+MACAddressPolicy=none
+```
+
+- *Semantics* (systemd.link(5)). `net_setup_link` applies, to a new link, the
+  first `.link` file in lexical order across its search directories whose
+  `[Match]` matches. This file sorts before `99-default.link`
+  (`OriginalName=*`, `MACAddressPolicy=persistent`). It also sorts before
+  netplan's generated `10-netplan-*.link`. `OriginalName=` is a
+  whitespace-separated list of shell globs over the kernel name.
+  `MACAddressPolicy=none` keeps the address the kernel assigned. The file sets
+  nothing else, so it renames nothing and adds no alternative name.
+- *Evidence.* RCA P9 used an equivalent file (`OriginalName=ovd-*`). udev's
+  `ID_NET_LINK_FILE` named it, and a new TAP kept its kernel address and
+  `addr_assign_type` 1 after 1 s. A control TAP in the same session, under the
+  default policy, was rewritten to type 3.
+- *Coverage.* TAPs are the load-bearing case, because they cannot be born with
+  an address. The bridge globs are defence in depth: creation already makes a
+  bridge immune. Other `ovd-` links are outside the match, because no #295
+  record or audit reads their address: the load-balancer veth pair
+  `ovd-veth-cli`/`ovd-veth-bk` (ADR-0061) and the test-gated `ovd-hv-*` and
+  `ovd-wl-*` veths.
+- *Where it lives.* The requirement belongs to the appliance image. ADR-0068
+  makes the image Overdrive's to build, and its §4 already records the kernel
+  configuration the image must carry. ADR-0068 is not amended, because it
+  records one decision, the kernel pin, and this is a separate one. The
+  image's build layer does not exist yet (`meta-overdrive`, the Image Factory
+  MVP, which `brief.md:7302` cites as
+  [GH #75](https://github.com/overdrive-sh/overdrive/issues/75)). Until it does,
+  the record is this section, carried into `brief.md` (§ *Required downstream
+  changes*). The image ships the file under `/usr/lib/systemd/network/`, and
+  its image test runs the installation check below.
+- *The dev and test substrates carry the same contract* (§ *Required
+  downstream changes*):
+  - the Lima dev VM, `infra/lima/overdrive-dev.yaml`, which also provisions
+    CI's integration job;
+  - the metal host, through `infra/provision/common-system.sh`, which
+    `infra/metal/provision.sh` runs.
+
+  Each installs the file under `/etc/systemd/network/` and reloads udev.
+
+**Earned Trust: proved where it is installed, detected where it runs.**
+
+- *At installation.* The image test and each substrate's provisioning prove
+  the policy by behaviour, not by the file's presence.
+  - Create a scratch persistent TAP `ovd-tp-lnkchk`, and a scratch bridge
+    `ovd-gbr-lnkchk` with no address.
+  - Wait until systemd-udevd reports each device initialized (`udevadm wait`,
+    systemd ≥ 251).
+  - For each device, require all three: `ID_NET_LINK_FILE` names the Overdrive
+    file; the address equals the one read at creation; `addr_assign_type` is
+    still 1.
+  - Delete both.
+
+  A failure fails provisioning or the image test. A file that another
+  matching file shadows fails the first check. The address comparison also
+  catches any other writer that acts before udev reports the device
+  initialized.
+- *At boot, the startup probe checks for the lie, one-sided.* The probe
+  already creates the scratch TAP `ovd-tp-probe`, which matches the policy.
+  - It reads that TAP, by name, right after `CreateTap`, and records its
+    ifindex and host-side address.
+  - On its success path, after the last exercise (`DetachedLinkGuard`) and
+    before cleanup, it reads the TAP by name again.
+  - The TAP passes only if both the ifindex and the address are equal.
+    Otherwise startup refuses with `PostconditionMismatch { operation:
+    StartupProbe, expected: TapHostMac { ifindex: <recorded>, mac:
+    Some(<recorded>) }, observed }`, which G-295-1 projects to
+    `health.startup.refused`. `observed` is:
+    - `Some(TapHostMac { ifindex, mac })` as re-read, for a changed address,
+      a replaced TAP, or a read that carries no address;
+    - `None` if the TAP is absent.
+  - A failure of either read is `Netlink { operation: StartupProbe, source }`.
+  - The ordinary scratch cleanup then runs, as for every probe failure
+    (D-295-DISTILL-5 steps 6–9).
+
+  The check needs no new dependency, and adds no variant: `TapHostMac` is
+  R21's fact, so it lands with this step (05-00) rather than at 06-02.
+  ERR-295-A's `StartupProbe` operation thereby covers a fourth scratch-probe
+  postcondition, carried by that fact rather than by
+  `GuestNetworkFact::StartupProbe` (§ *ERR-295-A*). The probe changes the
+  scratch TAP only in cleanup, which runs after the re-read. Any difference
+  is therefore another writer's doing, and a refusal is a true positive.
+
+  A pass proves only that the scratch TAP's address and ifindex were unchanged
+  between the record and the re-read. It does not rule out a writer that acted
+  before the record or after the re-read, or that wrote the same value. In the
+  RCA's run the scratch TAP lived about 70 ms (udev's `add` to `remove`),
+  against udev's 3.6 ms at info level and 28–31 ms at debug level.
+- *No deterministic runtime proof.* The only deterministic completion signal
+  is udev's own device database. Reading it would add a udev dependency, and
+  running `udevadm` would add a second subprocess beside Cloud Hypervisor
+  (ADR-0085). The installation check is the deterministic proof.
+- *What a violating host that passes the probe sees:*
+  - A bridge is immune by construction.
+  - A TAP rewritten before `provision` reads it back is recorded with the
+    rewritten address. That is harmless: it changes nothing after that one
+    write, and the TAP's host-side address carries no function beyond R21's
+    record.
+  - A TAP rewritten after the record is `TapHostMac` damage. At `activate`
+    that is the activation-failure projection; in the audit, R14 kills that
+    VM.
+
+  On an image that ships the file and passes its check, none of these
+  occurs.
+
+**Lifecycle Gate Ownership.** G-295-1 keeps its owner, its one affected
+result (`overdrive serve` startup), and its ordering. It gains one probe
+condition, the scratch TAP's unchanged address, which lies inside the
+existing probe stage. Its bridge read-back keeps its variant; only the
+refusal's facts now name the cause. No other gate changes. The boundary
+cases are E22's rows:
+
+- policy present: the probe passes and boot proceeds;
+- a scripted address change: startup refuses with the typed fact;
+- allocation states, which the probe never touches, are unaffected.
+
+**Alternatives compared on evidence:**
+
+| Alternative | Why rejected |
+|---|---|
+| Keep create-then-set; re-read and re-set until stable | It races an asynchronous writer that gives no completion signal. A read-back can pass before udev writes, which leaves the rewrite for the runtime audit to repair under quiescence. |
+| The `.link` file alone for the bridge | The structural fix makes the bridge immune whatever the host's policy (kernel and udev source above). A missing or shadowed file therefore cannot refuse boot. Both are kept. |
+| A separate `create_bridge` method | Both callers need create-or-adopt. A second method adds surface, and the changed signature makes each caller pass the identity at compile time. |
+| The owner assigns and records each TAP's address | A TAP cannot be born with an address (`tun.c:1332`, `:2283`). Any owner write lands after the add uevent, inside the window udev races (3.6 ms in RCA run 2). Bounding the race needs udev's completion signal, which the runtime does not read (see *Earned Trust*). |
+| Record the TAP's address after a settle delay | A timing heuristic. Nothing the owner controls bounds udev's latency: RCA run 1 measured 28–31 ms at debug level, against 3.6 ms at info level in run 2. |
+| Mask `99-default.link` on the host | It changes naming and address policy for every host interface, including the physical NICs. |
+| `OriginalName=ovd-*` (the P9 shape) | It also exempts links whose address #295 neither records nor audits, and changes their behaviour. |
+| A deterministic runtime proof of the host policy | It needs udev's device database or a `udevadm` subprocess (see *Earned Trust*). The one-sided probe condition is adopted instead. |
+| No boot check, relying on R21's read-back alone | On a violating host that would show up as racy `TapHostMac` VM kills that look like a MAC hijack of a workload. The adopted refusal instead reports an address change on the probe's scratch TAP, which no workload touches and only a host writer can cause. Every Earned-Trust gate refuses boot on a substrate lie (`brief.md` SD-5). |
+
+*(Pinned 2026-09-26 on evidence (the fresh-host RCA, root cause A), under the
+user's ruling that technical decisions are settled on evidence.)*
 
 ### [REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24
 
@@ -5080,6 +5430,7 @@ No test spawns the `overdrive` binary.
 | E19 | Creation-time close-on-exec (obligation OBL-295-CLOEXEC, L2) | — | The `xtask` source gate over every first-party `serve` crate: zero raw descriptor-creating calls without the close-on-exec flag; one planted violation per row of the gate's call table (including an `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s` rename, and a `nix`/`rustix` wrapper) fails it; an unparseable file fails the scan rather than being skipped | — | — |
 | E20 | Cleanup-pending status (R20, user ruling 6) | Pure predicate: `cleanup_pending` over every lease × row-state pair matches the table in § *Operator status* | In-process through `run_server` and the HTTP API, with an `MtlsIntercept` element-removal fault: a `StopAllocation` whose cleanup fails leaves the row `Running` and `GET /v1/allocs` reports `network_cleanup_pending: true`, excluded from `replicas_running`; after the retry converges the row is `Terminated` and the field is false. A crashed allocation (Failed row, Admitted lease) and a reclaim in progress report true. CLI live-path render tests (`render::workload_describe`): a pending row renders `CleanupPending` plus the lifecycle detail line and never `Running`, in both the Service and Job tables; every non-pending row renders byte-identically | — | — |
 | E21 | VMM launch seccomp filter (R22, ADR-0143): every Cloud Hypervisor thread carries it, each denied request returns `EPERM`, every other ABI route fails closed, and CH still boots and passes traffic | — | **Pure, default lane (no I/O).** On an x86_64 build, the program `VmmLaunchSeccompFilter::for_target` builds, evaluated over synthetic `seccomp_data`, yields this verdict partition. (a) Each of the 13 requests as `ioctl` `args[1]` → `ERRNO\|EPERM`, including with `args[1]`'s upper 32 bits set. (b) The six `fd=`-path requests, a read-only request, and a non-`ioctl` syscall carrying a denied value in `args[1]` → `ALLOW`. (c) A foreign audit architecture → `KILL_PROCESS`. (d) `nr = 0x4000_0000 + 514` (x32 `ioctl`), `0x4000_0000 + 16`, and any other `nr ≥ 0x4000_0000` except `-1` → `KILL_PROCESS`; `nr = -1` → `ALLOW`. Also: the 13 derived values equal the increment-aa numbers; the composed audit value and the x32 bit are pinned; `VMM_LAUNCH_DENIED_IOCTLS` is exactly the table. Source-local mapping tables: an unsupported-architecture value maps to `ConfinementUnavailable { control: Seccomp }`, and each probe cause maps to its `LaunchSeccomp*` variant. On any other build target (an aarch64 build, such as an Apple Silicon Lima VM) the arm with no program is the compiled arm: `for_target` returns `LaunchSeccompUnsupportedArch` naming the architecture, and `create`'s filter-first refusal on that arm can be executed there (ruling 10; GH #302). On an x86_64 build that arm is reviewed, not executed. **Lima root (real kernel; the source-local `launch_seccomp_kernel` module of § *Testability boundary*).** On an x86_64 VM, a process launched through `register_launch_child_hook` with the production program (a re-exec of the crate's test binary) holds an attached queue of a scratch persistent TAP at descriptor 3. Each of the 13 requests returns `EPERM` from its main thread and from three threads created after exec. None of the six `fd=`-path requests returns `EPERM`. `/proc/self/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`. The descriptor table is exactly 0–3. The probe's `check_launch_seccomp` passes. On any other architecture, such as an Apple Silicon Lima VM, `check_launch_seccomp` returns `LaunchSeccompUnsupportedArch` naming it, and the production-program cases are proven on metal by (f). | **x86_64 native metal, production launcher, through `serve` + `deploy`:** (e) CH reaches READY and passes bidirectional traffic (S-ND295-01 and E3 run with the filter in force). At READY and again after traffic, every thread in `/proc/<ch>/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`, and each thread's `Seccomp_filters` equals the shipped Cloud Hypervisor build's own count for that thread plus 1: leader 1, `vmm` and `http-server` 2, every other thread 3 (the increment-aa control table, measured on the audited v53.0 build; OBL-295-SECCOMP-REVERIFY re-measures it when the shipped build changes). The leader's count is the discriminating check, because CH's own filters never cover it; worker coverage follows from it together with kernel inheritance. (f) The whole Lima-root block repeated on metal, plus the fail-closed ABI routes under the production program. The block is the `EPERM` cases, the per-thread `NoNewPrivs`/`Seccomp` reads, the exact 0–3 descriptor table, and a passing `check_launch_seccomp`. The fail-closed ABI routes are: an x32 `syscall(0x4000_0000 + 514, …)` ends the process with `SIGSYS`, and so does an i386 `int 0x80` `ioctl` where the kernel provides the i386 entry. (g) OBL-295-SECCOMP-REVERIFY: the source audit and (e) on any of that obligation's triggers (a change to the shipped Cloud Hypervisor build, to the `--net` launch shape, or to the Cloud Hypervisor net-device paths the platform uses). It is a review obligation; no runtime version check exists (user ruling of 2026-09-25). There is no aarch64 case: aarch64 microVM launches are refused (user ruling 10), and proving the filter and enabling them is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302). | — |
+| E22 | One writer per managed-link address (fresh-host RCA; REQ-295-LINKMAC) | — | **Source-local, deterministic:** the startup probe's address condition, through the D-295-DISTILL-5 scripted scratch I/O. (p1) An unchanged address passes. (p2) A changed address refuses with `PostconditionMismatch { operation: StartupProbe }` over `TapHostMac`, and the scratch cleanup still runs with its complement. **Lima root, real kernel.** (a) `ensure_bridge` on an absent name: the first observation after the call reads `addr_assign_type` 3 and the address `mac`, with the link down and no set issued in between. This oracle is deterministic, and it holds with or without the host policy. A create-then-set control in the same session shows the race the fix removes on a host without the policy; it is supporting evidence, not a gate. (b) `ensure_bridge` on a present link of any kind writes nothing: its ifindex, address, `addr_assign_type`, and administrative state are unchanged. (c) A fresh-host `run_server` boot with `ovd-gbr0` absent passes the bridge read-back, and the read-back MAC is `GUEST_BRIDGE_MAC` (S-ND295-00's bridge-identity leg). Repeated fresh-host boots print their iteration count; one run is not a gate for a timing race. A run that ends in the RCA's unexplained `StartupProbe` timeout (RCA § 8: "detached guard packet did not reach the exact drop transition") is recorded as that outcome. It counts neither for nor against the bridge fix. (d) A bridge identity mismatch reports the observed MAC and up state, not two equal facts. The real-kernel stimulus is the audit leg: an out-of-band MAC write on `ovd-gbr0`, then `audit_shared`. After the fix, the boot read-back has no deterministic real-kernel stimulus, and it shares the audit's fact construction. (e) At 06-02, after systemd-udevd has initialized a provisioned TAP, the recorded `host_mac` equals its live address, and the audit reports no damage for it. | (c) and (e) on the metal host once `infra/provision` carries the policy, with the host's `systemd --version` recorded. The substrate's provisioning check is the policy's proof there. | — |
 
 **E12 whole-call branch.** When the owner cannot determine per-TAP outcomes
 (quiescence returns `Err`, or the call misses
@@ -5393,8 +5744,9 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     B-8)* (pinned 2026-09-26):
     - Both installs, and `remove_allocation_elements`, require the program a
       successful `converge_shared` recorded.
-    - Dropping a node guard withdraws the record. A `converge_shared` that
-      returns `Err` leaves the record as it was.
+    - Dropping a node guard withdraws the record, and removes the program only
+      when it is unchanged and member-free, on every adapter. A
+      `converge_shared` that returns `Err` leaves the record as it was.
     - An install's passed port must equal that leg's recorded target.
     - An install's complete ordered error partition is
       `SharedProgramNotConverged`, then `SharedListenerPortMismatch`, then
@@ -5405,6 +5757,28 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     ADR-0076 § 1a lists what the trait states; its Rev 11 amendment adds the
     precondition and the node guard's effect on the record. ADR-0125 leaves
     exact error vocabularies to this feature delta, so it needs no amendment.
+38. **C-295-0 bridge convergence and D-295-R21's host-side MAC record.**
+    C-295-0 said: *"The shared-switch owner creates or adopts only a
+    bridge-kind link, brings it down, sets `GUEST_BRIDGE_MAC`, reads back exact
+    name/ifindex/type/MAC/gateway-prefix, then brings it up"*. Its
+    implementation creates the bridge with no address (`client.rs:450-460`).
+    D-295-R21 says `provision` records *"the MAC read back when `provision`
+    observed the TAP down"*. Both assumed that the owner is the only writer of
+    a managed link's address. On a host running systemd-udevd with its default
+    policy, a new link has a second writer for its first milliseconds. That
+    writer refused 6 of the 9 fresh-host boots that reached the bridge check
+    (the fresh-host RCA, root cause A).
+    Replaced by § *Managed-link address from creation, and the host
+    link-address policy* (pinned 2026-09-26):
+    - `ensure_bridge` creates the bridge with its address;
+    - platform requirement REQ-295-LINKMAC excludes the host's link manager
+      from every managed link's address, and the startup probe refuses a host
+      it catches violating that;
+    - the BridgeObserve refusal reports the observed MAC and up state.
+
+    ADR-0126 names neither the creation step nor a single writer, so it needs
+    no amendment. Nor do ADR-0130 and ADR-0142, which own the read-back and the
+    delivery control, not the record's writer set.
 
 ### [REF] Reuse Analysis — replacement delta
 
@@ -5424,6 +5798,8 @@ Each superseded contract is quoted verbatim, followed by its replacement.
 | Placement input | The four ADR-0086 read-ports | **CREATE** one narrow read-port. No existing port exposes lease state. |
 | Cleanup retry for leased Failed/Terminated allocations no other action owns | `StopAllocation` and `FinalizeFailed` replay; `vm-reclamation` | **CREATE** one row-neutral action, computed on every reconcile path. The existing actions would rewrite rows, and `vm-reclamation` owns VMM residue, not lease residue. |
 | Grouped element release | Netlink `delete_shared_ip_intercept_elements_atomically`; `SharedElementGuard::drop` | **EXTEND** the `MtlsIntercept` port over the existing netlink effect, with convergent semantics. |
+| Bridge address from creation (fresh-host RCA) | `Client::ensure_bridge(name)` followed by `set_link_mac` (`client.rs:450-482`) | **EXTEND** `ensure_bridge` with the address, carried in its one create message. A separate creation method is rejected (two callers, one create-or-adopt need). `set_link_mac` is reused unchanged for adoption and repair. |
+| Excluding the host's link manager from managed-link addresses (fresh-host RCA) | systemd's shipped `99-default.link`; an owner-assigned TAP address; a runtime probe | **CREATE** one platform `.link` file (REQ-295-LINKMAC), proved at installation. **EXTEND** the existing startup probe with a one-sided address check on its scratch TAP, reusing R21's `TapHostMac` fact. An owner-assigned address cannot close the TAP's creation race. A deterministic runtime proof would need udev's database or a subprocess. |
 | Element-method refusal when no program is recorded (B-8) | `NftRuleInstallFailed`, `ChainAbsent`, `PostconditionMismatch`; the host's constructed-source refusals (`mtls_intercept_port.rs:661-674`, `:686-698`, `:1076-1085`) | **CREATE** one source-less `InterceptError` variant. Each existing variant either needs a fabricated source or identity, or reports a kernel observation rather than process-local state. |
 | Intercept listener a simulation can implement without a socket (B-7) | `std::net::TcpListener` from `bind_transparent`; `tokio::net::TcpListener`; the existing `make_transparent_listener`, `accept_outbound_and_recover_orig_dst`, and `accept_inbound_leg` (`mtls_intercept.rs:333`, `:1093-1136`) | **CREATE** one port-owned `InterceptListener` trait with its accepted-connection value and two-variant error; the host implementation reuses `make_transparent_listener` for the socket. Both listener types are rejected: each exists only as a bound kernel socket. The two accept helpers are the host's substrate, not a boundary a simulation can implement. |
 | Stop-error fan-out to many callers (B-6) | Today's `Clone` stored result (`mtls_intercept_worker.rs:1884-1927`) | **REUSE** the stored-result-and-clone mechanism; the two typed leaf sources are held in `Arc` so the R10 enum stays `Clone`. |
@@ -5741,6 +6117,10 @@ DESIGN created no issue. No other deferral is proposed.
     § *Charter, rulings, and evidence* shift; DISTILL re-anchors them.
 - **Consequences of the 2026-09-26 pin B-8 (element precondition) for DISTILL
   and DELIVER:**
+  - *DISTILL, re-roadmap input.* B-8, with the sim's program model, is
+    carried in 05-01's row unless DELIVER orders it earlier. Every pending
+    marker these bullets name uses that step, apart from the equivalence legs
+    named below for 08-02 and 08-03.
   - *DELIVER, host.* The step that lands the pin changes both adapters
     together, no later than 05-01 (S-ND295-70's step). Two clauses land
     later: the removal clause with `remove_allocation_elements` at 07-01, and
@@ -5786,7 +6166,32 @@ DESIGN created no issue. No other deferral is proposed.
       "`install_*` ⇔ any variant" pairing (`:125-139`);
     - returns the new variant from `remove_allocation_elements`, retiring
       `program_not_published` at all three uses (`:496-509`, `:724-726`,
-      `:743`).
+      `:743`);
+    - models the owned program (§ B-8 *Simulation adapter*):
+      - `converge_shared` takes the ordered partition: zero port, then the
+        armed fault, then prior mismatch, then adopt, then the
+        replace-over-members refusal, then write. Today it ignores `prior`
+        and the ports (`:615-641`).
+      - Its node guard carries the converged identity, and its `Drop` removes
+        the modeled program only when the program is unchanged and has no
+        members.
+      - The three observations read the modeled program.
+
+      This also makes stale the module doc's determinism paragraph (`:40-46`).
+  - *DELIVER, trait rustdoc (same step).* `converge_shared`'s one-line rustdoc
+    (`mtls_intercept_port.rs:313`) gains its preconditions, its ordered refusal
+    partition (zero port, observation failure, prior mismatch, then D15's
+    replacement and rollback variants), and the node guard's `Drop` contract:
+    - it withdraws the record;
+    - it removes the program only when the program is unchanged and has no
+      members;
+    - it never panics.
+
+    Until R15's member-tolerant observation lands (08-03), the host's
+    pre-check observation refuses while members exist
+    (`NftRuleInstallFailed { op: "observe-shared" }`, `nft.rs:3746-3751`).
+    An equivalence body that converges with live members stays pending until
+    that step.
   - *DISTILL, equivalence harness*
     (`overdrive-worker/tests/integration/mtls_intercept_equivalence.rs`).
     - The two failing bodies, `both_installs_…` (`:415-450`) and
@@ -5815,7 +6220,29 @@ DESIGN created no issue. No other deferral is proposed.
       RED until the landing step: the host returns `NftRuleInstallFailed` for
       outbound and installs a per-virt rule for inbound, and the sim returns
       `Ok`. Each carries a reasoned pending marker naming that step.
-    - The module's clause table (`:14-24`) gains the two clauses. Its
+    - Program clauses are added on both adapters. Each activates at the first
+      step at which the host can serve it:
+      - *At the B-8 landing step:*
+        - a node guard dropped with no members leaves `observe_shared` at
+          `Ok(None)`;
+        - a `converge_shared` whose `prior` differs from the observed program
+          returns `PostconditionMismatch` and changes nothing;
+        - a zero port returns `NftRuleInstallFailed { op: "shared-ip-expected" }`.
+
+        The host satisfies all three today; the sim returns `Ok` or keeps the
+        program, so each is RED until that step.
+      - *At 08-02*, when the host's `observe_shared_state` and
+        `converge_allocation_elements` stop being `todo!()`
+        (`mtls_intercept_port.rs:1100-1112`), the same no-member drop leaves
+        both of them at `Ok(None)`.
+      - *At 08-02, through `observe_shared_state`:* a node guard dropped
+        while members exist keeps the program. (Through `observe_shared`, the
+        same holds from 08-03, when the strict observation stops refusing
+        members, `nft.rs:3746-3751`.) The guard-ordering rule requires the
+        members' element guards to be relinquished, not dropped, before the
+        node guard drops. That is the one sanctioned way to hold members past
+        a node-guard drop.
+    - The module's clause table (`:14-24`) gains all five clauses. Its
       statement that each host method is a one-line delegation (`:62-64`) no
       longer holds.
     - `HostVethFixture`'s veth no longer serves `install_outbound`, which is
@@ -5851,6 +6278,47 @@ DESIGN created no issue. No other deferral is proposed.
       real fwmark-rule and local-route ensures, which the private seam does
       not cover. No deterministic real-kernel stimulus for it is known, so the
       host's evidence lane is DISTILL's to name, or to record as unavailable.
+  - *DISTILL, sim self-tests over the program model*
+    (`overdrive-sim/src/adapters/mtls_intercept.rs::tests`):
+    - active `shared_convergence_records_both_exact_targets_for_non_repairing_observation`
+      (`:762-786`). Its last assertion flips:
+      `assert!(sut.observe_shared()…is_some())` after `drop(guard)` becomes
+      false. The dropped guard's identity equals the modeled program and no
+      member exists, so the host's conditional delete, which the sim now
+      models, removes the program, and `observe_shared` returns `Ok(None)`.
+      The message "guard release is not a repair operation" describes the
+      inert guard. The body asserts absence instead. Whether it also adds the
+      complement (a member installed before the drop keeps the program) is
+      DISTILL's choice.
+    - active `shared_converge_and_observe_faults_are_independent_standing_slots`
+      (`:789-813`). It converges at `LEG_ADDR`, whose port is zero. The
+      zero-port refusal precedes the armed fault, so the first `matches!(…,
+      op: "replace-shared")` fails, and the closing `.expect("clear_faults
+      disarms shared convergence only")` would panic. It converges at non-zero
+      ports. Its scripted converge shape (`NftRuleInstall { op:
+      "replace-shared", .. }`, `:793`) is also not one the host returns before
+      a write. The pinned fault stands for the observation (`op:
+      "observe-shared"`). The scripted shape is DISTILL's test support.
+    - new self-tests: adopt without a write; replacement refused while a
+      member exists; a stale `prior` refused.
+    - Sim-composed bodies that drop an unpublished owner's node guard (the
+      worker's failed-start paths) and then observe the program see it
+      removed. DISTILL re-checks each such oracle.
+    - Test-local doubles that simulate program loss by masking the sim's
+      observation, while forwarding `converge_shared` to a sim whose modeled
+      program still exists, receive `PostconditionMismatch` once R15's repair
+      passes the observed absence as `prior`. The known instance is
+      `ProofIntercept`'s `program_lost` overlay
+      (`overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs:561-585`,
+      `:850-857`). The fix is DISTILL's test support: a sim-level
+      out-of-band program-loss stimulus, or doubles that stop forwarding. The
+      other forwarding wrappers are audited for the same shape: `server_lifecycle.rs:190`,
+      `shared_element_cleanup_failure.rs:355`,
+      `mtls_install_fail_closed.rs:622`, `:2240`,
+      `network_cleanup_pending_status.rs:124`,
+      `netns_density_guest_network.rs:470`,
+      `netns_density_shared_owner.rs:1131`, and
+      `netns_density_boot_order.rs:231`.
   - *DISTILL, removal bodies.*
     - Row 2 of `shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`
       (`:454-469`) removes through a fresh `HostMtlsIntercept`. That is now
@@ -5881,6 +6349,73 @@ DESIGN created no issue. No other deferral is proposed.
     path converges in `start_shared_owner` first, and the boot-order invariant
     converges before it seeds members
     (`overdrive-sim/src/invariants/netns_density_boot_order.rs:155-163`).
+- **Consequences of the 2026-09-26 fresh-host pin (managed-link address from
+  creation; REQ-295-LINKMAC) for DISTILL, DELIVER, and the substrates:**
+  - *Owning DELIVER step.* A new step, with the working ID **05-00**. It
+    depends on nothing, and every root step of the re-roadmap depends on it:
+    05-01, 05-02, 05-04, and 06-01. It is therefore ordered before every step
+    whose evidence boots `run_server`. About half the boots that must create
+    `ovd-gbr0` refuse today (RCA § 10). DELIVER owns the final ID, but may not
+    order the step later. Its scope:
+    - `Client::ensure_bridge(name, mac)`, with a rustdoc that states the
+      contract above;
+    - both callers passing `GUEST_BRIDGE_MAC` (`guest_network.rs:3977`,
+      `:1170`);
+    - the cause-naming bridge refusal in `converge_shared` and `audit_shared`;
+    - the startup probe's scratch-TAP address condition, with R21's
+      `GuestNetworkFact::TapHostMac` introduced here rather than at 06-02;
+    - the two substrate changes below, with their installation checks;
+    - E22 (p1), (p2), and (a) to (d).
+
+    The TAP half lands in the same step, as the substrate policy and the probe
+    condition. 06-02, which first records `host_mac`, carries E22 (e).
+  - *DISTILL, re-roadmap input.* Add the 05-00 row, and add 05-00 to the
+    dependencies of 05-01, 05-02, 05-04, and 06-01.
+  - *DISTILL, S-ND295-00.* The RCA (§ 9) recommends splitting the body. That
+    split is DISTILL's decision. If DISTILL splits it:
+    - the bridge-identity leg stays active and becomes 05-00's activation
+      evidence (E22 (c));
+    - the DNS leg is a test-body defect (RCA root cause B), re-authored and
+      activated at 05-01 with the host DNS factory and an in-zone NXDOMAIN
+      oracle.
+
+    DISTILL also adds bodies for E22 (p1) and (p2) in the owner's source-local
+    lane, for (a), (b), and (d) in `overdrive-netlink`'s and the owner's
+    real-kernel lanes, and for (e) in 06-02's scenarios. The
+    repeated fresh-host boot body the RCA recommends is DISTILL's choice. On a
+    substrate carrying the policy, the create-then-set race no longer
+    reproduces for either link kind. The bridge fix's RED therefore rests on
+    E22 (a)'s deterministic `addr_assign_type` oracle. DISTILL decides whether
+    06-02 runs a control without the policy to show that a rewrite is detected
+    as `TapHostMac` damage (the RCA's forward prediction).
+  - *DISTILL, red classification.* C-12b (and metal N-04, attributed by
+    inference) is reclassified under RCA root cause A, with 05-00 as its
+    owner.
+  - *Infra, dev and test substrates* (DESIGN edits no infra file):
+    - `infra/lima/overdrive-dev.yaml` gains a system provisioning block. It
+      writes `/etc/systemd/network/05-overdrive-managed-links.link` with the
+      pinned content, reloads udev, and runs the installation check. The
+      block is inline, because Lima does not run `infra/provision/` (see the
+      scope note in `common-system.sh`). CI's `integration` job provisions
+      from this file, and its cache key hashes it (`ci.yml:392`), so CI picks
+      the change up. The shared `overdrive` Lima VM is recreated after the
+      change; recreating it interrupts runs in the other Conductor workspaces.
+    - `infra/provision/common-system.sh` gains the same file, reload, and
+      check. The metal host gets them through `infra/metal/provision.sh:207`,
+      re-run by `infra/metal/bootstrap.sh`.
+  - *Appliance image.* REQ-295-LINKMAC is recorded in `brief.md`'s
+    shared-bridge section as a DEVOPS handoff annotation, beside the existing
+    appliance-image annotations (the reflink and Cloud Hypervisor
+    requirements under § 114). That is a DESIGN edit to `brief.md`, outside
+    this pin's edit scope, so it goes through the architect. The image build
+    that ships the file and runs the installation check is the Image Factory
+    MVP's (`brief.md:7302` cites
+    [GH #75](https://github.com/overdrive-sh/overdrive/issues/75)).
+  - *DELIVER review item for 05-00.* `attach_tap_to_bridge`'s comment
+    (`guest_network.rs:1959-1961`) says Linux may adopt the first port's
+    address as the bridge's. That is false for a `NET_ADDR_SET` bridge
+    (`br_stp_if.c:263-265`). Whether the reassert stays is internal structure,
+    but the comment must not keep a false claim.
 - **`.claude/rules/reconcilers.md`** § "Deferred Bar-2 promotions" names
   GH #234 as the home of the shared inbound-TPROXY routing infrastructure. When
   #295 lands that bullet becomes stale (GH #234 is superseded and closes), and
@@ -7587,9 +8122,14 @@ API only with no process/PID evidence.
   ip.octets()[3]]`; the second octet (`0x01` bridge vs `0x00` guest) proves
   collision freedom for every IPv4 address, independent of prefix contents.
 - Boot reclamation/sweep removes prior TAP ports before bridge convergence. The
-  shared-switch owner creates or adopts only a bridge-kind link, brings it down,
-  sets `GUEST_BRIDGE_MAC`, reads back exact name/ifindex/type/MAC/gateway-prefix,
-  then brings it up before writing any endpoint entry or attaching any TAP.
+  shared-switch owner creates the bridge with `GUEST_BRIDGE_MAC` as its address
+  from creation, or adopts the existing link. It then brings the bridge down,
+  sets `GUEST_BRIDGE_MAC`, reads back the exact name, ifindex, type, MAC, and
+  gateway prefix, and brings it up, all before writing any endpoint entry or
+  attaching any TAP. The owner is the only writer of the bridge's address. The
+  host's link manager is excluded by REQ-295-LINKMAC, and creation with the
+  address makes the bridge immune to it regardless (§ *Managed-link address
+  from creation, and the host link-address policy*).
   Lower-level failure preserves its typed source; successful mutation followed
   by wrong read-back is `GuestNetworkError::PostconditionMismatch` and refuses
   startup. A live MAC is never adopted and no fleet-wide endpoint rewrite path
@@ -8134,6 +8674,20 @@ orders as alternatives:
    `StartupProbeCleanup { primary, cleanup, observed }`; fully observed residue
    uses `ScratchCleanupIncomplete` as the direct cleanup leaf. Neither boxed
    error may itself be `StartupProbeCleanup`.
+
+The fresh-host pin (§ *Managed-link address from creation, and the host
+link-address policy*) adds the scratch TAP's address check to this sequence.
+It changes neither the order nor the cleanup:
+
+- The scratch I/O gains one fallible read of the scratch TAP's ifindex and
+  link-layer address, returning `NetlinkError` on failure. The read's exact
+  private shape is the crafter's.
+- The owner records the TAP's ifindex and address right after step 2's
+  `CreateTap`.
+- The owner re-reads them on the success path after step 5, before step 6.
+- A read failure maps to `Netlink { operation: StartupProbe }`. A difference
+  is the primary failure, as a `PostconditionMismatch` over `TapHostMac`.
+- Steps 6–9 then run unchanged.
 
 The direct source mapping is structural: `apply_netlink`/`count_netlink` map to
 `GuestNetworkError::Netlink`, `apply_tcx`/`count_tcx` map to
@@ -8720,7 +9274,9 @@ a different target as a structured port mismatch with no mutation. Foreign,
 duplicate, malformed, or identity-conflicting targets always return structured
 mismatch without mutation. The sim adapter implements
 the same observable target identity and fault partitions without pretending to
-create nft state. Neither method accepts an allocation, source address,
+create nft state; its exact program transitions, including the node guard's
+conditional delete, are pinned in § *Driven port — intercept element
+precondition (DISTILL gap B-8)*, *Simulation adapter*. Neither method accepts an allocation, source address,
 destination tuple, bridge/TAP, or TCX value, so node ownership cannot absorb
 per-allocation or shared-switch effects.
 
@@ -9347,7 +9903,10 @@ The three inherent pool signatures are exactly
 fallible host operation maps its existing typed source at the call site into
 exactly one operation-tagged variant; the inner source is never stringified or
 flattened. `StartupProbe` plus `GuestNetworkFact::StartupProbe` classifies the
-three semantic scratch-probe postconditions. Netlink and ordinary I/O failures
+three semantic scratch-probe postconditions. `StartupProbe` plus
+`GuestNetworkFact::TapHostMac` classifies the fourth: the scratch TAP's
+address held unchanged (§ *Managed-link address from creation, and the host
+link-address policy*). Netlink and ordinary I/O failures
 retain their existing exact sources directly. TCX map/program/pin failures
 cross the canonical `overdrive-dataplane::guest_tcx::GuestTcxError` boundary,
 so the chain is `GuestNetworkError::Tcx { operation }` →
@@ -10849,12 +11408,16 @@ changes meaning.
   endpoint, emit accepted/intercept proof marks, catch TCP locally with original
   destination preserved, drop map-miss/spoof/direct-bypass traffic, drop a
   valid packet after deliberate TCX detach through the bridge guard, and clean
-  every pin/map/rule/link scratch effect.
+  every pin/map/rule/link scratch effect. The scratch TAP's ifindex and
+  address are unchanged between their record after creation and their re-read
+  after `DetachedLinkGuard` (REQ-295-LINKMAC, one-sided).
 - **Affected result:** `overdrive serve` startup only.
 - **Failure projection:** typed construct/bind/classify/orig-dst/cleanup probe,
-  zero-complement, BootClosed-precondition, listener bind, owned-rule identity,
-  atomic replacement/read-back, or rollback error → `health.startup.refused`;
-  no cleartext-degraded boot and no foreign-rule mutation.
+  scratch-TAP address change (`PostconditionMismatch { operation:
+  StartupProbe }` over `TapHostMac`), zero-complement, BootClosed-precondition,
+  listener bind, owned-rule identity, atomic replacement/read-back, or
+  rollback error → `health.startup.refused`; no cleartext-degraded boot and no
+  foreign-rule mutation.
 - **Explicitly unaffected:** allocation `Running`, guest READY, Service Stable,
   per-connection liveness semantics.
 - **Ordering:** construct BootClosed gate → isolated scratch bridge/guard +

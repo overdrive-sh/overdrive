@@ -9,7 +9,8 @@ ADR-0089 §7 for the action-shim allocation-lifecycle boundary only; amended
 node-shared listener ownership only; amended 2026-09-25 by the GH #295
 interface-contract pin B-7 for the listener type only (Rev 10); amended
 2026-09-26 by the GH #295 interface-contract pin B-8 for the allocation element
-methods' precondition only (Rev 11).
+methods' precondition and the node guard's effect on the adapter's record and
+shared program only (Rev 11).
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -168,18 +169,25 @@ evidence): the allocation element methods gain a precondition.
   same adapter. Without it they refuse with one source-less typed error.
 - The record is withdrawn when a node guard is dropped. A failed converge
   leaves it as it was.
+- A dropped node guard also removes the shared program its converge
+  established, but only when that program is unchanged and holds no dynamic
+  members. Otherwise it removes nothing. This holds on every adapter, and the
+  simulation adapter models the program's presence to honour it.
 - An install's passed listener port must equal the recorded target of its leg.
 
 The reason: without the record, the host adapter refused outbound installs
 and fell back to the retired per-rule installer for inbound ones, while the
-simulation adapter installed regardless. The equivalence harness observed that
-divergence, and the trait did not state it.
+simulation adapter installed regardless; the equivalence harness observed that
+divergence. Reading both adapters found a second one: after a node guard was
+dropped, the host no longer reported the program while the simulation still
+did. The trait stated the behaviour behind neither.
 
 One statement below is superseded: § 1a's list of what the trait states now
 also includes this precondition and the node guard's effect on the adapter's
-record. Exact signatures, the error variant, and the ordered error partitions
-are single-sourced in the #295 feature delta (§ *Driven port — intercept
-element precondition (DISTILL gap B-8)*).
+record and on the shared program. Exact signatures, the error variant, the
+ordered error partitions, and the simulation adapter's program transitions are
+single-sourced in the #295 feature delta (§ *Driven port — intercept element
+precondition (DISTILL gap B-8)*).
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -392,8 +400,9 @@ elements; guard `Drop` neither panics nor errors; and nothing acquired by a
 failing call outlives it. *(Rev 10: the listener is the port's
 `InterceptListener`; see Status.)* *(Rev 11: the element methods also require
 the program a successful converge recorded on the same adapter. A dropped node
-guard withdraws that record, a failed converge leaves it as it was, and an
-install's listener port must equal its leg's recorded target; see Status.)*
+guard withdraws that record and removes its program only when the program is
+unchanged and member-free, a failed converge leaves the record as it was, and
+an install's listener port must equal its leg's recorded target; see Status.)*
 
 This matters because the simulation adapter binds a plain listener and appends
 no rule, **both by necessity** (§ Decision 5, § Decision 2). *(Rev 10: the
