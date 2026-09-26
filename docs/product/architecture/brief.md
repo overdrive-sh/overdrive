@@ -11480,6 +11480,58 @@ matrix, and the Changed Assumptions are in the #295 feature delta,
 conflicts with this table, the table governs; the ADRs it amends state each
 amendment explicitly.
 
+### Host link-address policy (fresh-host RCA; ADR-0144, accepted 2026-09-26)
+
+[ADR-0144](adr-0144-managed-host-links-protected-from-udev-mac-policy.md)
+protects every managed host link from the host link manager's MAC policy. The
+managed links are `ovd-gbr0`, `ovd-gbr-probe`, each guest TAP `ovd-tp-<4hex>`,
+and `ovd-tp-probe`. systemd-udevd's default `99-default.link`
+(`MACAddressPolicy=persistent`) rewrites a new link whose address the kernel
+assigned at random. That write refused about half of the fresh-host boots
+that create `ovd-gbr0`
+(`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`,
+root cause A). On a TAP, the RCA predicts that the same write, landing after
+provision records the host-side MAC, would read as per-allocation damage and
+kill a healthy VM.
+
+- The shared owner creates the bridge with its fixed address in the same
+  `RTM_NEWLINK`, so udev's address policy never rewrites it, whatever policy
+  the host sets.
+- A host that runs systemd-udevd carries `05-overdrive-managed-links.link`
+  (`OriginalName=ovd-gbr* ovd-tp-*`, `MACAddressPolicy=none`). TAPs depend on
+  it, because a TAP cannot be created with an address.
+- The startup probe refuses boot when its scratch TAP's address changes
+  between creation and cleanup.
+
+This is platform requirement REQ-295-LINKMAC. Its exact contract is in the
+#295 feature delta, § *Managed-link address from creation, and the host
+link-address policy*.
+
+**Handoff annotation for `nw-platform-architect` / DEVOPS:**
+
+- The appliance image must satisfy REQ-295-LINKMAC. Whether it runs
+  systemd-udevd is not yet pinned. If it does, it must ship
+  `05-overdrive-managed-links.link` under `/usr/lib/systemd/network/`, and its
+  image test must prove the policy by behaviour, not by the file's presence:
+  a scratch TAP and an addressless scratch bridge keep their creation-time
+  addresses once udev reports them initialized, and udev names the Overdrive
+  file as applied.
+- That image build is the Image Factory MVP,
+  [GH #75](https://github.com/overdrive-sh/overdrive/issues/75). The issue has
+  no acceptance criteria yet, so it does not list this requirement. ADR-0068
+  makes the image Overdrive's to build, and it is not amended.
+- The dev and test substrates must carry the same file and check, under
+  `/etc/systemd/network/`:
+  - the Lima dev VM, `infra/lima/overdrive-dev.yaml`, which also provisions
+    CI's integration job;
+  - the metal host, through `infra/provision/common-system.sh`, which
+    `infra/metal/provision.sh` runs.
+- A host running udev's default policy without the file is expected to refuse
+  nearly every boot once the probe condition lands, so each host must carry
+  the file before that code runs on it.
+- A host where another link manager (systemd-networkd, NetworkManager)
+  matches the managed names violates the requirement.
+
 ### Accepted stage-3 baseline
 
 **Status: Accepted — approved by independent solution-architecture review
@@ -11885,6 +11937,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-09-26 | **netns-density-295 ADR-0144 (REQ-295-LINKMAC): managed host links are protected from udev's MAC policy.** Comes from the fresh-host RCA's root cause A. systemd-udevd's default persistent-MAC policy rewrote a new `ovd-gbr0` after the owner's set, which refused about half of the fresh-host boots that create the bridge. A TAP cannot be created with an address, and the RCA predicts that a rewrite landing after its host-side MAC is recorded would read as audit damage. The shared owner creates the bridge with its fixed address in the same `RTM_NEWLINK`. A host that runs systemd-udevd carries an Overdrive `.link` file that exempts the managed bridge and TAP names from udev's MAC policy. The startup probe refuses boot when its scratch TAP's address changes. This change adds the appliance-image DEVOPS handoff annotation (Image Factory MVP, GH #75); ADR-0068 is not amended. Accepted under the user's appliance-OS ruling of 2026-09-25 and the ruling that technical decisions are settled on evidence. — Morgan. |
 | 2026-09-24 | **netns-density-295 D-295-R22 / ADR-0143 scoped to x86_64 by user ruling 10.** Cloud Hypervisor does not run in the Lima VM, and no aarch64 host with KVM is available, so the aarch64 filter cannot be proven on native hardware. The x86_64 program, with its x32 kill prologue, is the only program. The aarch64 program and the E21 aarch64 runner case are removed. On any other target, aarch64 included, `for_target` returns `LaunchSeccompUnsupportedArch`, so the VMM probe fails. Under the existing ADR-0083 §D3c rule the node then composes no microVM driver and rejects every microVM start, and `create` refuses before any effect in any case. The earlier R22 wording "the probe refuses the node" is corrected to this existing composition behaviour. Proving and enabling aarch64 is GH #302. — Morgan. |
 | 2026-09-24 | **netns-density-295 D-295-R22 / ADR-0143 ACCEPTED by user ruling, on native evidence (spike increment-aa).** A seccomp filter loaded by the VMM adapter's one launch hook, in the forked child before its first exec, denies every Cloud Hypervisor thread the 13 TAP-mutating ioctls (`EPERM`) and kills the process on a foreign syscall ABI (foreign audit architecture, x32). It prevents at the source the FDB-poisoning victim outage, the `TUNSETOWNER` re-grant, and the `TUNSETDEBUG` host-log flood, which are no longer residuals. ADR-0142's egress classifier and the ADR-0130 read-back stay; the read-back gains the TAP debug message mask (one dump per audit pass; a failed dump is a node-level audit failure). ADR-0128, 0129, 0130, and 0142 are revised in present tense (accepted, not yet implemented); the operative ADR-0122 and ADR-0124 amendment lists gain R22 (the `TapDebugMsgMask` fact; debug-mask damage). Mechanism: hand-built classic BPF over the locked `libc` (the natively proven shape, no new dependency); `seccompiler` not chosen, since it adds an unreviewed dependency and can close the x32 route only by a hand-enumerated literal. — Morgan. |
 | 2026-09-24 | **netns-density-295 correctness-recovery replacement DESIGN ACCEPTED by the user.** D-295-R1 to R21 and ADR-0127 to ADR-0142 are Accepted (R18 and R19 conditional on their native REDs). Revision 5 applies verification review `arch_rev_20260924_netns295_r5_verify` D1–D12. It pins R21's egress contract (dataplane `attach_first_egress`, a ninth counter slot, `<tap>-egress` pins, provision step 6, activate/audit/teardown extensions, the recorded host-side MAC, four egress operations, and one `TapHostMac` fact). It cites the native increment-z reproduction and makes the egress verdict total (a map miss drops unicast). It drops `flood off` on evidence, states the accepted victim-outage and `TUNSETOWNER` residuals, and completes ADR-0130's holder-ioctl table; that check surfaced a `TUNSETDEBUG` host-log residual for the user. The operative amended ADRs (0072, 0088, 0089, 0114, 0115, 0117, 0118, 0121, 0122, 0124, 0125) state their amendments explicitly. DELIVER stays stopped pending the DISTILL rewrite. |
