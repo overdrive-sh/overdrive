@@ -1167,7 +1167,9 @@ impl SharedGuestNetworkScratchIo for RealSharedGuestNetworkScratchIo {
         match action {
             GuestNetworkScratchNetlinkAction::ConvergeBridge => {
                 let client = overdrive_netlink::Client::new()?;
-                client.ensure_bridge(&plan.bridge).await?;
+                client
+                    .ensure_bridge(&plan.bridge, overdrive_core::dataplane::GUEST_BRIDGE_MAC)
+                    .await?;
                 client.set_link_down(&plan.bridge).await?;
                 client
                     .set_link_mac(&plan.bridge, overdrive_core::dataplane::GUEST_BRIDGE_MAC)
@@ -3974,7 +3976,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         let mut lifecycle = self.allocation_lifecycle.lock().await;
         overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
-            client.ensure_bridge(BRIDGE).await?;
+            client.ensure_bridge(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
             client.set_link_down(BRIDGE).await?;
             client.set_link_mac(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
             client.converge_addr(BRIDGE, GATEWAY, 16).await?;
@@ -4407,7 +4409,39 @@ mod scratch_probe_acceptance {
         fail_occurrence: usize,
         semantic_failure: Option<GuestNetworkProbeStage>,
         residue: Option<ScratchCall>,
+        /// Scripted outcomes of the scratch-TAP identity read (REQ-295-LINKMAC,
+        /// E22 (p1)/(p2)), FIFO. Once empty, every read returns
+        /// [`UNCHANGED_SCRATCH_TAP`], so a body that scripts nothing sees an
+        /// unchanged TAP.
+        tap_reads: std::collections::VecDeque<ScratchTapReadScript>,
+        /// For each scratch-TAP read, the length of `calls` when it ran: the
+        /// index of the call that followed it. Kept apart from `calls` so the
+        /// existing call-order oracles are unchanged by the read.
+        tap_read_positions: Vec<usize>,
     }
+
+    /// The scratch TAP's ifindex and host-side address, as one read reports
+    /// them (test support; the read's exact private shape is the crafter's).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ScratchTapRead {
+        ifindex: u32,
+        mac: Option<[u8; 6]>,
+    }
+
+    /// One scripted outcome of the scratch-TAP read.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ScratchTapReadScript {
+        /// The TAP is present with this identity.
+        Present(ScratchTapRead),
+        /// No link has the scratch TAP's name.
+        Absent,
+        /// The read itself fails.
+        Fails,
+    }
+
+    /// The identity an unscripted read reports.
+    const UNCHANGED_SCRATCH_TAP: ScratchTapRead =
+        ScratchTapRead { ifindex: 7_295, mac: Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x07]) };
 
     #[derive(Debug, Default)]
     struct ScriptedScratchIo {
@@ -4460,6 +4494,54 @@ mod scratch_probe_acceptance {
 
         fn calls(&self) -> Vec<ScratchCall> {
             self.script.lock().calls.clone()
+        }
+
+        fn with_tap_reads(reads: &[ScratchTapReadScript]) -> Arc<Self> {
+            Arc::new(Self {
+                script: parking_lot::Mutex::new(Script {
+                    tap_reads: reads.iter().copied().collect(),
+                    ..Script::default()
+                }),
+            })
+        }
+
+        fn with_tap_reads_and_semantic_failure(
+            reads: &[ScratchTapReadScript],
+            stage: GuestNetworkProbeStage,
+        ) -> Arc<Self> {
+            Arc::new(Self {
+                script: parking_lot::Mutex::new(Script {
+                    tap_reads: reads.iter().copied().collect(),
+                    semantic_failure: Some(stage),
+                    ..Script::default()
+                }),
+            })
+        }
+
+        fn tap_read_positions(&self) -> Vec<usize> {
+            self.script.lock().tap_read_positions.clone()
+        }
+
+        /// The scratch-TAP identity read (E22 (p1)/(p2)): records where in the
+        /// call sequence it ran and returns the next scripted outcome.
+        ///
+        /// DELIVER step 05-00 adds the read to the private scratch I/O in the
+        /// shape it chooses; this double's implementation of that method is
+        /// the one line that adapts this helper's result to it
+        /// (`test-scenarios.md` S-ND295-72, *the 05-00 test-support line*).
+        fn read_scratch_tap(&self) -> std::result::Result<Option<ScratchTapRead>, NetlinkError> {
+            let mut script = self.script.lock();
+            let position = script.calls.len();
+            script.tap_read_positions.push(position);
+            match script
+                .tap_reads
+                .pop_front()
+                .unwrap_or(ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP))
+            {
+                ScratchTapReadScript::Present(read) => Ok(Some(read)),
+                ScratchTapReadScript::Absent => Ok(None),
+                ScratchTapReadScript::Fails => Err(netlink_error()),
+            }
         }
 
         fn record(&self, call: ScratchCall) -> bool {
@@ -4677,8 +4759,7 @@ mod scratch_probe_acceptance {
                 fail: Some(ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::DeleteTap)),
                 fail_occurrence: 1,
                 semantic_failure: Some(GuestNetworkProbeStage::Classifier),
-                residue: None,
-                calls: Vec::new(),
+                ..Script::default()
             }),
         });
         let error = HostSharedGuestNetworkOwner::with_scratch_io(io)
@@ -4694,6 +4775,189 @@ mod scratch_probe_acceptance {
             } if !matches!(*primary, GuestNetworkError::StartupProbeCleanup { .. })
                 && !matches!(*cleanup, GuestNetworkError::StartupProbeCleanup { .. })
         ));
+    }
+
+    /// The scratch-TAP fact a read reports, as the probe's refusal names it.
+    const fn tap_host_mac(read: ScratchTapRead) -> GuestNetworkFact {
+        GuestNetworkFact::TapHostMac { ifindex: read.ifindex, mac: read.mac }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (p1): the startup probe reads the scratch TAP right after
+    /// `CreateTap` and again on its success path after the `DetachedLinkGuard`
+    /// exercise and before cleanup; with both reads equal, the probe passes.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
+    async fn an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads() {
+        let io = ScriptedScratchIo::with_tap_reads(&[
+            ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP),
+            ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP),
+        ]);
+        HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
+            .probe_startup()
+            .await
+            .expect("an unchanged scratch TAP passes the probe");
+
+        let calls = io.calls();
+        let positions = io.tap_read_positions();
+        assert_eq!(
+            positions.len(),
+            2,
+            "the probe reads the scratch TAP exactly twice: {positions:?}"
+        );
+        assert_eq!(
+            calls.get(positions[0].wrapping_sub(1)),
+            Some(&ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap)),
+            "the first read follows CreateTap immediately: {calls:?} at {positions:?}"
+        );
+        assert_eq!(
+            calls.get(positions[1].wrapping_sub(1)),
+            Some(&ScratchCall::Exercise(GuestNetworkProbeStage::DetachedLinkGuard)),
+            "the re-read follows the last exercise: {calls:?} at {positions:?}"
+        );
+        assert_eq!(
+            calls.get(positions[1]),
+            Some(&ScratchCall::CloseLoader),
+            "the re-read precedes the cleanup: {calls:?} at {positions:?}"
+        );
+        assert!(calls.ends_with(CLEANUP), "the ordinary cleanup runs after a pass");
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (p1), the success-path boundary: a probe that fails at the
+    /// `Classifier` stage reads the scratch TAP once, after `CreateTap`, and
+    /// never re-reads it; its primary is the stage failure, unchanged.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
+    async fn a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once() {
+        let io = ScriptedScratchIo::with_tap_reads_and_semantic_failure(
+            &[ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP)],
+            GuestNetworkProbeStage::Classifier,
+        );
+        let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
+            .probe_startup()
+            .await
+            .expect_err("the classifier stage fails");
+        assert!(
+            matches!(
+                error,
+                GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::StartupProbe,
+                    expected: GuestNetworkFact::StartupProbe {
+                        stage: GuestNetworkProbeStage::Classifier,
+                        passed: true
+                    },
+                    ..
+                }
+            ),
+            "the primary is the stage failure, got {error:?}"
+        );
+        let calls = io.calls();
+        let positions = io.tap_read_positions();
+        assert_eq!(positions.len(), 1, "no re-read off the success path: {positions:?}");
+        assert_eq!(
+            calls.get(positions[0].wrapping_sub(1)),
+            Some(&ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap)),
+            "the one read follows CreateTap: {calls:?} at {positions:?}"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (p2): a re-read that differs from the recorded ifindex and address
+    /// — a changed address, a replaced TAP, a read that carries no address, or
+    /// an absent TAP — refuses startup with `PostconditionMismatch {
+    /// operation: StartupProbe, expected: TapHostMac { recorded }, observed }`;
+    /// a failure of either read is `Netlink { operation: StartupProbe }`. In
+    /// every row the complete scratch cleanup and inventory still run, and the
+    /// primary is returned unchanged (the cleanup is fully observed and empty).
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
+    async fn a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up() {
+        let recorded = UNCHANGED_SCRATCH_TAP;
+        let changed =
+            ScratchTapRead { mac: Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x99]), ..recorded };
+        let replaced = ScratchTapRead { ifindex: recorded.ifindex + 1, ..recorded };
+        let no_address = ScratchTapRead { mac: None, ..recorded };
+        for (row, reads, observed) in [
+            (
+                "changed address",
+                vec![
+                    ScratchTapReadScript::Present(recorded),
+                    ScratchTapReadScript::Present(changed),
+                ],
+                Some(Some(tap_host_mac(changed))),
+            ),
+            (
+                "replaced TAP",
+                vec![
+                    ScratchTapReadScript::Present(recorded),
+                    ScratchTapReadScript::Present(replaced),
+                ],
+                Some(Some(tap_host_mac(replaced))),
+            ),
+            (
+                "no address",
+                vec![
+                    ScratchTapReadScript::Present(recorded),
+                    ScratchTapReadScript::Present(no_address),
+                ],
+                Some(Some(tap_host_mac(no_address))),
+            ),
+            (
+                "absent TAP",
+                vec![ScratchTapReadScript::Present(recorded), ScratchTapReadScript::Absent],
+                Some(None),
+            ),
+            ("first read fails", vec![ScratchTapReadScript::Fails], None),
+            (
+                "re-read fails",
+                vec![ScratchTapReadScript::Present(recorded), ScratchTapReadScript::Fails],
+                None,
+            ),
+        ] {
+            let io = ScriptedScratchIo::with_tap_reads(&reads);
+            let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
+                .probe_startup()
+                .await
+                .expect_err("the scratch-TAP condition refuses startup");
+            match observed {
+                Some(observed) => assert!(
+                    matches!(
+                        &error,
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::StartupProbe,
+                            expected,
+                            observed: got,
+                        } if *expected == tap_host_mac(recorded) && *got == observed
+                    ),
+                    "[{row}] expected TapHostMac {recorded:?} vs {observed:?}, got {error:?}"
+                ),
+                None => assert!(
+                    matches!(
+                        &error,
+                        GuestNetworkError::Netlink {
+                            operation: GuestNetworkOperation::StartupProbe,
+                            ..
+                        }
+                    ),
+                    "[{row}] a failed read is Netlink {{ StartupProbe }}, got {error:?}"
+                ),
+            }
+            assert!(
+                io.calls().ends_with(CLEANUP),
+                "[{row}] the complete scratch cleanup and inventory still run: {:?}",
+                io.calls()
+            );
+        }
     }
 }
 
@@ -4747,7 +5011,27 @@ mod scratch_probe_packet_acceptance {
         script: parking_lot::Mutex<PacketProbeScript>,
     }
 
+    /// The scratch TAP's ifindex and host-side address (test support; the
+    /// read's exact private shape is the crafter's).
+    type ScratchTapIdentity = (u32, Option<[u8; 6]>);
+
     impl PacketProbeIo {
+        /// The scratch-TAP identity read (REQ-295-LINKMAC): every read reports
+        /// the same ifindex and address, so this double's packet oracles are
+        /// unaffected by the address condition. DELIVER step 05-00's one
+        /// adapter line for this double delegates to it
+        /// (`test-scenarios.md` S-ND295-72, *the 05-00 test-support line*).
+        #[allow(
+            clippy::unnecessary_wraps,
+            clippy::unused_self,
+            reason = "the read's fallible shape is the port's; this double never fails it"
+        )]
+        const fn read_scratch_tap(
+            &self,
+        ) -> std::result::Result<Option<ScratchTapIdentity>, NetlinkError> {
+            Ok(Some((7_295, Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x07]))))
+        }
+
         fn with_failure(stage: GuestNetworkProbeStage, failure: ProbeFailure) -> Arc<Self> {
             Arc::new(Self {
                 script: parking_lot::Mutex::new(PacketProbeScript {
@@ -9873,5 +10157,254 @@ mod pool_acceptance {
 
         let shared = pool.clone();
         assert_eq!(shared.snapshot(), pool.snapshot(), "held ownership is Arc-shared");
+    }
+}
+
+/// REQ-295-LINKMAC, the owner's real-kernel lane (E22 (d) and (e); feature
+/// delta § "[REF] Managed-link address from creation, and the host
+/// link-address policy (fresh-host RCA) — pinned 2026-09-26" (the refusal
+/// names its cause; *Earned Trust*)). Lima root, `integration-tests`.
+///
+/// The production host owner (`HostSharedGuestNetworkOwner::new()`, its real
+/// scratch and allocation I/O) converges the node's real shared state; faults
+/// enter only as real out-of-band kernel mutations (`ip link set`) of links
+/// the owner created. A `NodeSharedStateSweep` removes every node-global
+/// object the bodies can create — the bridge, the scratch-free TAP, the bridge
+/// guard table, and the owner's bpffs pins — before and after each body, so a
+/// panic leaves nothing behind. These bodies mutate node-global names; the
+/// module is in the `host-kernel-shared` nextest group
+/// (`.config/nextest.toml`).
+#[cfg(all(test, feature = "integration-tests"))]
+#[allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::print_stderr,
+    reason = "Tier-3 source-local bodies: evidence goes to stderr and fixture preconditions panic"
+)]
+mod shared_owner_link_address_kernel {
+    use std::process::Command;
+
+    use super::*;
+
+    const BRIDGE: &str = "ovd-gbr0";
+
+    /// A production-shaped TAP name (`ovd-tp-<4hex>`, so the host link policy
+    /// covers it) for an address no other fixture uses.
+    const TAP_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 242, 229);
+    const TAP: &str = "ovd-tp-f2e5";
+
+    /// An address written out of band; never `GUEST_BRIDGE_MAC`.
+    const FOREIGN_MAC: &str = "02:95:72:00:00:0d";
+    const FOREIGN_MAC_BYTES: [u8; 6] = [0x02, 0x95, 0x72, 0x00, 0x00, 0x0d];
+
+    #[allow(unsafe_code, reason = "reading the effective uid is the test's root precondition")]
+    fn require_root(test: &str) {
+        // SAFETY: `geteuid` has no preconditions and cannot fail.
+        let euid = unsafe { libc::geteuid() };
+        assert_eq!(euid, 0, "{test} mutates node-global links and must run as root");
+    }
+
+    /// Run one diagnostic host command; its outcome is recorded, and
+    /// `must_succeed` makes a failure fatal.
+    fn run(program: &str, args: &[&str], must_succeed: bool) {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .unwrap_or_else(|error| panic!("spawning `{program} {args:?}`: {error}"));
+        eprintln!(
+            "[S-ND295-72] {program} {args:?} -> {:?} stderr={:?}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        if must_succeed {
+            assert!(output.status.success(), "`{program} {args:?}` must succeed");
+        }
+    }
+
+    /// Removes the node-global objects these bodies can create, when created
+    /// and when dropped. A step that finds nothing is the clean outcome.
+    struct NodeSharedStateSweep;
+
+    impl NodeSharedStateSweep {
+        fn fresh() -> Self {
+            sweep();
+            Self
+        }
+    }
+
+    impl Drop for NodeSharedStateSweep {
+        fn drop(&mut self) {
+            sweep();
+        }
+    }
+
+    fn sweep() {
+        run("ip", &["link", "del", TAP], false);
+        run("ip", &["link", "del", BRIDGE], false);
+        run("nft", &["delete", "table", "bridge", "overdrive-mtls"], false);
+        run("rm", &["-rf", "/sys/fs/bpf/overdrive/mtls-endpoints"], false);
+    }
+
+    fn bridge_gateway() -> Ipv4Net {
+        Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 1), 16)
+    }
+
+    fn live_identity(name: &str) -> overdrive_netlink::ObservedLinkIdentity {
+        let owned = name.to_owned();
+        overdrive_netlink::block_on_host_netlink(|| async move {
+            overdrive_netlink::Client::new()?.observe_link_identity(&owned).await
+        })
+        .unwrap_or_else(|error| panic!("reading the identity of {name}: {error}"))
+        .unwrap_or_else(|| panic!("{name} exists"))
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (d): a bridge identity mismatch reports the observed address and up
+    /// state, not two equal facts. After the production owner converges the
+    /// node, an out-of-band address write on `ovd-gbr0` makes `audit_shared`
+    /// refuse with component `Bridge` and `PostconditionMismatch { operation:
+    /// BridgeObserve }` whose expected fact is `Bridge { GUEST_BRIDGE_MAC, up,
+    /// gateway 100.95.0.1/16 }` and whose observed fact is `Bridge` carrying the
+    /// written address, the link's ifindex, and its up state. On a second
+    /// fresh node, an out-of-band `down` is reported the same way with
+    /// `up: false`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
+    async fn a_bridge_identity_mismatch_names_the_observed_address_and_up_state() {
+        require_root("a_bridge_identity_mismatch_names_the_observed_address_and_up_state");
+        for (row, mutation, observed_mac, observed_up) in [
+            (
+                "changed address",
+                vec!["link", "set", "dev", BRIDGE, "address", FOREIGN_MAC],
+                FOREIGN_MAC_BYTES,
+                true,
+            ),
+            (
+                "set down",
+                vec!["link", "set", "dev", BRIDGE, "down"],
+                overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                false,
+            ),
+        ] {
+            // Each row starts from a fresh node and a fresh owner: repeated
+            // convergence on one owner is the runtime repair's (09-01), not
+            // this row's subject.
+            let _sweep = NodeSharedStateSweep::fresh();
+            let owner = HostSharedGuestNetworkOwner::new();
+            owner.converge_shared().await.expect("the production owner converges a clean node");
+            let ifindex = live_identity(BRIDGE).ifindex;
+            run("ip", &mutation, true);
+            let refused =
+                owner.audit_shared().await.expect_err("the damaged bridge fails the audit");
+            eprintln!("[S-ND295-72 (d)][{row}] {refused:?}");
+            assert_eq!(
+                refused.component,
+                SharedGuestNetworkComponent::Bridge,
+                "[{row}] the bridge component fails"
+            );
+            let GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::BridgeObserve,
+                expected,
+                observed,
+            } = refused.source
+            else {
+                panic!("[{row}] a bridge identity mismatch, got {:?}", refused.source);
+            };
+            assert!(
+                matches!(
+                    &expected,
+                    GuestNetworkFact::Bridge { name, link_kind: GuestLinkKind::Bridge, mac, up: true, gateway, .. }
+                        if name == BRIDGE
+                            && *mac == overdrive_core::dataplane::GUEST_BRIDGE_MAC
+                            && *gateway == Some(bridge_gateway())
+                ),
+                "[{row}] the expected fact is the fixed bridge identity, got {expected:?}"
+            );
+            assert_eq!(
+                observed,
+                Some(GuestNetworkFact::Bridge {
+                    name: BRIDGE.to_owned(),
+                    ifindex: Some(ifindex),
+                    link_kind: GuestLinkKind::Bridge,
+                    mac: observed_mac,
+                    up: observed_up,
+                    gateway: Some(bridge_gateway()),
+                }),
+                "[{row}] the observed fact carries the read-back address and up state"
+            );
+            assert_ne!(
+                Some(expected),
+                observed,
+                "[{row}] the refusal never reports two equal facts"
+            );
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (e): after systemd-udevd has initialized a provisioned TAP, its
+    /// live address is the one `provision` recorded, so the audit reports no
+    /// damage for it — on a substrate carrying the host link policy
+    /// (REQ-295-LINKMAC). The contrasting case is the RCA's forward
+    /// prediction made deterministic: an out-of-band address write after the
+    /// record is reported as that allocation's `TapHostMac` damage, and the
+    /// node stays healthy.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn a_provisioned_taps_recorded_address_survives_udev_initialisation() {
+        require_root("a_provisioned_taps_recorded_address_survives_udev_initialisation");
+        let _sweep = NodeSharedStateSweep::fresh();
+        let owner = HostSharedGuestNetworkOwner::new();
+        owner.converge_shared().await.expect("the production owner converges a clean node");
+        let alloc = AllocationId::new("nd295-linkmac-e").expect("allocation id");
+        let plan = GuestNetworkPlan {
+            alloc: alloc.clone(),
+            bridge: BRIDGE.to_owned(),
+            node_prefix: "100.95.0.0/16".parse().expect("node prefix"),
+            assignment: GuestNetworkAssignment {
+                address: TAP_ADDRESS,
+                tap: TAP.to_owned(),
+                mac: [0x02, 0x00, 100, 95, 242, 229],
+                gateway: Ipv4Addr::new(100, 95, 0, 1),
+                prefix: 16,
+                dns: Ipv4Addr::new(100, 95, 0, 1),
+            },
+        };
+        owner.provision(&plan).await.expect("the production owner provisions the TAP down");
+        run("udevadm", &["wait", "--timeout=10", &format!("/sys/class/net/{TAP}")], true);
+        eprintln!(
+            "[S-ND295-72 (e)] {TAP} after udev initialization: mac={:?}",
+            live_identity(TAP).mac
+        );
+
+        let healthy = owner.audit_shared().await.expect("the node is healthy after provision");
+        assert!(
+            !healthy.damaged.contains_key(&alloc),
+            "the recorded host-side address equals the live one after udev: {:?}",
+            healthy.damaged
+        );
+
+        run("ip", &["link", "set", "dev", TAP, "address", FOREIGN_MAC], true);
+        let damaged = owner.audit_shared().await.expect("TAP damage leaves the node healthy");
+        let cause = damaged.damaged.get(&alloc).unwrap_or_else(|| {
+            panic!("the rewritten TAP is that allocation's damage: {damaged:?}")
+        });
+        assert!(
+            matches!(
+                cause,
+                GuestNetworkError::PostconditionMismatch {
+                    expected: GuestNetworkFact::TapHostMac { .. },
+                    observed: Some(GuestNetworkFact::TapHostMac { mac: Some(mac), .. }),
+                    ..
+                } if *mac == FOREIGN_MAC_BYTES
+            ),
+            "the damage names the rewritten host-side address as TapHostMac, got {cause:?}"
+        );
+        owner.teardown(&plan).await.expect("the production owner tears the TAP down");
     }
 }

@@ -1,6 +1,6 @@
 //! S-ND295-65 — the serve composition has no optional switch for protection,
-//! DNS, or the shared-network supervisor (D-295-R16, E16; FD 4372-4399,
-//! 1876-2034, 4735).
+//! DNS, or the shared-network supervisor (D-295-R16, E16; FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` ports, the removed `dns_probe_fault`, and the deleted `compose_mtls`);
+//! FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E16)).
 //!
 //! A token-level scan of the three production files that compose the serve
 //! boundary: `overdrive-control-plane/src/{lib.rs, action_shim/mod.rs}` and
@@ -18,20 +18,20 @@
 //!   `SharedGuestNetworkOwner`, `MtlsInterceptLifecycle`, `MtlsIntercept`,
 //!   `GuestDns`, `GuestDnsFactory`, `DnsServeTaskOwner`,
 //!   `SharedNetworkSupervisorHandle`, or an alias of one). E16 scopes the rule
-//!   to fields and parameters (FD 4735); a local binding is not scanned.
+//!   to fields and parameters (FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E16)); a local binding is not scanned.
 //! - **The required declarations exist, unwrapped.** `AppState.{mtls_worker,
 //!   shared_guest_network, guest_network_exec, guest_pool}` and the same
 //!   parameters of `AppState::new` and `AppState::new_with_workflow_engine`
-//!   (FD 1888-1938); `ServerHandle.{mtls_worker_owner, mtls_resolve_owner}` and
-//!   its `SharedNetworkSupervisorHandle` field (FD 1999-2007);
-//!   `ServerConfig.{mtls_intercept, guest_dns}` (FD 4382-4386); at least one
-//!   action-shim parameter of the `MtlsInterceptLifecycle` port (FD 1864-1871).
+//!   (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` fields and constructors)); `ServerHandle.{mtls_worker_owner, mtls_resolve_owner}` and
+//!   its `SharedNetworkSupervisorHandle` field (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: `ServerHandle` owner fields));
+//!   `ServerConfig.{mtls_intercept, guest_dns}` (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` port fields)); at least one
+//!   action-shim parameter of the `MtlsInterceptLifecycle` port (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (no activation path without intercept-live)).
 //! - **No switch and no after-boot replacement.** None of the identifiers
 //!   `compose_mtls`, `dns_probe_fault`, `replace_mtls_worker_for_test`,
 //!   `inject_owner_shutdown_failure_for_test`, or `owner_shutdown_failures`
-//!   occurs in code (FD 4389-4393, 2008-2015); no `ServerHandle` method assigns
+//!   occurs in code (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the removed `dns_probe_fault` and the deleted `compose_mtls`); FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: the deleted test-only replacement hooks)); no `ServerHandle` method assigns
 //!   one of its owner fields; and no `run_server*` body assigns a required
-//!   `AppState` or `ServerHandle` owner field after construction (FD 1995-1996).
+//!   `AppState` or `ServerHandle` owner field after construction (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: composition roots)).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -66,7 +66,7 @@ const BANNED_IDENTIFIERS: [&str; 5] = [
 ];
 
 /// Required `AppState` fields and constructor parameters, with the type each
-/// must name (FD 1888-1938).
+/// must name (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` fields and constructors)).
 const APP_STATE_OWNERS: [(&str, &str); 4] = [
     ("mtls_worker", "MtlsInterceptWorker"),
     ("shared_guest_network", "SharedGuestNetworkOwner"),
@@ -74,13 +74,13 @@ const APP_STATE_OWNERS: [(&str, &str); 4] = [
     ("guest_pool", "GuestAddressPool"),
 ];
 
-/// Required `ServerHandle` owner fields (FD 1999-2007).
+/// Required `ServerHandle` owner fields (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: `ServerHandle` owner fields)).
 const SERVER_HANDLE_OWNERS: [(&str, &str); 2] = [
     ("mtls_worker_owner", "MtlsInterceptWorker"),
     ("mtls_resolve_owner", "ServiceBackendsResolve"),
 ];
 
-/// Required `ServerConfig` port fields (FD 4382-4386).
+/// Required `ServerConfig` port fields (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` port fields)).
 const SERVER_CONFIG_PORTS: [(&str, &str); 2] =
     [("mtls_intercept", "MtlsIntercept"), ("guest_dns", "GuestDnsFactory")];
 

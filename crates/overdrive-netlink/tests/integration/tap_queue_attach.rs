@@ -1,5 +1,5 @@
 //! GH #295 D-295-R2 / R4 — the owner-side TAP queue attach port
-//! (`overdrive_netlink::attach_tap_queue`, FD 557-625) against real kernel TAPs.
+//! (`overdrive_netlink::attach_tap_queue`, FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the new `overdrive-netlink` TUN helper and the `attach_tap_queue` contract)) against real kernel TAPs.
 //!
 //! Every case runs as root in the Lima VM on scratch TAPs named outside the
 //! production `ovd-tp-` family, each deleted by RAII on every exit path. The
@@ -15,7 +15,7 @@ use overdrive_netlink::{
 };
 
 /// `IFF_TAP | IFF_NO_PI | IFF_VNET_HDR | IFF_PERSIST`: the exact flags of a
-/// queue attached to a persistent single-queue vnet-header TAP (FD 580-583).
+/// queue attached to a persistent single-queue vnet-header TAP (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (`TapQueueError::Flags` and postcondition 1 of the `attach_tap_queue` contract)).
 pub(super) const PERSISTENT_VNET_TAP_FLAGS: u16 = 0x5802;
 const IFF_PERSIST: u16 = 0x0800;
 /// `IFF_TAP | IFF_NO_PI | IFF_VNET_HDR`: what the attach requests.
@@ -315,8 +315,8 @@ fn unprivileged_child_attach(name: &str) -> ChildVerdict {
     let pid = unsafe { libc::fork() };
     assert!(pid >= 0, "fork failed: {}", std::io::Error::last_os_error());
     if pid == 0 {
-        let verdict = std::panic::catch_unwind(|| child_attach(name))
-            .unwrap_or(ChildVerdict::Panicked);
+        let verdict =
+            std::panic::catch_unwind(|| child_attach(name)).unwrap_or(ChildVerdict::Panicked);
         // SAFETY: `_exit` ends the forked child without running the parent's
         // atexit handlers or unwinding into the test harness.
         unsafe { libc::_exit(verdict.code()) }

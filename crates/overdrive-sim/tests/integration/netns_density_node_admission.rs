@@ -4,7 +4,7 @@
 //!
 //! # Contract under test
 //!
-//! D-295-R6, R7, R8, R11 (feature delta FD 2520-2800, ADR-0132 to ADR-0134):
+//! D-295-R6, R7, R8, R11 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the cap, the pool, placement, and restart gating); ADR-0132 to ADR-0134):
 //! a node holds at most `MAX_GUEST_NETWORK_ATTACHMENTS` = 16,384 guest-network
 //! leases. A lease is held from the pool's `assign` until the allocation's
 //! cleanup has finished and the pool releases it. The held population is
@@ -58,7 +58,7 @@
 //!   `run_convergence_tick_with_guest_network_provisioner_for_test`, the
 //!   production evaluation with only the guest-network driven port supplied by
 //!   the test (the accepted C-295-B seam; it reads the EXEC gate and the pool
-//!   from `state`, FD 7231-7238). The registered `WorkloadLifecycle` hydrates
+//!   from `state`, FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)). The registered `WorkloadLifecycle` hydrates
 //!   `desired` and `actual`, including the guest-attachment occupancy. The pure
 //!   `reconcile` calls `overdrive_core::scheduler::schedule` or emits the
 //!   restart or reclaim action, the runtime `ViewStore` persists the view, and
@@ -76,7 +76,7 @@
 //!   `SimMtlsResolve`, and `SimMtlsIntercept`. The ledger is the seams'
 //!   `provisioner` and the owner `AppState` receives, so every owner
 //!   observation has one source. `AppState` constructors are unchanged until
-//!   DELIVER 05-01 (FD 1876-1989); until then the helper passes today's inputs,
+//!   DELIVER 05-01 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)); until then the helper passes today's inputs,
 //!   and 05-01 changes that one call to pass the worker, owner, gate, and pool.
 //! - **Driven ports substituted**: `SimDriver`, `SimObservationStore`,
 //!   `SimViewStore`, `SimClock`, `SimCa`, `SimDataplane`, the three mTLS sim
@@ -95,10 +95,10 @@
 //!
 //! # Outcome oracle
 //!
-//! The pool's own counts are crate-private (FD 2663-2673), so the held
+//! The pool's own counts are crate-private (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the crate-private pool operations)), so the held
 //! population is counted from outside: every `provision` the ledger sees adds
 //! a held lease, and every `guest_network.lease_released { alloc }` event
-//! removes one (FD 2723-2744). A test-local tracing layer ([`LeaseEventLayer`])
+//! removes one (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)). A test-local tracing layer ([`LeaseEventLayer`])
 //! captures `lease_released`, `lease_retired`, and `admission_refused` and
 //! appends them, with each `provision`, to one ordered journal. The held
 //! count at each acquisition is the NA-1..NA-G measure; the journal order is
@@ -115,7 +115,7 @@
 //! nextest timeout override for this test alone. Until the DELIVER step that
 //! carries B-7 (05-01 at the latest), `SimMtlsIntercept`'s bind still opens a
 //! plain loopback listener for the worker's two shared legs; after it the
-//! worker binds nothing (FD 3720-3735). The worker's shared-leg tasks end when
+//! worker binds nothing (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)). The worker's shared-leg tasks end when
 //! the last worker reference drops.
 //!
 //! The seed comes from `OVERDRIVE_ND295_ADMISSION_SEED` (default
@@ -194,7 +194,7 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 
 /// The accepted fixed node-wide cap (D-295-R6; `MAX_GUEST_NETWORK_ATTACHMENTS`
-/// in `overdrive_core::guest_network`, FD 2520-2524).
+/// in `overdrive_core::guest_network`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the `MAX_GUEST_NETWORK_ATTACHMENTS` constant)).
 const CAP: usize = 16_384;
 const _: () = assert!(
     MAX_GUEST_NETWORK_ATTACHMENTS as usize == CAP,
@@ -202,7 +202,7 @@ const _: () = assert!(
 );
 /// Today's guest-address pool composition. R6 composes the per-server pool
 /// with the same node prefix, bridge, gateway, and DNS address the shared
-/// owner is composed with (FD 2646-2662).
+/// owner is composed with (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (one pool per server: the doc-hidden `GuestAddressPool::new`)).
 const POOL_PREFIX: &str = "100.95.0.0/16";
 const POOL_BRIDGE: &str = "ovd-gbr0";
 const POOL_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
@@ -219,7 +219,7 @@ const DEFAULT_SEED: u64 = 0x0295_0032_A0D1_0001;
 const SETTLE_TICKS: usize = 6;
 /// Bounded clock nudges while waiting for the exit observer.
 const CRASH_POLL_BUDGET: usize = 2_000;
-/// The pinned lease events (FD 2723-2744).
+/// The pinned lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)).
 const LEASE_RETIRED: &str = "guest_network.lease_retired";
 const LEASE_RELEASED: &str = "guest_network.lease_released";
 const ADMISSION_REFUSED: &str = "guest_network.admission_refused";
@@ -677,7 +677,7 @@ impl Decision {
 }
 
 /// The inputs DELIVER 05-01's `AppState` constructors take beside the owner
-/// (FD 1876-1989). The seam fixture holds them from phase B on so that
+/// (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)). The seam fixture holds them from phase B on so that
 /// constructor change is one line.
 #[allow(
     dead_code,
@@ -721,7 +721,7 @@ impl SimNode {
         let allocator =
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
 
-        // One started worker over the three mTLS sim ports (FD 1956-1964).
+        // One started worker over the three mTLS sim ports (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: why `mtls_worker` is a parameter)).
         let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
         let enforcement: Arc<dyn MtlsEnforcement> =
             Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
@@ -742,7 +742,7 @@ impl SimNode {
 
         // One EXEC wiring over the fixture clock. Only its paired supervisor
         // moves the gate; it is opened before the first dispatch
-        // (FD 2021-2031).
+        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
         let exec = GuestNetworkExecWiring::new(clock.clone());
         let exec_gate = exec.gate();
         let exec_supervisor = exec.supervisor();
@@ -762,7 +762,7 @@ impl SimNode {
 
         // DELIVER 05-01 changes this call and no other line of the file:
         // `AppState::new` appends `mtls_worker`, `shared_guest_network`,
-        // `guest_network_exec`, and `guest_pool` (FD 1876-1989), passed here as
+        // `guest_network_exec`, and `guest_pool` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)), passed here as
         // `Arc::clone(&mtls_worker)`,
         // `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
         // `Arc::clone(&exec_gate)`, and `Arc::clone(&guest_pool)`.
@@ -1034,7 +1034,7 @@ impl SimNode {
             self.harness_failure(&format!(
                 "{workload}'s lease was never released after stop: no \
                  `{LEASE_RELEASED} {{ alloc }}` event for its allocation within {SETTLE_TICKS} \
-                 evaluations (FD 2723-2744), so the held population cannot be measured"
+                 evaluations (FD § \"[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)\" (the admission refusal projection and the lease events)), so the held population cannot be measured"
             ));
         }
     }

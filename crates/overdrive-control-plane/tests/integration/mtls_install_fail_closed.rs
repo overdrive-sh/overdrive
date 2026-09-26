@@ -506,7 +506,7 @@ impl tracing::field::Visit for EventFields {
 }
 
 /// Records the install-success event and the pinned lease events
-/// (`guest_network.lease_retired` / `lease_released`, FD 2741-2744).
+/// (`guest_network.lease_retired` / `lease_released`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)).
 #[derive(Clone)]
 struct JournalLayer(Journal);
 
@@ -753,7 +753,7 @@ impl SharedGuestNetworkOwner for JournalOwner {
 /// instance, one EXEC wiring over the fixture clock, one pool from
 /// `GuestAddressPool::new`, and one worker over sim ports.
 ///
-/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD 1876-1989),
+/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)),
 /// `AppState::new` takes today's inputs, and the owner reaches dispatch only
 /// as the seam's `provisioner`; the gate and pool are held here. 05-01 changes
 /// only the constructor call in [`SeamFixture::new`]: it passes `worker`,
@@ -1453,7 +1453,7 @@ async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     assert_supersession_observable("S-MIF-05", &outcome);
 }
 
-/// The accepted failure projection of an activation `Err` (FD 2037-2054):
+/// The accepted failure projection of an activation `Err` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the activation failure projection)):
 /// `driver.stop`, lease retired, `stop_alloc`, teardown, lease released last;
 /// a dominating Failed row; zero EXEC release.
 async fn assert_activation_failure_projection(
@@ -1746,7 +1746,7 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
 /// S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
 /// The owner condemned the allocation (an audit reported it damaged, without
 /// latching quiescence), so its activation is refused source-less and the
-/// same failure projection follows (FD 6708-6718).
+/// same failure projection follows (FD § "Public deterministic shared-owner simulation API" (the pending condemned-set and `activate` rules)).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[ignore = "pending DELIVER step 06-04 (S-ND295-52)"]

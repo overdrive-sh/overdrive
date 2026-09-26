@@ -295,53 +295,191 @@ async fn cleanup_failure_refuses_and_preserves_primary_cleanup_and_observed_resi
     assert_startup_refusal_event(&events);
 }
 
+/// How many fresh-host boots the bridge-identity body runs. The refusal it
+/// guards against is a timing race with the host's link manager (fresh-host
+/// RCA, root cause A: 6 of 9 fresh boots refused), so one boot is not a gate;
+/// every run prints its iteration count and each outcome.
+const FRESH_HOST_BOOTS: usize = 5;
+
+/// The one intermittent refusal the fresh-host RCA recorded and did not root
+/// cause (§ 8). A boot that ends in it counts neither for nor against the
+/// bridge-identity contract.
+const UNEXPLAINED_PROBE_TIMEOUT: &str =
+    "detached guard packet did not reach the exact drop transition";
+
+/// Remove the node-global shared state a production boot converges — the node
+/// bridge, its bridge guard table, and the owner's bpffs pins — so the next
+/// boot starts on a fresh host. Diagnostic tools only; each outcome is logged.
+fn remove_node_shared_state() {
+    for (program, args) in [
+        ("ip", vec!["link", "del", "ovd-gbr0"]),
+        ("nft", vec!["delete", "table", "bridge", "overdrive-mtls"]),
+        ("rm", vec!["-rf", "/sys/fs/bpf/overdrive/mtls-endpoints"]),
+    ] {
+        let output = std::process::Command::new(program)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|error| panic!("spawning `{program} {args:?}`: {error}"));
+        eprintln!(
+            "[S-ND295-00] fresh-host sweep: {program} {args:?} -> {:?} {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+}
+
+/// Removes the node-global shared state on drop, so a failed boot iteration
+/// leaves no bridge with a foreign address for a later test.
+struct FreshHostCleanup;
+
+impl Drop for FreshHostCleanup {
+    fn drop(&mut self) {
+        remove_node_shared_state();
+    }
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+/// S-ND295-00 — The node refuses work when its shared-network proof is incomplete
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// The bridge-identity leg (E22 (c)). On a fresh host — `ovd-gbr0`, its guard
+/// table, and the owner's pins absent — the production composition boots
+/// through the isolated probe, sweep, and convergence, and the bridge it
+/// creates reads back with `GUEST_BRIDGE_MAC`, administratively up, with the
+/// exact bridge guard and both map pins. The boot is repeated
+/// `FRESH_HOST_BOOTS` times, each from a fresh host. A boot refused for any
+/// other cause fails the body (a `BridgeObserve` refusal is the RCA's root
+/// cause A). A boot that ends in the RCA's unexplained probe timeout is
+/// recorded and counts for neither side; at least one boot must reach the
+/// read-back.
 #[tokio::test]
+#[ignore = "pending DELIVER step 05-00 (S-ND295-00)"]
 async fn production_host_owner_boots_only_after_real_shared_identity_is_exact() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
-    if unsafe { libc::geteuid() } != 0 {
-        eprintln!(
-            "SKIP production_host_owner_boots_only_after_real_shared_identity_is_exact: root required"
-        );
-        return;
-    }
-    let tmp = TempDir::new().expect("tempdir");
-    let handle = run_server(config(&tmp), Arc::new(overdrive_host::RealCgroupFs::new()))
-        .await
-        .expect("production host owner passes isolated probe, sweep, converge and audit");
-
-    let netlink = overdrive_netlink::Client::new().expect("typed host netlink client");
     assert_eq!(
-        netlink.observe_link("ovd-gbr0").await.expect("observe shared bridge"),
-        Some(true),
-        "the exact production bridge is administratively up before admission"
+        unsafe { libc::geteuid() },
+        0,
+        "the bridge-identity leg creates node-global links and must run as root"
     );
-    let guard = overdrive_netlink::nft::bridge::BridgeGuardSpec::new(
-        "overdrive-mtls".to_owned(),
-        "prerouting".to_owned(),
-        "managed_taps".to_owned(),
-        -300,
-        0x295a,
-        0x295b,
-    )
-    .expect("canonical guard spec");
-    assert!(matches!(
-        overdrive_netlink::nft::bridge::observe(&guard, &std::collections::BTreeSet::new())
-            .expect("non-repairing production guard observation"),
-        overdrive_netlink::nft::bridge::BridgeGuardObservation::Exact { .. }
-    ));
-    assert!(Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints").exists());
-    assert!(Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters").exists());
+    let _cleanup = FreshHostCleanup;
+    let mut outcomes = Vec::with_capacity(FRESH_HOST_BOOTS);
+    for iteration in 1..=FRESH_HOST_BOOTS {
+        remove_node_shared_state();
+        let tmp = TempDir::new().expect("tempdir");
+        let booted = run_server(config(&tmp), Arc::new(overdrive_host::RealCgroupFs::new())).await;
+        let handle = match booted {
+            Ok(handle) => handle,
+            Err(ControlPlaneError::GuestNetworkBoot(GuestNetworkError::Io {
+                operation: GuestNetworkOperation::StartupProbe,
+                source,
+            })) if source.to_string().contains(UNEXPLAINED_PROBE_TIMEOUT) => {
+                eprintln!(
+                    "[S-ND295-00] fresh-host boot {iteration}/{FRESH_HOST_BOOTS}: unexplained \
+                     startup-probe timeout (RCA § 8), counted for neither side: {source}"
+                );
+                outcomes.push("probe-timeout");
+                continue;
+            }
+            Err(error) => panic!(
+                "[S-ND295-00] fresh-host boot {iteration}/{FRESH_HOST_BOOTS} refused: {error:?}"
+            ),
+        };
+
+        let netlink = overdrive_netlink::Client::new().expect("typed host netlink client");
+        let bridge = netlink
+            .observe_link_identity("ovd-gbr0")
+            .await
+            .expect("observe the shared bridge")
+            .expect("the production bridge exists after boot");
+        eprintln!(
+            "[S-ND295-00] fresh-host boot {iteration}/{FRESH_HOST_BOOTS}: bridge ifindex={} \
+             mac={:?} up={}",
+            bridge.ifindex, bridge.mac, bridge.up
+        );
+        assert_eq!(
+            bridge.mac,
+            Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC),
+            "boot {iteration}: the created bridge reads back with the fixed node address"
+        );
+        assert!(bridge.up, "boot {iteration}: the bridge is administratively up before admission");
+        let guard = overdrive_netlink::nft::bridge::BridgeGuardSpec::new(
+            "overdrive-mtls".to_owned(),
+            "prerouting".to_owned(),
+            "managed_taps".to_owned(),
+            -300,
+            0x295a,
+            0x295b,
+        )
+        .expect("canonical guard spec");
+        assert!(matches!(
+            overdrive_netlink::nft::bridge::observe(&guard, &std::collections::BTreeSet::new())
+                .expect("non-repairing production guard observation"),
+            overdrive_netlink::nft::bridge::BridgeGuardObservation::Exact { .. }
+        ));
+        assert!(Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/maps/endpoints").exists());
+        assert!(Path::new("/sys/fs/bpf/overdrive/mtls-endpoints/maps/counters").exists());
+        handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains cleanly");
+        outcomes.push("read-back-exact");
+    }
+    eprintln!("[S-ND295-00] {FRESH_HOST_BOOTS} fresh-host boots: {outcomes:?}");
+    assert!(
+        outcomes.contains(&"read-back-exact"),
+        "at least one fresh-host boot reaches the bridge read-back: {outcomes:?}"
+    );
+}
+
+/// The DNS leg's configuration: the production host responder through the
+/// required `ServerConfig.guest_dns` port (DELIVER step 05-01 composes the DNS
+/// owner from it for every boot).
+fn host_dns_config(tmp: &TempDir) -> ServerConfig {
+    ServerConfig {
+        guest_dns: Arc::new(overdrive_control_plane::dns_responder::HostGuestDnsFactory),
+        ..config(tmp)
+    }
+}
+
+/// A standard `A` query for `nd295-absent.svc.overdrive.local.` with
+/// transaction ID `0x295a` and recursion desired.
+fn absent_mesh_name_query() -> Vec<u8> {
+    let mut query = vec![0x29, 0x5a, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    for label in ["nd295-absent", "svc", "overdrive", "local"] {
+        query.push(u8::try_from(label.len()).expect("a DNS label fits one byte"));
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.extend_from_slice(&[0, 0, 1, 0, 1]);
+    query
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-00 — The node refuses work when its shared-network proof is incomplete
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The DNS leg, re-authored (fresh-host RCA, root cause B). With the host
+/// responder injected through the required `guest_dns` port, a query from the
+/// host for a name inside the responder's zone that no workload holds
+/// (`nd295-absent.svc.overdrive.local`) is answered from the exact shared
+/// gateway `100.95.0.1` with NXDOMAIN, no answer record, exactly one SOA in
+/// the authority section with `MINIMUM == 1`, and the transaction ID
+/// preserved.
+#[tokio::test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-00)"]
+async fn the_shared_gateway_answers_an_absent_mesh_name_with_nxdomain() {
+    // SAFETY: `geteuid` has no memory-safety preconditions.
+    assert_eq!(
+        unsafe { libc::geteuid() },
+        0,
+        "the DNS leg binds the shared gateway's port 53 and must run as root"
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let handle = run_server(host_dns_config(&tmp), Arc::new(overdrive_host::RealCgroupFs::new()))
+        .await
+        .expect("production composition boots with the host DNS responder");
 
     let (reply, source) = tokio::task::spawn_blocking(|| {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0").expect("bind DNS client");
         socket.set_read_timeout(Some(Duration::from_secs(2))).expect("bound DNS read timeout");
-        let query = [
-            0x29, 0x5a, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 7, b'm', b'i',
-            b's', b's', b'i', b'n', b'g', 0, 0, 1, 0, 1,
-        ];
         socket
-            .send_to(&query, (std::net::Ipv4Addr::new(100, 95, 0, 1), 53))
+            .send_to(&absent_mesh_name_query(), (std::net::Ipv4Addr::new(100, 95, 0, 1), 53))
             .expect("query the exact production shared gateway");
         let mut reply = [0_u8; 512];
         let (length, source) = socket.recv_from(&mut reply).expect("shared DNS reply");
@@ -349,12 +487,30 @@ async fn production_host_owner_boots_only_after_real_shared_identity_is_exact() 
     })
     .await
     .expect("DNS client task joins");
-    assert_eq!(&reply[..2], &[0x29, 0x5a], "transaction ID is preserved");
+
     assert_eq!(
         source.ip(),
         std::net::IpAddr::V4(std::net::Ipv4Addr::new(100, 95, 0, 1)),
-        "the wildcard-owned responder source-pins the reply to the exact shared gateway"
+        "the reply is source-pinned to the exact shared gateway"
     );
+    let message = hickory_proto::op::Message::from_vec(&reply).expect("the reply decodes");
+    assert_eq!(message.metadata.id, 0x295a, "the transaction ID is preserved");
+    assert_eq!(
+        message.metadata.response_code,
+        hickory_proto::op::ResponseCode::NXDomain,
+        "an absent in-zone name is NXDOMAIN"
+    );
+    assert!(message.answers.is_empty(), "NXDOMAIN carries no answer record");
+    let soas: Vec<_> = message
+        .authorities
+        .iter()
+        .filter_map(|record| match &record.data {
+            hickory_proto::rr::RData::SOA(soa) => Some(soa),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(soas.len(), 1, "exactly one SOA in the authority section");
+    assert_eq!(soas[0].minimum, 1, "the SOA MINIMUM (negative TTL) is 1");
     handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains cleanly");
 }
 

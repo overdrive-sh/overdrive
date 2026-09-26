@@ -480,7 +480,7 @@ mod tests {
     /// call while armed, with the exact mapped operation and a fresh
     /// `"scripted sim owner refusal"` source; each disarms independently, the
     /// default quiescence outcome is full quiescence, and every call is
-    /// recorded once in call order (FD 6705-6760).
+    /// recorded once in call order (FD § "Public deterministic shared-owner simulation API" (the standing slots, their `Default`, and the operation mapping)).
     #[tokio::test]
     async fn standing_owner_controls_preserve_exact_operation_semantics() {
         use GuestNetworkOperation::{
@@ -562,7 +562,7 @@ mod tests {
     /// names each not-yet-condemned member with a fresh `Io { TapSetDown }`
     /// (empty is full quiescence), `Fail` refuses, `Hang` never resolves.
     /// Every allocation a quiescence or audit result names is condemned and
-    /// never named again by either operation (FD 2142-2165, 6705-6718).
+    /// never named again by either operation (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter); FD § "Public deterministic shared-owner simulation API" (the pending `Default`, damage, and condemned-set rules)).
     #[tokio::test]
     async fn scripted_quiescence_outcomes_condemn_each_named_allocation_once() {
         use GuestNetworkOperation::{BridgeObserve, TapObserve, TapSetDown};

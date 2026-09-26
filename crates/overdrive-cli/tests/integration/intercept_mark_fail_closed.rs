@@ -326,6 +326,35 @@ impl SynCapture {
             panic!("SYN capture recv failed: {error}");
         }
     }
+
+    /// Drain every queued frame and return `true` if any is an IPv4 TCP
+    /// SYN-ACK whose SOURCE port is `self.dst_port` — a reopen reply from the
+    /// original destination back toward the guest (S-ND295-64 door). Sticky
+    /// across polls is unnecessary: a single true drain is the reopen.
+    fn syn_ack_seen(&self) -> bool {
+        loop {
+            let mut frame = [0_u8; 2048];
+            // SAFETY: `frame` is a live writable buffer; `self.fd` is owned.
+            let read = unsafe {
+                libc::recv(self.fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
+            };
+            if read > 0 {
+                let length = usize::try_from(read).expect("positive recv length");
+                if is_syn_ack_from_port(&frame[..length], self.dst_port) {
+                    return true;
+                }
+                continue;
+            }
+            if read == 0 {
+                return false;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                return false;
+            }
+            panic!("SYN capture recv failed: {error}");
+        }
+    }
 }
 
 impl Drop for SynCapture {
@@ -352,6 +381,26 @@ fn is_syn_to_port(frame: &[u8], dst_port: u16) -> bool {
     let port = u16::from_be_bytes([tcp[2], tcp[3]]);
     let flags = tcp[13];
     port == dst_port && (flags & 0x02) != 0 && (flags & 0x10) == 0
+}
+
+/// `true` iff `frame` is an Ethernet/IPv4/TCP SYN-ACK (SYN set, ACK set) whose
+/// TCP SOURCE port equals `src_port` — a reopen reply from the original
+/// destination (S-ND295-64).
+fn is_syn_ack_from_port(frame: &[u8], src_port: u16) -> bool {
+    if frame.len() < 14 + 20 + 20 {
+        return false;
+    }
+    if u16::from_be_bytes([frame[12], frame[13]]) != 0x0800 {
+        return false; // not IPv4
+    }
+    let ihl = usize::from(frame[14] & 0x0f) * 4;
+    if frame[23] != 0x06 || frame.len() < 14 + ihl + 20 {
+        return false; // not TCP / too short
+    }
+    let tcp = &frame[14 + ihl..];
+    let port = u16::from_be_bytes([tcp[2], tcp[3]]);
+    let flags = tcp[13];
+    port == src_port && (flags & 0x02) != 0 && (flags & 0x10) != 0
 }
 
 /// The bridge guard chain's default-drop counter (packets), read through the
@@ -768,16 +817,21 @@ async fn inbound_tcp_to_a_closed_listener_is_dropped() {
 /// S-ND295-64 — The TIME_WAIT side door is measured with both controls first
 /// CONTRACT_SHAPE: bounded-change.
 ///
-/// The controls run first on a host-only path a test-owned veth peer namespace
-/// under `TestCidrLease` provides — the TPROXY program does not handle it, so
-/// the host holds a true `TIME_WAIT` entry. The negative control (stale ISN,
-/// no timestamp) gets a bare ACK and no SYN-ACK, proving the substate and
-/// sequence gates; the positive control (after `tcp_invalid_ratelimit`, a
-/// newer sequence) reopens with a SYN-ACK. Only then is the guest case
-/// recorded. **A reproduced SYN-ACK is not absorbed: it routes to the user.**
+/// The controls run on a host-only path a test-owned veth peer namespace under
+/// `TestCidrLease` provides — the TPROXY program does not handle it, so the
+/// host holds a true `TIME_WAIT` entry. The negative control (stale ISN, no
+/// timestamp) gets a bare ACK and no SYN-ACK, proving the substate and sequence
+/// gates; the positive control (after `tcp_invalid_ratelimit`, a newer
+/// sequence) reopens with a SYN-ACK. These two are door-independent (E14 (e):
+/// "Two controls run first and do not depend on the door"): they prove the
+/// kernel gates the guest door relies on, and they need no guest. The guest
+/// door itself — a newer-sequence reconnect into a real intercepted guest's
+/// leg-F `TIME_WAIT` entry — is
+/// [`a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user`],
+/// which needs a Running mesh guest (05-03) and so is marked separately.
 #[tokio::test]
 #[ignore = "pending DELIVER step 08-01 (S-ND295-64)"]
-async fn a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_controls() {
+async fn both_time_wait_controls_prove_the_substate_and_sequence_gates() {
     let lease = TestCidrLease::acquire("nd295-64-time-wait")
         .expect("acquire a named CIDR for the TIME_WAIT controls");
     // The namespace name also prefixes the veth ends (`<ns>-h`, `<ns>-p`),
@@ -811,16 +865,254 @@ async fn a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_contro
         "the newer-sequence probe reopens the TIME_WAIT entry with a SYN-ACK"
     );
 
-    // Guest case: record whether a newer-sequence reconnect into the guest's
-    // own leg-F TIME_WAIT entry is answered. A reproduced SYN-ACK is not
-    // absorbed — it is surfaced to the user as the recorded outcome.
-    let guest_outcome = topology.probe_reconnect(tuple, ReconnectSeq::NewerSeq);
-    eprintln!(
-        "S-ND295-64 guest TIME_WAIT reconnect outcome (recorded, not absorbed): {guest_outcome:?}"
-    );
-
     drop(topology);
     drop(lease);
+}
+
+/// Build the guest program that reproduces the E14 (e) guest side: it dials the
+/// mesh peer by name (an intercepted leg-F flow), completes and cleanly closes
+/// that connection from inside the guest — so the host's leg-F side enters the
+/// true `TIME_WAIT` substate — recording its source port, then for the whole
+/// probe window raw-crafts newer-sequence SYNs from that same source 4-tuple to
+/// the original destination. The host closes leg F meanwhile; a reconnect that
+/// lands while leg F is absent is what the door test records.
+///
+/// The guest is malicious by model (E14 (e)): it controls its source port, ISN,
+/// and timestamps, so it reuses the closed connection's source port with a
+/// sequence above the old `rcv_nxt` and a newer `TSval`. The raw-SYN crafting is
+/// the same `AF_INET`/`SOCK_RAW`/`IP_HDRINCL` shape the host crafter uses,
+/// declared inline because a bare-`rustc` static binary links no `libc` crate.
+fn build_time_wait_guest(tmp: &Path) -> PathBuf {
+    let source = format!(
+        r#"
+use std::io::{{Read, Write}};
+use std::net::{{Ipv4Addr, TcpStream, ToSocketAddrs}};
+use std::time::{{Duration, Instant}};
+
+const AF_INET: i32 = 2;
+const SOCK_RAW: i32 = 3;
+const IPPROTO_RAW: i32 = 255;
+const IPPROTO_TCP: u8 = 6;
+
+extern "C" {{
+    fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+    fn sendto(fd: i32, buf: *const u8, len: usize, flags: i32, addr: *const u8, alen: u32) -> isize;
+    fn close(fd: i32) -> i32;
+}}
+
+fn csum(bytes: &[u8]) -> u16 {{
+    let mut sum: u32 = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {{
+        sum += u32::from(u16::from_be_bytes([bytes[i], bytes[i + 1]]));
+        i += 2;
+    }}
+    if i < bytes.len() {{
+        sum += u32::from(u16::from_be_bytes([bytes[i], 0]));
+    }}
+    while sum >> 16 != 0 {{
+        sum = (sum & 0xffff) + (sum >> 16);
+    }}
+    !(sum as u16)
+}}
+
+/// Craft one SYN from (src, sport) to (dst, dport) with `seq` and a newer TS.
+fn craft_syn(src: Ipv4Addr, sport: u16, dst: Ipv4Addr, dport: u16, seq: u32, tsval: u32) {{
+    let mut tcp = vec![0u8; 32];
+    tcp[0..2].copy_from_slice(&sport.to_be_bytes());
+    tcp[2..4].copy_from_slice(&dport.to_be_bytes());
+    tcp[4..8].copy_from_slice(&seq.to_be_bytes());
+    tcp[12] = 0x80; // data offset 8 words (20 + 12 TS option)
+    tcp[13] = 0x02; // SYN
+    tcp[14..16].copy_from_slice(&0xffff_u16.to_be_bytes());
+    // TS option: kind 8, len 10, TSval, TSecr 0, then NOP,NOP padding.
+    tcp[20] = 8;
+    tcp[21] = 10;
+    tcp[22..26].copy_from_slice(&tsval.to_be_bytes());
+    tcp[30] = 1;
+    tcp[31] = 1;
+    let mut pseudo = Vec::new();
+    pseudo.extend_from_slice(&src.octets());
+    pseudo.extend_from_slice(&dst.octets());
+    pseudo.push(0);
+    pseudo.push(IPPROTO_TCP);
+    pseudo.extend_from_slice(&(tcp.len() as u16).to_be_bytes());
+    pseudo.extend_from_slice(&tcp);
+    let tcp_csum = csum(&pseudo);
+    tcp[16..18].copy_from_slice(&tcp_csum.to_be_bytes());
+    let mut ip = vec![0u8; 20];
+    ip[0] = 0x45;
+    let total = (20 + tcp.len()) as u16;
+    ip[2..4].copy_from_slice(&total.to_be_bytes());
+    ip[8] = 64;
+    ip[9] = IPPROTO_TCP;
+    ip[12..16].copy_from_slice(&src.octets());
+    ip[16..20].copy_from_slice(&dst.octets());
+    let ip_csum = csum(&ip);
+    ip[10..12].copy_from_slice(&ip_csum.to_be_bytes());
+    let mut packet = ip;
+    packet.extend_from_slice(&tcp);
+    // SAFETY: a raw IP socket send of a self-built packet to a sockaddr_in.
+    unsafe {{
+        let fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+        if fd < 0 {{ return; }}
+        let mut sa = [0u8; 16];
+        sa[0] = AF_INET as u8;
+        sa[2..4].copy_from_slice(&dport.to_be_bytes());
+        sa[4..8].copy_from_slice(&dst.octets());
+        let _ = sendto(fd, packet.as_ptr(), packet.len(), 0, sa.as_ptr(), 16);
+        close(fd);
+    }}
+}}
+
+fn main() {{
+    // 1. Establish one intercepted connection to the peer by name, exchange a
+    //    byte, and close it cleanly (guest FIN) so the host leg-F enters
+    //    TIME_WAIT. The kernel picks the source port; read it back.
+    let target = ("{mesh}", {svc}).to_socket_addrs().ok().and_then(|mut a| a.next());
+    let Some(target) = target else {{ return; }};
+    let Ok(mut stream) = TcpStream::connect_timeout(&target, Duration::from_secs(2)) else {{ return; }};
+    let sport = stream.local_addr().map(|a| a.port()).unwrap_or(0);
+    let _ = stream.write_all(b"ND295-TW");
+    let mut byte = [0u8; 1];
+    let _ = stream.read(&mut byte);
+    drop(stream); // clean close from the guest side
+    let (dst, dport) = match target {{
+        std::net::SocketAddr::V4(v4) => (*v4.ip(), v4.port()),
+        std::net::SocketAddr::V6(_) => return,
+    }};
+    // The guest's own address on its TAP.
+    let src = local_ipv4().unwrap_or(Ipv4Addr::UNSPECIFIED);
+    // 2. For the whole window, reconnect from the same source tuple with a
+    //    sequence above the old rcv_nxt and a newer TSval. A base seq/TSval is
+    //    fine: the host holds one TIME_WAIT entry and PAWS accepts a newer TS.
+    let deadline = Instant::now() + Duration::from_secs({window});
+    let mut n: u32 = 0;
+    while Instant::now() < deadline {{
+        craft_syn(src, sport, dst, dport, 0x5000_0000u32.wrapping_add(n * 4_000), 0x0100_0000u32 + n);
+        n += 1;
+        std::thread::sleep(Duration::from_millis(200));
+    }}
+}}
+
+fn local_ipv4() -> Option<Ipv4Addr> {{
+    // The guest's single non-loopback IPv4, read from a UDP connect's local addr.
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect(("{gw}", 9)).ok()?;
+    match sock.local_addr().ok()? {{
+        std::net::SocketAddr::V4(v4) => Some(*v4.ip()),
+        std::net::SocketAddr::V6(_) => None,
+    }}
+}}
+"#,
+        mesh = MESH_NAME,
+        svc = SERVICE_PORT,
+        gw = GATEWAY,
+        window = PROBE_WINDOW.as_secs() + 20,
+    );
+    build_static_binary(tmp, "nd295-tw-guest", &source)
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-64 — The TIME_WAIT side door is measured with both controls first
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// E14 (e), the guest door. A real mesh guest (deployed through serve + deploy)
+/// opens an intercepted leg-F connection to a peer and closes it from the guest
+/// side, so the host's leg-F socket holds the true `TIME_WAIT` substate. The
+/// host then closes leg F (killed mode), and the guest reconnects from the same
+/// source tuple with a newer sequence for the probe window. The host records
+/// whether any reconnect is answered on the guest's TAP. **A reproduced SYN-ACK
+/// is not absorbed: the body fails and surfaces the reopen to the user** (FD
+/// § "[REF] Driven port — intercept element release, member convergence, boot
+/// clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19
+/// conditional on native RED)" (the `TIME_WAIT` side door's routing to the
+/// user)). Its precondition — a Running mesh guest — needs the 05-03 fd handoff,
+/// so it is marked 05-03; the door it records depends on R19 (08-01,
+/// conditional), which if withdrawn makes every reconnect fall through to a
+/// drop.
+#[tokio::test]
+#[ignore = "pending DELIVER step 05-03 (S-ND295-64)"]
+async fn a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user()
+ {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("native VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("nd295-64e-")
+        .tempdir_in(shared_staging_root())
+        .expect("native tempdir");
+    let peer = build_mesh_peer(tmp.path());
+    let peer_rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &peer, "gti-peer");
+    let tw_guest = build_time_wait_guest(tmp.path());
+    let guest_rootfs =
+        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &tw_guest, "nd295-tw-guest");
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
+    let cfg = config_path(server_tmp.path());
+
+    // The mesh peer the guest dials by name.
+    let service_spec = write_toml(
+        server_tmp.path(),
+        "nd295-64e-peer.toml",
+        &service_toml(&peer, &fixture.kernel_path, &peer_rootfs),
+    );
+    let peer_out = deploy(DeployArgs { spec: service_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the mesh peer service");
+    poll_until_running(&cfg, &peer_out.workload_id, RUNNING_BOUND).await;
+
+    // The TIME_WAIT guest: establishing + reconnecting is its whole program.
+    let guest_spec = write_toml(
+        server_tmp.path(),
+        "nd295-64e-guest.toml",
+        &vm_job_toml("nd295-tw", "/sbin/nd295-tw-guest", &[], &fixture.kernel_path, &guest_rootfs),
+    );
+    let guest_out = deploy(DeployArgs { spec: guest_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the TIME_WAIT guest");
+    let running = poll_until_running(&cfg, &guest_out.workload_id, RUNNING_BOUND).await;
+    let guest_addr = running
+        .snapshot
+        .rows
+        .first()
+        .expect("one Running guest row")
+        .workload_addr
+        .expect("the Running guest publishes its address");
+    let guest_tap = tap_for(guest_addr);
+
+    // The guest establishes and closes its intercepted connection first; wait
+    // for the host leg-F to hold a TIME_WAIT entry, then close leg F and watch
+    // the guest's TAP for a reopen while it reconnects.
+    let leg_f = leg_f_port();
+    let host_time_wait_present = wait_until(Duration::from_secs(30), || {
+        Command::new("ss")
+            .args(["-tan", "state", "time-wait", &format!("sport = :{leg_f}")])
+            .output()
+            .is_ok_and(|out| out.status.success() && out.stdout.windows(4).any(|w| w == b"127."))
+    })
+    .await;
+    assert!(
+        host_time_wait_present,
+        "the guest's closed intercepted connection leaves the host leg-F in TIME_WAIT"
+    );
+
+    let capture = SynCapture::open(&guest_tap, SERVICE_PORT);
+    // Close leg F from the host (killed mode) so the door is open per flow.
+    kill_serve_owner(handle).await.expect("killed-mode serve abandons its owner");
+    assert!(tap_is_up(&guest_tap), "the guest's TAP stays up after killed mode");
+
+    // The guest keeps reconnecting for the window. Record whether any host
+    // reply is a SYN-ACK (the door reproduced) on the guest's TAP.
+    let reopened = wait_until(PROBE_WINDOW, || capture.syn_ack_seen()).await;
+    eprintln!(
+        "S-ND295-64 guest leg-F TIME_WAIT door: reopened={reopened} (SYN-ACK seen on {guest_tap})"
+    );
+    assert!(
+        !reopened,
+        "the guest's newer-sequence reconnect into its leg-F TIME_WAIT entry was answered with a \
+         SYN-ACK: the door reproduced and is surfaced to the user, not absorbed (E14 (e))"
+    );
+
+    let _ = stop(StopArgs { id: guest_out.workload_id.clone(), config_path: cfg.clone() }).await;
+    let _ = stop(StopArgs { id: peer_out.workload_id, config_path: cfg }).await;
 }
 
 /// The reply a reconnect probe observed.

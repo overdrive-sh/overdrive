@@ -65,6 +65,7 @@ use overdrive_netlink::{Client, block_on_host_netlink};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
+use overdrive_worker::mtls_intercept::InterceptError;
 use overdrive_worker::mtls_intercept_port::{
     HostMtlsIntercept, InterceptMembers, InterceptState, MtlsIntercept,
 };
@@ -333,7 +334,7 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 
 /// Removal on the real kernel is convergent, and every refused request leaves
 /// the owned tables byte-equal (feature delta `remove_allocation_elements`,
-/// FD 2931-2994; E8's Lima column).
+/// FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (`remove_allocation_elements` through the netlink surface); E8's Lima column).
 ///
 /// A real program at two listener targets holds a stopping allocation (one
 /// source, two requested destinations) and a surviving allocation. One of the
@@ -342,9 +343,12 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 ///
 /// 1. two rejected batches — a duplicate destination and a zero-port
 ///    destination — each return `Err` and leave every owned table byte-equal;
-/// 2. an adapter whose recorded program identity does not equal the observed
-///    program (a fresh `HostMtlsIntercept` that recorded none) is refused, and
-///    the tables stay byte-equal;
+/// 2. an adapter that has recorded no program (a fresh `HostMtlsIntercept`
+///    whose `converge_shared` never ran) is refused with
+///    `SharedProgramNotConverged` (DISTILL gap B-8, removal refusal 2, after
+///    argument validation), and the tables stay byte-equal. The
+///    recorded-versus-observed refusal has its own body,
+///    [`removal_is_refused_when_the_recorded_program_was_replaced_out_of_band`];
 /// 3. the real removal returns `Ok(InterceptState)` without every requested
 ///    member — the pre-absent one included, which is not an error — with the
 ///    surviving allocation's members, the program, and the policy route
@@ -451,21 +455,22 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
         );
     }
 
-    // 2. A recorded identity unequal to the observed program is refused.
+    // 2. An adapter that recorded no program is refused by the precondition.
     let unrecorded = HostMtlsIntercept::new();
     let refused = unrecorded.remove_allocation_elements(
         REMOVAL_STOPPING_SOURCE,
         &[REMOVAL_STOPPING_PRESENT, REMOVAL_STOPPING_PRE_ABSENT],
     );
-    evidence.record("identity-mismatch", "refusal", format_args!("{refused:?}"));
+    evidence.record("not-converged", "refusal", format_args!("{refused:?}"));
     assert!(
-        refused.is_err(),
-        "an adapter whose recorded identity does not equal the observed program is refused"
+        matches!(refused, Err(InterceptError::SharedProgramNotConverged)),
+        "an adapter whose converge_shared never ran is refused with SharedProgramNotConverged, \
+         got {refused:?}"
     );
     assert_eq!(
         owned_tables_snapshot(),
         before,
-        "an identity refusal leaves every owned table byte-equal"
+        "a precondition refusal leaves every owned table byte-equal"
     );
 
     // 3. The convergent removal.
@@ -511,6 +516,97 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
     drop(surviving_outbound);
     drop(node_guard);
     drop((leg_c, leg_f));
+}
+
+/// The recorded-versus-observed branch of `remove_allocation_elements` (R10's
+/// removal refusal 3, DISTILL gap B-8): a converged adapter whose kernel program
+/// was replaced out of band is refused, with a typed refusal that is not the
+/// precondition's, and every owned table stays byte-equal.
+///
+/// The adapter under test converges its program and installs one allocation.
+/// The owned program table is then deleted with `nft delete table` (a real
+/// kernel mutation), and a second, independent `HostMtlsIntercept` — a writer
+/// the first adapter does not know about — converges a program at two other
+/// listener targets. The first adapter's recorded identity now differs from the
+/// observed program. Its removal must refuse without mutating, and must not be
+/// the no-record refusal: the record is present, it is stale.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-54 — Protection removal is convergent and its failures are typed.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+fn removal_is_refused_when_the_recorded_program_was_replaced_out_of_band() {
+    assert!(is_root(), "S-ND295-54 Lima evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-54-recorded-vs-observed");
+    let evidence = Evidence::begin("S-ND295-54");
+    let row = "recorded-vs-observed";
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sandbox = MemberSandbox::fresh(evidence, row);
+
+    let host = HostMtlsIntercept::new();
+    let leg_f = host
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent binds leg F");
+    let leg_c = host
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent binds leg C");
+    let outbound_target = leg_f.bound_v4().expect("leg F reports its bound IPv4 address");
+    let inbound_target = leg_c.bound_v4().expect("leg C reports its bound IPv4 address");
+    let node_guard = host
+        .converge_shared(None, outbound_target, inbound_target)
+        .expect("the owned program installs on a clean kernel");
+    let recorded = host
+        .observe_shared()
+        .expect("the recorded program is observable")
+        .expect("the owned program is present");
+    let stopping_outbound = host
+        .install_outbound(REMOVAL_STOPPING_SOURCE, outbound_target.port())
+        .expect("install the stopping allocation's source members");
+
+    // The out-of-band replacement: the table goes, and another writer converges
+    // a program at two other targets.
+    kernel_mutation(evidence, row, "nft", &["delete", "table", "ip", OWNED_TABLE]);
+    let successor = HostMtlsIntercept::new();
+    let successor_f = successor
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("the other writer binds its leg F");
+    let successor_c = successor
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("the other writer binds its leg C");
+    let successor_guard = successor
+        .converge_shared(
+            None,
+            successor_f.bound_v4().expect("the other writer's leg F address"),
+            successor_c.bound_v4().expect("the other writer's leg C address"),
+        )
+        .expect("the other writer converges its program on the emptied kernel");
+    let replaced = host
+        .observe_shared()
+        .expect("the replaced program is observable")
+        .expect("a program is present");
+    assert_ne!(replaced, recorded, "the observed program differs from the recorded one");
+    let before = owned_tables_snapshot();
+
+    let refused =
+        host.remove_allocation_elements(REMOVAL_STOPPING_SOURCE, &[REMOVAL_STOPPING_PRESENT]);
+    evidence.record(row, "refusal", format_args!("{refused:?}"));
+    assert!(refused.is_err(), "a stale recorded identity refuses the removal");
+    assert!(
+        !matches!(refused, Err(InterceptError::SharedProgramNotConverged)),
+        "a present but stale record is the recorded-versus-observed refusal, not the \
+         precondition's"
+    );
+    assert_eq!(
+        owned_tables_snapshot(),
+        before,
+        "a recorded-versus-observed refusal leaves every owned table byte-equal"
+    );
+
+    drop(stopping_outbound);
+    drop(node_guard);
+    drop(successor_guard);
+    drop((leg_c, leg_f, successor_c, successor_f));
 }
 
 // ---------------------------------------------------------------------------

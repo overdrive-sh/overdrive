@@ -47,7 +47,7 @@
 //! object: every stale object boot two meets is the real residue of the killed
 //! first server.
 //!
-//! Killed-mode fidelity deviation (FD 3951-3953): `EbpfDataplane`'s destructor
+//! Killed-mode fidelity deviation (FD § "[REF] Boot ordering (D-295-R12) — ACCEPTED 2026-09-24" (the killed-mode fidelity deviation)): `EbpfDataplane`'s destructor
 //! still runs, so its SERVICE_MAP pin unlink and XDP detach happen. No oracle
 //! below relies on either surviving.
 //!
@@ -480,7 +480,7 @@ fn observe_state() -> Result<Option<SharedIpInterceptState>, String> {
 }
 
 /// The D-295-R18 guard observation. The surface is provisional
-/// (FD 3462-3475): DELIVER step 08-01 implements it if R18 stands, or deletes
+/// (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R18-B contract: the provisional guard observe and converge functions)): DELIVER step 08-01 implements it if R18 stands, or deletes
 /// it (and this proof's guard assertion with it) if R18 is withdrawn. Until
 /// 08-01 it is a RED scaffold, so its panic is reported as a RED observation
 /// instead of aborting the proof's other verdicts.
@@ -494,7 +494,7 @@ fn observe_intercept_mark_guard() -> Result<bool, String> {
 
 /// Each rule of a kernel listing of `table ip overdrive-mtls` that TPROXYs,
 /// with whether its tail runs `tproxy`, then `meta mark set`, then `accept`
-/// (the D-295-R19 order, FD 3349-3356).
+/// (the D-295-R19 order, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R19 contract)).
 fn tproxy_rule_orders(listing: &str) -> Vec<(String, bool)> {
     listing
         .lines()
@@ -1548,7 +1548,7 @@ fn evaluate(
         (Ok(rules), Ok(table)) => policy_route_present(rules, table),
         _ => false,
     };
-    // R18 (conditional, FD 3478-3488): asserted only through its provisional
+    // R18 (conditional, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts and the shape without R18)): asserted only through its provisional
     // observation surface; if 08-01 withdraws R18 it deletes that surface and
     // this clause.
     let intercept_mark_guard = matches!(final_program.intercept_mark_guard, Ok(true));
@@ -1756,10 +1756,10 @@ struct ProofOutcome {
 ///
 /// D-295-R18 is conditional on DELIVER step 08-01's native RED. V4's guard
 /// clause reads the guard only through its provisional observation surface,
-/// `overdrive_netlink::nft::observe_intercept_mark_guard` (FD 3462-3475): if
+/// `overdrive_netlink::nft::observe_intercept_mark_guard` (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R18-B contract: the provisional guard observe and converge functions)): if
 /// 08-01 withdraws R18 it deletes that surface and this clause with it
-/// (FD 3478-3485, "Shape without R18"). D-295-R19 is conditional in the same
-/// way (FD 3486-3488); the order clause expects the R19 tail the scenario
+/// (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional-parts table, column "Shape without R18")). D-295-R19 is conditional in the same
+/// way (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts: the E14 withdrawal conditions)); the order clause expects the R19 tail the scenario
 /// names.
 ///
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
@@ -1801,7 +1801,7 @@ fn a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits() {
     // dynamic allocation residue would contaminate the measured baseline. A
     // program the typed observer rejects (for example a pre-R19 rule order
     // left by an earlier #295 build) is stale node-global state the operator
-    // clears first (FD 5203-5207).
+    // clears first (FD § "[REF] Required downstream changes (not edited by DESIGN)" (development and test hosts)).
     let pre_state = observe_state();
     evidence.record("precondition_intercept_state", &summarize_state(&pre_state));
     let dynamic_members_present = matches!(&pre_state, Ok(Some(state)) if !state_members(state).is_empty())

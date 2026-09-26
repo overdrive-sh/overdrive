@@ -712,6 +712,19 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-netlink) & binary(integration)'
 test-group = 'host-kernel-shared'
 
+# GH #295 S-ND295-72 (E22 (d), (e)): the source-local, `integration-tests`-gated
+# `guest_network::shared_owner_link_address_kernel` module converges the real
+# node bridge `ovd-gbr0`, its bridge guard table, and the owner's bpffs pins —
+# the same node-global names the control-plane and CLI integration binaries
+# converge. It lives in the crate's library test binary because the host owner's
+# constructor is crate-private. Only this module of that binary touches kernel
+# state; every other library test is in-process and stays in the parallel pool,
+# so the module, not the whole library binary, joins the single-writer group
+# (matched by module path, so a new test in the module joins automatically).
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & kind(lib) & test(/shared_owner_link_address_kernel::/)'
+test-group = 'host-kernel-shared'
+
 # Root system-conformance owns exported-handler composition plus typed host
 # observations and may provision the same global guest-network kernel names as
 # crate integration binaries. Keep its whole integration binary in the same

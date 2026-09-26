@@ -11,57 +11,66 @@
 //! exactly one of the contract / host adapter / sim adapter is wrong, and the
 //! failing scenario isolates which.
 //!
-//! ## The asserted set IS the trait contract, modulo ONE unobservable clause
+//! ## The asserted set IS the trait contract, modulo two unobservable clauses
 //!
 //! | Contract clause (`mtls_intercept_port.rs`) | Asserted by |
 //! |---|---|
 //! | `bind_transparent` returns a bound listener whose `local_addr()` port is NON-ZERO when `addr` carried port 0 | S-MIF-09 |
 //! | Each call returns a DISTINCT listener | S-MIF-10 |
 //! | An address still held by a live listener of the adapter is refused with `EADDRINUSE`; it binds again once its last holder drops | S-ND295-70 (held address) |
-//! | `install_*` returns a guard owning exactly what the call acquired; `Drop` never panics | S-MIF-11 |
+//! | After `converge_shared` records a program, `install_*` at the recorded ports returns a guard owning exactly what the call acquired; `Drop` never panics | S-MIF-11 |
 //! | `Drop` never panics even for a guard whose state was already released out-of-band | S-MIF-12 |
+//! | An install before any successful `converge_shared` is refused with `SharedProgramNotConverged` and changes nothing (DISTILL gap B-8, refusal 1) | S-ND295-71 (pre-converge refusal) |
+//! | An install at a port other than the recorded target of its leg is refused with `SharedListenerPortMismatch { leg, expected, actual }` (B-8, refusal 2) | S-ND295-71 (port mismatch) |
+//! | A node guard dropped with no member removes the program it established: `observe_shared` reads `Ok(None)` (B-8, D15's conditional delete) | S-ND295-71 (no-member drop) |
+//! | A `converge_shared` whose `prior` differs from the observed program returns `PostconditionMismatch` and changes nothing | S-ND295-71 (stale prior) |
+//! | A zero listener port returns `NftRuleInstallFailed { op: "shared-ip-expected" }` and changes nothing | S-ND295-71 (zero port) |
+//! | After a no-member node-guard drop, `observe_shared_state` and `converge_allocation_elements` read `Ok(None)` | S-ND295-71 (no-member drop, member-aware; from 08-02) |
+//! | A node guard dropped while members exist (their element guards relinquished first) keeps the program | S-ND295-71 (drop with members; from 08-02) |
 //! | A re-install of an identical capture is idempotent-by-convergence — it does not create a duplicate | **NOT asserted — substrate, owned by `HostMtlsIntercept`'s Tier-3 suite.** |
 //! | *"the capture is in effect against this adapter's OWN substrate"* | **NOT asserted — deliberately.** |
 //!
-//! Those last two clauses are **recorded here rather than silently dropped**,
+//! The last two clauses are **recorded here rather than silently dropped**,
 //! both for the same reason: neither is observable through any trait accessor,
 //! so no adapter can diverge on either *observably*.
 //!
 //! On the idempotence row specifically — S-MIF-12 DOES drive the re-install
 //! (that is how it reaches the double-`Drop` case), but it asserts only that
 //! both installs return `Ok` and that both releases are clean. **Non-
-//! duplication itself is not asserted**: counting rules means reading `nft`,
+//! duplication itself is not asserted**: counting members means reading `nft`,
 //! which is `HostMtlsIntercept`'s substrate and vacuous for the sim. A
-//! regression appending a duplicate rule would pass this suite.
+//! regression adding a duplicate element would pass this suite.
 //!
 //! The in-effect-against-own-substrate clause is honoured and asserted
 //! PER-ADAPTER — for `HostMtlsIntercept` by the existing Tier-3 suite
-//! (`start_alloc_installs_both_tproxy.rs`, `bidirectional_walking_skeleton.rs`,
-//! which observe real `nft` state and real intercepted traffic); for the sim,
-//! vacuously.
+//! (`shared_intercept_members.rs`, `mtls_intercept_install.rs`), which observes
+//! real `nft` state; for the sim, vacuously.
 //!
 //! ## What this suite deliberately does NOT assert
 //!
 //! The substrate specifics — `IP_TRANSPARENT` + `IP_FREEBIND` on the socket,
-//! "exactly ONE `nft` rule appended", removal BY HANDLE on `Drop`, the
+//! exactly which set elements an install adds, the element read-back, the
 //! shared-routing-infra convergence — are `HostMtlsIntercept`'s **own**
 //! documented obligations, NOT the trait's. Asserting them at the trait level
 //! would re-introduce the § 4.1 contract defect DFS-7 fixed: a trait
 //! postcondition half its sanctioned implementors cannot honour. They stay
-//! asserted by the **existing** Tier-3 suite, unchanged by this feature.
+//! asserted by the Tier-3 suite named above.
 //!
-//! ## The fault-arm limit, recorded rather than papered over
+//! ## Which failure arms are equivalence-tested
 //!
-//! This suite covers the **`Ok` arms only**. The FAULT arms are NOT
+//! Every clause the adapters reach deterministically from the same call
+//! sequence is asserted on both: the `Ok` arms, and the B-8 refusals (no
+//! recorded program, a mismatched port, a stale prior, a zero port), none of
+//! which needs a fault injected. The **injected** fault arms are NOT
 //! equivalence-testable for the classes `SimMtlsIntercept` scripts (`EPERM` on
-//! `setsockopt`, an absent `nft` binary): the host adapter cannot be made to
-//! exhibit them on demand — **and that inability is the entire reason this port
-//! exists**. Those arms are pinned by the trait's rustdoc contract plus the
-//! `SimMtlsIntercept` contract suite (S-MIF-06/07/08/13, step 03-01); the host
-//! adapter's fault arms are exercised, unscripted, by real operational
-//! failures. **Nothing here claims full host/sim equivalence** — that would be
-//! aspirational. The gap is smaller than it looks: each `HostMtlsIntercept`
-//! method is a ONE-LINE delegation with no logic of its own to diverge.
+//! `setsockopt`, an element batch the kernel rejects): the host adapter cannot
+//! be made to exhibit them on demand — **and that inability is the entire
+//! reason this port exists**. Those arms are pinned by the trait's rustdoc
+//! contract plus the `SimMtlsIntercept` contract suite (S-MIF-06/07/08/13). The
+//! host's allocation methods are not one-line delegations — they own the
+//! recorded program, the port check, and the element tokens — so this suite is
+//! what keeps the two adapters' observable partitions equal. **Nothing here
+//! claims full host/sim equivalence.**
 //!
 //! ## Lane — integration, Lima + root
 //!
@@ -83,26 +92,27 @@
 //!
 //! ## Leak hygiene
 //!
-//! Every acquired guard is dropped INSIDE the test (the host adapter's `Drop`
-//! removes its `nft` rule by handle). The two install scenarios additionally
-//! hold the cross-process kernel-state `flock` the sibling kernel-touching
-//! suites hold, and stand up / tear down their host-side veth around an
-//! `overdrive-mtls` ruleset pre-sweep — the `NetnsGuard` discipline step 04-01
-//! established.
+//! Every acquired guard is dropped INSIDE the test, allocation guards before
+//! the node guard (the host node guard's `Drop` is a conditional delete that
+//! refuses non-empty sets). A body that relinquishes an element guard on
+//! purpose leaves its member for the sweep. Every body that converges a
+//! program holds the cross-process kernel-state `flock` the sibling
+//! kernel-touching suites hold, and runs inside a [`SharedInfraSweep`], which
+//! razes the node-global intercept state before and after.
 
 #![allow(
     clippy::doc_markdown,
     clippy::print_stderr,
     clippy::expect_used,
-    reason = "Test body; skip messages + per-adapter execution evidence go to stderr; fixture preconditions and contract violations must panic with informative messages"
+    clippy::similar_names,
+    reason = "Test body; skip messages + per-adapter execution evidence go to stderr; fixture preconditions and contract violations must panic with informative messages; leg F and leg C are the port's own names for its two listeners"
 )]
 
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::process::{Command, Stdio};
 
 use overdrive_sim::adapters::SimMtlsIntercept;
-use overdrive_worker::mtls_intercept::InterceptError;
-use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
+use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg};
+use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, InterceptMembers, MtlsIntercept};
 
 use super::inbound_tproxy_harness::{KernelStateLock, clean_shared_infra, is_root, record_uname};
 use super::leg_listener::LegListener;
@@ -111,14 +121,6 @@ use super::leg_listener::LegListener;
 /// the kernel. `start_alloc` binds exactly this twice (leg-F then leg-C), and
 /// port `0` is the only behaviourally-distinguished value in the `u16` domain.
 const LEG_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
-
-/// The host-side veth `install_outbound`'s `iifname` names. Suite-distinct so
-/// concurrent (flock-serialised) runs cannot collide with the sibling Tier-3
-/// suites' veths.
-const VETH_H: &str = "ovd-hv-eq0501";
-/// The peer end of the pair — created only so the host end is a real veth
-/// interface; it never carries traffic in this suite.
-const VETH_PEER: &str = "ovd-wv-eq0501";
 
 /// The canonical guest source address admitted by the shared outbound set.
 const SOURCE_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 5, 2);
@@ -163,48 +165,61 @@ impl Adapter {
     }
 }
 
-/// Run `<prog> <args>` best-effort (teardown / tolerate-pre-existing).
-fn run_quiet(prog: &str, args: &[&str]) {
-    let _ = Command::new(prog).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
-}
-
-/// RAII real-infra fixture for the two INSTALL scenarios.
+/// RAII sweep for every body that converges a program.
 ///
-/// Pre-sweeps the node-global `overdrive-mtls` nft state (it PERSISTS by design
-/// — converge-on-boot — so a reproducible run must raze it), then creates a
-/// REAL host-side veth pair so `install_outbound`'s `iifname` names a live
-/// interface. `Drop` sweeps both again.
-///
-/// The fixture creates only the INTERFACE; every `nft` rule this suite observes
-/// is appended by the adapter under test.
-struct HostVethFixture;
+/// Razes the node-global `overdrive-mtls` intercept state (it PERSISTS by
+/// design — converge-on-boot — so a reproducible run must raze it) when
+/// created and again when dropped, so a panic leaves nothing behind. It
+/// creates nothing: every program, member, rule, and route a body observes is
+/// the adapter-under-test's.
+struct SharedInfraSweep;
 
-impl HostVethFixture {
+impl SharedInfraSweep {
     fn create() -> Self {
         clean_shared_infra();
-        run_quiet("ip", &["link", "del", VETH_H]);
-        let out = Command::new("ip")
-            .args(["link", "add", VETH_H, "type", "veth", "peer", "name", VETH_PEER])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .expect("spawn ip link add veth");
-        assert!(
-            out.status.success(),
-            "ip link add {VETH_H} type veth peer {VETH_PEER} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-        run_quiet("ip", &["link", "set", VETH_H, "up"]);
-        run_quiet("ip", &["link", "set", VETH_PEER, "up"]);
         Self
     }
 }
 
-impl Drop for HostVethFixture {
+impl Drop for SharedInfraSweep {
     fn drop(&mut self) {
         clean_shared_infra();
-        run_quiet("ip", &["link", "del", VETH_H]);
     }
+}
+
+/// Two bound legs, their addresses, and the program converged at them — the
+/// production call sequence (DISTILL gap B-8): observe the prior, bind leg F
+/// and leg C at port 0, then `converge_shared(prior, F, C)`. The caller drops
+/// every allocation guard before the node guard, and the node guard before the
+/// listeners.
+struct ConvergedLegs<L> {
+    node_guard: Box<dyn overdrive_worker::mtls_intercept_port::InterceptGuard>,
+    leg_f: L,
+    leg_c: L,
+    leg_f_addr: SocketAddrV4,
+    leg_c_addr: SocketAddrV4,
+}
+
+fn bind_and_converge(
+    sut: &dyn MtlsIntercept,
+    scenario: &str,
+    adapter: &str,
+) -> ConvergedLegs<impl LegListener> {
+    let prior = sut.observe_shared().unwrap_or_else(|error| {
+        panic!("[{scenario}][{adapter}] observing the prior program must succeed, got {error:?}")
+    });
+    let leg_f = sut.bind_transparent(LEG_ADDR).expect("leg F must bind");
+    let leg_c = sut.bind_transparent(LEG_ADDR).expect("leg C must bind");
+    let leg_f_addr = leg_f.bound_v4().expect("leg F reports its bound address");
+    let leg_c_addr = leg_c.bound_v4().expect("leg C reports its bound address");
+    let node_guard =
+        sut.converge_shared(prior.as_ref(), leg_f_addr, leg_c_addr).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}][{adapter}] converge_shared(prior, {leg_f_addr}, {leg_c_addr}) must \
+                 succeed on a swept node, got {error:?}"
+            )
+        });
+    ConvergedLegs { node_guard, leg_f, leg_c, leg_f_addr, leg_c_addr }
 }
 
 /// The port a bound listener reports, read through the `LegListener` bridge.
@@ -397,21 +412,31 @@ fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
     }
 }
 
-/// S-MIF-11 — both installs hand back a guard that releases without incident,
-/// whichever intercept surface is in use.
+/// S-MIF-11 — after the node program is converged, both installs hand back a
+/// guard that releases without incident, whichever intercept surface is in
+/// use.
 ///
-/// Universe: the two `Result<Box<dyn InterceptGuard>>` values (both `Ok`) plus
-/// the ABSENCE of a panic across both `Drop`s. **This test completing IS the
+/// The call sequence is production's (DISTILL gap B-8): observe the prior, bind
+/// leg F and leg C, `converge_shared(prior, F, C)`, then install with each
+/// leg's bound port. The allocation guards drop first, then the node guard,
+/// then the listeners.
+///
+/// Universe: the `converge_shared` and two install `Result`s (all `Ok`) plus
+/// the ABSENCE of a panic across every `Drop`. **This test completing IS the
 /// observable** — `InterceptGuard`'s contract is ENTIRELY its `Drop`, so there
 /// is no accessor to read.
 ///
-/// Deliberately NOT asserted: "exactly one nft rule exists", the
-/// `IP_TRANSPARENT` / `IP_FREEBIND` setsockopts, and removal-by-handle. Those
-/// are substrate — unobservable through the trait and owned by
-/// `HostMtlsIntercept`'s existing Tier-3 obligations (see the module doc).
+/// Deliberately NOT asserted: which set elements the host adds and removes —
+/// substrate, owned by `HostMtlsIntercept`'s Tier-3 obligations (see the module
+/// doc).
 ///
-/// Mutation target: a guard `Drop` that panics or that propagates an `nft`
-/// removal error.
+/// Mutation target: a guard `Drop` that panics or that propagates an element
+/// removal error; an install that refuses at the recorded port.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn both_installs_hand_back_a_guard_that_releases_cleanly() {
     if !is_root() {
@@ -420,31 +445,32 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
     }
     record_uname("05-01-S-MIF-11");
     let _kernel_lock = KernelStateLock::acquire();
-    let _fixture = HostVethFixture::create();
+    let _sweep = SharedInfraSweep::create();
 
     for adapter in ADAPTERS {
         let label = adapter.label();
         let sut = adapter.build();
-
-        let outbound_leg = sut.bind_transparent(LEG_ADDR).expect("the outbound leg must bind");
-        let inbound_leg = sut.bind_transparent(LEG_ADDR).expect("the inbound leg must bind");
-        let outbound_port = bound_ipv4_port(&outbound_leg, "S-MIF-11", label);
-        let inbound_port = bound_ipv4_port(&inbound_leg, "S-MIF-11", label);
+        let legs = bind_and_converge(sut.as_ref(), "S-MIF-11", label);
+        let outbound_port = legs.leg_f_addr.port();
+        let inbound_port = legs.leg_c_addr.port();
 
         let outbound_guard = sut
             .install_outbound(SOURCE_ADDR, outbound_port)
-            .expect("install_outbound against a live veth and a live leg-F must hand back a guard");
+            .expect("install_outbound at the recorded leg-F port must hand back a guard");
         let inbound_guard = sut
             .install_inbound(VIRT, inbound_port)
-            .expect("install_inbound for a declared Service port must hand back a guard");
+            .expect("install_inbound at the recorded leg-C port must hand back a guard");
 
         // Releasing each guard neither fails nor panics.
         drop(outbound_guard);
         drop(inbound_guard);
+        drop(legs.node_guard);
+        drop((legs.leg_f, legs.leg_c));
 
         eprintln!(
-            "[S-MIF-11][{label}] EXECUTED — install_outbound({SOURCE_ADDR}, {outbound_port}) and \
-             install_inbound({VIRT}, {inbound_port}) both Ok; both guards released cleanly"
+            "[S-MIF-11][{label}] EXECUTED — converge_shared at ({outbound_port}, {inbound_port}); \
+             install_outbound({SOURCE_ADDR}, {outbound_port}) and install_inbound({VIRT}, \
+             {inbound_port}) both Ok; every guard released cleanly"
         );
     }
 }
@@ -453,30 +479,36 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
 /// duplicating, and both guards release cleanly, whichever intercept surface is
 /// in use.
 ///
-/// Universe: the two `Result<Box<dyn InterceptGuard>>` values (both `Ok`) plus
-/// the absence of a panic across both `Drop`s — **including the second `Drop`,
-/// whose underlying state the first `Drop` already released**.
+/// The node program is converged once (DISTILL gap B-8); the capture is
+/// installed twice at the recorded leg-F port.
+///
+/// Universe: the two install `Result`s (both `Ok`) plus the absence of a panic
+/// across both `Drop`s — **including the second `Drop`, whose underlying state
+/// the first `Drop` may already have released**.
 ///
 /// This is a pure contract-clause assertion adding no API. It pins the two
 /// clauses `mtls_intercept_port.rs` states explicitly and that no other
 /// scenario reaches:
 ///
-/// 1. `install_outbound`'s edge case — *"A re-install for a veth already
-///    carrying an identical capture is idempotent-by-convergence; it does not
-///    create a duplicate."*
+/// 1. `install_outbound`'s edge case — *"A re-install for an already-owned
+///    source adopts the process-local element token; it does not create a
+///    duplicate set element."*
 /// 2. `InterceptGuard`'s invariant — *"Dropping never panics and never errors,
 ///    including for a guard whose underlying state was already released
 ///    out-of-band."*
 ///
-/// C4a (apply twice) + C4b (inverse op without its prerequisite): the second
-/// `Drop` releasing already-released state IS the
-/// inverse-without-prerequisite case.
+/// C4a (apply twice) + C4b (inverse op without its prerequisite).
 ///
-/// Deliberately NOT asserted: "exactly one nft rule exists" — substrate, per
+/// Deliberately NOT asserted: "exactly one element exists" — substrate, per
 /// the module doc.
 ///
-/// Mutation target: a non-idempotent install that appends a duplicate; a
+/// Mutation target: a non-idempotent install that adds a duplicate; a
 /// double-release panic.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-70 — The node's protection listeners belong to the protection port: a
+/// simulated node opens no socket, and a listener stops when its wait is cancelled.
+/// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
     if !is_root() {
@@ -488,14 +520,13 @@ fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
     }
     record_uname("05-01-S-MIF-12");
     let _kernel_lock = KernelStateLock::acquire();
-    let _fixture = HostVethFixture::create();
+    let _sweep = SharedInfraSweep::create();
 
     for adapter in ADAPTERS {
         let label = adapter.label();
         let sut = adapter.build();
-
-        let leg_f = sut.bind_transparent(LEG_ADDR).expect("the outbound leg must bind");
-        let leg_f_port = bound_ipv4_port(&leg_f, "S-MIF-12", label);
+        let legs = bind_and_converge(sut.as_ref(), "S-MIF-12", label);
+        let leg_f_port = legs.leg_f_addr.port();
 
         let first = sut
             .install_outbound(SOURCE_ADDR, leg_f_port)
@@ -505,14 +536,369 @@ fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
              back a guard",
         );
 
-        // Release both IN TURN. The second release acts on state the first
-        // already released — and must still neither fail nor panic.
+        // Release both IN TURN, then the node guard, then the listeners.
         drop(first);
         drop(second);
+        drop(legs.node_guard);
+        drop((legs.leg_f, legs.leg_c));
 
         eprintln!(
-            "[S-MIF-12][{label}] EXECUTED — two installs of ({SOURCE_ADDR}, {leg_f_port}) both Ok; \
-             both guards released in turn, the second over already-released state"
+            "[S-MIF-12][{label}] EXECUTED — two installs of ({SOURCE_ADDR}, {leg_f_port}) after \
+             one converge both Ok; both guards released in turn"
         );
+    }
+}
+
+/// B-8 refusal 1 on both adapters: on a fresh adapter with bound legs, before
+/// any `converge_shared`, `install_outbound` and `install_inbound` are each
+/// refused with `SharedProgramNotConverged`, and the owned program stays
+/// absent (`observe_shared` reads `Ok(None)` before and after).
+///
+/// Universe: the two install `Result`s and `observe_shared` before and after.
+///
+/// Mutation targets: a host `install_inbound` that falls back to a
+/// per-allocation rule; an adapter that records a member with no program; a
+/// refusal with a fabricated-source variant.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+fn an_install_before_convergence_is_refused_and_changes_nothing() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-pre-converge");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let leg_f = sut.bind_transparent(LEG_ADDR).expect("leg F must bind");
+        let leg_c = sut.bind_transparent(LEG_ADDR).expect("leg C must bind");
+        let leg_f_port = bound_ipv4_port(&leg_f, "S-ND295-71", label);
+        let leg_c_port = bound_ipv4_port(&leg_c, "S-ND295-71", label);
+        assert_eq!(
+            sut.observe_shared().expect("observe before the installs"),
+            None,
+            "[S-ND295-71][{label}] no program exists before the installs"
+        );
+
+        let outbound = sut.install_outbound(SOURCE_ADDR, leg_f_port).map(|_guard| ());
+        let inbound = sut.install_inbound(VIRT, leg_c_port).map(|_guard| ());
+        eprintln!("[S-ND295-71][{label}] pre-converge outbound={outbound:?} inbound={inbound:?}");
+        assert!(
+            matches!(outbound, Err(InterceptError::SharedProgramNotConverged)),
+            "[S-ND295-71][{label}] install_outbound before any converge is refused with \
+             SharedProgramNotConverged, got {outbound:?}"
+        );
+        assert!(
+            matches!(inbound, Err(InterceptError::SharedProgramNotConverged)),
+            "[S-ND295-71][{label}] install_inbound before any converge is refused with \
+             SharedProgramNotConverged, got {inbound:?}"
+        );
+        assert_eq!(
+            sut.observe_shared().expect("observe after the refusals"),
+            None,
+            "[S-ND295-71][{label}] a refused install changes no owned state"
+        );
+        drop((leg_f, leg_c));
+    }
+}
+
+/// B-8 refusal 2 on both adapters: after `converge_shared` records a program,
+/// an install at a port other than the recorded target of its leg is refused
+/// with `SharedListenerPortMismatch { leg, expected, actual }` — `expected`
+/// the recorded port, `actual` the passed one. Each install passes the other
+/// leg's port (a cross-wiring).
+///
+/// Universe: the two install `Result`s.
+///
+/// Mutation targets: an adapter that ignores the passed port; one that swaps
+/// `expected` and `actual`; one that names the wrong leg.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-port-mismatch");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let legs = bind_and_converge(sut.as_ref(), "S-ND295-71", label);
+        let leg_f_port = legs.leg_f_addr.port();
+        let leg_c_port = legs.leg_c_addr.port();
+
+        for (leg, result) in [
+            (InterceptLeg::F, sut.install_outbound(SOURCE_ADDR, leg_c_port).map(|_guard| ())),
+            (InterceptLeg::C, sut.install_inbound(VIRT, leg_f_port).map(|_guard| ())),
+        ] {
+            let (recorded, passed) = match leg {
+                InterceptLeg::F => (leg_f_port, leg_c_port),
+                InterceptLeg::C => (leg_c_port, leg_f_port),
+            };
+            eprintln!("[S-ND295-71][{label}] {leg:?} install at port {passed}: {result:?}");
+            match result {
+                Err(InterceptError::SharedListenerPortMismatch {
+                    leg: got_leg,
+                    expected,
+                    actual,
+                }) => {
+                    assert_eq!(got_leg, leg, "[S-ND295-71][{label}] the refusal names the leg");
+                    assert_eq!(
+                        expected, recorded,
+                        "[S-ND295-71][{label}] expected is the recorded port"
+                    );
+                    assert_eq!(actual, passed, "[S-ND295-71][{label}] actual is the passed port");
+                }
+                other => panic!(
+                    "[S-ND295-71][{label}] a {leg:?} install at port {passed} must be refused \
+                     with SharedListenerPortMismatch, got {other:?}"
+                ),
+            }
+        }
+        drop(legs.node_guard);
+        drop((legs.leg_f, legs.leg_c));
+    }
+}
+
+/// B-8 program clause on both adapters: a node guard dropped with no member
+/// removes the program its convergence established — D15's conditional
+/// delete, which the sim models — so `observe_shared` reads `Ok(None)`.
+///
+/// Universe: `observe_shared` before and after the drop.
+///
+/// Mutation targets: an inert node guard; a guard that deletes a program it
+/// did not establish.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+fn a_node_guard_dropped_with_no_members_leaves_no_program() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-no-member-drop");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let legs = bind_and_converge(sut.as_ref(), "S-ND295-71", label);
+        assert!(
+            sut.observe_shared().expect("observe the converged program").is_some(),
+            "[S-ND295-71][{label}] the converged program is present before the drop"
+        );
+
+        drop(legs.node_guard);
+        assert_eq!(
+            sut.observe_shared().expect("observe after the drop"),
+            None,
+            "[S-ND295-71][{label}] a node guard dropped with no member removes its program"
+        );
+        drop((legs.leg_f, legs.leg_c));
+    }
+}
+
+/// B-8 program clause on both adapters: a `converge_shared` whose `prior`
+/// differs from the observed program — here an absent prior over a converged
+/// program at the same targets — returns `PostconditionMismatch { expected,
+/// observed }` with `expected` the requested identity (equal to the program at
+/// the same targets) and `observed` the program, and changes nothing.
+///
+/// Universe: the refused `Result` and `observe_shared` after it.
+///
+/// Mutation targets: an adapter that ignores `prior`; one that rewrites the
+/// program before comparing.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-stale-prior");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let legs = bind_and_converge(sut.as_ref(), "S-ND295-71", label);
+        let program = sut
+            .observe_shared()
+            .expect("observe the converged program")
+            .expect("the converged program is present");
+
+        let Err(refused) = sut.converge_shared(None, legs.leg_f_addr, legs.leg_c_addr) else {
+            panic!("[S-ND295-71][{label}] an absent prior over a present program is refused")
+        };
+        match refused {
+            InterceptError::PostconditionMismatch { expected, observed } => {
+                assert_eq!(
+                    expected, program,
+                    "[S-ND295-71][{label}] expected is the requested identity"
+                );
+                assert_eq!(
+                    observed,
+                    Some(program.clone()),
+                    "[S-ND295-71][{label}] observed is the program"
+                );
+            }
+            other => panic!(
+                "[S-ND295-71][{label}] a stale prior is refused with PostconditionMismatch, got \
+                 {other:?}"
+            ),
+        }
+        assert_eq!(
+            sut.observe_shared().expect("observe after the refusal"),
+            Some(program),
+            "[S-ND295-71][{label}] a stale-prior refusal changes nothing"
+        );
+        drop(legs.node_guard);
+        drop((legs.leg_f, legs.leg_c));
+    }
+}
+
+/// B-8 program clause on both adapters: a zero listener port on either leg
+/// returns `NftRuleInstallFailed { op: "shared-ip-expected" }` and changes
+/// nothing (the program stays absent).
+///
+/// Universe: the two refused `Result`s and `observe_shared` after them.
+///
+/// Mutation target: an adapter that records a zero target.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+fn a_zero_listener_port_is_refused_before_any_program_change() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-zero-port");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let leg = sut.bind_transparent(LEG_ADDR).expect("one leg must bind");
+        let bound = leg.bound_v4().expect("the leg reports its bound address");
+
+        for (row, leg_f, leg_c) in [("leg F", LEG_ADDR, bound), ("leg C", bound, LEG_ADDR)] {
+            let Err(refused) = sut.converge_shared(None, leg_f, leg_c) else {
+                panic!("[S-ND295-71][{label}] a zero {row} port is refused")
+            };
+            assert!(
+                matches!(
+                    refused,
+                    InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", .. }
+                ),
+                "[S-ND295-71][{label}] a zero {row} port is refused as shared-ip-expected, got \
+                 {refused:?}"
+            );
+        }
+        assert_eq!(
+            sut.observe_shared().expect("observe after the refusals"),
+            None,
+            "[S-ND295-71][{label}] a zero-port refusal changes nothing"
+        );
+        drop(leg);
+    }
+}
+
+/// B-8 program clause on both adapters, member-aware: after a no-member
+/// node-guard drop, `observe_shared_state` and `converge_allocation_elements`
+/// both read `Ok(None)` (the host's two member methods stop being RED
+/// scaffolds at 08-02).
+///
+/// Universe: `observe_shared_state` and `converge_allocation_elements(∅)` after
+/// the drop.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 08-02 (S-ND295-71)"]
+fn a_node_guard_dropped_with_no_members_leaves_no_member_state() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-no-member-drop-state");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let legs = bind_and_converge(sut.as_ref(), "S-ND295-71", label);
+
+        drop(legs.node_guard);
+        assert_eq!(
+            sut.observe_shared_state().expect("observe the state after the drop"),
+            None,
+            "[S-ND295-71][{label}] the member-aware observation reads the program as absent"
+        );
+        assert_eq!(
+            sut.converge_allocation_elements(&InterceptMembers::default())
+                .expect("member convergence without a program succeeds"),
+            None,
+            "[S-ND295-71][{label}] member convergence reads the program as absent"
+        );
+        drop((legs.leg_f, legs.leg_c));
+    }
+}
+
+/// B-8 program clause on both adapters: a node guard dropped while a member
+/// exists keeps the program. The member's element guard is relinquished, not
+/// dropped, first — the guard-ordering rule's one sanctioned way to hold a
+/// member past a node-guard drop — and the member-aware observation reads the
+/// program with that member (08-02; through `observe_shared` the same holds
+/// once the strict observation stops refusing members, 08-03).
+///
+/// Universe: `observe_shared_state` after the drop.
+///
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-71 — Protection is installed only against the node's own converged program.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 08-02 (S-ND295-71)"]
+fn a_node_guard_dropped_while_members_exist_keeps_the_program() {
+    assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
+    record_uname("S-ND295-71-drop-with-members");
+    let _kernel_lock = KernelStateLock::acquire();
+    let _sweep = SharedInfraSweep::create();
+
+    for adapter in ADAPTERS {
+        let label = adapter.label();
+        let sut = adapter.build();
+        let legs = bind_and_converge(sut.as_ref(), "S-ND295-71", label);
+        let program = sut
+            .observe_shared()
+            .expect("observe the converged program")
+            .expect("the converged program is present");
+        let member = sut
+            .install_outbound(SOURCE_ADDR, legs.leg_f_addr.port())
+            .expect("install one member at the recorded port");
+        // Relinquish, not drop: the member stays for the sweep.
+        std::mem::forget(member);
+
+        drop(legs.node_guard);
+        let state = sut
+            .observe_shared_state()
+            .expect("observe the state after the drop")
+            .expect("a node guard dropped while members exist keeps the program");
+        assert_eq!(state.program, program, "[S-ND295-71][{label}] the program is unchanged");
+        assert!(
+            state.members.outbound_sources.contains(&SOURCE_ADDR),
+            "[S-ND295-71][{label}] the relinquished member is still present"
+        );
+        drop((legs.leg_f, legs.leg_c));
     }
 }

@@ -122,7 +122,7 @@ mod tests {
     const NR_IOCTL_X86_64: i32 = 16;
 
     /// The increment-aa x86_64 measurement of the thirteen denied requests
-    /// (FD 1009-1023), in table order: the oracle for the `libc` derivation.
+    /// (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the thirteen-row deny-list table)), in table order: the oracle for the `libc` derivation.
     #[cfg(target_arch = "x86_64")]
     const MEASURED_DENIED_IOCTLS: [(&str, u32); 13] = [
         ("SIOCSIFHWADDR", 0x8924),
@@ -141,7 +141,7 @@ mod tests {
     ];
 
     /// The six requests Cloud Hypervisor v53's `fd=` path issues, and two
-    /// read-only requests: every one must be allowed (FD 1025-1028).
+    /// read-only requests: every one must be allowed (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the requests allowed beside the deny-list)).
     #[cfg(target_arch = "x86_64")]
     const ALLOWED_REQUESTS: [(&str, u64); 8] = [
         ("TUNGETIFF", libc::TUNGETIFF),
@@ -225,7 +225,7 @@ mod tests {
         }
     }
 
-    /// The accepted verdict model (FD 1030-1052, 1102-1116): foreign audit
+    /// The accepted verdict model (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (ABI selection and fail-closed, and the exact program table)): foreign audit
     /// architecture → kill; `nr == -1` → allow; any other `nr` with the x32 bit
     /// or above → kill; `ioctl` whose request's low 32 bits are denied → EPERM;
     /// everything else → allow.
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(actual.len(), 24, "the launch program is exactly 24 instructions");
         assert_eq!(
             actual, expected,
-            "the launch program must be exactly the accepted instruction table (FD 1102-1116)",
+            "the launch program must be exactly the accepted instruction table (FD § \"[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24\" (the exact program table))",
         );
         assert_eq!(actual[1].3, 0xC000_003E, "the composed audit value is pinned");
         assert_eq!(actual[5].3, 0x4000_0000, "the x32 syscall bit is pinned");

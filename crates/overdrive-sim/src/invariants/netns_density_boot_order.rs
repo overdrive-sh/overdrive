@@ -1,5 +1,5 @@
 //! S-ND295-13A seeded safety/convergence evidence for the D-295-R12 boot
-//! order (feature delta FD 3918-3950).
+//! order (FD § "[REF] Boot ordering (D-295-R12) — ACCEPTED 2026-09-24" (the boot sequence)).
 //!
 //! The test drives the real injected-driver server helper
 //! (`run_server_with_obs_and_driver`, D-295-DISTILL-13's boundary). The same
@@ -14,7 +14,7 @@
 //! and against `open_after_boot`.
 //!
 //! D-295-R16 composes the worker, and with it the real `HostMtlsEnforcement`
-//! kTLS probe, on every `run_server*` boot (N-2, FD 4391-4396), so the module is
+//! kTLS probe, on every `run_server*` boot (N-2, FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (`compose_mtls` is deleted)), so the module is
 //! gated behind `integration-tests` and runs as root under Lima.
 
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::print_stderr)]
@@ -51,7 +51,7 @@ mod tests {
     use crate::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
 
     /// The port's listener type. The DELIVER step that carries B-7 (05-01 at
-    /// the latest, FD 3522-3527) changes this one line to
+    /// the latest, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)) changes this one line to
     /// `Arc<dyn InterceptListener>`; nothing here reads the listener.
     type BoundListener = std::net::TcpListener;
 
@@ -152,15 +152,17 @@ mod tests {
                 Ipv4Addr::new(10, 98, bytes[4], bytes[5]),
                 1_024 + u16::from(bytes[6]),
             );
-            let residue = vec![
-                inner
-                    .converge_shared(None, prior_f, prior_c)
-                    .expect("seed the prior process's shared program"),
-                inner
-                    .install_outbound(guest, prior_f.port())
-                    .expect("seed a stale outbound member"),
-                inner.install_inbound(virt, prior_c.port()).expect("seed a stale inbound member"),
-            ];
+            let node_guard = inner
+                .converge_shared(None, prior_f, prior_c)
+                .expect("seed the prior process's shared program");
+            let outbound = inner
+                .install_outbound(guest, prior_f.port())
+                .expect("seed a stale outbound member");
+            let inbound =
+                inner.install_inbound(virt, prior_c.port()).expect("seed a stale inbound member");
+            // Dropped in vector order: the element guards before the node guard
+            // (DISTILL gap B-8's guard-ordering rule).
+            let residue = vec![outbound, inbound, node_guard];
             let seeded = inner
                 .observe_shared_state()
                 .expect("read back the seeded program")

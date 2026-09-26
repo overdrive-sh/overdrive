@@ -119,6 +119,11 @@ pub fn clean_shared_infra() {
     }
     run_quiet("ip", &["route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "100"]);
     run_quiet("nft", &["delete", "table", "ip", "overdrive-mtls"]);
+    // The D-295-R18 intercept-mark guard table (`ip overdrive-mtls-guard`),
+    // which `converge_shared` installs once R18 lands; absent until then, so
+    // this is a no-op. R18 is conditional: DELIVER step 08-01 removes this line
+    // if R18 is withdrawn.
+    run_quiet("nft", &["delete", "table", "ip", "overdrive-mtls-guard"]);
 }
 
 /// `nft -a list chain ip overdrive-mtls prerouting` — `Ok(dump)` on a present

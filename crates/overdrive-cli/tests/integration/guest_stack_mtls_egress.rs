@@ -3144,7 +3144,7 @@ fn assert_exact_pre_ready_failure(
 }
 
 // ---------------------------------------------------------------------
-// S-ND295-01 zero-frame witness (FD 10733-10763, 10835; E1, E3, E4).
+// S-ND295-01 zero-frame witness (FD § "D-295-DELIVER-04-01 — same-node protected-transport boundary (pre-event oracle WITHDRAWN)" (the restored pre-intercept contract); FD § "Effect isolation and Contract Shape classification" (the S-ND295-01 zero-frame witness row); E1, E3, E4).
 //
 // Observation only: every probe below reads production state (sysfs, procfs,
 // rtnetlink notifications, AF_PACKET) and none installs or mutates a network
@@ -3358,7 +3358,7 @@ struct ActivationWitnessSnapshot {
 /// emits `mtls.intercept.install.success`, reads the caller TAP's admin state,
 /// ifindex, owner, six counters, and queue holders. The production source
 /// emits the event after `start_alloc` returns and before it awaits
-/// `activate` (FD 10345-10361), so this read is at the event and before any
+/// `activate` (FD § "Gate G-295-2 — existing guest command release, narrowed to the new switch" (the intercept-install event barrier)), so this read is at the event and before any
 /// activation. It installs beside [`InterceptInstallTrace`], whose realtime
 /// sample stays the barrier; this Layer runs after it.
 #[derive(Clone, Default)]
@@ -4562,7 +4562,7 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
 /// notification follows the event.
 ///
 /// The production dispatch reaches the event only after READY and the
-/// accepted Running write (FD 10628), so a TAP down continuously from before
+/// accepted Running write (FD § "Current-to-target component mapping" (the `action_shim::dispatch*` row)), so a TAP down continuously from before
 /// Cloud Hypervisor exists until strictly after the event is down across
 /// Cloud Hypervisor creation, READY, and Running. Any missing or duplicate
 /// event, monitor overrun, or unreadable sample fails closed.
@@ -4853,7 +4853,7 @@ async fn concurrent_vm_job_deploys_preserve_distinct_c3_capture_and_rule_identit
 ///
 /// Wire half: the guest's plaintext request/reply uses one exact same-node
 /// TLS 1.3 kTLS/splice owner whose tuple is loopback-only, with plaintext
-/// confined to the guest-local leg-F/leg-S tuples (FD 145-154, retained over
+/// confined to the guest-local leg-F/leg-S tuples (FD § "Feature Delta — `netns-density-295`" (the D-295-DELIVER-04-01 status paragraph: the surviving kTLS/splice evidence-boundary correction), retained over
 /// the descriptor handoff). Every guest frame after the intercept-install
 /// event decodes well-formed with no 12-byte zero prefix, so the virtio-net
 /// header is agreed between the queue and Cloud Hypervisor (E3).
@@ -5097,7 +5097,7 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 /// The caller TAP is down at the exact intercept-install event, the one
 /// loss-accounted exact-ifindex link-layer capture holds no caller-TAP frame
 /// at or before that event, and all six TAP counters read zero before Cloud
-/// Hypervisor exists and at the event (FD 10727-10763).
+/// Hypervisor exists and at the event (FD § "D-295-DELIVER-04-01 — same-node protected-transport boundary (pre-event oracle WITHDRAWN)" (the restored pre-intercept contract)).
 ///
 /// Observable universe: every AF_PACKET frame captured from before VM deploy
 /// through guest termination on the exact allocation TAP whose source is

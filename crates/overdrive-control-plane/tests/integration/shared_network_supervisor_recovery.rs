@@ -15,12 +15,12 @@
 //!
 //! `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept,
 //! guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` (feature-delta FD 9533-9559) with a
+//! guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with a
 //! `SimDriver`, a test-local owner delegating to `SimSharedGuestNetworkOwner`,
 //! `SimGuestDnsFactory` as the required DNS port, a test-local stateful
 //! intercept delegating `bind_transparent` to an inner `SimMtlsIntercept` as the
 //! required intercept port, and `vm_cgroups = CgroupManager::new(<root>,
-//! Arc::new(fs.clone()))` over one `SimCgroupFs` (FD 4074-4107). No test writes
+//! Arc::new(fs.clone()))` over one `SimCgroupFs` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (where the kill capability's `CgroupManager` comes from)). No test writes
 //! a real `cgroup.kill`.
 //!
 //! # Faults — only through the driven ports
@@ -52,8 +52,9 @@
 //! ADR-0124's accepted cadence contract — the 1 s audit period, the 250 ms
 //! attempt period, the 5 s recovery deadline, 20 attempts — written as that
 //! contract and measured on the injected clock. The private `SHARED_NETWORK_*`
-//! constants are unreachable from `tests/` and are never named here (FD
-//! 4109-4145). A hung-audit detection is bounded only by the 5 s horizon.
+//! constants are unreachable from `tests/` and are never named here
+//! (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the six private cadence constants)). A hung-audit detection
+//! is bounded only by the 5 s horizon.
 //!
 //! Every cell prints its seed, cell, and verdict append-only; a body fails when
 //! any cell is RED or UNREACHED (a clause whose precondition production never
@@ -132,7 +133,7 @@ use tracing_subscriber::{Layer, Registry};
 
 // ---------------------------------------------------------------------------
 // ADR-0124's accepted cadence contract. These are the contract values, not the
-// private `SHARED_NETWORK_*` constants of the crate root (FD 4109-4145).
+// private `SHARED_NETWORK_*` constants of the crate root (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the six private cadence constants)).
 // ---------------------------------------------------------------------------
 
 /// ADR-0124: the one-second full-audit period.
@@ -150,7 +151,7 @@ const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 /// A guest-shaped address no allocation holds: the unexpected intercept member.
 const FOREIGN_MEMBER: Ipv4Addr = Ipv4Addr::new(100, 95, 255, 254);
 
-/// The eleven node-level components in D8's fixed order (FD 4190-4194). The
+/// The eleven node-level components in D8's fixed order (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the full audit: D8's fixed component order)). The
 /// `Supervisor` component is C8's, reached only through task loss.
 const COMPONENTS: [SharedGuestNetworkComponent; 11] = [
     SharedGuestNetworkComponent::Bridge,
@@ -166,7 +167,7 @@ const COMPONENTS: [SharedGuestNetworkComponent; 11] = [
     SharedGuestNetworkComponent::Dns,
 ];
 
-/// Which production owner repairs a component (the FD 3961-3974 matrix).
+/// Which production owner repairs a component (the component matrix of FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RepairOwner {
     SharedGuestNetworkOwner,
@@ -186,7 +187,7 @@ const fn repair_owner(component: SharedGuestNetworkComponent) -> RepairOwner {
 }
 
 /// Kernel-path components quiesce managed TAPs; a pure listener or DNS loss
-/// never does (FD 4238-4249).
+/// never does (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (quiescence)).
 const fn is_kernel_path(component: SharedGuestNetworkComponent) -> bool {
     !matches!(
         component,
@@ -201,7 +202,7 @@ fn kernel_path_components() -> Vec<SharedGuestNetworkComponent> {
     COMPONENTS.into_iter().filter(|component| is_kernel_path(*component)).collect()
 }
 
-/// The detection cause a stimulus produces (FD 4223-4226).
+/// The detection cause a stimulus produces (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection, step 1)).
 const fn expected_cause(component: SharedGuestNetworkComponent) -> &'static str {
     match component {
         SharedGuestNetworkComponent::LegF
@@ -565,10 +566,26 @@ impl MtlsIntercept for ProofIntercept {
         leg_c: SocketAddrV4,
     ) -> InterceptResult<Box<dyn InterceptGuard>> {
         self.record(InterceptCall::ConvergeShared);
-        if self.model.lock().converge_blocked {
+        let (blocked, program_lost) = {
+            let model = self.model.lock();
+            (model.converge_blocked, model.program_lost)
+        };
+        if blocked {
             return Err(Self::refusal("shared-replace"));
         }
-        let guard = self.sim.converge_shared(prior, leg_f, leg_c)?;
+        // While the loss overlay holds, the caller observed the program as
+        // absent and passes that absence as `prior`, but the inner sim still
+        // models the program (the overlay masks only observations). The repair
+        // therefore re-establishes the program against the inner sim's own
+        // observation instead of forwarding the caller's prior, which the sim
+        // would refuse as stale (DISTILL gap B-8). With no overlay the call is
+        // forwarded unchanged.
+        let guard = if program_lost {
+            let inner_prior = self.sim.observe_shared()?;
+            self.sim.converge_shared(inner_prior.as_ref(), leg_f, leg_c)?
+        } else {
+            self.sim.converge_shared(prior, leg_f, leg_c)?
+        };
         self.update(|model| {
             model.legs = Some((leg_f, leg_c));
             model.program_lost = false;
@@ -1385,8 +1402,9 @@ async fn every_component_loss_is_detected_within_one_audit_and_closes_admission(
 
 /// A shared-owner audit that never answers fails that owner's first
 /// component, `Bridge`, with cause `audit_timeout`. The call bound is private
-/// and E18-derived, so detection is bounded only by the 5 s horizon (FD
-/// 4123-4145, 4200-4202).
+/// and E18-derived, so detection is bounded only by the 5 s horizon
+/// (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (how the in-process lane bounds time, and the full audit's
+/// call bound)).
 async fn hung_audit_detection(node: &mut Node, phase: Duration) -> Verdict {
     if let Some(gap) = node.composition_gap() {
         return Verdict::Unreached(gap);

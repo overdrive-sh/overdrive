@@ -233,6 +233,14 @@ pub enum InterceptError {
         expected: InterceptPostcondition,
         observed: Option<InterceptPostcondition>,
     },
+    /// An allocation element method ran before this process recorded a program
+    /// through a successful `converge_shared` (DISTILL gap B-8). Source-less:
+    /// no lower operation ran.
+    // RED scaffold (B-8): not constructed before DELIVER step 05-01.
+    #[error(
+        "shared mTLS intercept program has not been converged by this process; allocation intercept elements cannot be installed or removed"
+    )]
+    SharedProgramNotConverged,
     /// `make_transparent_listener` could not stand up the agent's
     /// `IP_TRANSPARENT` inbound leg-C listener (socket / setsockopt / bind /
     /// listen failed). Needs `CAP_NET_ADMIN` for the `IP_TRANSPARENT` setopt.

@@ -1775,7 +1775,7 @@ mod shared_network_task_owner_acceptance {
     //!
     //! The supervisor under test is the private
     //! `SharedNetworkSupervisorHandle::run_shared_network_supervisor(ports,
-    //! exec, clock, request_tx, shutdown)` (FD 3977-4027). Its ports are the
+    //! exec, clock, request_tx, shutdown)` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the private signature)). Its ports are the
     //! crate-private test-local owner and DNS doubles
     //! (`shared_network_test_ports`, because the `overdrive-sim` doubles
     //! implement a second compiled copy of this crate's traits), a real
@@ -1796,7 +1796,7 @@ mod shared_network_task_owner_acceptance {
     //! ```
     //!
     //! Every observation point also asserts the E11 latch invariant (L9,
-    //! FD 1820-1832): while the owner's latch is set, the gate is Recovering or
+    //! FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the latch-set implies gate-not-Open invariant)): while the owner's latch is set, the gate is Recovering or
     //! a fail-stop request was received, and the gate admits no claim.
     //!
     //! # Universe
@@ -1882,7 +1882,7 @@ mod shared_network_task_owner_acceptance {
     ];
 
     /// The node-level components the shared guest-network owner repairs
-    /// (runtime supervisor matrix, FD 3960-3975).
+    /// (runtime supervisor matrix, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the component matrix)).
     const OWNER_COMPONENTS: [SharedGuestNetworkComponent; 6] = [
         SharedGuestNetworkComponent::Bridge,
         SharedGuestNetworkComponent::TcxLink,
@@ -2078,7 +2078,7 @@ mod shared_network_task_owner_acceptance {
 
     /// The listener type `bind_transparent` returns. The DELIVER step that
     /// carries B-7 changes this one line to `Arc<dyn InterceptListener>`
-    /// (FD 3522-3527); the recording below reads it through `LegListener`.
+    /// (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the recording below reads it through `LegListener`.
     type BoundListener = TcpListener;
 
     struct S19NodeGuard(Arc<AtomicUsize>);
@@ -2143,7 +2143,7 @@ mod shared_network_task_owner_acceptance {
 
     /// A stateful `MtlsIntercept` modelling the owned constant program, the
     /// policy route, the R18 mark guard, and the dynamic members with the
-    /// accepted observation and repair contract (FD 2856-2994, 3132-3229): the
+    /// accepted observation and repair contract (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the eight-method `MtlsIntercept` port through the netlink surface, the runtime member audit, and the runtime repair contract)): the
     /// program is observed by identity whatever the members; `converge_shared`
     /// refuses unless its observation equals `prior`, writes only when the
     /// identity differs, and ensures the route and guard; deleting the table
@@ -2364,11 +2364,10 @@ mod shared_network_task_owner_acceptance {
             _agent_leg_f_port: u16,
         ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
             self.record(InterceptCall::InstallOutbound { source: source_addr });
+            // The B-8 precondition; this double conflates the record with the
+            // program it models.
             if self.program.lock().is_none() {
-                return Err(InterceptError::NftRuleInstallFailed {
-                    op: "install-outbound",
-                    source: Self::nft_refusal("install-outbound"),
-                });
+                return Err(InterceptError::SharedProgramNotConverged);
             }
             let mut members = self.members.lock();
             members.managed_guest_ips.insert(source_addr);
@@ -2383,11 +2382,10 @@ mod shared_network_task_owner_acceptance {
             _agent_leg_c_port: u16,
         ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
             self.record(InterceptCall::InstallInbound { virt });
+            // The B-8 precondition; this double conflates the record with the
+            // program it models.
             if self.program.lock().is_none() {
-                return Err(InterceptError::NftRuleInstallFailed {
-                    op: "install-inbound",
-                    source: Self::nft_refusal("install-inbound"),
-                });
+                return Err(InterceptError::SharedProgramNotConverged);
             }
             self.members.lock().inbound_destinations.insert(virt);
             Ok(Box::new(S19InertGuard))
@@ -2432,16 +2430,7 @@ mod shared_network_task_owner_acceptance {
                 members.inbound_destinations.remove(destination);
             }
             drop(members);
-            self.state().ok_or_else(|| InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: overdrive_netlink::NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
-                    ),
-                ),
-            })
+            self.state().ok_or(InterceptError::SharedProgramNotConverged)
         }
     }
 
@@ -2609,7 +2598,7 @@ mod shared_network_task_owner_acceptance {
     }
 
     /// The workloads slice every allocation scope lives under
-    /// (`CgroupPath::workloads_slice`, FD 4029-4037).
+    /// (`CgroupPath::workloads_slice`, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the private signature: `CgroupPath::workloads_slice`)).
     fn workloads_slice_dir(root: &Path) -> PathBuf {
         root.join("overdrive.slice/workloads.slice")
     }
@@ -2659,7 +2648,7 @@ mod shared_network_task_owner_acceptance {
     }
 
     // -----------------------------------------------------------------------
-    // Losses: one per node-level component or task class (FD 3960-3975)
+    // Losses: one per node-level component or task class (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the component matrix))
     // -----------------------------------------------------------------------
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3401,7 +3390,7 @@ mod shared_network_task_owner_acceptance {
     /// differently targeted program, then one full audit; nothing is restored;
     /// at five seconds exactly one `IpRules / RecoveryDeadlineExceeded / 20 /
     /// 5 s` request is sent and no twenty-first attempt runs. Terminal
-    /// ownership stays with `ServerHandle::shutdown` (FD 4360-4370).
+    /// ownership stays with `ServerHandle::shutdown` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the S19 consequence)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 09-01 (S-ND295-19)"]
     async fn published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop()
@@ -3731,7 +3720,7 @@ mod shared_network_task_owner_acceptance {
     /// or the mark guard under an intact program is repaired by one
     /// `converge_shared(Some(recorded), F, C)` that writes no program, the
     /// members stay exactly the live set, and the prior node guard is
-    /// relinquished, never dropped (FD 3160-3229). A deleted table is recreated
+    /// relinquished, never dropped (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime repair contract)). A deleted table is recreated
     /// and its members reconverged to the live set.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
@@ -3904,7 +3893,7 @@ mod shared_network_task_owner_acceptance {
         Withheld,
     }
 
-    /// The pinned action-shim activation loop (FD 1791-1803), as a test
+    /// The pinned action-shim activation loop (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order)), as a test
     /// client over the gate and the owner port.
     async fn activation_client(
         gate: Arc<GuestNetworkExecGate>,

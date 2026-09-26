@@ -9,7 +9,7 @@
 //! `SimMtlsIntercept`. The pool's operations are crate-private, so lease state
 //! is observed only through the pinned events `guest_network.lease_retired`,
 //! `guest_network.lease_released`, and `guest_network.admission_refused`
-//! (FD 2723-2744), captured by [`LeaseEventLayer`] into one ordered
+//! (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)), captured by [`LeaseEventLayer`] into one ordered
 //! [`StepTrace`] together with the driver's stops and the intercept's element
 //! removals. Each trace entry samples the sim owner's `calls().len()`, so the
 //! owner's calls are interleaved into the same order.
@@ -218,9 +218,9 @@ impl StepTrace {
     }
 }
 
-/// `steps` without `LeaseRetired { alloc }` entries: FD 2743 pins that `retire`
+/// `steps` without `LeaseRetired { alloc }` entries: FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events) pins that `retire`
 /// emits `lease_retired`, but not whether a `retire` of an already-Retiring
-/// lease (which changes nothing and returns `false`, FD 2686-2688) emits it.
+/// lease (which changes nothing and returns `false`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the pool operations: `retire`)) emits it.
 fn without_noop_retire(steps: Vec<Step>, alloc: &str) -> Vec<Step> {
     steps
         .into_iter()
@@ -285,7 +285,7 @@ impl Visit for LeaseEventFields {
     }
 }
 
-/// Records the three pinned lease events (FD 2723-2744) into the trace.
+/// Records the three pinned lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)) into the trace.
 struct LeaseEventLayer {
     trace: Arc<StepTrace>,
 }
@@ -397,14 +397,14 @@ impl Driver for TraceDriver {
 
 /// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
 /// step that carries B-7 (05-01 at the latest) changes it to
-/// `Arc<dyn InterceptListener>` (FD 3522-3527); the delegation below is
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
 /// unchanged by that step.
 type BoundListener = std::net::TcpListener;
 
 /// The `op` of the element-removal failure [`RecordingIntercept`] injects.
 const INJECTED_REMOVAL_OP: &str = "nd295-injected-member-delete";
 
-/// The removal failure a rejected delete batch reports (FD 2931-2946): the
+/// The removal failure a rejected delete batch reports (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `remove_allocation_elements` contract)): the
 /// managed-guest member of `source` could not be deleted, `EBUSY`.
 fn injected_removal_failure(source: Ipv4Addr) -> InterceptError {
     InterceptError::NftElementUpdateFailed {
@@ -601,7 +601,7 @@ impl SharedGuestNetworkOwner for ActivationFaultOwner {
 }
 
 // ---------------------------------------------------------------------------
-// Seam fixture (test-scenarios § Seam fixture; FD 1850-2034, 7231-7238).
+// Seam fixture (test-scenarios § Seam fixture; FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)).
 // ---------------------------------------------------------------------------
 
 /// Distinct declared Service ports, as the production service projection
@@ -704,7 +704,7 @@ where
             Arc::clone(&store) as Arc<dyn IntentStore>
         );
         // The constructor call. Until DELIVER 05-01 cuts the pinned
-        // constructors (FD 1876-1989) it passes today's inputs; 05-01 appends
+        // constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)) it passes today's inputs; 05-01 appends
         // `Arc::clone(&worker)`, `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
         // `wiring.gate()`, and `Arc::clone(&pool)`, and nothing else in this
         // file changes with the constructors.
@@ -743,9 +743,9 @@ where
     }
 
     /// Start the worker's shared owner (it binds nothing over the sim port
-    /// from B-7, FD 3646-3663) and open the EXEC gate through the paired
+    /// from B-7, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract)) and open the EXEC gate through the paired
     /// supervisor, as a body whose dispatch reaches intercept install and
-    /// `claim_release` must (FD 2021-2031).
+    /// `claim_release` must (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
     async fn start_protection_and_open_exec(&self) {
         self.worker.start_shared_owner().await.expect("the shared intercept owner starts");
         assert!(
@@ -781,7 +781,7 @@ where
 
     /// Dispatch a reclaim of `alloc` and assert it wrote no allocation row,
     /// recorded no lifecycle occurrence, and emitted no lifecycle event
-    /// (FD 3895).
+    /// (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the shim arm)).
     async fn reclaim_without_row_or_event(&self, alloc: &str) -> Result<(), ShimError> {
         let rows_before = self.state.obs.alloc_status_rows().await.expect("rows readable");
         let occurrences_before = self
@@ -1007,7 +1007,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
 
     // The retried stop completes the teardown and only then releases the
     // lease. The protection was already removed, so no removal repeats
-    // (B-6 caller rule 2, FD 3086-3087), and the VMM stays gone.
+    // (B-6 caller rule 2, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives, rule 2)), and the VMM stays gone.
     fixture.sim_owner.script_teardown_failure(false);
     let retry = fixture.trace.mark();
     fixture
@@ -1053,11 +1053,11 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
 // ---------------------------------------------------------------------------
 
 impl SeamFixture<ActivationFaultOwner> {
-    /// Precondition through the production path (FD 2036-2053): `alloc`
+    /// Precondition through the production path (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the activation failure projection)): `alloc`
     /// starts, its activation is refused, and its protection removal fails, so
     /// the action owner confirms the VMM gone, retires the lease, withholds
     /// teardown and release, and writes the allocation's Failed row. The
-    /// worker keeps the allocation's retirement for a retry (FD 3009-3011).
+    /// worker keeps the allocation's retirement for a retry (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's retirement outcomes)).
     async fn finished_allocation_with_a_retiring_lease(&self, alloc: &str) -> Ipv4Addr {
         self.start_protection_and_open_exec().await;
         self.owner.script_activation_failure(true);

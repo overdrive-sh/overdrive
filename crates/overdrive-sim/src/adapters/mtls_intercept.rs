@@ -95,16 +95,20 @@ pub enum SimInterceptFault {
         /// The kernel `errno` the real `NLMSG_ERROR` would carry.
         errno: i32,
     },
-    /// Materialises `InterceptError::IpRuleAddFailed { source }` — the shared
-    /// `fwmark <TPROXY_FWMARK> lookup <TPROXY_RT_TABLE>` FIB-rule ensure failure
-    /// (ADR-0085 D3/D6). Modelled as the `NetlinkError::Connect` shape the real
-    /// `ensure_fwmark_rule` path produces when `Client::new()` cannot open the
-    /// `NETLINK_ROUTE` socket for the rule op (e.g. missing `CAP_NET_ADMIN`),
-    /// carrying the armed `errno` in its `io::Error`. The faithful `route`
-    /// sub-variant is not synthesizable off a live kernel without an
-    /// `rtnetlink::Error`; the socket-open failure is the other real source.
-    IpRuleAdd {
-        /// The kernel `errno` the netlink socket-open failure would carry.
+    /// Materialises `InterceptError::NftElementUpdateFailed { set, operation,
+    /// key, source }` — refusal 3 of the pinned install partition (DISTILL gap
+    /// B-8): the element insert or its mandatory read-back failed. `set` and
+    /// `key` are those of the call's first element, as the host reports them
+    /// (an outbound install: `ManagedGuestIps` and the source address; an
+    /// inbound install: `InboundDestinations` and the destination). The
+    /// `source` is a real errno-carrying `NetlinkError::Nft`. Sanctioned on
+    /// `install_outbound` and `install_inbound` only; armed on any other
+    /// method it materialises as that method's call key would, which models a
+    /// substrate the real one cannot exhibit (a test defect).
+    NftElementUpdate {
+        /// `Insert` or `ReadBack`, the two install-time element operations.
+        operation: InterceptElementOperation,
+        /// The kernel `errno` the element batch or read-back would carry.
         errno: i32,
     },
 }
@@ -124,19 +128,21 @@ pub enum SimInterceptFault {
 ///
 /// # Out-of-contract fault pairings
 ///
-/// [`SimInterceptFault`] is one type shared by all three scripting helpers, so
-/// the compiler permits arming an install fault
-/// ([`NftRuleInstall`](SimInterceptFault::NftRuleInstall) /
-/// [`IpRuleAdd`](SimInterceptFault::IpRuleAdd)) on
-/// [`bind_transparent`](MtlsIntercept::bind_transparent) (or a
-/// [`TransparentListener`](SimInterceptFault::TransparentListener) fault on an
-/// install). Doing so produces an [`InterceptError`] variant that method's
-/// contract says it never returns, so the double would model a substrate the
-/// real one cannot exhibit. The SANCTIONED pairings are `bind_transparent` ⇔
-/// `TransparentListener` and `install_*` ⇔ any variant (the `Inbound` arm
-/// legitimately carries the transparent-listener bind AND the nft/ip install
-/// failures, per `MtlsInterceptInstallError::stage`). Arming any other pairing
-/// is a test defect, not a supported scenario.
+/// [`SimInterceptFault`] is one type shared by every scripting helper, so the
+/// compiler permits arming a shape on a method whose contract says it never
+/// returns that shape. Doing so models a substrate the real one cannot exhibit.
+/// The SANCTIONED pairings are:
+///
+/// - `bind_transparent` ⇔ [`TransparentListener`](SimInterceptFault::TransparentListener);
+/// - `converge_shared` and `observe_shared` ⇔
+///   [`NftRuleInstall`](SimInterceptFault::NftRuleInstall) with op
+///   `observe-shared`, the host's one failure before any write (DISTILL gap
+///   B-8);
+/// - `install_outbound` and `install_inbound` ⇔
+///   [`NftElementUpdate`](SimInterceptFault::NftElementUpdate), refusal 3 of
+///   the pinned install partition (DISTILL gap B-8).
+///
+/// Arming any other pairing is a test defect, not a supported scenario.
 #[allow(
     clippy::struct_field_names,
     reason = "the shared `_fault` postfix is load-bearing: each field is the STANDING fault slot \
@@ -576,12 +582,52 @@ fn materialise(fault: SimInterceptFault, addr: SocketAddrV4) -> InterceptError {
             op,
             source: NetlinkError::nft(op, std::io::Error::from_raw_os_error(errno)),
         },
-        // The shared fwmark FIB-rule ensure failing at the netlink socket-open
-        // step (`Client::new`) — a real `IpRuleAddFailed` source carrying the
-        // armed errno in its `io::Error`.
-        SimInterceptFault::IpRuleAdd { errno } => InterceptError::IpRuleAddFailed {
-            source: NetlinkError::connect(std::io::Error::from_raw_os_error(errno)),
-        },
+        // Keyed by the address the call was made with: a destination tuple,
+        // as an inbound install's first element is.
+        SimInterceptFault::NftElementUpdate { operation, errno } => element_update_failure(
+            InterceptSet::InboundDestinations,
+            operation,
+            InterceptElementKey::Destination(addr),
+            errno,
+        ),
+    }
+}
+
+/// Materialise an armed fault on `install_outbound(source_addr, _)`. An
+/// element-update fault is keyed as the host keys an outbound install's first
+/// element: the managed-guest set and the source address. Every other shape
+/// materialises as [`materialise`] does against the loopback wildcard.
+fn materialise_outbound(fault: SimInterceptFault, source_addr: Ipv4Addr) -> InterceptError {
+    match fault {
+        SimInterceptFault::NftElementUpdate { operation, errno } => element_update_failure(
+            InterceptSet::ManagedGuestIps,
+            operation,
+            InterceptElementKey::Address(source_addr),
+            errno,
+        ),
+        other => materialise(other, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
+    }
+}
+
+/// The host's refusal-3 shape: `NftElementUpdateFailed` carrying a real
+/// errno-bearing `NetlinkError::Nft`.
+fn element_update_failure(
+    set: InterceptSet,
+    operation: InterceptElementOperation,
+    key: InterceptElementKey,
+    errno: i32,
+) -> InterceptError {
+    let op = match operation {
+        InterceptElementOperation::ReadBack => "shared-element-readback",
+        InterceptElementOperation::Insert | InterceptElementOperation::Delete => {
+            "shared-element-insert"
+        }
+    };
+    InterceptError::NftElementUpdateFailed {
+        set,
+        operation,
+        key,
+        source: NetlinkError::nft(op, std::io::Error::from_raw_os_error(errno)),
     }
 }
 
@@ -653,12 +699,12 @@ impl MtlsIntercept for SimMtlsIntercept {
         _agent_leg_f_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
         if let Some(fault) = armed(&self.outbound_fault) {
-            // No address is in scope on this method, so a `TransparentListener`
-            // descriptor armed here — an OUT-OF-CONTRACT pairing (see the type
-            // docs: a test defect, not a supported scenario) — materialises
-            // against the loopback wildcard. The sanctioned outbound pairings
-            // (`NftRuleInstall` / `IpRuleAdd`) carry no address at all.
-            return Err(materialise(fault, SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)));
+            // An element-update fault is keyed by the source address, as the
+            // host keys it. No socket address is in scope on this method, so a
+            // `TransparentListener` descriptor armed here — an OUT-OF-CONTRACT
+            // pairing (see the type docs: a test defect, not a supported
+            // scenario) — materialises against the loopback wildcard.
+            return Err(materialise_outbound(fault, source_addr));
         }
 
         // The double installs no nft rule; it records the two members the
@@ -749,6 +795,8 @@ impl MtlsIntercept for SimMtlsIntercept {
 mod tests {
     use std::net::Ipv4Addr;
 
+    use overdrive_worker::mtls_intercept::InterceptLeg;
+
     use super::*;
 
     /// The canonical leg-F / leg-C bind address the production caller uses.
@@ -758,8 +806,53 @@ mod tests {
     /// is called with.
     const VIRT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 8080);
 
+    /// The leg-F target every install row converges before it installs; the
+    /// outbound rows install with its port.
+    const INSTALL_LEG_F: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4001);
+
+    /// The leg-C target every install row converges before it installs; the
+    /// inbound rows install with its port.
+    const INSTALL_LEG_C: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4002);
+
+    /// A guest source address the member rows install.
+    const MEMBER_SOURCE: Ipv4Addr = Ipv4Addr::new(100, 95, 71, 2);
+
+    /// Converge a fresh adapter at the install rows' targets, as the production
+    /// caller does before any install (DISTILL gap B-8): the prior is the
+    /// adapter's own observation. The caller holds the returned node guard for
+    /// as long as it installs.
+    fn converge_at_install_ports(sut: &SimMtlsIntercept) -> Box<dyn InterceptGuard> {
+        let prior = sut.observe_shared().expect("the adapter observes its own program");
+        sut.converge_shared(prior.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("a fresh adapter converges its program at non-zero targets")
+    }
+
+    /// The sim's substrate-neutral program identity for two targets, as its
+    /// `converge_shared` records it (module docs, *Determinism*).
+    fn sim_program(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
+        let encode = |addr: SocketAddrV4| {
+            let mut bytes = Vec::from(addr.ip().octets());
+            bytes.extend_from_slice(&addr.port().to_be_bytes());
+            bytes
+        };
+        InterceptPostcondition::ConstantRules {
+            table_and_chains: vec![b"sim-shared-table-and-chains".to_vec()],
+            sets: vec![b"sim-shared-sets".to_vec()],
+            prerouting: vec![encode(leg_f)],
+            output: vec![encode(leg_c)],
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Convergence records both exact targets for a non-repairing observation,
+    /// and the drop of its node guard, with no member present, removes the
+    /// unchanged modeled program (D15's conditional delete, which the sim
+    /// models under DISTILL gap B-8): every observation then reads `Ok(None)`.
     #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn shared_convergence_records_both_exact_targets_for_non_repairing_observation() {
         let sut = SimMtlsIntercept::new();
         let leg_f = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_001);
@@ -782,34 +875,452 @@ mod tests {
         assert_eq!(prerouting, [encode(leg_f)]);
         assert_eq!(output, [encode(leg_c)]);
         drop(guard);
-        assert!(sut.observe_shared().expect("guard release is not a repair operation").is_some());
+        assert_eq!(
+            sut.observe_shared().expect("an observation after the drop succeeds"),
+            None,
+            "the dropped guard's identity equals the modeled program and no member exists, so \
+             its drop removes the program"
+        );
+        assert_eq!(
+            sut.observe_shared_state().expect("a state observation after the drop succeeds"),
+            None,
+            "the member-aware observation reads the removed program as absent"
+        );
+        assert_eq!(
+            sut.converge_allocation_elements(&InterceptMembers::default())
+                .expect("member convergence without a program succeeds"),
+            None,
+            "member convergence reads the removed program as absent and writes nothing"
+        );
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A node guard dropped while a member exists keeps the program: its
+    /// element guard is relinquished first (the guard-ordering rule's one
+    /// sanctioned way to hold a member past a node-guard drop). The drop still
+    /// withdraws the record, so a later install and a later removal are refused
+    /// with `SharedProgramNotConverged` (DISTILL gap B-8).
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+    fn a_node_guard_dropped_while_a_member_exists_keeps_the_program_and_withdraws_the_record() {
+        let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        let member = sut
+            .install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port())
+            .expect("install one member against the recorded program");
+        std::mem::forget(member);
+
+        drop(node_guard);
+        assert_eq!(
+            sut.observe_shared().expect("an observation after the drop succeeds"),
+            program,
+            "a node guard dropped while a member exists removes nothing"
+        );
+        let state = sut
+            .observe_shared_state()
+            .expect("a state observation after the drop succeeds")
+            .expect("the kept program is observable");
+        assert_eq!(
+            state.members.outbound_sources,
+            BTreeSet::from([MEMBER_SOURCE]),
+            "the relinquished member is still present"
+        );
+        assert!(
+            matches!(
+                sut.install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port()).map(|_guard| ()),
+                Err(InterceptError::SharedProgramNotConverged)
+            ),
+            "the drop withdrew the record, so an install is refused"
+        );
+        assert!(
+            matches!(
+                sut.remove_allocation_elements(MEMBER_SOURCE, &[]),
+                Err(InterceptError::SharedProgramNotConverged)
+            ),
+            "the drop withdrew the record, so a removal is refused"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A converge whose `prior` is the modeled program and whose targets equal
+    /// it adopts the program: it succeeds with a member present (no replacement
+    /// is attempted over it) and leaves the program and every member unchanged.
+    #[test]
+    fn converging_to_the_recorded_program_adopts_it_and_keeps_every_member() {
+        let sut = SimMtlsIntercept::new();
+        let first_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        let member = sut
+            .install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port())
+            .expect("install one member against the recorded program");
+        let before = sut.observe_shared_state().expect("observe the state before the adopt");
+
+        let adopted = sut
+            .converge_shared(program.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("an equal identity is adopted, even with a member present");
+
+        assert_eq!(sut.observe_shared().expect("observe after the adopt"), program);
+        assert_eq!(
+            sut.observe_shared_state().expect("observe the state after the adopt"),
+            before,
+            "an adopt changes no member"
+        );
+        drop(member);
+        drop(adopted);
+        drop(first_guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A program replacement is refused while a member exists
+    /// (`NftSharedReplaceFailed` whose `prior` is the modeled program and whose
+    /// source has the host's strict-observation shape), and it changes neither
+    /// the program, the members, nor the record.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+    fn a_program_replacement_is_refused_while_a_member_exists() {
+        let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        let member = sut
+            .install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port())
+            .expect("install one member against the recorded program");
+        let before = sut.observe_shared_state().expect("observe the state before");
+        let retargeted_f = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5001);
+        let retargeted_c = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5002);
+
+        let refused = sut
+            .converge_shared(program.as_ref(), retargeted_f, retargeted_c)
+            .map(|_guard| ())
+            .expect_err("a replacement over a live member is refused");
+        match &refused {
+            InterceptError::NftSharedReplaceFailed { prior, requested, source } => {
+                assert_eq!(prior, &program, "the refusal names the modeled program as prior");
+                assert_eq!(
+                    requested,
+                    &sim_program(retargeted_f, retargeted_c),
+                    "the refusal names the requested identity"
+                );
+                assert!(
+                    matches!(
+                        source,
+                        NetlinkError::Nft { op, source }
+                            if *op == "shared-ip-observe"
+                                && source.kind() == std::io::ErrorKind::InvalidData
+                    ),
+                    "the source has the host's strict-observation shape, got {source:?}"
+                );
+            }
+            other => panic!("expected NftSharedReplaceFailed, got {other:?}"),
+        }
+        assert_eq!(sut.observe_shared().expect("observe after the refusal"), program);
+        assert_eq!(sut.observe_shared_state().expect("observe the state after"), before);
+        let still_recorded = sut
+            .install_inbound(VIRT, INSTALL_LEG_C.port())
+            .expect("the record is unchanged: an install at the recorded port succeeds");
+        drop(still_recorded);
+        drop(member);
+        drop(node_guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A converge whose `prior` is not the modeled program is refused with
+    /// `PostconditionMismatch { expected, observed }` — `expected` the caller's
+    /// prior, or the requested identity when the prior is `None` — and changes
+    /// nothing.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+    fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
+        let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        let stale = sim_program(
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6001),
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6002),
+        );
+
+        for (label, prior, expected) in [
+            ("absent prior", None, sim_program(INSTALL_LEG_F, INSTALL_LEG_C)),
+            ("different prior", Some(stale.clone()), stale),
+        ] {
+            let refused = sut
+                .converge_shared(prior.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+                .map(|_guard| ())
+                .expect_err("a stale prior is refused");
+            match refused {
+                InterceptError::PostconditionMismatch { expected: got_expected, observed } => {
+                    assert_eq!(got_expected, expected, "[{label}] the expected identity");
+                    assert_eq!(observed, program, "[{label}] the observed identity");
+                }
+                other => panic!("[{label}] expected PostconditionMismatch, got {other:?}"),
+            }
+            assert_eq!(
+                sut.observe_shared().expect("observe after the refusal"),
+                program,
+                "[{label}] the refusal changes nothing"
+            );
+        }
+        drop(node_guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// `converge_shared` refuses in the host's order: a zero port before an
+    /// armed fault, an armed fault before a stale prior, a stale prior before
+    /// the replace-over-members refusal. Each refusal changes no modeled state.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+    fn shared_convergence_refuses_in_the_hosts_order() {
+        let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        let member =
+            sut.install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port()).expect("install one member");
+        let before = sut.observe_shared_state().expect("observe the state before");
+        let retargeted_f = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5001);
+        let retargeted_c = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5002);
+        sut.script_converge_shared_fault(SimInterceptFault::NftRuleInstall {
+            op: "observe-shared",
+            errno: libc::EIO,
+        });
+
+        // 1. A zero port precedes the armed fault.
+        let zero = sut
+            .converge_shared(program.as_ref(), LEG_ADDR, retargeted_c)
+            .map(|_guard| ())
+            .expect_err("a zero port is refused");
+        assert!(
+            matches!(
+                &zero,
+                InterceptError::NftRuleInstallFailed { op: "shared-ip-expected", source }
+                    if matches!(
+                        source,
+                        NetlinkError::Nft { op, source }
+                            if *op == "shared-ip-identity"
+                                && source.kind() == std::io::ErrorKind::InvalidData
+                    )
+            ),
+            "a zero port refuses before the armed fault, got {zero:?}"
+        );
+
+        // 2. The armed fault precedes a stale prior.
+        let faulted = sut
+            .converge_shared(None, retargeted_f, retargeted_c)
+            .map(|_guard| ())
+            .expect_err("the armed fault fires");
+        assert_err_shape(
+            &faulted,
+            ExpectedErr::NftRuleInstall { op: "observe-shared", errno: libc::EIO },
+        );
+
+        // 3. A stale prior precedes the replace-over-members refusal.
+        sut.clear_faults();
+        let stale = sut
+            .converge_shared(None, retargeted_f, retargeted_c)
+            .map(|_guard| ())
+            .expect_err("a stale prior is refused");
+        assert!(
+            matches!(stale, InterceptError::PostconditionMismatch { .. }),
+            "a stale prior refuses before the replace-over-members refusal, got {stale:?}"
+        );
+
+        assert_eq!(sut.observe_shared().expect("observe after the refusals"), program);
+        assert_eq!(sut.observe_shared_state().expect("observe the state after"), before);
+        drop(member);
+        drop(node_guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The two standing shared slots are independent: the converge fault
+    /// stands for the host's one failure before any write (the observation,
+    /// `op: "observe-shared"`), fires on every call while armed, and never
+    /// leaks into the observe slot; `clear_faults` disarms both.
     #[test]
     fn shared_converge_and_observe_faults_are_independent_standing_slots() {
         let sut = SimMtlsIntercept::new();
         let converge_fault =
-            SimInterceptFault::NftRuleInstall { op: "replace-shared", errno: libc::EBUSY };
+            SimInterceptFault::NftRuleInstall { op: "observe-shared", errno: libc::EBUSY };
         let observe_fault =
             SimInterceptFault::NftRuleInstall { op: "observe-shared", errno: libc::EIO };
         sut.script_converge_shared_fault(converge_fault);
         sut.script_observe_shared_fault(observe_fault);
 
         for _ in 0..2 {
-            assert!(matches!(
-                sut.converge_shared(None, LEG_ADDR, LEG_ADDR),
-                Err(InterceptError::NftRuleInstallFailed { op: "replace-shared", .. })
-            ));
-            assert!(matches!(
-                sut.observe_shared(),
-                Err(InterceptError::NftRuleInstallFailed { op: "observe-shared", .. })
-            ));
+            let converge = sut
+                .converge_shared(None, INSTALL_LEG_F, INSTALL_LEG_C)
+                .map(|_guard| ())
+                .expect_err("the armed converge fault fires");
+            assert_err_shape(
+                &converge,
+                ExpectedErr::NftRuleInstall { op: "observe-shared", errno: libc::EBUSY },
+            );
+            let observe = sut.observe_shared().expect_err("the armed observe fault fires");
+            assert_err_shape(
+                &observe,
+                ExpectedErr::NftRuleInstall { op: "observe-shared", errno: libc::EIO },
+            );
         }
         sut.clear_faults();
-        sut.converge_shared(None, LEG_ADDR, VIRT)
-            .expect("clear_faults disarms shared convergence only");
+        let guard = sut
+            .converge_shared(None, INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("clear_faults disarms shared convergence");
         assert!(sut.observe_shared().expect("shared observation is healthy").is_some());
+        drop(guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A `converge_shared` that fails leaves the record as it was (DISTILL gap
+    /// B-8, the failed-converge clause): after a converge, an armed converge
+    /// fault's `Err` changes neither the program nor the record, so an install
+    /// at the recorded port still succeeds and a removal is not refused for
+    /// want of a record.
+    #[test]
+    fn a_failed_convergence_keeps_the_recorded_program() {
+        let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
+        let program = sut.observe_shared().expect("observe the converged program");
+        sut.script_converge_shared_fault(SimInterceptFault::NftRuleInstall {
+            op: "observe-shared",
+            errno: libc::EIO,
+        });
+
+        let failed = sut
+            .converge_shared(program.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+            .map(|_guard| ())
+            .expect_err("the armed converge fault fires");
+        assert_err_shape(
+            &failed,
+            ExpectedErr::NftRuleInstall { op: "observe-shared", errno: libc::EIO },
+        );
+
+        assert_eq!(
+            sut.observe_shared().expect("observe after the failed converge"),
+            program,
+            "a failed converge changes no program"
+        );
+        let member = sut
+            .install_outbound(MEMBER_SOURCE, INSTALL_LEG_F.port())
+            .expect("an install at the recorded port succeeds after a failed converge");
+        drop(member);
+        let removed = sut
+            .remove_allocation_elements(MEMBER_SOURCE, &[])
+            .expect("a removal is not refused for want of a record after a failed converge");
+        assert_eq!(removed.program, program.expect("the program is present"));
+        drop(node_guard);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-71 — Protection is installed only against the node's own converged program.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The install partition is checked in order (DISTILL gap B-8): with an
+    /// install fault armed, a call before any converge is refused with
+    /// `SharedProgramNotConverged`; after a converge, a call at the other
+    /// leg's port is refused with `SharedListenerPortMismatch { leg, expected,
+    /// actual }`; only a call at the recorded port reaches the armed fault.
+    /// No refusal records a member.
+    #[test]
+    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
+    fn an_armed_install_fault_fires_only_after_the_record_and_port_checks() {
+        for (method, fault, leg, recorded, crossed, expected) in [
+            (
+                Method::InstallOutbound,
+                SimInterceptFault::NftElementUpdate {
+                    operation: InterceptElementOperation::Insert,
+                    errno: libc::EIO,
+                },
+                InterceptLeg::F,
+                INSTALL_LEG_F.port(),
+                INSTALL_LEG_C.port(),
+                ExpectedErr::ElementUpdate {
+                    set: InterceptSet::ManagedGuestIps,
+                    operation: InterceptElementOperation::Insert,
+                    key: ExpectedKey::Address(Ipv4Addr::LOCALHOST),
+                    errno: libc::EIO,
+                },
+            ),
+            (
+                Method::InstallInbound,
+                SimInterceptFault::NftElementUpdate {
+                    operation: InterceptElementOperation::ReadBack,
+                    errno: libc::EIO,
+                },
+                InterceptLeg::C,
+                INSTALL_LEG_C.port(),
+                INSTALL_LEG_F.port(),
+                ExpectedErr::ElementUpdate {
+                    set: InterceptSet::InboundDestinations,
+                    operation: InterceptElementOperation::ReadBack,
+                    key: ExpectedKey::Destination(VIRT),
+                    errno: libc::EIO,
+                },
+            ),
+        ] {
+            let sut = SimMtlsIntercept::new();
+            arm(&sut, method, fault);
+
+            let unconverged = drive_expecting_err(&sut, method);
+            assert!(
+                matches!(unconverged, InterceptError::SharedProgramNotConverged),
+                "{method:?}: before any converge the precondition refuses first, got \
+                 {unconverged:?}"
+            );
+
+            let node_guard = converge_at_install_ports(&sut);
+            let mismatched = match method {
+                Method::InstallOutbound => {
+                    sut.install_outbound(Ipv4Addr::LOCALHOST, crossed).map(|_guard| ())
+                }
+                Method::InstallInbound => sut.install_inbound(VIRT, crossed).map(|_guard| ()),
+                Method::BindTransparent => unreachable!("only the two installs are driven"),
+            }
+            .expect_err("a port other than the recorded one is refused");
+            match mismatched {
+                InterceptError::SharedListenerPortMismatch {
+                    leg: got_leg,
+                    expected: got_expected,
+                    actual,
+                } => {
+                    assert_eq!(got_leg, leg, "{method:?}: the mismatch names the leg");
+                    assert_eq!(got_expected, recorded, "{method:?}: expected is the recorded port");
+                    assert_eq!(actual, crossed, "{method:?}: actual is the passed port");
+                }
+                other => panic!(
+                    "{method:?}: the port check refuses before the armed fault, got {other:?}"
+                ),
+            }
+
+            assert_err_shape(&drive_expecting_err(&sut, method), expected);
+            assert_eq!(
+                sut.observe_shared_state()
+                    .expect("observe the state after the refusals")
+                    .expect("the converged program is present")
+                    .members,
+                InterceptMembers::default(),
+                "{method:?}: no refusal records a member"
+            );
+            drop(node_guard);
+        }
     }
 
     /// Which trait method a S-MIF-06 case drives.
@@ -820,6 +1331,14 @@ mod tests {
         InstallInbound,
     }
 
+    /// The element key an [`ExpectedErr::ElementUpdate`] names (a `Copy`
+    /// mirror of `InterceptElementKey`).
+    #[derive(Debug, Clone, Copy)]
+    enum ExpectedKey {
+        Address(Ipv4Addr),
+        Destination(SocketAddrV4),
+    }
+
     /// The `Err` payload a S-MIF-06 case expects, in the shape the REAL
     /// substrate reports it.
     #[derive(Debug, Clone, Copy)]
@@ -828,56 +1347,68 @@ mod tests {
         /// and whose `source.raw_os_error()` is exactly this `errno`.
         ///
         /// `addr` is asserted, not ignored: ADR-0076 § 4.6 pins it as "the
-        /// address the faulted call was made with", and the two methods that
-        /// can materialise this shape are called with DISTINCT addresses
-        /// ([`LEG_ADDR`] vs [`VIRT`]). Dropping the assertion would let
-        /// `materialise`'s address argument be swapped for any other value
-        /// undetected.
+        /// address the faulted call was made with". Dropping the assertion
+        /// would let `materialise`'s address argument be swapped for any other
+        /// value undetected.
         TransparentListener { addr: SocketAddrV4, errno: i32 },
         /// `InterceptError::NftRuleInstallFailed` carrying exactly this `op`,
         /// and whose `source.errno()` is exactly `-errno` (the netlink
         /// negative-errno convention the `NetlinkError::Nft` shape re-negates
         /// the positive kernel `errno` into).
         NftRuleInstall { op: &'static str, errno: i32 },
-        /// `InterceptError::IpRuleAddFailed` whose `source` is the
-        /// `NetlinkError::Connect` socket-open shape carrying exactly this
-        /// `errno`.
-        IpRuleAdd { errno: i32 },
+        /// `InterceptError::NftElementUpdateFailed` carrying exactly this set,
+        /// operation, and key, and whose `source.errno()` is exactly `-errno`
+        /// (refusal 3 of the pinned install partition, DISTILL gap B-8).
+        ElementUpdate {
+            set: InterceptSet,
+            operation: InterceptElementOperation,
+            key: ExpectedKey,
+            errno: i32,
+        },
     }
 
-    /// The 4 SANCTIONED S-MIF-06 pairings — `(method, armed fault, expected
-    /// error)` — exhausting the three variants [`SimInterceptFault`] can
-    /// materialise. The UNSANCTIONED pairings (an install fault on
-    /// `bind_transparent`, a `TransparentListener` fault on `install_outbound`)
-    /// model a substrate the real one cannot exhibit and are a documented test
-    /// defect, so they are deliberately absent.
-    fn sanctioned_pairings() -> [(Method, SimInterceptFault, ExpectedErr); 4] {
-        // Missing `CAP_NET_ADMIN` on the outbound egress-rule append; ruleset
-        // lock contention on the inbound append — the real errno shapes the
-        // hand-rolled nft `NETLINK_NETFILTER` path returns.
-        const NFT_EPERM: i32 = libc::EPERM;
-        const NFT_EBUSY: i32 = libc::EBUSY;
-
+    /// The 3 SANCTIONED S-MIF-06 pairings — `(method, armed fault, expected
+    /// error)` — one per scriptable method, each in the shape the pinned
+    /// partition of that method contains (DISTILL gap B-8: an install's only
+    /// scriptable refusal is the element update). The UNSANCTIONED pairings
+    /// (an install fault on `bind_transparent`, a `TransparentListener` fault
+    /// on an install) model a substrate the real one cannot exhibit and are a
+    /// documented test defect, so they are deliberately absent.
+    fn sanctioned_pairings() -> [(Method, SimInterceptFault, ExpectedErr); 3] {
         [
             (
                 Method::BindTransparent,
                 SimInterceptFault::TransparentListener { errno: libc::EPERM },
                 ExpectedErr::TransparentListener { addr: LEG_ADDR, errno: libc::EPERM },
             ),
+            // Missing `CAP_NET_ADMIN` on the element insert; ruleset lock
+            // contention on the inbound read-back — the real errno shapes the
+            // hand-rolled nft `NETLINK_NETFILTER` path returns.
             (
                 Method::InstallOutbound,
-                SimInterceptFault::NftRuleInstall { op: "append-egress", errno: NFT_EPERM },
-                ExpectedErr::NftRuleInstall { op: "append-egress", errno: NFT_EPERM },
+                SimInterceptFault::NftElementUpdate {
+                    operation: InterceptElementOperation::Insert,
+                    errno: libc::EPERM,
+                },
+                ExpectedErr::ElementUpdate {
+                    set: InterceptSet::ManagedGuestIps,
+                    operation: InterceptElementOperation::Insert,
+                    key: ExpectedKey::Address(Ipv4Addr::LOCALHOST),
+                    errno: libc::EPERM,
+                },
             ),
             (
                 Method::InstallInbound,
-                SimInterceptFault::NftRuleInstall { op: "append-inbound", errno: NFT_EBUSY },
-                ExpectedErr::NftRuleInstall { op: "append-inbound", errno: NFT_EBUSY },
-            ),
-            (
-                Method::InstallInbound,
-                SimInterceptFault::TransparentListener { errno: libc::ENOPROTOOPT },
-                ExpectedErr::TransparentListener { addr: VIRT, errno: libc::ENOPROTOOPT },
+                SimInterceptFault::NftElementUpdate {
+                    operation: InterceptElementOperation::ReadBack,
+                    errno: libc::EBUSY,
+                },
+                ExpectedErr::ElementUpdate {
+                    set: InterceptSet::InboundDestinations,
+                    operation: InterceptElementOperation::ReadBack,
+                    key: ExpectedKey::Destination(VIRT),
+                    errno: libc::EBUSY,
+                },
             ),
         ]
     }
@@ -885,7 +1416,8 @@ mod tests {
     /// Drive `method` on `sut` and return the `Err` it must produce. Every
     /// caller here has a fault armed, so an `Ok` is a test failure — and for
     /// `bind_transparent` an `Ok` would additionally bind a real socket, which
-    /// is exactly the default-lane I/O this suite must not perform.
+    /// is exactly the default-lane I/O this suite must not perform. The
+    /// installs use the recorded ports of [`converge_at_install_ports`].
     fn drive_expecting_err(sut: &SimMtlsIntercept, method: Method) -> InterceptError {
         match method {
             // The `Ok` payload is mapped away before `expect_err` so this
@@ -899,11 +1431,11 @@ mod tests {
             // contract is its `Drop`), so the `Ok` payload is mapped away
             // before `expect_err`.
             Method::InstallOutbound => sut
-                .install_outbound(Ipv4Addr::LOCALHOST, 4001)
+                .install_outbound(Ipv4Addr::LOCALHOST, INSTALL_LEG_F.port())
                 .map(|_guard| ())
                 .expect_err("an armed outbound fault short-circuits"),
             Method::InstallInbound => sut
-                .install_inbound(VIRT, 4002)
+                .install_inbound(VIRT, INSTALL_LEG_C.port())
                 .map(|_guard| ())
                 .expect_err("an armed inbound fault short-circuits"),
         }
@@ -947,50 +1479,64 @@ mod tests {
                 }
                 other => panic!("expected NftRuleInstallFailed, got {other:?}"),
             },
-            ExpectedErr::IpRuleAdd { errno } => match got {
-                // The sim models the shared-fwmark-rule ensure failing at the
-                // netlink socket-open step; the errno rides in the `Connect`
-                // source's `io::Error` (`NetlinkError::errno()` is `None` for a
-                // structural connect failure, by its own contract).
-                InterceptError::IpRuleAddFailed {
-                    source: NetlinkError::Connect { source: io },
+            ExpectedErr::ElementUpdate { set, operation, key, errno } => match got {
+                InterceptError::NftElementUpdateFailed {
+                    set: got_set,
+                    operation: got_operation,
+                    key: got_key,
+                    source,
                 } => {
+                    assert_eq!(*got_set, set, "NftElementUpdateFailed must name the call's set");
                     assert_eq!(
-                        io.raw_os_error(),
-                        Some(errno),
-                        "IpRuleAddFailed source must carry the armed errno",
+                        *got_operation, operation,
+                        "NftElementUpdateFailed must carry the armed operation"
+                    );
+                    let expected_key = match key {
+                        ExpectedKey::Address(address) => InterceptElementKey::Address(address),
+                        ExpectedKey::Destination(destination) => {
+                            InterceptElementKey::Destination(destination)
+                        }
+                    };
+                    assert_eq!(
+                        *got_key, expected_key,
+                        "NftElementUpdateFailed must name the call's key"
+                    );
+                    assert_eq!(
+                        source.errno(),
+                        Some(-errno.abs()),
+                        "NftElementUpdateFailed source must carry the armed errno (netlink -errno convention)",
                     );
                 }
-                other => {
-                    panic!("expected IpRuleAddFailed with a Connect-shaped source, got {other:?}")
-                }
+                other => panic!("expected NftElementUpdateFailed, got {other:?}"),
             },
         }
     }
 
     /// S-MIF-06 — an armed fault surfaces as exactly the error the REAL
-    /// substrate produces, across the 4 sanctioned pairings.
+    /// substrate produces, across the 3 sanctioned pairings.
     ///
     /// Universe (port-exposed): the `Result` the trait method returns — its
     /// `Err` discriminant, plus `addr` and `source.raw_os_error()` for
-    /// `TransparentListener`, the `op` + `source.errno()` for
-    /// `NftRuleInstallFailed`, and the `source` errno for `IpRuleAddFailed`.
-    /// Nothing reads a private slot; the scripting helpers are the only writes
-    /// and the trait method the only read.
+    /// `TransparentListener`, and the set, operation, key, and
+    /// `source.errno()` for `NftElementUpdateFailed`. Nothing reads a private
+    /// slot; the scripting helpers are the only writes and the trait method the
+    /// only read. Each case converges first, as the production caller does, so
+    /// an install reaches its armed fault rather than the B-8 precondition.
     ///
     /// Realism criterion (research Finding 5.3, DFS-4): the faults are armed in
     /// the REAL shapes the substrate produces — `libc::EPERM` is the
-    /// missing-`CAP_NET_ADMIN` shape, `libc::ENOPROTOOPT` the
-    /// kernel-without-`IP_TRANSPARENT` shape — never a generic "fail now".
+    /// missing-`CAP_NET_ADMIN` shape — never a generic "fail now".
     #[test]
     fn armed_fault_surfaces_as_the_real_substrate_error() {
         for (method, fault, expected) in sanctioned_pairings() {
             let sut = SimMtlsIntercept::new();
+            let node_guard = converge_at_install_ports(&sut);
             arm(&sut, method, fault);
 
             let got = drive_expecting_err(&sut, method);
 
             assert_err_shape(&got, expected);
+            drop(node_guard);
         }
     }
 
@@ -1043,23 +1589,29 @@ mod tests {
     #[test]
     fn clear_faults_disarms_every_slot_and_is_idempotent() {
         let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
-        sut.script_outbound_fault(SimInterceptFault::NftRuleInstall {
-            op: "append-egress",
+        sut.script_outbound_fault(SimInterceptFault::NftElementUpdate {
+            operation: InterceptElementOperation::Insert,
             errno: libc::EPERM,
         });
-        sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
+        sut.script_inbound_fault(SimInterceptFault::NftElementUpdate {
+            operation: InterceptElementOperation::ReadBack,
+            errno: libc::EPERM,
+        });
 
         sut.clear_faults();
-        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, INSTALL_LEG_F.port())
             .expect("clear_faults disarms the outbound slot");
-        sut.install_inbound(VIRT, 4002).expect("clear_faults disarms the inbound slot");
+        sut.install_inbound(VIRT, INSTALL_LEG_C.port())
+            .expect("clear_faults disarms the inbound slot");
 
         sut.clear_faults();
-        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, INSTALL_LEG_F.port())
             .expect("a second clear_faults leaves the outbound slot disarmed");
-        sut.install_inbound(VIRT, 4002)
+        sut.install_inbound(VIRT, INSTALL_LEG_C.port())
             .expect("a second clear_faults leaves the inbound slot disarmed");
+        drop(node_guard);
     }
 
     /// S-MIF-13 — the three fault slots are INDEPENDENT: arming exactly one
@@ -1089,38 +1641,64 @@ mod tests {
     /// (DFS-5), so the direction is not covered by the active suite.
     #[test]
     fn arming_one_slot_leaves_the_others_on_their_success_arms() {
+        let outbound_fault = SimInterceptFault::NftElementUpdate {
+            operation: InterceptElementOperation::Insert,
+            errno: libc::EPERM,
+        };
+        let inbound_fault = SimInterceptFault::NftElementUpdate {
+            operation: InterceptElementOperation::ReadBack,
+            errno: libc::EPERM,
+        };
+
         // Direction 1 — arming the BIND slot leaks to neither install.
         let sut = SimMtlsIntercept::new();
+        let node_guard = converge_at_install_ports(&sut);
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
-        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
+        sut.install_outbound(Ipv4Addr::LOCALHOST, INSTALL_LEG_F.port())
             .expect("a bind fault does not leak into install_outbound");
-        sut.install_inbound(VIRT, 4002).expect("a bind fault does not leak into install_inbound");
+        sut.install_inbound(VIRT, INSTALL_LEG_C.port())
+            .expect("a bind fault does not leak into install_inbound");
+        drop(node_guard);
 
         // Direction 2 — arming the OUTBOUND slot refuses only `install_outbound`.
         let sut = SimMtlsIntercept::new();
-        sut.script_outbound_fault(SimInterceptFault::NftRuleInstall {
-            op: "append-egress",
-            errno: libc::EPERM,
-        });
+        let node_guard = converge_at_install_ports(&sut);
+        sut.script_outbound_fault(outbound_fault);
         let got = drive_expecting_err(&sut, Method::InstallOutbound);
         assert_err_shape(
             &got,
-            ExpectedErr::NftRuleInstall { op: "append-egress", errno: libc::EPERM },
+            ExpectedErr::ElementUpdate {
+                set: InterceptSet::ManagedGuestIps,
+                operation: InterceptElementOperation::Insert,
+                key: ExpectedKey::Address(Ipv4Addr::LOCALHOST),
+                errno: libc::EPERM,
+            },
         );
-        sut.install_inbound(VIRT, 4002)
+        sut.install_inbound(VIRT, INSTALL_LEG_C.port())
             .expect("an outbound fault does not leak into install_inbound");
+        drop(node_guard);
 
         // Direction 3 — arming the INBOUND slot refuses only `install_inbound`.
         let sut = SimMtlsIntercept::new();
-        sut.script_inbound_fault(SimInterceptFault::IpRuleAdd { errno: libc::EPERM });
-        sut.install_outbound(Ipv4Addr::LOCALHOST, 4001)
+        let node_guard = converge_at_install_ports(&sut);
+        sut.script_inbound_fault(inbound_fault);
+        sut.install_outbound(Ipv4Addr::LOCALHOST, INSTALL_LEG_F.port())
             .expect("an inbound fault does not leak into install_outbound");
         let got = drive_expecting_err(&sut, Method::InstallInbound);
-        assert_err_shape(&got, ExpectedErr::IpRuleAdd { errno: libc::EPERM });
+        assert_err_shape(
+            &got,
+            ExpectedErr::ElementUpdate {
+                set: InterceptSet::InboundDestinations,
+                operation: InterceptElementOperation::ReadBack,
+                key: ExpectedKey::Destination(VIRT),
+                errno: libc::EPERM,
+            },
+        );
+        drop(node_guard);
     }
 
     // -----------------------------------------------------------------------
-    // S-ND295-70 — the socket-free listener surface (B-7, FD 3522-3663).
+    // S-ND295-70 — the socket-free listener surface (B-7, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned contract through the `SimMtlsIntercept` contract)).
     //
     // Until the DELIVER step that carries B-7 (05-01), `bind_transparent`'s
     // `Ok` arm returns a real `std::net::TcpListener` and registers nothing,
@@ -1593,20 +2171,28 @@ mod tests {
     #[test]
     #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn an_install_fault_leaves_bind_on_its_success_arm() {
-        for (method, fault) in [
-            (
-                Method::InstallOutbound,
-                SimInterceptFault::NftRuleInstall { op: "append-egress", errno: libc::EPERM },
-            ),
-            (Method::InstallInbound, SimInterceptFault::IpRuleAdd { errno: libc::EPERM }),
-        ] {
+        for method in [Method::InstallOutbound, Method::InstallInbound] {
             let sut = SimMtlsIntercept::new();
-            arm(&sut, method, fault);
+            let node_guard = converge_at_install_ports(&sut);
+            arm(
+                &sut,
+                method,
+                SimInterceptFault::NftElementUpdate {
+                    operation: InterceptElementOperation::Insert,
+                    errno: libc::EPERM,
+                },
+            );
 
             let (_held, at) = bind_live(&sut, LEG_ADDR);
             assert_eq!(at, loopback(49_152), "{method:?} fault: bind takes its socket-free Ok arm");
             assert_eq!(sut.live_listeners(), [at], "{method:?} fault: the listener is live");
-            drive_expecting_err(&sut, method);
+            let refused = drive_expecting_err(&sut, method);
+            assert!(
+                matches!(refused, InterceptError::NftElementUpdateFailed { .. }),
+                "{method:?} fault: the converged install still reaches its armed fault, got \
+                 {refused:?}"
+            );
+            drop(node_guard);
         }
     }
 }

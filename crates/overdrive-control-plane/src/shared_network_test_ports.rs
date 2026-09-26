@@ -725,7 +725,10 @@ mod tests {
         owner.script_restore_failure(true);
         let failed = owner.restore_quiesced_taps().await;
         assert!(
-            matches!(failed, Err(GuestNetworkError::Io { operation: GuestNetworkOperation::TapSetUp, .. })),
+            matches!(
+                failed,
+                Err(GuestNetworkError::Io { operation: GuestNetworkOperation::TapSetUp, .. })
+            ),
             "an armed restore fails with the typed set-up error: {failed:?}"
         );
         assert!(owner.latched(), "a failed restore keeps the latch");

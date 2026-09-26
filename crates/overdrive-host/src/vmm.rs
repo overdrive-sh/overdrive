@@ -916,7 +916,7 @@ mod tests {
 
     use super::*;
 
-    /// The probe stages in their accepted order (FD 1232-1233): R2 removes
+    /// The probe stages in their accepted order (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the startup probe order)): R2 removes
     /// `ip`, and D-295-R22 inserts `launch-seccomp` after `setpriv`.
     const ACCEPTED_PROBE_ORDER: [&str; 7] =
         ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "launch-seccomp", "kvm", "run-dir"];
@@ -1292,7 +1292,7 @@ mod tests {
 
 /// E21's real-kernel cases (D-295-R22, ADR-0143) and S-ND295-40's queue
 /// release: a scratch persistent TAP named outside `ovd-tp-` (never bridged,
-/// deleted on drop) and re-execs of this test binary (FD 1416-1473).
+/// deleted on drop) and re-execs of this test binary (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the testability boundary)).
 #[cfg(all(test, feature = "integration-tests"))]
 #[allow(unsafe_code)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
@@ -1364,7 +1364,7 @@ mod launch_seccomp_kernel {
         request
     }
 
-    /// The flags of a vnet-header single-queue TAP queue (FD 592-594).
+    /// The flags of a vnet-header single-queue TAP queue (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the `attach_tap_queue` contract: effect)).
     fn tap_queue_flags() -> libc::c_short {
         libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI | libc::IFF_VNET_HDR)
             .expect("TAP queue flags fit ifr_flags")
@@ -1505,7 +1505,7 @@ mod launch_seccomp_kernel {
     #[cfg(target_arch = "x86_64")]
     const CHILD_ROLE_TEST: &str = "vmm::launch_seccomp_kernel::launch_seccomp_child_role";
 
-    /// The thirteen TAP-mutating requests (FD 1009-1023), in table order.
+    /// The thirteen TAP-mutating requests (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the thirteen-row deny-list table)), in table order.
     #[cfg(target_arch = "x86_64")]
     const DENIED_REQUESTS: [&str; 13] = [
         "SIOCSIFHWADDR",

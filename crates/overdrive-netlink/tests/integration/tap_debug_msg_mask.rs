@@ -1,6 +1,6 @@
 //! GH #295 D-295-R22 read-back — the TAP debug message mask through
 //! `overdrive_netlink::ethtool::{debug_msg_mask, debug_msg_masks}`
-//! (FD 1294-1354) against real kernel TAPs.
+//! (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the audit read-back of the TAP debug message mask)) against real kernel TAPs.
 //!
 //! The level is changed with a real `TUNSETDEBUG` on the scratch TAP's queue:
 //! the one mutation the launch filter denies, performed here as the test's
@@ -54,7 +54,11 @@ fn a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump(
     // scratch TAP for the duration of the call; `TUNSETDEBUG` takes its
     // argument by value and writes no memory.
     let rc = unsafe {
-        libc::ioctl(queue.as_fd().as_raw_fd(), libc::TUNSETDEBUG, libc::c_ulong::from(CHANGED_LEVEL))
+        libc::ioctl(
+            queue.as_fd().as_raw_fd(),
+            libc::TUNSETDEBUG,
+            libc::c_ulong::from(CHANGED_LEVEL),
+        )
     };
     assert_eq!(rc, 0, "TUNSETDEBUG: {}", std::io::Error::last_os_error());
     drop(queue);

@@ -59,12 +59,12 @@
 //! (driver stop → lease retirement → mTLS stop → guest-network teardown →
 //! lease release → terminal row). No kernel state is touched.
 //!
-//! # Accepted contract (S-ND295-07B; D-295-R10, R7, R20; FD 3018-3063)
+//! # Accepted contract (S-ND295-07B; D-295-R10, R7, R20; FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's `MtlsInterceptStopError` and its `Arc`-shared typed sources))
 //!
 //! The stop fails with `ShimError::MtlsStop(MtlsInterceptStopError::ElementRemoval
 //! { alloc_id, source })`, `&*source` being exactly the `InterceptError` the
 //! element model injected; the lease stays Retiring (`guest_network.lease_retired`
-//! with no `lease_released`, FD 2741-2744 — the pool is crate-private); the row
+//! with no `lease_released`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events) — the pool is crate-private); the row
 //! stays `Running`; a retried stop calls `remove_allocation_elements` again, and
 //! only then do teardown and `lease_released` follow and the row becomes
 //! `Terminated`. The bodies build `AppState` through the file's seam fixture
@@ -443,18 +443,9 @@ impl MtlsIntercept for ElementFaultIntercept {
                 ),
             }
         })?;
-        self.state()?.ok_or_else(|| {
-            overdrive_worker::mtls_intercept::InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: overdrive_worker::mtls_intercept::NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
-                    ),
-                ),
-            }
-        })
+        // The B-8 refusal; this double conflates the record with the program.
+        self.state()?
+            .ok_or(overdrive_worker::mtls_intercept::InterceptError::SharedProgramNotConverged)
     }
 }
 
@@ -566,7 +557,7 @@ impl tracing::field::Visit for EventFields {
 }
 
 /// Records the pinned lease events (`guest_network.lease_retired` /
-/// `lease_released`, FD 2741-2744) into the shared log.
+/// `lease_released`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)) into the shared log.
 #[derive(Clone)]
 struct LeaseLayer(Log);
 
@@ -768,7 +759,7 @@ fn allocation_members(address: Ipv4Addr) -> BTreeSet<SetMember> {
 /// instance, one EXEC wiring over the fixture clock, one pool from
 /// `GuestAddressPool::new`, and one worker over the injected port.
 ///
-/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD 1876-1989),
+/// Until DELIVER 05-01 cuts the pinned `AppState` constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)),
 /// `AppState::new` takes today's inputs and the owner reaches dispatch only as
 /// the seam's `provisioner`; the gate and pool are held here. 05-01 changes only
 /// the constructor call in [`Harness::boot`]: it passes `worker`, `network`,

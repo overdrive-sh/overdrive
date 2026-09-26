@@ -1,6 +1,6 @@
 //! GH #295 S-ND295-40 — the VMM adapter reports every TAP queue-attach
 //! failure in its own terms, observed through the PUBLIC `Vmm::create`
-//! contract (FD § "Core `VmmError` additions"), never a private mapping
+//! contract (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the core `VmmError` additions)), never a private mapping
 //! function.
 //!
 //! `CloudHypervisorVmm::create` attaches one queue to the down persistent TAP
@@ -73,7 +73,10 @@ const IFF_PERSIST: u16 = 0x0800;
 fn require_root() {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
     let euid = unsafe { libc::geteuid() };
-    assert_eq!(euid, 0, "this test creates kernel TAPs and must run as root (cargo xtask metal run)");
+    assert_eq!(
+        euid, 0,
+        "this test creates kernel TAPs and must run as root (cargo xtask metal run)"
+    );
 }
 
 /// A scratch-TAP name unique to this process and tag, outside `ovd-tp-`.

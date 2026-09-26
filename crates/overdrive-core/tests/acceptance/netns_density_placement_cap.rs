@@ -1,6 +1,6 @@
 //! GH #295 D-295-R8 — placement refuses on the node's **held** guest
 //! attachments, read through the occupancy read-port, never on the placed
-//! workload's own Running rows (FD 2757-2771).
+//! workload's own Running rows (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (placement)).
 //!
 //! `schedule` returns `NoCapacity` exactly when
 //! `guest_attachments.held >= MAX_GUEST_NETWORK_ATTACHMENTS`, for every count of

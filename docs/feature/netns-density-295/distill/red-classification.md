@@ -500,3 +500,121 @@ Runs C-01 through C-20, N-03 and N-04; each passed on its first execution.
 - `overdrive-worker` `integration::outbound_enforce_substrate_splice` (2): `real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle`, `two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops`
 - `overdrive-worker` `mtls_intercept_port::shared_program_rollback_acceptance` (4): `runtime_present_wrong_target_and_observe_error_are_non_mutating`, `shared_program_post_commit_failure_rolls_back_source_honestly_for_every_prior`, `shared_program_prior_snapshot_mismatch_preserves_complete_state_and_complement`, `shared_program_replace_refusal_idempotence_and_guard_cleanup_preserve_complete_state_delta`
 - `overdrive-worker` `mtls_intercept_worker::tests` (1): `shared_allocation_start_after_owner_shutdown_is_rejected_before_install`
+
+## Phase D — DESIGN-pin follow-up run (B-8 element precondition; fresh-host RCA / N-4)
+
+Executed 2026-09-26 after the architect pinned B-8 (element install/removal
+precondition) and the fresh-host RCA (root cause A → REQ-295-LINKMAC), and
+after the DISTILL bodies were brought into line with those pins. Run serially,
+one command at a time in the foreground, against the working tree at the time
+of this run, on the two substrates below. The four phase-C blockers are
+addressed: blocker 4 (host/sim/contract divergence on the install call
+sequence) is resolved by the B-8 pin, and blocker 3's bridge half is owned by
+05-00. Raw logs are under `target/phase-d-295/` (not committed).
+
+### Substrates
+
+| Substrate | `uname -r` | Runner |
+|---|---|---|
+| Lima | `overdrive` VM, aarch64, cgroup v2, root via the wrapper (quiet, clean before the run; `table ip nat` pre-existing) | `cargo xtask lima run -- …` |
+| Native metal | non-virtualized x86_64, KVM preflight + canonical lease on every command | `cargo xtask metal run --no-sync -- …` |
+
+The BPF object was rebuilt clean on Lima (`cargo xtask bpf-build`; the warm
+Lima target dir needed a `chown` back to the user first) and carries
+`gh295c_egress` and `gh295c_endpoint`.
+
+### Environment and cleanup
+
+- **Lima quiet throughout**; no other workspace's cargo/nextest was present.
+- **Lima, after the boot-driving bodies:** the DNS-leg body and the
+  bridge-identity body each boot `run_server`, which by design leaves the node
+  bridge `ovd-gbr0`, `table bridge overdrive-mtls`, and the
+  `mtls-endpoints` pins; they were removed after the run. The bridge-identity
+  body's RAII cleanup was then confirmed to leave the node clean.
+- **Metal, after the S-ND295-45 timeout:** the timed-out production boot left
+  the `ovd-veth-cli`/`ovd-veth-bk` pair, `ovd-gbr0`, `table bridge
+  overdrive-mtls`, the `mtls-endpoints` pins, and one `fwmark 0x1 lookup 100`
+  rule + table-100 route; all removed. No leaked Cloud Hypervisor, cgroup
+  scope, TAP, or netns remained.
+
+### Gate / lint
+
+`cargo check` and `cargo clippy --all-targets --features integration-tests
+-- -D warnings` are clean for every touched crate on Lima; `overdrive-cli`
+also clean with `kvm-tests`. `cargo check` on metal is clean for
+`overdrive-host` (default features) and `overdrive-cli`
+(`integration-tests,kvm-tests`). `rustfmt --check` is clean on every changed
+file.
+
+### Test-side changes in this run
+
+| File | Change | Why |
+|---|---|---|
+| `crates/overdrive-worker/tests/integration/mtls_intercept_equivalence.rs` | the two B-8 refusal bodies destructure the `Err` and name the adapter in the panic (`[S-ND295-71][{label}]`) instead of `expect_err(())` | the message told which contract failed but not which adapter; the sim is the diverging side, and the message must say so |
+| `crates/overdrive-control-plane/src/guest_network.rs` (`shared_owner_link_address_kernel`, `#[cfg(test)]`) | (d) starts each row from a fresh node + fresh owner; the doc says "a second fresh node", not "re-converges" | the first pins failed on a leaked bpffs pin (`BPF_OBJ_PIN` EEXIST) from the prior row; per-row fresh state isolates the bridge-mismatch contract |
+| `crates/overdrive-netlink/tests/integration/managed_link_address.rs` | (b) waits `udevadm wait` before snapshotting each present link; (a) records the create-then-set control before the assertions | the host link manager rewrote a just-created scratch link's MAC before the snapshot (the very race the fix removes); the settled link is the (b) precondition, and (a) records its control even on a RED |
+| `crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs` | the bridge-identity body drops a `FreshHostCleanup` guard so a failed iteration leaves no foreign-MAC bridge | the repeated-boot body must not leak node state on a mid-loop refusal |
+
+### Per-body results
+
+| Scenario | Marker step | Body (`file::fn`) | Classification | First failing line / message (verbatim) |
+|---|---|---|---|---|
+| S-ND295-71 | 05-01 | `overdrive-sim/…/mtls_intercept.rs::tests::shared_convergence_records_both_exact_targets_for_non_repairing_observation` | RED | `assertion left == right failed: the dropped guard's identity equals the modeled program and no member exists, so its drop removes the program` left `Some(ConstantRules { … })` right `None` (:878) |
+| S-ND295-71 | 05-01 | `…::tests::a_node_guard_dropped_while_a_member_exists_keeps_the_program_and_withdraws_the_record` | RED | `the drop withdrew the record, so an install is refused` (:932) |
+| S-ND295-71 | active | `…::tests::converging_to_the_recorded_program_adopts_it_and_keeps_every_member` | PASS (genuine) | — (the sim already adopts an equal identity; kept active) |
+| S-ND295-71 | 05-01 | `…::tests::a_program_replacement_is_refused_while_a_member_exists` | RED | `a replacement over a live member is refused: ()` (:1004) |
+| S-ND295-71 | 05-01 | `…::tests::a_convergence_from_a_stale_prior_is_refused_and_changes_nothing` | RED | `a stale prior is refused: ()` (:1061) |
+| S-ND295-71 | 05-01 | `…::tests::shared_convergence_refuses_in_the_hosts_order` | RED | `a zero port refuses before the armed fault, got NftRuleInstallFailed { op: "observe-shared", … }` (:1106) |
+| S-ND295-71 | active | `…::tests::a_failed_convergence_keeps_the_recorded_program` | PASS (genuine) | — (the sim already keeps its `shared_observation` across a scripted `converge_shared` fault) |
+| S-ND295-71 | 05-01 | `…::tests::an_armed_install_fault_fires_only_after_the_record_and_port_checks` | RED | `InstallOutbound: before any converge the precondition refuses first, got NftElementUpdateFailed { … }` (:1283) |
+| S-ND295-71 | active | `…::tests::{armed_fault_surfaces_as_the_real_substrate_error, armed_fault_is_standing_and_fires_on_every_call, arming_one_slot_leaves_the_others_on_their_success_arms, clear_faults_disarms_every_slot_and_is_idempotent, shared_converge_and_observe_faults_are_independent_standing_slots}` | PASS (genuine) | — (retargeted onto the element-update fault + converge-first sequence; pass on the sim today) |
+| S-ND295-71 | 05-01 | `overdrive-worker/…/mtls_intercept_equivalence.rs::an_install_before_convergence_is_refused_and_changes_nothing` | RED | `[S-ND295-71][host] install_outbound before any converge is refused with SharedProgramNotConverged, got Err(NftRuleInstallFailed { op: "shared-owner-required", … })` (:590) |
+| S-ND295-71 | 05-01 | `…::an_install_at_a_port_other_than_the_recorded_target_is_refused` | RED | `[S-ND295-71][sim] a F install at port 33833 must be refused with SharedListenerPortMismatch, got Ok(())` (:660) |
+| S-ND295-71 | 05-01 | `…::a_node_guard_dropped_with_no_members_leaves_no_program` | RED | `[S-ND295-71][sim] a node guard dropped with no member removes its program` left `Some(ConstantRules { … })` right `None` (:701) |
+| S-ND295-71 | 05-01 | `…::a_convergence_from_a_stale_prior_is_refused_and_changes_nothing` | RED | `[S-ND295-71][sim] an absent prior over a present program is refused` (:742) |
+| S-ND295-71 | 05-01 | `…::a_zero_listener_port_is_refused_before_any_program_change` | RED | `[S-ND295-71][sim] a zero leg F port is refused` (:798) |
+| S-ND295-71 | 08-02 | `…::a_node_guard_dropped_with_no_members_leaves_no_member_state` | RED — preceding-step gap (08-02) | `not yet implemented: RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02` (`mtls_intercept_port.rs:1102`) |
+| S-ND295-71 | 08-02 | `…::a_node_guard_dropped_while_members_exist_keeps_the_program` | RED — preceding-step gap (08-02) | `not yet implemented: RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02` (`mtls_intercept_port.rs:1102`) |
+| S-ND295-70 (retargeted install pair) | active | `…::mtls_intercept_equivalence::{both_installs_hand_back_a_guard_that_releases_cleanly, re_installing_the_same_capture_converges_and_both_guards_release_cleanly}` | PASS (genuine) → phase-C blocker 4 CLOSED | both installs converge first; `[S-MIF-11/12][host]` and `[sim]` EXECUTED, every guard released cleanly |
+| S-ND295-54 | 07-01 | `overdrive-worker/src/mtls_intercept_port.rs::shared_program_rollback_acceptance::remove_allocation_elements_deletes_only_present_requested_members` | RED | `not yet implemented: RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01` (:1121) |
+| S-ND295-54 | 07-01 | `overdrive-worker/…/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state` | RED | `not yet implemented: RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01` (`mtls_intercept_port.rs:1121`), reached after the fixture converged and installed |
+| S-ND295-54 | 07-01 | `overdrive-worker/…/shared_intercept_members.rs::removal_is_refused_when_the_recorded_program_was_replaced_out_of_band` (NEW — R10 recorded-versus-observed row) | RED | `not yet implemented: RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01` (`mtls_intercept_port.rs:1121`), reached after the out-of-band replacement |
+| S-ND295-72 | 05-00 | `overdrive-netlink/…/managed_link_address.rs::a_created_bridge_carries_its_address_from_creation_and_starts_down` | RED | `assertion left == right failed: the address is set by userspace from creation (NET_ADDR_SET) …` left `1` right `3` (:178); control recorded `create-then-set … final mac=02:01:00:00:00:01 addr_assign_type=3` |
+| S-ND295-72 | active | `…::managed_link_address.rs::ensure_bridge_adopts_a_present_link_of_any_kind_without_writing` | PASS (genuine) | bridge/dummy/persistent-TAP before==after; today's `ensure_bridge` already adopts a present link without writing |
+| S-ND295-72 | 05-00 | `overdrive-control-plane/…/guest_network.rs::scratch_probe_acceptance::an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads` | RED | `assertion left == right failed: the probe reads the scratch TAP exactly twice: []` (:4806) — the probe reads no scratch TAP yet |
+| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once` | RED | `assertion left == right failed: no re-read off the success path: []` (:4863) |
+| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up` | RED | `the scratch-TAP condition refuses startup: ()` (:4931) |
+| S-ND295-72 | 05-00 | `overdrive-control-plane/…/guest_network.rs::shared_owner_link_address_kernel::a_bridge_identity_mismatch_names_the_observed_address_and_up_state` | RED | `[changed address] the observed fact carries the read-back address and up state` left `None` right `Some(Bridge { … mac: [2, 149, 114, 0, 0, 13], up: true … })` (:10326) — today's audit reports `observed: None` |
+| S-ND295-72 | 06-02 | `…::shared_owner_link_address_kernel::a_provisioned_taps_recorded_address_survives_udev_initialisation` | RED — preceding-step gap (06-02) | `the node is healthy after provision: SharedGuestNetworkAuditError { component: Bridge, source: PostconditionMismatch { operation: TapObserve, … owner_uid: Some(4200) …` — no `host_mac` record until 06-02 |
+| S-ND295-00 (bridge leg) | 05-00 | `overdrive-control-plane/…/shared_guest_network_startup.rs::production_host_owner_boots_only_after_real_shared_identity_is_exact` | RED — REPRODUCED DEFECT (RCA root cause A) | `[S-ND295-00] fresh-host boot 4/5 refused: GuestNetworkBoot(PostconditionMismatch { operation: BridgeObserve, expected: BridgeLinkIdentity { … }, observed: Some(BridgeLinkIdentity { … }) })` — repeated boots: 2 read-back-exact, 2 BridgeObserve refusals, 1 unexplained probe timeout (RCA § 8, counted for neither side) |
+| S-ND295-00 (DNS leg) | 05-01 | `…::shared_guest_network_startup.rs::the_shared_gateway_answers_an_absent_mesh_name_with_nxdomain` (re-authored) | RED — preceding-step gap (05-01) | `DNS client task joins: JoinError::Panic(…, "shared DNS reply: Os { code: 11, kind: WouldBlock … }")` — no responder bound until 05-01 composes the host DNS factory through `guest_dns` |
+| S-ND295-64 (controls) | 08-01 | `overdrive-cli/…/intercept_mark_fail_closed.rs::both_time_wait_controls_prove_the_substate_and_sequence_gates` | RETARGETED — the vacuous guest re-probe removed; the body now asserts only the two door-independent controls (host-veth), which is a real oracle. NEW native RED at its own step (metal) | the two controls are the phase-C `SynAck`/`BareAck` pair, unchanged; not metal-run in this cut (host-veth only, no production change), classified by the phase-C control evidence |
+| S-ND295-64 (guest door) | 05-03 | `overdrive-cli/…/intercept_mark_fail_closed.rs::a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user` (NEW; replaces the vacuous guest case) | RED — preceding-step gap (05-03) | precondition `workload server did not reach Running within 90s; … error: Some("  3: Cannot create virtio-net device\n  4: Failed to open taps\n … Operation not permitted")` (vm_walking_skeleton.rs:573), then nextest TIMEOUT at 120 s — the named-TAP path the 05-03 fd handoff replaces; the door it records additionally depends on R19 (08-01, conditional) |
+| S-ND295-45 | 05-03 | `overdrive-cli/…/vm_walking_skeleton.rs::every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters` (marker moved 05-02 → 05-03) | RED — preceding-step gap (05-03) | precondition `workload nd295-s45 did not reach Running within 90s; … error: Some("  3: Cannot create virtio-net device\n  4: Failed to open taps\n … Operation not permitted")` (vm_walking_skeleton.rs:573), then nextest TIMEOUT at 120 s — the named-TAP path the 05-03 fd handoff replaces |
+
+Retained-active bodies re-run in this cut and still green: the seven active
+`adapters::mtls_intercept::tests` bodies, the 10
+`netns_density_shared_owner` integration bodies, the 240 control-plane library
+bodies, and the 76 worker library bodies. The §3.3 supervisor proof
+(`shared_network_supervisor_recovery`) and §3.4 element-cleanup proof stay
+**RED — REPRODUCED DEFECT** at their own steps (09-01, 07-01), unchanged; the
+`ProofIntercept` `program_lost` overlay now re-establishes against the inner
+sim's own observation so it does not trip the sim's new stale-`prior` refusal,
+and the boot-order invariant (§3.2 sibling, 08-02) still fails with
+`no converge_allocation_elements(∅) call`, seeds printed.
+
+### C-12b reclassified
+
+C-12b (fresh-host `BridgeObserve` refusal) and metal N-04 (by inference) are
+reclassified under the fresh-host RCA root cause A, owned by DELIVER step
+05-00. They were **BROKEN — remaining (blocker)** in phase C as an active-body
+production failure; they are now **RED — REPRODUCED DEFECT** on the split
+S-ND295-00 bridge-identity leg (pending 05-00), with the DNS half a separate
+test-body defect re-authored and pending 05-01. Blocker 3 of phase C is
+resolved.
+
+### C-12b classification note (superseded)
+
+The phase-C blocker-3 entry (S-ND295-00 active, fails on production) is
+superseded by the split above: the bridge half is the reproduced RCA defect
+(05-00), and the DNS half is the re-authored preceding-step gap (05-01).

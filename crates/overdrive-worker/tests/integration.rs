@@ -151,13 +151,14 @@ mod integration {
     // BOTH sanctioned adapters — `HostMtlsIntercept` and `SimMtlsIntercept` —
     // through the SAME call sequence and asserts the SAME observables, so a
     // divergence isolates exactly one of the trait contract / host adapter /
-    // sim adapter. Scope is the `Ok`-arm contract set (S-MIF-09..12); the
-    // FAULT arms are deliberately NOT equivalence-tested (the host adapter
-    // cannot be made to exhibit them on demand — that inability is the whole
-    // reason this port exists). Integration-lane because `HostMtlsIntercept`
-    // needs CAP_NET_ADMIN for IP_TRANSPARENT and real `nft` — a reason that
-    // holds on both sides of the DELIVER step that makes the sim's listener
-    // socket-free (GH #295, gap B-7).
+    // sim adapter. Scope is every clause both adapters reach deterministically:
+    // the `Ok` arms (S-MIF-09..12) and the GH #295 B-8 refusals and program
+    // clauses (S-ND295-71); the INJECTED fault arms are deliberately NOT
+    // equivalence-tested (the host adapter cannot be made to exhibit them on
+    // demand — that inability is the whole reason this port exists).
+    // Integration-lane because `HostMtlsIntercept` needs CAP_NET_ADMIN for
+    // IP_TRANSPARENT and real `nft` — a reason that holds on both sides of the
+    // DELIVER step that makes the sim's listener socket-free (GH #295, gap B-7).
     mod mtls_intercept_equivalence;
 
     // GH #295 (S-ND295-70) — the `LegListener` bridge: reads a bound intercept

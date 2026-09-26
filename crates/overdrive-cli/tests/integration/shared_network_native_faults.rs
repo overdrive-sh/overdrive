@@ -90,11 +90,11 @@ const ONE_AUDIT_PERIOD: Duration = Duration::from_secs(1);
 const RUNNING_BOUND: Duration = Duration::from_secs(90);
 /// Bound for a stop or teardown to converge on an empty complement.
 const TERMINAL_BOUND: Duration = Duration::from_secs(30);
-/// The per-VM kill event (D-295-R14, FD 4233/4257) — pinned name/fields.
+/// The per-VM kill event (D-295-R14, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection and the kill-scope table)) — pinned name/fields.
 const VM_KILLED_EVENT: &str = "guest_network.shared_owner_vm_killed";
-/// The node-level unhealthy detection event (FD 4231, lib.rs:1538).
+/// The node-level unhealthy detection event (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection), lib.rs:1538).
 const UNHEALTHY_EVENT: &str = "guest_network.shared_owner_unhealthy";
-/// The lease-released event (D-295-R7, FD 2744).
+/// The lease-released event (D-295-R7, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)).
 const LEASE_RELEASED_EVENT: &str = "guest_network.lease_released";
 /// A distinct wire marker so a captured frame is provably one we injected.
 const HIJACK_NEEDLE: &[u8] = b"ND295-67-HIJACK-IDENTIFIABLE";
@@ -202,7 +202,7 @@ fn cloud_hypervisor_pid_for_alloc(alloc: &AllocationId) -> Option<u32> {
 }
 
 /// Descriptor 3 of a Cloud Hypervisor process is its own TAP queue: the
-/// `iff:` line of `/proc/<pid>/fdinfo/3` names `tap` (D-295-R3, FD 629). Any
+/// `iff:` line of `/proc/<pid>/fdinfo/3` names `tap` (D-295-R3, FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (`CloudHypervisorVmm::create`: `VMM_TAP_QUEUE_FD`)). Any
 /// read failure returns `false` so a vanished process reads as "no holder".
 fn descriptor_three_holds_tap_queue(pid: u32, tap: &str) -> bool {
     let Ok(fdinfo) = std::fs::read_to_string(format!("/proc/{pid}/fdinfo/3")) else {
@@ -400,7 +400,7 @@ async fn stop_and_await_terminal(cfg: &Path, workload_id: &str) {
     );
 }
 
-/// The empty-complement assertion R5 teardown must reach (FD 1769-1789): no
+/// The empty-complement assertion R5 teardown must reach (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (teardown converges on absence)): no
 /// TAP, no endpoint entry, no ingress or egress pin.
 fn assert_empty_complement(vm: &DeployedVm) {
     assert!(!tap_exists(&vm.tap), "teardown removes the TAP {}", vm.tap);

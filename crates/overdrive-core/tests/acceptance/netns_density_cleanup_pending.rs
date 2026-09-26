@@ -2,7 +2,7 @@
 //! function of the allocation's guest-network lease and its row state.
 //!
 //! The table is exhaustive over every lease state (`None`, `Admitted`,
-//! `Retiring`) × every `AllocState` (FD 4575-4591).
+//! `Retiring`) × every `AllocState` (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (`cleanup_pending` and its table)).
 
 #![allow(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
 
@@ -21,7 +21,7 @@ const ALL_ROW_STATES: [AllocState; 6] = [
     AllocState::Failed,
 ];
 
-/// The FD 4586-4591 table, written as the decision the operator reads.
+/// The cleanup-pending table of FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)", written as the decision the operator reads.
 const fn expected_cleanup_pending(lease: Option<GuestAttachmentLease>, row: AllocState) -> bool {
     match lease {
         // No lease: cleanup finished and the lease was released, or no network

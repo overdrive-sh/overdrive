@@ -241,7 +241,7 @@ fn member_convergence_refused(errno: i32) -> InterceptError {
 }
 
 /// The typed refusal of a program create or target replacement while members
-/// exist: the host's program write is strict about empty sets (FD 3188-3190).
+/// exist: the host's program write is strict about empty sets (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime repair contract: program writes stay strict)).
 fn program_write_over_members(
     prior: Option<InterceptPostcondition>,
     requested: InterceptPostcondition,
@@ -548,18 +548,10 @@ fn member_elements(members: &InterceptMembers) -> BTreeSet<SharedElement> {
         .collect()
 }
 
-/// The typed refusal for a member effect while no program is published.
-fn program_not_published() -> InterceptError {
-    InterceptError::NftRuleInstallFailed {
-        op: "shared-element-owner",
-        source: overdrive_worker::mtls_intercept::NetlinkError::nft(
-            "shared-element-owner",
-            std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "shared constant program is not published",
-            ),
-        ),
-    }
+/// The typed refusal for a member effect while no program is recorded (DISTILL
+/// gap B-8); this double conflates the record with the observed program.
+const fn program_not_published() -> InterceptError {
+    InterceptError::SharedProgramNotConverged
 }
 
 /// The members one allocation's removal requests:
@@ -737,16 +729,7 @@ impl MtlsIntercept for RecordingSharedIntercept {
         self.record(InterceptCall::InstallOutbound(source_addr));
         // The host admits a source only while a recorded owner exists.
         if self.recorded_identity.lock().is_none() {
-            return Err(InterceptError::NftRuleInstallFailed {
-                op: "shared-owner-required",
-                source: overdrive_worker::mtls_intercept::NetlinkError::nft(
-                    "shared-owner-required",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "allocation source admission requires the shared owner",
-                    ),
-                ),
-            });
+            return Err(InterceptError::SharedProgramNotConverged);
         }
         let owned = BTreeSet::from([
             SharedElement::ManagedGuest(source_addr),
@@ -1975,7 +1958,7 @@ enum ProtectionLoss {
 )]
 async fn policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished() {
     // The `InterceptMarkGuard` population is conditional on D-295-R18: step
-    // 08-01 removes it if its native RED withdraws R18 (FD 3487-3490).
+    // 08-01 removes it if its native RED withdraws R18 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts: the E14 withdrawal conditions)).
     for (index, loss) in
         [ProtectionLoss::PolicyRoute, ProtectionLoss::InterceptMarkGuard].into_iter().enumerate()
     {

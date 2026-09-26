@@ -447,7 +447,20 @@ impl Client {
     }
 
     /// Create or adopt a host bridge with the requested name.
-    pub async fn ensure_bridge(&self, name: &str) -> Result<(), NetlinkError> {
+    ///
+    /// A link already named `name`, of any kind, is adopted without a write.
+    /// Otherwise one bridge is created. `mac` is the link-layer address the
+    /// pinned contract creates the bridge with (REQ-295-LINKMAC); until DELIVER
+    /// step 05-00 it is unused, and a created bridge carries a kernel-assigned
+    /// address that the caller then sets.
+    ///
+    /// # Errors
+    ///
+    /// [`NetlinkError::Link`] with `op: "get"` for an `RTM_GETLINK` failure
+    /// other than `ENODEV`, and with `op: "add-bridge"` for a refused create.
+    pub async fn ensure_bridge(&self, name: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
+        // RED scaffold (REQ-295-LINKMAC): consumed in DELIVER step 05-00.
+        let _ = mac;
         if self.observe_link(name).await?.is_none() {
             self.handle
                 .link()

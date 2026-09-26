@@ -1162,7 +1162,7 @@ fn thread_status_number(vmm_pid: u32, tid: &str, field: &str) -> u32 {
 /// The `Seccomp_filters` count D-295-R22 pins for one Cloud Hypervisor v53
 /// thread: CH's own filter count for that thread plus the one launch filter
 /// every thread inherits from the launch child (increment-aa control table,
-/// FD 4740 (e)). CH never filters its thread-group leader, so the leader's
+/// FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E21, case (e))). CH never filters its thread-group leader, so the leader's
 /// count is the discriminating check.
 fn expected_launch_filter_count(vmm_pid: u32, tid: &str, name: &str) -> u32 {
     if tid == vmm_pid.to_string() {
@@ -1293,14 +1293,19 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 /// S-ND295-45 — Every Cloud Hypervisor thread carries the launch filter under its own filters
 /// CONTRACT_SHAPE: bounded-change.
 ///
-/// E21 native (e), per-thread half (D-295-R22, FD 1446-1453 and 4740). A VM
+/// E21 native (e), per-thread half (D-295-R22, FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the testability boundary: architecture gating); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E21)). A VM
 /// launched through `serve` and `deploy` runs with the launch seccomp filter
 /// the launch child installs before its first exec, so every thread, the
 /// thread-group leader included, reports `NoNewPrivs: 1` and `Seccomp: 2`,
-/// and each thread's `Seccomp_filters` is Cloud Hypervisor v53's own count
-/// plus one: leader 1, `vmm` and `http-server` 2, every other thread 3.
-/// D-295-R22 makes the retired S-VM-09 claim (the leader reports
-/// `SECCOMP_MODE_DISABLED`) false.
+/// and each thread's `Seccomp_filters` is the audited Cloud Hypervisor
+/// build's own count plus one: leader 1, `vmm` and `http-server` 2, every
+/// other thread 3. D-295-R22 makes the retired S-VM-09 claim (the leader
+/// reports `SECCOMP_MODE_DISABLED`) false.
+///
+/// The body activates at DELIVER step 05-03, not 05-02 where the launch
+/// filter lands: its precondition is a guest that reaches Running, which the
+/// 05-03 descriptor handoff makes possible (before it, the named-TAP launch
+/// fails with `Failed to open taps` / `EPERM`).
 ///
 /// The table is read at READY (the allocation reports `Running` only after
 /// the guest's READY beacon) and again after traffic, as E21 (e) requires:
@@ -1315,7 +1320,7 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 05-02 (S-ND295-45)"]
+#[ignore = "pending DELIVER step 05-03 (S-ND295-45)"]
 async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2704,7 +2709,7 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
 /// shared bridge, with no per-workload namespace, veth, or /30. Each Cloud
 /// Hypervisor receives its TAP only as the inherited queue at descriptor 3:
 /// its argv carries `--net fd=[3],mac=<mac>,offload_tso=off,offload_ufo=off,
-/// offload_csum=off` and no `tap=` (FD 635-636). Stop removes every owned
+/// offload_csum=off` and no `tap=` (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (`CloudHypervisorVmm::create`: the rendered `--net`)). Stop removes every owned
 /// part, and release returns the first address to the pool. The descriptor
 /// facts are [`each_vmm_holds_only_its_own_tap_queue_at_descriptor_three`].
 #[expect(
@@ -2967,7 +2972,7 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
 }
 
 /// The child descriptor number D-295-R3 maps the VMM's TAP queue to
-/// (`VMM_TAP_QUEUE_FD` is crate-private in `overdrive-host`, FD 629).
+/// (`VMM_TAP_QUEUE_FD` is crate-private in `overdrive-host`, FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (`CloudHypervisorVmm::create`: `VMM_TAP_QUEUE_FD`)).
 const VMM_TAP_QUEUE_DESCRIPTOR: RawFd = 3;
 
 /// One open descriptor of a process, as `/proc/<pid>/fd` and
@@ -3037,7 +3042,7 @@ fn shared_kernel_object(target: &str) -> Option<&str> {
 /// S-ND295-35 — Each VMM holds exactly its own TAP queue and nothing of the server
 /// CONTRACT_SHAPE: bounded-change.
 ///
-/// Descriptor half (E2 native, D-295-R2/R3, FD 628-665 and 875-892). Two VM
+/// Descriptor half (E2 native, D-295-R2/R3, FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (`CloudHypervisorVmm::create` and the `Vmm::probe` native descriptor evidence)). Two VM
 /// allocations are deployed back to back, so the second launch overlaps the
 /// first (the contrast E2 names). With both guests Running:
 ///
@@ -3186,8 +3191,8 @@ async fn each_vmm_holds_only_its_own_tap_queue_at_descriptor_three() {
 // ---------------------------------------------------------------------
 
 /// Supervisor evidence the accepted DESIGN names: detection, retry,
-/// per-VM kill, reopen, and fail-stop (D-295-R13/R14, FD 4219-4260;
-/// RUN-295-B observations, FD 10027-10029).
+/// per-VM kill, reopen, and fail-stop (D-295-R13/R14, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection, quiescence, and the kill scope);
+/// RUN-295-B observations, FD § "D-295-DISTILL-8 — approved retained supervisor and DNS task owners" (the exact supervisor observations)).
 const SHARED_OWNER_UNHEALTHY: &str = "guest_network.shared_owner_unhealthy";
 const SHARED_OWNER_RETRY: &str = "guest_network.shared_owner_retry";
 const SHARED_OWNER_VM_KILLED: &str = "guest_network.shared_owner_vm_killed";
@@ -3406,7 +3411,7 @@ fn field_names_alloc(value: Option<&String>, alloc: &AllocationId) -> bool {
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// E11 native (double loss), G5/r2, D-295-R13/R14 with review finding H1
-/// (FD 4183-4345, 6143-6154). A managed guest emits identifiable frames. An
+/// (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the full audit through the recovery attempt); FD § "D-295-DISTILL-6 — approved typed TCX mutation/query adapter boundary" (the S-ND295-37 typed double-loss sequence)). A managed guest emits identifiable frames. An
 /// external actor deletes the bridge guard and that guest's TAP ingress link
 /// back to back. The ingress link is a per-allocation part, so the guard is
 /// the first failing node-level component:

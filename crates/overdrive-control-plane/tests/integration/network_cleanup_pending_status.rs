@@ -1,11 +1,11 @@
 //! S-ND295-59 — `GET /v1/allocs` reports a stuck stop as cleanup-pending and
 //! never counts it as a running replica (GH #295, D-295-R20 server projection,
-//! feature-delta FD 4625-4648).
+//! FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the server projection)).
 //!
 //! In-process lane (Lima root, `integration-tests`): the production composition
 //! `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept,
 //! guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` (FD 9533-9559) with a `SimDriver`, the
+//! guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with a `SimDriver`, the
 //! `SimSharedGuestNetworkOwner`, `SimGuestDnsFactory`, and `vm_cgroups` over
 //! `SimCgroupFs`. Workloads are deployed and stopped, and allocations read,
 //! through the public HTTPS API only.

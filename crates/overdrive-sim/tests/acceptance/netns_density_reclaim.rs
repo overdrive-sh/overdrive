@@ -1,6 +1,6 @@
 //! S-ND295-57 — leftover guest networks are reclaimed until released, across
 //! restart predecessors, stopped workloads, and deleted workloads
-//! (D-295-R11, FD 3779-3904).
+//! (D-295-R11, FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (emission through the validator)).
 //!
 //! # Contract under test
 //!
@@ -39,7 +39,7 @@
 //! The decorator journals every `provision` and `teardown` with the sim-clock
 //! instant and outcome; a test-local tracing `Layer` journals the pinned lease
 //! events `guest_network.lease_released { alloc }` and
-//! `guest_network.lease_retired { alloc }` (FD 2723-2744) in the same order.
+//! `guest_network.lease_retired { alloc }` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)) in the same order.
 //! Reclaim re-dispatch instants per allocation are at least one second apart
 //! and within one evaluation step of that second; each leftover lease is
 //! released once, after the disarm, and never touched again; the leftover
@@ -132,7 +132,7 @@ const GUEST_PREFIX: &str = "100.95.0.0/16";
 const GUEST_BRIDGE: &str = "ovd-gbr0";
 const GUEST_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// The reclaim re-dispatch spacing of D-295-R11: `backoff_for_attempt`,
-/// constant one second until GH #137 (FD 3857-3866; TS S-ND295-57 oracle).
+/// constant one second until GH #137 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (real cadence and load: the cadence); TS S-ND295-57 oracle).
 const RECLAIM_SPACING: Duration = Duration::from_secs(1);
 /// Evaluation steps of simulated time; every leftover target is evaluated
 /// once per step, so a due reclaim runs within one step of its deadline.
@@ -441,7 +441,7 @@ impl Fixture {
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
         // DELIVER 05-01 changes this one call: the pinned `AppState::new`
         // appends `worker`, `owner`, `gate`, and `pool` as required parameters
-        // (FD 1850-1998). Until then the fixture keeps them for its bodies.
+        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
         let state = AppState::new(
             store,
             store_path,
@@ -511,7 +511,7 @@ impl Fixture {
     }
 
     /// The gate every activation claims: opened once, as `run_server*`'s boot
-    /// sequence does (FD 2021-2031).
+    /// sequence does (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
     fn open_gate(&self) {
         if !self.supervisor.open_after_boot() {
             self.harness_failure("open_after_boot was refused");

@@ -2849,7 +2849,10 @@ mod netns_density_lifecycle_fixture {
         retiring: u32,
         leases: BTreeMap<AllocationId, GuestAttachmentLease>,
     ) -> GuestAttachmentObservation {
-        GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held, retiring }, leases }
+        GuestAttachmentObservation {
+            occupancy: GuestAttachmentOccupancy { held, retiring },
+            leases,
+        }
     }
 
     /// Which intent the workload's desired projection carries.
@@ -2965,7 +2968,9 @@ mod netns_density_lifecycle_fixture {
 
     /// The View with its two reclaim-bookkeeping fields cleared, so every
     /// other remembered input can be compared across evaluations.
-    pub(super) fn without_reclaim_bookkeeping(view: &WorkloadLifecycleView) -> WorkloadLifecycleView {
+    pub(super) fn without_reclaim_bookkeeping(
+        view: &WorkloadLifecycleView,
+    ) -> WorkloadLifecycleView {
         WorkloadLifecycleView {
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
@@ -2978,7 +2983,7 @@ mod netns_density_lifecycle_fixture {
         [None, Some(GuestAttachmentLease::Admitted), Some(GuestAttachmentLease::Retiring)];
 }
 
-/// GH #295 S-ND295-05C (D-295-R7, R8, R11; FD 2778-2824, 3787-3799) — restart
+/// GH #295 S-ND295-05C (D-295-R7, R8, R11; FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (restart gating and at-cap recreate ordering); FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (emission: the pending-restart exclusion)) — restart
 /// gating counts the predecessor's lease: below the cap a due restart is
 /// emitted; at the cap a due restart hands a leased predecessor to network
 /// reclaim first; without a lease, or before the restart is due, nothing is
@@ -3229,7 +3234,7 @@ mod restart_gating_acceptance {
     }
 }
 
-/// GH #295 S-ND295-55 (D-295-R11; FD 3779-3855) — every leased, unowned,
+/// GH #295 S-ND295-55 (D-295-R11; FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (emission through retry forever)) — every leased, unowned,
 /// Failed or Terminated allocation is reclaimed from every reconcile return
 /// path, in `AllocationId` order; a pending restart owns its predecessor until
 /// it is due at the cap; a failing reclaim is re-emitted no sooner than one
@@ -3268,7 +3273,7 @@ mod reclaim_emission_acceptance {
     }
 
     /// Every early return of `reconcile_inner` plus the restart, finalize, and
-    /// placement tails (FD 3818-3827).
+    /// placement tails (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (computed on every path)).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ReturnPath {
         StopBranchStopping,

@@ -1,11 +1,11 @@
 //! S-ND295-05A (in-process half) — a server restarted after being killed
 //! starts with an empty guest-attachment pool (GH #295, D-295-R6: one pool per
-//! server, feature-delta FD 2646-2701).
+//! server, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (one pool per server: the doc-hidden pool and its crate-private operations)).
 //!
 //! In-process lane (Lima root, `integration-tests`): two boots of the
 //! production composition `run_server_with_obs_and_driver(ServerConfig::new(kek,
 //! mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` (FD 9533-9559) on the same data and
+//! guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) on the same data and
 //! operator roots, each with a `SimDriver`, a `SimSharedGuestNetworkOwner`,
 //! `SimGuestDnsFactory`, and `vm_cgroups` over `SimCgroupFs`. The first server
 //! is abandoned with `ServerHandle::kill_for_test`, the way process death would

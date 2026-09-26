@@ -4589,16 +4589,16 @@ mod fail_closed_mtls_tests {
 )]
 mod admission_refusal_acceptance {
     //! S-ND295-05E — a refused admission writes nothing and says how full the
-    //! node is (FD 2723-2737).
+    //! node is (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection)).
     //!
     //! Source-local because the cap is reached through the pool's own
-    //! crate-private `assign` and `retire` (FD 2663-2673), and the one owner
+    //! crate-private `assign` and `retire` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the crate-private pool operations)), and the one owner
     //! instance is the crate-private `TestSharedOwner` (the `overdrive-sim`
     //! owner implements a second compiled copy of this crate's traits here).
     //! The seam fixture holds the one owner, the kept EXEC wiring, the pool,
     //! and an unstarted worker over sim ports; DELIVER 05-01 passes them to
     //! `AppState`'s pinned constructor, and the seam reads the gate and pool
-    //! from `state` (FD 1850-2034, 7231-7238). The refusal precedes every
+    //! from `state` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)). The refusal precedes every
     //! intercept install, so the worker stays unstarted and binds nothing.
     //!
     //! # Universe
@@ -4606,7 +4606,7 @@ mod admission_refusal_acceptance {
     //! The returned `ShimError`; the owner's journal; `SimDriver::started_specs`;
     //! the allocation rows and lifecycle occurrences; the lifecycle event bus;
     //! the pinned events `guest_network.{admission_refused, lease_retired,
-    //! lease_released}` (FD 2723-2744), each stamped with the owner journal
+    //! lease_released}` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)), each stamped with the owner journal
     //! length as emitted; and the pool's own `observe` and `snapshot`.
 
     use std::collections::{BTreeMap, BTreeSet};
@@ -4777,7 +4777,7 @@ mod admission_refusal_acceptance {
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
             // The constructor call. Until DELIVER 05-01 cuts the pinned
-            // constructors (FD 1876-1989) it passes today's inputs; 05-01
+            // constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)) it passes today's inputs; 05-01
             // appends the worker, the owner, `wiring.gate()`, and the pool.
             let state = crate::AppState::new(
                 store,

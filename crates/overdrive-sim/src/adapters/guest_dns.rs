@@ -239,7 +239,7 @@ mod tests {
     /// One standing probe slot per factory, shared by every responder it
     /// built — before or after arming — and by no other factory's; never
     /// consumed; the build log lists responders in build order and does not
-    /// drain (FD 4480-4489, 4498-4499).
+    /// drain (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` rules: `responder`, `probe`, and standing slots)).
     #[tokio::test]
     async fn the_probe_slot_is_shared_by_every_responder_and_is_standing() {
         let factory = SimGuestDnsFactory::default();
@@ -322,7 +322,7 @@ mod tests {
     /// `serve` stays pending until `end_serve` or `stop`; `end_serve(Return)`
     /// and `stop` make it return, `end_serve(Panic)` makes it panic; the first
     /// call decides and later calls change nothing; an ending decided before
-    /// the first poll applies at that poll (FD 4490-4493).
+    /// the first poll applies at that poll (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` rules: how `serve` ends)).
     #[tokio::test]
     async fn serve_ends_on_the_first_end_serve_or_stop_even_before_its_first_poll() {
         use Decision::{EndPanic, EndReturn, Stop};
@@ -392,7 +392,7 @@ mod tests {
     /// The audit slot belongs to one responder: while armed it refuses every
     /// audit of that responder with the scripted `Socket` error, a sibling and
     /// a replacement built after the fault audit clean, and the audit and
-    /// probe slots do not reach each other (FD 4494-4499).
+    /// probe slots do not reach each other (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `SimGuestDns` rules: the per-responder audit slot and standing slots)).
     #[tokio::test]
     async fn the_audit_slot_is_per_responder_so_a_replacement_audits_clean() {
         let factory = SimGuestDnsFactory::default();

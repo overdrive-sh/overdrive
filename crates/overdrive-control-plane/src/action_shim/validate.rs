@@ -127,7 +127,7 @@ pub enum WriteRoute {
 /// The allocation action a `ReclaimAllocationNetwork` conflicted with in one
 /// `reconcile()` return: the other action names the same `alloc_id`.
 ///
-/// GH #295 D-295-R11 (FD § "Reclaim action, shim arm, validator rule"). RED
+/// GH #295 D-295-R11 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the reclaim action, shim arm, and validator rule)). RED
 /// scaffold — no reconciler emits `Action::ReclaimAllocationNetwork` before
 /// DELIVER step 07-03, and the validator rule that constructs
 /// [`ReconcilerOutputViolation::ConflictingAllocationReclaim`] lands in 07-02.
@@ -651,7 +651,7 @@ mod tests {
     }
 
     /// The four actions that already own an allocation's cleanup in one
-    /// evaluation (FD 3902-3904), each naming `name`.
+    /// evaluation (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the validator)), each naming `name`.
     fn owning_actions(name: &str) -> [(&'static str, Action); 4] {
         [
             (
@@ -687,7 +687,7 @@ mod tests {
     /// `RestartAllocation` (its predecessor), `StopAllocation`, or
     /// `FinalizeFailed` for the same `alloc_id` is rejected in either order;
     /// beside the same actions for another allocation, alone, or beside a
-    /// reclaim of another allocation, it is accepted (FD 3902-3904).
+    /// reclaim of another allocation, it is accepted (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the validator)).
     #[test]
     #[ignore = "pending DELIVER step 07-02 (S-ND295-55)"]
     fn a_reclaim_beside_another_action_for_the_same_allocation_is_rejected() {

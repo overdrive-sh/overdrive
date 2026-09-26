@@ -1984,12 +1984,14 @@ mod shared_program_rollback_acceptance {
     /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// The source-local half of `remove_allocation_elements` (FD 2931-2954):
+    /// The source-local half of `remove_allocation_elements` (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `remove_allocation_elements` contract)):
     /// a batch naming a duplicate or zero-port destination is refused before
     /// any I/O, removes none of the requested members, and leaves every
     /// process-local element token untouched ("On `Err` the tokens are
-    /// untouched"). The pinned private seam carries only the program's
-    /// observe/replace (FD 3179-3182), so the deletion of exactly the present
+    /// untouched"). The host here never converged, so the body also pins the
+    /// refusal order (DISTILL gap B-8): argument validation comes before the
+    /// `SharedProgramNotConverged` precondition. The pinned private seam carries only the program's
+    /// observe/replace (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime repair contract: observation)), so the deletion of exactly the present
     /// requested members is observed on a real kernel by
     /// `tests/integration/shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state`.
     #[test]
@@ -2029,6 +2031,12 @@ mod shared_program_rollback_acceptance {
             let refused = host.remove_allocation_elements(source_addr, &destinations);
 
             assert!(refused.is_err(), "{label}: the batch is refused, not partially applied");
+            // The host is unconverged: argument validation precedes the B-8
+            // precondition, so the refusal is not `SharedProgramNotConverged`.
+            assert!(
+                !matches!(refused, Err(InterceptError::SharedProgramNotConverged)),
+                "{label}: argument validation refuses before the recorded-program check"
+            );
             assert_eq!(io.calls(), [], "{label}: refused before any program observation or write");
             assert_eq!(
                 *host.elements.counts.lock(),

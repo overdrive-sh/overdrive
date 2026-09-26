@@ -644,10 +644,13 @@ mod tests {
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// S-ND295-49 — The platform can read every TAP's debug message level: the
-    /// pinned debug-get wire constants equal their UAPI values (FD 1330-1338).
+    /// pinned debug-get wire constants equal their UAPI values (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the audit read-back of the TAP debug message mask: pinned constants)).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[expect(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
+    #[expect(
+        clippy::doc_markdown,
+        reason = "the exact CONTRACT_SHAPE marker is repository-mandated"
+    )]
     fn debug_message_constants_equal_the_uapi_values() {
         // `include/uapi/linux/ethtool_netlink_generated.h`.
         let ethtool = [

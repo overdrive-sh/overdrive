@@ -1,5 +1,5 @@
 //! S-ND295-65 — a server configuration without the protection and DNS ports
-//! does not compile (D-295-R16, E16; FD 4372-4386).
+//! does not compile (D-295-R16, E16; FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` constructor and port fields)).
 //!
 //! `ServerConfig::new` takes the KEK, the `MtlsIntercept` port, and the
 //! `GuestDnsFactory` port as required parameters. A configuration built from

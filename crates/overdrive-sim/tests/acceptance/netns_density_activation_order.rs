@@ -1,5 +1,5 @@
 //! S-ND295-53 — activation waits out a shared guest-network recovery and never
-//! turns it into a failure (D-295-R5, FD 1791-1849).
+//! turns it into a failure (D-295-R5, FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order through no Failed row for an observed recovery)).
 //!
 //! # Contract under test
 //!
@@ -19,8 +19,8 @@
 //!
 //! `dispatch_with_guest_network_provisioner_for_test` drives the real action
 //! shim with a `StartAllocation`. The EXEC gate reaches the shim through
-//! `AppState` (FD 1850-2034); this file's seam fixture keeps the paired
-//! `GuestNetworkExecSupervisor`, which only the test moves (FD 2021-2031). No
+//! `AppState` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)); this file's seam fixture keeps the paired
+//! `GuestNetworkExecSupervisor`, which only the test moves (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)). No
 //! supervisor runs in this lane, so the test is the only caller of
 //! `quiesce_managed_taps` and `restore_quiesced_taps`.
 //!
@@ -28,7 +28,7 @@
 //!
 //! The activation count comes from `SimSharedGuestNetworkOwner::calls()`: the
 //! sim records `TapSetUp` for a raised activation and for every restore call,
-//! and nothing for a latched activation (FD 6708-6720). The test brackets
+//! and nothing for a latched activation (FD § "Public deterministic shared-owner simulation API" (the pending `activate` and `restore_quiesced_taps` recording rules)). The test brackets
 //! each of its own quiesce and restore calls with `calls().len()`; every
 //! `TapSetUp` outside those brackets is an activation. EXEC release and the
 //! command hook are observed at the driver port by a recording decorator over
@@ -539,7 +539,7 @@ impl Fixture {
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
         // DELIVER 05-01 changes this one call: the pinned `AppState::new`
         // appends `worker`, `owner`, `gate`, and `pool` as required parameters
-        // (FD 1850-1998). Until then the fixture keeps them for its bodies.
+        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
         let state = AppState::new(
             store,
             store_path,
@@ -755,7 +755,7 @@ impl Fixture {
                 activations.is_empty(),
                 "seed={}: activation ran while {while_} (poll {poll}): TapSetUp at owner call \
                  indices {activations:?} outside the test's quiesce/restore brackets {:?}; calls \
-                 {:?}. The activation must wait on the EXEC gate until it reopens (FD 1791-1815)",
+                 {:?}. The activation must wait on the EXEC gate until it reopens (FD § \"[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24\" (the action-shim order and the EXEC-gate wait))",
                 self.seed,
                 self.brackets.lock(),
                 self.owner.calls(),
@@ -764,7 +764,7 @@ impl Fixture {
                 Step::Pending => {}
                 Step::Done(result) => panic!(
                     "seed={}: the dispatch completed while {while_} (poll {poll}) with \
-                     {result:?}; it must wait on the EXEC gate (FD 1791-1815)",
+                     {result:?}; it must wait on the EXEC gate (FD § \"[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24\" (the action-shim order and the EXEC-gate wait))",
                     self.seed
                 ),
                 Step::Panicked(message) => panic!(
@@ -1110,7 +1110,7 @@ async fn fail_stop_withholds(seed: u64) {
     fixture.expect_transition(fixture.supervisor.begin_recovery(component), "begin_recovery");
     let mut dispatch = Box::pin(fixture.dispatch(Fixture::start_action(&workload, &alloc)));
     fixture.wait_parked(&mut dispatch, rng.gen_range(1..=4), "the gate is Recovering").await;
-    // The durable Running write precedes the activation wait (FD 1791-1806);
+    // The durable Running write precedes the activation wait (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order));
     // keep the dispatch parked until that write is visible.
     let mut parked_row = fixture.row(&alloc).await;
     for _ in 0..ROW_POLL_BUDGET {

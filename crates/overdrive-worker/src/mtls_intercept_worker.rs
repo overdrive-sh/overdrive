@@ -4124,7 +4124,7 @@ mod tests {
     }
 
     /// The socket-free listener of [`TestSharedIntercept`], with exactly
-    /// `SimInterceptListener`'s semantics (FD 3646-3663, TS § Intercept
+    /// `SimInterceptListener`'s semantics (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract), TS § Intercept
     /// listener and stop-error test support). Live from its bind until its last
     /// `Arc` drops; the intercept holds only a `Weak`.
     #[derive(Debug)]
@@ -4232,7 +4232,7 @@ mod tests {
 
     /// The member sets plus the process-local element tokens that own them —
     /// the model `SimMtlsIntercept` keeps, so an allocation's members are what
-    /// the host adapter's installs would add (FD 2931-2994).
+    /// the host adapter's installs would add (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (`remove_allocation_elements` through the netlink surface)).
     #[derive(Debug, Default)]
     struct TestMemberState {
         members: InterceptMembers,
@@ -4435,7 +4435,7 @@ mod tests {
         /// Register a socket-free listener: port 0 takes the smallest port ≥
         /// 49152 no live listener of this intercept holds at that IP; a non-zero
         /// address is honoured exactly; an address a live listener holds is
-        /// refused with `EADDRINUSE` (FD 3554-3572).
+        /// refused with `EADDRINUSE` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`bind_transparent` behaviour)).
         #[allow(
             dead_code,
             reason = "the DELIVER step that carries B-7 (05-01 at the latest) makes \
@@ -4508,17 +4508,10 @@ mod tests {
             Some(cause)
         }
 
-        fn program_not_published() -> InterceptError {
-            InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: crate::mtls_intercept::NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
-                    ),
-                ),
-            }
+        /// The B-8 refusal for an element method with no recorded program;
+        /// this double conflates the record with the observed program.
+        const fn program_not_published() -> InterceptError {
+            InterceptError::SharedProgramNotConverged
         }
     }
 
@@ -5818,7 +5811,7 @@ mod tests {
     ///
     /// A shared allocation's failed enforced-connection teardown is surfaced as
     /// `HandleTeardown` with one typed failure per connection, in teardown order,
-    /// and a retried stop converges on the retained handle (FD 3018-3063,
+    /// and a retried stop converges on the retained handle (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's `MtlsInterceptStopError` and its `Arc`-shared typed sources),
     /// D-295-R10). RETARGETED onto a shared allocation: the per-allocation
     /// record the original registered is deleted with B-7's step. The
     /// connection is delivered through the shared leg-F listener
@@ -6261,7 +6254,7 @@ mod tests {
     /// returns `ElementRemoval` with the typed cause, keeps the Retiring record
     /// (the address stays reserved) and the element guards (every member stays
     /// installed), and a retried stop runs exactly one new removal and releases
-    /// the address (FD 2931-2954, 3056-3062).
+    /// the address (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `remove_allocation_elements` contract, and why the typed sources are shared through `Arc`)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn element_removal_failure_keeps_the_retiring_record_until_a_retry_converges() {
@@ -6319,7 +6312,7 @@ mod tests {
     /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// B-6 caller rule 1 (FD 3076-3084): a second `stop_alloc(a)` issued while
+    /// B-6 caller rule 1 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives, rule 1)): a second `stop_alloc(a)` issued while
     /// the first attempt's element removal is held joins that attempt. When the
     /// removal fails, both callers receive equal errors — same variant, same
     /// allocation — whose sources are `Arc::ptr_eq`, and the attempt called
@@ -6385,7 +6378,7 @@ mod tests {
     /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// B-6 caller rule 3 (FD 3087-3093): after an attempt ends `Err`, two
+    /// B-6 caller rule 3 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives, rule 3)): after an attempt ends `Err`, two
     /// simultaneous `stop_alloc(a)` calls begin exactly one new attempt between
     /// them (`removal_calls()` rises by one, not two), and both receive that
     /// attempt's result — never the error it supersedes.
@@ -6446,7 +6439,7 @@ mod tests {
     /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// B-6 caller rules 4 and 5 (FD 3094-3104): with `a`'s failed attempt
+    /// B-6 caller rules 4 and 5 (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives, rules 4 and 5)): with `a`'s failed attempt
     /// retained, `b` active, and removals held so the owner shutdown's teardown
     /// of `b` is in flight, `stop_alloc(a)` runs no removal or teardown of its
     /// own and returns, after the owner shutdown, an error equal to the
@@ -6546,7 +6539,7 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     ///
     /// `MtlsSharedOwnerError::component()` is the one SSOT the supervisor
-    /// consumes; its table equals FD 3251-3258 row for row. The exhaustive
+    /// consumes; its table equals FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the component SSOT table) row for row. The exhaustive
     /// `variant_name` match is the closed-set guard: a new variant fails to
     /// compile here until the table names it.
     #[test]
@@ -6628,7 +6621,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// Each leg parks exactly one accept; dropping the last worker reference
-    /// cancels both waits and releases both listeners (FD 3665-3679: an accept
+    /// cancels both waits and releases both listeners (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (what the worker's use of it guarantees): an accept
     /// task never keeps the worker alive).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
@@ -6657,7 +6650,7 @@ mod tests {
     ///
     /// When `shutdown_owner` returns `Ok`, both accept tasks have ended, both
     /// listeners are released, and the node guard was relinquished, not dropped
-    /// (FD 3665-3679; D15).
+    /// (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (what the worker's use of it guarantees); D15).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     async fn owner_shutdown_ends_both_accept_tasks_releases_both_listeners_and_relinquishes_the_node_guard()
@@ -6692,7 +6685,7 @@ mod tests {
     /// with the listener's errno) while leg C stays parked; the owner releases
     /// the dead listener before rebinding exactly the recorded leg-F address,
     /// so the rebind is never refused by its own listener, and the audit then
-    /// passes (FD 3587-3591, 3668-3672).
+    /// passes (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::accept` behaviour, and what the worker's use of it guarantees)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     async fn a_lost_listener_ends_only_its_own_task_and_the_owner_rebinds_the_recorded_address() {
@@ -6747,7 +6740,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// An accepted connection whose original destination cannot be read is
-    /// connection-scoped: it ends no task and the leg re-parks (FD 3592-3596).
+    /// connection-scoped: it ends no task and the leg re-parks (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::accept` behaviour: `OriginalDestination`)).
     /// A later `ListenerLost` proves the task consumed the first script and
     /// kept waiting.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -6800,7 +6793,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// A listener whose bound address cannot be read makes the audit return
-    /// `ListenerLocalAddr` for that leg with the adapter's cause (FD 3574-3578).
+    /// `ListenerLocalAddr` for that leg with the adapter's cause (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::local_addr` behaviour)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     async fn an_unreadable_listener_address_is_reported_by_the_audit() {
@@ -7117,7 +7110,7 @@ mod tests {
     /// allocation. The per-allocation original requires stop to abort the
     /// child before it would return; C-295-L instead has retirement wait for
     /// the in-flight claim and tear the late handle down rather than publish it
-    /// (FD 8183-8193), which the retained shared body
+    /// (FD § "C-295-L — approved node-shared listener and capability contract" (the capability claim, publication, and retirement rules)), which the retained shared body
     /// `enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain`
     /// asserts. The DESIGN governs, so this twin keeps the join: stop does not
     /// return while the enforce child is in flight, and when it returns the
@@ -7400,7 +7393,9 @@ mod tests {
             0
         );
         assert_eq!(
-            accepted.read(&mut byte).expect("the relay's upstream leg is closed after owner shutdown"),
+            accepted
+                .read(&mut byte)
+                .expect("the relay's upstream leg is closed after owner shutdown"),
             0
         );
     }
