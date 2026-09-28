@@ -216,8 +216,9 @@ Positive:
   included, which Cloud Hypervisor's own filters do not.
 - ADR-0142's egress classifier and ADR-0130's read-back stay as independent
   layers. The classifier still closes the unknown-unicast flood leak, which
-  needs no ioctl. The read-back of host-side MAC, owner, persistence, and debug
-  mask detects a change made outside the VMM or through a gap in the filter.
+  needs no ioctl. The read-back detects an owner, persistence, or debug-mask
+  change made outside the VMM or through a gap in the filter, and a host-side
+  MAC that is a reserved address, whatever set it (ADR-0130, ADR-0144).
 - No new crate is added. The program is a classic-BPF program built over the
   `libc` types the workspace already locks. The mechanism is chosen, with its
   evidence, in the feature delta.

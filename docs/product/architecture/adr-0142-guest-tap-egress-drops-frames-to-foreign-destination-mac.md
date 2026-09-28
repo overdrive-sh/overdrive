@@ -107,15 +107,16 @@ not even its legitimate target, until that guest transmits. With flooding on,
 the target's own classifier admits the flooded copy and delivery never waits on
 learning.
 
-### Detection only — audit the TAP's host-side MAC and kill on a change
+### Detection only — audit the TAP's host-side MAC and kill on a reserved address
 
 Not chosen as the closure. Setting the TAP down after detection leaves the
 stolen `LOCAL|STATIC` entry in place (`br_fdb.c:885-890` skips static entries),
-and there is an unavoidable leak window between the change and the next audit.
-Detection is retained as a *complement* to this structural control (ADR-0130's
-audit reads back the host-side MAC and treats a change as per-allocation damage,
-so the affected VM is killed and teardown removes its port, which clears the
-poisoned entry), but detection is not the control that closes the theft.
+and there is an unavoidable leak window between the theft and the next audit.
+Detection is retained as a *complement* to this structural control. ADR-0130's
+audit reads back the host-side MAC and treats a reserved address, such as
+another held guest's MAC, as per-allocation damage (ADR-0144). The affected VM
+is killed, and teardown removes its port, which clears the poisoned entry. But
+detection is not the control that closes the theft.
 
 ### Prevent the poisoning at its source instead of controlling delivery
 
@@ -162,18 +163,27 @@ Negative:
   classifier, with its own verifier budget and one drop-counter class in the
   shared counter map.
 - **The check stops a theft but does not revert a poisoned entry.** ADR-0143
-  prevents the VMM's `SIOCSIFHWADDR`, so a poisoned entry can arise only through
-  a gap in that filter, or from a MAC change made by another process, which
-  needs `CAP_NET_ADMIN` (only Cloud Hypervisor holds a queue) and is outside the
-  threat model. If one arises, host
-  unicast to the victim is dropped at the changed TAP until that TAP is torn
-  down, so the victim receives none. The bound: the change is detected within
-  one audit period (ADR-0130 read-back); only the changed TAP's VM is killed
-  (ADR-0124); its ordinary lifecycle cleanup, within about one restart-backoff
-  window plus the cleanup itself (retried at a one-second cadence on failure),
-  deletes the TAP, which removes the port and the poisoned entry; the next host
-  unicast to the victim is then flooded and admitted only by the victim's own
-  classifier, and the bridge re-learns the victim's MAC from its next frame.
+  prevents the VMM's `SIOCSIFHWADDR`, so a poisoned entry can arise only in
+  three ways:
+  - through a gap in that filter;
+  - from a MAC change made by another process, which needs `CAP_NET_ADMIN`
+    (only Cloud Hypervisor holds a queue) and is outside the threat model;
+  - from a TAP address, assigned by the kernel or a host link manager, that
+    happens to equal a held guest's MAC. ADR-0144 bounds that chance.
+
+  If one arises, host unicast to the victim is dropped at the offending TAP
+  until that TAP is torn down, so the victim receives none. The bound: if the
+  offending TAP's own provision or activation reads the reserved address, the
+  provision is refused or the activation fails (ADR-0144). Otherwise the audit
+  detects the address within one audit period of its becoming reserved, which
+  is the change itself or, if the victim was not yet held, the victim's
+  provision (ADR-0130 read-back, ADR-0144), and kills only the offending TAP's
+  VM (ADR-0124). That VM's ordinary lifecycle cleanup, within about one
+  restart-backoff window plus the cleanup itself (retried at a one-second
+  cadence on failure), deletes the TAP, which removes the port and the
+  poisoned entry. The next host unicast to the victim is then flooded and
+  admitted only by the victim's own classifier, and the bridge re-learns the
+  victim's MAC from its next frame.
 - **Evidence.** The mechanism, and the gate in its nft form, are proven
   natively (increment-z). The chosen TCX form carries the feature delta's
   native case (E12 (h)), which also proves the kill, teardown, and re-learn

@@ -81,16 +81,19 @@ emits component/cause degraded health. Kernel-path mismatch also quiesces
 managed TAPs. Quiescence reports, for each managed TAP, whether it was read back
 administratively down. The VMM cgroup of each allocation whose TAP could not be
 confirmed down is killed, and bounded repair continues for the rest. An
-allocation whose own network parts are damaged (its TAP deleted or its owner,
-persistence, host-side MAC, or debug message mask changed; its TCX ingress or egress link or
-classifier detached; or its link pin, endpoint entry, or bridge-guard member
-gone) is handled the same way: only its VM is killed, and the node is not
-fail-stopped for it. A killed VM's parts are no longer audited or restored, so
-recovery can reopen for the rest. When the platform cannot determine which TAPs
-are down (the quiescence call fails as a whole or misses its bound), or a per-VM
-kill cannot be written, the whole workloads slice is killed and the fail-stop
-path is taken. Whole-node fail-stop otherwise remains only for node-level
-components that fail bounded repair.
+allocation whose own network parts are damaged (its TAP deleted; its owner,
+persistence, or debug message mask changed; its host-side MAC a reserved
+address under ADR-0130's invariant (ADR-0144), or missing from the read-back;
+its TCX ingress or egress link or classifier detached; or its link pin,
+endpoint entry, or bridge-guard member gone) is handled the same way: only its
+VM is killed, and the node is not fail-stopped for it. A host-side MAC that
+changed to an unreserved address is not damage. A killed VM's parts are no
+longer audited or restored, so recovery can reopen for the rest. When the
+platform cannot determine which TAPs are down (the quiescence call fails as a
+whole or misses its bound), or a per-VM kill cannot be written, the whole
+workloads slice is killed and the fail-stop path is taken. Whole-node
+fail-stop otherwise remains only for node-level components that fail bounded
+repair.
 
 A consequence of the per-allocation classification, stated so it is not
 mistaken for a repair path: a single common-cause loss that manifests as

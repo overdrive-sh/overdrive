@@ -1646,7 +1646,7 @@ C4Container
     Container(pool, "Guest address pool", "overdrive-control-plane", "One per server; sole admission linearization point; Admitted and Retiring leases both count against the placeholder cap until cleanup finishes")
     Container(wl, "WorkloadLifecycle + scheduler", "overdrive-reconcilers", "Reads held and retiring counts through a read-port; gates restart with its predecessor counted; at the cap reclaims the predecessor first; emits row-neutral reclaim on every path")
     Container(shim, "Action shim", "overdrive-control-plane", "Assigns, provisions down, starts VM, writes Running, installs intercept, waits on the EXEC gate while recovering, activates, releases EXEC; retires before cleanup")
-    Container(sw, "Shared guest-network owner", "overdrive-control-plane", "Creates persistent TAPs down, owned by uid 0, and records each TAP's host-side MAC; activates after intercept-live; per-TAP TCX ingress + egress guest-MAC classifiers (egress delivers unicast only to the registered guest MAC and drops it on a map miss, ADR-0142) over the shared endpoint map; reports per-TAP quiescence and per-allocation damage including a host-side-MAC or debug-mask change; excludes condemned allocations; restores quiesced TAPs only when asked after a clean audit")
+    Container(sw, "Shared guest-network owner", "overdrive-control-plane", "Creates persistent TAPs down, owned by uid 0; activates after intercept-live; per-TAP TCX ingress + egress guest-MAC classifiers (egress delivers unicast only to the registered guest MAC and drops it on a map miss, ADR-0142) over the shared endpoint map; reports per-TAP quiescence and per-allocation damage, including a debug-mask change or a host-side MAC that is missing or a reserved address (the bridge MAC or a held guest MAC, judged by invariant and never against a recorded value, ADR-0144); excludes condemned allocations; restores quiesced TAPs only when asked after a clean audit")
     Container(vmm, "VmDriver + CloudHypervisorVmm", "overdrive-worker + overdrive-host", "Attaches one TAP queue, verifies flags and down-state, maps it to fd 3; in one child hook marks every other descriptor close-on-exec, then loads the launch seccomp filter (TAP-mutating ioctls never reach the tun ioctl handler on any CH thread: EPERM, or CH's own stricter action; a foreign syscall ABI is killed); drops the queue before any await")
     Container(mtls, "Node-shared intercept owner", "overdrive-worker", "Awaited convergent element removal; boot member clear; TPROXY-before-mark rules (ADR-0140, conditional on native RED); audits and repairs program, policy route, guard table, and members with live allocations")
     Container(dns, "Guest DNS owner", "overdrive-control-plane", "Built through the required GuestDns port; replacement only after EXEC is closed")
@@ -1691,10 +1691,10 @@ sequenceDiagram
   SH->>POOL: assign(alloc) (a restart assigns its successor the same way)
   POOL-->>SH: plan, or AdmissionCapReached(held, retiring) / LeaseRetiring / PoolExhausted (no effect, no row)
   SH->>SW: provision(plan)
-  SW-->>SH: persistent TAP down (owner uid 0, debug mask 0), guard, endpoint, TCX ingress and egress read back; host-side MAC recorded
+  SW-->>SH: persistent TAP down (owner uid 0, debug mask 0), guard, endpoint, TCX ingress and egress read back, host-side MAC not a reserved address
   SH->>VM: create(config)
-  VM->>VM: build the launch seccomp program; attach_tap_queue checks flags 0x5802 and TAP down
-  VM->>CH: spawn with --net fd=[3]; child hook marks every other fd close-on-exec, then loads the launch seccomp filter before exec; parent copy dropped
+  VM->>VM: build the launch seccomp program, then attach_tap_queue checks flags 0x5802 and TAP down
+  VM->>CH: spawn with --net fd=[3], child hook marks every other fd close-on-exec, then loads the launch seccomp filter before exec, parent copy dropped
   CH-->>SH: guest READY (TAP still down, zero frames)
   SH->>OBS: write Running
   SH->>ML: start_alloc (2 + P elements read back)

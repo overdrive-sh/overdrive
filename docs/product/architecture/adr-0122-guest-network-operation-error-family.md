@@ -19,7 +19,9 @@ are stated explicitly here and the Decision below is otherwise unchanged:
 - four TCX egress operation discriminators, so the egress guest-MAC
   classifier's attach, link-pin, query, and detach failures stay unambiguous
   beside their ingress counterparts, and one TAP host-side-MAC fact for a
-  host-MAC mismatch (R21, ADR-0142, ADR-0130);
+  host-side MAC that is a reserved address under ADR-0130's invariant, or a
+  read-back that carries no address. An unreserved address produces no fact
+  (R21, ADR-0142, ADR-0130, ADR-0144);
 - one TAP debug-message-mask fact for a non-zero mask read back at provision,
   activation, or audit (R22, ADR-0143, ADR-0130). It adds no operation: a
   failed read keeps the existing TAP-observe operation.
