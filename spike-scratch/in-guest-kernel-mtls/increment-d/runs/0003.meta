@@ -1,0 +1,10 @@
+run_id=0003
+label=build-host-private-cargo-home
+started_utc=2026-09-28T20:20:29Z
+ended_utc=2026-09-28T20:20:59Z
+exit_code=0
+local_commit=2c3a8ec68f970de507c9aa4508fca88f0be09d3f
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-d/build-host.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=0b03ea15c5db9e0a0875265fcab3ea81b738f1bb5b8954eaf476771ebed90d5c
+stderr_sha256=14cc827af4957ad05426922d7015f148a7560bb0dd5aecd4891d62683381baad

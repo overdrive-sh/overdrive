@@ -1,0 +1,9 @@
+# Spike B (GH #303): in-guest mTLS hook for Unikraft. Throwaway probe.
+menuconfig LIBMTLSGUARD
+	bool "mtlsguard: hold mesh connects, relay the handshake to the host, TLS 1.3 record layer"
+	default n
+	select LIBPOSIX_SOCKET
+	select LIBUKVSOCKDEV
+	select LIBUKLIBPARAM
+	select LIBUKALLOC
+	select LIBUKSCHED

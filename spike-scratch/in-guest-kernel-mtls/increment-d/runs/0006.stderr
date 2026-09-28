@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run --no-sudo -- bash -c 'I=$HOME/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64.dbg; sha256sum $I; nm $I | grep -E " uk_socket_connect_hook$"; objdump -d --no-show-raw-insn --disassemble=uk_syscall_r_connect $I | grep -E "call" ; nm $HOME/igkm-spike-a/unikraft/build-igkmd/libposix_socket.o | grep -E "uk_socket_connect_hook"; nm $HOME/igkm-spike-a/unikraft/build-igkmd/libmtlsguard.o | grep -E "uk_socket_connect_hook"'`
+xtask: running metal run (one bootstrap lease session)

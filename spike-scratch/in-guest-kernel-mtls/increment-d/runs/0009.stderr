@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run -- bash spike-scratch/in-guest-kernel-mtls/increment-d/run-boot-fc.sh mesh`
+xtask: running metal run (one bootstrap lease session)
+grep: <metal-home>/igkm-spike-a/runs-igkmd/20260928T203429Z-258148/serial.log: binary file matches

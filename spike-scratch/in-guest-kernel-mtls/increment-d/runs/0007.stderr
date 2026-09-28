@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run --no-sudo -- bash -c 'I=$HOME/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64.dbg; objdump -d --no-show-raw-insn --disassemble=__uk_syscall_r_connect $I | grep -E "call"'`
+xtask: running metal run (one bootstrap lease session)

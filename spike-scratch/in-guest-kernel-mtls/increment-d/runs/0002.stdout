@@ -1,0 +1,50 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0a20424a01933af33aefc835 pid=241654
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 787,269 bytes  received 843,158 bytes  171,623.89 bytes/sec
+total size is 157,234,088  speedup is 96.44
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-host] toolchain  (20:20:10)
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+1915eee6efe16069087a1bd862786903c59c779a1b6412d448d2d9913f32c85f  Cargo.toml
+a3ea684d5a7e065325761fb7d4c669a1a3805b1b6fa17050078e6e082f1fa9d4  Cargo.lock
+1519f6fc83aa52af6d0014804144d206bc0edeab31e2d4a1386c9ad73ac094d1  src/lib.rs
+d16029d7443f8bd3707cd70aa03e72de0c71b39e97eeca04d236944248b08f2d  src/bin/gencerts.rs
+fbb554fb840dafae79d0af2a077c3cb35a80533c14abe20ad82e87a156ac2ec1  src/bin/peer.rs
+1741bf1c53ef821d2d89cb4c336ad9bf8776fe822bfce1a6ead1e45b16769fd0  src/bin/relay.rs
+
+##### [build-host] pinned crate versions (Cargo.lock)  (20:20:10)
+  rcgen 0.14.10
+  ring 0.17.14
+  rustls 0.23.45
+  rustls-pki-types 1.15.1
+  rustls-webpki 0.103.15
+  time 0.3.55
+  x509-parser 0.18.1
+
+##### [build-host] cargo build --release --locked  (20:20:10)
+    Updating crates.io index
+warning: failed to write cache, path: <metal-home>/.cargo/registry/index/index.crates.io-1949cf8c6b5b557f/.cache/th/is/thiserror, error: Permission denied (os error 13)
+ Downloading crates ...
+  Downloaded cfg-if v1.0.5
+error: failed to open `<metal-home>/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/cfg-if-1.0.5.crate`
+
+Caused by:
+  Permission denied (os error 13)

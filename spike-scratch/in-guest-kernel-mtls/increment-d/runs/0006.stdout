@@ -1,0 +1,28 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e8d6b4ab44eadfb26acc3dbe pid=252232
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 156,079 bytes  received 4,482 bytes  64,224.40 bytes/sec
+total size is 157,303,525  speedup is 979.71
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+e51f15ad0872c07cbe17db7dec91849c4e5f18ae6dc4d18864f455a1c25c4275  <metal-home>/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64.dbg
+0000000000128d10 t uk_socket_connect_hook
+0000000000166cc0 T uk_socket_connect_hook
+00000000001291e0 <uk_syscall_r_connect>:
+  1291e4:	call   128d20 <__uk_syscall_r_connect>
+0000000000006780 t uk_socket_connect_hook
+0000000000001c00 T uk_socket_connect_hook

@@ -1,0 +1,4 @@
+# Spike B guest app (GH #303): one C source, plain TCP sockets, no TLS.
+$(eval $(call addlib,appigkmd))
+
+APPIGKMD_SRCS-y += $(APPIGKMD_BASE)/main.c

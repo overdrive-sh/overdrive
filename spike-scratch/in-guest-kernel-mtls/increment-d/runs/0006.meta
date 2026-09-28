@@ -1,0 +1,10 @@
+run_id=0006
+label=inspect-0005-callsite
+started_utc=2026-09-28T20:27:53Z
+ended_utc=2026-09-28T20:28:09Z
+exit_code=0
+local_commit=2c3a8ec68f970de507c9aa4508fca88f0be09d3f
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash -c I=$HOME/igkm-spike-a/unikraft/out-igkmd/igkmd_fc-x86_64.dbg; sha256sum $I; nm $I | grep -E " uk_socket_connect_hook$"; objdump -d --no-show-raw-insn --disassemble=uk_syscall_r_connect $I | grep -E "call" ; nm $HOME/igkm-spike-a/unikraft/build-igkmd/libposix_socket.o | grep -E "uk_socket_connect_hook"; nm $HOME/igkm-spike-a/unikraft/build-igkmd/libmtlsguard.o | grep -E "uk_socket_connect_hook"
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=0b4bffa03837b14cfe8b935deaaaf86719df5a94dfd4d2fb8357b63dcec6f990
+stderr_sha256=e7c92c3d8444cbe99b2da78e2fb68fda1375db955ef6890dd0b7f6cdda066f09

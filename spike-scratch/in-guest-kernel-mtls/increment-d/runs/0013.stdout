@@ -1,0 +1,71 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ed9279454c57cc76f720e32c pid=265036
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 188,234 bytes  received 4,534 bytes  77,107.20 bytes/sec
+total size is 157,601,026  speedup is 817.57
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+firecracker processes:        []
+jailer processes:             []
+igkmd peer/relay processes:   []
+tcpdump processes:            []
+listener processes (A-A3):    []
+tap igkmd0 present:           no
+tap igkmc0 present:           no
+tap igkmb0 present:           no
+tap igkma0 present:           no
+tun/tap links on host:        []
+192.168.203.x on host:        0
+listeners 5001/6443-6446:     []
+unix sockets under scratch:   0
+per-run dirs left:            none
+root-owned files in scratch:  0
+root-owned files in increment-d: 0
+unikraft worktrees:
+<metal-home>/igkm-spike-a/unikraft/unikraft       eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkmd eb8fa236 (detached HEAD)
+retained user-owned trees (outside ~/overdrive):
+1.1G	<metal-home>/igkm-spike-a
+3.9M	<metal-home>/igkm-spike-a/bin
+48M	<metal-home>/igkm-spike-a/cargo-home
+58M	<metal-home>/igkm-spike-a/firecracker
+163M	<metal-home>/igkm-spike-a/igkmd-host-target
+192M	<metal-home>/igkm-spike-a/nanos
+52K	<metal-home>/igkm-spike-a/nanos-make-kernel.log
+4.0K	<metal-home>/igkm-spike-a/nanos-make-mkfs.log
+175M	<metal-home>/igkm-spike-a/nanos-pvhfix
+56K	<metal-home>/igkm-spike-a/nanos-pvhfix-make.log
+4.0K	<metal-home>/igkm-spike-a/nanos-pvhfix-sockdebug-make.log
+6.9M	<metal-home>/igkm-spike-a/out
+68M	<metal-home>/igkm-spike-a/src
+408M	<metal-home>/igkm-spike-a/unikraft
+60K	<metal-home>/igkm-spike-a/unikraft/app-igkmc
+60K	<metal-home>/igkm-spike-a/unikraft/app-igkmd
+101M	<metal-home>/igkm-spike-a/unikraft/build-igkmc
+105M	<metal-home>/igkm-spike-a/unikraft/build-igkmd
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmc-defconfig.log
+16K	<metal-home>/igkm-spike-a/unikraft/igkmc-make.log
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmd-defconfig.log
+16K	<metal-home>/igkm-spike-a/unikraft/igkmd-make.log
+940K	<metal-home>/igkm-spike-a/unikraft/lib-lwip
+52K	<metal-home>/igkm-spike-a/unikraft/lib-mtlsguard
+57M	<metal-home>/igkm-spike-a/unikraft/mbedtls
+4.4M	<metal-home>/igkm-spike-a/unikraft/out
+4.7M	<metal-home>/igkm-spike-a/unikraft/out-igkmd
+98M	<metal-home>/igkm-spike-a/unikraft/tools
+24M	<metal-home>/igkm-spike-a/unikraft/unikraft
+17M	<metal-home>/igkm-spike-a/unikraft/unikraft-igkmd

@@ -1,0 +1,71 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=72a4d63f929a0c09974569bd pid=252874
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 148,914 bytes  received 4,390 bytes  43,801.14 bytes/sec
+total size is 157,307,274  speedup is 1,026.11
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+0000000000128d20 <__uk_syscall_r_connect>:
+  128d23:	je     128e60 <__uk_syscall_r_connect+0x140>
+  128d3e:	call   11b780 <uk_fdtab_get>
+  128d49:	je     128e70 <__uk_syscall_r_connect+0x150>
+  128d59:	jne    128e80 <__uk_syscall_r_connect+0x160>
+  128d66:	ja     129120 <__uk_syscall_r_connect+0x400>
+  128d74:	call   135150 <uk_rwlock_wlock>
+  128d7f:	je     128ed0 <__uk_syscall_r_connect+0x1b0>
+  128d8c:	je     128f08 <__uk_syscall_r_connect+0x1e8>
+  128da1:	je     128fc0 <__uk_syscall_r_connect+0x2a0>
+  128dad:	call   *%rax
+  128db9:	call   135540 <uk_rwlock_wunlock>
+  128dc6:	je     128e30 <__uk_syscall_r_connect+0x110>
+  128dcb:	je     129020 <__uk_syscall_r_connect+0x300>
+  128dd5:	je     129020 <__uk_syscall_r_connect+0x300>
+  128de7:	je     128ff0 <__uk_syscall_r_connect+0x2d0>
+  128df0:	jne    128e20 <__uk_syscall_r_connect+0x100>
+  128df5:	call   122a40 <uk_file_release>
+  128e04:	je     1290f0 <__uk_syscall_r_connect+0x3d0>
+  128e10:	call   *0x28(%rax)
+  128e3c:	je     128f40 <__uk_syscall_r_connect+0x220>
+  128e51:	call   128d10 <uk_socket_connect_hook>
+  128e59:	jmp    128ddb <__uk_syscall_r_connect+0xbb>
+  128e75:	jmp    128e23 <__uk_syscall_r_connect+0x103>
+  128e8c:	je     12905e <__uk_syscall_r_connect+0x33e>
+  128e95:	jne    128ec0 <__uk_syscall_r_connect+0x1a0>
+  128e9a:	call   122a40 <uk_file_release>
+  128ea9:	je     129127 <__uk_syscall_r_connect+0x407>
+  128eb5:	call   *0x28(%rax)
+  128ec5:	jmp    128e23 <__uk_syscall_r_connect+0x103>
+  128ef4:	call   139a90 <_uk_printk>
+  128f2a:	call   139a90 <_uk_printk>
+  128f53:	call   1227d0 <uk_file_poll.isra.0>
+  128f5f:	call   134d00 <uk_rwlock_rlock>
+  128f6a:	je     12908e <__uk_syscall_r_connect+0x36e>
+  128f77:	je     1290c0 <__uk_syscall_r_connect+0x3a0>
+  128f8c:	je     12902e <__uk_syscall_r_connect+0x30e>
+  128fa4:	call   *%rax
+  128fad:	call   135430 <uk_rwlock_runlock>
+  128fb6:	jmp    128dc8 <__uk_syscall_r_connect+0xa8>
+  128fe2:	call   139a90 <_uk_printk>
+  129012:	call   139a90 <_uk_printk>
+  129029:	jmp    128e42 <__uk_syscall_r_connect+0x122>
+  129050:	call   139a90 <_uk_printk>
+  129080:	call   139a90 <_uk_printk>
+  1290b2:	call   139a90 <_uk_printk>
+  1290e2:	call   139a90 <_uk_printk>
+  129112:	call   139a90 <_uk_printk>
+  129122:	jmp    128e23 <__uk_syscall_r_connect+0x103>
+  129149:	call   139a90 <_uk_printk>
