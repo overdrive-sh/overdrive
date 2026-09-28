@@ -61,7 +61,7 @@ current mainline, and the line numbers cited in this ADR are mainline's):
 
 | ioctl | Effect on the holder's own TAP | Disposition |
 |---|---|---|
-| `SIOCSIFHWADDR` | Sets the TAP's host-side MAC (`dev_set_mac_address_user`; `IFF_LIVE_ADDR_CHANGE` lets it apply while up). Setting it to another guest's virtio-net MAC poisons the bridge FDB and can redirect that guest's host-originated frames to this port (reproduced natively, increment-z). | **Prevented** by the launch filter (ADR-0143). A change made anyway, through a gap in the filter or by another process, is closed at delivery by ADR-0142's TAP egress classifier: a TAP egresses unicast only to its registered guest MAC, so neither the redirected frames nor flooded unknown unicast reach it. It is detected by the host-side MAC read-back: per-allocation damage, so only that VM is killed (ADR-0124). Its teardown deletes the TAP, which removes the port and the poisoned `LOCAL` FDB entry on it. The next host unicast to the victim is flooded and admitted only by the victim's own egress classifier, and the bridge re-learns the victim's MAC on the victim's port from the victim's next frame. |
+| `SIOCSIFHWADDR` | Sets the TAP's host-side MAC (`dev_set_mac_address_user`; `IFF_LIVE_ADDR_CHANGE` lets it apply while up). Setting it to another guest's virtio-net MAC poisons the bridge FDB and can redirect that guest's host-originated frames to this port (reproduced natively, increment-z). | **Prevented** by the launch filter (ADR-0143). A change made anyway, through a gap in the filter or by another process, is closed at delivery by ADR-0142's TAP egress classifier: a TAP egresses unicast only to its registered guest MAC, so neither the redirected frames nor flooded unknown unicast reach it. It is detected by the host-side MAC read-back, because the stolen address is a reserved one (below): per-allocation damage, so only that VM is killed (ADR-0124). Its teardown deletes the TAP, which removes the port and the poisoned `LOCAL` FDB entry on it. The next host unicast to the victim is flooded and admitted only by the victim's own egress classifier, and the bridge re-learns the victim's MAC on the victim's port from the victim's next frame. |
 | `TUNSETOWNER` | Hands the TAP to uid 4200. | **Prevented** by the launch filter (ADR-0143). A change made anyway is detected by the owner-uid read-back → per-allocation damage → kill. |
 | `TUNSETGROUP` | Sets the TAP group. | **Prevented** by the launch filter (ADR-0143). A group change would grant nothing in any case while the owner stays uid 0: `tun_not_capable` (`tun.c:516-524`) refuses an attach when `(owner-mismatch OR group-mismatch) AND no CAP_NET_ADMIN`, and for owner 0 the owner-mismatch disjunct holds for every uid-4200 caller regardless of the group. So the audit needs no group read-back. (This corrects the research addendum's A1 claim that a group match alone admits a caller; that holds only for an ownerless TAP, not for owner 0.) |
 | `TUNSETPERSIST(0)` | Makes the TAP vanish when the holder exits. | **Prevented** by the launch filter (ADR-0143). A change made anyway is detected by the persistence read-back, and teardown converges on absence. |
@@ -74,14 +74,22 @@ current mainline, and the line numbers cited in this ADR are mainline's):
 | Read-only arms: `TUNGETFEATURES`, `TUNGETIFF`, `SIOCGIFHWADDR`, `TUNGETSNDBUF`, `TUNGETFILTER`, `TUNGETVNETHDRSZ` / `TUNGETVNETLE` / `TUNGETVNETBE` | Read the holder's own TAP state. | Allowed. No effect. |
 | Refused arms: `TUNSETIFF`, `TUNSETIFINDEX`, `SIOCGSKNS`, `TUNGETDEVNETNS`, and every other request | On an attached single-queue TAP: `TUNSETIFF` returns `-EEXIST` (Cloud Hypervisor reissues it on the `fd=` path and accepts `EEXIST`), and `TUNSETIFINDEX` `-EPERM`; `SIOCGSKNS` and `TUNGETDEVNETNS` require `CAP_NET_ADMIN`. Every other request, `SIOCSIFFLAGS` and `SIOCSIFMTU` included, returns `-EINVAL` and is never forwarded to the netdev ioctl path. | Allowed by the filter; refused by the kernel. No effect. Administrative state therefore stays out of the holder's reach. |
 
-The audit's TAP identity read-back includes the host-side MAC, the owner uid,
-persistence, and the TAP's debug message mask (`msg_enable`, which must read
-0). The filter prevents the holder from changing any of them; the read-back
-detects a change made anyway, through a gap in the filter or by another
-process. A change to any is treated as damage to that VM's network parts: the
-VM is killed and its TAP is torn down (ADR-0124). The prevention is ADR-0143,
-and the delivery-side structural control against the `SIOCSIFHWADDR` hazard is
-ADR-0142; this decision owns only the uid-0 owner and the read-back set.
+The audit's TAP identity read-back includes the owner uid, which must be 0;
+persistence; the TAP's debug message mask (`msg_enable`, which must read 0);
+and the host-side MAC, which must not be a reserved address. The reserved
+addresses are the bridge MAC and the guest MAC of every allocation the owner
+holds outside `Condemned`, the TAP's own included. The host-side MAC is judged
+by that invariant, not against a recorded value: a host link manager may
+rewrite a TAP's address after creation, and every unreserved address is
+harmless (ADR-0144). Provision and activation apply the same host-side MAC
+check to their own TAP. The filter prevents the holder from writing any of
+these. The read-back detects a violation made anyway, through a gap in the
+filter or by another process, and a random address that happens to be
+reserved. A violation of any is treated as damage to that VM's network parts:
+the VM is killed and its TAP is torn down (ADR-0124). The prevention is
+ADR-0143, and the delivery-side structural control against the
+`SIOCSIFHWADDR` hazard is ADR-0142; this decision owns only the uid-0 owner
+and the read-back set.
 
 ## Alternatives considered
 
@@ -123,9 +131,9 @@ Negative:
   holder's TAP-mutating ioctls are prevented by ADR-0143's launch filter, and
   the table in the Decision gives each arm's disposition with it in force. The
   arms the filter allows configure only the holder's own TAP and queue, or are
-  refused by the kernel. Owner-uid, persistence, host-side-MAC, and debug-mask
-  changes made anyway are each detected by the audit read-back within one audit
-  period and kill that VM.
+  refused by the kernel. An owner-uid, persistence, or debug-mask change made
+  anyway, and a host-side MAC set to a reserved address, are each detected by
+  the audit read-back within one audit period and kill that VM.
 - **No re-grant path remains.** `TUNSETOWNER` returns `EPERM` to every Cloud
   Hypervisor thread (ADR-0143), so an exited holder's TAP stays owned by uid 0
   until teardown, and no second uid-4200 process can attach it in that window.

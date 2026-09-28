@@ -1127,7 +1127,8 @@ placement advisory over the authoritative held count
      -> bridge -> managed guard -> endpoint map
      -> TCX ingress attach/pin/query
      -> TCX egress guest-MAC attach/pin/query (ADR-0142)
-     -> read back DOWN (debug message mask 0), record host-side MAC
+     -> read back DOWN (debug message mask 0; host-side MAC not a reserved
+        address)
   -> VMM adapter builds the launch seccomp program (ADR-0143) and attaches one
      IFF_VNET_HDR queue, verifying TAP still down
   -> CH --net fd=[3], inheriting only descriptors 0-3, under the launch
@@ -1188,11 +1189,17 @@ Three layers answer them:
   bridge FDB — the Cilium/Neutron shape. Unicast flooding stays on, because the
   same check drops each flooded copy at every non-target TAP. This closes the
   flood leak, which needs no ioctl, and a MAC change the filter does not see.
-- **Detection.** The ADR-0130 audit read-back of each TAP's host-side MAC,
-  owner, persistence, and debug message mask reports a change made through a
-  gap in the filter or by another process as per-allocation damage. Only that
-  VM is killed, and a victim's delivery resumes once the changed TAP is torn
-  down.
+- **Detection.** The ADR-0130 audit read-back of each TAP's owner,
+  persistence, debug message mask, and host-side MAC reports a violation as
+  per-allocation damage. For the host-side MAC the check is an invariant, not
+  a recorded value: the address must not be a reserved one, meaning the
+  bridge MAC or the guest MAC of an allocation the owner holds outside
+  `Condemned`, the TAP's own included. A
+  hijacked TAP therefore breaks it, whatever made the change, while a host
+  link manager's rewrite to any other address is harmless
+  ([ADR-0144](adr-0144-managed-link-identity-independent-of-host-link-configuration.md)).
+  Only that VM is killed, and a victim's delivery resumes once the offending
+  TAP is torn down.
 
 The node bridge MAC is set explicitly to the fixed `02:01:00:00:00:01`
 (ADR-0126), which marks it `NET_ADDR_SET` and closes the bridge-MAC-takeover
@@ -11460,7 +11467,7 @@ reproduce. Prior art for each choice is in
 | Component | Change | Decisions / ADR |
 |---|---|---|
 | VMM adapter (`CloudHypervisorVmm`) | Owns a per-launch TAP queue descriptor. It attaches one `IFF_VNET_HDR` queue to the down persistent TAP, verifying flags and down state; maps it to child fd 3 through `command-fds`; in one audited `pre_exec` hook it marks every other descriptor close-on-exec and then loads the launch seccomp filter, which denies every Cloud Hypervisor thread the TAP-mutating ioctls and fails closed on a foreign syscall ABI; renders `--net fd=[3],mac=…`; drops its copy before any await. The filter exists for x86_64 only: on any other target, aarch64 included, the startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect (aarch64 is GH #302). On x86_64 the startup probe proves the kernel accepts the filter. The value types and the `Vmm` trait are unchanged. Creating first-party raw descriptors close-on-exec under a source gate is a separate implementation obligation. | D-295-R1 to R3, R22; ADR-0127, 0128, 0129, 0143 |
-| Shared guest-switch owner | TAPs are owned by uid 0, so no unprivileged process without the queue can attach one. Provision ends with the TAP down and records the plan. A new `activate` raises it only after the allocation's install-success event and before EXEC, serialized with runtime quiescence; a latched quiescence defers it instead of failing the allocation. Quiescence reports per-TAP outcomes; the audit reports per-allocation damage separately from node-level failures; a reported allocation is condemned, its VM is killed, and its parts leave the audit and restore universes. A new `restore_quiesced_taps` is the only runtime restore, and the supervisor calls it only after a clean full audit. Teardown treats an absent part as removed. Each managed TAP also carries a TCX egress guest-MAC classifier over the shared endpoint map: it delivers unicast only to the TAP's registered guest MAC, drops every other unicast (a map miss included), and always delivers broadcast and multicast. Provision records the TAP's host-side MAC; activation and the audit read it back, together with the TAP's debug message mask (expected 0), and a change to either is per-allocation damage. | D-295-R4, R5, R13, R14, R21, R22; ADR-0130, 0131, 0142 |
+| Shared guest-switch owner | TAPs are owned by uid 0, so no unprivileged process without the queue can attach one. Provision ends with the TAP down and records the plan. A new `activate` raises it only after the allocation's install-success event and before EXEC, serialized with runtime quiescence; a latched quiescence defers it instead of failing the allocation. Quiescence reports per-TAP outcomes; the audit reports per-allocation damage separately from node-level failures; a reported allocation is condemned, its VM is killed, and its parts leave the audit and restore universes. A new `restore_quiesced_taps` is the only runtime restore, and the supervisor calls it only after a clean full audit. Teardown treats an absent part as removed. Each managed TAP also carries a TCX egress guest-MAC classifier over the shared endpoint map: it delivers unicast only to the TAP's registered guest MAC, drops every other unicast (a map miss included), and always delivers broadcast and multicast. Provision, activation, and the audit read back the TAP's debug message mask (expected 0) and its host-side MAC, which must not be a reserved address (the bridge MAC, or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included). A violation of either is per-allocation damage. No host-side MAC is recorded, so a host link manager's rewrite to any other address is harmless. | D-295-R4, R5, R13, R14, R21, R22; ADR-0130, 0131, 0142, 0144 |
 | Guest-address pool | One pool per server becomes the node-wide admission linearization point. Admitted and Retiring leases both count against the placeholder cap until cleanup finishes (user-approved D-295-R7); at the cap a replacement's predecessor is reclaimed first. A fifth hydration read-port gives placement one consistent occupancy snapshot (held, retiring, leases). | D-295-R6 to R8; ADR-0132, 0133, 0134 |
 | Intercept owner (`MtlsIntercept`, worker) | Three port methods: grouped, awaited, convergent, retry-retaining element release; member convergence, used for the fresh-boot clear and runtime repair; state observation with members, the policy route, and the guard. A typed stop error. Runtime repair observes the program identity without regard to dynamic members and hands over the node guard without dropping it, so repair runs with live allocations. One independent guard table (R18-B, chosen on evidence) drops TCP still carrying the TCX intercept mark, keeping intercept-marked TCP fail-closed without the IP program for both forwarding and host-local delivery. Both TPROXY rules order TPROXY before the mark, so an absent outbound listener falls through to the drop. Both conditional on a native RED. | D-295-R10, R12, R15, R18, R19; ADR-0135, 0137, 0139, 0140 |
 | `WorkloadLifecycle` and action shim | Retirement points; admission refusal writes no row; the shim waits on the EXEC gate during recovery before activation; row-neutral `ReclaimAllocationNetwork` for every leased Failed/Terminated allocation no other action owns, computed on every reconcile path, retried forever at a constant one second until GH #137. | D-295-R5, R7, R11; ADR-0131, 0136 |
@@ -11480,57 +11487,50 @@ matrix, and the Changed Assumptions are in the #295 feature delta,
 conflicts with this table, the table governs; the ADRs it amends state each
 amendment explicitly.
 
-### Host link-address policy (fresh-host RCA; ADR-0144, accepted 2026-09-26)
+### Managed-link identity independent of host link configuration (fresh-host RCA; ADR-0144)
 
-[ADR-0144](adr-0144-managed-host-links-protected-from-udev-mac-policy.md)
-protects every managed host link from the host link manager's MAC policy. The
-managed links are `ovd-gbr0`, `ovd-gbr-probe`, each guest TAP `ovd-tp-<4hex>`,
-and `ovd-tp-probe`. systemd-udevd's default `99-default.link`
-(`MACAddressPolicy=persistent`) rewrites a new link whose address the kernel
-assigned at random. That write refused about half of the fresh-host boots
-that create `ovd-gbr0`
+[ADR-0144](adr-0144-managed-link-identity-independent-of-host-link-configuration.md)
+makes every managed host link correct whatever the host's link configuration,
+and whether or not systemd-udevd runs. The managed links are `ovd-gbr0`,
+`ovd-gbr-probe`, each guest TAP `ovd-tp-<4hex>`, and `ovd-tp-probe`.
+systemd-udevd's default `99-default.link` (`MACAddressPolicy=persistent`)
+rewrites a new link whose address the kernel assigned at random. That write
+refused about half of the fresh-host boots that create `ovd-gbr0`
 (`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`,
-root cause A). On a TAP, the RCA predicts that the same write, landing after
-provision records the host-side MAC, would read as per-allocation damage and
-kill a healthy VM.
+root cause A). It also rewrites every new TAP a few milliseconds after
+creation.
 
-- The shared owner creates the bridge with its fixed address in the same
-  `RTM_NEWLINK`, so udev's address policy never rewrites it, whatever policy
-  the host sets.
-- A host that runs systemd-udevd carries `05-overdrive-managed-links.link`
-  (`OriginalName=ovd-gbr* ovd-tp-*`, `MACAddressPolicy=none`). TAPs depend on
-  it, because a TAP cannot be created with an address.
-- The startup probe refuses boot when its scratch TAP's address changes
-  between creation and cleanup.
+- **Bridge.** The shared owner creates the bridge with its fixed address in
+  the same `RTM_NEWLINK`, so udev's address policy leaves it alone, whatever
+  that policy is. The boot read-back names the observed address and up state
+  when it refuses, and the runtime audit repairs a later write.
+- **TAP.** A TAP's host-side MAC is judged by an invariant, not by a recorded
+  value. The address must not be reserved: not the bridge MAC, and not the
+  guest MAC of an allocation the owner holds outside `Condemned`, the TAP's
+  own included. It is checked at provision,
+  at activation, and on every audit pass. A host link manager's rewrite to any
+  other address is harmless. A reserved address, from a hijack or a rare
+  random collision, refuses the provision, fails the activation, or kills
+  that one VM.
+- **No host requirement and no host probe.** Nothing installs, reads, or
+  requires a host link-configuration file or udev's device database, and the
+  startup probe does not read its scratch TAP's address. Removing the node
+  runtime's dependence on systemd in general is
+  [GH #304](https://github.com/overdrive-sh/overdrive/issues/304).
 
-This is platform requirement REQ-295-LINKMAC. Its exact contract is in the
-#295 feature delta, § *Managed-link address from creation, and the host
-link-address policy*.
+The exact contract is in the #295 feature delta, § *Managed-link identity
+independent of host link configuration*, and the reserved set and its
+residual are in § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*.
 
-**Handoff annotation for `nw-platform-architect` / DEVOPS:**
-
-- The appliance image must satisfy REQ-295-LINKMAC. Whether it runs
-  systemd-udevd is not yet pinned. If it does, it must ship
-  `05-overdrive-managed-links.link` under `/usr/lib/systemd/network/`, and its
-  image test must prove the policy by behaviour, not by the file's presence:
-  a scratch TAP and an addressless scratch bridge keep their creation-time
-  addresses once udev reports them initialized, and udev names the Overdrive
-  file as applied.
-- That image build is the Image Factory MVP,
-  [GH #75](https://github.com/overdrive-sh/overdrive/issues/75). The issue has
-  no acceptance criteria yet, so it does not list this requirement. ADR-0068
-  makes the image Overdrive's to build, and it is not amended.
-- The dev and test substrates must carry the same file and check, under
-  `/etc/systemd/network/`:
-  - the Lima dev VM, `infra/lima/overdrive-dev.yaml`, which also provisions
-    CI's integration job;
-  - the metal host, through `infra/provision/common-system.sh`, which
-    `infra/metal/provision.sh` runs.
-- A host running udev's default policy without the file is expected to refuse
-  nearly every boot once the probe condition lands, so each host must carry
-  the file before that code runs on it.
-- A host where another link manager (systemd-networkd, NetworkManager)
-  matches the managed names violates the requirement.
+**Handoff annotation for `nw-platform-architect` / DEVOPS:** the appliance
+image and the dev and test substrates carry no link-configuration requirement
+for #295. A narrow `.link` file exempting the managed links
+(`OriginalName=ovd-gbr* ovd-tp-*`, `MACAddressPolicy=none`) may ship as image
+hygiene. It keeps a TAP's kernel address, which is redrawn at each creation.
+Whether to ship it is the Image Factory MVP's choice
+([GH #75](https://github.com/overdrive-sh/overdrive/issues/75)). A blanket
+mask of `99-default.link` is never used, because it would also drop
+predictable names for the host's NICs.
 
 ### Accepted stage-3 baseline
 
@@ -11732,7 +11732,7 @@ deploy / existing lifecycle Action
   -> down TAP + bridge membership
   -> managed guard membership
   -> endpoint map + TCX ingress and egress attach/pin/query (ADR-0142)
-  -> TAP read back DOWN, host-side MAC recorded;
+  -> TAP read back DOWN, host-side MAC not a reserved address;
      VMM attaches one queue fd (ADR-0127/0128) and spawns CH under the
      launch seccomp filter (ADR-0129/0143)
   -> guest READY
@@ -11937,6 +11937,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-09-28 | **netns-density-295 ADR-0144: managed-link identity is independent of host link configuration (user rulings of 2026-09-28).** The bridge is still created with its address. A TAP's host-side MAC is judged by an invariant instead of a recorded value: it must not be the bridge MAC or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included. The fact a violation reports (`TapHostMac { ifindex, address: TapHostAddress }`) is proposed, pending the user's confirmation. A host link manager's rewrite to any other address is harmless, and a reserved address costs that one VM. No host `.link` file is required, no substrate installs one, and the startup probe does not read its scratch TAP's address. A narrow `.link` stays optional image hygiene for the Image Factory (GH #75). ADR-0144 is rewritten in present tense and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`, and ADR-0130's read-back set states the invariant. GH #304 covers the node runtime's systemd dependence in general. — Morgan. |
 | 2026-09-26 | **netns-density-295 ADR-0144 (REQ-295-LINKMAC): managed host links are protected from udev's MAC policy.** Comes from the fresh-host RCA's root cause A. systemd-udevd's default persistent-MAC policy rewrote a new `ovd-gbr0` after the owner's set, which refused about half of the fresh-host boots that create the bridge. A TAP cannot be created with an address, and the RCA predicts that a rewrite landing after its host-side MAC is recorded would read as audit damage. The shared owner creates the bridge with its fixed address in the same `RTM_NEWLINK`. A host that runs systemd-udevd carries an Overdrive `.link` file that exempts the managed bridge and TAP names from udev's MAC policy. The startup probe refuses boot when its scratch TAP's address changes. This change adds the appliance-image DEVOPS handoff annotation (Image Factory MVP, GH #75); ADR-0068 is not amended. Accepted under the user's appliance-OS ruling of 2026-09-25 and the ruling that technical decisions are settled on evidence. — Morgan. |
 | 2026-09-24 | **netns-density-295 D-295-R22 / ADR-0143 scoped to x86_64 by user ruling 10.** Cloud Hypervisor does not run in the Lima VM, and no aarch64 host with KVM is available, so the aarch64 filter cannot be proven on native hardware. The x86_64 program, with its x32 kill prologue, is the only program. The aarch64 program and the E21 aarch64 runner case are removed. On any other target, aarch64 included, `for_target` returns `LaunchSeccompUnsupportedArch`, so the VMM probe fails. Under the existing ADR-0083 §D3c rule the node then composes no microVM driver and rejects every microVM start, and `create` refuses before any effect in any case. The earlier R22 wording "the probe refuses the node" is corrected to this existing composition behaviour. Proving and enabling aarch64 is GH #302. — Morgan. |
 | 2026-09-24 | **netns-density-295 D-295-R22 / ADR-0143 ACCEPTED by user ruling, on native evidence (spike increment-aa).** A seccomp filter loaded by the VMM adapter's one launch hook, in the forked child before its first exec, denies every Cloud Hypervisor thread the 13 TAP-mutating ioctls (`EPERM`) and kills the process on a foreign syscall ABI (foreign audit architecture, x32). It prevents at the source the FDB-poisoning victim outage, the `TUNSETOWNER` re-grant, and the `TUNSETDEBUG` host-log flood, which are no longer residuals. ADR-0142's egress classifier and the ADR-0130 read-back stay; the read-back gains the TAP debug message mask (one dump per audit pass; a failed dump is a node-level audit failure). ADR-0128, 0129, 0130, and 0142 are revised in present tense (accepted, not yet implemented); the operative ADR-0122 and ADR-0124 amendment lists gain R22 (the `TapDebugMsgMask` fact; debug-mask damage). Mechanism: hand-built classic BPF over the locked `libc` (the natively proven shape, no new dependency); `seccompiler` not chosen, since it adds an unreviewed dependency and can close the x32 route only by a hand-enumerated literal. — Morgan. |

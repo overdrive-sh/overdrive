@@ -374,6 +374,51 @@ Prior art for every VMM, networking, kernel, and process choice is in
    (§ *Driven port — VMM launch seccomp filter (D-295-R22)*). Kernel version
    stays out of scope.
 
+**User rulings of 2026-09-28 — recorded as approved.** The user asked why #295
+relied on udev and ruled that it must not. Every managed link is correct
+whether or not systemd-udevd runs, and whatever its policy.
+[GH #304](https://github.com/overdrive-sh/overdrive/issues/304) removes the
+node runtime's dependence on systemd in general, and #295 adds none.
+
+1. **Bridge: create-with-address stands.** `Client::ensure_bridge(&self, name,
+   mac)` creates the bridge with its fixed MAC in the same `RTM_NEWLINK`. The
+   kernel marks the address as set, so udev's MAC policy never touches it,
+   whatever udev's configuration.
+2. **TAP host-side MAC: check the invariant, not the recorded value.** A TAP's
+   host-side MAC is per-allocation damage only when it breaks the invariant the
+   MAC-steal attack needs (increment-z, `spike/findings-mac-fdb-isolation.md`):
+   no managed TAP's host-side MAC equals a registered guest MAC or the bridge
+   MAC. That VM alone is killed, as before. The read-back of the host-side MAC
+   stays; only what it is compared against changes. This amends ruling 9 of
+   2026-09-24, which kept "the audit read-back of host-side MAC": the read-back
+   is kept, and a changed address is no longer damage in itself. The exact
+   compared set is pinned on evidence in § *Driven port — TAP egress guest-MAC
+   delivery (D-295-R21)*.
+3. **A host `.link` file is optional hygiene, not a requirement.**
+   REQ-295-LINKMAC is not a correctness requirement. A narrow `.link`
+   (`OriginalName=ovd-gbr* ovd-tp-*`, `MACAddressPolicy=none`) may ship as image
+   hygiene; that is the Image Factory's choice
+   ([GH #75](https://github.com/overdrive-sh/overdrive/issues/75)). It is never
+   a blanket `99-default.link` mask, which would also drop predictable NIC
+   names. No test substrate needs it.
+4. **No startup-probe refusal over a TAP's address.** Under ruling 2 a udev
+   rewrite is harmless, so refusing boot over one would be wrong. The startup
+   probe does not read its scratch TAP's address.
+5. **ADR-0144 records the one remaining decision:** a managed link's identity
+   is independent of the host's link configuration. A managed bridge is
+   created with its address, and a TAP's MAC safety is an invariant rather
+   than a recorded value. ADR-0144 is accepted and not implemented, so it is
+   rewritten in present tense, as
+   [ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md).
+
+Ruling 2 asked DESIGN to choose the compared set on evidence. The set is
+pinned in § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*. It
+includes the TAP's own guest MAC, and it leaves out `Condemned` allocations,
+which is narrower than a literal reading of "any registered guest MAC". The
+fact a violation reports is a public-contract change that ruling 2 did not
+name: `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }`. It
+is **PROPOSED 2026-09-28, pending the user's confirmation**.
+
 **GitHub context (recorded; DESIGN takes no GitHub action):**
 
 - [GH #197](https://github.com/overdrive-sh/overdrive/issues/197) stays open.
@@ -521,6 +566,8 @@ evidence; the residuals R21 and R4 had stated become prevented. Revision 7
 | ADR-0128, ADR-0129, ADR-0130, ADR-0142 | **Revised in present tense 2026-09-24 for D-295-R22** (accepted, not yet implemented, so no amendment narrative): ADR-0129 records the filter's place and order in its one launch hook; ADR-0130's holder-ioctl dispositions and read-back set, ADR-0142's source-prevention alternative and residual text, and ADR-0128's by-name-attach consequence state the ADR-0143 prevention. |
 | ADR-0122, ADR-0124 | **Operative; their explicit 2026-09-24 amendments gain D-295-R22:** ADR-0122 lists the `TapDebugMsgMask` fact; ADR-0124 counts a changed TAP debug message mask as per-allocation damage. |
 | `brief.md` #295 sections; `c4-diagrams.md` #295 | Replacement added and marked accepted (2026-09-24). Where the earlier baseline conflicts, including the brief's "exactly `assign`, `release`, and `snapshot`" and "eight constant IP rules" sentences, the replacement governs. |
+| ADR-0144, ADR-0130, `brief.md` | **Revised in present tense 2026-09-28 for the user rulings of 2026-09-28** (accepted, not yet implemented, so no amendment narrative). ADR-0144 is rewritten and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`. ADR-0130's read-back set states the host-side MAC invariant. `brief.md`'s #295 sections state it too, and its host link-policy section and handoff annotation carry no host requirement. |
+| ADR-0122, ADR-0124, ADR-0142, ADR-0143, `c4-diagrams.md` | **Routed to the user 2026-09-28; outside this DESIGN's edit scope.** Each still describes the host-side MAC read-back as detecting a change or mismatch, or shows a recorded MAC (§ *Required downstream changes*). ADR-0122 and ADR-0124 are operative and need explicit amendments. |
 | `distill/test-scenarios.md`, `distill/red-classification.md` | PENDING the DISTILL rewrite; not edited. |
 | `deliver/roadmap.json` | `validation.status` must return to `pending`. Steps 02-01, 02-03, 03-01, 03-03, 04-01, and 04-02 are invalidated in part; see *Required downstream changes*. |
 
@@ -915,12 +962,12 @@ production launch always installs it.
 
 | Step | Owner | Effect | TAP admin state | Queue holders |
 |---|---|---|---|---|
-| provision | shared guest-network owner | Create the persistent TAP (owner uid 0), set master, add the guard member, endpoint, TCX ingress attach/pin/query, and TCX egress attach/pin/query (D-295-R21); read everything back, including a debug message mask of 0, and record the TAP's host-side MAC. | down | none |
+| provision | shared guest-network owner | Create the persistent TAP (owner uid 0), set master, add the guard member, endpoint, TCX ingress attach/pin/query, and TCX egress attach/pin/query (D-295-R21); read everything back, including a debug message mask of 0 and a host-side MAC outside the reserved set (D-295-R21). | down | none |
 | VMM create | `CloudHypervisorVmm` | Build the D-295-R22 launch filter; `attach_tap_queue`, which checks down-at-attach; spawn with fd 3, every other descriptor close-on-exec, and the launch seccomp filter loaded in the child before its first exec; drop the parent copy before any await. | down | CH only |
 | launch failure before exec | `CloudHypervisorVmm` | The parent copy is dropped with the `Command` before the failure branch awaits. The action shim's start-failure path tears the TAP down. | down | none |
 | CH exits before READY | CH / `VmDriver` | The kernel releases the queue at exit; the start is rejected; teardown follows. | down | none |
 | READY → Running → `start_alloc` → event | action shim | No TAP effect. | down | CH only |
-| activate | shared guest-network owner | Re-read protection, including both TCX links and pins, the recorded host-side MAC, and a debug message mask of 0; `TapSetUp`; read back up and master. | up | CH only |
+| activate | shared guest-network owner | Re-read protection, including both TCX links and pins, a host-side MAC outside the reserved set, and a debug message mask of 0; `TapSetUp`; read back up and master. | up | CH only |
 | runtime quiesce / recovery | shared guest-network owner | Set down; restore activation-complete TAPs only. | down → up | CH only |
 | VMM exit (stop or crash) | kernel | The queue is released and carrier drops; the TAP keeps its admin state. No unprivileged process can attach it in this window (R4), and its holder could not have re-granted it (`TUNSETOWNER` returns `EPERM` under R22). | unchanged, possibly up | none |
 | teardown | shared guest-network owner, then the action shim | Endpoint delete → TCX ingress unpin/detach → TCX egress unpin/detach → **TAP down and read-back** → `RTM_DELLINK` → guard member delete → complement read-back. Each step treats an already-absent part as removed (see *Teardown converges on absence*). The action shim releases the lease last. | down → absent | none |
@@ -1601,7 +1648,7 @@ The audit attributes every check to exactly one of two classes:
 | Class | Parts | Failure reported as | Repaired by |
 |---|---|---|---|
 | Node-level | Bridge identity (name, kind, fixed MAC, up, gateway); the bridge-guard table, chains, and three rules, and any guard member naming a TAP the owner does not manage; the loaded TCX program; endpoint and counter map identity; the endpoint and counter map pins; any endpoint entry for an ifindex the owner does not manage; the per-pass debug-mask dump itself (a failed dump is component `Bridge`, D-295-R22) | `Err(SharedGuestNetworkAuditError { component, .. })` with the matrix component | `converge_shared` (a failed dump is retried by the next attempt's audit) |
-| Per-allocation | That allocation's TAP (existence, persistence, owner uid 0, **host-side MAC equal to the recorded one**, **debug message mask 0** (D-295-R22), ifindex, bridge master, and administrative state versus phase); its TCX ingress attachment on its ifindex and its ingress link pin; **its TCX egress attachment on its ifindex and its egress link pin** (D-295-R21); its endpoint entry value; its bridge-guard member | `Ok(SharedGuestNetworkAudit { damaged })` naming the allocation | never repaired in place: the VM is killed (R14) and its lifecycle replaces it |
+| Per-allocation | That allocation's TAP (existence, persistence, owner uid 0, **host-side MAC outside the reserved set** (D-295-R21), **debug message mask 0** (D-295-R22), ifindex, bridge master, and administrative state versus phase); its TCX ingress attachment on its ifindex and its ingress link pin; **its TCX egress attachment on its ifindex and its egress link pin** (D-295-R21); its endpoint entry value; its bridge-guard member | `Ok(SharedGuestNetworkAudit { damaged })` naming the allocation | never repaired in place: the VM is killed (R14) and its lifecycle replaces it |
 
 The audit runs every node-level check first and returns `Err` at the first
 failure, so per-allocation damage is reported only when every node-level part is
@@ -1616,30 +1663,28 @@ failure (`guest_network.rs:4067-4081`). Per-allocation parts are never
 repaired in place, because `converge_shared` is node-level (C-295-G) and a
 re-attached link or re-inserted entry would follow a loss nobody explained.
 
-**Host-side TAP MAC read-back (review finding R5-H1).** The per-allocation TAP
-check adds the TAP's host-side MAC to what it already reads back. The owner
-records each allocation's provisioned host-side MAC — the MAC read back when
-`provision` observed the TAP down — in the `host_mac` field of the same private
-allocation state that holds the `GuestNetworkPlan` and phase, and `activate` and
-the audit compare the live host-side MAC against it. This is projection-only
-over the existing observation: `ObservedLinkIdentity` already carries
-`mac: Option<[u8; 6]>` (`client.rs:80`), and
-`GuestNetworkAllocationTapObservation::Persistent` (which today drops it,
-`guest_network.rs:1852-1859`) gains the observed host-side MAC; no new netlink
-surface is added. A mismatch is reported through the one fact R21 adds (exact
-shape in § *Driven port — TAP egress guest-MAC delivery*). A changed host-side
-MAC is per-allocation damage, handled by R14 exactly like an owner-uid or
+**Host-side TAP MAC check (review finding R5-H1; user ruling 2 of
+2026-09-28).** The per-allocation TAP check adds the TAP's host-side MAC to
+what it already reads back, and requires it to satisfy the host-side MAC
+invariant: a 6-byte address outside the reserved set (exact set in § *Driven
+port — TAP egress guest-MAC delivery*). `provision` and `activate` apply the
+same check to their own TAP. This is projection-only over the existing
+observation: `ObservedLinkIdentity` already carries `mac: Option<[u8; 6]>`
+(`client.rs:80`), and `GuestNetworkAllocationTapObservation::Persistent`
+carries it (`guest_network.rs:2000-2008`); no new netlink surface is added.
+Nothing is recorded: no check compares a TAP's address with an earlier reading,
+so a host link manager that rewrites a TAP to an unreserved address changes
+nothing the owner checks. A violation is reported through the one fact R21
+adds, and is per-allocation damage, handled by R14 exactly like an owner-uid or
 persistence change: only that VM is killed, and its lifecycle tears it down.
-The audit does not repair the MAC in place. The recorded MAC is the address
-the kernel assigned when the TAP was created, and it stays unchanged for the
-TAP's lifetime on a healthy host: the owner never writes a TAP's address, and
-the host's link manager is excluded by REQ-295-LINKMAC (§ *Managed-link
-address from creation, and the host link-address policy*). This detection complements the
+The audit does not repair the MAC in place. This detection complements the
 structural delivery control in D-295-R21 / ADR-0142. Under D-295-R22 the VMM
-cannot issue `SIOCSIFHWADDR` at all, so the read-back detects a change made
-through a gap in the launch filter or by another process. The same check reads
-the TAP's debug message mask, which must be 0 (exact contract in § *Driven
-port — VMM launch seccomp filter (D-295-R22)*).
+cannot issue `SIOCSIFHWADDR` at all, so the check detects a reserved address
+set through a gap in the launch filter or by another process, and a kernel or
+host-link-manager address that happens to be reserved (§ *Driven port — TAP
+egress guest-MAC delivery*, *Residual*). The same check reads the TAP's debug
+message mask, which must be 0 (exact contract in § *Driven port — VMM launch
+seccomp filter (D-295-R22)*).
 
 **How the victim's delivery is restored (the re-learn step; review defect D5).**
 D-295-R22 prevents the VMM's `SIOCSIFHWADDR`, so this path runs only for a
@@ -1728,12 +1773,13 @@ the TAP administratively **down**:
 - the endpoint entry;
 - the first-ingress TCX program and its link pin;
 - the first-egress TCX program and its egress link pin (D-295-R21);
+- the TAP's host-side MAC, which must satisfy the host-side MAC invariant
+  (D-295-R21), with the plan being provisioned counted in the reserved set;
 - the TAP's debug message mask, which must be 0 (D-295-R22).
 
-It records the TAP's observed host-side MAC in the allocation's `host_mac`
-field together with the plan, both program identities, and the
-`ProvisionedDown` phase. The exact step order is D12A's (§ *D-295-DISTILL-12A*),
-as extended by D-295-R21.
+It records the plan, both program identities, and the `ProvisionedDown` phase.
+It does not record the host-side MAC. The exact step order is D12A's
+(§ *D-295-DISTILL-12A*), as extended by D-295-R21.
 
 A repeat call for the same plan while the attachment is still provisioned-down
 is idempotent. Re-entering after activation returns the existing source-less
@@ -1754,7 +1800,8 @@ with the TAP administratively down.
 2. While the TAP is still down, re-read:
    - the current Bridge-kind ifindex and master;
    - the persistent TAP's owner, ifindex, and down state;
-   - the TAP's host-side MAC, which must equal the recorded `host_mac`;
+   - the TAP's host-side MAC, which must satisfy the host-side MAC invariant
+     (D-295-R21);
    - the TAP's debug message mask, which must be 0 (D-295-R22);
    - complete guard membership;
    - the endpoint value;
@@ -1781,11 +1828,11 @@ A repeat call on an allocation whose activation already completed returns
 
 D-295-R5 adds no new operation, fact, or error variant. `TapActivation`,
 `TapQuiescence`, and `SharedGuestNetworkAudit` are the only new value types on
-this port. D-295-R21 adds exactly one fact variant, `GuestNetworkFact::TapHostMac`
-(§ *Driven port — TAP egress guest-MAC delivery*), which `activate` and the
-audit use for a host-side MAC mismatch. The startup probe uses it for its
-scratch TAP (§ *Managed-link address from creation, and the host link-address
-policy*). D-295-R22 adds exactly one more,
+this port. D-295-R21 adds exactly one fact variant, `GuestNetworkFact::TapHostMac`,
+whose payload is the proposed `TapHostAddress` enum (§ *Driven port — TAP
+egress guest-MAC delivery*, pending the user's confirmation). `provision`,
+`activate`, and the audit use it for a host-side MAC that breaks the invariant.
+D-295-R22 adds exactly one more,
 `GuestNetworkFact::TapDebugMsgMask`, which provision, `activate`, and the audit
 use for a non-zero debug message mask (§ *Driven port — VMM launch seccomp
 filter*).
@@ -2102,10 +2149,6 @@ struct HostGuestNetworkAllocationState {
     /// Program id returned by `pin_egress_link` for the TCX egress
     /// guest-MAC classifier (D-295-R21).
     egress_program_id: u32,
-    /// The TAP's host-side MAC as observed by provision's final down
-    /// read-back (D-295-R21). `activate` and the audit require the live
-    /// host-side MAC to equal it.
-    host_mac: Option<[u8; 6]>,
     phase: HostGuestNetworkAllocationPhase,
 }
 
@@ -2208,7 +2251,7 @@ frames travel host→guest, which the ADR-0115 ingress-only classifier never see
 Two verified repository facts sharpen it:
 
 - **Guest MACs are deterministic** — `[0x02, 0x00, address.octets()]`
-  (`guest_network.rs:481`) — so the target MAC is derivable from the victim's
+  (`guest_network.rs:553-563`) — so the target MAC is derivable from the victim's
   IPv4 and needs no ARP learning. This removes the "must learn the MAC first"
   precondition the research left open.
 - **Cloud Hypervisor is never given a host-side MAC** — the renderer passes the
@@ -2283,8 +2326,8 @@ netlink `IFLA_ADDRESS` set marks the device `NET_ADDR_SET`
 early (`br_stp_if.c:269`) and `NETDEV_PRE_CHANGEADDR` on a port a no-op
 (`br.c:79-80`). No new control is needed for it; this DESIGN records the fact.
 The bridge carries `NET_ADDR_SET` from its creation, because it is created with
-its address (§ *Managed-link address from creation, and the host link-address
-policy*). No interval exists in which its address is unset, so this argument
+its address (§ *Managed-link identity independent of host link
+configuration*). No interval exists in which its address is unset, so this argument
 does not depend on the reassert at each membership change.
 
 **Prevention at the source is D-295-R22, beside this control (research
@@ -2300,10 +2343,12 @@ control stays, for two reasons:
   syscall ABI, so a MAC change through a gap in it, or by another process,
   would otherwise steal delivery again.
 
-Such a change still leaves a poisoned entry. Its bound, end to end:
+A change to a reserved address still leaves a poisoned entry. Its bound, end
+to end:
 
-- the change is detected within one audit period (one second, subject to E18)
-  and reported as per-allocation damage;
+- the reserved address is detected within one audit period (one second,
+  subject to E18) and reported as per-allocation damage (the host-side MAC
+  invariant, below);
 - the changed TAP's VM alone is killed (R14);
 - its ordinary lifecycle cleanup then tears the TAP down: the restart's
   one-shot predecessor cleanup once the constant one-second restart backoff
@@ -2316,6 +2361,126 @@ E12 (h) exercises exactly this path, from a test process outside the launch
 filter, and records the kill→teardown interval. A BPF-LSM `file_ioctl` hook is
 rejected in ADR-0143: it is a node-global mandatory-access-control policy over
 every process's ioctls and adds nothing the launch filter lacks.
+
+**The host-side MAC invariant (user ruling 2 of 2026-09-28).** A managed TAP's
+host-side MAC is judged against an invariant, never against a recorded value:
+
+> For every allocation the owner holds outside `Condemned`, the host-side MAC
+> its TAP reads back is a 6-byte address, and it is not a **reserved
+> address**. The reserved set is `GUEST_BRIDGE_MAC` and the guest MAC
+> (`GuestNetworkAssignment::mac`) of every allocation the owner holds outside
+> `Condemned`, the TAP's own allocation included.
+
+- *Where it is checked.* At every read-back of a TAP's host-side MAC:
+  - provision's final down read-back (D12A step 7), where the plan being
+    provisioned is counted in the reserved set;
+  - `activate`'s step-2 re-read;
+  - each audit pass, for every audited allocation.
+
+  The owner computes the set from the plans it holds in `allocation_lifecycle`,
+  under that sequencer, with no I/O. A violation is `PostconditionMismatch {
+  operation: TapObserve }` over `TapHostMac` (exact shape below). At provision
+  it refuses publication, at `activate` it takes the activation failure
+  projection, and in the audit it is per-allocation damage, so that VM alone
+  is killed (R14).
+- *Nothing is recorded.* Provision does not record the host-side MAC, and no
+  check compares an address with an earlier reading. A changed address is not
+  damage in itself.
+
+*Why these members* (kernel source: the 7.2 tree of research addendum 2). A
+TAP's host-side MAC affects forwarding only through the `LOCAL|STATIC` FDB
+entry the bridge installs for a port's own address. The entry is installed at
+enslavement (`br_add_if` → `br_fdb_add_local`, `net/bridge/br_if.c:655`) and
+at every address change (`br_fdb_changeaddr` → `fdb_add_local`,
+`br_fdb.c:460-504`). `fdb_add_local` deletes any non-local entry for the
+address and installs the local one on the TAP's port (`br_fdb.c:438-451`). A
+local entry then decides two paths, and learning cannot move it
+(`br_fdb.c:985-988`):
+
+- host-originated unicast to the address leaves through the entry's port
+  (`br_dev_xmit`, `br_device.c:109-110`);
+- unicast to it that is bridged in from any port is passed up to the host,
+  not forwarded (`br_handle_frame_finish`, `br_input.c:218-222`).
+
+Each member of the set, and each exclusion, follows from those two paths:
+
+- *Another held allocation's guest MAC* is the steal (R5-H1; increment-z
+  STEPs 4–6). Host unicast to the victim leaves through the TAP's port, where
+  the egress classifier drops it, so the victim receives no host unicast until
+  the TAP is torn down. Bridged unicast to the victim goes to the host. An
+  allocation the owner does not yet hold has no entry. If it is later assigned
+  a MAC that a TAP already holds, the next audit's reserved set contains it.
+- *The TAP's own guest MAC* steals nothing. Host unicast to that guest still
+  leaves through its own port, and its egress classifier admits it. It does
+  break the guest's bridged reception: unicast addressed to the guest from
+  another port is passed up to the host (`br_input.c:221-222`). The one such
+  frame this design bridges between guests is a peer's ARP reply. The ingress
+  classifier admits it (`ArpPass`,
+  `overdrive-bpf/src/programs/guest_tcx.rs:55-86`), and a guest resolves every
+  peer on its /16 by ARP. Such a guest would lose its east-west peers, and
+  every frame it sent would log the kernel's rate-limited own-address warning
+  (`br_fdb.c:985-988`). libvirt keeps a TAP's address off its guest's MAC,
+  citing that warning (research addendum 2 B3.1). Including it costs nothing:
+  the check is one set-membership test, with no per-TAP exception.
+- *`GUEST_BRIDGE_MAC`* has no forwarding effect on this bridge, and is
+  reserved as defence in depth. The bridge's own local entry already exists,
+  so `fdb_add_local` returns without a change (`br_fdb.c:443-444`), and the
+  bridge is `NET_ADDR_SET`, so its identity does not follow a port
+  (`br_stp_if.c:269`). No legitimate cause gives a TAP the gateway's address.
+  If the audit repairs a drifted bridge address while a TAP holds it,
+  `fdb_delete_local` attributes the bridge's own entry to that TAP's port until
+  the TAP leaves (`br_fdb.c:348-356`, `:517-523`). No forwarding decision
+  reads that attribution.
+- *Not reserved: another TAP's host-side MAC.* An address that already has a
+  local entry gains nothing from a second port (`br_fdb.c:440-444`), and no
+  frame this design sends is addressed to a TAP's host-side MAC (research
+  addendum 2 B1.4).
+- *Not reserved: a `Condemned` allocation's guest MAC.* Its VMM has been
+  killed, so nothing it receives matters. Its address is not reassigned until
+  teardown has removed its TAP, because the lease is released last.
+- *Every other address is harmless.* Its local entry steers only frames
+  addressed to it, and none are.
+- *A read that carries no 6-byte address* cannot be shown to lie outside the
+  set, so it breaks the invariant (fail-closed).
+
+*Residual.* A guest MAC is `02:00:` followed by the four octets of the guest's
+IPv4 address (`guest_network.rs:553-563`). On the node guest prefix
+`100.95.0.0/16` (the pool the action shim uses, `guest_network.rs:635-642`)
+that is `02:00:64:5f:xx:xx`. `GUEST_BRIDGE_MAC` is `02:01:00:00:00:01`
+(`overdrive-core/src/dataplane/mod.rs:30`). Two writers give a TAP a
+random-looking locally administered unicast address with 46 free bits:
+
+- the kernel, at creation (`tun_net_initialize` → `eth_hw_addr_random`,
+  `drivers/net/tun.c:1418`; `eth_random_addr`,
+  `include/linux/etherdevice.h:237-242`);
+- udev's persistent policy. The RCA's observed udev addresses (`62:a6:…`,
+  `3e:8f:…`, `b6:f2:…`) all have the multicast bit clear and the local bit
+  set.
+
+For one address uniform over those 46 bits, the chance that it is reserved
+when it is read is at most R × 2^-46, where R is the size of the reserved set:
+about 2.3 × 10^-10 at the placeholder cap of 16,384 held allocations. The set
+changes as allocations come and go, so over a TAP's life the relevant bound is
+the whole /16, about 9.3 × 10^-10 per address. On a host running udev, a TAP
+carries two addresses in turn, the kernel's and then udev's, and either can be
+read, so the per-TAP chance is at most twice the per-address figure. Two
+properties bound the consequence:
+
+- *It is fail-safe.* A collision is refused at provision, fails activation, or
+  kills that one VM. No frame reaches the wrong guest, because the egress
+  classifier admits only the registered destination. The collided guest, if it
+  is live, receives no host unicast until the colliding TAP is torn down,
+  bounded by one audit period plus that TAP's cleanup (the bound above).
+- *The draw depends on the writer.* The kernel draws a new address at every
+  creation. udev's persistent address is a fixed function of the machine and
+  the link name: RCA P1 read the same `b6:f2:51:ad:47:ae` for `ovd-gbr0` on
+  every create. A TAP's name derives from its allocation's address
+  (`guest_network.rs:555`). On a host running that policy, a collision is
+  therefore a fixed pair of addresses, and it recurs whenever both are held.
+  If the derivation is uniform, the chance that a given host has any such pair
+  among the /16's 65,533 addresses is at most about 6 × 10^-5. A `.link` file
+  exempting managed TAPs (user ruling 3, optional) restores a draw per
+  creation.
 
 **Exact implementation-facing contract (review defect D1).** Signatures below
 are checked against `crates/overdrive-dataplane/src/guest_tcx.rs`,
@@ -2472,10 +2637,26 @@ pub enum GuestNetworkOperation {
 // public
 pub enum GuestNetworkFact {
     // every existing variant unchanged, plus:
-    /// A TAP's host-side MAC: expected is the MAC recorded at provision (for
-    /// the startup probe's scratch TAP, the MAC read at its creation),
-    /// observed is the live one.
-    TapHostMac { ifindex: u32, mac: Option<[u8; 6]> },
+    /// A managed TAP's host-side MAC, judged by the host-side MAC invariant
+    /// (D-295-R21). The expected fact is `address: Unreserved`; the observed
+    /// fact is `Reserved` or `Missing`.
+    TapHostMac { ifindex: u32, address: TapHostAddress },
+}
+
+// public
+/// The standing of a managed TAP's host-side MAC under the invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapHostAddress {
+    /// A 6-byte address outside the reserved set. It appears only as the
+    /// expected fact; an unreserved address is never reported.
+    Unreserved,
+    /// A reserved address: `GUEST_BRIDGE_MAC`, or the guest MAC of an
+    /// allocation the owner holds outside `Condemned`, the TAP's own included.
+    /// The address itself names its holder: the bridge, or the guest whose
+    /// IPv4 address it encodes.
+    Reserved([u8; 6]),
+    /// The read-back carried no 6-byte address.
+    Missing,
 }
 ```
 
@@ -2498,9 +2679,20 @@ pub enum GuestNetworkFact {
   exactly the recorded `egress_program_id`. A missing or unexpected egress pin
   is `PostconditionMismatch { operation: TcxEgressLinkPin, .. }` over
   `BpfLinkPin`, shaped like its ingress sibling.
-- A host-side MAC mismatch in `activate` or the audit is
-  `PostconditionMismatch { operation: TapObserve, expected: TapHostMac { ifindex,
-  mac: <recorded host_mac> }, observed: Some(TapHostMac { ifindex, mac: <live> }) }`.
+- A host-side MAC that breaks the invariant, at provision, at `activate`, or in
+  the audit, is `PostconditionMismatch { operation: TapObserve, expected:
+  TapHostMac { ifindex, address: Unreserved }, observed: Some(TapHostMac {
+  ifindex, address: Reserved(<mac>) | Missing }) }`. The two facts always
+  differ, and no field combination is invalid. An unreserved address produces
+  no fact. An absent or incompatible TAP keeps the existing `Tap` fact.
+- The fact does not name the colliding allocation, because the address already
+  does: `GUEST_BRIDGE_MAC` is the bridge's, and a guest MAC encodes the IPv4
+  address the pool leases to exactly one allocation.
+- *Status.* The set's composition is pinned on evidence, as user ruling 2
+  asked DESIGN to choose it. The `TapHostMac` shape and `TapHostAddress` are a
+  public-contract change that ruling 2 did not name, and are **PROPOSED
+  2026-09-28, pending the user's confirmation**. The existing variant is
+  `TapHostMac { ifindex, mac: Option<[u8; 6]> }` (`guest_network.rs:416-421`).
 - `SimSharedGuestNetworkOwner` records one operation per owner-port method, so
   its call log and scripting surface do not change.
 - Rollback state tracks both links. Wherever the owner keeps a partial
@@ -2511,8 +2703,8 @@ pub enum GuestNetworkFact {
   whichever egress link remains.
 
 *Allocation step order.* D12A's provision order gains the egress step as step
-6, before the final down read-back (now step 7, which also records the host
-MAC); rollback and normal teardown gain the egress detach immediately after the
+6, before the final down read-back (now step 7, which also checks the host-side
+MAC against the invariant); rollback and normal teardown gain the egress detach immediately after the
 ingress detach, and their absence read-backs cover both attach points. The
 exact text is in § *D-295-DISTILL-12A*.
 
@@ -2528,7 +2720,9 @@ production-composed GREEN through `serve` + `deploy` shows:
 - positive controls: host unicast to the attacker's own guest still arrives,
   and broadcast reaches every guest;
 - while the entry is poisoned, the victim receives no host unicast;
-- the audit reports the host-side-MAC damage and kills only the attacker;
+- the audit reports the attacker's host-side MAC, which is now the victim's
+  guest MAC and so a reserved address, as per-allocation damage, and kills only
+  the attacker;
 - after teardown removes the attacker's port, the poisoned entry is gone,
   host-to-victim delivery resumes, and the victim's MAC is re-learned on its
   port, within the stated bound.
@@ -4114,7 +4308,7 @@ lifecycle state gains, loses, or moves a gate.
 *(Pinned 2026-09-26 on evidence (DISTILL gap B-8), under the user's ruling
 that technical decisions are settled on evidence.)*
 
-### [REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26
+### [REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28
 
 **The defect** (`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`,
 root cause A). `converge_shared` creates `ovd-gbr0` with no address and then
@@ -4137,32 +4331,48 @@ link up (`client.rs:450-460`; rtnetlink 0.23 `link/bridge.rs:38-40`).
 - The refusal could not name its cause. Both facts were `BridgeLinkIdentity`,
   which carries no MAC and no up state.
 
-TAPs have the same exposure without a refusal today. A TAP cannot be born
-with an address: `tun_net_init` assigns a random one, and rtnetlink creation
-of a tun is refused (upstream v7.0 `drivers/net/tun.c:1332`, `:2283`). udev
-rewrote the probe TAP 3.6 ms after its creation. The RCA predicts, for 06-02
-to confirm, that once `provision` records the host-side MAC (D-295-R21), a
-rewrite landing after the record reads as `TapHostMac` damage and R14 kills a
-healthy VM.
+TAPs are exposed too. A TAP cannot be born with an address: `tun_net_initialize`
+assigns a random one, and rtnetlink creation of a tun is refused (upstream
+v7.0 `drivers/net/tun.c:1332`, `:2283`). udev rewrote the probe TAP 3.6 ms
+after its creation. A design that compares a TAP's host-side MAC with a value
+recorded at provision therefore reads a rewrite landing after the record as
+tampering, and R14 kills a healthy VM (the RCA's forward prediction).
 
-**The invariant: one writer per managed-link address.** The managed links are
-the node bridge `ovd-gbr0`, the startup probe's scratch bridge
-`ovd-gbr-probe`, every guest TAP `ovd-tp-<4hex>`, and the probe's scratch TAP
-`ovd-tp-probe`.
+**The decision: no managed link depends on the host's link configuration**
+(user rulings of 2026-09-28;
+[ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md)).
+Each managed link is correct whether or not systemd-udevd runs, and whatever
+its policy. A write by any other host writer is detected, and it fails safe:
+a wrong bridge address refuses boot or is repaired, and a reserved TAP address
+costs that one VM. The managed links are the node bridge
+`ovd-gbr0`, the startup probe's scratch bridge `ovd-gbr-probe`, every guest
+TAP `ovd-tp-<4hex>`, and the probe's scratch TAP `ovd-tp-probe`.
 
-- A bridge the owner creates carries `GUEST_BRIDGE_MAC` from the moment it
-  exists, and an adopted bridge is converged to it. The shared owner is its
-  only writer (C-295-0).
-- A TAP's host-side address is the one the kernel assigns when `TUNSETIFF`
-  creates it. Nothing writes it afterwards:
-  - the owner never sets a TAP's address;
-  - D-295-R22 denies Cloud Hypervisor `SIOCSIFHWADDR`;
-  - the platform requirement below excludes the host's link-configuration
-    daemon.
+- *A bridge* is created with `GUEST_BRIDGE_MAC` in the `RTM_NEWLINK` that
+  creates it, so udev's address policy leaves it alone, whatever that policy
+  is (the evidence is under *Bridge creation contract*). An adopted bridge is
+  converged to it. Any other write to its address, by any writer or host
+  configuration, is caught by the boot read-back and repaired by the runtime
+  audit (C-295-0).
+- *A TAP* keeps whatever address it is given. The owner never writes one, and
+  D-295-R22 denies Cloud Hypervisor `SIOCSIFHWADDR`. A host link manager may
+  rewrite it, and that is harmless. Correctness rests on the host-side MAC
+  invariant (§ *Driven port — TAP egress guest-MAC delivery (D-295-R21)*),
+  which every unreserved address satisfies. A reserved address, whoever wrote
+  it, is caught at the next read-back.
+- *The scratch TAP's address* is not read. No probe result depends on it.
 
-  The MAC that `provision` records is therefore the TAP's address from
-  creation to deletion. On a healthy host, `activate` and every audit compare
-  it against a value nothing changes.
+Nothing in #295 installs, reads, or requires a host link-configuration file,
+reads udev's device database, or runs `udevadm`. A narrow `.link` file that
+exempts the managed links (`OriginalName=ovd-gbr* ovd-tp-*`,
+`MACAddressPolicy=none`) may ship as image hygiene. That is the Image
+Factory's choice ([GH #75](https://github.com/overdrive-sh/overdrive/issues/75)),
+and it changes no contract here. With it, a TAP keeps the kernel's address,
+which is redrawn at each creation (see *Residual* in § *Driven port — TAP
+egress guest-MAC delivery (D-295-R21)*). A blanket mask of `99-default.link` is
+never used: it would also drop predictable names for the host's NICs. Removing
+the node runtime's dependence on systemd in general is
+[GH #304](https://github.com/overdrive-sh/overdrive/issues/304).
 
 **Bridge creation contract** (`overdrive_netlink::Client`,
 `crates/overdrive-netlink/src/client.rs`):
@@ -4195,7 +4405,7 @@ impl Client {
     logged it: "MAC address on the device already set by userspace".
   - A `NET_ADDR_SET` bridge keeps its address when ports are added and removed
     (`br_stp_recalculate_bridge_id` returns early,
-    `net/bridge/br_stp_if.c:263-265`).
+    `net/bridge/br_stp_if.c:263-265` at v7.0; `:269-270` in the 7.2 tree).
   - RCA P8: `addr_assign_type` read 3 at the first observation after creation
     in 10 of 10 trials, and every final MAC was `02:01:00:00:00:01`.
 - *A link named `name` exists, of any kind.* `Ok(())` with no write. The
@@ -4236,157 +4446,91 @@ read-back in `converge_shared` and to the bridge check in `audit_shared`
 No variant or field is added (ERR-295-A). The refusal keeps its variant and
 operation; only its facts change.
 
-**Platform requirement REQ-295-LINKMAC: no host process other than `overdrive
-serve` writes a managed link's address.** The invariant covers every host link
-manager. The pinned mechanism is for systemd-udevd, which is the writer the
-RCA observed. A host where another link manager (systemd-networkd,
-NetworkManager) matches managed names violates the requirement as well. A
-host that runs systemd-udevd carries this file, named
-`05-overdrive-managed-links.link`, in its `systemd/network` configuration:
+**Earned Trust: independent by construction, checked at every read-back.**
+Asking *"what if the host lies?"* has one answer per link kind, and neither
+answer probes the host's link configuration, because neither relies on it:
 
-```ini
-[Match]
-OriginalName=ovd-gbr* ovd-tp-*
+- *Bridge.* Its independence is proved deterministically on the real kernel:
+  E22 (a) reads `addr_assign_type` 3 and the requested address at the first
+  observation after creation, with or without a host link policy. A later
+  writer, under any host configuration, is caught by the boot read-back, which
+  refuses boot with a fact that names the observed MAC and up state, and by the
+  runtime audit, which repairs it under quiescence (C-295-0).
+- *TAP.* Correctness rests on the host-side MAC invariant, which is checked at
+  provision, at activation, and on every audit pass. A writer that picks an
+  unreserved address changes nothing the owner checks, and a writer that picks
+  a reserved address is detected within one audit period and fails safe: one
+  VM is killed. E22 (e) proves both on the real kernel: after systemd-udevd has
+  initialised the TAP, and with an out-of-band write that stands in for any
+  other writer. E12 (h)'s native hijack drives the reserved case from a real
+  `SIOCSIFHWADDR`.
+- *No host database is read.* The only deterministic signal that udev has
+  finished with a link is udev's own device database. Reading it would add a
+  udev dependency, and running `udevadm` would add a second subprocess beside
+  Cloud Hypervisor (ADR-0085). Neither is needed, because no result waits on
+  udev.
+- *What any host shows, under any link manager and configuration:*
+  - the bridge keeps `GUEST_BRIDGE_MAC`, or boot refuses with the cause
+    named;
+  - a TAP carries whatever address the kernel or a link manager chose;
+  - a TAP holding a reserved address, by collision (*Residual*, § R21) or by
+    any writer, is refused at provision, fails activation, or kills that VM
+    alone.
 
-[Link]
-MACAddressPolicy=none
-```
+**Lifecycle Gate Ownership.** No gate moves, and no state changes meaning.
 
-- *Semantics* (systemd.link(5)). `net_setup_link` applies, to a new link, the
-  first `.link` file in lexical order across its search directories whose
-  `[Match]` matches. This file sorts before `99-default.link`
-  (`OriginalName=*`, `MACAddressPolicy=persistent`). It also sorts before
-  netplan's generated `10-netplan-*.link`. `OriginalName=` is a
-  whitespace-separated list of shell globs over the kernel name.
-  `MACAddressPolicy=none` keeps the address the kernel assigned. The file sets
-  nothing else, so it renames nothing and adds no alternative name.
-- *Evidence.* RCA P9 used an equivalent file (`OriginalName=ovd-*`). udev's
-  `ID_NET_LINK_FILE` named it, and a new TAP kept its kernel address and
-  `addr_assign_type` 1 after 1 s. A control TAP in the same session, under the
-  default policy, was rewritten to type 3.
-- *Coverage.* TAPs are the load-bearing case, because they cannot be born with
-  an address. The bridge globs are defence in depth: creation already makes a
-  bridge immune. Other `ovd-` links are outside the match, because no #295
-  record or audit reads their address: the load-balancer veth pair
-  `ovd-veth-cli`/`ovd-veth-bk` (ADR-0061) and the test-gated `ovd-hv-*` and
-  `ovd-wl-*` veths.
-- *Where it lives.* The requirement belongs to the appliance image. ADR-0068
-  makes the image Overdrive's to build, and its §4 already records the kernel
-  configuration the image must carry. The decision is recorded by
-  [ADR-0144](../../product/architecture/adr-0144-managed-host-links-protected-from-udev-mac-policy.md),
-  not by amending ADR-0068, which records a separate decision, the kernel pin.
-  This section remains the contract. The image's build layer does not exist
-  yet (`meta-overdrive`, the Image Factory MVP, which `brief.md:7302` cites as
-  [GH #75](https://github.com/overdrive-sh/overdrive/issues/75)). Until it
-  does, the requirement is carried by ADR-0144 and by the DEVOPS handoff
-  annotation in `brief.md` (§ *Shared-bridge microVM application
-  architecture*, § *Host link-address policy*). The image ships the file under
-  `/usr/lib/systemd/network/`, and its image test runs the installation check
-  below.
-- *The dev and test substrates carry the same contract* (§ *Required
-  downstream changes*):
-  - the Lima dev VM, `infra/lima/overdrive-dev.yaml`, which also provisions
-    CI's integration job;
-  - the metal host, through `infra/provision/common-system.sh`, which
-    `infra/metal/provision.sh` runs.
+- G-295-1 keeps its owner, its one affected result (`overdrive serve`
+  startup), and its ordering. Its bridge read-back keeps its variant, and its
+  refusal's facts name the cause. It has no condition on the scratch TAP's
+  address (user ruling 4).
+- G-295-2's allocation flow keeps its order. Provision's down read-back gains
+  one refusal: a host-side MAC that breaks the invariant refuses publication
+  and takes the existing "network provision failure before start" projection.
+- G-295-3 keeps its owner, its affected state, and its ordering. Its promise
+  reads the TAP's host-side MAC against the invariant, not against a recorded
+  value (user ruling 2).
+- R14's per-allocation damage for a TAP's host-side MAC is a reserved or
+  missing address (user ruling 2). The kill takes G-295-5's existing per-VM
+  path.
 
-  Each installs the file under `/etc/systemd/network/` and reloads udev.
+The boundary cases are E22's and E12 (g)'s rows:
 
-**Earned Trust: proved where it is installed, detected where it runs.**
-
-- *At installation.* The image test and each substrate's provisioning prove
-  the policy by behaviour, not by the file's presence.
-  - Create a scratch persistent TAP `ovd-tp-lnkchk`, and a scratch bridge
-    `ovd-gbr-lnkchk` with no address.
-  - Wait until systemd-udevd reports each device initialized (`udevadm wait`,
-    systemd ≥ 251).
-  - For each device, require all three: `ID_NET_LINK_FILE` names the Overdrive
-    file; the address equals the one read at creation; `addr_assign_type` is
-    still 1.
-  - Delete both.
-
-  A failure fails provisioning or the image test. A file that another
-  matching file shadows fails the first check. The address comparison also
-  catches any other writer that acts before udev reports the device
-  initialized.
-- *At boot, the startup probe checks for the lie, one-sided.* The probe
-  already creates the scratch TAP `ovd-tp-probe`, which matches the policy.
-  - It reads that TAP, by name, right after `CreateTap`, and records its
-    ifindex and host-side address.
-  - On its success path, after the last exercise (`DetachedLinkGuard`) and
-    before cleanup, it reads the TAP by name again.
-  - The TAP passes only if both the ifindex and the address are equal.
-    Otherwise startup refuses with `PostconditionMismatch { operation:
-    StartupProbe, expected: TapHostMac { ifindex: <recorded>, mac:
-    Some(<recorded>) }, observed }`, which G-295-1 projects to
-    `health.startup.refused`. `observed` is:
-    - `Some(TapHostMac { ifindex, mac })` as re-read, for a changed address,
-      a replaced TAP, or a read that carries no address;
-    - `None` if the TAP is absent.
-  - A failure of either read is `Netlink { operation: StartupProbe, source }`.
-  - The ordinary scratch cleanup then runs, as for every probe failure
-    (D-295-DISTILL-5 steps 6–9).
-
-  The check needs no new dependency, and adds no variant: `TapHostMac` is
-  R21's fact, so it lands with this step (05-00) rather than at 06-02.
-  ERR-295-A's `StartupProbe` operation thereby covers a fourth scratch-probe
-  postcondition, carried by that fact rather than by
-  `GuestNetworkFact::StartupProbe` (§ *ERR-295-A*). The probe changes the
-  scratch TAP only in cleanup, which runs after the re-read. Any difference
-  is therefore another writer's doing, and a refusal is a true positive.
-
-  A pass proves only that the scratch TAP's address and ifindex were unchanged
-  between the record and the re-read. It does not rule out a writer that acted
-  before the record or after the re-read, or that wrote the same value. In the
-  RCA's run the scratch TAP lived about 70 ms (udev's `add` to `remove`),
-  against udev's 3.6 ms at info level and 28–31 ms at debug level.
-- *No deterministic runtime proof.* The only deterministic completion signal
-  is udev's own device database. Reading it would add a udev dependency, and
-  running `udevadm` would add a second subprocess beside Cloud Hypervisor
-  (ADR-0085). The installation check is the deterministic proof.
-- *What a violating host that passes the probe sees:*
-  - A bridge is immune by construction.
-  - A TAP rewritten before `provision` reads it back is recorded with the
-    rewritten address. That is harmless: it changes nothing after that one
-    write, and the TAP's host-side address carries no function beyond R21's
-    record.
-  - A TAP rewritten after the record is `TapHostMac` damage. At `activate`
-    that is the activation-failure projection; in the audit, R14 kills that
-    VM.
-
-  On an image that ships the file and passes its check, none of these
-  occurs.
-
-**Lifecycle Gate Ownership.** G-295-1 keeps its owner, its one affected
-result (`overdrive serve` startup), and its ordering. It gains one probe
-condition, the scratch TAP's unchanged address, which lies inside the
-existing probe stage. Its bridge read-back keeps its variant; only the
-refusal's facts now name the cause. No other gate changes. The boundary
-cases are E22's rows:
-
-- policy present: the probe passes and boot proceeds;
-- a scripted address change: startup refuses with the typed fact;
-- allocation states, which the probe never touches, are unaffected.
+1. *available:* an unreserved host-side MAC, including one udev wrote, passes
+   provision, activation, and every audit, and the bridge read-back passes on a
+   fresh host;
+2. *unavailable:* a reserved or missing address refuses publication at
+   provision, fails activation through the existing activation failure
+   projection, or is that allocation's audit damage;
+3. *unrelated state:* other allocations, the bridge, and the EXEC gate are
+   untouched by one TAP's reserved address, and per-allocation damage leaves
+   the gate Open;
+4. *late:* a rewrite that lands after activation is judged at the next audit,
+   and only by the invariant;
+5. *restart:* nothing about a TAP's address is recorded, so a restart loses
+   nothing, and boot removes every managed TAP;
+6. *feature disabled:* not applicable (single cut).
 
 **Alternatives compared on evidence:**
 
 | Alternative | Why rejected |
 |---|---|
 | Keep create-then-set; re-read and re-set until stable | It races an asynchronous writer that gives no completion signal. A read-back can pass before udev writes, which leaves the rewrite for the runtime audit to repair under quiescence. |
-| The `.link` file alone for the bridge | The structural fix makes the bridge immune whatever the host's policy (kernel and udev source above). A missing or shadowed file therefore cannot refuse boot. Both are kept. |
+| Protect the bridge with a host `.link` file | Boot would then depend on the host's configuration: a missing or shadowed file refuses boot (user rulings of 2026-09-28). Creation with the address holds whatever udev's policy is (kernel and udev source above). |
 | A separate `create_bridge` method | Both callers need create-or-adopt. A second method adds surface, and the changed signature makes each caller pass the identity at compile time. |
-| The owner assigns and records each TAP's address | A TAP cannot be born with an address (`tun.c:1332`, `:2283`). Any owner write lands after the add uevent, inside the window udev races (3.6 ms in RCA run 2). Bounding the race needs udev's completion signal, which the runtime does not read (see *Earned Trust*). |
+| Compare a TAP's host-side MAC with the value recorded at provision | A TAP cannot be born with an address (`tun.c:1332`, `:2283`), and udev rewrites it after creation (3.6 ms in RCA run 2; 28–31 ms at debug level in run 1). On a host with udev's default policy, a healthy VM would read as tampered and be killed. Making the record safe needs the host to exempt managed TAPs, a host dependency the user ruled out. |
+| The owner assigns and records each TAP's address | Any owner write lands after the add uevent, inside the window udev races, so it needs the same host exemption. Bounding the race needs udev's completion signal, which the runtime does not read (see *Earned Trust*). |
 | Record the TAP's address after a settle delay | A timing heuristic. Nothing the owner controls bounds udev's latency: RCA run 1 measured 28–31 ms at debug level, against 3.6 ms at info level in run 2. |
+| Require the host to exempt managed links with a narrow `.link` file, proved at installation | A host-configuration dependency (user rulings of 2026-09-28; GH #304). Every substrate and the image would have to carry and prove the file, and a host without it would refuse boot or kill healthy VMs. It is optional hygiene only. |
 | Mask `99-default.link` on the host | It changes naming and address policy for every host interface, including the physical NICs. |
-| `OriginalName=ovd-*` (the P9 shape) | It also exempts links whose address #295 neither records nor audits, and changes their behaviour. |
-| A deterministic runtime proof of the host policy | It needs udev's device database or a `udevadm` subprocess (see *Earned Trust*). The one-sided probe condition is adopted instead. |
-| No boot check, relying on R21's read-back alone | On a violating host that would show up as racy `TapHostMac` VM kills that look like a MAC hijack of a workload. The adopted refusal instead reports an address change on the probe's scratch TAP, which no workload touches and only a host writer can cause. Every Earned-Trust gate refuses boot on a substrate lie (`brief.md` SD-5). |
+| Refuse boot when the startup probe's scratch TAP changes address | Under the invariant a rewrite is harmless, so the refusal would refuse a correct host (user ruling 4). |
+| Leave the TAP's own guest MAC out of the reserved set | It steals nothing, but it breaks the guest's bridged reception of its peers' ARP replies (`br_input.c:221-222`), and it would need a per-TAP exception in the check (§ R21). |
+| Reserve every held allocation's guest MAC, `Condemned` ones included | A `Condemned` allocation's VMM is dead, so a TAP holding its MAC harms no guest. Its address is reassigned only after its teardown, and the next audit then reserves it for the new holder. |
 
-*(Pinned 2026-09-26 on evidence (the fresh-host RCA, root cause A), under the
-user's ruling that technical decisions are settled on evidence. Decision
-record:
-[ADR-0144](../../product/architecture/adr-0144-managed-host-links-protected-from-udev-mac-policy.md),
-accepted 2026-09-26.)*
+*(The bridge contract was pinned 2026-09-26 on evidence (the fresh-host RCA,
+root cause A). The host independence, the TAP invariant, and the absence of
+any host requirement or probe condition are the user's rulings of 2026-09-28;
+the reserved set is pinned on evidence under ruling 2. Decision record:
+[ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md).)*
 
 ### [REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24
 
@@ -4664,7 +4808,7 @@ hitless restore follows from #295's no-adoption rule, not from this ordering.
 | `CounterMap` | shared owner | audit | yes | `converge_shared()` |
 | `BpffsPin` (endpoint and counter map pins) | shared owner | audit (pins now observed) | yes | `converge_shared()` |
 | `BridgeGuard` (table, chains, three rules; members naming unmanaged TAPs) | shared owner | audit (no longer reported as Bridge) | yes | `converge_shared()` |
-| *Per-allocation damage* (one allocation's TAP existence/persistence/owner-uid/**host-side MAC**/admin-state, TCX attachment, link pin, endpoint entry, or guard member) — not a component | shared owner reports it; nobody repairs it | audit `Ok(SharedGuestNetworkAudit { damaged })` | **no** | none: that VM is killed (user ruling 8) and its lifecycle replaces it |
+| *Per-allocation damage* (one allocation's TAP existence/persistence/owner-uid/**host-side MAC in the reserved set or missing** (D-295-R21)/admin-state, TCX attachment, link pin, endpoint entry, or guard member) — not a component | shared owner reports it; nobody repairs it | audit `Ok(SharedGuestNetworkAudit { damaged })` | **no** | none: that VM is killed (user ruling 8) and its lifecycle replaces it |
 | `IpRules` (constant program in R19 order; policy route: the `fwmark 0x1 lookup 100` rule and table 100's `local 0.0.0.0/0 dev lo` route; R18 guard table) | worker | audit through `observe_shared_state` | yes | `converge_shared_owner()` |
 | `IpSets` (dynamic members versus registry) | worker | audit | yes | `converge_shared_owner()` |
 | `LegF` / `LegC` | worker | immediate (`wait_shared_owner_failure`) plus audit | **no**, only because R19 makes a missing listener fail closed | `converge_shared_owner()` (exact-port rebind) |
@@ -5426,7 +5570,7 @@ No test spawns the `overdrive` binary.
 | E9 | Reclaim on every path, forever, at the constant cadence (R11, F9, L4, M2) | A restart predecessor's cleanup fails, then Reclaim is emitted with backoff and eventually releases; no row is rewritten. Boundary scenarios: a leased Failed allocation of a workload that is then **stopped** (Stop branch) and of one that is **deleted** (GC branch) is reclaimed; so are leased allocations behind the Job terminal fence, the Running guard, the Draining guard, the operator-stop veto, and the Job natural-exit handler. A reclaim that fails N times re-dispatches no sooner than one second after each failure and never stops retrying while the lease exists. At the cap, a current allocation whose restart is pending but not yet due gets no reclaim; the reclaim appears only once the restart is due. | The shim arm and the validator conflict rule; a reclaim whose parts were removed out of band releases the lease | — | — |
 | E10 | Boot after process loss (R12) | S-ND295-13 extended to: reclamation ≺ sweep ≺ member clear ≺ constant program and policy route ≺ open | — | Proof §3.5 in killed mode: V0–V6 GREEN | — |
 | E11 | Supervisor component matrix (R13, R14, R16) and the latch invariant (L9) | Source-local, all 12 components and task classes, printed seeds. Includes: an `IpRules`-only and an `IpSets`-only loss that quiesce, repair, restore, and reopen; a policy-route-only loss detected as `IpRules` and repaired through `converge_shared` with live members, in which the prior node guard is relinquished and not dropped (host targets survive, and a later `install_outbound` succeeds); a double failure (shared-owner component plus `IpRules`) in which no TAP comes up before the worker repair and full audit pass; an activation in flight when a kernel-path detection latches quiescence, which waits and then raises exactly once after reopen. **Invariant, every schedule:** whenever the test-local owner's latch is set (derived from its call journal: a quiescence `TapSetDown` not yet followed by a successful restore), the supervisor capability reports Recovering (`recovery_progress().is_some()`) or FailStop has been requested; the gate is never Open | Proof §3.3 through `run_server_with_obs_and_driver(s)` and the required ports: C0–C8 GREEN, with C6 re-targeted to the per-TAP kill scope | S-ND295-37 (double loss); one native `IpRules` table-deletion case | — |
-| E12 | Per-VM kill scope (R14, user rulings 2 and 8; review finding H1) | Sim `CgroupFs` records writes; the owner call journal shows no owner call between a report and its kill writes. Cases: (a) `unconfirmed = {A}`: exactly A's scope `cgroup.kill` is written, no slice kill, recovery continues and reopens; (b) the quiescence call returns `Err` or hangs past its bound: the workloads-slice `cgroup.kill` is written before the `TapQuiescenceUndetermined` request; (c) a per-VM kill write fails with an I/O error other than `NotFound`: slice kill, then `VmKillFailed`; (d) a per-VM kill write returns `NotFound` (the scope was removed by a concurrent stop or exit watcher): counted as confirmed, no slice kill, recovery reopens; (e) `unconfirmed = {A}` because A's TAP was deleted: A is killed, is never reported by later audits, and recovery reopens for the rest; (f) a `ProvisionedDown` allocation whose TAP vanished is reported damaged by the audit while Open: only its VM is killed, EXEC stays Open, its start is rejected through the VMM-exit path, teardown converges on absence, and the lease is released; (g) audit damage while Open for each per-allocation part (TAP deleted, TCX ingress attachment detached, ingress link pin removed, **TCX egress attachment detached, egress link pin removed**, endpoint entry deleted, guard member removed, TAP raised while `ProvisionedDown`, owner uid or persistence changed, **host-side MAC changed**, **debug message mask non-zero** (D-295-R22)): only that VM is killed, EXEC stays Open, and no fail-stop occurs | Through `run_server_with_obs_and_driver(s)` with the required ports, the sim owner, and a `CgroupManager` over `SimCgroupFs` (proof §3.3, C6 re-targeted to the per-TAP kill scope): `Unconfirmed({A})` emits `guest_network.shared_owner_vm_killed` for A alone, the snapshot holds A's scope `cgroup.kill` write and no workloads-slice write, and recovery reopens; audit damage while Open kills only that VM and EXEC stays Open; quiescence `Fail` and quiescence `Hang` each end in exactly one `TapQuiescenceUndetermined` request through `ServerHandle::shutdown_requested`, with the workloads-slice `cgroup.kill` write in the snapshot when it is received | Native cases through `serve` + `deploy`: an injected per-TAP set-down failure kills only that VM and the node recovers; (e) deleting one `Active` TAP during an unrelated `IpRules` fault kills only that VM and recovery reopens; (f) deleting the TAP of an allocation held `ProvisionedDown` (a guest image that delays READY) kills only that VM; (g) out-of-band detach of one TAP's TCX ingress link, separately of its TCX egress link, and separately removal of one guard member, kills only that VM with EXEC open; **(h) R5-H1 host-side-MAC hijack (D-295-R21). Pre-control RED oracle: the increment-z native reproduction (`spike/findings-mac-fdb-isolation.md` STEPs 4–6: uid 4200 with `CapEff=0`, holding only its own queue fd, moved the victim's guest MAC to its port as `LOCAL\|STATIC` and read the victim's host-to-guest frames from that fd; the unknown-unicast flood also reached it). The production composition always has the control, so no uncontrolled production run is rebuilt. Production-composed GREEN through `serve` + `deploy`, with two `Active` allocations, attacker A and victim V: a process running as uid 4200 with no capabilities, holding a duplicate of A's queue descriptor, sets A's host-side MAC to V's guest MAC with `SIOCSIFHWADDR` (this test process is not launched through the VMM adapter, so it runs outside the D-295-R22 launch filter and models a change the filter does not see; the prevention itself is E21); the test then sends host-originated unicast to V's guest MAC. Oracles: (1) A's TAP transmits zero frames addressed to V (exact-ifindex capture on A's TAP plus a read on the held queue descriptor; this is the primary oracle), and the node-wide `EgressDestinationDrop` slot, which every TAP's egress program shares, rises by at least the frames sent; (2) positive controls: host unicast to A's own guest MAC still reaches A's guest, and a host broadcast reaches every guest; (3) while the entry is poisoned (after the change, before A's teardown), V receives no host unicast (exact-ifindex capture on V's TAP); (4) the next audit reports A's host-side MAC as per-allocation damage (`TapHostMac`) and kills only A's VM; EXEC stays Open, and V and every other allocation are untouched; A's teardown is then performed by its ordinary lifecycle cleanup (its restart's predecessor cleanup after the one-second restart backoff, or FinalizeFailed or R11 reclaim), with no test-installed effect, and the kill→teardown interval is recorded; (5) after A's teardown returns its empty complement, `bridge fdb show` lists V's MAC on no port except V's own, a host→V ICMP echo sent then is answered (whether the host first re-resolves V by broadcast ARP or sends straight into the empty FDB entry, only V's egress classifier admits a unicast to V's MAC), and V's reply re-learns V's MAC as a learned, non-permanent entry on V's port. Bounds: (4) within one audit period (1 s, subject to E18) of the change; (5) the echo answered and the re-learned entry observed within 1 s of teardown's complement read-back**. No native case exercises the whole-call branch (see *E12 whole-call branch* below) | — |
+| E12 | Per-VM kill scope (R14, user rulings 2 and 8; review finding H1) | Sim `CgroupFs` records writes; the owner call journal shows no owner call between a report and its kill writes. Cases: (a) `unconfirmed = {A}`: exactly A's scope `cgroup.kill` is written, no slice kill, recovery continues and reopens; (b) the quiescence call returns `Err` or hangs past its bound: the workloads-slice `cgroup.kill` is written before the `TapQuiescenceUndetermined` request; (c) a per-VM kill write fails with an I/O error other than `NotFound`: slice kill, then `VmKillFailed`; (d) a per-VM kill write returns `NotFound` (the scope was removed by a concurrent stop or exit watcher): counted as confirmed, no slice kill, recovery reopens; (e) `unconfirmed = {A}` because A's TAP was deleted: A is killed, is never reported by later audits, and recovery reopens for the rest; (f) a `ProvisionedDown` allocation whose TAP vanished is reported damaged by the audit while Open: only its VM is killed, EXEC stays Open, its start is rejected through the VMM-exit path, teardown converges on absence, and the lease is released; (g) audit damage while Open for each per-allocation part (TAP deleted, TCX ingress attachment detached, ingress link pin removed, **TCX egress attachment detached, egress link pin removed**, endpoint entry deleted, guard member removed, TAP raised while `ProvisionedDown`, owner uid or persistence changed, **host-side MAC equal to a reserved address** (another held allocation's guest MAC, its own guest MAC, or `GUEST_BRIDGE_MAC`; D-295-R21), **debug message mask non-zero** (D-295-R22)): only that VM is killed, EXEC stays Open, and no fail-stop occurs; the contrast, a host-side MAC changed to an unreserved address, is not damage: nothing is killed | Through `run_server_with_obs_and_driver(s)` with the required ports, the sim owner, and a `CgroupManager` over `SimCgroupFs` (proof §3.3, C6 re-targeted to the per-TAP kill scope): `Unconfirmed({A})` emits `guest_network.shared_owner_vm_killed` for A alone, the snapshot holds A's scope `cgroup.kill` write and no workloads-slice write, and recovery reopens; audit damage while Open kills only that VM and EXEC stays Open; quiescence `Fail` and quiescence `Hang` each end in exactly one `TapQuiescenceUndetermined` request through `ServerHandle::shutdown_requested`, with the workloads-slice `cgroup.kill` write in the snapshot when it is received | Native cases through `serve` + `deploy`: an injected per-TAP set-down failure kills only that VM and the node recovers; (e) deleting one `Active` TAP during an unrelated `IpRules` fault kills only that VM and recovery reopens; (f) deleting the TAP of an allocation held `ProvisionedDown` (a guest image that delays READY) kills only that VM; (g) out-of-band detach of one TAP's TCX ingress link, separately of its TCX egress link, and separately removal of one guard member, kills only that VM with EXEC open; **(h) R5-H1 host-side-MAC hijack (D-295-R21). Pre-control RED oracle: the increment-z native reproduction (`spike/findings-mac-fdb-isolation.md` STEPs 4–6: uid 4200 with `CapEff=0`, holding only its own queue fd, moved the victim's guest MAC to its port as `LOCAL\|STATIC` and read the victim's host-to-guest frames from that fd; the unknown-unicast flood also reached it). The production composition always has the control, so no uncontrolled production run is rebuilt. Production-composed GREEN through `serve` + `deploy`, with two `Active` allocations, attacker A and victim V: a process running as uid 4200 with no capabilities, holding a duplicate of A's queue descriptor, sets A's host-side MAC to V's guest MAC with `SIOCSIFHWADDR` (this test process is not launched through the VMM adapter, so it runs outside the D-295-R22 launch filter and models a change the filter does not see; the prevention itself is E21); the test then sends host-originated unicast to V's guest MAC. Oracles: (1) A's TAP transmits zero frames addressed to V (exact-ifindex capture on A's TAP plus a read on the held queue descriptor; this is the primary oracle), and the node-wide `EgressDestinationDrop` slot, which every TAP's egress program shares, rises by at least the frames sent; (2) positive controls: host unicast to A's own guest MAC still reaches A's guest, and a host broadcast reaches every guest; (3) while the entry is poisoned (after the change, before A's teardown), V receives no host unicast (exact-ifindex capture on V's TAP); (4) the next audit reports A's host-side MAC, now V's guest MAC and so a reserved address, as per-allocation damage (`TapHostMac` with `address: Reserved(<V's guest MAC>)`) and kills only A's VM; EXEC stays Open, and V and every other allocation are untouched; A's teardown is then performed by its ordinary lifecycle cleanup (its restart's predecessor cleanup after the one-second restart backoff, or FinalizeFailed or R11 reclaim), with no test-installed effect, and the kill→teardown interval is recorded; (5) after A's teardown returns its empty complement, `bridge fdb show` lists V's MAC on no port except V's own, a host→V ICMP echo sent then is answered (whether the host first re-resolves V by broadcast ARP or sends straight into the empty FDB entry, only V's egress classifier admits a unicast to V's MAC), and V's reply re-learns V's MAC as a learned, non-permanent entry on V's port. Bounds: (4) within one audit period (1 s, subject to E18) of the change; (5) the echo answered and the re-learned entry observed within 1 s of teardown's complement read-back**. No native case exercises the whole-call branch (see *E12 whole-call branch* below) | — |
 | E13 | Member, policy-route, and guard audit and repair (R15, F18, H2) | Sim intercept; the worker hands over the guard without dropping the prior one | Lima real nft and routing, **with live allocations** (non-empty dynamic sets): delete one member, the whole table, the fwmark rule, the table-100 route, or the guard table; detection within 1 s; repair restores exactly the deleted object; after every repair the recorded targets are intact and a new allocation installs its elements | — | — |
 | E14 | Intercept-marked TCP fails closed (R18, R19) | — | — | Native RED first, then GREEN, with the bridge guard intact. The pre-test value of host `net.ipv4.ip_forward` is recorded; oracle (a) runs with forwarding enabled as a declared environment precondition. **R18** (`table ip overdrive-mtls` deleted): (a) forwarding: a peer-TAP capture shows zero forwarded intercept-marked frames for a guest SYN to the peer's address; (b) host-local: a guest SYN to the bridge gateway address, and one to another host interface address, at the port of a host listener bound to `0.0.0.0`, gets no SYN-ACK, and that listener accepts nothing. **R19** (program present, listener absent; outbound rule 1 → rule 2): (c) with the leg-F listener closed and the TAP up, and (d) in killed mode with Cloud Hypervisor alive and the TAP up, a guest SYN to the gateway address and one to an external address outside every managed and registered set, each at the port of a host listener bound to `0.0.0.0`, get no SYN-ACK and that listener accepts nothing. An inbound control (leg C closed; SYN to a registered destination) is dropped by rule 4 under both orders. **`TIME_WAIT` side door (L3, preconditions per research A2):** (e) complete one leg-F connection from guest source port P to destination D:p, and make the **guest complete its own close** so the entry is in the true `TIME_WAIT` substate (a `FIN_WAIT2` substate answers the SYN with RST), then close leg F (and, separately, kill `serve` in killed mode — which closes every leg-F socket at once, opening the door per flow for ~60 s), and within the `TIME_WAIT` interval send a guest SYN from P to D:p **carrying a sequence number above the old `rcv_nxt` (or a newer `TSval`)** with a host listener bound to `0.0.0.0:p`: record whether it gets a SYN-ACK. Two controls run first and do not depend on the door. Both target one `TIME_WAIT` entry held by a host listener on a path the TPROXY program does not handle (for example a test-owned veth peer namespace under the `TestCidrLease` discipline, connecting to a host listener bound to `0.0.0.0:p`): the listener's accepted socket closes first, then the peer closes, so the host side holds the true `TIME_WAIT` substate. **Negative control (first):** the probe generator sends, from the same peer 4-tuple, a SYN with a stale ISN and no timestamp option (or a TSval no newer than the entry's), and gets a bare ACK (`TCP_TW_ACK`, research A2) and no SYN-ACK, proving the substate and sequence gates; the entry survives. **Positive control (second; review defect D9):** after an interval longer than `tcp_invalid_ratelimit`, the same generator sends a SYN with a sequence number above the old `rcv_nxt`, meets the sequence precondition, and receives the SYN-ACK (a reopen consumes the entry, which is why it runs second). Only then does (e) run against the guest's leg-F entry. **Healthy baseline (the guard's non-interference control), before any fault:** with both tables present, leg F listening, and the guard table read back present (`observe_intercept_mark_guard` returns `Ok(true)`), each guest SYN of the R18 cases (to the peer's address, to the bridge gateway address, and to another host interface address, at the port of a host listener bound to `0.0.0.0`) receives a SYN-ACK, and that host listener accepts nothing: the intercept answered it and the guard dropped nothing on the healthy path. The guard rule carries no counter (§ *R18-B contract*). A further fault deletes only the guard table and shows the intercept program still catches or drops. **In-run ingress witness (every R18 GREEN case and the guard-only case):** each probe SYN appears in an exact-ifindex capture on its sender's TAP, which reads back administratively up when the SYN is sent; the node-wide TCX `Intercept` counter (`GuestTcxCounter::Intercept`) rises by at least the SYNs sent; and the bridge guard's default-drop counter does not change. A run in which the TAP was already quiesced (the `IpRules` loss quiesces managed TAPs) is void, not GREEN. | — |
 | E15 | The CLI consumes fail-stop (R17) | — | `serve_lifetime_fail_stop` (in-process `serve`, injected signals and clock): the internal request beats a ready SIGINT or SIGTERM; the 10 s bound is measured on the injected clock; `exit_code()==1`; drained and abandoned cases | The same test runs on metal, because its real fault needs the kernel | — |
@@ -5436,7 +5580,7 @@ No test spawns the `overdrive` binary.
 | E19 | Creation-time close-on-exec (obligation OBL-295-CLOEXEC, L2) | — | The `xtask` source gate over every first-party `serve` crate: zero raw descriptor-creating calls without the close-on-exec flag; one planted violation per row of the gate's call table (including an `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s` rename, and a `nix`/`rustix` wrapper) fails it; an unparseable file fails the scan rather than being skipped | — | — |
 | E20 | Cleanup-pending status (R20, user ruling 6) | Pure predicate: `cleanup_pending` over every lease × row-state pair matches the table in § *Operator status* | In-process through `run_server` and the HTTP API, with an `MtlsIntercept` element-removal fault: a `StopAllocation` whose cleanup fails leaves the row `Running` and `GET /v1/allocs` reports `network_cleanup_pending: true`, excluded from `replicas_running`; after the retry converges the row is `Terminated` and the field is false. A crashed allocation (Failed row, Admitted lease) and a reclaim in progress report true. CLI live-path render tests (`render::workload_describe`): a pending row renders `CleanupPending` plus the lifecycle detail line and never `Running`, in both the Service and Job tables; every non-pending row renders byte-identically | — | — |
 | E21 | VMM launch seccomp filter (R22, ADR-0143): every Cloud Hypervisor thread carries it, each denied request returns `EPERM`, every other ABI route fails closed, and CH still boots and passes traffic | — | **Pure, default lane (no I/O).** On an x86_64 build, the program `VmmLaunchSeccompFilter::for_target` builds, evaluated over synthetic `seccomp_data`, yields this verdict partition. (a) Each of the 13 requests as `ioctl` `args[1]` → `ERRNO\|EPERM`, including with `args[1]`'s upper 32 bits set. (b) The six `fd=`-path requests, a read-only request, and a non-`ioctl` syscall carrying a denied value in `args[1]` → `ALLOW`. (c) A foreign audit architecture → `KILL_PROCESS`. (d) `nr = 0x4000_0000 + 514` (x32 `ioctl`), `0x4000_0000 + 16`, and any other `nr ≥ 0x4000_0000` except `-1` → `KILL_PROCESS`; `nr = -1` → `ALLOW`. Also: the 13 derived values equal the increment-aa numbers; the composed audit value and the x32 bit are pinned; `VMM_LAUNCH_DENIED_IOCTLS` is exactly the table. Source-local mapping tables: an unsupported-architecture value maps to `ConfinementUnavailable { control: Seccomp }`, and each probe cause maps to its `LaunchSeccomp*` variant. On any other build target (an aarch64 build, such as an Apple Silicon Lima VM) the arm with no program is the compiled arm: `for_target` returns `LaunchSeccompUnsupportedArch` naming the architecture, and `create`'s filter-first refusal on that arm can be executed there (ruling 10; GH #302). On an x86_64 build that arm is reviewed, not executed. **Lima root (real kernel; the source-local `launch_seccomp_kernel` module of § *Testability boundary*).** On an x86_64 VM, a process launched through `register_launch_child_hook` with the production program (a re-exec of the crate's test binary) holds an attached queue of a scratch persistent TAP at descriptor 3. Each of the 13 requests returns `EPERM` from its main thread and from three threads created after exec. None of the six `fd=`-path requests returns `EPERM`. `/proc/self/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`. The descriptor table is exactly 0–3. The probe's `check_launch_seccomp` passes. On any other architecture, such as an Apple Silicon Lima VM, `check_launch_seccomp` returns `LaunchSeccompUnsupportedArch` naming it, and the production-program cases are proven on metal by (f). | **x86_64 native metal, production launcher, through `serve` + `deploy`:** (e) CH reaches READY and passes bidirectional traffic (S-ND295-01 and E3 run with the filter in force). At READY and again after traffic, every thread in `/proc/<ch>/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`, and each thread's `Seccomp_filters` equals the shipped Cloud Hypervisor build's own count for that thread plus 1: leader 1, `vmm` and `http-server` 2, every other thread 3 (the increment-aa control table, measured on the audited v53.0 build; OBL-295-SECCOMP-REVERIFY re-measures it when the shipped build changes). The leader's count is the discriminating check, because CH's own filters never cover it; worker coverage follows from it together with kernel inheritance. (f) The whole Lima-root block repeated on metal, plus the fail-closed ABI routes under the production program. The block is the `EPERM` cases, the per-thread `NoNewPrivs`/`Seccomp` reads, the exact 0–3 descriptor table, and a passing `check_launch_seccomp`. The fail-closed ABI routes are: an x32 `syscall(0x4000_0000 + 514, …)` ends the process with `SIGSYS`, and so does an i386 `int 0x80` `ioctl` where the kernel provides the i386 entry. (g) OBL-295-SECCOMP-REVERIFY: the source audit and (e) on any of that obligation's triggers (a change to the shipped Cloud Hypervisor build, to the `--net` launch shape, or to the Cloud Hypervisor net-device paths the platform uses). It is a review obligation; no runtime version check exists (user ruling of 2026-09-25). There is no aarch64 case: aarch64 microVM launches are refused (user ruling 10), and proving the filter and enabling them is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302). | — |
-| E22 | One writer per managed-link address (fresh-host RCA; REQ-295-LINKMAC) | — | **Source-local, deterministic:** the startup probe's address condition, through the D-295-DISTILL-5 scripted scratch I/O. (p1) An unchanged address passes. (p2) A changed address refuses with `PostconditionMismatch { operation: StartupProbe }` over `TapHostMac`, and the scratch cleanup still runs with its complement. **Lima root, real kernel.** (a) `ensure_bridge` on an absent name: the first observation after the call reads `addr_assign_type` 3 and the address `mac`, with the link down and no set issued in between. This oracle is deterministic, and it holds with or without the host policy. A create-then-set control in the same session shows the race the fix removes on a host without the policy; it is supporting evidence, not a gate. (b) `ensure_bridge` on a present link of any kind writes nothing: its ifindex, address, `addr_assign_type`, and administrative state are unchanged. (c) A fresh-host `run_server` boot with `ovd-gbr0` absent passes the bridge read-back, and the read-back MAC is `GUEST_BRIDGE_MAC` (S-ND295-00's bridge-identity leg). Repeated fresh-host boots print their iteration count; one run is not a gate for a timing race. A run that ends in the RCA's unexplained `StartupProbe` timeout (RCA § 8: "detached guard packet did not reach the exact drop transition") is recorded as that outcome. It counts neither for nor against the bridge fix. (d) A bridge identity mismatch reports the observed MAC and up state, not two equal facts. The real-kernel stimulus is the audit leg: an out-of-band MAC write on `ovd-gbr0`, then `audit_shared`. After the fix, the boot read-back has no deterministic real-kernel stimulus, and it shares the audit's fact construction. (e) At 06-02, after systemd-udevd has initialized a provisioned TAP, the recorded `host_mac` equals its live address, and the audit reports no damage for it. | (c) and (e) on the metal host once `infra/provision` carries the policy, with the host's `systemd --version` recorded. The substrate's provisioning check is the policy's proof there. | — |
+| E22 | Managed-link identity independent of host link configuration (fresh-host RCA; user rulings of 2026-09-28) | — | **Source-local, deterministic:** the host-side MAC invariant through the D12A allocation I/O, at provision, at `activate`, and in the audit. (i1) Each reserved class, set on one TAP, breaks the invariant with `PostconditionMismatch { operation: TapObserve }` over `TapHostMac` (observed `Reserved(<mac>)`, or `Missing` for a read without an address): another held allocation's guest MAC, including one held `ProvisionedDown`; the TAP's own guest MAC; and `GUEST_BRIDGE_MAC`. At provision it refuses publication; at `activate` it refuses before any mutation; in the audit it names exactly that allocation. The ordering case: a TAP that took a guest MAC before that guest's allocation was held passes every audit until the allocation is provisioned, and the first audit after that names the TAP. (i2) The contrast: a host-side MAC changed to an unreserved address passes all three, and in the audit a TAP holding a `Condemned` allocation's guest MAC is not damage. **Lima root, real kernel.** (a) `ensure_bridge` on an absent name: the first observation after the call reads `addr_assign_type` 3 and the address `mac`, with the link down and no set issued in between. This oracle is deterministic, and it holds with or without the host policy. A create-then-set control in the same session shows the race the fix removes on a host without the policy; it is supporting evidence, not a gate. (b) `ensure_bridge` on a present link of any kind writes nothing: its ifindex, address, `addr_assign_type`, and administrative state are unchanged. (c) A fresh-host `run_server` boot with `ovd-gbr0` absent passes the bridge read-back, and the read-back MAC is `GUEST_BRIDGE_MAC` (S-ND295-00's bridge-identity leg). Repeated fresh-host boots print their iteration count; one run is not a gate for a timing race. A run that ends in the RCA's unexplained `StartupProbe` timeout (RCA § 8: "detached guard packet did not reach the exact drop transition") is recorded as that outcome. It counts neither for nor against the bridge fix. (d) A bridge identity mismatch reports the observed MAC and up state, not two equal facts. The real-kernel stimulus is the audit leg: an out-of-band MAC write on `ovd-gbr0`, then `audit_shared`. After the fix, the boot read-back has no deterministic real-kernel stimulus, and it shares the audit's fact construction. (e) At 06-02, with two allocations provisioned by the production owner: after systemd-udevd, where the substrate runs it, has initialized the first TAP (the test may wait with `udevadm wait`; production never runs it), the audit reports no damage for it, whatever address udev left; an out-of-band write of an unreserved address on that TAP is still no damage; an out-of-band write of the second allocation's guest MAC is that TAP's `TapHostMac` damage alone (observed `Reserved(<mac>)`), and the second allocation and the node stay healthy. No case installs or requires a host `.link` file. | (c) and (e) on the metal host as it is provisioned, with the host's `systemd --version` recorded. No host link configuration is installed or required. | — |
 
 **E12 whole-call branch.** When the owner cannot determine per-TAP outcomes
 (quiescence returns `Err`, or the call misses
@@ -5769,22 +5913,30 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     name/ifindex/type/MAC/gateway-prefix, then brings it up"*. Its
     implementation creates the bridge with no address (`client.rs:450-460`).
     D-295-R21 says `provision` records *"the MAC read back when `provision`
-    observed the TAP down"*. Both assumed that the owner is the only writer of
-    a managed link's address. On a host running systemd-udevd with its default
-    policy, a new link has a second writer for its first milliseconds. That
-    writer refused 6 of the 9 fresh-host boots that reached the bridge check
-    (the fresh-host RCA, root cause A).
-    Replaced by § *Managed-link address from creation, and the host
-    link-address policy* (pinned 2026-09-26):
+    observed the TAP down"*, and that `activate` and the audit compare the live
+    host-side MAC against it, a changed MAC being per-allocation damage. Both
+    assumed that the owner is the only writer of a managed link's address. On
+    a host running systemd-udevd with its default policy, a new link has a
+    second writer for its first milliseconds. That writer refused 6 of the 9
+    fresh-host boots that reached the bridge check, and it rewrites every new
+    TAP (the fresh-host RCA, root cause A).
+    Replaced by § *Managed-link identity independent of host link
+    configuration* and § *Driven port — TAP egress guest-MAC delivery
+    (D-295-R21)* (the bridge pinned 2026-09-26; user rulings of 2026-09-28):
     - `ensure_bridge` creates the bridge with its address;
-    - platform requirement REQ-295-LINKMAC excludes the host's link manager
-      from every managed link's address, and the startup probe refuses a host
-      it catches violating that;
+    - a TAP's host-side MAC is judged by the host-side MAC invariant, not by a
+      recorded value, and nothing is recorded;
+    - no host link configuration is required or probed, and the startup probe
+      does not read its scratch TAP's address;
     - the BridgeObserve refusal reports the observed MAC and up state.
 
     ADR-0126 names neither the creation step nor a single writer, so it needs
-    no amendment. Nor do ADR-0130 and ADR-0142, which own the read-back and the
-    delivery control, not the record's writer set.
+    no amendment. ADR-0130, which owns the audit read-back set, states the
+    invariant; it is accepted and not implemented, so it is revised in present
+    tense. ADR-0122, ADR-0124, ADR-0142, ADR-0143, and `c4-diagrams.md`
+    describe the host-side MAC read-back as detecting "a change" or a
+    "mismatch", or show a recorded MAC. Their wording is routed to the user in
+    § *Required downstream changes*.
 
 ### [REF] Reuse Analysis — replacement delta
 
@@ -5794,7 +5946,7 @@ Each superseded contract is quoted verbatim, followed by its replacement.
 | Child descriptor mapping and inheritance set | None in the tree (no `pre_exec`/`pass_fds`/`dup2` helper) | **CREATE** through the `command-fds` dependency (gate closed by research F1.5) plus one audited `pre_exec` close-on-exec hook, which also carries the D-295-R22 filter install. The creation-time close-on-exec source gate is a separate implementation obligation (OBL-295-CLOEXEC). `command-fds` alone is rejected: it closes nothing else (research F1.4). |
 | TAP owner | `create_persistent_tap(name, owner_uid)` | **REUSE** the existing signature with owner uid 0. Dropping the owner is rejected (review finding F1). |
 | Host→guest delivery only to the registered guest MAC (R5-H1) | The ADR-0115 endpoint map (`GuestEndpointFact.source_mac`, keyed by ifindex), the existing per-TAP TCX ingress classifier and its `COUNTERS` array, and the D6/D12 attach/pin/query/detach operations | **EXTEND** with a TCX egress program per TAP that reads the same endpoint map and drops every unicast not addressed to the registered guest MAC (map miss included), one added counter slot, and one `attach_first_egress` sibling; query, pin, detach, and counter read are reused. `flood off` is rejected on evidence (it adds nothing to the egress check against the flood leak and delays delivery to un-learned guests). An nft bridge output rule is rejected (a second owner/codec beside the endpoint map). Prevention at the source is the separate D-295-R22 launch filter (ADR-0143); a BPF-LSM ioctl hook is rejected there. |
-| Host-side TAP MAC change detection (R5-H1) | The existing D12A `observe_tap` and `ObservedLinkIdentity.mac` | **REUSE** the existing observation, projecting the host-side MAC into `GuestNetworkAllocationTapObservation::Persistent` and recording the provisioned MAC in the owner's per-allocation state; a change is per-allocation damage (R14). No new netlink surface. |
+| Host-side TAP MAC check (R5-H1; user ruling 2 of 2026-09-28) | The existing D12A `observe_tap` and `ObservedLinkIdentity.mac`; the plans the owner already holds | **REUSE** the existing observation, projecting the host-side MAC into `GuestNetworkAllocationTapObservation::Persistent`, and the held plans as the source of the reserved set. A reserved or missing address is per-allocation damage (R14). No new netlink surface and no recorded MAC. Comparing with a MAC recorded at provision is rejected: host link managers rewrite a TAP after creation. |
 | Denying Cloud Hypervisor the TAP-mutating ioctls (R22) | Cloud Hypervisor's own `--seccomp` (`VmConfinement::seccomp_arg`); the ADR-0129 launch hook; `seccompiler` 0.5.0 | **EXTEND** the one ADR-0129 hook with the install and **CREATE** a private pure program builder over the locked `libc`. CH's own filters are rejected as the control (per-thread, leader unfiltered, `SIOCSIFHWADDR` allowed; research B2, increment-aa control). `seccompiler` is not chosen, on evidence: the proven artefact is the hand-built shape, it adds an unreviewed dependency, and it can close the x32 route only by a hand-enumerated literal key (§ *Driven port — VMM launch seccomp filter*). A second hook is rejected: one audited hook carries both the close and the install. |
 | TAP debug message mask read-back (R22, ADR-0130 read-back set) | `observe_tap` (rtnetlink link attributes, which do not carry `msg_enable`); the `ethtool` crate 0.2.9 (no debug-message handle); the hand-rolled `GenlSock` in `overdrive-netlink::ethtool` | **EXTEND** `overdrive-netlink::ethtool` with an `ETHTOOL_MSG_DEBUG_GET` single read and dump over the existing `GenlSock`, and D12A with two leaf methods; one fact variant. The legacy `SIOCETHTOOL` `ETHTOOL_GMSGLVL` ioctl is rejected: it would add a second, ioctl-based ethtool path beside the netlink one the module already owns. |
 | Activation wait during recovery | `GuestNetworkExecGate::claim_release` | **REUSE** the existing capability as a wait in the action shim; a new retry owner or "activation pending" state is rejected. |
@@ -5805,7 +5957,7 @@ Each superseded contract is quoted verbatim, followed by its replacement.
 | Cleanup retry for leased Failed/Terminated allocations no other action owns | `StopAllocation` and `FinalizeFailed` replay; `vm-reclamation` | **CREATE** one row-neutral action, computed on every reconcile path. The existing actions would rewrite rows, and `vm-reclamation` owns VMM residue, not lease residue. |
 | Grouped element release | Netlink `delete_shared_ip_intercept_elements_atomically`; `SharedElementGuard::drop` | **EXTEND** the `MtlsIntercept` port over the existing netlink effect, with convergent semantics. |
 | Bridge address from creation (fresh-host RCA) | `Client::ensure_bridge(name)` followed by `set_link_mac` (`client.rs:450-482`) | **EXTEND** `ensure_bridge` with the address, carried in its one create message. A separate creation method is rejected (two callers, one create-or-adopt need). `set_link_mac` is reused unchanged for adoption and repair. |
-| Excluding the host's link manager from managed-link addresses (fresh-host RCA) | systemd's shipped `99-default.link`; an owner-assigned TAP address; a runtime probe | **CREATE** one platform `.link` file (REQ-295-LINKMAC), proved at installation. **EXTEND** the existing startup probe with a one-sided address check on its scratch TAP, reusing R21's `TapHostMac` fact. An owner-assigned address cannot close the TAP's creation race. A deterministic runtime proof would need udev's database or a subprocess. |
+| Independence from the host's link managers (fresh-host RCA; user rulings of 2026-09-28) | A platform `.link` file; systemd's shipped `99-default.link`; an owner-assigned TAP address; a startup-probe check | **NOTHING CREATED.** Creation with the address (above) and the host-side MAC invariant (row above) make every managed link correct under any host link configuration. A required `.link` file is rejected as a host dependency (it stays optional image hygiene, GH #75). An owner-assigned address cannot close the TAP's creation race. A startup-probe check would refuse hosts that are correct. |
 | Element-method refusal when no program is recorded (B-8) | `NftRuleInstallFailed`, `ChainAbsent`, `PostconditionMismatch`; the host's constructed-source refusals (`mtls_intercept_port.rs:661-674`, `:686-698`, `:1076-1085`) | **CREATE** one source-less `InterceptError` variant. Each existing variant either needs a fabricated source or identity, or reports a kernel observation rather than process-local state. |
 | Intercept listener a simulation can implement without a socket (B-7) | `std::net::TcpListener` from `bind_transparent`; `tokio::net::TcpListener`; the existing `make_transparent_listener`, `accept_outbound_and_recover_orig_dst`, and `accept_inbound_leg` (`mtls_intercept.rs:333`, `:1093-1136`) | **CREATE** one port-owned `InterceptListener` trait with its accepted-connection value and two-variant error; the host implementation reuses `make_transparent_listener` for the socket. Both listener types are rejected: each exists only as a bound kernel socket. The two accept helpers are the host's substrate, not a boundary a simulation can implement. |
 | Stop-error fan-out to many callers (B-6) | Today's `Clone` stored result (`mtls_intercept_worker.rs:1884-1927`) | **REUSE** the stored-result-and-clone mechanism; the two typed leaf sources are held in `Arc` so the R10 enum stays `Clone`. |
@@ -5857,8 +6009,9 @@ DESIGN created no issue. No other deferral is proposed.
   - Add steps for R1 to R4 (VMM fd handoff and descriptor inheritance), the
     OBL-295-CLOEXEC source gate, R6 to R8, R10 to R12, R14 to R16, R18, R19,
     R20, and R21 (TAP egress guest-MAC classifier with its counter slot and
-    provision/activate/audit/teardown steps, plus the host-side-MAC record and
-    audit read-back; no `flood off`), and R22 (the pure launch seccomp program
+    provision/activate/audit/teardown steps, plus the host-side MAC invariant
+    check at provision, `activate`, and the audit, with no recorded MAC; no
+    `flood off`), and R22 (the pure launch seccomp program
     builder, its install in the one launch hook on every launch, the
     `create`-first architecture refusal, the probe's `launch-seccomp` stage and
     three `VmmProbeError` variants, and the debug-mask read-back through
@@ -5890,8 +6043,8 @@ DESIGN created no issue. No other deferral is proposed.
     verdict partition — own-MAC deliver, foreign-MAC drop, map-miss unicast
     drop, broadcast/multicast deliver with or without an entry, short-frame
     drop — plus the egress provision/activate/audit/teardown steps, the
-    host-side-MAC record and audit read-back, and its per-allocation-damage
-    kill), R22 (E21: the pure verdict partition, the Lima-root `EPERM` and
+    host-side MAC invariant check at provision, `activate`, and the audit
+    (E22 (i1), (i2)), and its per-allocation-damage kill), R22 (E21: the pure verdict partition, the Lima-root `EPERM` and
     per-thread cases through the production hook, the native boot/traffic and
     per-thread filter cases, the x32 and i386 fail-closed cases, the
     debug-mask provision/activate/audit read-back with its per-allocation-damage
@@ -5908,7 +6061,8 @@ DESIGN created no issue. No other deferral is proposed.
     double-failure no-early-restore case, and the latch-implies-not-Open
     invariant; the E7 at-cap recreate-ordering cases; the E12 kill-scope cases
     (a) to (h), including the absent-scope, deleted-TAP, `ProvisionedDown`,
-    damaged-part (egress link and pin and host-side MAC included), and
+    damaged-part (egress link and pin, and a reserved host-side MAC, included),
+    and
     `VmKillFailed` cases, the non-zero debug-mask damage case, and (h) the
     R5-H1 host-side-MAC hijack, from a test process outside the R22 launch
     filter: the increment-z native reproduction as its pre-control RED oracle
@@ -6355,28 +6509,39 @@ DESIGN created no issue. No other deferral is proposed.
     path converges in `start_shared_owner` first, and the boot-order invariant
     converges before it seeds members
     (`overdrive-sim/src/invariants/netns_density_boot_order.rs:155-163`).
-- **Consequences of the 2026-09-26 fresh-host pin (managed-link address from
-  creation; REQ-295-LINKMAC) for DISTILL, DELIVER, and the substrates:**
-  - *Owning DELIVER step.* A new step, with the working ID **05-00**. It
-    depends on nothing, and every root step of the re-roadmap depends on it:
-    05-01, 05-02, 05-04, and 06-01. It is therefore ordered before every step
-    whose evidence boots `run_server`. About half the boots that must create
-    `ovd-gbr0` refuse today (RCA § 10). DELIVER owns the final ID, but may not
-    order the step later. Its scope:
-    - `Client::ensure_bridge(name, mac)`, with a rustdoc that states the
-      contract above;
-    - both callers passing `GUEST_BRIDGE_MAC` (`guest_network.rs:3977`,
-      `:1170`);
+- **Consequences of the managed-link pins (the bridge pinned 2026-09-26; the
+  user rulings of 2026-09-28) for DISTILL, DELIVER, and the substrates:**
+  - *Owning DELIVER step for the bridge.* A step with the working ID
+    **05-00**. It depends on nothing, and every root step of the re-roadmap
+    depends on it: 05-01, 05-02, 05-04, and 06-01. It is therefore ordered
+    before every step whose evidence boots `run_server`. About half the boots
+    that must create `ovd-gbr0` refuse today (RCA § 10). DELIVER owns the final
+    ID, but may not order the step later. Its scope is the bridge only:
+    - `Client::ensure_bridge(name, mac)` creating the bridge with `mac` in its
+      create message, with a rustdoc that states the contract in § *Managed-link
+      identity independent of host link configuration*. The signature and both
+      callers passing `GUEST_BRIDGE_MAC` are already in the tree
+      (`client.rs:461-473`; `guest_network.rs:1171`, `:3979`); the scaffold
+      ignores `mac`;
     - the cause-naming bridge refusal in `converge_shared` and `audit_shared`;
-    - the startup probe's scratch-TAP address condition, with R21's
-      `GuestNetworkFact::TapHostMac` introduced here rather than at 06-02;
-    - the two substrate changes below, with their installation checks;
-    - E22 (p1), (p2), and (a) to (d).
+    - E22 (a) to (d).
 
-    The TAP half lands in the same step, as the substrate policy and the probe
-    condition. 06-02, which first records `host_mac`, carries E22 (e).
-  - *DISTILL, re-roadmap input.* Add the 05-00 row, and add 05-00 to the
-    dependencies of 05-01, 05-02, 05-04, and 06-01.
+    05-00 touches no TAP, no startup-probe read, no infra file, and no host
+    configuration.
+  - *Owning DELIVER step for the TAP invariant.* The step that lands R21's
+    host-side MAC read-back (06-02 in the current re-roadmap input, with
+    S-ND295-51's activation re-read at 06-04). It changes the in-tree variant
+    `GuestNetworkFact::TapHostMac { ifindex, mac }` (`guest_network.rs:416-421`,
+    documented as comparing with "the MAC recorded at provision") to the
+    proposed `TapHostMac { ifindex, address: TapHostAddress }`, once the user
+    confirms it. It adds the invariant at provision, `activate`, and the
+    audit, and carries E22 (i1), (i2), and (e). No step records a host-side
+    MAC.
+  - *DISTILL, re-roadmap input.* Keep the 05-00 row, with the bridge-only
+    scope above, and keep 05-00 in the dependencies of 05-01, 05-02, 05-04, and
+    06-01. 06-02's row changes "down read-back with host-MAC record" to "down
+    read-back with the host-side MAC invariant" (DISTILL § *DELIVER re-roadmap
+    input*).
   - *DISTILL, S-ND295-00.* The RCA (§ 9) recommends splitting the body. That
     split is DISTILL's decision. If DISTILL splits it:
     - the bridge-identity leg stays active and becomes 05-00's activation
@@ -6385,42 +6550,105 @@ DESIGN created no issue. No other deferral is proposed.
       activated at 05-01 with the host DNS factory and an in-zone NXDOMAIN
       oracle.
 
-    DISTILL also adds bodies for E22 (p1) and (p2) in the owner's source-local
-    lane, for (a), (b), and (d) in `overdrive-netlink`'s and the owner's
-    real-kernel lanes, and for (e) in 06-02's scenarios. The
-    repeated fresh-host boot body the RCA recommends is DISTILL's choice. On a
-    substrate carrying the policy, the create-then-set race no longer
-    reproduces for either link kind. The bridge fix's RED therefore rests on
-    E22 (a)'s deterministic `addr_assign_type` oracle. DISTILL decides whether
-    06-02 runs a control without the policy to show that a rewrite is detected
-    as `TapHostMac` damage (the RCA's forward prediction).
+    The repeated fresh-host boot body the RCA recommends is DISTILL's choice.
+    The bridge fix's RED rests on E22 (a)'s deterministic `addr_assign_type`
+    oracle, which holds on any substrate.
+  - *DISTILL, bodies to change* (DESIGN edits no test; the list is the
+    re-authoring input, and the mechanics are DISTILL's):
+    - `crates/overdrive-control-plane/src/guest_network.rs::scratch_probe_acceptance`:
+      delete E22 (p1) and (p2), which have no contract to defend. The bodies are
+      `an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads`,
+      `a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once`,
+      and `a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up`.
+      Their test support goes with them: `ScratchTapRead`,
+      `ScratchTapReadScript`, `UNCHANGED_SCRATCH_TAP`, `Script::tap_reads`,
+      `Script::tap_read_positions`, `with_tap_reads`,
+      `with_tap_reads_and_semantic_failure`, `tap_read_positions`,
+      `read_scratch_tap`, and `tap_host_mac`. So does the same read on the
+      D14 double, `PacketProbeIo::read_scratch_tap` and `ScratchTapIdentity`.
+      The startup probe gains no scratch-TAP read.
+    - `crates/overdrive-control-plane/src/guest_network.rs::shared_owner_link_address_kernel::a_provisioned_taps_recorded_address_survives_udev_initialisation`:
+      re-author as E22 (e) above. It has no recorded address to compare, it
+      provisions two allocations, and it asserts no damage for an unreserved
+      address, whether udev wrote it or an out-of-band write did, and
+      `TapHostMac` damage with `address: Reserved(<mac>)` for the second
+      allocation's guest MAC. Its module doc (`guest_network.rs:10163`) and
+      the body doc (`:10346-10356`) cite REQ-295-LINKMAC and "the host link
+      policy".
+    - The recorded-MAC form in the D12A tables. `AllocationDamage::HostMacChanged`
+      and `ProtectionFault::HostMacChanged` write `CHANGED_HOST_MAC`
+      (`fe:95:de:ad:00:01`), which is not a reserved address, and expect
+      `TapHostMac { mac: host_mac(ifindex) }` as the recorded value. Under the
+      invariant that write is not damage. The users are
+      `every_per_allocation_damage_is_named_only_when_the_node_is_healthy`
+      (its table row and the two-allocation case),
+      `a_condemned_allocation_leaves_every_later_audit_and_restore_universe`
+      and `activation_under_a_latch_or_condemnation_changes_nothing` (each
+      uses the write as its damage stimulus), and
+      `activation_reads_every_protection_fact_before_reporting_success`. Each
+      needs a reserved-address stimulus and the `TapHostAddress` fact. The
+      unreserved write becomes the E22 (i2) no-damage contrast. The fake
+      kernel's `host_mac(ifindex)` (`fe:95:00:00:…`) reserves nothing, so the
+      healthy fixtures stay healthy.
+    - Provision has no host-side MAC row today. E22 (i1) at provision is new:
+      `provision_reads_every_attachment_fact_before_reporting_success` or a
+      sibling refusal table.
+    - `crates/overdrive-cli/tests/integration/shared_network_native_faults.rs`,
+      E12 (h): its oracle (4) holds unchanged, because A's hijacked MAC is V's
+      guest MAC.
+    - `crates/overdrive-netlink/tests/integration/managed_link_address.rs` and
+      `tests/integration.rs:8` (E22 (a), (b)): the oracles hold. The
+      REQ-295-LINKMAC labels go, and so do comments that assume a host link
+      policy.
+    - Scaffold and source comments DELIVER rewrites with the landing steps:
+      `ensure_bridge`'s rustdoc and RED comment (`client.rs:449-463`, which
+      cite REQ-295-LINKMAC), and `TapHostMac`'s doc
+      (`guest_network.rs:416-417`, "expected is the MAC recorded at
+      provision").
+    - `distill/test-scenarios.md` S-ND295-72 (discharges, lane, driving port,
+      fault stimulus, oracle, Rust home, disposition); S-ND295-11's Then-line
+      and oracle (`test-scenarios.md:578`, `:589`: "recorded for later
+      comparison", "host-MAC record as step 7"); and the other scenario lines
+      that name `TapHostMac`, a host-MAC record, REQ-295-LINKMAC, or the 05-00
+      test-support line; `distill/red-classification.md`'s REQ-295-LINKMAC
+      rows; this file's `## Wave: DISTILL` sections that carry the old form
+      (*Prose Scenario List* group B, "host-MAC record" and "one writer per
+      managed-link address"; the *Completeness Audit* row naming
+      REQ-295-LINKMAC and `TapHostMac`; and *DELIVER re-roadmap input* rows
+      05-00 and 06-02); and every DISTILL citation of the managed-link
+      section by its former title, *Managed-link address from creation, and
+      the host link-address policy*, which is now *Managed-link identity
+      independent of host link configuration*.
   - *DISTILL, red classification.* C-12b (and metal N-04, attributed by
     inference) is reclassified under RCA root cause A, with 05-00 as its
     owner.
-  - *Infra, dev and test substrates* (DESIGN edits no infra file):
-    - `infra/lima/overdrive-dev.yaml` gains a system provisioning block. It
-      writes `/etc/systemd/network/05-overdrive-managed-links.link` with the
-      pinned content, reloads udev, and runs the installation check. The
-      block is inline, because Lima does not run `infra/provision/` (see the
-      scope note in `common-system.sh`). CI's `integration` job provisions
-      from this file, and its cache key hashes it (`ci.yml:392`), so CI picks
-      the change up. The shared `overdrive` Lima VM is recreated after the
-      change; recreating it interrupts runs in the other Conductor workspaces.
-    - `infra/provision/common-system.sh` gains the same file, reload, and
-      check. The metal host gets them through `infra/metal/provision.sh:207`,
-      re-run by `infra/metal/bootstrap.sh`.
-  - *Appliance image.* REQ-295-LINKMAC is recorded in `brief.md`'s
-    shared-bridge section as a DEVOPS handoff annotation, beside the existing
-    appliance-image annotations (the reflink and Cloud Hypervisor
-    requirements under § 114). That is a DESIGN edit to `brief.md`, outside
-    this pin's edit scope, so it goes through the architect. The image build
-    that ships the file and runs the installation check is the Image Factory
-    MVP's (`brief.md:7302` cites
-    [GH #75](https://github.com/overdrive-sh/overdrive/issues/75)).
+  - *Infra, dev and test substrates.* No change. No substrate installs a
+    `.link` file or runs an installation check.
+  - *Appliance image.* No requirement. A narrow `.link` exempting managed
+    links is optional hygiene for the Image Factory MVP to decide
+    ([GH #75](https://github.com/overdrive-sh/overdrive/issues/75)); `brief.md`
+    records it as such.
+  - *Outside DESIGN's edit scope, routed to the user* (each describes the
+    host-side MAC read-back as detecting "a change" or a "mismatch", which the
+    invariant replaces. ADR-0122 and ADR-0124 are operative and need explicit
+    amendments. ADR-0142 and ADR-0143 are accepted and not implemented):
+    - ADR-0122, its 2026-09-24 amendment list: *"one TAP host-side-MAC fact
+      for a host-MAC mismatch"*. The fact now reports an invariant violation,
+      and its proposed shape changes;
+    - ADR-0124, Decision: *"its owner, persistence, host-side MAC, or debug
+      message mask changed"*;
+    - ADR-0142, *Detection only* alternative and the Consequences bound
+      (*"audit the TAP's host-side MAC and kill on a change"*, *"treats a
+      change as per-allocation damage"*, *"the change is detected within one
+      audit period"*);
+    - ADR-0143, Consequences (*"The read-back of host-side MAC … detects a
+      change"*);
+    - `c4-diagrams.md` lines 1649 and 1694 (*"records each TAP's host-side
+      MAC"*, *"host-side MAC recorded"*, *"a host-side-MAC … change"*).
   - *DELIVER review item for 05-00.* `attach_tap_to_bridge`'s comment
     (`guest_network.rs:1959-1961`) says Linux may adopt the first port's
     address as the bridge's. That is false for a `NET_ADDR_SET` bridge
-    (`br_stp_if.c:263-265`). Whether the reassert stays is internal structure,
+    (`br_stp_if.c:263-265` at v7.0; `:269-270` in the 7.2 tree). Whether the reassert stays is internal structure,
     but the comment must not keep a false claim.
 - **`.claude/rules/reconcilers.md`** § "Deferred Bar-2 promotions" names
   GH #234 as the home of the shared inbound-TPROXY routing infrastructure. When
@@ -8132,10 +8360,10 @@ API only with no process/PID evidence.
   from creation, or adopts the existing link. It then brings the bridge down,
   sets `GUEST_BRIDGE_MAC`, reads back the exact name, ifindex, type, MAC, and
   gateway prefix, and brings it up, all before writing any endpoint entry or
-  attaching any TAP. The owner is the only writer of the bridge's address. The
-  host's link manager is excluded by REQ-295-LINKMAC, and creation with the
-  address makes the bridge immune to it regardless (§ *Managed-link address
-  from creation, and the host link-address policy*).
+  attaching any TAP. Creation with the address keeps udev's address policy off
+  the bridge whatever that policy is, and a write to its address by any other
+  writer is caught by this read-back at boot and by the runtime audit (§
+  *Managed-link identity independent of host link configuration*).
   Lower-level failure preserves its typed source; successful mutation followed
   by wrong read-back is `GuestNetworkError::PostconditionMismatch` and refuses
   startup. A live MAC is never adopted and no fleet-wide endpoint rewrite path
@@ -8681,19 +8909,9 @@ orders as alternatives:
    uses `ScratchCleanupIncomplete` as the direct cleanup leaf. Neither boxed
    error may itself be `StartupProbeCleanup`.
 
-The fresh-host pin (§ *Managed-link address from creation, and the host
-link-address policy*) adds the scratch TAP's address check to this sequence.
-It changes neither the order nor the cleanup:
-
-- The scratch I/O gains one fallible read of the scratch TAP's ifindex and
-  link-layer address, returning `NetlinkError` on failure. The read's exact
-  private shape is the crafter's.
-- The owner records the TAP's ifindex and address right after step 2's
-  `CreateTap`.
-- The owner re-reads them on the success path after step 5, before step 6.
-- A read failure maps to `Netlink { operation: StartupProbe }`. A difference
-  is the primary failure, as a `PostconditionMismatch` over `TapHostMac`.
-- Steps 6–9 then run unchanged.
+The scratch I/O has no read of the scratch TAP's address, and no probe result
+depends on it (user ruling 4 of 2026-09-28; § *Managed-link identity
+independent of host link configuration*).
 
 The direct source mapping is structural: `apply_netlink`/`count_netlink` map to
 `GuestNetworkError::Netlink`, `apply_tcx`/`count_tcx` map to
@@ -9909,10 +10127,7 @@ The three inherent pool signatures are exactly
 fallible host operation maps its existing typed source at the call site into
 exactly one operation-tagged variant; the inner source is never stringified or
 flattened. `StartupProbe` plus `GuestNetworkFact::StartupProbe` classifies the
-three semantic scratch-probe postconditions. `StartupProbe` plus
-`GuestNetworkFact::TapHostMac` classifies the fourth: the scratch TAP's
-address held unchanged (§ *Managed-link address from creation, and the host
-link-address policy*). Netlink and ordinary I/O failures
+three semantic scratch-probe postconditions. Netlink and ordinary I/O failures
 retain their existing exact sources directly. TCX map/program/pin failures
 cross the canonical `overdrive-dataplane::guest_tcx::GuestTcxError` boundary,
 so the chain is `GuestNetworkError::Tcx { operation }` →
@@ -11322,6 +11537,7 @@ and one leg C for Overdrive's current TCP mTLS path.
 | TAP owner (PROPOSED D-295-R4) | The owner's TAP identity read-back expects owner uid 0 at provision and activation. Lima root proves that an attach as uid 4200 without `CAP_NET_ADMIN` gets `EPERM`. |
 | VMM launch seccomp filter (D-295-R22) | Three orthogonal layers. **Type and lint:** registering a `pre_exec` hook is `unsafe`, and under `deny(unsafe_code)` the crate's one allowed production function, `register_launch_child_hook`, takes a built filter by value, so no production hook can be registered without a program; `create` builds it before any effect, and a launch that registered no hook at all is caught by the behavioural layer. **Boot probe:** `check_launch_seccomp` spawns `prlimit --version` through the same hook with the same program, so a kernel that refuses the filter, or a wrong audit-architecture constant (the tool dies with `SIGSYS`), fails `Vmm::probe` with a typed `LaunchSeccomp*` error, and the node composes no microVM driver (ADR-0083 §D3c). On every target but x86_64 the stage fails the same way with `LaunchSeccompUnsupportedArch` (ruling 10; GH #302). **Behaviour:** E21's native case reads every Cloud Hypervisor thread's `Seccomp`/`Seccomp_filters` at READY and after traffic, and the production-program `EPERM` and fail-closed ABI cases run on the real kernel. Self-application: OBL-295-SECCOMP-REVERIFY repeats the source audit and E21 on any of its triggers (the shipped Cloud Hypervisor build, the `--net` launch shape, or the net-device paths the platform uses), as a review obligation (no runtime version check, user ruling of 2026-09-25). |
 | TAP debug message mask (D-295-R22, ADR-0130 read-back set) | Read at provision and activation with a single `ETHTOOL_MSG_DEBUG_GET`, and once per audit pass with one dump; expected 0. A Lima-root adapter test reads 0 from a freshly created persistent TAP, through both forms, and the changed value after a test-side `TUNSETDEBUG` issued outside the launch filter. |
+| Managed-link identity versus host link managers (fresh-host RCA; user rulings of 2026-09-28) | No host link configuration is relied on, so none is probed, and no host database or `udevadm` is read. The bridge is created with its address: E22 (a) reads `addr_assign_type` 3 and the address at the first observation after creation, with or without a host link policy, and the boot read-back (refusal naming the observed MAC and up state) and the runtime audit (repair) catch any later writer. A TAP's host-side MAC is judged by the D-295-R21 invariant at provision, activation, and every audit pass: an unreserved address is correct whoever wrote it, and a reserved one fails safe for that VM alone. E22 (e) proves both on the real kernel, after systemd-udevd has initialised the TAP and with an out-of-band write standing in for any other writer, and E12 (h) drives the reserved case from a real `SIOCSIFHWADDR`. |
 | Node-wide admission (PROPOSED D-295-R6 to R8) | In-process deterministic state, so there is no substrate to probe. Evidence is pool property tests plus the seeded §3.2 proof, re-targeted to held-population semantics. |
 | Intercept-mark fail-closure (PROPOSED D-295-R18, R19) | Native metal only, RED first. R18: delete the IP program with a live allocation; no forwarded intercept-marked frame, and no host wildcard listener accepts a guest SYN. R19: with the program present and the listener absent (leg-F closed; killed mode with Cloud Hypervisor alive), no host wildcard listener accepts a guest SYN. The audit reads back the program order, the policy route, and the guard table every second. |
 
@@ -11414,13 +11630,15 @@ changes meaning.
   endpoint, emit accepted/intercept proof marks, catch TCP locally with original
   destination preserved, drop map-miss/spoof/direct-bypass traffic, drop a
   valid packet after deliberate TCX detach through the bridge guard, and clean
-  every pin/map/rule/link scratch effect. The scratch TAP's ifindex and
-  address are unchanged between their record after creation and their re-read
-  after `DetachedLinkGuard` (REQ-295-LINKMAC, one-sided).
+  every pin/map/rule/link scratch effect. The production bridge reads back with
+  `GUEST_BRIDGE_MAC`, created with that address when absent. No condition
+  reads the scratch TAP's address, and none depends on the host's link
+  configuration (user rulings 1 and 4 of 2026-09-28).
 - **Affected result:** `overdrive serve` startup only.
 - **Failure projection:** typed construct/bind/classify/orig-dst/cleanup probe,
-  scratch-TAP address change (`PostconditionMismatch { operation:
-  StartupProbe }` over `TapHostMac`), zero-complement, BootClosed-precondition,
+  bridge identity mismatch (`PostconditionMismatch { operation: BridgeObserve
+  }`, facts naming the observed MAC and up state), zero-complement,
+  BootClosed-precondition,
   listener bind, owned-rule identity, atomic replacement/read-back, or
   rollback error → `health.startup.refused`; no cleartext-degraded boot and no
   foreign-rule mutation.
@@ -11505,7 +11723,7 @@ changes meaning.
     -> down TAP (owner uid 0) / bridge -> managed guard membership
     -> endpoint map -> TCX ingress attach/pin/query
     -> TCX egress guest-MAC attach/pin/query (R21)
-    -> read-back TAP DOWN, record host-side MAC
+    -> read-back TAP DOWN, host-side MAC outside the reserved set
     -> VMM queue attach with the TAP down (G-295-4)
     -> CH fd spawn (descriptors 0-3 only) -> VMM READY -> accepted Running
     -> exact-generation capability registration
@@ -11576,7 +11794,8 @@ changes meaning.
   following are read back and live: the bridge master, guard membership, the
   endpoint value, the first-ingress TCX program and its link pin, the
   first-egress TCX guest-MAC program and its link pin (D-295-R21), and the TAP's
-  host-side MAC equal to the one recorded at provision. This happens only after
+  host-side MAC outside the reserved set (the D-295-R21 invariant, not a value
+  recorded at provision; user ruling 2 of 2026-09-28). This happens only after
   the allocation's exact install-success event. On return, the TAP is read back
   up with the exact master.
 - **Affected state:** only that TAP's administrative state and the owner's
@@ -12011,7 +12230,7 @@ to infer its mutation universe.
 | Address/MAC/TAP derivation and TCP-listener projection | **pure-function** | Return value only; no store, kernel, registry, or observation mutation | Source-local properties over `/16` boundaries, reserved addresses, uniqueness, TCP filter/dedup/order, and bridge/guest MAC disjointness. |
 | Guest address-pool assign/release/snapshot *(PROPOSED D-295-R6/R7: plus retire/observe)* | **bounded-change** | Only the allocation-keyed held map and each lease's Admitted/Retiring state. `assign` adds one Admitted binding, returns the byte-equal existing binding, or refuses with no change. `retire` flips only the named binding Admitted→Retiring. `release` removes only the named binding. `snapshot` and `observe` mutate nothing. | One mutex makes check-and-act atomic, per `.claude/rules/rust.md` § check-and-act. Assertions: the complete before/after map-and-state delta; complement equality for every other allocation; a property that held (Admitted plus Retiring) ≤ the cap after every operation sequence; and a property that Retiring never returns to Admitted. |
 | Grouped `AllocationSpec` / `VmNetworkAttachment` projection | **pure-function** | Returned transient values only; every non-network field remains equal | Rust types make partial guest assignment and netns-bearing VMM attachment unrepresentable; compile and property checks cover exact projection. D10's detached transition overlay applies the destructive shape plus acceptance patch, proves every final-shape body compiles/REDs, and persists reviewed hashes while the committed pre-cut tree keeps only the old sole shape and stays GREEN. |
-| `GuestNetworkProvisioner::provision/teardown` (+ `activate`, D-295-R5; egress link and host-MAC record, D-295-R21) | **bounded-change** | The named allocation's TAP/master/up state, endpoint entry, TCX ingress link/pin, TCX egress link/pin, bridge-guard membership, and private state: the recorded `GuestNetworkPlan`, both program ids, the recorded host-side MAC, and the phase (`ProvisionedDown`, `Active`, `QuiescedActive`, `Condemned`), plus lease-correlated facts. The shared bridge, maps, and rules may change only toward their one desired identity. No bridge-port flag and no TAP MAC is ever written. | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary. Provision's postcondition is the complete protected attachment, both TCX links included, with the TAP exactly down, a debug message mask of 0 (R22), the recorded plan, and the recorded host-side MAC. Only `activate` performs and reads back down→up, after the event and after re-reading both links, the host-side MAC, and the debug message mask; it refuses a latched quiescence without mutation and a `Condemned` allocation without mutation. Teardown accepts every phase, treats each absent part as removed, sets a present TAP down and reads it back before delete, and proves the empty complement at both attach points. Evidence: the typed operation/error family, allocation-scoped state-delta universes including the absent-part tables, and the real-kernel complement. |
+| `GuestNetworkProvisioner::provision/teardown` (+ `activate`, D-295-R5; egress link and host-side MAC invariant, D-295-R21) | **bounded-change** | The named allocation's TAP/master/up state, endpoint entry, TCX ingress link/pin, TCX egress link/pin, bridge-guard membership, and private state: the recorded `GuestNetworkPlan`, both program ids, and the phase (`ProvisionedDown`, `Active`, `QuiescedActive`, `Condemned`), plus lease-correlated facts. The shared bridge, maps, and rules may change only toward their one desired identity. No bridge-port flag and no TAP MAC is ever written. | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary. Provision's postcondition is the complete protected attachment, both TCX links included, with the TAP exactly down, a debug message mask of 0 (R22), a host-side MAC outside the reserved set (R21), and the recorded plan. Only `activate` performs and reads back down→up, after the event and after re-reading both links, the host-side MAC, and the debug message mask; it refuses a latched quiescence without mutation and a `Condemned` allocation without mutation. Teardown accepts every phase, treats each absent part as removed, sets a present TAP down and reads it back before delete, and proves the empty complement at both attach points. Evidence: the typed operation/error family, allocation-scoped state-delta universes including the absent-part tables, and the real-kernel complement. |
 | `SharedGuestNetworkOwner` startup/sweep/converge | **bounded-change** | Platform bpffs hierarchy, one bridge/gateway, endpoint/counter maps, three guard rules, scratch-probe resources; unrelated host objects preserved. `converge_shared` changes only node-level parts, never a per-allocation part and never a TAP's administrative state | One mandatory owner is also the provisioner. D14A's production-used private validator covers every semantic mismatch/lower source; D5/D12A source-local tables cover owner algorithms. Non-persisted stage/attachment/guard/complement events expose only completed real-boot effects to the tracing subscriber. Public Sim remains composition-only; Lima/native retains kernel authority. |
 | `SharedGuestNetworkOwner::audit_shared` *(PROPOSED D-295-R14)* | **bounded-change** (kernel read-only) | No kernel mutation. The only change is owner-private: each allocation reported in `damaged` moves to `Condemned`. Read universe: every node-level part and every non-`Condemned` allocation's parts; `Condemned` allocations are the complement and are not read | D12A source-local tables: node-level failure returns `Err` before any per-allocation read; each per-allocation part fault yields exactly that allocation in `damaged`; a reported allocation is absent from every later audit; kernel state is byte-equal before and after. |
 | `SharedGuestNetworkOwner::quiesce_managed_taps` *(PROPOSED D-295-R5/R14)* | **bounded-change** | The latch; each `Active` allocation's TAP administrative state (up→down) and phase (`Active`→`QuiescedActive`, or `Condemned` when not confirmed down). `ProvisionedDown`, `QuiescedActive`, and `Condemned` allocations, the bridge, maps, guard, and every non-managed link are the complement | D12A tables: the latch is set before the first mutation; one failed set-down continues the pass; an absent TAP is reported unconfirmed; a repeat call while latched performs no I/O; a whole-call failure (no netlink socket) returns `Err` with no phase change beyond the latch. |
@@ -12063,7 +12282,7 @@ not gain write methods.
 | Guest source spoofing or direct shared-L2 bypass | Untrusted guest TAP → host bridge | TCX validates registered ifindex, source MAC, and IPv4/ARP identity; malformed, map-miss, spoof, non-IP/non-ARP, and peer-directed non-TCP drop with one exact counter. |
 | Pre-intercept guest-kernel traffic *(PROPOSED D-295-R1/R5)* | Guest NIC before allocation mTLS publication | The host TAP stays administratively down until the post-event `activate`, so no guest frame reaches the host or bridge (ADR-0088 zero-frame outcome). The VMM holds only an inherited queue and cannot raise the TAP. |
 | Cross-guest queue attach *(PROPOSED D-295-R3/R4)* | VMM process (shared uid 4200) → another guest's TAP | TAPs are owned by uid 0, so the kernel refuses an attach from any caller that is neither uid 0 nor holding `CAP_NET_ADMIN`; an ownerless TAP would be attachable by anyone who can open `/dev/net/tun` (research F2.2). The queue descriptor is mapped only into its own CH child, with every other descriptor close-on-exec. |
-| A compromised queue holder rewriting its own TAP *(D-295-R4/R14/R21/R22; review findings L8, R5-H1, D7; user ruling 9)* | Cloud Hypervisor holding its TAP's queue → any ioctl on that queue: every arm of `__tun_chr_ioctl`, listed and verified from `drivers/net/tun.c` in ADR-0130 | The kernel runs no capability or owner check for these ioctls on an attached queue (`__tun_chr_ioctl`, the only gate is attachment), so the uid-0 owner does not bind the holder. **Prevention (D-295-R22, ADR-0143):** a seccomp filter loaded in the launcher child before its first exec, and inherited by every Cloud Hypervisor thread including the leader, returns `EPERM` for `SIOCSIFHWADDR`, `TUNSETOWNER`, `TUNSETGROUP`, `TUNSETPERSIST`, `TUNSETCARRIER`, `TUNSETDEBUG`, `TUNSETLINK`, `TUNSETTXFILTER`, `TUNATTACHFILTER`, `TUNDETACHFILTER`, `TUNSETSTEERINGEBPF`, `TUNSETFILTEREBPF`, and `TUNSETQUEUE`, on any descriptor, and kills the process on a foreign syscall ABI (i386 compat, x32). The filter exists for x86_64 only, and no microVM starts on any other target, so no unfiltered VMM ever holds a queue (user ruling 10; aarch64 is GH #302). It therefore prevents the bridge-FDB poisoning (R5-H1, reproduced in increment-z) and with it the victim outage, the `TUNSETOWNER` re-grant, and the `TUNSETDEBUG` host-log flood. **Allowed arms (ADR-0130):** `TUNSETOFFLOAD`, `TUNSETSNDBUF`, and `TUNSETVNETHDRSZ`/`TUNSETVNETLE`/`TUNSETVNETBE` configure only the holder's own TAP and queue; `TUNSETNOCSUM` is a no-op; Cloud Hypervisor itself issues `TUNSETIFF`, `TUNSETOFFLOAD`, and `TUNSETVNETHDRSZ` on the `fd=` path; the read-only arms have no effect; and the kernel refuses `TUNSETIFF` (`EEXIST`), `TUNSETIFINDEX`, `SIOCGSKNS`, `TUNGETDEVNETNS`, and every other request including `SIOCSIFFLAGS` on an attached single-queue TAP. **Independent layers, for a change made through a gap in the filter or by another process:** the D-295-R21 TAP egress guest-MAC classifier (ADR-0142) keeps redirected frames and flooded unknown unicast from every non-target TAP, and the flood leak needs no ioctl at all; the audit read-back of host-side MAC, owner uid 0, persistence, and debug message mask 0 reports any change as per-allocation damage, so the next audit kills that VM (≤ one audit period), its teardown removes the port and any poisoned entry, and the victim's delivery resumes and re-learns. `TUNSETGROUP` would grant nothing while the owner is uid 0 in any case (the owner-mismatch disjunct in `tun_not_capable`, mainline `tun.c:516-524`, always holds — this corrects research A1's group claim, which holds only for an ownerless TAP). CH v53's own Landlock grants `/dev/net/tun` `rw` whenever `--net` is present (research A5), so no layer here relies on Landlock. |
+| A compromised queue holder rewriting its own TAP *(D-295-R4/R14/R21/R22; review findings L8, R5-H1, D7; user ruling 9)* | Cloud Hypervisor holding its TAP's queue → any ioctl on that queue: every arm of `__tun_chr_ioctl`, listed and verified from `drivers/net/tun.c` in ADR-0130 | The kernel runs no capability or owner check for these ioctls on an attached queue (`__tun_chr_ioctl`, the only gate is attachment), so the uid-0 owner does not bind the holder. **Prevention (D-295-R22, ADR-0143):** a seccomp filter loaded in the launcher child before its first exec, and inherited by every Cloud Hypervisor thread including the leader, returns `EPERM` for `SIOCSIFHWADDR`, `TUNSETOWNER`, `TUNSETGROUP`, `TUNSETPERSIST`, `TUNSETCARRIER`, `TUNSETDEBUG`, `TUNSETLINK`, `TUNSETTXFILTER`, `TUNATTACHFILTER`, `TUNDETACHFILTER`, `TUNSETSTEERINGEBPF`, `TUNSETFILTEREBPF`, and `TUNSETQUEUE`, on any descriptor, and kills the process on a foreign syscall ABI (i386 compat, x32). The filter exists for x86_64 only, and no microVM starts on any other target, so no unfiltered VMM ever holds a queue (user ruling 10; aarch64 is GH #302). It therefore prevents the bridge-FDB poisoning (R5-H1, reproduced in increment-z) and with it the victim outage, the `TUNSETOWNER` re-grant, and the `TUNSETDEBUG` host-log flood. **Allowed arms (ADR-0130):** `TUNSETOFFLOAD`, `TUNSETSNDBUF`, and `TUNSETVNETHDRSZ`/`TUNSETVNETLE`/`TUNSETVNETBE` configure only the holder's own TAP and queue; `TUNSETNOCSUM` is a no-op; Cloud Hypervisor itself issues `TUNSETIFF`, `TUNSETOFFLOAD`, and `TUNSETVNETHDRSZ` on the `fd=` path; the read-only arms have no effect; and the kernel refuses `TUNSETIFF` (`EEXIST`), `TUNSETIFINDEX`, `SIOCGSKNS`, `TUNGETDEVNETNS`, and every other request including `SIOCSIFFLAGS` on an attached single-queue TAP. **Independent layers, for a change made through a gap in the filter or by another process:** the D-295-R21 TAP egress guest-MAC classifier (ADR-0142) keeps redirected frames and flooded unknown unicast from every non-target TAP, and the flood leak needs no ioctl at all; the audit read-back of owner uid 0, persistence, debug message mask 0, and a host-side MAC outside the reserved set (the D-295-R21 invariant: no held allocation's guest MAC, the TAP's own included, and not `GUEST_BRIDGE_MAC`) reports any violation as per-allocation damage, so the next audit kills that VM (≤ one audit period), its teardown removes the port and any poisoned entry, and the victim's delivery resumes and re-learns. `TUNSETGROUP` would grant nothing while the owner is uid 0 in any case (the owner-mismatch disjunct in `tun_not_capable`, mainline `tun.c:516-524`, always holds — this corrects research A1's group claim, which holds only for an ownerless TAP). CH v53's own Landlock grants `/dev/net/tun` `rw` whenever `--net` is present (research A5), so no layer here relies on Landlock. |
 | Descriptor leak into the VMM *(PROPOSED D-295-R3)* | Leg-F/leg-C listeners, leg-S sockets, netlink sockets, the DNS socket, or splice pipes inherited by Cloud Hypervisor | The in-child `close_range` hook leaves exactly descriptors 0–3; the OBL-295-CLOEXEC source gate makes every first-party raw descriptor close-on-exec; the native scan checks the complete descriptor table. |
 | Loss of the IP nft program *(PROPOSED D-295-R18, conditional; option R18-B, chosen on evidence)* | Intercept-marked TCP → host IP routing: local delivery to host wildcard listeners, and forwarding to a peer TAP when host `ip_forward` is on | An independent intercept-owned guard table drops TCP still marked `0x295a` at filter priority after the intercept chain. It survives deletion of `ip overdrive-mtls`, and it matches nothing while that table is healthy. Native RED first. |
 | Absent TPROXY listener *(PROPOSED D-295-R19, conditional)* | Outbound guest TCP after listener loss, a crashed `serve` with VMs alive, or an abandoned fail-stop → the `0x1` policy route → host wildcard listeners | TPROXY runs before the mark, so a failed outbound TPROXY leaves `0x295a` and rule 2 drops the packet; inbound already fails closed at rule 4. Native RED first. The `TIME_WAIT` side door (E14 (e)) is judged on its own RED. |
@@ -13750,10 +13969,11 @@ The successful provision order is exact (steps 6 and 7 as accepted
 7. **(D-295-R5, replacing the earlier set-up step)** refresh the exact
    Bridge-kind identity and ifindex, then observe persistent, owner uid 0
    (D-295-R4), exact master, and **down**, together with the TAP's host-side
-   MAC; then read the TAP's debug message mask (`observe_tap_debug_msg_mask`,
-   D-295-R22), which must be 0. Record the MAC as `host_mac`, publish the
-   allocation as `ProvisionedDown`, and return success only after all of these
-   facts match.
+   MAC, which must satisfy the host-side MAC invariant (D-295-R21, with this
+   plan counted in the reserved set); then read the TAP's debug message mask
+   (`observe_tap_debug_msg_mask`, D-295-R22), which must be 0. Publish the
+   allocation as `ProvisionedDown`, recording no MAC, and return success only
+   after all of these facts match.
 
 Provisioning never performs `TapSetUp`, and it performs no bridge-port flag
 write (`flood off` is not adopted). The separate activation order is in
@@ -14189,7 +14409,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-R1 guest NIC attachment | **ACCEPTED 2026-09-24:** one inherited TAP queue descriptor (`--net fd=`); TAP down through READY/Running | [ADR-0127](../../product/architecture/adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md) (Accepted) |
 | D-295-R2 queue ownership | **ACCEPTED 2026-09-24:** `CloudHypervisorVmm::create` attaches/verifies/maps/closes the per-launch queue, dropping its copy before any await on every branch; value types and `Vmm` unchanged; `VmmError` gains two typed variants | [ADR-0128](../../product/architecture/adr-0128-vmm-adapter-owns-per-launch-tap-queue-descriptor.md) (Accepted) |
 | D-295-R3 VMM child descriptor set | **ACCEPTED 2026-09-24:** exactly descriptors 0–3; `command-fds` mapping (gate closed, research F1.5) and one audited `pre_exec` `close_range` close-on-exec hook, which also loads the D-295-R22 filter as its last effect. The creation-time close-on-exec source gate is implementation obligation OBL-295-CLOEXEC, outside the ADR | [ADR-0129](../../product/architecture/adr-0129-safe-descriptor-mapping-for-vmm-launch.md) (Accepted) |
-| D-295-R4 TAP owner | **ACCEPTED 2026-09-24:** owner uid 0, so the kernel refuses attaches from processes that do not hold the queue and lack `CAP_NET_ADMIN` (an ownerless TAP is attachable by anyone; research F2.2); the queue holder itself is not bound (L8), and every own-queue ioctl has a stated disposition (D7); the TAP-mutating ones are prevented by R22, and the read-back covers host-side MAC, owner, persistence, and debug message mask | [ADR-0130](../../product/architecture/adr-0130-guest-taps-carry-no-unprivileged-owner-grant.md) (Accepted) |
+| D-295-R4 TAP owner | **ACCEPTED 2026-09-24:** owner uid 0, so the kernel refuses attaches from processes that do not hold the queue and lack `CAP_NET_ADMIN` (an ownerless TAP is attachable by anyone; research F2.2); the queue holder itself is not bound (L8), and every own-queue ioctl has a stated disposition (D7); the TAP-mutating ones are prevented by R22, and the read-back covers owner, persistence, debug message mask, and a host-side MAC outside the reserved set (R21 invariant; user ruling 2 of 2026-09-28) | [ADR-0130](../../product/architecture/adr-0130-guest-taps-carry-no-unprivileged-owner-grant.md) (Accepted) |
 | D-295-R5 activation gate | **ACCEPTED 2026-09-24:** provision-down; EXEC-gate wait, then `activate` after the exact event and before EXEC; serialized with quiescence; a latched quiescence defers, never fails; a `Condemned` allocation is refused; genuine failure fail-closed with the existing reason/stage; the owner records each plan; teardown converges on absence | [ADR-0131](../../product/architecture/adr-0131-activate-allocation-tap-after-intercept-live.md) (Accepted) |
 | D-295-R6 admission linearization | **ACCEPTED 2026-09-24:** `GuestAddressPool::assign`, one pool per server, refuses at the cap over held leases; typed, non-terminal, no row | [ADR-0132](../../product/architecture/adr-0132-linearize-guest-attachment-admission-at-address-assignment.md) (Accepted) |
 | D-295-R7 held population | **ACCEPTED 2026-09-24 (user rulings 1 and 5):** Admitted and Retiring both count until cleanup finishes; at the cap the predecessor is cleaned up first; no slot is reserved for the replacement; retiring accumulation operator-visible; 16,384 is a placeholder (GH #299, GH #261) | [ADR-0133](../../product/architecture/adr-0133-retiring-guest-attachment-counts-until-cleanup.md) (Accepted) |
@@ -14208,6 +14428,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-R20 cleanup-pending status | **ACCEPTED 2026-09-24; operator behaviour by user ruling 6 of the same date:** `describe` shows `CleanupPending`, never `Running`, for an allocation whose network cleanup has not finished; derived at read time from the live lease and row state; not persisted; one additive wire field | [ADR-0141](../../product/architecture/adr-0141-cleanup-pending-status-derived-from-live-guest-lease.md) (Accepted) |
 | D-295-R21 TAP egress guest-MAC control | **ACCEPTED 2026-09-24 (review finding R5-H1, reproduced natively in increment-z); a structural control:** a TCX egress classifier per TAP delivers unicast only to the TAP's registered guest MAC (reusing the ADR-0115 endpoint map) and drops every other unicast, a map miss included; broadcast/multicast always delivered; closes the host-side-MAC FDB-theft path and the unknown-unicast flood leak; `flood off` rejected on evidence (D5); complemented by the ADR-0130 host-side-MAC audit read-back; prevention at the source is the separate D-295-R22 (below), which makes the victim outage and the `TUNSETOWNER` re-grant prevented rather than accepted residuals | [ADR-0142](../../product/architecture/adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md) (Accepted) |
 | D-295-R22 launch seccomp filter | **ACCEPTED 2026-09-24 (user ruling 9; native evidence increment-aa):** every Cloud Hypervisor launch loads, in the forked child before its first exec and as the last effect of the one ADR-0129 hook, a hand-built classic-BPF seccomp deny-list returning `EPERM` for the 13 TAP-mutating ioctl requests (values from `libc`, low 32 bits) on any descriptor, killing the process on a foreign audit architecture or an x32 syscall; every CH thread inherits it. **x86_64 only (user ruling 10, 2026-09-24):** every other target, aarch64 included, has no program; its startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect; aarch64 is GH #302. `seccompiler` not chosen, on evidence; the ADR-0142 egress check and the ADR-0130 read-back (now including the TAP debug message mask) stay as independent layers; resolves Open Questions 8 and 10 by prevention | [ADR-0143](../../product/architecture/adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md) (Accepted) |
+| Managed-link identity independent of host link configuration (fresh-host RCA) | **ACCEPTED (user rulings of 2026-09-28; the bridge contract pinned on evidence 2026-09-26):** a managed bridge is created with its address; a TAP's host-side MAC is judged by the D-295-R21 invariant (not a reserved address: `GUEST_BRIDGE_MAC` or a held allocation's guest MAC outside `Condemned`, the TAP's own included), never against a recorded value; no host link-configuration requirement, host probe, or startup-probe scratch-TAP condition. The reserved set is pinned on evidence, as ruling 2 asked. The `TapHostMac { ifindex, address: TapHostAddress }` fact shape is **PROPOSED, pending the user's confirmation** | This feature delta § *Managed-link identity independent of host link configuration* and § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*; [ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md) (Accepted); ADR-0130 read-back set |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
@@ -14387,7 +14608,7 @@ author checks:**
     (`vmm.rs` fd handoff; guest TAPs are bridge ports via `set_link_master`,
     `guest_network.rs:1811`); the queue's `SIOCSIFHWADDR` has no cap check
     (kernel `tun.c:3385-3394`); guest MACs are deterministic
-    (`guest_network.rs:481`); and CH is given no `host_mac` (`vmm.rs:294-305`).
+    (`guest_network.rs:553-563`); and CH is given no `host_mac` (`vmm.rs:294-305`).
     This is a real production-reachable hazard, not a test-only state; the
     delivery-side control (D-295-R21) and the audit read-back are grounded in
     the ADR-0115 endpoint map and the existing `observe_tap`.
