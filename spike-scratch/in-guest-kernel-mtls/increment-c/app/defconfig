@@ -1,0 +1,47 @@
+# Spike A3 (GH #303): native Unikraft app on Firecracker, x86_64.
+# Kconfig fragment for `make defconfig UK_DEFCONFIG=<this file>`; every other
+# symbol takes its Kconfig default. The resolved .config is captured per build.
+CONFIG_UK_NAME="igkmc"
+CONFIG_ARCH_X86_64=y
+
+# Platform: KVM guest, Firecracker VMM. KVM_VMM_FIRECRACKER selects
+# KVM_BOOT_PROTO_LXBOOT (Linux 64-bit boot) and, with LIBVIRTIO_MMIO,
+# VIRTIO_MMIO_LINUX_COMPAT_CMDLINE (unikraft:plat/kvm/Config.uk:119-125).
+CONFIG_PLAT_KVM=y
+CONFIG_KVM_VMM_FIRECRACKER=y
+CONFIG_KVM_BOOT_PROTO_LXBOOT=y
+
+# Console: COM1 16550 (Firecracker's serial), early console, info-level klog.
+CONFIG_LIBUKCONSOLE=y
+CONFIG_LIBNS16550=y
+CONFIG_LIBNS16550_COM1=y
+CONFIG_LIBNS16550_EARLY_CONSOLE=y
+CONFIG_LIBNS16550_COM1_EARLY=y
+CONFIG_LIBUKPRINT_KLVL_INFO=y
+
+# Power-off on exit: ukpm + PS/2 controller CPU reset (Firecracker i8042 exit).
+CONFIG_LIBUKPM=y
+CONFIG_LIBUKPS2=y
+CONFIG_LIBUKPS2_SYSRESET=y
+
+# Kernel command line parameters (virtio_mmio.device=, netdev.ip=).
+CONFIG_LIBUKLIBPARAM=y
+
+# virtio over MMIO: net + vsock.
+CONFIG_LIBUKBUS=y
+CONFIG_LIBVIRTIO_BUS=y
+CONFIG_LIBVIRTIO_MMIO=y
+CONFIG_LIBUKNETDEV=y
+CONFIG_LIBUKNETDEV_EINFO_LIBPARAM=y
+CONFIG_LIBVIRTIO_NET=y
+CONFIG_LIBUKVSOCKDEV=y
+CONFIG_LIBVIRTIO_VSOCK=y
+
+# Sockets: posix-socket front end, lwIP (AF_INET) over uknetdev, threaded.
+CONFIG_LIBPOSIX_SOCKET=y
+CONFIG_LIBLWIP=y
+CONFIG_LWIP_UKNETDEV=y
+CONFIG_LWIP_THREADS=y
+CONFIG_LWIP_IPV4=y
+CONFIG_LWIP_TCP=y
+CONFIG_LWIP_SOCKET=y

@@ -1,0 +1,274 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4bf25f8a2584d1399166a4b2 pid=229770
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 147,337 bytes  received 3,972 bytes  33,624.22 bytes/sec
+total size is 157,021,017  speedup is 1,037.75
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+
+2026-09-28T07:35:16.932082019 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0
+eb8fa2368618cea11c9bde196f79e6e6b9caeed5
+ec55ae17618feeb57c8c10109bcf5c42723e8e95
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+675c53f0d19ad918eb1dda220e5516ceea1f5031f81308520087d92da4126ed0  <metal-home>/igkm-spike-a/unikraft/out/igkmc_fc-x86_64
+1cf15ac8a70946f49327cfa4bc6923555b8c4ceeb11e4dc4f20e530b674403af  <metal-home>/igkm-spike-a/unikraft/build-igkmc/liblwip/UNIKRAFT-2_1_x.zip
+--- kernel ELF entry and notes (no Xen note = no PVH entry)
+  Entry point address:               0x171ffa
+Xen notes: 0
+preset=noargv0
+
+===== create tap igkmc0 (the only host network change) =====
+igkmc0           DOWN           192.168.203.1/24 
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/unikraft/out/igkmc_fc-x86_64",
+    "boot_args": "netdev.ip=192.168.203.2/24:192.168.203.1 -- probe"
+  },
+  "drives": [],
+  "machine-config": {
+    "vcpu_count": 1,
+    "mem_size_mib": 512
+  },
+  "network-interfaces": [
+    {
+      "iface_id": "net0",
+      "guest_mac": "52:54:00:1a:03:02",
+      "host_dev_name": "igkmc0"
+    }
+  ],
+  "vsock": {
+    "vsock_id": "vsock0",
+    "guest_cid": 3,
+    "uds_path": "<metal-home>/igkm-spike-a/runs-ukfc/20260928T073516Z-230121/vsock.sock"
+  },
+  "logger": {
+    "log_path": "<metal-home>/igkm-spike-a/runs-ukfc/20260928T073516Z-230121/fc.log",
+    "level": "Debug",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "<metal-home>/igkm-spike-a/runs-ukfc/20260928T073516Z-230121/fc.metrics"
+  }
+}
+
+===== launch =====
+Firecracker command: <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64 --no-api --config-file <metal-home>/igkm-spike-a/runs-ukfc/20260928T073516Z-230121/vm.json --id igkm-c 
+firecracker pid=230176 listener pid=230172 T0=1790580917.045929622 firecracker-start=t+0.061834s
+firecracker exited on its own: exit=0 at t+0.298s (<=0.05s poll)
+listener exit=1
+
+===== host listener log =====
+HOST: vsock-leg listening on unix <metal-home>/igkm-spike-a/runs-ukfc/20260928T073516Z-230121/vsock.sock_5000 t+0.016266s
+HOST: net-leg listening on tcp 192.168.203.1:5001 (IP_FREEBIND) t+0.016330s
+HOST: vsock-leg accepted connection peer='' t+0.245412s
+HOST: vsock-leg received 33 bytes: b'IGKM-A-VSOCK-REQUEST guest->host\n' t+0.246813s
+HOST: vsock-leg replied 34 bytes: b'IGKM-A-VSOCK-RESPONSE host->guest\n' t+0.246852s
+HOST: net-leg NO CONNECTION before deadline t+60.147493s
+HOST: VERDICT vsock=PASS t+60.147736s
+HOST: VERDICT net=FAIL t+60.147754s
+
+===== guest serial console (Unikraft, = firecracker stdout) =====
+2026-09-28T07:35:17.110623633 [igkm-c:main] Running Firecracker v1.17.0
+[    0.000000] Info: [libukrandom] <swrand.c @  111> Initializing the random number generator...
+[    0.000000] Info: [libukrandom] <random.c @  108> CSPRNG seed source: CPU
+[    0.000000] Info: [libkvmplat] <setup.c @  179> Switch from bootstrap stack to stack @0x11000
+[    0.000000] Info: [libukboot] <boot.c @  279> Unikraft constructor table at 0x18a000 - 0x18a040
+[    0.000000] Info: [libukboot] <boot.c @  288> Initialize memory allocator...
+[    0.000000] Info: [libukallocbbuddy] <bbuddy.c @  659> Initialize binary buddy allocator 11000
+[    0.000000] Info: [libukboot] <boot.c @  347> Initialize the IRQ subsystem...
+[    0.000000] Info: [libukboot] <boot.c @  354> Initialize platform time...
+[    0.000000] Info: [libkvmplat] <tscclock.c @  258> Calibrating TSC clock against i8254 timer
+[    0.100002] Info: [libkvmplat] <tscclock.c @  279> Clock source: TSC, frequency estimate is 2396474640 Hz
+[    0.101856] Info: [libukboot] <boot.c @  358> Initialize scheduling...
+[    0.103111] Info: [libukschedcoop] <schedcoop.c @  289> Initializing cooperative scheduler
+[    0.104820] Info: [libukboot] <boot.c @  391> Init Table @ 0x18a040 - 0x18a0c0
+[    0.106245] Info: [libukbus] <bus.c @  133> Initialize bus handlers...
+[    0.107474] Info: [libukbus] <bus.c @  135> Probe buses...
+[    0.108510] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0001000:5
+[    0.110276] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x212020 initialized
+[    0.111846] Info: [libuknetdev] <netdev.c @  198> Registered netdev0: 0x213030 (virtio-net)
+[    0.113433] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.114999] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0002000:6
+[    0.116741] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x53020 initialized
+[    0.122211] Info: [libukvsockdev] <vsockdev.c @  176> vsockdev: Configured event queue
+[    0.123778] Info: [libukvsockdev] <vsockdev.c @  152> vsockdev: Configured receive queue
+[    0.125376] Info: [libvirtio_vsock] <virtio_vsock.c @ 2073> Started virtio-vsock device
+[    0.126893] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.128512] Info: [liblwip] <init.c @  174> Initializing lwip
+[    0.129762] Info: [liblwip] <init.c @  225> Attach network device 0 to lwIP...
+[    0.131355] Warn: [libvirtio_mmio] <virtio_mmio.c @  173> Unaligned io read: 6 bytes
+[    0.132893] Info: [libuknetdev] <netdev.c @  407> netdev0: Configured interface
+[    0.136599] Info: [libuknetdev] <netdev.c @  554> netdev0: Configured receive queue 0
+[    0.138194] Info: [libuknetdev] <netdev.c @  587> netdev0: Configured transmit queue 0
+[    0.139779] Info: [libvirtio_net] <virtio_net.c @ 1403> virtio-net: 0 started
+[    0.141143] Info: [libuknetdev] <netdev.c @  606> netdev0: Started interface
+en1: Added
+[    0.142670] Info: [liblwip] <init.c @  345> en1: Hardware address: 52:54:00:1a:03:02
+[    0.144134] Info: [liblwip] <init.c @  352> en1: Check checksums:
+[    0.145282] Info: [liblwip] <init.c @  371> en1: Generate checksums: IP UDP TCP ICMP ICMP6
+[    0.146840] Info: [liblwip] <init.c @  442> en1: Set as default interface
+en1: Interface is up
+Powered by
+o.   .o       _ _               __ _
+Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
+oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
+oOo oOO| | | | |   (| | | (_) |  _) :_
+ OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
+                 Ijiraq 0.21.0~eb8fa236
+[    0.152692] Info: [libukboot] <boot.c @  470> Pre-init table at 0x18a168 - 0x18a168
+[    0.154148] Info: [libukboot] <boot.c @  481> Constructor table at 0x18a168 - 0x18a168
+[    0.155637] Info: [libukboot] <boot.c @  504> Calling main(2, ['netdev.ip=192.168.203.2/24:192.168.203.1', 'probe'])
+IGKM-C: BOOT-MARKER native Unikraft app started t=0.157637
+IGKM-C: wall clock ukplat_wall_clock()=946598400.056774 s since 1970-01-01
+IGKM-C: argv[0]="netdev.ip=192.168.203.2/24:192.168.203.1"
+IGKM-C: argv[1]="probe"
+IGKM-C: vsock socket(AF_VSOCK=40, SOCK_STREAM) t=0.161280
+IGKM-C: vsock connected local cid=3 port=0 -> cid=2 port=5000 t=0.162686
+IGKM-C: vsock wrote 33 bytes t=0.163928
+IGKM-C: vsock read 34 bytes: IGKM-A-VSOCK-RESPONSE host->guest
+IGKM-C: VERDICT vsock=PASS
+IGKM-C: net socket(AF_INET, SOCK_STREAM) t=0.166175
+IGKM-C: net connect(192.168.203.1:5001) FAILED errno=113 (No route to host)
+IGKM-C: VERDICT net=FAIL
+IGKM-C: app returning from main t=0.168776
+[    0.169502] Info: [libukboot] <boot.c @  514> main returned 1
+[    0.170588] Info: [libukboot] <shutdown_req.c @   50> Shutdown requested (0)
+[    0.171931] Info: [libukboot] <boot.c @  430> Shutting down system (0)
+[  
+===== firecracker stderr =====
+
+===== firecracker log (Debug) =====
+2026-09-28T07:35:17.111225139 [igkm-c:main:DEBUG:src/vmm/src/builder.rs:379] event_start: build microvm for boot
+2026-09-28T07:35:17.113983681 [igkm-c:main:DEBUG:src/vmm/src/arch/x86_64/mod.rs:524] Kernel loaded using Linux 64-bit boot protocol
+2026-09-28T07:35:17.114001758 [igkm-c:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V000. memory range: 0xc0001000:4096 gsi: 5
+2026-09-28T07:35:17.114035949 [igkm-c:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V001. memory range: 0xc0002000:4096 gsi: 6
+2026-09-28T07:35:17.114084883 [igkm-c:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:58] vmgenid: building VMGenID device. Address: 0x000dfff0. IRQ: 7
+2026-09-28T07:35:17.114118233 [igkm-c:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:113] vmgenid: writing new generation ID to guest: 0x480782d2477558e45ea2d025f9f11ddd
+2026-09-28T07:35:17.114256722 [igkm-c:main:DEBUG:src/vmm/src/arch/x86_64/mptable.rs:130] mptable: Allocated 304 bytes for MPTable 1 vCPUs at address 0x0009fc00
+2026-09-28T07:35:17.114295690 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (629 bytes) at address: 0x0009fd30
+2026-09-28T07:35:17.114302210 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (276 bytes) at address: 0x0009ffa5
+2026-09-28T07:35:17.114306066 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (64 bytes) at address: 0x000a00b9
+2026-09-28T07:35:17.114309361 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a00f9
+2026-09-28T07:35:17.114312636 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a0135
+2026-09-28T07:35:17.114317613 [igkm-c:main:DEBUG:src/vmm/src/acpi/mod.rs:174] acpi: Wrote RSDP (36 bytes) at address: 0x000e0000
+2026-09-28T07:35:17.114399977 [igkm-c:main:DEBUG:src/vmm/src/builder.rs:381] event_end: build microvm for boot
+2026-09-28T07:35:17.114404103 [igkm-c:main:DEBUG:src/vmm/src/builder.rs:383] event_start: boot microvm
+2026-09-28T07:35:17.114407619 [igkm-c:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-28T07:35:17.114509822 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-28T07:35:17.114524074 [igkm-c:main:DEBUG:src/vmm/src/builder.rs:385] event_end: boot microvm
+2026-09-28T07:35:17.114527719 [igkm-c:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-28T07:35:17.126866911 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126885319 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126899961 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126914062 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126928424 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126942435 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126956666 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126970637 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126984849 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.126998800 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.127021824 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.127036677 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.127050928 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.127064869 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-28T07:35:17.254037467 [igkm-c:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Vsock:vsock] notifying queues
+2026-09-28T07:35:17.259968884 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/devices/virtio/device.rs:159] Received acknowledge request for unknown feature: 0x202089a3
+2026-09-28T07:35:17.268444581 [igkm-c:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Net:net0] notifying queues
+2026-09-28T07:35:17.291039208 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 0, dst_port: 5000, len: 0, type_: 1, op: 1, flags: 0, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T07:35:17.291243065 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 0, len: 0, type_: 1, op: 2, flags: 0, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T07:35:17.292624504 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 0, dst_port: 5000, len: 33, type_: 1, op: 5, flags: 0, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T07:35:17.292791786 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:362] vsock: muxer processing event: fd=7, evset=IN
+2026-09-28T07:35:17.292829463 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 0, len: 34, type_: 1, op: 5, flags: 0, buf_alloc: 65536, fwd_cnt: 33 }
+2026-09-28T07:35:17.292879078 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 0, len: 0, type_: 1, op: 4, flags: 3, buf_alloc: 65536, fwd_cnt: 33 }
+2026-09-28T07:35:17.293337167 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 0, dst_port: 5000, len: 0, type_: 1, op: 4, flags: 3, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T07:35:17.293384368 [igkm-c:main:DEBUG:src/vmm/src/devices/virtio/vsock/csm/connection.rs:389] vsock: dropping invalid TX pkt for connection: state=LocalClosed, pkt.hdr=VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 0, dst_port: 5000, len: 0, type_: 1, op: 4, flags: 3, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T07:35:17.301872674 [igkm-c:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-28T07:35:17.301893195 [igkm-c:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-28T07:35:17.301919735 [igkm-c:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:409] Requested a vCPU run with immediate_exit enabled. The operation was skipped
+2026-09-28T07:35:17.318087289 [igkm-c:main:INFO:src/firecracker/src/main.rs:116] Firecracker exiting successfully. exit_code=0
+
+===== firecracker metrics (every flushed line; non-zero counters only; counters are per-flush deltas) =====
+-- metrics line 1 utc_timestamp_ms=1790580917114
+-- metrics line 2 utc_timestamp_ms=1790580917302
+   i8042.missed_write_count = 1
+   i8042.read_count = 2
+   i8042.reset_count = 1
+   i8042.write_count = 4
+   uart.write_count = 4764
+   net_net0.no_tx_avail_buffer = 1
+   net_net0.rx_queue_event_count = 2
+   net_net0.rx_tap_event_count = 1
+   net_net0.rx_bytes_count = 204
+   net_net0.rx_packets_count = 2
+   net_net0.rx_count = 2
+   net_net0.tx_queue_event_count = 1
+   net.no_tx_avail_buffer = 1
+   net.rx_queue_event_count = 2
+   net.rx_tap_event_count = 1
+   net.rx_bytes_count = 204
+   net.rx_packets_count = 2
+   net.rx_count = 2
+   net.tx_queue_event_count = 1
+   vcpu.exit_io_in = 4773
+   vcpu.exit_io_out = 4781
+   vcpu.exit_mmio_read = 38
+   vcpu.exit_mmio_write = 80
+   vcpu.exit_io_in_agg.max_us = 16
+   vcpu.exit_io_in_agg.sum_us = 1105
+   vcpu.exit_io_out_agg.min_us = 3
+   vcpu.exit_io_out_agg.max_us = 20
+   vcpu.exit_io_out_agg.sum_us = 16184
+   vcpu.exit_mmio_read_agg.max_us = 1
+   vcpu.exit_mmio_read_agg.sum_us = 14
+   vcpu.exit_mmio_write_agg.max_us = 83
+   vcpu.exit_mmio_write_agg.sum_us = 164
+   vsock.tx_queue_event_count = 4
+   vsock.rx_bytes_count = 34
+   vsock.tx_bytes_count = 33
+   vsock.rx_packets_count = 3
+   vsock.tx_packets_count = 2
+   vsock.conns_added = 1
+   interrupts.triggers = 2
+
+===== run verdict =====
+HOST: VERDICT vsock=PASS t+60.147736s
+HOST: VERDICT net=FAIL t+60.147754s
+IGKM-C: VERDICT vsock=PASS
+IGKM-C: VERDICT net=FAIL
+
+===== cleanup =====
+deleting tap igkmc0
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkmc0 present: no
+192.168.203.x on host: 0
+run dir present: no
+leftover listener/firecracker pids: 

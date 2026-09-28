@@ -1,0 +1,10 @@
+run_id=0010
+label=boot-fcdefault-fc1.17.0
+started_utc=2026-09-28T07:20:45Z
+ended_utc=2026-09-28T07:22:02Z
+exit_code=1
+local_commit=f1dd126258733fdbbdd16e1b8b67f4b6b0000567
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out/igkmc_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-c/run-boot-fc.sh <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64 <metal-home>/igkm-spike-a/unikraft/out/igkmc_fc-x86_64 fcdefault
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=a113535c0e39ff8388bd7de1338ad0411d654c772742ecc914f84c9e3ee3f7ca
+stderr_sha256=94076980efe4d93dcbd2004139abb65bc489e2dd061865817ed22b4bc9a7c402
