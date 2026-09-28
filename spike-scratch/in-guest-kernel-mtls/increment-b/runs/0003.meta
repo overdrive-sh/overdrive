@@ -1,0 +1,10 @@
+run_id=0003
+label=boot-stock-fc1.17.0
+started_utc=2026-09-28T06:42:48Z
+ended_utc=2026-09-28T06:44:02Z
+exit_code=1
+local_commit=4143f29cff6f21049f0efb238120b76ef0b96031
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img OVERDRIVE_METAL_ROOTFS=<metal-home>/igkm-spike-a/out/nanos-vsock.img cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-b/run-boot-fc.sh <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64 <metal-home>/igkm-spike-a/nanos/output/platform/pc/bin/kernel.img
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=d756c638fcda9941f400c5686133cc54daf90e2321819e21501f5773850e7413
+stderr_sha256=ab287003b41d86049950c02d803d7df4eb0f44ab9262d91729d222005adb9c18

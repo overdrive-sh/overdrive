@@ -1,0 +1,305 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=69cf5a89aada333dd092198c pid=184006
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 150,434 bytes  received 3,002 bytes  61,374.40 bytes/sec
+total size is 156,546,642  speedup is 1,020.27
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+
+2026-09-28T06:44:48.881975376 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0
+aad473aad2f73a9893d5c32be333f2796725ab82
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+792bf6e7fa5b190d435d229a7c07608b783f3388cf68897aab9b7f86870f259d  <metal-home>/igkm-spike-a/out/kernel-pvhfix.img
+27157a22bd2ceb9d0167248b3b04bb68add394368c2840e2f8ffce75a542beec  <metal-home>/igkm-spike-a/out/nanos-vsock.img
+--- kernel ELF entry and notes (PVH = Xen note type 0x12)
+  Entry point address:               0x201d87
+  Xen                  0x00000004	Unknown note type: (0x00000012)
+   description data: dc 00 20 00 
+
+===== create tap igkmb0 (the only host network change) =====
+igkmb0           DOWN           192.168.203.1/24 
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/out/kernel-pvhfix.img"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "<metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/disk.img",
+      "is_root_device": false,
+      "is_read_only": false
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 1,
+    "mem_size_mib": 512
+  },
+  "network-interfaces": [
+    {
+      "iface_id": "net0",
+      "guest_mac": "52:54:00:1a:03:02",
+      "host_dev_name": "igkmb0"
+    }
+  ],
+  "vsock": {
+    "vsock_id": "vsock0",
+    "guest_cid": 3,
+    "uds_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/vsock.sock"
+  },
+  "logger": {
+    "log_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/fc.log",
+    "level": "Debug",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "<metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/fc.metrics"
+  }
+}
+
+===== launch =====
+Firecracker command: <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64 --no-api --config-file <metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/vm.json --id igkm-b 
+firecracker pid=184406 listener pid=184402 T0=1790577888.994567678 firecracker-start=t+0.060395s
+firecracker exited on its own: exit=0 at t+0.135s (<=0.05s poll)
+listener exit=0
+
+===== host listener log =====
+HOST: vsock-leg listening on unix <metal-home>/igkm-spike-a/runs-fc/20260928T064448Z-184356/vsock.sock_5000 t+0.016267s
+HOST: net-leg listening on tcp 192.168.203.1:5001 (IP_FREEBIND) t+0.016330s
+HOST: vsock-leg accepted connection peer='' t+0.095615s
+HOST: vsock-leg received 33 bytes: b'IGKM-A-VSOCK-REQUEST guest->host\n' t+0.097059s
+HOST: vsock-leg replied 34 bytes: b'IGKM-A-VSOCK-RESPONSE host->guest\n' t+0.097075s
+HOST: net-leg accepted connection peer=('192.168.203.2', 60079) t+0.100217s
+HOST: net-leg received 31 bytes: b'IGKM-A-NET-REQUEST guest->host\n' t+0.101600s
+HOST: net-leg replied 32 bytes: b'IGKM-A-NET-RESPONSE host->guest\n' t+0.101623s
+HOST: VERDICT vsock=PASS t+0.101689s
+HOST: VERDICT net=PASS t+0.101693s
+
+===== guest serial console (Nanos, = firecracker stdout) =====
+2026-09-28T06:44:49.057794991 [igkm-b:main] Running Firecracker v1.17.0
+[0.022340] NET: static IP config for interface en1:
+	address	192.168.203.2
+	netmask	192.168.203.2
+	gateway	192.168.203.2
+[0.024456] en1: assigned 192.168.203.2
+[0.025128] NET: starting DHCPv6 for interface en1
+[0.025995] gitversion: aad473aad2f73a9893d5c32be333f2796725ab82
+IGKM-A: BOOT-MARKER guest program started t=0.029227
+IGKM-A: vsock socket(AF_VSOCK=40, SOCK_STREAM) t=0.030396
+IGKM-A: vsock connected local cid=4294967295 port=1024 -> cid=2 port=5000 t=0.031549
+IGKM-A: vsock wrote 33 bytes t=0.033017
+IGKM-A: vsock read 34 bytes: IGKM-A-VSOCK-RESPONSE host->guest
+IGKM-A: VERDICT vsock=PASS
+IGKM-A: net connected local 192.168.203.2:60079 -> 192.168.203.1:5001 t=0.036168
+IGKM-A: net wrote 31 bytes t=0.037569
+IGKM-A: net read 32 bytes: IGKM-A-NET-RESPONSE host->guest
+IGKM-A: VERDICT net=PASS
+IGKM-A: program exiting t=0.039799
+
+===== firecracker stderr =====
+
+===== firecracker log (Debug) =====
+2026-09-28T06:44:49.058463757 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:379] event_start: build microvm for boot
+2026-09-28T06:44:49.061407839 [igkm-b:main:DEBUG:src/vmm/src/arch/x86_64/mod.rs:524] Kernel loaded using PVH boot protocol
+2026-09-28T06:44:49.061425756 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V000. memory range: 0xc0001000:4096 gsi: 5
+2026-09-28T06:44:49.061471434 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V001. memory range: 0xc0002000:4096 gsi: 6
+2026-09-28T06:44:49.061496742 [igkm-b:main:DEBUG:src/vmm/src/device_manager/mmio.rs:85] acpi: Building AML for VirtIO device _SB_.V002. memory range: 0xc0003000:4096 gsi: 7
+2026-09-28T06:44:49.061513978 [igkm-b:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:58] vmgenid: building VMGenID device. Address: 0x000dfff0. IRQ: 8
+2026-09-28T06:44:49.061554049 [igkm-b:main:DEBUG:src/vmm/src/devices/acpi/vmgenid.rs:113] vmgenid: writing new generation ID to guest: 0x3ce1368156dae52498f9d88270e4be95
+2026-09-28T06:44:49.061679307 [igkm-b:main:DEBUG:src/vmm/src/arch/x86_64/mptable.rs:130] mptable: Allocated 304 bytes for MPTable 1 vCPUs at address 0x0009fc00
+2026-09-28T06:44:49.061765848 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (700 bytes) at address: 0x0009fd30
+2026-09-28T06:44:49.061783905 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (276 bytes) at address: 0x0009ffec
+2026-09-28T06:44:49.061801151 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (64 bytes) at address: 0x000a0100
+2026-09-28T06:44:49.061804876 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a0140
+2026-09-28T06:44:49.061808301 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:72] acpi: Wrote table (60 bytes) at address: 0x000a017c
+2026-09-28T06:44:49.061813619 [igkm-b:main:DEBUG:src/vmm/src/acpi/mod.rs:174] acpi: Wrote RSDP (36 bytes) at address: 0x000e0000
+2026-09-28T06:44:49.061923184 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:381] event_end: build microvm for boot
+2026-09-28T06:44:49.061927250 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:383] event_start: boot microvm
+2026-09-28T06:44:49.061930535 [igkm-b:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-28T06:44:49.062128293 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-28T06:44:49.062149615 [igkm-b:main:DEBUG:src/vmm/src/builder.rs:385] event_end: boot microvm
+2026-09-28T06:44:49.062153160 [igkm-b:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-28T06:44:49.064101673 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064140572 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfe:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064168704 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064196266 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfc:0x2 failed: Failed to find address range.
+2026-09-28T06:44:49.064224608 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064251929 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcff:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064268554 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064282165 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfe:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064295976 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064316947 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcff:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064331139 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064344769 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfe:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064358560 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064372190 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfc:0x2 failed: Failed to find address range.
+2026-09-28T06:44:49.064386241 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064399992 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcff:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064413773 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064427363 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcfe:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.064441174 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0xcf8:0x4 failed: Failed to find address range.
+2026-09-28T06:44:49.064454765 [igkm-b:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0xcff:0x1 failed: Failed to find address range.
+2026-09-28T06:44:49.068765723 [igkm-b:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Block:rootfs] notifying queues
+2026-09-28T06:44:49.070196577 [igkm-b:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Vsock:vsock] notifying queues
+2026-09-28T06:44:49.080892655 [igkm-b:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Net:net0] notifying queues
+2026-09-28T06:44:49.090012091 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 1, flags: 0, buf_alloc: 212992, fwd_cnt: 0 }
+2026-09-28T06:44:49.090073643 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 1024, len: 0, type_: 1, op: 2, flags: 0, buf_alloc: 65536, fwd_cnt: 0 }
+2026-09-28T06:44:49.091600171 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 33, type_: 1, op: 5, flags: 0, buf_alloc: 212992, fwd_cnt: 0 }
+2026-09-28T06:44:49.091646711 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:362] vsock: muxer processing event: fd=7, evset=IN
+2026-09-28T06:44:49.091656265 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 1024, len: 34, type_: 1, op: 5, flags: 0, buf_alloc: 65536, fwd_cnt: 33 }
+2026-09-28T06:44:49.091661503 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:183] vsock muxer: RX pkt: VsockPacketHeader { src_cid: 2, dst_cid: 3, src_port: 5000, dst_port: 1024, len: 0, type_: 1, op: 4, flags: 3, buf_alloc: 65536, fwd_cnt: 33 }
+2026-09-28T06:44:49.092345583 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 3, flags: 0, buf_alloc: 212992, fwd_cnt: 0 }
+2026-09-28T06:44:49.092355938 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 1 }
+2026-09-28T06:44:49.092366024 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 2 }
+2026-09-28T06:44:49.092379354 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 3 }
+2026-09-28T06:44:49.092449319 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 4 }
+2026-09-28T06:44:49.092453225 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 5 }
+2026-09-28T06:44:49.092457071 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=2]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 6 }
+2026-09-28T06:44:49.092460676 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=3]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 7 }
+2026-09-28T06:44:49.092473566 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 8 }
+2026-09-28T06:44:49.092544963 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 9 }
+2026-09-28T06:44:49.092555269 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 10 }
+2026-09-28T06:44:49.092558954 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=2]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 11 }
+2026-09-28T06:44:49.092562559 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=3]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 12 }
+2026-09-28T06:44:49.092566315 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=4]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 13 }
+2026-09-28T06:44:49.092586726 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 14 }
+2026-09-28T06:44:49.092658133 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 15 }
+2026-09-28T06:44:49.092661809 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 16 }
+2026-09-28T06:44:49.092668659 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=2]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 17 }
+2026-09-28T06:44:49.092672225 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=3]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 18 }
+2026-09-28T06:44:49.092675750 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=4]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 19 }
+2026-09-28T06:44:49.092679315 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=5]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 20 }
+2026-09-28T06:44:49.092692375 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 21 }
+2026-09-28T06:44:49.092764884 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 22 }
+2026-09-28T06:44:49.092768590 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 23 }
+2026-09-28T06:44:49.092772095 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=2]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 24 }
+2026-09-28T06:44:49.092775530 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=3]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 25 }
+2026-09-28T06:44:49.092778955 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=4]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 26 }
+2026-09-28T06:44:49.092782501 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=5]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 27 }
+2026-09-28T06:44:49.092786046 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=6]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 28 }
+2026-09-28T06:44:49.092799486 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 29 }
+2026-09-28T06:44:49.092876091 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=0]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 30 }
+2026-09-28T06:44:49.092879827 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=1]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 31 }
+2026-09-28T06:44:49.092886477 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=2]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 32 }
+2026-09-28T06:44:49.092890072 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=3]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 33 }
+2026-09-28T06:44:49.092893558 [igkm-b:main:DEBUG:src/vmm/src/devices/virtio/vsock/unix/muxer.rs:204] vsock: muxer.send[rxq.len=4]: VsockPacketHeader { src_cid: 3, dst_cid: 2, src_port: 1024, dst_port: 5000, len: 0, type_: 1, op: 6, flags: 0, buf_alloc: 212992, fwd_cnt: 34 }
+2026-09-28T06:44:49.099106959 [igkm-b:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-28T06:44:49.099123224 [igkm-b:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-28T06:44:49.115495646 [igkm-b:main:INFO:src/firecracker/src/main.rs:116] Firecracker exiting successfully. exit_code=0
+
+===== firecracker metrics (every flushed line; non-zero counters only; counters are per-flush deltas) =====
+-- metrics line 1 utc_timestamp_ms=1790577889062
+-- metrics line 2 utc_timestamp_ms=1790577889099
+   block_rootfs.no_avail_buffer = 7
+   block_rootfs.queue_event_count = 40
+   block_rootfs.read_bytes = 1278976
+   block_rootfs.write_bytes = 512
+   block_rootfs.read_count = 53
+   block_rootfs.write_count = 1
+   block_rootfs.read_agg.min_us = 2
+   block_rootfs.read_agg.max_us = 410
+   block_rootfs.read_agg.sum_us = 829
+   block_rootfs.write_agg.min_us = 6
+   block_rootfs.write_agg.max_us = 6
+   block_rootfs.write_agg.sum_us = 6
+   block_rootfs.remaining_reqs_count = 7
+   block.no_avail_buffer = 7
+   block.queue_event_count = 40
+   block.read_bytes = 1278976
+   block.write_bytes = 512
+   block.read_count = 53
+   block.write_count = 1
+   block.read_agg.sum_us = 829
+   block.write_agg.sum_us = 6
+   block.remaining_reqs_count = 7
+   i8042.reset_count = 1
+   i8042.write_count = 1
+   uart.write_count = 838
+   logger.rate_limited_log_count = 1521
+   net_net0.no_tx_avail_buffer = 1
+   net_net0.rx_queue_event_count = 7
+   net_net0.rx_tap_event_count = 7
+   net_net0.rx_bytes_count = 526
+   net_net0.rx_packets_count = 7
+   net_net0.rx_count = 7
+   net_net0.tap_write_agg.min_us = 9
+   net_net0.tap_write_agg.max_us = 23
+   net_net0.tap_write_agg.sum_us = 104
+   net_net0.tx_bytes_count = 477
+   net_net0.tx_count = 7
+   net_net0.tx_packets_count = 7
+   net_net0.tx_queue_event_count = 8
+   net.no_tx_avail_buffer = 1
+   net.rx_queue_event_count = 7
+   net.rx_tap_event_count = 7
+   net.rx_bytes_count = 526
+   net.rx_packets_count = 7
+   net.rx_count = 7
+   net.tap_write_agg.sum_us = 104
+   net.tx_bytes_count = 477
+   net.tx_count = 7
+   net.tx_packets_count = 7
+   net.tx_queue_event_count = 8
+   vcpu.exit_io_in = 1608
+   vcpu.exit_io_out = 1616
+   vcpu.exit_mmio_read = 132
+   vcpu.exit_mmio_write = 137
+   vcpu.exit_io_in_agg.max_us = 15
+   vcpu.exit_io_in_agg.sum_us = 471
+   vcpu.exit_io_out_agg.min_us = 3
+   vcpu.exit_io_out_agg.max_us = 26
+   vcpu.exit_io_out_agg.sum_us = 3173
+   vcpu.exit_mmio_read_agg.max_us = 1
+   vcpu.exit_mmio_read_agg.sum_us = 26
+   vcpu.exit_mmio_write_agg.max_us = 66
+   vcpu.exit_mmio_write_agg.sum_us = 148
+   vsock.tx_queue_event_count = 17
+   vsock.rx_bytes_count = 34
+   vsock.tx_bytes_count = 33
+   vsock.rx_packets_count = 3
+   vsock.tx_packets_count = 1
+   vsock.conns_added = 1
+   vsock.conns_removed = 1
+   interrupts.triggers = 52
+
+===== run verdict =====
+HOST: VERDICT vsock=PASS t+0.101689s
+HOST: VERDICT net=PASS t+0.101693s
+IGKM-A: VERDICT vsock=PASS
+IGKM-A: VERDICT net=PASS
+
+===== cleanup =====
+deleting tap igkmb0
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkmb0 present: no
+192.168.203.x on host: 0
+run dir present: no
+leftover listener/firecracker pids: 

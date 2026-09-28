@@ -1,0 +1,43 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d7ec31e7f648d9823d315947 pid=186994
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 149,220 bytes  received 2,891 bytes  60,844.40 bytes/sec
+total size is 156,618,159  speedup is 1,029.63
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+firecracker processes:       []
+jailer processes:            []
+igkm listener processes:     []
+tap igkmb0 present:          no
+tap igkma0 present:          no
+tun/tap links on host:       []
+192.168.203.x on host:       0
+unix sockets under scratch:  0
+per-run dirs left:           none
+root-owned files in scratch: 0
+retained build tree (user-owned, outside ~/overdrive):
+502M	<metal-home>/igkm-spike-a
+3.9M	<metal-home>/igkm-spike-a/bin
+58M	<metal-home>/igkm-spike-a/firecracker
+192M	<metal-home>/igkm-spike-a/nanos
+52K	<metal-home>/igkm-spike-a/nanos-make-kernel.log
+4.0K	<metal-home>/igkm-spike-a/nanos-make-mkfs.log
+175M	<metal-home>/igkm-spike-a/nanos-pvhfix
+56K	<metal-home>/igkm-spike-a/nanos-pvhfix-make.log
+4.0K	<metal-home>/igkm-spike-a/nanos-pvhfix-sockdebug-make.log
+6.9M	<metal-home>/igkm-spike-a/out
+68M	<metal-home>/igkm-spike-a/src
