@@ -1987,7 +1987,7 @@ sequenceDiagram
   SH->>OBS: write Running + workload_addr
   OBS-->>SH: accepted durable row
   SH->>ML: register Pending capability and shared IP elements
-  ML-->>SH: exact generation Active; F/C listeners remain node-owned
+  ML-->>SH: exact generation Active, F/C listeners remain node-owned
   SH->>VM: call existing release_for_exit_emission
   VM->>GATE: claim Open before taking pending EXEC state
   GATE-->>VM: claim held or wait/refuse
@@ -2041,7 +2041,7 @@ sequenceDiagram
     end
   end
   alt five-second deadline or abnormal supervisor exit
-    AUD->>GATE: lock -> FailStop; freeze latest snapshot
+    AUD->>GATE: lock -> FailStop, freeze latest snapshot
     AUD->>SH: typed shutdown request / retained JoinHandle result
     SH->>CLI: return exact fail-stop cause and snapshot
     CLI->>CLI: bound graceful shutdown to ten seconds
