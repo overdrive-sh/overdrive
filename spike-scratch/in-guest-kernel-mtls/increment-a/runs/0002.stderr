@@ -1,0 +1,12 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-a/build.sh`
+xtask: running metal run (one bootstrap lease session)
+configure: WARNING: No asciidoc package found, cannot build man pages
+configure: WARNING: No xmlto package found, cannot build man pages
+stdlib/strrchrnul.c: In function ‘strrchrnul’:
+stdlib/strrchrnul.c:42:7: warning: assignment discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]
+   42 |     p = strrchr(s, c);
+      |       ^
+stdlib/strrchrnul.c:44:11: warning: assignment discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]
+   44 |         p = strchr(s, '\0');
+      |           ^

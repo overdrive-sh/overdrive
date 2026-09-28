@@ -1,0 +1,10 @@
+run_id=0002
+label=build
+started_utc=2026-09-28T06:06:25Z
+ended_utc=2026-09-28T06:07:17Z
+exit_code=0
+local_commit=6cd4d702cb8d39656da0e7e3f47b353cf088faa0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-a/build.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=3bda40e1b7ac87a5b08f753c96df634d4328444213106a92198a9b08a27e20e7
+stderr_sha256=de07ef97916c54bac7f6c6795d953ee884a6ea2b2ba5ef35c4c7e4fafea19b47

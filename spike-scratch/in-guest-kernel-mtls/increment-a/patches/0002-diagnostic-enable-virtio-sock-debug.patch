@@ -1,0 +1,13 @@
+Probe-only DIAGNOSTIC patch against nanovms/nanos aad473aa (NOT upstreamed).
+
+Uncomments Nanos's existing VIRTIO_SOCK_DEBUG switch so virtio_sock_dev_attach
+prints the device-offered and negotiated feature masks and the guest CID
+(virtio_socket.c:95,99). No logic change; used only for the F_STREAM evidence.
+
+--- a/src/virtio/virtio_socket.c
++++ b/src/virtio/virtio_socket.c
+@@ -43,3 +43,3 @@ struct virtio_vsock_hdr {
+
+-//#define VIRTIO_SOCK_DEBUG
++#define VIRTIO_SOCK_DEBUG
+ #ifdef VIRTIO_SOCK_DEBUG

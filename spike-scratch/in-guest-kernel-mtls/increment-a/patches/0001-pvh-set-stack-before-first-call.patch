@@ -1,0 +1,18 @@
+Probe-only patch against nanovms/nanos aad473aa (NOT upstreamed).
+
+pvh_start32 executes `call pvh_zero_page` (init.s:116,121,129) before it sets
+`mov esp, 0xa000` (init.s:142). The PVH boot ABI leaves ESP unspecified, and
+Cloud Hypervisor v53.0 enters PVH with RSP=0 (arch/src/x86_64/regs.rs:100-104),
+so the first call pushes its return address to 0xfffffffc (unbacked) and the
+matching ret pops garbage. Set the same stack pointer the code already uses,
+before the first call. The later `mov esp, 0xa000` is left in place.
+
+--- a/src/x86_64/init.s
++++ b/src/x86_64/init.s
+@@ -107,5 +107,6 @@ extern pvh_start
+
+ bits 32
+ pvh_start32:
++        mov esp, 0xa000
+         PREPARE_LONG_MODE eax
+         ; set up minimal mapping to be able to run in 64-bit mode, carving page

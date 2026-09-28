@@ -1,0 +1,10 @@
+run_id=0007
+label=boot-pvhfix-sockdebug
+started_utc=2026-09-28T06:17:20Z
+ended_utc=2026-09-28T06:18:37Z
+exit_code=0
+local_commit=6cd4d702cb8d39656da0e7e3f47b353cf088faa0
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/out/kernel-pvhfix-sockdebug.img OVERDRIVE_METAL_ROOTFS=<metal-home>/igkm-spike-a/out/nanos-vsock.img cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-a/run-boot.sh <metal-home>/igkm-spike-a/out/kernel-pvhfix-sockdebug.img
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=b0faa9c59f4091cfc298d71484a83f53ee0ad5e0df13635f4b6dfa4fa1a4bbe4
+stderr_sha256=0dd1c838df53cbfc53e8c2d56041f7559b295376cacbef8f6ab59d36a51fb2ae

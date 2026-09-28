@@ -1,0 +1,12 @@
+run_id=0001
+label=inventory
+started_utc=2026-09-28T06:02:58Z
+ended_utc=2026-09-28T06:03:31Z
+exit_code=0
+local_commit=6cd4d702cb8d39656da0e7e3f47b353cf088faa0
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-a/host-inventory.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=c165c9790b0bb52b5cc1e89b9a1d4e866cfb974a82ae801ae2b60c5faeba286a
+stderr_sha256=bc2e8aa09bad0113dd7d4a0b1fc8a78764650f1f7ad4d6e958ea5db36661de82
+post_capture_redaction=provider IPv4 addresses sharing the host first-two octets replaced with <redacted-provider-ip> (routes section); no other change
+stdout_sha256_after_redaction=872e0f763f9a4fbb0dd9dafe4578a82c35ca4b75f89db6cd0b13e4a42bb33837
