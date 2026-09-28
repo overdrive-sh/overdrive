@@ -39,6 +39,9 @@ Both runs stay as evidence. Neither is GREEN credit for any replacement body.
 | "DEFERRED TAP ACTIVATION DESIGN FALSIFIED … no `activate`, phase, error, fd handoff, capability grant, or confinement change is permitted" | **SUPERSEDED.** Only its named-TAP clause was falsified; the ordering and owner-state contract survives as D-295-R5 over the fd handoff. |
 | The 2026-09-23 "deferred-TAP-activation amendment" v1 subsection | **SURVIVES IN INTENT** as D-295-R5; its "Cloud Hypervisor attaches the down TAP by name" and "argv stays `tap=`" clauses are superseded by D-295-R1/R2. |
 | Every classification that credited the eight user-waived `panic!` placeholders as "not scored" | **SUPERSEDED.** `testing.md` forbids handing a placeholder body to DELIVER; phase B authors or deletes each (`test-scenarios.md` § *Existing-body disposition register*). |
+| Phase D's REQ-295-LINKMAC framing of the fresh-host RCA (root cause A → a host `.link` policy on the substrates and the image, "one writer per managed-link address") | **SUPERSEDED 2026-09-28** by the user rulings of that date (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28"). REQ-295-LINKMAC is not a requirement; root cause A's fix is the bridge creation contract alone (05-00). The phase-D rows below that rest on it are marked in place; Phase E holds the current classifications. |
+| Phase D S-ND295-72 (p1)/(p2) — the startup probe's scratch-TAP address condition (three `scratch_probe_acceptance` bodies) | **SUPERSEDED 2026-09-28 — bodies DELETED** (user ruling 4: under the host-side MAC invariant a rewrite is harmless, so the condition would refuse a correct host). |
+| Phase D S-ND295-72 (e) `a_provisioned_taps_recorded_address_survives_udev_initialisation` — a recorded host-side MAC compared with the live one | **SUPERSEDED 2026-09-28 — body re-authored** as `a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote` (two allocations; no recorded address; Phase E). |
 
 ## Recovery proof REDs — current classification
 
@@ -504,7 +507,8 @@ Runs C-01 through C-20, N-03 and N-04; each passed on its first execution.
 ## Phase D — DESIGN-pin follow-up run (B-8 element precondition; fresh-host RCA / N-4)
 
 Executed 2026-09-26 after the architect pinned B-8 (element install/removal
-precondition) and the fresh-host RCA (root cause A → REQ-295-LINKMAC), and
+precondition) and the fresh-host RCA (root cause A → REQ-295-LINKMAC, a framing
+superseded on 2026-09-28; see § *Superseded classifications* and § *Phase E*), and
 after the DISTILL bodies were brought into line with those pins. Run serially,
 one command at a time in the foreground, against the working tree at the time
 of this run, on the two substrates below. The four phase-C blockers are
@@ -581,11 +585,11 @@ file.
 | S-ND295-54 | 07-01 | `overdrive-worker/…/shared_intercept_members.rs::removal_is_refused_when_the_recorded_program_was_replaced_out_of_band` (NEW — R10 recorded-versus-observed row) | RED | `not yet implemented: RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01` (`mtls_intercept_port.rs:1121`), reached after the out-of-band replacement |
 | S-ND295-72 | 05-00 | `overdrive-netlink/…/managed_link_address.rs::a_created_bridge_carries_its_address_from_creation_and_starts_down` | RED | `assertion left == right failed: the address is set by userspace from creation (NET_ADDR_SET) …` left `1` right `3` (:178); control recorded `create-then-set … final mac=02:01:00:00:00:01 addr_assign_type=3` |
 | S-ND295-72 | active | `…::managed_link_address.rs::ensure_bridge_adopts_a_present_link_of_any_kind_without_writing` | PASS (genuine) | bridge/dummy/persistent-TAP before==after; today's `ensure_bridge` already adopts a present link without writing |
-| S-ND295-72 | 05-00 | `overdrive-control-plane/…/guest_network.rs::scratch_probe_acceptance::an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads` | RED | `assertion left == right failed: the probe reads the scratch TAP exactly twice: []` (:4806) — the probe reads no scratch TAP yet |
-| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once` | RED | `assertion left == right failed: no re-read off the success path: []` (:4863) |
-| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up` | RED | `the scratch-TAP condition refuses startup: ()` (:4931) |
+| S-ND295-72 | 05-00 | `overdrive-control-plane/…/guest_network.rs::scratch_probe_acceptance::an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads` | SUPERSEDED 2026-09-28 — DELETED (was RED) | `assertion left == right failed: the probe reads the scratch TAP exactly twice: []` (:4806) — the probe reads no scratch TAP yet |
+| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once` | SUPERSEDED 2026-09-28 — DELETED (was RED) | `assertion left == right failed: no re-read off the success path: []` (:4863) |
+| S-ND295-72 | 05-00 | `…::scratch_probe_acceptance::a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up` | SUPERSEDED 2026-09-28 — DELETED (was RED) | `the scratch-TAP condition refuses startup: ()` (:4931) |
 | S-ND295-72 | 05-00 | `overdrive-control-plane/…/guest_network.rs::shared_owner_link_address_kernel::a_bridge_identity_mismatch_names_the_observed_address_and_up_state` | RED | `[changed address] the observed fact carries the read-back address and up state` left `None` right `Some(Bridge { … mac: [2, 149, 114, 0, 0, 13], up: true … })` (:10326) — today's audit reports `observed: None` |
-| S-ND295-72 | 06-02 | `…::shared_owner_link_address_kernel::a_provisioned_taps_recorded_address_survives_udev_initialisation` | RED — preceding-step gap (06-02) | `the node is healthy after provision: SharedGuestNetworkAuditError { component: Bridge, source: PostconditionMismatch { operation: TapObserve, … owner_uid: Some(4200) …` — no `host_mac` record until 06-02 |
+| S-ND295-72 | 06-02 | `…::shared_owner_link_address_kernel::a_provisioned_taps_recorded_address_survives_udev_initialisation` | SUPERSEDED 2026-09-28 — RE-AUTHORED (was RED — preceding-step gap (06-02); current row in Phase E) | `the node is healthy after provision: SharedGuestNetworkAuditError { component: Bridge, source: PostconditionMismatch { operation: TapObserve, … owner_uid: Some(4200) …` — no `host_mac` record until 06-02 |
 | S-ND295-00 (bridge leg) | 05-00 | `overdrive-control-plane/…/shared_guest_network_startup.rs::production_host_owner_boots_only_after_real_shared_identity_is_exact` | RED — REPRODUCED DEFECT (RCA root cause A) | `[S-ND295-00] fresh-host boot 4/5 refused: GuestNetworkBoot(PostconditionMismatch { operation: BridgeObserve, expected: BridgeLinkIdentity { … }, observed: Some(BridgeLinkIdentity { … }) })` — repeated boots: 2 read-back-exact, 2 BridgeObserve refusals, 1 unexplained probe timeout (RCA § 8, counted for neither side) |
 | S-ND295-00 (DNS leg) | 05-01 | `…::shared_guest_network_startup.rs::the_shared_gateway_answers_an_absent_mesh_name_with_nxdomain` (re-authored) | RED — preceding-step gap (05-01) | `DNS client task joins: JoinError::Panic(…, "shared DNS reply: Os { code: 11, kind: WouldBlock … }")` — no responder bound until 05-01 composes the host DNS factory through `guest_dns` |
 | S-ND295-64 (controls) | 08-01 | `overdrive-cli/…/intercept_mark_fail_closed.rs::both_time_wait_controls_prove_the_substate_and_sequence_gates` | RETARGETED — the vacuous guest re-probe removed; the body now asserts only the two door-independent controls (host-veth), which is a real oracle. NEW native RED at its own step (metal) | the two controls are the phase-C `SynAck`/`BareAck` pair, unchanged; not metal-run in this cut (host-veth only, no production change), classified by the phase-C control evidence |
@@ -618,3 +622,106 @@ resolved.
 The phase-C blocker-3 entry (S-ND295-00 active, fails on production) is
 superseded by the split above: the bridge half is the reproduced RCA defect
 (05-00), and the DNS half is the re-authored preceding-step gap (05-01).
+
+## Phase E — managed-link host-independence follow-up (2026-09-28)
+
+Executed 2026-09-28 after the user rulings of that date (DESIGN commits
+`fbb6acd4`, `c51ab167`): REQ-295-LINKMAC withdrawn as a requirement, the
+startup probe's scratch-TAP condition removed, and a TAP's host-side MAC judged
+by the D-295-R21 invariant, reported as `GuestNetworkFact::TapHostMac { ifindex,
+address: TapHostAddress }` (`Unreserved | Reserved([u8; 6]) | Missing`). Run
+serially, one command at a time in the foreground, against HEAD `c51ab167` plus
+this cut's uncommitted changes.
+
+### Substrates
+
+| Substrate | Kernel and host | Runner |
+|---|---|---|
+| Lima | `overdrive` VM, aarch64, `7.0.0-34-generic`, systemd-udevd active; cold-started, quiet, and clean before the run (only the pre-existing `table ip nat`) | `cargo xtask lima run -- …` |
+| Native metal | non-virtualized x86_64 (`systemd-detect-virt`: `none`), `7.0.0-29-generic`, `systemd 259 (259.5-0ubuntu3.4)`, systemd-udevd active; KVM preflight and canonical lease on every command; quiet | `cargo xtask metal run [--no-sync] -- …` |
+
+The BPF object was built on Lima (`cargo xtask bpf-build`) and natively on
+metal (`OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`: without the variable,
+`bpf-build` re-dispatches into Lima, which the metal host does not have). Both
+objects carry `gh295c_egress` and `gh295c_endpoint`.
+
+### Environment and cleanup
+
+- **Lima:** the (e) body's `NodeSharedStateSweep` removed `ovd-tp-f2e5`,
+  `ovd-tp-f2e6`, `ovd-gbr0`, `table bridge overdrive-mtls`, and the
+  `mtls-endpoints` pins; the empty `/sys/fs/bpf/overdrive` directory it left
+  was removed after the run.
+- **Metal:** before the run, an empty `/sys/fs/bpf/overdrive/probe` directory
+  dated 2026-09-26 was removed (it held no pins; the only BPF objects present
+  were systemd's sysctl monitor). After the run the sweep removed the same
+  objects as on Lima, and the empty `/sys/fs/bpf/overdrive` was removed. No
+  TAP, bridge, nft table, cgroup scope, or policy rule remained on either
+  substrate.
+
+### Gate / lint
+
+`cargo clippy -p overdrive-control-plane -p overdrive-netlink --all-targets
+--features integration-tests -- -D warnings` is clean on Lima. `rustfmt
+--edition 2024 --check` is clean on the three changed Rust files. The six
+remaining active `scratch_probe_acceptance` / `scratch_probe_packet_acceptance`
+bodies still pass after the deletion (Lima: `6 tests run: 6 passed`).
+
+### Test-side changes in this cut
+
+| File | Change | Why |
+|---|---|---|
+| `crates/overdrive-control-plane/src/guest_network.rs` (`scratch_probe_acceptance`, `scratch_probe_packet_acceptance`) | DELETED the three E22 (p1)/(p2) bodies and their support: `Script::{tap_reads, tap_read_positions}`, `ScratchTapRead`, `ScratchTapReadScript`, `UNCHANGED_SCRATCH_TAP`, `with_tap_reads`, `with_tap_reads_and_semantic_failure`, `tap_read_positions`, `read_scratch_tap`, `tap_host_mac`, and the D14 double's `PacketProbeIo::read_scratch_tap` / `ScratchTapIdentity` | user ruling 4: the startup probe reads no scratch-TAP address; the bodies defend no contract |
+| same file (production enum, class P/V) | `GuestNetworkFact::TapHostMac { ifindex: u32, address: TapHostAddress }` and the public `TapHostAddress { Unreserved, Reserved([u8; 6]), Missing }` exactly as FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" pins them; no behaviour change (the variant is constructed only in tests) | the user-approved fact shape (ruling 6) |
+| same file (`allocation_owner_acceptance`) | `AllocationDamage::HostMacChanged` and `ProtectionFault::HostMacChanged` (an unreserved `fe:95:de:ad:00:01` write, expected as a recorded value) replaced by `HostMacReserved` (the TAP's own guest MAC) and `HostMacMissing` (no address) in the four bodies that used them; after the second review, the same unreserved bytes written inline as the recovery-audit damage in `every_node_level_audit_failure_names_its_matrix_component_first` became `HostMacReserved`, and its recovered audit now asserts the named fact | under the invariant an unreserved write is not damage; each table needs a reserved-address stimulus and the `TapHostAddress` fact |
+| same file (`allocation_owner_acceptance`) | six NEW E22 (i1)/(i2) bodies over one shared `InvariantBreak` vocabulary (each reserved class plus the missing address) on `AuditFixture`. After review: the provision table also writes each break after the egress step; the unreserved audit passes change both TAPs' addresses between audits; the `Condemned` leg is its own 06-04 body | E22 (i1) at provision, `activate`, and the audit, the ordering case, and the (i2) contrasts |
+| same file (`shared_owner_link_address_kernel`) | the (e) body re-authored with two allocations and renamed; the module doc and constants lose REQ-295-LINKMAC and the host link policy; the sweep removes the second TAP | E22 (e) as the DESIGN states it |
+| `crates/overdrive-netlink/tests/integration/managed_link_address.rs`, `tests/integration.rs` | REQ-295-LINKMAC labels and host-link-policy wording removed; scenario title updated. No oracle changed, so the two bodies were not re-run | FD § *Required downstream changes* (the netlink bodies' oracles hold) |
+
+### Per-body results
+
+Every source-local body below stops at the same fixture precondition, the
+provision owner-uid read-back (D-295-R4, the 06-02 owner-uid change), exactly as
+phase C recorded for the sibling bodies on this fixture (rows S-ND295-50/51
+above). A marker of 06-02 is its own step (**RED**); a marker of 06-04 is a
+**preceding-step gap (06-02)**. These are fixture-precondition REDs: no
+invariant oracle executed today. Each body's own oracle is unexercised until its
+step's RED phase, where the crafter records the invariant oracle's semantic
+RED before any production change.
+
+| Scenario | Marker step | Body (`file::fn`) | Classification | First failing line / message (verbatim) |
+|---|---|---|---|---|
+| S-ND295-50 | 06-02 | `overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::every_node_level_audit_failure_names_its_matrix_component_first` (RETARGETED stimulus after the second review: its recovery-audit damage was an unreserved write, which the invariant does not count) | RED (fixture precondition; oracle unexercised) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-aa", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-aa", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-50 | 06-02 | `overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::every_per_allocation_damage_is_named_only_when_the_node_is_healthy` (RETARGETED stimulus) | RED | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-aa", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-aa", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-50 | 06-04 | `…::allocation_owner_acceptance::a_condemned_allocation_leaves_every_later_audit_and_restore_universe` (RETARGETED stimulus) | RED — preceding-step gap (06-02) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-ca", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-ca", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-51 | 06-04 | `…::allocation_owner_acceptance::activation_reads_every_protection_fact_before_reporting_success` (RETARGETED stimulus) | RED — preceding-step gap (06-02) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-v1", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-v1", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-51 | 06-04 | `…::allocation_owner_acceptance::activation_under_a_latch_or_condemnation_changes_nothing` (RETARGETED stimulus) | RED — preceding-step gap (06-02) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-l1", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-l1", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-02 | `…::allocation_owner_acceptance::a_reserved_or_missing_host_side_address_refuses_publication` (NEW; revised after review: each break is also written after the egress step, so only the step-7 read-back sees it) | RED (fixture precondition; oracle unexercised) | both runs: `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-aa", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-aa", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-04 | `…::allocation_owner_acceptance::a_reserved_or_missing_host_side_address_refuses_activation_before_any_change` (NEW) | RED — preceding-step gap (06-02) | same message, `t295-aa` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-02 | `…::allocation_owner_acceptance::a_reserved_or_missing_host_side_address_is_that_allocations_audit_damage` (NEW) | RED | same message, `t295-aa` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-02 | `…::allocation_owner_acceptance::an_unreserved_host_side_address_is_not_audit_damage_whenever_it_changes` (NEW; split out after review, and its passes now change both TAPs' addresses between audits) | RED (fixture precondition; oracle unexercised) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-aa", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-aa", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-04 | `…::allocation_owner_acceptance::a_tap_holding_a_condemned_guests_address_is_not_audit_damage` (NEW; the `Condemned` leg split out after review, because audit condemnation lands with R5 at 06-04) | RED — preceding-step gap (06-02) (fixture precondition; oracle unexercised) | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-ih", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-ih", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-02 | `…::allocation_owner_acceptance::a_guest_address_a_tap_took_early_is_damage_from_the_first_audit_after_that_guest_is_held` (NEW) | RED | `fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-ie", ifindex: Some(295), … owner_uid: Some(4200) }, observed: Some(Tap { name: "t295-ie", … owner_uid: Some(0) }) }` (guest_network.rs:6842:37) |
+| S-ND295-72 | 06-02 | `…::shared_owner_link_address_kernel::a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote` (RE-AUTHORED), Lima root | RED | `[S-ND295-72 (e)] systemd-udevd running on this substrate: true (Ok(Some(0)))` … `ovd-tp-f2e5 ifindex 4 after udev: mac=Some([46, 169, 182, 12, 2, 201])`, then `the node is healthy after provision: SharedGuestNetworkAuditError { component: Bridge, source: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "ovd-tp-f2e5", ifindex: Some(4), link_kind: Tap, persistent: true, up: false, owner_uid: Some(4200) }, observed: None } }` (guest_network.rs:10580:50) |
+| S-ND295-72 | 06-02 | same body, native metal (first run) | RED | `ovd-tp-f2e5 ifindex 59079 after udev: mac=Some([238, 81, 190, 34, 254, 55])`, then `the node is healthy after provision: SharedGuestNetworkAuditError { component: Bridge, source: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "ovd-tp-f2e5", ifindex: Some(59079), link_kind: Tap, persistent: true, up: false, owner_uid: Some(4200) }, observed: None } }` (guest_network.rs:10580:50) |
+| S-ND295-72 | 06-02 | same body after review (adds the systemd version record), Lima root rerun | RED | `[S-ND295-72 (e)] host systemd: Ok("systemd 259 (259.5-0ubuntu3.4)")`, `ovd-tp-f2e5 ifindex 7 after udev: mac=Some([46, 169, 182, 12, 2, 201])`, then the same `the node is healthy after provision: … observed: None } }` (guest_network.rs:10628:50) |
+| S-ND295-72 | 06-02 | same body after review, native metal rerun | RED | `[S-ND295-72 (e)] host systemd: Ok("systemd 259 (259.5-0ubuntu3.4)")`, `ovd-tp-f2e5 ifindex 59084 after udev: mac=Some([238, 81, 190, 34, 254, 55])`, then the same `the node is healthy after provision: … ifindex: Some(59084) … observed: None } }` (guest_network.rs:10628:50) |
+
+Why the (e) body fails where it does: today's `audit_shared` resolves each held
+allocation through the static pool (`action_plan`), not through the plan the
+owner holds, so it reports a hand-built plan's TAP as absent (`observed: None`)
+and still expects owner uid 4200. The 06-02 per-allocation audit over held
+plans, with owner uid 0, replaces both, so the failure is that step's missing
+behaviour, not a fixture defect. On both substrates systemd-udevd rewrote the
+first TAP's address after creation (`2e:a9:b6:0c:02:c9` on Lima,
+`ee:51:be:22:fe:37` on metal): a locally administered unicast outside the
+reserved set, which is the case the invariant accepts. Rerun after review, udev
+wrote the same address again for the same link name on each substrate. That fits
+the DESIGN's residual analysis (udev's persistent address is a fixed function of
+the machine and the link name).
+
+After the review, the three revised or split source-local bodies were rerun once
+serially (`3 tests run: 0 passed, 3 failed`, each at guest_network.rs:6842:37 as
+above). Both substrates were checked clean afterwards. After the second review,
+the node-level audit body and the unreserved-pass body (which now uses a third,
+udev-shaped unreserved address) were rerun once serially (`2 tests run: 0
+passed, 2 failed`, each at guest_network.rs:6842:37).

@@ -422,13 +422,15 @@ node runtime's dependence on systemd in general, and #295 adds none.
    approved it.
 8. **Correct the stale artifacts outside the previous edit scope.** ADR-0122,
    ADR-0124, ADR-0142, ADR-0143, and `c4-diagrams.md` must not treat a changed
-   host-side MAC as damage or show a recorded MAC. For this correction, an
-   operative ADR, meaning one implemented on `main`, externally depended on, or
-   with persisted or wire state under it, states the amendment explicitly, and
-   any other ADR is revised in present tense. DESIGN found none of the four
-   operative, so each is revised in present tense (§ *Invalidation register*,
-   artifacts table, which also records the open question this test raises for
-   § *Freeze and inventory*).
+   host-side MAC as damage or show a recorded MAC. A clause that is operative
+   under the test in § *Freeze and inventory* states the correction as an
+   explicit amendment; any other clause is revised in present tense. Code
+   committed on the feature branch counts as landed: in the user's words of
+   2026-09-28, "we merge commit with linear history", so the feature branch's
+   commits become `main`'s history. The clause corrected here, that a changed
+   or recorded host-side MAC is damage, is not implemented even on the feature
+   branch, so it has no operative contract to amend and is revised in present
+   tense in all four ADRs (§ *Invalidation register*, artifacts table).
 
 Ruling 2 asked DESIGN to choose the compared set on evidence. The set is
 pinned in § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*: it
@@ -459,21 +461,23 @@ invariant and every accepted security outcome are preserved unweakened.
 
 **Committed state.** HEAD `db3af700` carries steps 01-01 through 03-03 as
 commits on the feature branch, plus the 04-01 test activation (`6f639179`).
-Nothing is merged to `main` (merge base `736811d7`), no persisted or wire state
-exists under any #295 decision, and no external consumer depends on one. The
-contracts in this feature delta are therefore written in present tense.
+Nothing is merged to `main` yet (merge base `736811d7`), but those commits
+count as landed under the test below. No persisted or wire state exists under
+any #295 decision, and no external consumer depends on one. This feature delta
+states the replacement contracts in present tense; the ADRs whose decisions
+the feature branch already implements state their amendments explicitly
+(below).
 
 **Operative status of the ADRs the replacement amends (decided per ADR on
-evidence at HEAD `db3af700`, 2026-09-24).** An ADR is treated as operative when
-its prior decision is implemented in code committed at HEAD, merged to `main`,
-persisted, or externally depended on. Every amended ADR meets that test, so
-each states its amendment explicitly rather than being rewritten silently.
-*(Open question for the user, raised 2026-09-28: the test the user set for the
-2026-09-28 correction (ruling 8 of that date) does not count code committed
-only on the feature branch. Under it, the ADRs below that are operative
-through HEAD alone would not be operative. See the "ADR-0122, ADR-0124,
-ADR-0142, ADR-0143, `c4-diagrams.md`" row of § *Invalidation register*,
-artifacts table.)*
+evidence at HEAD `db3af700`, 2026-09-24).** An ADR decision is operative when
+it is implemented in committed code, persisted, or externally depended on.
+Code committed on the feature branch counts as implemented: in the user's words
+of 2026-09-28, "we merge commit with linear history", so the feature branch's
+commits become `main`'s history. Every amended ADR meets that test, so each
+states its amendment explicitly rather than being rewritten silently. The test
+applies per clause: a clause that no committed code implements, even on the
+feature branch, has no operative contract, so a correction to it is written in
+present tense (ruling 8 of 2026-09-28).
 
 | ADR | Prior decision | Evidence | Operative through |
 |---|---|---|---|
@@ -584,14 +588,14 @@ evidence; the residuals R21 and R4 had stated become prevented. Revision 7
 
 | Artifact | Marking |
 |---|---|
-| ADR-0121 | **Resolved 2026-09-24:** superseded in part (enforcement location and counted population) by ADR-0132 to ADR-0134, stated explicitly. *Operative through HEAD alone; see the open question in the 2026-09-28 ADR-0122/0124/0142/0143 row below.* |
-| ADR-0117, ADR-0118, ADR-0122, ADR-0124, ADR-0125, ADR-0072 | **Resolved 2026-09-24:** each is operative and states its amendment explicitly, with pointers to the accepted ADRs (ADR-0117: user ruling with R7 and ADR-0133; ADR-0118: ADR-0132/0133; ADR-0122: R5–R7 and R21 additions; ADR-0124: R13–R15, ADR-0131, ADR-0138, ADR-0140; ADR-0125: ADR-0135, ADR-0137, R15, ADR-0139, ADR-0140; ADR-0072: ADR-0138). *All but ADR-0072 are operative through HEAD alone; see the open question in the 2026-09-28 ADR-0122/0124/0142/0143 row below.* |
-| ADR-0088, ADR-0089, ADR-0114, ADR-0115 | **Resolved 2026-09-24:** v2 text stays reverted; each operative ADR states its amendment explicitly with a pointer to ADR-0127 to ADR-0131 (and ADR-0140 for the rule order, ADR-0142 for TAP egress delivery). *ADR-0114 and ADR-0115 are operative through HEAD alone; see the open question in the 2026-09-28 ADR-0122/0124/0142/0143 row below.* |
+| ADR-0121 | **Resolved 2026-09-24:** superseded in part (enforcement location and counted population) by ADR-0132 to ADR-0134, stated explicitly. |
+| ADR-0117, ADR-0118, ADR-0122, ADR-0124, ADR-0125, ADR-0072 | **Resolved 2026-09-24:** each is operative and states its amendment explicitly, with pointers to the accepted ADRs (ADR-0117: user ruling with R7 and ADR-0133; ADR-0118: ADR-0132/0133; ADR-0122: R5–R7 and R21 additions; ADR-0124: R13–R15, ADR-0131, ADR-0138, ADR-0140; ADR-0125: ADR-0135, ADR-0137, R15, ADR-0139, ADR-0140; ADR-0072: ADR-0138). |
+| ADR-0088, ADR-0089, ADR-0114, ADR-0115 | **Resolved 2026-09-24:** v2 text stays reverted; each operative ADR states its amendment explicitly with a pointer to ADR-0127 to ADR-0131 (and ADR-0140 for the rule order, ADR-0142 for TAP egress delivery). |
 | ADR-0128, ADR-0129, ADR-0130, ADR-0142 | **Revised in present tense 2026-09-24 for D-295-R22** (accepted, not yet implemented, so no amendment narrative): ADR-0129 records the filter's place and order in its one launch hook; ADR-0130's holder-ioctl dispositions and read-back set, ADR-0142's source-prevention alternative and residual text, and ADR-0128's by-name-attach consequence state the ADR-0143 prevention. |
-| ADR-0122, ADR-0124 | **Operative; their explicit 2026-09-24 amendments gain D-295-R22:** ADR-0122 lists the `TapDebugMsgMask` fact; ADR-0124 counts a changed TAP debug message mask as per-allocation damage. *Operative through HEAD alone; see the open question in the 2026-09-28 ADR-0122/0124/0142/0143 row below.* |
+| ADR-0122, ADR-0124 | **Operative; their explicit 2026-09-24 amendments gain D-295-R22:** ADR-0122 lists the `TapDebugMsgMask` fact; ADR-0124 counts a changed TAP debug message mask as per-allocation damage. |
 | `brief.md` #295 sections; `c4-diagrams.md` #295 | Replacement added and marked accepted (2026-09-24). Where the earlier baseline conflicts, including the brief's "exactly `assign`, `release`, and `snapshot`" and "eight constant IP rules" sentences, the replacement governs. |
 | ADR-0144, ADR-0130, `brief.md` | **Revised in present tense 2026-09-28 for the user rulings of 2026-09-28** (accepted, not yet implemented, so no amendment narrative). ADR-0144 is rewritten and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`. ADR-0130's read-back set states the host-side MAC invariant. `brief.md`'s #295 sections state it too, and its host link-policy section and handoff annotation carry no host requirement. |
-| ADR-0122, ADR-0124, ADR-0142, ADR-0143, `c4-diagrams.md` | **Revised in present tense 2026-09-28, on the user's approval of the same date (ruling 8).** ADR-0122's 2026-09-24 addition list names the fact for a host-side MAC that breaks the invariant. ADR-0124's Decision counts a reserved or missing host-side MAC as damage, and a change to an unreserved address as none. ADR-0142's *Detection only* alternative and Consequences bound, and ADR-0143's Consequences, describe detection of a reserved address. The C4 shared-owner container and allocation sequence show no recorded MAC. None of the four ADRs is operative under ruling 8's test. None of their files exists on `origin/main` (`6cd4d702`, merge base with HEAD `736811d7`) or on the local `main` (`58694bd8`), no code on either references them or `TapHostMac`, no persisted or wire state exists under them, and no external consumer depends on them. Independently, the revised text concerns R21's host-side MAC check, which is not implemented even on the feature branch: at HEAD `fbb6acd4`, `GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` modules of `guest_network.rs`. No amendment narrative is therefore added. **Open for the user:** § *Freeze and inventory* judged ADR-0114, 0115, 0117, 0118, 0121, 0122, 0124, and 0125 operative on code committed to the feature branch alone (the two ADR-0122/0124 rows above rest on it), and their 2026-09-24 amendment blocks follow from that test. Under ruling 8's test they are not operative, so those blocks would be revised in present tense instead. DESIGN has not changed them. |
+| ADR-0122, ADR-0124, ADR-0142, ADR-0143, `c4-diagrams.md` | **Revised in present tense 2026-09-28, on the user's approval of the same date (ruling 8).** ADR-0122's 2026-09-24 addition list names the fact for a host-side MAC that breaks the invariant. ADR-0124's Decision counts a reserved or missing host-side MAC as damage, and a change to an unreserved address as none. ADR-0142's *Detection only* alternative and Consequences bound, and ADR-0143's Consequences, describe detection of a reserved address. The C4 shared-owner container and allocation sequence show no recorded MAC. Code committed on the feature branch counts as landed (the user, 2026-09-28: "we merge commit with linear history"; § *Freeze and inventory*), so ADR-0122 and ADR-0124 are operative, and their 2026-09-24 amendment blocks, like those of ADR-0114, 0115, 0117, 0118, 0121, and 0125, stand as written. The clause revised here, that a changed or recorded host-side MAC is damage, is R21's host-side MAC check, and it is not implemented even on the feature branch: at HEAD `c51ab167`, `GuestNetworkFact::TapHostMac` is declared in production code but constructed only in the `#[cfg(test)]` modules `scratch_probe_acceptance` and `allocation_owner_acceptance` of `guest_network.rs`. No production path can report that damage, and no persisted or wire state or external consumer depends on the clause. With no operative contract there is nothing to amend, so the clause is revised in present tense in all four ADRs, with no amendment narrative. |
 | `distill/test-scenarios.md`, `distill/red-classification.md` | PENDING the DISTILL rewrite; not edited. |
 | `deliver/roadmap.json` | `validation.status` must return to `pending`. Steps 02-01, 02-03, 03-01, 03-03, 04-01, and 04-02 are invalidated in part; see *Required downstream changes*. |
 
@@ -5964,11 +5968,15 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     tense. ADR-0122, ADR-0124, ADR-0142, ADR-0143, and `c4-diagrams.md`
     described the host-side MAC read-back as detecting "a change" or a
     "mismatch", or showed a recorded MAC. On the user's approval of 2026-09-28
-    (ruling 8 of that date) the four ADRs are revised in present tense, since
-    none is operative under that ruling's test (none is implemented on `main`,
-    externally depended on, or carries persisted or wire state), and
-    `c4-diagrams.md` is revised with them (§ *Invalidation register*,
-    artifacts table).
+    (ruling 8 of that date) that clause is revised in present tense in the
+    four ADRs, and `c4-diagrams.md` is revised with them (§ *Invalidation
+    register*, artifacts table). Code committed on the feature branch counts
+    as landed ("we merge commit with linear history", the user, 2026-09-28),
+    so ADR-0122 and ADR-0124 are operative and keep their explicit 2026-09-24
+    amendments. The clause itself has no operative contract: the host-side MAC
+    check is not implemented even on the feature branch, where
+    `GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` code,
+    so there is nothing to amend.
 
 ### [REF] Reuse Analysis — replacement delta
 
@@ -15007,6 +15015,7 @@ Wave-decision inputs read:
 | `docs/feature/netns-density-295/devops/wave-decisions.md` | missing (no `devops/` directory) | Graceful degradation. Environments come from the project ATDD policy, `testing.md` (Lima, `cargo xtask metal run`), and the DESIGN evidence-lane matrix. No deployment behaviour is inferred. |
 | `docs/feature/netns-density-295/spike/wave-decisions.md` | present | The increment-y (persistent-TAP fd handoff) and increment-aa (launch seccomp) probes were DISCARDED from promotion and handed to DESIGN; DESIGN adopted both mechanisms and pinned their APIs (D-295-R1 to R3, R22). Consistent. |
 | User rulings 2026-09-23 (1-5) and 2026-09-24 (1-10) | recorded in DESIGN | Applied verbatim: no binary spawn; seeded proofs in `overdrive-sim`; real guests on native x86_64 metal only; x86_64-only launch filter with aarch64 refusal (GH #302); no kernel-version gating; out-of-scope GH #261/#299/#301/#302. |
+| User rulings 2026-09-28 (managed-link identity independent of host link configuration; the `TapHostMac { ifindex, address: TapHostAddress }` fact and the reserved set's `Condemned` exclusion, rulings 6-7) | recorded in DESIGN (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28") | Applied 2026-09-28: REQ-295-LINKMAC withdrawn, the startup probe's scratch-TAP condition and its three bodies deleted, a TAP's host-side MAC judged by the D-295-R21 invariant at provision, `activate`, and the audit (S-ND295-72 (i1), (i2), (e)). **Reconciliation passed — 0 contradictions:** no DISCUSS or DEVOPS artifact carried a host `.link` requirement, and no substrate file installs one (`infra/lima/overdrive-dev.yaml`, `infra/provision/common-system.sh`). |
 
 Lane reconciliation notes (not contradictions; recorded for the reviewer):
 
@@ -15041,7 +15050,7 @@ DELIVER step.
 | Group | Scenarios | Outcome |
 |---|---|---|
 | A — journey and VMM launch boundary (gap 7) | S-ND295-01, 35, 38-46 | two VMs by name with zero frames before protection; one queue at descriptor 3; root-owned TAPs; the launch seccomp filter; creation-time close-on-exec |
-| B — guest attachment lifecycle | S-ND295-00, 06, 08-12, 47-50, 72 | provision down with owner 0, egress guest-MAC delivery, debug mask 0, host-MAC record; teardown converges on absence; node-level vs per-allocation audit; one writer per managed-link address |
+| B — guest attachment lifecycle | S-ND295-00, 06, 08-12, 47-50, 72 | provision down with owner 0, egress guest-MAC delivery, debug mask 0, and the host-side MAC invariant (no reserved or missing address; nothing recorded) at provision, activation, and the audit; teardown converges on absence; node-level vs per-allocation audit; managed links correct whatever the host's link configuration |
 | C — node-wide admission (gap 1) | S-ND295-02-04, 05A-05E | held (Admitted + Retiring) ≤ cap at `assign`; placement over the read-port; at-cap recreate ordering; the §3.2 proof |
 | D — TAP activation (gap 7) | S-ND295-51-53 | activate after the event and before release; latched/condemned outcomes; activation waits out recovery |
 | E — cleanup and reclaim (gap 5) | S-ND295-07, 07B, 54-57 | awaited convergent element release with retained retirement; the §3.4 proof; row-neutral reclaim on every path, forever, at one second |
@@ -15052,14 +15061,16 @@ DELIVER step.
 | J — native fault evidence | S-ND295-30B, 36, 37, 66, 67, 69 | per-VM kill on real guests, double loss, absent-part stop, MAC hijack and recovery, table deletion repair |
 
 Counts: 84 scenario entries — 22 RETAINED, 22 RETARGETED, 40 NEW (S-ND295-71
-the element precondition, S-ND295-72 one-writer-per-managed-link-address); 8
-bodies DELETED (the seven earlier deletions plus the S-ND295-33
+the element precondition, S-ND295-72 managed-link identity independent of host
+link configuration); 8 bodies DELETED (the seven earlier deletions plus the S-ND295-33
 `forced_shutdown_timeout_records_abandoned_at_exit_separately_from_graceful_drain`
 body dropped 2026-09-25 — it checked records only the CLI serve lifetime
 emits, which S-ND295-68 covers via drained/abandoned) and 2 proof files moved
 in phase B, and the worker bodies that drive the per-allocation listener
-branch deleted with it by the step that lands B-7. Error/fault/boundary
-share **80.9 %**.
+branch deleted with it by the step that lands B-7. The three S-ND295-72
+scratch-TAP probe bodies DISTILL authored on 2026-09-26 were deleted on
+2026-09-28 with the user rulings of that date (the startup probe reads no
+scratch-TAP address). Error/fault/boundary share **80.9 %**.
 Benchmark and measurement receipts (T1-BASE, T1-PORT4, M-ND295-E18) are
 listed separately from tests. #295 has no verification expectation.
 
@@ -15262,7 +15273,7 @@ classifying the phase-C run (B-8, the fresh-host RCA / N-4):
 | B-6 how `stop_alloc` and `shutdown_owner` return R10's typed stop error, whose sources are not `Clone`, to every concurrent or later caller | SPECIFICATION_AMBIGUITY (public cross-crate error shape) | **PINNED** — `Clone` error types holding `Arc<InterceptError>` / `Arc<MtlsEnforcementError>`; the cause reached through the field (`&*source`); five caller rules (joined callers get pointer-equal clones, one atomically claimed retry after `Err`, nothing begun after owner shutdown); owner-shutdown, shim, and install-error types unchanged (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's typed stop error, DISTILL gap B-6)) |
 | B-7 the `MtlsIntercept` port returns a bound `std::net::TcpListener`, so a sim-composed worker binds real sockets | SPECIFICATION_AMBIGUITY (port contract) | **PINNED** — `bind_transparent` returns `Arc<dyn InterceptListener>` with a cancel-safe async `accept`; a socket-free `SimMtlsIntercept`; production keeps `IP_TRANSPARENT`; the worker is no reason to gate a test; the per-allocation listener branch goes with the step that lands it, no later than 05-01 (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25"; FD § "[REF] Required downstream changes (not edited by DESIGN)" (the consequences of pins B-6 and B-7)) |
 | B-8 the element install/removal precondition — `HostMtlsIntercept` refuses without a recorded program while `SimMtlsIntercept` installs unconditionally, so the same call sequence returns `Ok` on one adapter and `Err` on the other (phase-C blocker 4) | SPECIFICATION_AMBIGUITY (port contract) | **PINNED** — one added `InterceptError::SharedProgramNotConverged`; the ordered install partition (not-converged → `SharedListenerPortMismatch` → `NftElementUpdateFailed`) and removal partition; the sim holds the record and models the owned program with the host's transitions; a failed `converge_shared` keeps the record; `install_inbound`'s per-rule fallback deleted (FD § "[REF] Driven port — intercept element precondition (DISTILL gap B-8) — pinned 2026-09-26") |
-| N-4 the fresh-host bridge race (RCA root cause A) — `converge_shared` creates `ovd-gbr0` with no address and sets it after, so ~half of fresh-host boots refuse at `BridgeObserve` and the refusal cannot name its cause | SPECIFICATION_AMBIGUITY (interface contract + platform requirement) | **PINNED** — `Client::ensure_bridge(name, mac)` creates the bridge with its address; the refusal names its cause via `GuestNetworkFact::Bridge`; the startup probe adds a scratch-TAP address condition carried by `TapHostMac`; REQ-295-LINKMAC's `.link` policy on the substrates and the appliance image (FD § "[REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26") |
+| N-4 the fresh-host bridge race (RCA root cause A) — `converge_shared` creates `ovd-gbr0` with no address and sets it after, so ~half of fresh-host boots refuse at `BridgeObserve` and the refusal cannot name its cause | SPECIFICATION_AMBIGUITY (interface contract + platform requirement) | **PINNED** — `Client::ensure_bridge(name, mac)` creates the bridge with its address; the refusal names its cause via `GuestNetworkFact::Bridge`. Re-decided for TAPs by the user rulings of 2026-09-28: no host link-configuration requirement and no startup-probe scratch-TAP condition; a TAP's host-side MAC is judged by the D-295-R21 invariant, reported as `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }` (user-approved 2026-09-28) (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28"; FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the host-side MAC invariant)) |
 
 Falsifier telemetry for this run: `(netns-density-295, C1..C7, findings 0, severity none)`
 over the in-scope set; no open upstream item.
@@ -15297,15 +15308,15 @@ plan and adopts these IDs.
 
 | Step | Scope | Decisions | Scenarios activated | Depends on |
 |---|---|---|---|---|
-| 05-00 | Managed-link address from creation (REQ-295-LINKMAC): `Client::ensure_bridge(&self, name, mac)` creates the bridge with `IFLA_ADDRESS = mac` from creation, both callers passing `GUEST_BRIDGE_MAC`; `converge_shared`/`audit_shared` name the bridge-identity mismatch cause via `GuestNetworkFact::Bridge`; the startup probe reads its scratch TAP after `CreateTap` and re-reads it before cleanup, refusing on a changed address (`R21`'s `GuestNetworkFact::TapHostMac` introduced here, not 06-02); the two substrate `.link` policies (`infra/lima/overdrive-dev.yaml`, `infra/provision/common-system.sh`) with their installation check; the `attach_tap_to_bridge` stale comment and the C-295-0/ADR-0126 read-back-then-up ordering review items. Depends on nothing; every root step below depends on it | REQ-295-LINKMAC; fresh-host RCA root cause A (FD § "[REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26") | S-ND295-72 (a, b, c, d, p1, p2), S-ND295-00 bridge-identity leg | — |
+| 05-00 | Managed-link identity, the bridge (fresh-host RCA root cause A): `Client::ensure_bridge(&self, name, mac)` creates the bridge with `IFLA_ADDRESS = mac` in its create message, with the rustdoc stating the pinned contract, both callers passing `GUEST_BRIDGE_MAC`; `converge_shared`/`audit_shared` name the bridge-identity mismatch cause via `GuestNetworkFact::Bridge`; the `attach_tap_to_bridge` stale comment and the C-295-0/ADR-0126 read-back-then-up ordering review items. It touches no TAP, no startup-probe read, no infra file, and no host configuration. Depends on nothing; every root step below depends on it | fresh-host RCA root cause A; user rulings of 2026-09-28 (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28") | S-ND295-72 (a, d; (b) stays active), S-ND295-00 bridge-identity leg (c) | — |
 | 05-01 | Required serve-boundary ports: `ServerConfig::new(kek, mtls_intercept, guest_dns)` consumed; worker, DNS owner, and supervisor always composed; `compose_mtls`, `dns_probe_fault`, and the no-worker supervisor branch deleted; `GuestDns`/`GuestDnsDeps`/`GuestDnsFactory`/`HostGuestDnsFactory`; `DnsServeTaskOwner` over `Arc<dyn GuestDns>`; `DnsResponder::audit`; action-shim lifecycle parameters non-optional. Required `AppState` inputs: both constructors take the worker, the shared owner, the EXEC gate, and the pool (the gate and pool are threaded and consumed at 06-04 / 06-03); `ServerHandle` owner fields non-`Option`; `replace_mtls_worker_for_test`, `inject_owner_shutdown_failure_for_test`, and `owner_shutdown_failures` deleted; the `None` fallback of `dispatch_with_network_owner` and its `.expect` deleted; the source-local `s19_server_handle` supplies a `ServiceBackendsResolve` built over its sim store. Fixture fallout: every `AppState` fixture passes a worker over sim ports and an owner (`SimSharedGuestNetworkOwner` in `tests/` suites and other crates, `TestSharedOwner` source-locally), keeping its lane and its assertions. Intercept listener (B-7), carried here unless DELIVER lands it in a step ordered before this one: `bind_transparent` returns `Arc<dyn InterceptListener>`; the host listener over today's `IP_TRANSPARENT` socket with its pinned obligations; the shared owner and its accept tasks share each listener `Arc` and stop by cancellation (no `try_clone`, `await_pending_connection`, 200 ms slices, or `stop` flag), and per-connection dispatch awaits `MtlsResolve::resolve`; the per-allocation listener branch of `start_alloc` deleted with the bodies that drive it; the four test-support lines of `test-scenarios.md` § *Intercept listener and stop-error test support* changed; an accept helper left without a production caller deleted with its tests | R16; B-1 pin (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the DISTILL gap B-1 pin, from how the gate reaches the shim); FD § "C-295-B — network provisioner boundary" (the helpers read the EXEC gate and the pool from `state`)); B-7 pin (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25"); B-8 pin — both adapters gain the recorded program, the ordered install/removal partition, `SharedProgramNotConverged`, and the sim's program model; `install_inbound`'s per-rule fallback deleted (the removal clause lands at 07-01, the failed-converge clause with R15) (FD § "[REF] Driven port — intercept element precondition (DISTILL gap B-8) — pinned 2026-09-26") | S-ND295-65, 34 (port bodies), 70, 71, and the `shared_…` twins of S-ND295-20 that script a connection | 05-00 |
 | 05-02 | Audited launch hook and launch seccomp filter: pure program builder and deny-list; `register_launch_child_hook` (close-on-exec, no-new-privs, filter); `create`-first architecture refusal; probe `launch-seccomp` stage and three `VmmProbeError` variants; `deny(unsafe_code)` and narration fixes; CI selector | R3 (hook), R22 | S-ND295-41-44 | 05-00 |
 | 05-03 | Cloud Hypervisor fd handoff: `TapQueue`/`attach_tap_queue`; queue mapped to fd 3; argv `fd=[3]`; `VmmError::TapQueue*`; `Command` dropped before any await; `ip` removed from launch tools (no Cloud Hypervisor version gate — user ruling of 2026-09-25). **Review items** (`crates/overdrive-host/src/vmm.rs`, `ficlone_rootfs` and its callers): (1) `if clone_dest.exists() { remove_file }` (`:609-611`) hides errors — `exists()` is `false` on `PermissionDenied` — and is a check-then-act; it should `remove_file` and treat only `NotFound` as fine (`.claude/rules/rust.md` § "Check-and-act must be atomic", § "Errors"). (2) `let _ = std::fs::remove_file(clone_dest)` on ioctl failure (`:625`) and `let _ = tokio::fs::remove_file(config.rootfs.clone_dest())` at `create` (`:410`) drop the cleanup error; record its typed cause. The three sync operations inside the one `spawn_blocking` are correct (the FICLONE ioctl has no async form). | R1, R2 | S-ND295-38, 40, 45 | 05-02 |
 | 05-04 | Creation-time close-on-exec at the eight sites (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the OBL-295-CLOEXEC eight-site table)) and the `xtask::cloexec_lint` source gate with `cargo xtask cloexec-lint` (FD § "[REF] Driven port — VMM TAP queue attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24" (the source gate and its entry point)) | OBL-295-CLOEXEC | S-ND295-46 | 05-00 |
 | 06-01 | Egress guest-MAC classifier (Tier-2 program, counter slot 9, dataplane attach/pin/query/detach, inventory) and debug-mask netlink reads | R21 (adapters), R22 (read-back adapter) | S-ND295-47, 48, 49 | 05-00 |
-| 06-02 | Owner allocation lifecycle: owner uid 0; provision egress step and down read-back with host-MAC record and mask 0; teardown converges on absence; recorded plan replaces pool lookups; per-allocation audit attribution, pins, guard, dump | R4, R21, R22, M2, H1 | S-ND295-10, 11, 12, 39, 50, 72 (e) | 06-01 |
+| 06-02 | Owner allocation lifecycle: owner uid 0; provision egress step and down read-back with the host-side MAC invariant and mask 0 (the step-7 read-back is the first producer of `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }`, whose shape DISTILL already landed as a class P/V scaffold; nothing is recorded); teardown converges on absence; recorded plan replaces pool lookups; per-allocation audit attribution, the host-side MAC invariant, pins, guard, dump | R4, R21, R22, M2, H1 | S-ND295-10, 11, 12, 39, 50, 72 ((i1) at provision and in the audit, the unreserved leg of (i2), (e)) | 06-01 |
 | 06-03 | One admission pool per server, read by dispatch from `state.guest_pool` (the seams' signatures unchanged); lease states; `retire`/`observe`; `AdmissionCapReached`/`LeaseRetiring`; retirement points on every path; refusal projection and events; `MAX_GUEST_NETWORK_ATTACHMENTS`/`GuestAttachmentOccupancy` in core | R6, R7 | S-ND295-04, 05A, 05E, 06 | 05-01 |
-| 06-04 | TAP activation gate: `TapActivation`; activate/quiesce/restore contracts under the one sequencer; shim waits on `state.guest_network_exec`; activation-failure projection; `activation_withheld`; sim owner surface | R5 | S-ND295-51, 52, 53 | 05-03, 06-02, 06-03 |
+| 06-04 | TAP activation gate: `TapActivation`; activate/quiesce/restore contracts under the one sequencer; shim waits on `state.guest_network_exec`; activation-failure projection; `activation_withheld`; sim owner surface; `activate`'s re-read checks the host-side MAC invariant | R5, R21 | S-ND295-51, 52, 53, 72 ((i1) at `activate`; the reserved set's `Condemned` exclusion, which needs the audit's condemnation) | 05-03, 06-02, 06-03 |
 | 07-01 | Awaited convergent element release: `remove_allocation_elements`; convergent netlink delete; `element_effects`; retirement retry; the five B-6 caller rules over the `Arc`-sourced `MtlsInterceptStopError` phase B cuts (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (what each caller receives)), with the review items below | R10; B-6 pin (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's typed stop error, DISTILL gap B-6)) | S-ND295-07, 07B, 54 (and S-ND295-21 if RED) | 06-03 |
 | 07-02 | Reclaim action, shim arm, validator rule, View fields | R11 (part 1) | S-ND295-56 | 07-01 |
 | 07-03 | Placement read-port, `schedule` over held occupancy, restart gating and at-cap recreate ordering, reclaim emission on every path with backoff | R8, R11 (part 2) | S-ND295-05B, 05C, 05D, 55, 57 | 07-02 |

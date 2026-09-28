@@ -575,7 +575,7 @@ GIVEN the production shared-switch owner and one admitted lease
 WHEN it provisions the attachment
 THEN the TAP exists, is persistent, is owned by root, carries debug level zero, and stays down
 AND its bridge master, guard membership, endpoint entry, ingress program and pin, and egress program and pin all read back exactly
-AND the TAP's host-side MAC is recorded for later comparison
+AND the TAP's host-side MAC is present and is neither the bridge's address nor the guest MAC of a VM the node still holds, its own included, and nothing about it is recorded
 AND no step raises the TAP, and any incompatible identity refuses without publishing the allocation
 ```
 
@@ -586,9 +586,9 @@ AND no step raises the TAP, and any incompatible identity refuses without publis
 | Lane | pure (source-local D12A tables) + lima-kernel (ordinary production composition) |
 | Driving port | `GuestNetworkProvisioner::provision` on the private host owner through D12A leaves (source-local); `serve` → action shim → `provision` with an injected recording VMM (Lima) |
 | Fault stimulus | scripted leaf observations (every TAP/bridge identity partition; egress attach/pin/query failures; mask `Some(n≠0)`, `None`, sourced error) |
-| Oracle | exact D12A call order with egress as step 6 and the down read-back plus host-MAC record as step 7; expected TAP fact `owner_uid: Some(0)`, `up: false`; every failure returns its operation-tagged error (`TcxEgress*`, `TapObserve` with `TapDebugMsgMask`) and publishes nothing; Lima: the recording VMM sees no start until the real kernel shows the complete attachment down, and the same ifindex remains down through the injected VMM's READY |
+| Oracle | exact D12A call order with egress as step 6 and, as step 7, the down read-back that checks the host-side MAC invariant (D-295-R21; nothing is recorded — a reserved or missing address refuses publication with `TapObserve` over `TapHostMac`, S-ND295-72 (i1)); expected TAP fact `owner_uid: Some(0)`, `up: false`; every failure returns its operation-tagged error (`TcxEgress*`, `TapObserve` with `TapDebugMsgMask`) and publishes nothing; Lima: the recording VMM sees no start until the real kernel shows the complete attachment down, and the same ifindex remains down through the injected VMM's READY |
 | Seed / isolation | table + example; control-plane integration binary is `host-kernel-shared` |
-| Rust home | `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success, every_incompatible_tap_or_bridge_identity_refuses_owner_publication, rollback_retry_skips_attachment_query_after_tap_removal}` (RETARGETED: owner 0, egress step, mask, host MAC, egress rollback state), `…::early_provision_failure_without_tap_skips_attachment_query` (RETAINED); NEW `…::every_egress_and_debug_mask_provision_failure_refuses_publication`; `crates/overdrive-netlink/src/client.rs::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field` (RETAINED); `crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs::ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start` (placeholder AUTHORED) |
+| Rust home | `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::{provision_reads_every_attachment_fact_before_reporting_success, every_incompatible_tap_or_bridge_identity_refuses_owner_publication, rollback_retry_skips_attachment_query_after_tap_removal}` (RETARGETED: owner 0, egress step, mask, host-side MAC invariant, egress rollback state; the reserved-address refusal table is S-ND295-72's `a_reserved_or_missing_host_side_address_refuses_publication`), `…::early_provision_failure_without_tap_skips_attachment_query` (RETAINED); NEW `…::every_egress_and_debug_mask_provision_failure_refuses_publication`; `crates/overdrive-netlink/src/client.rs::tests::persistent_tap_and_bridge_projection_preserves_every_observable_identity_field` (RETAINED); `crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs::ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start` (placeholder AUTHORED) |
 | Disposition / step | RETARGETED + NEW + AUTHORED — 06-02 |
 
 #### S-ND295-12 — Teardown leaves nothing behind and converges on parts already gone
@@ -631,15 +631,15 @@ AND the audit changes nothing
 
 | Field | Value |
 |---|---|
-| Discharges | E11 prerequisite, E12 (g) owner half; G5/r2, G5/r3; D-295-R14/H1 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (node-level versus per-allocation parts; the `audit_shared` contract and when `Condemned` takes effect)), R21 (host MAC, egress parts), R22 (mask 0; failed dump is `Bridge`, FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (a failed audit dump is a node-level failure)) |
+| Discharges | E11 prerequisite, E12 (g) owner half; G5/r2, G5/r3; D-295-R14/H1 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (node-level versus per-allocation parts; the `audit_shared` contract and when `Condemned` takes effect)), R21 (the host-side MAC invariant, egress parts), R22 (mask 0; failed dump is `Bridge`, FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (a failed audit dump is a node-level failure)) |
 | Contract shape | bounded-change |
 | Lane | pure (source-local over scripted D12A leaves and scratch I/O) |
 | Driving port | `SharedGuestNetworkOwner::audit_shared` |
-| Fault stimulus | per node-level part: bridge identity, guard table/chains/rules, a guard member naming an unmanaged TAP, TCX program, map identity, map pins, an unmanaged endpoint entry, a failed debug-mask dump; per allocation: TAP deleted, non-persistent, owner changed, host MAC changed, mask non-zero, ifindex changed, master lost, admin state versus phase, ingress/egress attachment detached, ingress/egress pin removed, endpoint value changed, guard member removed |
-| Oracle | node-level → `Err(SharedGuestNetworkAuditError { component, source })` with the matrix component (guard → `BridgeGuard`, pins → `BpffsPin`, dump → `Bridge`); per-allocation → `Ok(SharedGuestNetworkAudit { damaged: {alloc: first failing check} })` with `TapHostMac` / `TapDebugMsgMask` / `TcxEgressQuery` / `TcxEgressLinkPin` facts; a reported allocation is excluded from every later audit and restore; no mutating leaf is called |
+| Fault stimulus | per node-level part: bridge identity, guard table/chains/rules, a guard member naming an unmanaged TAP, TCX program, map identity, map pins, an unmanaged endpoint entry, a failed debug-mask dump; per allocation (the node-level table's recovery audit uses the reserved host-side MAC): TAP deleted, non-persistent, owner changed, host-side MAC reserved (the TAP's own guest MAC) or missing, mask non-zero, ifindex changed, master lost, admin state versus phase, ingress/egress attachment detached, ingress/egress pin removed, endpoint value changed, guard member removed |
+| Oracle | node-level → `Err(SharedGuestNetworkAuditError { component, source })` with the matrix component (guard → `BridgeGuard`, pins → `BpffsPin`, dump → `Bridge`); per-allocation → `Ok(SharedGuestNetworkAudit { damaged: {alloc: first failing check} })` with `TapHostMac { address: Reserved(<mac>) | Missing }` / `TapDebugMsgMask` / `TcxEgressQuery` / `TcxEgressLinkPin` facts (an unreserved host-side MAC is not damage, S-ND295-72 (i2)); a reported allocation is excluded from every later audit and restore; no mutating leaf is called |
 | Seed / isolation | finite table |
 | Rust home | NEW `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::{every_node_level_audit_failure_names_its_matrix_component_first, every_per_allocation_damage_is_named_only_when_the_node_is_healthy, a_condemned_allocation_leaves_every_later_audit_and_restore_universe}` |
-| Disposition / step | NEW — 06-02 |
+| Disposition / step | NEW — 06-02 (`a_condemned_allocation_leaves_every_later_audit_and_restore_universe` at 06-04, where condemnation lands with R5) |
 
 #### S-ND295-10 — A removed ingress link is still blocked by the guard and condemns only that VM
 
@@ -844,10 +844,10 @@ AND restore raises only activation-complete TAPs in order and clears the latch l
 | Contract shape | bounded-change |
 | Lane | pure (source-local over D12A leaves) |
 | Driving port | `GuestNetworkProvisioner::activate`, `SharedGuestNetworkOwner::{quiesce_managed_taps, restore_quiesced_taps}` on the private host owner |
-| Fault stimulus | each protection re-read mismatch (bridge, owner, down state, host MAC `TapHostMac`, mask `TapDebugMsgMask`, guard, endpoint, ingress program/pin, egress program/pin); `set_link_up` failure; post-set-up read-back failure; per-TAP set-down failure and missing TAP during quiescence; whole-call netlink open failure; restore failure mid-list |
+| Fault stimulus | each protection re-read mismatch (bridge, owner, down state, host-side MAC reserved or missing `TapHostMac`, mask `TapDebugMsgMask`, guard, endpoint, ingress program/pin, egress program/pin); `set_link_up` failure; post-set-up read-back failure; per-TAP set-down failure and missing TAP during quiescence; whole-call netlink open failure; restore failure mid-list |
 | Oracle | `Ok(TapActivation::Raised)` after exact read-back; `Ok(QuiescenceLatched)` with zero mutating leaf calls; condemned → source-less `PostconditionMismatch`; post-set-up read-back failure attempts `TapSetDown`; `TapQuiescence.unconfirmed` names exactly the failing allocations with `Netlink { TapSetDown }` or `PostconditionMismatch`; repeat quiesce while latched → empty result, no I/O; restore order by `AllocationId`, stops at the first failure keeping the latch, retry resumes the remainder; `ProvisionedDown`/`Condemned` never raised |
 | Seed / isolation | finite tables |
-| Rust home | `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::activation_reads_every_protection_fact_before_reporting_success` (RETARGETED: `TapActivation`, host MAC, mask, egress); NEW `…::{activation_under_a_latch_or_condemnation_changes_nothing, quiescence_reports_every_unconfirmed_tap_and_condemns_it, restore_raises_only_quiesced_active_taps_in_order_and_clears_the_latch_last}` |
+| Rust home | `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::activation_reads_every_protection_fact_before_reporting_success` (RETARGETED: `TapActivation`, host-side MAC invariant, mask, egress; every reserved class at `activate` is S-ND295-72's `a_reserved_or_missing_host_side_address_refuses_activation_before_any_change`); NEW `…::{activation_under_a_latch_or_condemnation_changes_nothing, quiescence_reports_every_unconfirmed_tap_and_condemns_it, restore_raises_only_quiesced_active_taps_in_order_and_clears_the_latch_last}` |
 | Disposition / step | RETARGETED + NEW — 06-04 |
 
 #### S-ND295-52 — The action shim raises the TAP after the protection-live event and before the command
@@ -1387,30 +1387,29 @@ AND dropping the node's holder with no member present removes the program, and w
 | Rust home | `crates/overdrive-sim/src/adapters/mtls_intercept.rs::tests::{shared_convergence_records_both_exact_targets_for_non_repairing_observation, a_node_guard_dropped_while_a_member_exists_keeps_the_program_and_withdraws_the_record, converging_to_the_recorded_program_adopts_it_and_keeps_every_member, a_program_replacement_is_refused_while_a_member_exists, a_convergence_from_a_stale_prior_is_refused_and_changes_nothing, shared_convergence_refuses_in_the_hosts_order, a_failed_convergence_keeps_the_recorded_program, an_armed_install_fault_fires_only_after_the_record_and_port_checks}`; `crates/overdrive-worker/tests/integration/mtls_intercept_equivalence.rs::{an_install_before_convergence_is_refused_and_changes_nothing, an_install_at_a_port_other_than_the_recorded_target_is_refused, a_node_guard_dropped_with_no_members_leaves_no_program, a_convergence_from_a_stale_prior_is_refused_and_changes_nothing, a_zero_listener_port_is_refused_before_any_program_change, a_node_guard_dropped_with_no_members_leaves_no_member_state, a_node_guard_dropped_while_members_exist_keeps_the_program}`. The two S-MIF-11/12 install bodies (`both_installs_hand_back_a_guard_that_releases_cleanly`, `re_installing_the_same_capture_converges_and_both_guards_release_cleanly`) converge before installing and pass today on both adapters (the phase-C C-14 divergence closed) |
 | Disposition / step | NEW — 05-01, apart from the two member-aware equivalence bodies (08-02, when the host's `observe_shared_state` stops being a `todo!`). The sim self-tests activate at 05-01; the equivalence refusal/program bodies too. The two install-`Ok` bodies are active |
 
-#### S-ND295-72 — A managed link's address has one writer from creation to deletion
+#### S-ND295-72 — A managed link is correct whatever the host's link configuration
 
 `@real-io @error @contract-shape:bounded-change`
 
 ```gherkin
-GIVEN the node bridge and every guest TAP are managed links whose address the shared owner alone writes
-WHEN the owner creates the bridge, provisions a TAP, and boots or audits the node
-THEN the bridge carries its address from creation and no host link manager overwrites it
-AND a bridge identity mismatch names the observed address and up state, never two equal facts
-AND the startup probe reads its scratch TAP after creation and again before cleanup, and refuses on a changed address
-AND a provisioned TAP's recorded host-side address survives udev initialisation, and a later rewrite is that VM's damage
+GIVEN the node bridge and every guest TAP are managed links, on a host whose link manager may rewrite a link's address, or may not run at all
+WHEN the owner reads a managed link back, at bridge creation or boot, at provision, at activation, or in an audit
+THEN the bridge carries its address from creation, and a bridge identity mismatch names the observed address and up state
+AND a TAP holding no address, the bridge's address, or the guest MAC of a VM the node still holds is refused at provision, refused at activation, or is that VM's damage alone in the audit
+AND a TAP moved to any other address, whoever wrote it, is not damage
 ```
 
 | Field | Value |
 |---|---|
-| Discharges | REQ-295-LINKMAC and E22 (FD § "[REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26"; FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E22 row)); the fresh-host RCA root cause A (`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`) |
+| Discharges | E22 (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28"; FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the host-side MAC invariant); FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E22 row)); the fresh-host RCA root cause A (`docs/analysis/root-cause-analysis-netns295-fresh-bridge-boot-refusal.md`) |
 | Contract shape | bounded-change |
-| Lane | pure/seeded (the scratch-probe address condition through the D-295-DISTILL-5 scripted scratch I/O, E22 (p1)/(p2)) + lima-kernel (`ensure_bridge` create/adopt, E22 (a)/(b); the owner's bridge and TAP audit, E22 (d)/(e)) |
-| Driving port | `Client::ensure_bridge(name, mac)`; the D5/D14A startup-probe owner algorithm and its scratch-TAP read; `SharedGuestNetworkOwner::{converge_shared, provision, audit_shared}` |
-| Fault stimulus | an out-of-band `ip link set … address`/`… down` on `ovd-gbr0`; a scripted scratch-TAP read that changes, is replaced, carries no address, is absent, or fails; on the metal contrast, a rewrite of a provisioned TAP after `provision` records it |
-| Oracle | (a) a created bridge reads back `addr_assign_type` 3 and the requested address, down, and the create-then-set control is recorded only; (b) `ensure_bridge` on a present link of any kind writes nothing; (p1) the probe reads the scratch TAP after `CreateTap` and re-reads it before cleanup on the success path, and once only off it; (p2) a changed/replaced/no-address/absent read refuses with `PostconditionMismatch { operation: StartupProbe, expected: TapHostMac { recorded }, observed }`, a failed read with `Netlink { StartupProbe }`, and both still run the complete scratch cleanup and inventory; (d) a bridge mismatch reports the observed MAC and up state, never `observed: None`; (e) after `udevadm wait` a provisioned TAP's recorded host-side address equals its live one and the audit reports no damage, and a later rewrite is that allocation's `TapHostMac` damage with the node healthy |
-| Seed / isolation | finite tables + examples; scratch names outside `ovd-gbr*`/`ovd-tp-*` for (a)/(b); node-global names for (d)/(e) → the source-local kernel module is in `host-kernel-shared`; the netlink integration binary is `host-kernel-shared` |
-| Rust home | `crates/overdrive-netlink/tests/integration/managed_link_address.rs::{a_created_bridge_carries_its_address_from_creation_and_starts_down, ensure_bridge_adopts_a_present_link_of_any_kind_without_writing}`; `crates/overdrive-control-plane/src/guest_network.rs::scratch_probe_acceptance::{an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads, a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once, a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up}`; `crates/overdrive-control-plane/src/guest_network.rs::shared_owner_link_address_kernel::{a_bridge_identity_mismatch_names_the_observed_address_and_up_state, a_provisioned_taps_recorded_address_survives_udev_initialisation}`; the S-ND295-00 bridge-identity leg is the `run_server` read-back (E22 (c)) |
-| Disposition / step | NEW — 05-00, apart from `ensure_bridge`'s adopt-a-present-link body (active — today's create-or-adopt already adopts without writing) and the metal contrast (e) at 06-02 where `host_mac` is first recorded. The remaining bodies are RED until 05-00 creates the bridge with its address and adds the scratch-TAP read |
+| Lane | pure (source-local D12A tables over the fake attachment kernel: (i1), (i2)) + lima-kernel (`ensure_bridge` create/adopt, (a)/(b); the owner's bridge audit, (d); the owner's TAP audit after udev, (e)) + native ((e) on the metal host as provisioned, the host's `systemd --version` recorded (printed through `systemctl --version`); (c) through S-ND295-00) |
+| Driving port | `Client::ensure_bridge(name, mac)`; `SharedGuestNetworkOwner::{converge_shared, provision, audit_shared}` and `GuestNetworkProvisioner::activate` on the one host owner (over the D12A leaves source-locally; over the production allocation I/O on Lima and metal) |
+| Fault stimulus | an out-of-band `ip link set … address`/`… down` on `ovd-gbr0`; a TAP's host-side MAC set, from creation or later, to each reserved class — another held allocation's guest MAC (held `Active`, held `ProvisionedDown`), the TAP's own guest MAC, `GUEST_BRIDGE_MAC` — or to no address; an unreserved address (`fe:95:de:ad:00:01`, `62:a6:95:00:00:02`, `02:95:72:00:00:0d`); a TAP holding a `Condemned` allocation's guest MAC; a guest MAC a TAP took before that guest's allocation was held; on Lima and metal, systemd-udevd's own write where it runs |
+| Oracle | (a) a created bridge reads back `addr_assign_type` 3 and the requested address, down, and the create-then-set control is recorded only; (b) `ensure_bridge` on a present link of any kind writes nothing; (c) S-ND295-00's fresh-host read-back is `GUEST_BRIDGE_MAC`; (d) a bridge mismatch reports the observed MAC and up state, never `observed: None`; (i1) each reserved class and a missing address is `PostconditionMismatch { operation: TapObserve, expected: TapHostMac { ifindex, address: Unreserved }, observed: Some(TapHostMac { ifindex, address: Reserved(<mac>) \| Missing }) }` — at provision, with each break written from creation and again after the egress step (step 6) has run, so that only the step-7 read-back can see it, publication is refused, the TAP is never raised, every part is rolled back, and the held attachments stay byte-equal; at `activate` it is refused with zero mutating leaf calls and the node unchanged, and the attachment still activates once the address is restored; in the audit exactly that allocation is named, the other is not, and nothing is written; the ordering case: a TAP that took a guest MAC before that guest's allocation was held passes every audit until the allocation is provisioned, and the first audit after that names the TAP's allocation alone; (i2) an unreserved address passes provision (written at either point), `activate`, and every audit, including audits that each follow a move of both TAPs to unreserved addresses they did not carry at the previous audit (each audit still reads the TAP it judges), and a TAP holding a `Condemned` allocation's guest MAC is not damage; (e) with two allocations provisioned by the production owner: after udev (where it runs) has initialized the first TAP, the audit reports no damage, whatever address udev left; an out-of-band unreserved write is no damage; the second allocation's guest MAC on the first TAP is that TAP's `TapHostMac` damage alone (`Reserved(<mac>)`), and the second allocation and the node stay healthy. No case installs, reads, or requires a host link-configuration file, and the startup probe reads no scratch-TAP address (user ruling 4) |
+| Seed / isolation | finite tables + examples; the (i1)/(i2) tables are default-lane over the fake attachment kernel; scratch names outside `ovd-gbr*`/`ovd-tp-*` for (a)/(b); node-global names for (d)/(e) → the source-local kernel module is in `host-kernel-shared`; the netlink integration binary is `host-kernel-shared` |
+| Rust home | `crates/overdrive-netlink/tests/integration/managed_link_address.rs::{a_created_bridge_carries_its_address_from_creation_and_starts_down, ensure_bridge_adopts_a_present_link_of_any_kind_without_writing}`; `crates/overdrive-control-plane/src/guest_network.rs::allocation_owner_acceptance::{a_reserved_or_missing_host_side_address_refuses_publication, a_reserved_or_missing_host_side_address_refuses_activation_before_any_change, a_reserved_or_missing_host_side_address_is_that_allocations_audit_damage, an_unreserved_host_side_address_is_not_audit_damage_whenever_it_changes, a_tap_holding_a_condemned_guests_address_is_not_audit_damage, a_guest_address_a_tap_took_early_is_damage_from_the_first_audit_after_that_guest_is_held}`; `crates/overdrive-control-plane/src/guest_network.rs::shared_owner_link_address_kernel::{a_bridge_identity_mismatch_names_the_observed_address_and_up_state, a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote}` (the latter re-authored from `a_provisioned_taps_recorded_address_survives_udev_initialisation`); the S-ND295-00 bridge-identity leg is the `run_server` read-back (E22 (c)). S-ND295-50's and 51's per-part tables carry a reserved-address row (the TAP's own guest MAC) and a missing-address row. DELETED with the user rulings of 2026-09-28: the three `scratch_probe_acceptance` bodies (`an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads`, `a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once`, `a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up`), their scratch-TAP read support, and `PacketProbeIo::read_scratch_tap` |
+| Disposition / step | NEW — 05-00 for the bridge ((a), (d), and S-ND295-00's (c)); `ensure_bridge`'s adopt body (b) is active (today's create-or-adopt already adopts without writing); 06-02 for the TAP invariant at provision and in the audit ((i1), the unreserved leg of (i2), (e)); 06-04 for (i1) at `activate` and for (i2)'s `Condemned` exclusion, which needs the audit's condemnation (R5) |
 
 #### S-ND295-70 — The node's protection listeners belong to the protection port: a simulated node opens no socket, and a listener stops when its wait is cancelled
 
@@ -1521,7 +1520,7 @@ AND a stopped VM is never audited or restored again, and recovery continues for 
 | Contract shape | bounded-change |
 | Lane | seeded-sim (source-local, default lane; as S-ND295-29A) |
 | Driving port | as S-ND295-29A |
-| Fault stimulus | the test-local owner's quiescence outcome (`Unconfirmed({A})`, `Fail`, `Hang`) and damage set `{A}` for each per-allocation part class (a TAP deleted; ingress/egress attachment or pin removed; endpoint; guard member; raised while `ProvisionedDown`; owner or persistence; host MAC; debug mask). Every case first creates the workloads slice and each reported allocation's scope directory, with every ancestor, through `CgroupFs::create_dir` on the one `SimCgroupFs`. (c) `SimCgroupFs::inject_error(SimOp::Write, <A's scope>/cgroup.kill, ErrorKind::Other)`; (d) A's scope directory is not created, so the kill write under a missing parent returns `NotFound`, the absent scope a concurrent stop leaves (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle)) |
+| Fault stimulus | the test-local owner's quiescence outcome (`Unconfirmed({A})`, `Fail`, `Hang`) and damage set `{A}` for each per-allocation part class (a TAP deleted; ingress/egress attachment or pin removed; endpoint; guard member; raised while `ProvisionedDown`; owner or persistence; a reserved or missing host-side MAC; debug mask). Every case first creates the workloads slice and each reported allocation's scope directory, with every ancestor, through `CgroupFs::create_dir` on the one `SimCgroupFs`. (c) `SimCgroupFs::inject_error(SimOp::Write, <A's scope>/cgroup.kill, ErrorKind::Other)`; (d) A's scope directory is not created, so the kill write under a missing parent returns `NotFound`, the absent scope a concurrent stop leaves (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle)) |
 | Oracle | `SimCgroupFs::snapshot()` holds the last payload per path, not an ordered log, so each assertion names its observation point. (a),(e),(f),(g): `1\n` at A's scope `cgroup.kill` and no entry at the workloads-slice `cgroup.kill`; (d): no entry at either, and A counts as killed; (b) and (c): `1\n` at the slice `cgroup.kill` in the snapshot taken when the `TapQuiescenceUndetermined` / `VmKillFailed` request is received. Ordering: the test-local owner stores the snapshot taken at the start of each owner call in its journal, and the first owner call after a report already holds every reported allocation's kill write. `shared_owner_vm_killed { alloc, cause }` per kill; EXEC stays Open for damage found while Open; a killed allocation is never in a later audit's damage set or a later restore; recovery reopens after (a), (d), (e) |
 | Seed / isolation | as S-ND295-29A |
 | Rust home | NEW `crates/overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance::{an_unconfirmed_tap_stops_only_its_vm_and_recovery_reopens, an_undetermined_quiescence_stops_every_workload_vm_then_fails_the_node, a_failed_per_vm_stop_stops_every_workload_vm_then_fails_the_node, an_already_removed_scope_counts_as_stopped, every_damaged_per_vm_part_stops_only_that_vm_while_admission_stays_open, a_killed_vm_leaves_every_later_audit_and_restore}` |
@@ -1723,7 +1722,7 @@ GIVEN two Active guests A and V on native metal
 WHEN a process outside the launch filter, holding a copy of A's queue as the VM uid with no capabilities, sets A's host-side MAC to V's guest MAC
 THEN A's TAP carries no frame addressed to V, while A's own unicast and every broadcast still arrive
 AND V receives no host unicast while the entry is poisoned
-AND the next audit names A as damaged by its host-side MAC and stops only A
+AND the next audit names A as damaged by its host-side MAC, now V's guest MAC and so a reserved address, and stops only A
 AND after A's cleanup the poisoned entry is gone, V answers the host again, and V's MAC is re-learned on V's port within a second
 ```
 
@@ -1734,7 +1733,7 @@ AND after A's cleanup the poisoned entry is gone, V answers the host again, and 
 | Lane | native |
 | Driving port | `serve` + `deploy` |
 | Fault stimulus | `pidfd_getfd` of A's descriptor 3 into a forked child that drops to uid 4200 with `CapEff=0` and issues `SIOCSIFHWADDR` on it; host-originated unicast to V's guest MAC |
-| Oracle | (1) exact-ifindex capture on A's TAP plus a read on the held queue: zero frames to V; node-wide `EgressDestinationDrop` rises by at least the frames sent; (2) controls: host unicast to A's MAC arrives; broadcast reaches every guest; (3) capture on V's TAP: no host unicast while poisoned; (4) within one audit period `shared_owner_vm_killed { alloc: A, cause: "attachment_damaged" }` with a `TapHostMac` cause; EXEC stays Open; A's teardown by its ordinary lifecycle, kill→teardown interval recorded; (5) after A's complement read-back, `bridge fdb show` lists V's MAC only on V's port, a host→V echo is answered, and V's MAC is a learned non-permanent entry on V's port within 1 s |
+| Oracle | (1) exact-ifindex capture on A's TAP plus a read on the held queue: zero frames to V; node-wide `EgressDestinationDrop` rises by at least the frames sent; (2) controls: host unicast to A's MAC arrives; broadcast reaches every guest; (3) capture on V's TAP: no host unicast while poisoned; (4) within one audit period `shared_owner_vm_killed { alloc: A, cause: "attachment_damaged" }` (the `TapHostMac { address: Reserved(<V's guest MAC>) }` fact behind that cause is proven source-locally by S-ND295-72); EXEC stays Open; A's teardown by its ordinary lifecycle, kill→teardown interval recorded; (5) after A's complement read-back, `bridge fdb show` lists V's MAC only on V's port, a host→V echo is answered, and V's MAC is a learned non-permanent entry on V's port within 1 s |
 | Seed / isolation | example; `host-kernel-shared` |
 | Rust home | NEW `crates/overdrive-cli/tests/integration/shared_network_native_faults.rs::a_mac_hijack_from_outside_the_vm_steals_nothing_and_the_victim_recovers` |
 | Disposition / step | NEW — 10-02 |
@@ -1902,7 +1901,7 @@ Other dispositions that phase B must apply:
 | S-ND295-69 | bounded-change | native | NEW | 10-02 |
 | S-ND295-70 | bounded-change | pure + lima-kernel | NEW + RETARGETED | 05-01 |
 | S-ND295-71 | bounded-change | pure + lima-kernel | NEW | 05-01 (08-02 for the two member-aware equivalence bodies) |
-| S-ND295-72 | bounded-change | pure + seeded + lima-kernel | NEW | 05-00 (06-02 for the metal TAP-damage contrast) |
+| S-ND295-72 | bounded-change | pure + lima-kernel + native | NEW | 05-00 (bridge); 06-02 (TAP invariant at provision and audit, (e)); 06-04 ((i1) at `activate`, the `Condemned` exclusion); (b) active |
 
 **Counts.** 84 scenario entries (the IDs above with every ranged row
 expanded: S-ND295-02/03, 08/09, 14-18, 20-26, 27/28, 31A/31B). By scenario:
@@ -1921,9 +1920,11 @@ body, item 6); the step that lands B-7 also deletes, with the per-allocation
 listener branch, the worker bodies that drive it (§ *Intercept listener and
 stop-error test support*). Error, fault, or boundary scenarios: **68 of 84
 (80.9 %)**. By lane, counted once per expanded scenario ID for every lane its
-matrix row names: pure 45, seeded-sim 7, seeded-in-process 1, in-process 9,
-lima-kernel 29, tier2 3, native 25, integration 11, xtask-integration 1
-(recomputed 2026-09-25: the `integration` lane — the worker/control-plane
+matrix row names: pure 47, seeded-sim 7, seeded-in-process 1, in-process 9,
+lima-kernel 31, tier2 3, native 26, integration 11, xtask-integration 1
+(recomputed 2026-09-28 to add S-ND295-71 (pure, lima-kernel) and S-ND295-72
+(pure, lima-kernel, native), which the 2026-09-25 tally predates; recomputed
+2026-09-25: the `integration` lane — the worker/control-plane
 integration binaries with real loopback sockets, S-ND295-13D, 20-26, 31A, 31B,
 61 — was omitted before the WP-5 move to the worker integration binary; and
 S-ND295-40's queue-error body moved from `overdrive-host` `vmm::tests` to its
@@ -1956,7 +1957,7 @@ for its wall-clock budget. No verification expectation.
 | E19 creation-time close-on-exec | S-ND295-46 (`scan_source` tables; `scan_workspace` in the xtask integration binary) | — | — | — |
 | E20 cleanup-pending | S-ND295-58, 60 | S-ND295-59 | — | — |
 | E21 launch filter | S-ND295-42, 44 | — | S-ND295-41, 43 | S-ND295-43 (f), 45, 01 |
-| E22 one writer per managed-link address | S-ND295-72 (p1, p2 scratch-TAP probe condition) | — | S-ND295-72 (a, b `ensure_bridge`; d bridge mismatch), 00 (c bridge read-back) | S-ND295-72 (e TAP-damage contrast at 06-02) |
+| E22 managed-link identity independent of host link configuration | S-ND295-72 ((i1), (i2): the host-side MAC invariant at provision, `activate`, and the audit), 50 and 51 (reserved and missing rows) | — | S-ND295-72 (a, b `ensure_bridge`; d bridge mismatch; e a TAP judged by the invariant after udev), 00 (c bridge read-back) | S-ND295-72 (e on the metal host as provisioned) |
 
 ## Gate boundary coverage (G-295-0..5 × FD § "Required boundary scenarios per gate")
 
@@ -2367,13 +2368,15 @@ forwards the inner result and constructs no error, so it needs no change.
 
 - Unbounded: S-ND295-04, 05A, 05B, 05C, 13A, 27, 42, 55 (proptest).
 - Finite, table-driven: S-ND295-11, 12, 29A, 30A, 40, 44, 47, 49, 50, 51, 58,
-  61, 70 (one row per `SimAcceptScript` outcome).
+  61, 70 (one row per `SimAcceptScript` outcome), 72 (one row per reserved
+  class of the host-side MAC invariant, plus the missing address).
 - Seeded schedules: S-ND295-05D, 19, 29A, 29B, 30A, 32, 53, 57.
 - Shared test vocabulary (helpers only, never production types):
   `GuestAttachment`, `HeldLease`, `RetiringLease`, `ManagedTap`,
   `ProtectionLive`, `ReleaseLast`, `ProofMark`, `CondemnedVm`.
-- Step-reuse ratio (informational, no gate): the 63 prose Gherkin blocks
-  contain 328 Given/When/Then lines and 328 distinct line texts — **1.00×**.
+- Step-reuse ratio (informational, no gate): the 65 prose Gherkin blocks
+  contain 338 Given/When/Then lines and 338 distinct line texts — **1.00×**
+  (recomputed 2026-09-28).
   Rust has no step-decorator layer; each prose step is written for its
   scenario, and readability is not collapsed to raise the ratio. Reuse lives
   in the shared Rust fixtures named in each field table.
@@ -2392,7 +2395,7 @@ forwards the inner result and constructs no error, so it needs no change.
 | C5a mode combinations | PASS | x86_64 vs other targets (42, 44); cold boot vs killed restart (13A, 13C); Job vs Service render (60); node-level vs per-allocation audit (50) |
 | C5b orthogonality | PASS | listener/DNS loss never quiesces (29A); damage while Open leaves the gate Open (30A); non-pending rows render byte-identically (60) |
 | C6a malformed input | PASS | duplicate/zero-port destinations (54); non-persistent / raised / busy TAP (38); foreign ABI syscalls (42, 43) |
-| C6b each declared error | PASS | every `TapQueueError`/`VmmError`/`VmmProbeError` variant (38, 40, 44); `AdmissionCapReached`/`LeaseRetiring` (05A, 04); `ElementRemoval`/`HandleTeardown` (54, 07B); `BootMemberClear`/`MemberMismatch`/`MemberRepair` (13D, 61); both new fail-stop causes (30A, 27); `SharedProgramNotConverged` and the ordered install/removal partition (71); the `TapHostMac`/`Bridge` refusal facts (72) |
+| C6b each declared error | PASS | every `TapQueueError`/`VmmError`/`VmmProbeError` variant (38, 40, 44); `AdmissionCapReached`/`LeaseRetiring` (05A, 04); `ElementRemoval`/`HandleTeardown` (54, 07B); `BootMemberClear`/`MemberMismatch`/`MemberRepair` (13D, 61); both new fail-stop causes (30A, 27); `SharedProgramNotConverged` and the ordered install/removal partition (71); the `TapHostMac { address: Reserved | Missing }` and `Bridge` refusal facts (72, 50, 51) |
 | C6c closed error set | PASS | exhaustive mapping tables with no catch-all (40, 44, 61 `component()`); eight-cause gate table (27) |
 | C7a degraded resource | PASS | netlink open failure (51); failed debug-mask dump (50); kill write failure (30A); missing kernel image (66) |
 | C7b interruption | PASS | killed-mode serve (13C, 63); hung audit/quiesce (32, 30A); activation in flight during detection (29A) |
@@ -2405,8 +2408,11 @@ forwards the inner result and constructs no error, so it needs no change.
 Every gap DISTILL returned is pinned: B-1 to B-5 and N-1 from the first pass,
 approved in two DESIGN review rounds; B-6 and B-7, found while aligning the
 scenarios to those pins; and B-8 and the fresh-host RCA (N-4), pinned
-2026-09-26 while classifying the phase-C run. None is open; the scenarios above
-follow the pins.
+2026-09-26 while classifying the phase-C run. N-4's TAP half was re-decided by
+the user rulings of 2026-09-28 (no host link-configuration requirement; a TAP's
+host-side MAC judged by the D-295-R21 invariant, reported as
+`TapHostMac { ifindex, address: TapHostAddress }`). None is open; the scenarios
+above follow the pins.
 
 | ID | Gap as returned | Pin (FD) | What changed here |
 |---|---|---|---|
@@ -2421,7 +2427,7 @@ follow the pins.
 | N-2 (note) | R16 makes every `run_server*` boot run the real `HostMtlsEnforcement` kTLS probe, so the S-ND295-13 seeded invariant becomes Lima-root in-process | FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (`compose_mtls` is deleted); FD § "D-295-DISTILL-13 — production-composed S-ND295-13 boot-order boundary" (the selected shape) | S-ND295-13A keeps its boundary and seed and gains `integration-tests` gating |
 | N-3 (note) | D-295-R22 falsifies the S-VM-09 assertion that the CH thread-group leader reports `SECCOMP_MODE_DISABLED` (`vm_walking_skeleton.rs:1102-1105`) | FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (the E21 row, case (e)) | The body is re-targeted as S-ND295-45, and its marker moves 05-02 → 05-03 (its precondition is a Running guest, which the 05-03 descriptor handoff provides) |
 | B-8 | `HostMtlsIntercept` refuses an element install/removal without a recorded program (constructed-source `NftRuleInstallFailed`, or `install_inbound`'s fallback to the retired per-rule installer) while `SimMtlsIntercept` installs unconditionally — the same call sequence returns `Ok` on one adapter and `Err` on the other (phase-C blocker 4, `red-classification.md`) | **PINNED** — one added `InterceptError::SharedProgramNotConverged`; the ordered install partition (not-converged → `SharedListenerPortMismatch` → `NftElementUpdateFailed`) and removal partition; the sim holds the record and models the owned program with the host's transitions; a failed `converge_shared` keeps the record; `install_inbound`'s fallback deleted (FD § "[REF] Driven port — intercept element precondition (DISTILL gap B-8) — pinned 2026-09-26") | NEW S-ND295-71; the equivalence harness converges before installing (phase-C C-14 closed); the sim self-tests, `SimMtlsIntercept`'s program model, and every test-local `MtlsIntercept` double return `SharedProgramNotConverged`; the removal bodies split the recorded-versus-observed refusal into its own body (S-ND295-54); the `ProofIntercept` `program_lost` overlay re-establishes against the inner sim's observation; B-8 lands in 05-01 (removal clause 07-01, failed-converge clause with R15) |
-| N-4 (note) | The fresh-host RCA (root cause A) — `converge_shared` creates `ovd-gbr0` with no address and sets it after, racing the host's link manager, so ~half of fresh-host boots refuse at `BridgeObserve` (metal N-04 by inference) | **PINNED** — `Client::ensure_bridge(name, mac)` creates the bridge with its address (REQ-295-LINKMAC); the refusal names its cause via `GuestNetworkFact::Bridge`; the startup probe adds a scratch-TAP address condition carried by `TapHostMac`; the dev/test substrates carry a `.link` policy exempting `ovd-*` from udev MAC assignment (FD § "[REF] Managed-link address from creation, and the host link-address policy (fresh-host RCA) — pinned 2026-09-26") | NEW S-ND295-72; S-ND295-00 split (bridge-identity leg 05-00, DNS leg 05-01); C-12b reclassified under RCA root cause A with 05-00 as owner (`red-classification.md`) |
+| N-4 (note) | The fresh-host RCA (root cause A) — `converge_shared` creates `ovd-gbr0` with no address and sets it after, racing the host's link manager, so ~half of fresh-host boots refuse at `BridgeObserve` (metal N-04 by inference) | **PINNED** — `Client::ensure_bridge(name, mac)` creates the bridge with its address; the refusal names its cause via `GuestNetworkFact::Bridge`; a TAP's host-side MAC is judged by the D-295-R21 invariant (`TapHostMac { ifindex, address: TapHostAddress }`, user-approved 2026-09-28), never against a recorded value; no host link-configuration requirement and no startup-probe scratch-TAP condition (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28"; user rulings of 2026-09-28) | NEW S-ND295-72 (its scratch-TAP probe bodies deleted 2026-09-28); S-ND295-00 split (bridge-identity leg 05-00, DNS leg 05-01); C-12b reclassified under RCA root cause A with 05-00 as owner (`red-classification.md`) |
 
 **Consequence for DELIVER 05-01.** Once `AppState` requires a worker, a
 fixture whose dispatch reaches intercept install starts the worker's shared

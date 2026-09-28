@@ -1,17 +1,19 @@
-//! GH #295 REQ-295-LINKMAC — one writer per managed-link address: the bridge
-//! creation contract of `Client::ensure_bridge(name, mac)` against real kernel
-//! links (E22 (a) and (b); feature delta § "[REF] Managed-link address from
-//! creation, and the host link-address policy (fresh-host RCA) — pinned
-//! 2026-09-26" (the bridge creation contract)).
+//! GH #295 S-ND295-72 — a managed link is correct whatever the host's link
+//! configuration: the bridge creation contract of
+//! `Client::ensure_bridge(name, mac)` against real kernel links (E22 (a) and
+//! (b); feature delta § "[REF] Managed-link identity independent of host link
+//! configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of
+//! 2026-09-28" (the bridge creation contract)).
 //!
 //! - (a) A bridge `ensure_bridge` creates carries `mac` from creation: the
 //!   first observation after the call reads `addr_assign_type` 3
 //!   (`NET_ADDR_SET`) and the address `mac`, with the link down and no set
 //!   issued in between. The oracle is deterministic and holds whatever the
-//!   host's link policy, because the kernel marks the address as set before
-//!   it emits the add uevent. A create-then-set control in the same run is
-//!   recorded as supporting evidence only (it shows the race the fix removes on
-//!   a host without the policy; it is never a gate).
+//!   host's link configuration, because the kernel marks the address as set
+//!   before it emits the add uevent. A create-then-set control in the same
+//!   run is recorded as supporting evidence only (it shows the race the fix
+//!   removes, where a host link manager rewrites a kernel-random address; it
+//!   is never a gate).
 //! - (b) `ensure_bridge` on a present link of any kind writes nothing: its
 //!   ifindex, address, `addr_assign_type`, kind, and administrative state are
 //!   unchanged.
@@ -131,7 +133,7 @@ fn facts(name: &str) -> LinkFacts {
 }
 
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-/// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+/// S-ND295-72 — A managed link is correct whatever the host's link configuration.
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// E22 (a): on an absent name, `ensure_bridge(name, mac)` creates a bridge
@@ -158,9 +160,9 @@ fn a_created_bridge_carries_its_address_from_creation_and_starts_down() {
     );
 
     // Supporting evidence, never a gate: the create-then-set shape the fix
-    // replaces, on a name no link policy exempts, observed after udev has had
-    // time to process the add event; recorded before the assertions so a RED
-    // run captures it too.
+    // replaces, observed after the host's link manager, where one runs, has
+    // had time to process the add event; recorded before the assertions so a
+    // RED run captures it too.
     let control = scratch_name("lc");
     let _control_cleanup = AbsentNameGuard(control.clone());
     ip(&["link", "add", &control, "type", "bridge"]);
@@ -185,7 +187,7 @@ fn a_created_bridge_carries_its_address_from_creation_and_starts_down() {
 }
 
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-/// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+/// S-ND295-72 — A managed link is correct whatever the host's link configuration.
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// E22 (b): on a present link of any kind — a bridge, a dummy, and a

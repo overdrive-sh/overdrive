@@ -413,11 +413,12 @@ pub enum GuestNetworkFact {
         component: SharedGuestNetworkComponent,
         healthy: bool,
     },
-    /// A TAP's host-side MAC: expected is the MAC recorded at provision,
-    /// observed is the live one.
+    /// A managed TAP's host-side MAC, judged by the host-side MAC invariant
+    /// (D-295-R21). The expected fact is `address: Unreserved`; the observed
+    /// fact is `Reserved` or `Missing`.
     TapHostMac {
         ifindex: u32,
-        mac: Option<[u8; 6]>,
+        address: TapHostAddress,
     },
     /// A TAP's ethtool debug message mask: expected is 0, observed is the
     /// live one (the ADR-0130 read-back set).
@@ -425,6 +426,21 @@ pub enum GuestNetworkFact {
         ifindex: u32,
         mask: u32,
     },
+}
+
+/// The standing of a managed TAP's host-side MAC under the invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapHostAddress {
+    /// A 6-byte address outside the reserved set. It appears only as the
+    /// expected fact; an unreserved address is never reported.
+    Unreserved,
+    /// A reserved address: `GUEST_BRIDGE_MAC`, or the guest MAC of an
+    /// allocation the owner holds outside `Condemned`, the TAP's own included.
+    /// The address itself names its holder: the bridge, or the guest whose
+    /// IPv4 address it encodes.
+    Reserved([u8; 6]),
+    /// The read-back carried no 6-byte address.
+    Missing,
 }
 
 /// Source-honest orchestration error for all guest-network effects.
@@ -4409,39 +4425,7 @@ mod scratch_probe_acceptance {
         fail_occurrence: usize,
         semantic_failure: Option<GuestNetworkProbeStage>,
         residue: Option<ScratchCall>,
-        /// Scripted outcomes of the scratch-TAP identity read (REQ-295-LINKMAC,
-        /// E22 (p1)/(p2)), FIFO. Once empty, every read returns
-        /// [`UNCHANGED_SCRATCH_TAP`], so a body that scripts nothing sees an
-        /// unchanged TAP.
-        tap_reads: std::collections::VecDeque<ScratchTapReadScript>,
-        /// For each scratch-TAP read, the length of `calls` when it ran: the
-        /// index of the call that followed it. Kept apart from `calls` so the
-        /// existing call-order oracles are unchanged by the read.
-        tap_read_positions: Vec<usize>,
     }
-
-    /// The scratch TAP's ifindex and host-side address, as one read reports
-    /// them (test support; the read's exact private shape is the crafter's).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct ScratchTapRead {
-        ifindex: u32,
-        mac: Option<[u8; 6]>,
-    }
-
-    /// One scripted outcome of the scratch-TAP read.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum ScratchTapReadScript {
-        /// The TAP is present with this identity.
-        Present(ScratchTapRead),
-        /// No link has the scratch TAP's name.
-        Absent,
-        /// The read itself fails.
-        Fails,
-    }
-
-    /// The identity an unscripted read reports.
-    const UNCHANGED_SCRATCH_TAP: ScratchTapRead =
-        ScratchTapRead { ifindex: 7_295, mac: Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x07]) };
 
     #[derive(Debug, Default)]
     struct ScriptedScratchIo {
@@ -4494,54 +4478,6 @@ mod scratch_probe_acceptance {
 
         fn calls(&self) -> Vec<ScratchCall> {
             self.script.lock().calls.clone()
-        }
-
-        fn with_tap_reads(reads: &[ScratchTapReadScript]) -> Arc<Self> {
-            Arc::new(Self {
-                script: parking_lot::Mutex::new(Script {
-                    tap_reads: reads.iter().copied().collect(),
-                    ..Script::default()
-                }),
-            })
-        }
-
-        fn with_tap_reads_and_semantic_failure(
-            reads: &[ScratchTapReadScript],
-            stage: GuestNetworkProbeStage,
-        ) -> Arc<Self> {
-            Arc::new(Self {
-                script: parking_lot::Mutex::new(Script {
-                    tap_reads: reads.iter().copied().collect(),
-                    semantic_failure: Some(stage),
-                    ..Script::default()
-                }),
-            })
-        }
-
-        fn tap_read_positions(&self) -> Vec<usize> {
-            self.script.lock().tap_read_positions.clone()
-        }
-
-        /// The scratch-TAP identity read (E22 (p1)/(p2)): records where in the
-        /// call sequence it ran and returns the next scripted outcome.
-        ///
-        /// DELIVER step 05-00 adds the read to the private scratch I/O in the
-        /// shape it chooses; this double's implementation of that method is
-        /// the one line that adapts this helper's result to it
-        /// (`test-scenarios.md` S-ND295-72, *the 05-00 test-support line*).
-        fn read_scratch_tap(&self) -> std::result::Result<Option<ScratchTapRead>, NetlinkError> {
-            let mut script = self.script.lock();
-            let position = script.calls.len();
-            script.tap_read_positions.push(position);
-            match script
-                .tap_reads
-                .pop_front()
-                .unwrap_or(ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP))
-            {
-                ScratchTapReadScript::Present(read) => Ok(Some(read)),
-                ScratchTapReadScript::Absent => Ok(None),
-                ScratchTapReadScript::Fails => Err(netlink_error()),
-            }
         }
 
         fn record(&self, call: ScratchCall) -> bool {
@@ -4776,189 +4712,6 @@ mod scratch_probe_acceptance {
                 && !matches!(*cleanup, GuestNetworkError::StartupProbeCleanup { .. })
         ));
     }
-
-    /// The scratch-TAP fact a read reports, as the probe's refusal names it.
-    const fn tap_host_mac(read: ScratchTapRead) -> GuestNetworkFact {
-        GuestNetworkFact::TapHostMac { ifindex: read.ifindex, mac: read.mac }
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E22 (p1): the startup probe reads the scratch TAP right after
-    /// `CreateTap` and again on its success path after the `DetachedLinkGuard`
-    /// exercise and before cleanup; with both reads equal, the probe passes.
-    #[tokio::test]
-    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
-    async fn an_unchanged_scratch_tap_address_passes_the_probe_between_two_reads() {
-        let io = ScriptedScratchIo::with_tap_reads(&[
-            ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP),
-            ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP),
-        ]);
-        HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
-            .probe_startup()
-            .await
-            .expect("an unchanged scratch TAP passes the probe");
-
-        let calls = io.calls();
-        let positions = io.tap_read_positions();
-        assert_eq!(
-            positions.len(),
-            2,
-            "the probe reads the scratch TAP exactly twice: {positions:?}"
-        );
-        assert_eq!(
-            calls.get(positions[0].wrapping_sub(1)),
-            Some(&ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap)),
-            "the first read follows CreateTap immediately: {calls:?} at {positions:?}"
-        );
-        assert_eq!(
-            calls.get(positions[1].wrapping_sub(1)),
-            Some(&ScratchCall::Exercise(GuestNetworkProbeStage::DetachedLinkGuard)),
-            "the re-read follows the last exercise: {calls:?} at {positions:?}"
-        );
-        assert_eq!(
-            calls.get(positions[1]),
-            Some(&ScratchCall::CloseLoader),
-            "the re-read precedes the cleanup: {calls:?} at {positions:?}"
-        );
-        assert!(calls.ends_with(CLEANUP), "the ordinary cleanup runs after a pass");
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E22 (p1), the success-path boundary: a probe that fails at the
-    /// `Classifier` stage reads the scratch TAP once, after `CreateTap`, and
-    /// never re-reads it; its primary is the stage failure, unchanged.
-    #[tokio::test]
-    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
-    async fn a_probe_that_fails_before_the_last_exercise_reads_the_scratch_tap_once() {
-        let io = ScriptedScratchIo::with_tap_reads_and_semantic_failure(
-            &[ScratchTapReadScript::Present(UNCHANGED_SCRATCH_TAP)],
-            GuestNetworkProbeStage::Classifier,
-        );
-        let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
-            .probe_startup()
-            .await
-            .expect_err("the classifier stage fails");
-        assert!(
-            matches!(
-                error,
-                GuestNetworkError::PostconditionMismatch {
-                    operation: GuestNetworkOperation::StartupProbe,
-                    expected: GuestNetworkFact::StartupProbe {
-                        stage: GuestNetworkProbeStage::Classifier,
-                        passed: true
-                    },
-                    ..
-                }
-            ),
-            "the primary is the stage failure, got {error:?}"
-        );
-        let calls = io.calls();
-        let positions = io.tap_read_positions();
-        assert_eq!(positions.len(), 1, "no re-read off the success path: {positions:?}");
-        assert_eq!(
-            calls.get(positions[0].wrapping_sub(1)),
-            Some(&ScratchCall::Netlink(GuestNetworkScratchNetlinkAction::CreateTap)),
-            "the one read follows CreateTap: {calls:?} at {positions:?}"
-        );
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E22 (p2): a re-read that differs from the recorded ifindex and address
-    /// — a changed address, a replaced TAP, a read that carries no address, or
-    /// an absent TAP — refuses startup with `PostconditionMismatch {
-    /// operation: StartupProbe, expected: TapHostMac { recorded }, observed }`;
-    /// a failure of either read is `Netlink { operation: StartupProbe }`. In
-    /// every row the complete scratch cleanup and inventory still run, and the
-    /// primary is returned unchanged (the cleanup is fully observed and empty).
-    #[tokio::test]
-    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
-    async fn a_changed_scratch_tap_address_refuses_startup_and_still_cleans_up() {
-        let recorded = UNCHANGED_SCRATCH_TAP;
-        let changed =
-            ScratchTapRead { mac: Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x99]), ..recorded };
-        let replaced = ScratchTapRead { ifindex: recorded.ifindex + 1, ..recorded };
-        let no_address = ScratchTapRead { mac: None, ..recorded };
-        for (row, reads, observed) in [
-            (
-                "changed address",
-                vec![
-                    ScratchTapReadScript::Present(recorded),
-                    ScratchTapReadScript::Present(changed),
-                ],
-                Some(Some(tap_host_mac(changed))),
-            ),
-            (
-                "replaced TAP",
-                vec![
-                    ScratchTapReadScript::Present(recorded),
-                    ScratchTapReadScript::Present(replaced),
-                ],
-                Some(Some(tap_host_mac(replaced))),
-            ),
-            (
-                "no address",
-                vec![
-                    ScratchTapReadScript::Present(recorded),
-                    ScratchTapReadScript::Present(no_address),
-                ],
-                Some(Some(tap_host_mac(no_address))),
-            ),
-            (
-                "absent TAP",
-                vec![ScratchTapReadScript::Present(recorded), ScratchTapReadScript::Absent],
-                Some(None),
-            ),
-            ("first read fails", vec![ScratchTapReadScript::Fails], None),
-            (
-                "re-read fails",
-                vec![ScratchTapReadScript::Present(recorded), ScratchTapReadScript::Fails],
-                None,
-            ),
-        ] {
-            let io = ScriptedScratchIo::with_tap_reads(&reads);
-            let error = HostSharedGuestNetworkOwner::with_scratch_io(io.clone())
-                .probe_startup()
-                .await
-                .expect_err("the scratch-TAP condition refuses startup");
-            match observed {
-                Some(observed) => assert!(
-                    matches!(
-                        &error,
-                        GuestNetworkError::PostconditionMismatch {
-                            operation: GuestNetworkOperation::StartupProbe,
-                            expected,
-                            observed: got,
-                        } if *expected == tap_host_mac(recorded) && *got == observed
-                    ),
-                    "[{row}] expected TapHostMac {recorded:?} vs {observed:?}, got {error:?}"
-                ),
-                None => assert!(
-                    matches!(
-                        &error,
-                        GuestNetworkError::Netlink {
-                            operation: GuestNetworkOperation::StartupProbe,
-                            ..
-                        }
-                    ),
-                    "[{row}] a failed read is Netlink {{ StartupProbe }}, got {error:?}"
-                ),
-            }
-            assert!(
-                io.calls().ends_with(CLEANUP),
-                "[{row}] the complete scratch cleanup and inventory still run: {:?}",
-                io.calls()
-            );
-        }
-    }
 }
 
 #[cfg(test)]
@@ -5011,27 +4764,7 @@ mod scratch_probe_packet_acceptance {
         script: parking_lot::Mutex<PacketProbeScript>,
     }
 
-    /// The scratch TAP's ifindex and host-side address (test support; the
-    /// read's exact private shape is the crafter's).
-    type ScratchTapIdentity = (u32, Option<[u8; 6]>);
-
     impl PacketProbeIo {
-        /// The scratch-TAP identity read (REQ-295-LINKMAC): every read reports
-        /// the same ifindex and address, so this double's packet oracles are
-        /// unaffected by the address condition. DELIVER step 05-00's one
-        /// adapter line for this double delegates to it
-        /// (`test-scenarios.md` S-ND295-72, *the 05-00 test-support line*).
-        #[allow(
-            clippy::unnecessary_wraps,
-            clippy::unused_self,
-            reason = "the read's fallible shape is the port's; this double never fails it"
-        )]
-        const fn read_scratch_tap(
-            &self,
-        ) -> std::result::Result<Option<ScratchTapIdentity>, NetlinkError> {
-            Ok(Some((7_295, Some([0x02, 0x95, 0x00, 0x00, 0x00, 0x07]))))
-        }
-
         fn with_failure(stage: GuestNetworkProbeStage, failure: ProbeFailure) -> Arc<Self> {
             Arc::new(Self {
                 script: parking_lot::Mutex::new(PacketProbeScript {
@@ -7156,6 +6889,12 @@ mod allocation_owner_acceptance {
         GuestNetworkFact::LinkMaster { ifindex, master_ifindex }
     }
 
+    /// The host-side MAC invariant's fact (D-295-R21): expected
+    /// `Unreserved`, observed `Reserved(<mac>)` or `Missing`.
+    const fn host_mac_fact(ifindex: u32, address: TapHostAddress) -> GuestNetworkFact {
+        GuestNetworkFact::TapHostMac { ifindex, address }
+    }
+
     fn attachment_fact(
         ifindex: u32,
         program_id: Option<u32>,
@@ -8474,9 +8213,8 @@ mod allocation_owner_acceptance {
     async fn every_node_level_audit_failure_names_its_matrix_component_first() {
         for fault in NodeFault::ALL {
             let fixture = AuditFixture::new("nd295-s50-node").await;
-            let active_tap = fixture.active.assignment().tap.clone();
             fixture.kernel.with_node(|node| {
-                node.tap_mut(&active_tap).mac = Some([0xfe, 0x95, 0xde, 0xad, 0x00, 0x01]);
+                AllocationDamage::HostMacReserved.inject(node, &fixture.active, ACTIVE_IFINDEX);
             });
             let damaged_only = fixture.kernel.node();
             fault.inject(&fixture.kernel);
@@ -8517,6 +8255,11 @@ mod allocation_owner_acceptance {
                 vec![fixture.active.alloc().clone()],
                 "{fault:?}: the node-level failure condemned and hid nothing"
             );
+            AllocationDamage::HostMacReserved.assert_named(
+                &audit.damaged[fixture.active.alloc()],
+                &fixture.active,
+                ACTIVE_IFINDEX,
+            );
         }
     }
 
@@ -8526,7 +8269,8 @@ mod allocation_owner_acceptance {
         TapDeleted,
         TapNotPersistent,
         TapOwnerChanged,
-        HostMacChanged,
+        HostMacReserved,
+        HostMacMissing,
         DebugMaskNonZero,
         DebugMaskMissingFromDump,
         IfindexChanged,
@@ -8541,15 +8285,15 @@ mod allocation_owner_acceptance {
         GuardMemberRemoved,
     }
 
-    const CHANGED_HOST_MAC: [u8; 6] = [0xfe, 0x95, 0xde, 0xad, 0x00, 0x01];
     const CHANGED_IFINDEX: u32 = 301;
 
     impl AllocationDamage {
-        const ALL: [Self; 16] = [
+        const ALL: [Self; 17] = [
             Self::TapDeleted,
             Self::TapNotPersistent,
             Self::TapOwnerChanged,
-            Self::HostMacChanged,
+            Self::HostMacReserved,
+            Self::HostMacMissing,
             Self::DebugMaskNonZero,
             Self::DebugMaskMissingFromDump,
             Self::IfindexChanged,
@@ -8581,7 +8325,10 @@ mod allocation_owner_acceptance {
                     node.tap_mut(tap).owner_uid =
                         Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID);
                 }
-                Self::HostMacChanged => node.tap_mut(tap).mac = Some(CHANGED_HOST_MAC),
+                // A reserved address the target holds whatever else the owner
+                // holds: its own guest MAC (the reserved set includes it).
+                Self::HostMacReserved => node.tap_mut(tap).mac = Some(plan.assignment().mac),
+                Self::HostMacMissing => node.tap_mut(tap).mac = None,
                 Self::DebugMaskNonZero => node.tap_mut(tap).debug_mask = 0x10,
                 Self::DebugMaskMissingFromDump => {
                     node.mask_dump_omits.insert(ifindex);
@@ -8643,11 +8390,17 @@ mod allocation_owner_acceptance {
                         Some(overdrive_core::vm::config::OVERDRIVE_VMM_UID),
                     )),
                 ),
-                Self::HostMacChanged => assert_mismatch(
+                Self::HostMacReserved => assert_mismatch(
                     error,
                     GuestNetworkOperation::TapObserve,
-                    &GuestNetworkFact::TapHostMac { ifindex, mac: Some(host_mac(ifindex)) },
-                    Some(&GuestNetworkFact::TapHostMac { ifindex, mac: Some(CHANGED_HOST_MAC) }),
+                    &host_mac_fact(ifindex, TapHostAddress::Unreserved),
+                    Some(&host_mac_fact(ifindex, TapHostAddress::Reserved(plan.assignment().mac))),
+                ),
+                Self::HostMacMissing => assert_mismatch(
+                    error,
+                    GuestNetworkOperation::TapObserve,
+                    &host_mac_fact(ifindex, TapHostAddress::Unreserved),
+                    Some(&host_mac_fact(ifindex, TapHostAddress::Missing)),
                 ),
                 Self::DebugMaskNonZero => assert_mismatch(
                     error,
@@ -8743,13 +8496,15 @@ mod allocation_owner_acceptance {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// With every node-level part healthy, each damage to one allocation's
-    /// own parts — TAP deleted, non-persistent, owner changed, host MAC
-    /// changed, debug mask non-zero or missing from the dump, ifindex
-    /// changed, master lost, administrative state against its phase, ingress
-    /// or egress attachment detached or pin removed, endpoint value changed,
-    /// guard member removed — returns `Ok` naming exactly that allocation
-    /// with its first failing check; the other allocation is not named; two
-    /// damaged allocations are both named. The audit writes nothing.
+    /// own parts — TAP deleted, non-persistent, owner changed, a host-side
+    /// MAC that breaks the D-295-R21 invariant (a reserved address, here the
+    /// TAP's own guest MAC, or no address), debug mask non-zero or missing
+    /// from the dump, ifindex changed, master lost, administrative state
+    /// against its phase, ingress or egress attachment detached or pin
+    /// removed, endpoint value changed, guard member removed — returns `Ok`
+    /// naming exactly that allocation with its first failing check; the
+    /// other allocation is not named; two damaged allocations are both named.
+    /// The audit writes nothing.
     #[tokio::test]
     #[ignore = "pending DELIVER step 06-02 (S-ND295-50)"]
     async fn every_per_allocation_damage_is_named_only_when_the_node_is_healthy() {
@@ -8783,7 +8538,7 @@ mod allocation_owner_acceptance {
 
         let fixture = AuditFixture::new("nd295-s50-both").await;
         fixture.kernel.with_node(|node| {
-            AllocationDamage::HostMacChanged.inject(node, &fixture.active, ACTIVE_IFINDEX);
+            AllocationDamage::HostMacReserved.inject(node, &fixture.active, ACTIVE_IFINDEX);
             AllocationDamage::ProvisionedTapFoundUp.inject(node, &fixture.down, DOWN_IFINDEX);
         });
         let audit = fixture.audit().await.expect("a healthy node reports both damaged allocations");
@@ -8791,7 +8546,7 @@ mod allocation_owner_acceptance {
             audit.damaged.keys().cloned().collect::<BTreeSet<_>>(),
             BTreeSet::from([fixture.active.alloc().clone(), fixture.down.alloc().clone()])
         );
-        AllocationDamage::HostMacChanged.assert_named(
+        AllocationDamage::HostMacReserved.assert_named(
             &audit.damaged[fixture.active.alloc()],
             &fixture.active,
             ACTIVE_IFINDEX,
@@ -8839,7 +8594,7 @@ mod allocation_owner_acceptance {
         }
         let damaged_ifindex = FIRST_TAP_IFINDEX;
         kernel.with_node(|node| {
-            AllocationDamage::HostMacChanged.inject(node, &damaged, damaged_ifindex);
+            AllocationDamage::HostMacReserved.inject(node, &damaged, damaged_ifindex);
         });
 
         let first = owner.audit_shared().await.expect("a healthy node");
@@ -8920,7 +8675,8 @@ mod allocation_owner_acceptance {
         TapOwnerChanged,
         TapAlreadyUp,
         TapNotPersistent,
-        HostMacChanged,
+        HostMacReserved,
+        HostMacMissing,
         DebugMaskNonZero,
         DebugMaskReadFails,
         GuardMemberRemoved,
@@ -8932,13 +8688,14 @@ mod allocation_owner_acceptance {
     }
 
     impl ProtectionFault {
-        const ALL: [Self; 14] = [
+        const ALL: [Self; 15] = [
             Self::BridgeAbsent,
             Self::BridgeReplaced,
             Self::TapOwnerChanged,
             Self::TapAlreadyUp,
             Self::TapNotPersistent,
-            Self::HostMacChanged,
+            Self::HostMacReserved,
+            Self::HostMacMissing,
             Self::DebugMaskNonZero,
             Self::DebugMaskReadFails,
             Self::GuardMemberRemoved,
@@ -8966,8 +8723,11 @@ mod allocation_owner_acceptance {
                 Self::TapNotPersistent => kernel.with_node(|node| {
                     AllocationDamage::TapNotPersistent.inject(node, plan, ifindex);
                 }),
-                Self::HostMacChanged => kernel.with_node(|node| {
-                    AllocationDamage::HostMacChanged.inject(node, plan, ifindex);
+                Self::HostMacReserved => kernel.with_node(|node| {
+                    AllocationDamage::HostMacReserved.inject(node, plan, ifindex);
+                }),
+                Self::HostMacMissing => kernel.with_node(|node| {
+                    AllocationDamage::HostMacMissing.inject(node, plan, ifindex);
                 }),
                 Self::DebugMaskNonZero => kernel.with_node(|node| {
                     AllocationDamage::DebugMaskNonZero.inject(node, plan, ifindex);
@@ -9024,8 +8784,11 @@ mod allocation_owner_acceptance {
                 Self::TapNotPersistent => {
                     AllocationDamage::TapNotPersistent.assert_named_down(error, plan, ifindex);
                 }
-                Self::HostMacChanged => {
-                    AllocationDamage::HostMacChanged.assert_named(error, plan, ifindex);
+                Self::HostMacReserved => {
+                    AllocationDamage::HostMacReserved.assert_named(error, plan, ifindex);
+                }
+                Self::HostMacMissing => {
+                    AllocationDamage::HostMacMissing.assert_named(error, plan, ifindex);
                 }
                 Self::DebugMaskNonZero => {
                     AllocationDamage::DebugMaskNonZero.assert_named(error, plan, ifindex);
@@ -9089,7 +8852,8 @@ mod allocation_owner_acceptance {
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// Activation re-reads every protection fact — bridge and master, TAP
-    /// owner / down state / host MAC, debug mask, guard membership, endpoint,
+    /// owner / down state / host-side MAC (the D-295-R21 invariant: a reserved
+    /// or missing address refuses), debug mask, guard membership, endpoint,
     /// ingress program and pin, egress program and pin — once each, then
     /// raises the TAP once and reads the bridge and TAP back, and reports
     /// `Raised`; a repeat is idempotent. Each protection mismatch refuses with
@@ -9304,7 +9068,7 @@ mod allocation_owner_acceptance {
         provisioned(&owner, &damaged).await;
         let damaged_ifindex = kernel.node().taps[&damaged.assignment().tap].ifindex;
         kernel.with_node(|node| {
-            AllocationDamage::HostMacChanged.inject(node, &damaged, damaged_ifindex);
+            AllocationDamage::HostMacReserved.inject(node, &damaged, damaged_ifindex);
         });
         let audit = owner.audit_shared().await.expect("a healthy node");
         assert_eq!(
@@ -9647,6 +9411,429 @@ mod allocation_owner_acceptance {
         assert_eq!(
             raised_since(&fixture.kernel, retry),
             vec![tap_of(&fixture.a), tap_of(&fixture.b), tap_of(&fixture.c)]
+        );
+    }
+
+    // ---- S-ND295-72: the host-side MAC invariant (E22 (i1), (i2)) --------
+
+    /// A host-side MAC outside the reserved set: neither `GUEST_BRIDGE_MAC`
+    /// nor a guest MAC (`02:00:` followed by an IPv4 address).
+    const UNRESERVED_HOST_MAC: [u8; 6] = [0xfe, 0x95, 0xde, 0xad, 0x00, 0x01];
+
+    /// A second unreserved host-side MAC.
+    const OTHER_UNRESERVED_HOST_MAC: [u8; 6] = [0x62, 0xa6, 0x95, 0x00, 0x00, 0x02];
+
+    /// A third unreserved host-side MAC, shaped like a udev persistent address.
+    const THIRD_UNRESERVED_HOST_MAC: [u8; 6] = [0xb6, 0xf2, 0x51, 0xad, 0x47, 0xae];
+
+    /// The ifindex of the next TAP the fake kernel creates on an
+    /// `AuditFixture` owner (after 295 and 296).
+    const NEXT_TAP_IFINDEX: u32 = FIRST_TAP_IFINDEX + 2;
+
+    /// One way a TAP's host-side MAC breaks the D-295-R21 invariant: each
+    /// class of the reserved set, and a read that carries no address.
+    #[derive(Debug, Clone, Copy)]
+    enum InvariantBreak {
+        /// The guest MAC of another allocation the owner holds `Active`.
+        HeldActiveGuestMac,
+        /// The guest MAC of another allocation the owner holds
+        /// `ProvisionedDown`.
+        HeldProvisionedDownGuestMac,
+        /// The guest MAC of the TAP's own allocation.
+        OwnGuestMac,
+        /// The node bridge's address, `GUEST_BRIDGE_MAC`.
+        BridgeMac,
+        /// The read-back carries no 6-byte address.
+        NoAddress,
+    }
+
+    impl InvariantBreak {
+        const ALL: [Self; 5] = [
+            Self::HeldActiveGuestMac,
+            Self::HeldProvisionedDownGuestMac,
+            Self::OwnGuestMac,
+            Self::BridgeMac,
+            Self::NoAddress,
+        ];
+
+        /// The address the TAP of `own` is given, and the observed fact the
+        /// owner reports for it, over an owner holding `held`'s two
+        /// allocations.
+        fn stimulus(
+            self,
+            held: &AuditFixture,
+            own: &GuestNetworkPlan,
+        ) -> (Option<[u8; 6]>, TapHostAddress) {
+            let mac = match self {
+                Self::HeldActiveGuestMac => held.active.assignment().mac,
+                Self::HeldProvisionedDownGuestMac => held.down.assignment().mac,
+                Self::OwnGuestMac => own.assignment().mac,
+                Self::BridgeMac => overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+                Self::NoAddress => return (None, TapHostAddress::Missing),
+            };
+            (Some(mac), TapHostAddress::Reserved(mac))
+        }
+    }
+
+    impl AuditFixture {
+        /// Both held attachments' parts, as the node holds them.
+        fn held_parts(&self) -> [AttachmentParts; 2] {
+            let node = self.kernel.node();
+            [
+                node.parts(&self.active.assignment().tap, ACTIVE_IFINDEX),
+                node.parts(&self.down.assignment().tap, DOWN_IFINDEX),
+            ]
+        }
+    }
+
+    /// The invariant's refusal: `PostconditionMismatch { operation:
+    /// TapObserve, expected: TapHostMac { ifindex, Unreserved }, observed:
+    /// Some(TapHostMac { ifindex, <observed> }) }`.
+    fn assert_invariant_broken(
+        error: &GuestNetworkError,
+        ifindex: u32,
+        observed: TapHostAddress,
+        row: impl std::fmt::Debug,
+    ) {
+        assert!(
+            matches!(
+                error,
+                GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::TapObserve,
+                    expected,
+                    observed: Some(got),
+                } if *expected == host_mac_fact(ifindex, TapHostAddress::Unreserved)
+                    && *got == host_mac_fact(ifindex, observed)
+            ),
+            "{row:?}: expected TapObserve over TapHostMac {{ {ifindex}, Unreserved }} vs \
+             {observed:?}, got {error:?}"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i1) and (i2) at provision (FD § "[REF] Driven port — TAP egress
+    /// guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the host-side
+    /// MAC invariant; provision's final down read-back, D12A step 7)). On an
+    /// owner that holds one `Active` and one `ProvisionedDown` allocation, a
+    /// new TAP whose host-side MAC becomes another held allocation's guest
+    /// MAC (either phase), its own allocation's guest MAC, `GUEST_BRIDGE_MAC`,
+    /// or no address refuses publication with the invariant's `TapObserve`
+    /// mismatch over `TapHostMac`. Each break is written twice over: from
+    /// creation, and after the egress step (step 6) has run, so only the
+    /// step-7 read-back can see it. Provision never raises the TAP, rolls back
+    /// every part it made, and leaves both held attachments byte-equal. The
+    /// contrast: a TAP whose address is unreserved, written at either point,
+    /// is published and activates.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn a_reserved_or_missing_host_side_address_refuses_publication() {
+        for written_after in [AllocationCall::CreateTap, AllocationCall::EgressLinkPinPresent] {
+            for broken in InvariantBreak::ALL {
+                let row = (written_after, broken);
+                let fixture = AuditFixture::new("nd295-s72-provision").await;
+                let plan = scratch_plan("nd295-s72-provision-new", "t295-in", 4);
+                let tap = plan.assignment().tap.clone();
+                let (mac, observed) = broken.stimulus(&fixture, &plan);
+                let written = tap.clone();
+                fixture.kernel.after_call(written_after, 1, move |node| {
+                    node.tap_mut(&written).mac = mac;
+                });
+                let held = fixture.held_parts();
+                let mark = fixture.kernel.mark();
+
+                let error =
+                    fixture.owner.provision(&plan).await.expect_err(
+                        "a host-side MAC that breaks the invariant refuses publication",
+                    );
+                assert_invariant_broken(&error, NEXT_TAP_IFINDEX, observed, row);
+                let trace = fixture.kernel.trace_since(mark);
+                assert!(
+                    !trace.iter().any(|(call, _)| *call == AllocationCall::SetTapUp),
+                    "{row:?}: provision never raises the TAP"
+                );
+                if written_after == AllocationCall::EgressLinkPinPresent {
+                    for step_six in
+                        [AllocationCall::AttachFirstEgress, AllocationCall::PinEgressLink]
+                    {
+                        assert!(
+                            trace.contains(&(step_six, Some(tap.clone()))),
+                            "{row:?}: the break lands after step 6 ran, so only the step-7 \
+                             read-back sees it: {trace:?}"
+                        );
+                    }
+                }
+                assert!(
+                    fixture.kernel.node().parts(&tap, NEXT_TAP_IFINDEX).is_empty(),
+                    "{row:?}: the rollback leaves no attachment part: {:?}",
+                    fixture.kernel.node().parts(&tap, NEXT_TAP_IFINDEX)
+                );
+                assert_eq!(
+                    fixture.held_parts(),
+                    held,
+                    "{row:?}: the held attachments are untouched"
+                );
+                assert_unpublished(&fixture.owner, || fixture.kernel.mark(), &plan).await;
+            }
+        }
+
+        for written_after in [AllocationCall::CreateTap, AllocationCall::EgressLinkPinPresent] {
+            let fixture = AuditFixture::new("nd295-s72-provision-unreserved").await;
+            let plan = scratch_plan("nd295-s72-provision-unreserved-new", "t295-iu", 4);
+            let written = plan.assignment().tap.clone();
+            fixture.kernel.after_call(written_after, 1, move |node| {
+                node.tap_mut(&written).mac = Some(UNRESERVED_HOST_MAC);
+            });
+            fixture.owner.provision(&plan).await.unwrap_or_else(|error| {
+                panic!("{written_after:?}: an unreserved host-side MAC is published, got {error:?}")
+            });
+            assert_eq!(
+                fixture.owner.activate(&plan).await.expect("the published allocation activates"),
+                TapActivation::Raised,
+                "{written_after:?}"
+            );
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i1) at `activate`: on an owner that holds one `Active` and one
+    /// `ProvisionedDown` allocation, a provisioned-down TAP whose host-side
+    /// MAC became another held allocation's guest MAC (either phase), its own
+    /// guest MAC, `GUEST_BRIDGE_MAC`, or no address is refused with the
+    /// invariant's `TapObserve` mismatch before any mutation, and the node is
+    /// unchanged. With the address restored, the attachment still activates.
+    /// The contrast (E22 (i2)): a TAP moved to an unreserved address
+    /// activates.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-72)"]
+    async fn a_reserved_or_missing_host_side_address_refuses_activation_before_any_change() {
+        for broken in InvariantBreak::ALL {
+            let fixture = AuditFixture::new("nd295-s72-activate").await;
+            let plan = scratch_plan("nd295-s72-activate-new", "t295-iv", 4);
+            provisioned(&fixture.owner, &plan).await;
+            let provisioned_node = fixture.kernel.node();
+            let (mac, observed) = broken.stimulus(&fixture, &plan);
+            fixture.kernel.with_node(|node| node.tap_mut(&plan.assignment().tap).mac = mac);
+            let broken_node = fixture.kernel.node();
+            let mark = fixture.kernel.mark();
+
+            let error = fixture
+                .owner
+                .activate(&plan)
+                .await
+                .expect_err("a host-side MAC that breaks the invariant refuses activation");
+            assert_invariant_broken(&error, NEXT_TAP_IFINDEX, observed, broken);
+            assert_eq!(
+                fixture.kernel.mutations_since(mark),
+                Vec::new(),
+                "{broken:?}: the refusal writes nothing"
+            );
+            assert_eq!(fixture.kernel.node(), broken_node, "{broken:?}: the node is unchanged");
+
+            fixture.kernel.with_node(|node| *node = provisioned_node.clone());
+            assert_eq!(
+                fixture.owner.activate(&plan).await.expect("the attachment stayed activatable"),
+                TapActivation::Raised,
+                "{broken:?}"
+            );
+        }
+
+        let fixture = AuditFixture::new("nd295-s72-activate-unreserved").await;
+        let plan = scratch_plan("nd295-s72-activate-unreserved-new", "t295-iw", 4);
+        provisioned(&fixture.owner, &plan).await;
+        fixture
+            .kernel
+            .with_node(|node| node.tap_mut(&plan.assignment().tap).mac = Some(UNRESERVED_HOST_MAC));
+        assert_eq!(
+            fixture.owner.activate(&plan).await.expect("an unreserved host-side MAC activates"),
+            TapActivation::Raised
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i1) in the audit: on a healthy node holding one `Active` and one
+    /// `ProvisionedDown` allocation, a TAP that holds the other held
+    /// allocation's guest MAC (either phase), its own guest MAC,
+    /// `GUEST_BRIDGE_MAC`, or no address is that allocation's damage alone,
+    /// named with the invariant's `TapObserve` mismatch over `TapHostMac`.
+    /// The other allocation is not named, and the audit writes nothing.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn a_reserved_or_missing_host_side_address_is_that_allocations_audit_damage() {
+        for broken in InvariantBreak::ALL {
+            let fixture = AuditFixture::new("nd295-s72-audit").await;
+            // The active allocation's guest MAC is taken by the provisioned-down
+            // TAP; every other break is set on the active TAP.
+            let (target, ifindex) = match broken {
+                InvariantBreak::HeldActiveGuestMac => (fixture.down.clone(), DOWN_IFINDEX),
+                _ => (fixture.active.clone(), ACTIVE_IFINDEX),
+            };
+            let (mac, observed) = broken.stimulus(&fixture, &target);
+            fixture.kernel.with_node(|node| node.tap_mut(&target.assignment().tap).mac = mac);
+            let broken_node = fixture.kernel.node();
+            let mark = fixture.kernel.mark();
+
+            let audit = fixture.audit().await.unwrap_or_else(|failure| {
+                panic!("{broken:?}: TAP damage leaves the node healthy, got {failure:?}")
+            });
+            assert_eq!(
+                audit.damaged.keys().cloned().collect::<Vec<_>>(),
+                vec![target.alloc().clone()],
+                "{broken:?}: exactly the allocation whose TAP breaks the invariant is named"
+            );
+            assert_invariant_broken(&audit.damaged[target.alloc()], ifindex, observed, broken);
+            assert_eq!(
+                fixture.kernel.mutations_since(mark),
+                Vec::new(),
+                "{broken:?}: the audit writes nothing"
+            );
+            assert_eq!(fixture.kernel.node(), broken_node, "{broken:?}: the node is unchanged");
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i2) in the audit: an unreserved host-side MAC is not damage, and
+    /// nothing is recorded. The first pass audits the addresses provision
+    /// left. Each later pass first moves both TAPs to unreserved addresses
+    /// they did not carry at the previous audit (the provisioned-down TAP
+    /// back to its provisioned address in the last pass), then audits. No
+    /// pass names either allocation, each pass reads every TAP it judges, and
+    /// no audit writes.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn an_unreserved_host_side_address_is_not_audit_damage_whenever_it_changes() {
+        let fixture = AuditFixture::new("nd295-s72-unreserved").await;
+        let active_tap = fixture.active.assignment().tap.clone();
+        let down_tap = fixture.down.assignment().tap.clone();
+        for (pass, active_mac, down_mac) in [
+            (0, host_mac(ACTIVE_IFINDEX), host_mac(DOWN_IFINDEX)),
+            (1, UNRESERVED_HOST_MAC, OTHER_UNRESERVED_HOST_MAC),
+            (2, THIRD_UNRESERVED_HOST_MAC, host_mac(DOWN_IFINDEX)),
+        ] {
+            fixture.kernel.with_node(|node| {
+                node.tap_mut(&active_tap).mac = Some(active_mac);
+                node.tap_mut(&down_tap).mac = Some(down_mac);
+            });
+            let changed = fixture.kernel.node();
+            let mark = fixture.kernel.mark();
+            let audit = fixture.audit().await.expect("a healthy node");
+            assert!(
+                audit.damaged.is_empty(),
+                "pass {pass}: an unreserved address is not damage: {:?}",
+                audit.damaged
+            );
+            let reads = fixture.per_allocation_reads_since(mark);
+            for tap in fixture.managed_taps() {
+                assert!(
+                    reads.contains(&(AllocationCall::ObserveTap, tap.clone())),
+                    "pass {pass}: the audit reads the TAP it judges ({tap:?}): {reads:?}"
+                );
+            }
+            assert_eq!(fixture.kernel.mutations_since(mark), Vec::new(), "pass {pass}");
+            assert_eq!(fixture.kernel.node(), changed, "pass {pass}");
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i2), the reserved set's `Condemned` exclusion: once the audit has
+    /// named, and so condemned, an allocation, a TAP that holds that
+    /// allocation's guest MAC is not damage. The later audit still reads the
+    /// holder's TAP and names nothing.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-72)"]
+    async fn a_tap_holding_a_condemned_guests_address_is_not_audit_damage() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let holder = scratch_plan("nd295-s72-condemned-holder", "t295-ih", 2);
+        let condemned = scratch_plan("nd295-s72-condemned", "t295-ix", 3);
+        activated(&owner, &holder).await;
+        activated(&owner, &condemned).await;
+        kernel.with_node(|node| {
+            AllocationDamage::IngressDetached.inject(node, &condemned, FIRST_TAP_IFINDEX + 1);
+        });
+        let first = owner.audit_shared().await.expect("a healthy node");
+        assert_eq!(
+            first.damaged.keys().cloned().collect::<Vec<_>>(),
+            vec![condemned.alloc().clone()],
+            "the audit condemns the damaged allocation"
+        );
+        kernel.with_node(|node| {
+            node.tap_mut(&holder.assignment().tap).mac = Some(condemned.assignment().mac);
+        });
+        let mark = kernel.mark();
+        let second = owner.audit_shared().await.expect("a healthy node");
+        assert!(
+            second.damaged.is_empty(),
+            "a condemned allocation's guest MAC is not reserved: {:?}",
+            second.damaged
+        );
+        assert!(
+            kernel.trace_since(mark).contains(&(AllocationCall::ObserveTap, tap_of(&holder))),
+            "the audit reads the TAP that holds the condemned guest's MAC"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (i1), the ordering case: a TAP that took a guest MAC before that
+    /// guest's allocation was held passes every audit until the allocation is
+    /// provisioned. The first audit after that names the TAP's allocation
+    /// alone, with `Reserved(<the guest's MAC>)`; the newly provisioned
+    /// allocation is not named.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn a_guest_address_a_tap_took_early_is_damage_from_the_first_audit_after_that_guest_is_held()
+     {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let holder = scratch_plan("nd295-s72-early-holder", "t295-ie", 2);
+        let later = scratch_plan("nd295-s72-early-later", "t295-il", 3);
+        activated(&owner, &holder).await;
+        kernel.with_node(|node| {
+            node.tap_mut(&holder.assignment().tap).mac = Some(later.assignment().mac);
+        });
+        for pass in 0..2 {
+            let mark = kernel.mark();
+            let audit = owner.audit_shared().await.expect("a healthy node");
+            assert!(
+                audit.damaged.is_empty(),
+                "pass {pass}: a guest MAC no held allocation carries is not reserved: {:?}",
+                audit.damaged
+            );
+            assert!(
+                kernel.trace_since(mark).contains(&(AllocationCall::ObserveTap, tap_of(&holder))),
+                "pass {pass}: the audit reads the holder's TAP"
+            );
+        }
+
+        provisioned(&owner, &later).await;
+        let audit = owner.audit_shared().await.expect("a healthy node");
+        assert_eq!(
+            audit.damaged.keys().cloned().collect::<Vec<_>>(),
+            vec![holder.alloc().clone()],
+            "the first audit after the guest is held names the TAP holding its MAC, alone"
+        );
+        assert_invariant_broken(
+            &audit.damaged[holder.alloc()],
+            FIRST_TAP_IFINDEX,
+            TapHostAddress::Reserved(later.assignment().mac),
+            "ordering",
         );
     }
 }
@@ -10160,20 +10347,21 @@ mod pool_acceptance {
     }
 }
 
-/// REQ-295-LINKMAC, the owner's real-kernel lane (E22 (d) and (e); feature
-/// delta § "[REF] Managed-link address from creation, and the host
-/// link-address policy (fresh-host RCA) — pinned 2026-09-26" (the refusal
-/// names its cause; *Earned Trust*)). Lima root, `integration-tests`.
+/// S-ND295-72, the owner's real-kernel lane (E22 (d) and (e); feature delta
+/// § "[REF] Managed-link identity independent of host link configuration
+/// (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28" (the
+/// refusal names its cause; *Earned Trust*)). Lima root, `integration-tests`;
+/// (e) also runs on the metal host as it is provisioned.
 ///
 /// The production host owner (`HostSharedGuestNetworkOwner::new()`, its real
 /// scratch and allocation I/O) converges the node's real shared state; faults
 /// enter only as real out-of-band kernel mutations (`ip link set`) of links
-/// the owner created. A `NodeSharedStateSweep` removes every node-global
-/// object the bodies can create — the bridge, the scratch-free TAP, the bridge
-/// guard table, and the owner's bpffs pins — before and after each body, so a
-/// panic leaves nothing behind. These bodies mutate node-global names; the
-/// module is in the `host-kernel-shared` nextest group
-/// (`.config/nextest.toml`).
+/// the owner created. No body installs, reads, or requires a host
+/// link-configuration file. A `NodeSharedStateSweep` removes every node-global
+/// object the bodies can create — the bridge, the two TAPs, the bridge guard
+/// table, and the owner's bpffs pins — before and after each body, so a panic
+/// leaves nothing behind. These bodies mutate node-global names; the module is
+/// in the `host-kernel-shared` nextest group (`.config/nextest.toml`).
 #[cfg(all(test, feature = "integration-tests"))]
 #[allow(
     clippy::doc_markdown,
@@ -10188,12 +10376,16 @@ mod shared_owner_link_address_kernel {
 
     const BRIDGE: &str = "ovd-gbr0";
 
-    /// A production-shaped TAP name (`ovd-tp-<4hex>`, so the host link policy
-    /// covers it) for an address no other fixture uses.
+    /// Production-shaped TAP names (`ovd-tp-<4hex>`, derived from the
+    /// address) for two addresses no other fixture uses.
     const TAP_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 242, 229);
     const TAP: &str = "ovd-tp-f2e5";
+    const SECOND_TAP_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 242, 230);
+    const SECOND_TAP: &str = "ovd-tp-f2e6";
 
-    /// An address written out of band; never `GUEST_BRIDGE_MAC`.
+    /// An address written out of band. It is unreserved: neither
+    /// `GUEST_BRIDGE_MAC` nor a guest MAC (`02:00:` followed by an IPv4
+    /// address).
     const FOREIGN_MAC: &str = "02:95:72:00:00:0d";
     const FOREIGN_MAC_BYTES: [u8; 6] = [0x02, 0x95, 0x72, 0x00, 0x00, 0x0d];
 
@@ -10240,6 +10432,7 @@ mod shared_owner_link_address_kernel {
 
     fn sweep() {
         run("ip", &["link", "del", TAP], false);
+        run("ip", &["link", "del", SECOND_TAP], false);
         run("ip", &["link", "del", BRIDGE], false);
         run("nft", &["delete", "table", "bridge", "overdrive-mtls"], false);
         run("rm", &["-rf", "/sys/fs/bpf/overdrive/mtls-endpoints"], false);
@@ -10259,7 +10452,7 @@ mod shared_owner_link_address_kernel {
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// E22 (d): a bridge identity mismatch reports the observed address and up
@@ -10343,68 +10536,137 @@ mod shared_owner_link_address_kernel {
         }
     }
 
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-72 — A managed link's address has one writer from creation to deletion.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E22 (e): after systemd-udevd has initialized a provisioned TAP, its
-    /// live address is the one `provision` recorded, so the audit reports no
-    /// damage for it — on a substrate carrying the host link policy
-    /// (REQ-295-LINKMAC). The contrasting case is the RCA's forward
-    /// prediction made deterministic: an out-of-band address write after the
-    /// record is reported as that allocation's `TapHostMac` damage, and the
-    /// node stays healthy.
-    #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
-    async fn a_provisioned_taps_recorded_address_survives_udev_initialisation() {
-        require_root("a_provisioned_taps_recorded_address_survives_udev_initialisation");
-        let _sweep = NodeSharedStateSweep::fresh();
-        let owner = HostSharedGuestNetworkOwner::new();
-        owner.converge_shared().await.expect("the production owner converges a clean node");
-        let alloc = AllocationId::new("nd295-linkmac-e").expect("allocation id");
-        let plan = GuestNetworkPlan {
-            alloc: alloc.clone(),
+    /// A guest-network plan for `address` on the node bridge, with the
+    /// production TAP name and guest MAC derivation.
+    fn kernel_plan(alloc: &str, address: Ipv4Addr, tap: &str) -> GuestNetworkPlan {
+        let [a, b, c, d] = address.octets();
+        GuestNetworkPlan {
+            alloc: AllocationId::new(alloc).expect("allocation id"),
             bridge: BRIDGE.to_owned(),
             node_prefix: "100.95.0.0/16".parse().expect("node prefix"),
             assignment: GuestNetworkAssignment {
-                address: TAP_ADDRESS,
-                tap: TAP.to_owned(),
-                mac: [0x02, 0x00, 100, 95, 242, 229],
+                address,
+                tap: tap.to_owned(),
+                mac: [0x02, 0x00, a, b, c, d],
                 gateway: Ipv4Addr::new(100, 95, 0, 1),
                 prefix: 16,
                 dns: Ipv4Addr::new(100, 95, 0, 1),
             },
-        };
-        owner.provision(&plan).await.expect("the production owner provisions the TAP down");
-        run("udevadm", &["wait", "--timeout=10", &format!("/sys/class/net/{TAP}")], true);
+        }
+    }
+
+    /// Wait until systemd-udevd, where this substrate runs it, has finished
+    /// with `tap`; on a substrate without it there is nothing to wait for.
+    /// Production never waits (feature delta § *Earned Trust*: no result waits
+    /// on udev); the test waits so that "whatever address udev left" is the
+    /// address udev left.
+    fn udev_settled(tap: &str) {
+        // The E22 metal lane records the host's systemd version
+        // (`systemctl --version` prints what `systemd --version` prints).
+        let version = Command::new("systemctl").arg("--version").output();
         eprintln!(
-            "[S-ND295-72 (e)] {TAP} after udev initialization: mac={:?}",
-            live_identity(TAP).mac
+            "[S-ND295-72 (e)] host systemd: {:?}",
+            version.as_ref().map(|output| String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned())
+        );
+        let ping = Command::new("udevadm").args(["control", "--ping", "--timeout=2"]).output();
+        let running = ping.as_ref().is_ok_and(|output| output.status.success());
+        eprintln!(
+            "[S-ND295-72 (e)] systemd-udevd running on this substrate: {running} ({:?})",
+            ping.map(|output| output.status.code())
+        );
+        if running {
+            run("udevadm", &["wait", "--timeout=10", &format!("/sys/class/net/{tap}")], true);
+        }
+    }
+
+    fn damaged_by_tap_host_mac(cause: &GuestNetworkError, ifindex: u32) -> Option<TapHostAddress> {
+        match cause {
+            GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::TapObserve,
+                expected:
+                    GuestNetworkFact::TapHostMac {
+                        ifindex: expected,
+                        address: TapHostAddress::Unreserved,
+                    },
+                observed: Some(GuestNetworkFact::TapHostMac { ifindex: observed, address }),
+            } if *expected == ifindex && *observed == ifindex => Some(*address),
+            _ => None,
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// E22 (e): the production owner provisions two allocations. After
+    /// systemd-udevd, where the substrate runs it, has initialized the first
+    /// TAP, the audit reports no damage, whatever address udev left on it.
+    /// An out-of-band write of an unreserved address on that TAP is still no
+    /// damage. An out-of-band write of the second allocation's guest MAC is
+    /// that TAP's `TapHostMac` damage alone (observed `Reserved(<mac>)`), and
+    /// the second allocation and the node stay healthy. No host link
+    /// configuration is installed or required.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "pending DELIVER step 06-02 (S-ND295-72)"]
+    async fn a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote() {
+        require_root(
+            "a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote",
+        );
+        let _sweep = NodeSharedStateSweep::fresh();
+        let owner = HostSharedGuestNetworkOwner::new();
+        owner.converge_shared().await.expect("the production owner converges a clean node");
+        let first = kernel_plan("nd295-s72-e-first", TAP_ADDRESS, TAP);
+        let second = kernel_plan("nd295-s72-e-second", SECOND_TAP_ADDRESS, SECOND_TAP);
+        owner.provision(&first).await.expect("the production owner provisions the first TAP down");
+        owner
+            .provision(&second)
+            .await
+            .expect("the production owner provisions the second TAP down");
+        udev_settled(TAP);
+        let identity = live_identity(TAP);
+        eprintln!(
+            "[S-ND295-72 (e)] {TAP} ifindex {} after udev: mac={:?}",
+            identity.ifindex, identity.mac
         );
 
-        let healthy = owner.audit_shared().await.expect("the node is healthy after provision");
+        let settled = owner.audit_shared().await.expect("the node is healthy after provision");
         assert!(
-            !healthy.damaged.contains_key(&alloc),
-            "the recorded host-side address equals the live one after udev: {:?}",
-            healthy.damaged
+            settled.damaged.is_empty(),
+            "whatever address the host's link manager left, no allocation is damaged: {:?}",
+            settled.damaged
         );
 
         run("ip", &["link", "set", "dev", TAP, "address", FOREIGN_MAC], true);
-        let damaged = owner.audit_shared().await.expect("TAP damage leaves the node healthy");
-        let cause = damaged.damaged.get(&alloc).unwrap_or_else(|| {
-            panic!("the rewritten TAP is that allocation's damage: {damaged:?}")
-        });
+        assert_eq!(live_identity(TAP).mac, Some(FOREIGN_MAC_BYTES), "the unreserved write landed");
+        let unreserved = owner.audit_shared().await.expect("the node stays healthy");
         assert!(
-            matches!(
-                cause,
-                GuestNetworkError::PostconditionMismatch {
-                    expected: GuestNetworkFact::TapHostMac { .. },
-                    observed: Some(GuestNetworkFact::TapHostMac { mac: Some(mac), .. }),
-                    ..
-                } if *mac == FOREIGN_MAC_BYTES
-            ),
-            "the damage names the rewritten host-side address as TapHostMac, got {cause:?}"
+            unreserved.damaged.is_empty(),
+            "an unreserved address is not damage: {:?}",
+            unreserved.damaged
         );
-        owner.teardown(&plan).await.expect("the production owner tears the TAP down");
+
+        let stolen = second.assignment().mac;
+        let stolen_text =
+            stolen.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(":");
+        run("ip", &["link", "set", "dev", TAP, "address", &stolen_text], true);
+        let reserved = owner.audit_shared().await.expect("TAP damage leaves the node healthy");
+        assert_eq!(
+            reserved.damaged.keys().cloned().collect::<Vec<_>>(),
+            vec![first.alloc().clone()],
+            "the TAP holding the second allocation's guest MAC is the only damage"
+        );
+        assert_eq!(
+            damaged_by_tap_host_mac(&reserved.damaged[first.alloc()], identity.ifindex),
+            Some(TapHostAddress::Reserved(stolen)),
+            "the damage names the reserved address, got {:?}",
+            reserved.damaged[first.alloc()]
+        );
+
+        owner.teardown(&first).await.expect("the production owner tears the first TAP down");
+        owner.teardown(&second).await.expect("the production owner tears the second TAP down");
     }
 }
