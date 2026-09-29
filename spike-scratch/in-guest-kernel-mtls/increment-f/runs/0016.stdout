@@ -1,0 +1,67 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=152978042ca048de8b23d8cf pid=324663
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 156,379 bytes  received 3,436 bytes  63,926.00 bytes/sec
+total size is 160,272,211  speedup is 1,002.86
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-busybox] fetch https://busybox.net/downloads/busybox-1.37.0.tar.bz2 (+ .sha256)  (11:03:20)
+3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4  busybox-1.37.0.tar.bz2
+busybox-1.37.0.tar.bz2: OK
+-rw-rw-r-- 1 ubuntu ubuntu 2565764 Sep 29 11:02 busybox-1.37.0.tar.bz2
+
+##### [build-busybox] unpack + configure (allnoconfig + the busybox and wget applets only)  (11:03:20)
+CONFIG_BUSYBOX=y
+# CONFIG_STATIC is not set
+CONFIG_PIE=y
+CONFIG_EXTRA_CFLAGS="-std=gnu17"
+CONFIG_EXTRA_LDFLAGS=""
+CONFIG_WGET=y
+# CONFIG_FEATURE_WGET_LONG_OPTIONS is not set
+# CONFIG_FEATURE_WGET_STATUSBAR is not set
+# CONFIG_FEATURE_WGET_FTP is not set
+# CONFIG_FEATURE_WGET_AUTHENTICATION is not set
+# CONFIG_FEATURE_WGET_TIMEOUT is not set
+# CONFIG_FEATURE_WGET_HTTPS is not set
+# CONFIG_FEATURE_WGET_OPENSSL is not set
+75ef07e0fe938ad4e33dc06d74022bbfc5e998f249e4dd061fe39c5c3886e649  .config
+
+##### [build-busybox] build (host gcc 15.2.0, glibc 2.43)  (11:03:27)
+warnings: 9
+Trying libraries: crypt m rt
+ Library crypt is not needed, excluding it
+ Library m is not needed, excluding it
+ Library rt is not needed, excluding it
+Final link with: <none>
+
+##### [build-busybox] identity  (11:03:32)
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/busybox: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=72024977fb2ad728e05f36fe2a52dcea987c1e56, for GNU/Linux 3.2.0, stripped
+f062e1b88be4a70ca00afec4ab8228a3a083e76875481da51ada675807e2440f  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/busybox
+-rwxrwxr-x 1 ubuntu ubuntu 1223344 Sep 29 11:03 <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/busybox
+  Type:                              DYN (Position-Independent Executable file)
+  Entry point address:               0x9aea0
+  DYNAMIC        0x126c20 0x0000000000127c20 0x0000000000127c20 0x0001b0 0x0001b0 RW  0x8
+  TLS            0x121e78 0x0000000000122e78 0x0000000000122e78 0x000048 0x000078 R   0x8
+  NEEDED: (none)
+sh
+wget
+
+##### [build-busybox] native smoke test on the host Linux  (11:03:32)
+BusyBox v1.37.0 (2026-09-29 11:03:26 UTC) multi-call binary.
+BusyBox is copyrighted by many authors between 1998-2015.
+Licensed under GPLv2. See source distribution for detailed

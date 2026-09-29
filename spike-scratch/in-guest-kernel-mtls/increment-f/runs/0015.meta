@@ -1,0 +1,10 @@
+run_id=0015
+label=build-busybox
+started_utc=2026-09-29T11:02:15Z
+ended_utc=2026-09-29T11:02:42Z
+exit_code=1
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-busybox.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=443ade2feb5aebc6811e611e31ceda320d9dca033049f11875043b8c54f553ce
+stderr_sha256=0acc3bcedf54505adf47456d50acc640462f091e09d4efef0d5bf0d0df568be2

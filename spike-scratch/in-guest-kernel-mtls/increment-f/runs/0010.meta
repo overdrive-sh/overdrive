@@ -1,0 +1,10 @@
+run_id=0010
+label=boot-trace-archprctl
+started_utc=2026-09-29T10:56:28Z
+ended_utc=2026-09-29T10:56:45Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-strace_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-f/run-boot-fc.sh trace
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=a25d485675d3d80c311bb8db1070cf4c2eba922cf69e0e787121ddc70cc61580
+stderr_sha256=f422c525dc54359bcd12847290d7951ce3436a3ec31f1e8a0e4ebf7411b689b3

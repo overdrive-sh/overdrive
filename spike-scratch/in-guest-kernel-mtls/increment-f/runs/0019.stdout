@@ -1,0 +1,68 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4895d472981576693695313a pid=330820
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 155,865 bytes  received 3,529 bytes  63,757.60 bytes/sec
+total size is 168,421,739  speedup is 1,056.64
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-go] latest stable Go for linux-amd64 from https://go.dev/dl/?mode=json  (11:06:55)
+version=go1.27.1 file=go1.27.1.linux-amd64.tar.gz sha256(go.dev)=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+go1.27.1.linux-amd64.tar.gz: OK
+go version go1.27.1 linux/amd64
+linux
+amd64
+gcc
+
+##### [build-go] record: CGO_ENABLED=0 -buildmode=pie with Go's internal linker (what does it produce?)  (11:06:56)
+51667153405531962dc1902a0850fa3babbd8b01d30430e9314c90faec329172  main.go
+c13cce5835cb6fb67437b1de6ad45bf389ab6dc92c8bb0e1df0fa12e354ae724  go.mod
+<metal-home>/igkm-spike-a/stretch/go-internal-pie/igkmf-go: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, Go BuildID=_p1lNyDO1VGJ1lba4zXX/ysJD2LAGMKdwuBsWzqiO/AC_gNXtuss4gnx54WENm/gj6abHJZ3yhgfba9mXOz, BuildID[sha1]=b6ed951fb077ead341f80e31d607ff347a3728f4, with debug_info, not stripped
+  INTERP         0x000fe4 0x0000000000400fe4 0x0000000000400fe4 0x00001c 0x00001c R   0x1
+      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+  DYNAMIC        0x5e5120 0x00000000009e5120 0x00000000009e5120 0x0000c0 0x0000c0 RW  0x8
+(run 0018: CGO_ENABLED=0 with -linkmode=external is refused by go1.27.1:
+ '-linkmode=external requires external (cgo) linking, but cgo is not enabled')
+
+##### [build-go] build: CGO_ENABLED=1 (runtime/cgo, static glibc), -buildmode=pie, external link with -static-pie, netgo+osusergo  (11:07:02)
+go build exit=0
+
+##### [build-go] identity  (11:07:05)
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=17ebb80ba0b329ba5eb05f3d1ef42427b3ec3b87, for GNU/Linux 3.2.0, with debug_info, not stripped
+1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go
+-rwxrwxr-x 1 ubuntu ubuntu 10145848 Sep 29 11:07 <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go
+  Type:                              DYN (Position-Independent Executable file)
+  Entry point address:               0x9c8a0
+  DYNAMIC        0x6dbc88 0x00000000006dbc88 0x00000000006dbc88 0x0001b0 0x0001b0 RW  0x8
+  TLS            0x649640 0x0000000000649640 0x0000000000649640 0x000040 0x000068 R   0x8
+  NEEDED: (none)
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go: go1.27.1
+	path	igkmf-go
+	mod	igkmf-go	(devel)	
+	build	-buildmode=pie
+	build	-compiler=gc
+	build	-tags=netgo,osusergo
+	build	-trimpath=true
+	build	DefaultGODEBUG=containermaxprocs=0,cryptocustomrand=1,decoratemappings=0,gotestjsonbuildtext=1,httpcookiemaxnum=0,httpservecontentkeepheaders=1,multipathtcp=0,randseednop=0,rsa1024min=0,tlsmlkem=0,tlssecpmlkem=0,tlssha1=1,tracebacklabels=0,updatemaxprocs=0,urlmaxqueryparams=0,urlstrictcolons=0,winreadlinkvolume=0,winsymlink=0,x509negativeserial=1,x509rsacrt=0,x509sha256skid=0,x509sslcertoverrideplatform=0,x509usepolicies=0
+	build	CGO_ENABLED=1
+	build	GOARCH=amd64
+	build	GOOS=linux
+	build	GOAMD64=v1
+
+##### [build-go] native smoke test on the host Linux (no argument: banner only, exit 2)  (11:07:05)
+IGKM-F-GO: go1.27.1 linux/amd64 GOMAXPROCS=16 NumCPU=16 args=["<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go"]
+exit=2

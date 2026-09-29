@@ -1,0 +1,87 @@
+# Spike B3 (GH #303, increment-f): Unikraft app-elfloader + lib-mtlsguard on
+# Firecracker, x86_64. Kconfig fragment for `make defconfig UK_DEFCONFIG=<this>`;
+# every other symbol takes its Kconfig default (elfloader's Config.uk selects /
+# implies syscall_shim + binary handler + ULTLS, posix-process, posix-mmap,
+# paging, posix-tty, posix-sysinfo, posix-user, ukrandom). The resolved .config
+# is captured per build.
+#
+# Differences from Spike B2's app/defconfig: the application is app-elfloader
+# (A=), loading the unmodified Linux ELF given as the Firecracker initrd
+# (APPELFLOADER_INITRDEXEC: the initrd IS the ELF, no filesystem), with
+# posix-process multithreading (exit_group), getrandom, and no VFS. The B2
+# platform, console, network, vsock, posix-socket, lwIP, mtlsguard and poll
+# settings are unchanged. build-guest.sh appends one line for the strace
+# variant (CONFIG_LIBSYSCALL_SHIM_STRACE=y).
+CONFIG_UK_NAME="igkmf"
+CONFIG_ARCH_X86_64=y
+
+# Platform: KVM guest, Firecracker VMM (B2).
+CONFIG_PLAT_KVM=y
+CONFIG_KVM_VMM_FIRECRACKER=y
+CONFIG_KVM_BOOT_PROTO_LXBOOT=y
+
+# Console (B2).
+CONFIG_LIBUKCONSOLE=y
+CONFIG_LIBNS16550=y
+CONFIG_LIBNS16550_COM1=y
+CONFIG_LIBNS16550_EARLY_CONSOLE=y
+CONFIG_LIBNS16550_COM1_EARLY=y
+CONFIG_LIBUKPRINT_KLVL_INFO=y
+
+# Power-off on exit (B2).
+CONFIG_LIBUKPM=y
+CONFIG_LIBUKPS2=y
+CONFIG_LIBUKPS2_SYSRESET=y
+
+# Kernel command line parameters (B2).
+CONFIG_LIBUKLIBPARAM=y
+
+# virtio over MMIO: net + vsock (B2).
+CONFIG_LIBUKBUS=y
+CONFIG_LIBVIRTIO_BUS=y
+CONFIG_LIBVIRTIO_MMIO=y
+CONFIG_LIBUKNETDEV=y
+CONFIG_LIBUKNETDEV_EINFO_LIBPARAM=y
+CONFIG_LIBVIRTIO_NET=y
+CONFIG_LIBUKVSOCKDEV=y
+CONFIG_LIBVIRTIO_VSOCK=y
+
+# Sockets: posix-socket front end, lwIP (AF_INET) over uknetdev (B2).
+CONFIG_LIBPOSIX_SOCKET=y
+CONFIG_LIBLWIP=y
+CONFIG_LWIP_UKNETDEV=y
+CONFIG_LWIP_THREADS=y
+CONFIG_LWIP_IPV4=y
+CONFIG_LWIP_TCP=y
+CONFIG_LWIP_SOCKET=y
+
+# The in-guest mTLS library (B2's, plus B3's initrd evidence hash).
+CONFIG_LIBMTLSGUARD=y
+CONFIG_LIBPOSIX_TIME=y
+CONFIG_LIBPOSIX_POLL=y
+
+# --- new for B3: app-elfloader running an unmodified Linux ELF --------------
+# Load the ELF from the initrd (no filesystem). Only static-pie ELFs.
+CONFIG_APPELFLOADER_INITRDEXEC=y
+# argv[1] of the kernel command line (after `--`) is the program name
+# (the ELF's argv[0]); the rest are its arguments.
+CONFIG_APPELFLOADER_CUSTOMAPPNAME=y
+# 1 MiB application stack.
+CONFIG_APPELFLOADER_STACK_NBPAGES=256
+# exit_group(2) and the app thread as a pthread of the init process.
+CONFIG_LIBPOSIX_PROCESS=y
+CONFIG_LIBPOSIX_PROCESS_MULTITHREADING=y
+# Run 0008: glibc's static start-up sets its TLS pointer with
+# arch_prctl(ARCH_SET_FS); without this option the syscall is -ENOSYS and glibc
+# dies with "Cannot allocate TLS block". Not selected by app-elfloader's
+# Config.uk, default n in lib/posix-process/Config.uk.
+CONFIG_LIBPOSIX_PROCESS_ARCH_PRCTL=y
+# Run 0008: brk(2) was -ENOSYS (glibc then fell back to mmap, which worked).
+# Enabled so glibc's allocator sees a Linux-like brk.
+CONFIG_LIBPOSIX_PROCESS_BRK=y
+# glibc's getrandom(2).
+CONFIG_LIBUKRANDOM=y
+CONFIG_LIBUKRANDOM_GETRANDOM=y
+# No VFS: elfloader implies LIBVFSCORE; keep it (and the VFS it would imply) off.
+# CONFIG_LIBVFSCORE is not set
+# CONFIG_LIBPOSIX_VFS is not set

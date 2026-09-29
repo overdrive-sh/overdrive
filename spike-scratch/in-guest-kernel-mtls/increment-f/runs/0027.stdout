@@ -1,0 +1,28 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0022e7e8fe39d8af44a60c7d pid=355333
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 164,172 bytes  received 3,752 bytes  67,169.60 bytes/sec
+total size is 160,636,335  speedup is 956.60
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+total 16
+drwxr-xr-x 2 ubuntu ubuntu 4096 Sep 29 11:14 .
+drwxr-xr-x 9 ubuntu ubuntu 4096 Sep 29 11:12 ..
+-rw-r--r-- 1 ubuntu ubuntu   25 Sep 29 11:05 go.mod
+-rw-r--r-- 1 ubuntu ubuntu 1195 Sep 29 11:05 main.go
+no firecracker
+0

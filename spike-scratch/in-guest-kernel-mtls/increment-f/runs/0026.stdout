@@ -1,0 +1,102 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=dcfb12b955ed68c9c0391a88 pid=354567
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 171,463 bytes  received 3,671 bytes  70,053.60 bytes/sec
+total size is 168,672,428  speedup is 963.10
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+uname -r:                     7.0.0-29-generic
+firecracker processes:        []
+jailer processes:             []
+peer/relay/inclient procs:    []
+test binaries running:        []
+tcpdump processes:            []
+igk* links on host:           []
+tun/tap links on host:        []
+192.168.203.x/204.x on host:  0
+listeners 5001/6443-6451/7100: []
+unix sockets under scratch:   0
+per-run dirs left:            none
+root-owned files in scratch:  0
+root-owned files in increment-d: 0
+root-owned files in increment-e: 0
+root-owned files in increment-f: 0
+unikraft worktrees:
+<metal-home>/igkm-spike-a/unikraft/unikraft       eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkmd eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkme eb8fa236 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/unikraft-igkmf eb8fa236 (detached HEAD)
+lib-lwip worktrees:
+<metal-home>/igkm-spike-a/unikraft/lib-lwip       ec55ae1 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/lib-lwip-igkme ec55ae1 (detached HEAD)
+<metal-home>/igkm-spike-a/unikraft/lib-lwip-igkmf ec55ae1 (detached HEAD)
+pristine clones clean: unikraft dirty=0 lib-lwip dirty=0
+app-elfloader HEAD=a6c9dc2b655572bee1f9657cbcc2d1eca8f6cb73 dirty=0
+lib-libelf    HEAD=c03d4ceb22a2b9e9799238f9c277a14284d313ad dirty=0
+Spike B  worktree unikraft-igkmd diff --stat (must be 0001+0002 only):
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+Spike B2 worktrees unikraft-igkme (0001+0002) and lib-lwip-igkme (0003):
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+Spike B3 worktrees unikraft-igkmf (0001+0002) and lib-lwip-igkmf (0003):
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+retained user-owned trees (outside ~/overdrive):
+3.5G	<metal-home>/igkm-spike-a
+163M	<metal-home>/igkm-spike-a/igkmf-host-target
+505M	<metal-home>/igkm-spike-a/stretch
+361M	<metal-home>/igkm-spike-a/unikraft/build-igkmf-go
+361M	<metal-home>/igkm-spike-a/unikraft/build-igkmf-go-strace
+316M	<metal-home>/igkm-spike-a/unikraft/build-igkmf-main
+316M	<metal-home>/igkm-spike-a/unikraft/build-igkmf-strace
+52K	<metal-home>/igkm-spike-a/unikraft/config-igkmf-go
+52K	<metal-home>/igkm-spike-a/unikraft/config-igkmf-go-strace
+40K	<metal-home>/igkm-spike-a/unikraft/config-igkmf-main
+40K	<metal-home>/igkm-spike-a/unikraft/config-igkmf-strace
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmf-go-defconfig.log
+24K	<metal-home>/igkm-spike-a/unikraft/igkmf-go-make.log
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmf-go-strace-defconfig.log
+24K	<metal-home>/igkm-spike-a/unikraft/igkmf-go-strace-make.log
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmf-main-defconfig.log
+24K	<metal-home>/igkm-spike-a/unikraft/igkmf-main-make.log
+4.0K	<metal-home>/igkm-spike-a/unikraft/igkmf-strace-defconfig.log
+24K	<metal-home>/igkm-spike-a/unikraft/igkmf-strace-make.log
+528K	<metal-home>/igkm-spike-a/unikraft/lib-lwip-igkmf
+76K	<metal-home>/igkm-spike-a/unikraft/lib-mtlsguard-igkmf
+36M	<metal-home>/igkm-spike-a/unikraft/out-igkmf
+17M	<metal-home>/igkm-spike-a/unikraft/unikraft-igkmf
+1.3M	<metal-home>/igkm-spike-a/unikraft/app-elfloader
+4.3M	<metal-home>/igkm-spike-a/unikraft/lib-libelf
+gitignored out/ of increment-f on the host:
+12M	<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out
+total 11980
+-rwxrwxr-x 1 ubuntu ubuntu  1223344 Sep 29 11:03 busybox
+-rwxrwxr-x 1 ubuntu ubuntu   890080 Sep 29 10:50 igkmf-app
+-rwxrwxr-x 1 ubuntu ubuntu 10145848 Sep 29 11:07 igkmf-go

@@ -1,0 +1,502 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=bfb712ed84a6ebf76a2951d8 pid=339907
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 161,880 bytes  received 3,249 bytes  47,179.71 bytes/sec
+total size is 168,461,075  speedup is 1,020.18
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+unikraft-igkmf  eb8fa2368618cea11c9bde196f79e6e6b9caeed5
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+lib-lwip-igkmf  ec55ae17618feeb57c8c10109bcf5c42723e8e95
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+app-elfloader   a6c9dc2b655572bee1f9657cbcc2d1eca8f6cb73
+lib-libelf      c03d4ceb22a2b9e9799238f9c277a14284d313ad
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+da182069ce6c28c17513426e4d3f8f0122fb1d45cddb3ed2bb0acd373c4a6f93  <metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-go-strace_fc-x86_64
+21d496d7b67acf11e726bacbfa4c5a42f2335dcbfe0d62a46a0ca46d51149f4e  <metal-home>/igkm-spike-a/igkmf-host-target/release/peer
+ad9c0b483db3702f6be04d1ce394d50b6e1b94633c560f460e626e9873b5cad4  <metal-home>/igkm-spike-a/igkmf-host-target/release/relay
+da30d240aac45c2dad035b67ec6ebc2e39ca6ed469f86ffd829667fa179083b4  <metal-home>/igkm-spike-a/igkmf-host-target/release/inclient
+e3b35083cba6adf3def8328105dfbe3cd289714f34df61814ae852600969dfae  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-d/patches/0001-posix-socket-connect-post-hook.patch
+9c798cce6ffca36e6d379f7a6463c9d7f5cb31fd3ac2c46228860c0ee13b10f4  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-d/patches/0002-posix-socket-accept-post-hook.patch
+a4857fcef29d354dce2c55d6d4d019098cf4c9cfd3414cfe5aa521cd952302ff  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-e/patches/0003-lib-lwip-readiness-interposition.patch
+--- the application: an unmodified Linux ELF, given to Firecracker as the initrd
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=17ebb80ba0b329ba5eb05f3d1ef42427b3ec3b87, for GNU/Linux 3.2.0, with debug_info, not stripped
+initrd (host) sha256=1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651 size=10145848
+preset=http-go-trace boot_args="igkmf netdev.ip=192.168.204.2/24:192.168.204.1 mtlsguard.mesh=192.168.204.1:6443-6451 mtlsguard.mesh_in=192.168.204.2:7443 mtlsguard.agent_port=7100 -- igkmf-go http://192.168.204.1:6451/igkm-f-http"
+
+===== create tap igkf29110823 (the only host network change) =====
+igkf29110823     DOWN           192.168.204.1/24 
+
+===== start capture, peer, relay =====
+tcpdump: listening on igkf29110823, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+tcpdump pid=340310 peer pid=340321 relay pid=340334 t+0.284783s
+LISTEN 0      128    192.168.204.1:6443 0.0.0.0:* users:(("peer",pid=340321,fd=3))                          
+LISTEN 0      128    192.168.204.1:6446 0.0.0.0:* users:(("peer",pid=340321,fd=8))                          
+LISTEN 0      128    192.168.204.1:6447 0.0.0.0:* users:(("peer",pid=340321,fd=9))                          
+LISTEN 0      128    192.168.204.1:6444 0.0.0.0:* users:(("peer",pid=340321,fd=4))                          
+LISTEN 0      128    192.168.204.1:6445 0.0.0.0:* users:(("peer",pid=340321,fd=6))                          
+LISTEN 0      128    192.168.204.1:6450 0.0.0.0:* users:(("peer",pid=340321,fd=15))                         
+LISTEN 0      128    192.168.204.1:6451 0.0.0.0:* users:(("peer",pid=340321,fd=18))                         
+LISTEN 0      128    192.168.204.1:6448 0.0.0.0:* users:(("peer",pid=340321,fd=12))                         
+LISTEN 0      128    192.168.204.1:6449 0.0.0.0:* users:(("peer",pid=340321,fd=13))                         
+LISTEN 0      128    192.168.204.1:5001 0.0.0.0:* users:(("peer",pid=340321,fd=19))                         
+u_str LISTEN 0      4096   <metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/vsock.sock_7100 52391608 * 0 users:(("relay",pid=340334,fd=3))                                                                                                    
+
+===== control: the SAME Go binary natively on the host Linux, without the guest mechanism, against the TLS port (expected to fail: plain HTTP to a TLS server) =====
+native binary sha256=1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651
+IGKM-F-GO: go1.27.1 linux/amd64 GOMAXPROCS=16 NumCPU=16 args=["<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go" "http://192.168.204.1:6451/igkm-f-http"]
+IGKM-F-GO: GET http://192.168.204.1:6451/igkm-f-http failed after 584.229Âµs: Get "http://192.168.204.1:6451/igkm-f-http": net/http: HTTP/1.x transport connection broken: malformed HTTP response "\x15\x03\x03\x00\x02\x022"
+native exit=1
+PEER[6451#1] accepted tcp from 192.168.204.1:57132 t+0.379061s
+PEER[6451#1] handshake FAILED: received corrupt message of type InvalidContentType; application plaintext bytes received=0 t+0.379281s
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-go-strace_fc-x86_64",
+    "initrd_path": "<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-go",
+    "boot_args": "igkmf netdev.ip=192.168.204.2/24:192.168.204.1 mtlsguard.mesh=192.168.204.1:6443-6451 mtlsguard.mesh_in=192.168.204.2:7443 mtlsguard.agent_port=7100 -- igkmf-go http://192.168.204.1:6451/igkm-f-http"
+  },
+  "drives": [],
+  "machine-config": { "vcpu_count": 1, "mem_size_mib": 512 },
+  "network-interfaces": [
+    { "iface_id": "net0", "guest_mac": "52:54:00:1a:04:06", "host_dev_name": "igkf29110823" }
+  ],
+  "vsock": { "vsock_id": "vsock0", "guest_cid": 3, "uds_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/vsock.sock" },
+  "logger": { "log_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/fc.log", "level": "Info", "show_level": true, "show_log_origin": true },
+  "metrics": { "metrics_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/fc.metrics" }
+}
+
+===== launch =====
+firecracker pid=340357 t+1.046726s
+firecracker exited on its own: exit=0 t+2.086075s
+tcpdump pid 340310 still running -> SIGINT
+peer pid 340321 still running -> SIGTERM
+relay pid 340334 still running -> SIGTERM
+
+===== inbound caller log =====
+cat: <metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/inclient.log: No such file or directory
+
+===== relay log =====
+RELAY listening on unix <metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/vsock.sock_7100 pid=340334 client identity=spiffe://overdrive.test/ns/default/sa/guest-client server identity=spiffe://overdrive.test/ns/default/sa/guest-server (keys: client PKCS#8 138 B, guest-server PKCS#8 138 B, P-256 scalars 32 B, held in this process only; one thread per vsock connection) t+0.272532s
+
+===== peer log =====
+PEER listening tls 192.168.204.1:6443 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Echo tickets=2 (rustls default) t+0.267765s
+PEER listening tls 192.168.204.1:6444 identity=spiffe://overdrive.test/ns/default/sa/peer-denied mode=Echo tickets=2 (rustls default) t+0.267911s
+PEER listening tls 192.168.204.1:6445 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=ServerFirst tickets=2 (rustls default) t+0.268017s
+PEER listening tls 192.168.204.1:6446 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=KeyUpdateEcho tickets=2 (rustls default) t+0.268113s
+PEER listening tls 192.168.204.1:6447 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Bulk tickets=2 (rustls default) t+0.268203s
+PEER listening tls 192.168.204.1:6448 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=RawOk tickets=0 via rustls (crafted by the raw record layer) t+0.268294s
+PEER listening tls 192.168.204.1:6449 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=RawBad tickets=0 via rustls (crafted by the raw record layer) t+0.268393s
+PEER listening tls 192.168.204.1:6450 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Echo tickets=2 (rustls default) t+0.268492s
+PEER listening tls 192.168.204.1:6451 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Http tickets=2 (rustls default) t+0.268584s
+PEER listening plain 192.168.204.1:5001 (non-mesh pass-through) t+0.268622s
+PEER ready t+0.268653s
+PEER[6451#1] accepted tcp from 192.168.204.1:57132 t+0.379061s
+PEER[6451#1] handshake FAILED: received corrupt message of type InvalidContentType; application plaintext bytes received=0 t+0.379281s
+
+===== guest serial console (Unikraft + the unmodified ELF) =====
+2026-09-29T11:08:24.877331245 [igkm-f:main] Running Firecracker v1.17.0
+[    0.000000] Info: [libukrandom] <swrand.c @  111> Initializing the random number generator...
+[    0.000000] Info: [libukrandom] <random.c @  108> CSPRNG seed source: CPU
+[    0.000000] Info: [libkvmplat] <setup.c @   94> SYSCALL entrance @ 0x101000
+[    0.000000] Info: [libkvmplat] <setup.c @  179> Switch from bootstrap stack to stack @0x11000
+[    0.000000] Info: [libukboot] <boot.c @  279> Unikraft constructor table at 0x1ec000 - 0x1ec048
+[    0.000000] Info: [libukboot] <boot.c @  288> Initialize memory allocator...
+[    0.000000] Info: [libukallocbbuddy] <bbuddy.c @  659> Initialize binary buddy allocator 400000000
+[    0.000000] Info: [libukboot] <boot.c @  347> Initialize the IRQ subsystem...
+[    0.000000] Info: [libukboot] <boot.c @  354> Initialize platform time...
+[    0.000000] Info: [libkvmplat] <tscclock.c @  258> Calibrating TSC clock against i8254 timer
+[    0.100001] Info: [libkvmplat] <tscclock.c @  279> Clock source: TSC, frequency estimate is 2396516640 Hz
+[    0.101851] Info: [libukboot] <boot.c @  358> Initialize scheduling...
+[    0.103097] Info: [libukschedcoop] <schedcoop.c @  289> Initializing cooperative scheduler
+[    0.104894] Info: [libukboot] <boot.c @  391> Init Table @ 0x1ec048 - 0x1ec148
+[    0.106432] Info: [libukbus] <bus.c @  133> Initialize bus handlers...
+[    0.107667] Info: [libukbus] <bus.c @  135> Probe buses...
+[    0.108705] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0001000:5
+[    0.110487] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x41f386020 initialized
+[    0.112131] Info: [libuknetdev] <netdev.c @  198> Registered netdev0: 0x41f387030 (virtio-net)
+[    0.113767] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.115325] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0002000:6
+[    0.117080] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x40001b020 initialized
+[    0.121992] Info: [libukvsockdev] <vsockdev.c @  176> vsockdev: Configured event queue
+[    0.123606] Info: [libukvsockdev] <vsockdev.c @  152> vsockdev: Configured receive queue
+[    0.125195] Info: [libvirtio_vsock] <virtio_vsock.c @ 2073> Started virtio-vsock device
+[    0.126704] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.128399] Info: [liblwip] <init.c @  174> Initializing lwip
+[    0.129687] Info: [liblwip] <init.c @  225> Attach network device 0 to lwIP...
+  1: Set IPv4 address 192.168.204.2 mask 255.255.255.0 gw 192.168.204.1
+[    0.132482] Warn: [libvirtio_mmio] <virtio_mmio.c @  173> Unaligned io read: 6 bytes
+[    0.134028] Info: [libuknetdev] <netdev.c @  407> netdev0: Configured interface
+[    0.138265] Info: [libuknetdev] <netdev.c @  554> netdev0: Configured receive queue 0
+[    0.139909] Info: [libuknetdev] <netdev.c @  587> netdev0: Configured transmit queue 0
+[    0.141490] Info: [libvirtio_net] <virtio_net.c @ 1403> virtio-net: 0 started
+[    0.142847] Info: [libuknetdev] <netdev.c @  606> netdev0: Started interface
+en1: Added
+[    0.144379] Info: [liblwip] <init.c @  345> en1: Hardware address: 52:54:00:1a:04:06
+[    0.145848] Info: [liblwip] <init.c @  352> en1: Check checksums:
+[    0.147000] Info: [liblwip] <init.c @  371> en1: Generate checksums: IP UDP TCP ICMP ICMP6
+[    0.148560] Info: [liblwip] <init.c @  442> en1: Set as default interface
+en1: Interface is up
+[    0.150305] Warn: [libposix_process] <clone.c @  193> uk_posix_clone_sighand() stubbed
+[    0.151814] Warn: [libuklock] <semaphore.c @   23> uk_posix_clone_sysvsem() stubbed
+MTLSGUARD: evidence: initrd0 (the ELF app-elfloader will load) vbase=0x1f652000 pg_off=0 len=10145848 sha256=1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651
+Powered by
+o.   .o       _ _               __ _
+Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
+oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
+oOo oOO| | | | |   (| | | (_) |  _) :_
+ OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
+          Ijiraq 0.21.0~eb8fa236-custom
+[    0.208157] Info: [libukboot] <boot.c @  470> Pre-init table at 0x1ec258 - 0x1ec258
+[    0.209611] Info: [libukboot] <boot.c @  481> Constructor table at 0x1ec258 - 0x1ec260
+[    0.211126] Info: [libukboot] <boot.c @  496> Environment variables:
+[    0.212327] Info: [libukboot] <boot.c @  498> 	PATH=/bin
+[    0.213336] Info: [libukboot] <boot.c @  504> Calling main(3, ['igkmf', 'igkmf-go', 'http://192.168.204.1:6451/igkm-f-http'])
+[    0.215486] Info: [appelfloader] <main.c @  299> Image at 0x1f652000, len 10145848 bytes
+[    0.270526] Info: [appelfloader] <main.c @  358> igkmf-go: ELF program loaded to 0x418001000-0x41a771000 (41353216 B), entry at 0x41809d8a0
+brk(NULL) = va:0x1000174000
+brk(va:0x1000174d40) = va:0x1000174d40
+arch_prctl(0x1002, 0x10001743c0, ...) = 0x0
+set_tid_address(0x10001749e8, 0x41874fcd0, ...) = 0x2
+set_robust_list(0x10001746a0, 0x18, ...) = Function not implemented (-38)
+rseq(0x1000174320, 0x20, ...) = Function not implemented (-38)
+prlimit64(0x0, 0x3, ...) = 0x0
+getrandom(0x41874f990, 0x8, ...) = 0x8
+readlinkat(0xffffff9c, 0x418412a77, ...) = Function not implemented (-38)
+brk(NULL) = va:0x1000174d40
+brk(va:0x1000195d40) = va:0x1000195d40
+brk(va:0x1000196000) = va:0x1000196000
+mprotect(va:0x41864a000, 602112, PROT_READ) = OK
+openat(0xffffff9c, 0x4184123a2, ...) = Function not implemented (-38)
+[    0.284909] Warn: [libuksched] <sched.c @  434> __uk_syscall_r_sched_getaffinity() stubbed
+sched_getaffinity(0x0, 0x2000, ...) = 0x2000
+openat(0xffffff9c, 0x4186ec890, ...) = Function not implemented (-38)
+clock_gettime(CLOCK_MONOTONIC, <out>timespec:{tv_sec=0, tv_nsec=288461154}) = OK
+mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x100048e000
+mmap(NULL, 131072, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x10004ce000
+mmap(NULL, 1048576, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x10004ee000
+mmap(NULL, 8388608, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x10005ee000
+mmap(NULL, 67108864, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1000dee000
+mmap(NULL, 536870912, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1004dee000
+mmap(NULL, 536870912, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1024dee000
+mmap(va:0x25fbd4000000, 67108864, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x25fbd4000000
+mmap(NULL, 33554432, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1044dee000
+madvise(0x1044dee000, 0x2000000, ...) = 0x0
+mmap(NULL, 69648, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1046dee000
+mmap(va:0x25fbd7800000, 4194304, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x25fbd7800000
+mmap(va:0x10004ce000, 131072, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x10004ce000
+mmap(va:0x1000593000, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x1000593000
+mmap(va:0x1000b1d000, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x1000b1d000
+mmap(va:0x100376c000, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x100376c000
+mmap(va:0x10199e5000, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x10199e5000
+mmap(va:0x10399e5000, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, fd:-1, 0) = va:0x10399e5000
+mmap(NULL, 1048576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1046e00000
+madvise(0x1046e00000, 0x100000, ...) = 0x0
+mmap(NULL, 65536, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1046f00000
+mmap(NULL, 65536, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1046f10000
+[    0.325835] Warn: [libposix_process] <rt_sigprocmask.c @   72> __uk_syscall_r_rt_sigprocmask() stubbed
+rt_sigprocmask(0x2, 0x0, ...) = 0x0
+fcntl(0x0, 0x1, ...) = 0x0
+fcntl(0x1, 0x1, ...) = 0x0
+fcntl(0x2, 0x1, ...) = 0x0
+mmap(NULL, 1439992, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1046f20000
+openat(0xffffffffffffff9c, 0x1000489ac6, ...) = Function not implemented (-38)
+clock_gettime(CLOCK_MONOTONIC, <out>timespec:{tv_sec=0, tv_nsec=332760379}) = OK
+clock_gettime(CLOCK_MONOTONIC, <out>timespec:{tv_sec=0, tv_nsec=334128745}) = OK
+[    0.335596] Warn: [libposix_process] <sigaltstack.c @   68> __uk_syscall_r_sigaltstack() stubbed
+sigaltstack(0x0, 0x1000489c18, ...) = 0x0
+rt_sigprocmask(0x2, 0x1000489c30, ...) = 0x0
+gettid() = pid:2
+[    0.339167] Warn: [libposix_process] <rt_sigaction.c @   69> __uk_syscall_r_rt_sigaction() stubbed
+rt_sigaction(0x1, 0x0, ...) = 0x0
+rt_sigaction(0x1, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2, 0x0, ...) = 0x0
+rt_sigaction(0x2, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3, 0x0, ...) = 0x0
+rt_sigaction(0x3, 0x1000489840, ...) = 0x0
+rt_sigaction(0x4, 0x0, ...) = 0x0
+rt_sigaction(0x4, 0x1000489840, ...) = 0x0
+rt_sigaction(0x5, 0x0, ...) = 0x0
+rt_sigaction(0x5, 0x1000489840, ...) = 0x0
+rt_sigprocmask(0x0, 0x418419a18, ...) = 0x0
+rt_sigaction(0x6, 0x0, ...) = 0x0
+rt_sigprocmask(0x2, 0x10004899c0, ...) = 0x0
+rt_sigprocmask(0x0, 0x418419a18, ...) = 0x0
+rt_sigaction(0x6, 0x1000489800, ...) = 0x0
+rt_sigprocmask(0x2, 0x1000489970, ...) = 0x0
+rt_sigaction(0x7, 0x0, ...) = 0x0
+rt_sigaction(0x7, 0x1000489840, ...) = 0x0
+rt_sigaction(0x8, 0x0, ...) = 0x0
+rt_sigaction(0x8, 0x1000489840, ...) = 0x0
+rt_sigaction(0xa, 0x0, ...) = 0x0
+rt_sigaction(0xa, 0x1000489840, ...) = 0x0
+rt_sigaction(0xb, 0x0, ...) = 0x0
+rt_sigaction(0xb, 0x1000489840, ...) = 0x0
+rt_sigaction(0xc, 0x0, ...) = 0x0
+rt_sigaction(0xc, 0x1000489840, ...) = 0x0
+rt_sigaction(0xd, 0x0, ...) = 0x0
+rt_sigaction(0xd, 0x1000489840, ...) = 0x0
+rt_sigaction(0xe, 0x0, ...) = 0x0
+rt_sigaction(0xe, 0x1000489840, ...) = 0x0
+rt_sigaction(0xf, 0x0, ...) = 0x0
+rt_sigaction(0xf, 0x1000489840, ...) = 0x0
+rt_sigaction(0x10, 0x0, ...) = 0x0
+rt_sigaction(0x10, 0x1000489840, ...) = 0x0
+rt_sigaction(0x11, 0x0, ...) = 0x0
+rt_sigaction(0x11, 0x1000489840, ...) = 0x0
+rt_sigaction(0x17, 0x0, ...) = 0x0
+rt_sigaction(0x17, 0x1000489840, ...) = 0x0
+rt_sigaction(0x18, 0x0, ...) = 0x0
+rt_sigaction(0x18, 0x1000489840, ...) = 0x0
+rt_sigaction(0x19, 0x0, ...) = 0x0
+rt_sigaction(0x19, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1a, 0x0, ...) = 0x0
+rt_sigaction(0x1a, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1b, 0x0, ...) = 0x0
+rt_sigaction(0x1b, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1c, 0x0, ...) = 0x0
+rt_sigaction(0x1c, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1d, 0x0, ...) = 0x0
+rt_sigaction(0x1d, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1e, 0x0, ...) = 0x0
+rt_sigaction(0x1e, 0x1000489840, ...) = 0x0
+rt_sigaction(0x1f, 0x0, ...) = 0x0
+rt_sigaction(0x1f, 0x1000489840, ...) = 0x0
+rt_sigaction(0x20, 0x0, ...) = 0x0
+rt_sigaction(0x21, 0x0, ...) = 0x0
+rt_sigaction(0x22, 0x0, ...) = 0x0
+rt_sigaction(0x23, 0x0, ...) = 0x0
+rt_sigaction(0x23, 0x1000489840, ...) = 0x0
+rt_sigaction(0x24, 0x0, ...) = 0x0
+rt_sigaction(0x24, 0x1000489840, ...) = 0x0
+rt_sigaction(0x25, 0x0, ...) = 0x0
+rt_sigaction(0x25, 0x1000489840, ...) = 0x0
+rt_sigaction(0x26, 0x0, ...) = 0x0
+rt_sigaction(0x26, 0x1000489840, ...) = 0x0
+rt_sigaction(0x27, 0x0, ...) = 0x0
+rt_sigaction(0x27, 0x1000489840, ...) = 0x0
+rt_sigaction(0x28, 0x0, ...) = 0x0
+rt_sigaction(0x28, 0x1000489840, ...) = 0x0
+rt_sigaction(0x29, 0x0, ...) = 0x0
+rt_sigaction(0x29, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2a, 0x0, ...) = 0x0
+rt_sigaction(0x2a, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2b, 0x0, ...) = 0x0
+rt_sigaction(0x2b, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2c, 0x0, ...) = 0x0
+rt_sigaction(0x2c, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2d, 0x0, ...) = 0x0
+rt_sigaction(0x2d, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2e, 0x0, ...) = 0x0
+rt_sigaction(0x2e, 0x1000489840, ...) = 0x0
+rt_sigaction(0x2f, 0x0, ...) = 0x0
+rt_sigaction(0x2f, 0x1000489840, ...) = 0x0
+rt_sigaction(0x30, 0x0, ...) = 0x0
+rt_sigaction(0x30, 0x1000489840, ...) = 0x0
+rt_sigaction(0x31, 0x0, ...) = 0x0
+rt_sigaction(0x31, 0x1000489840, ...) = 0x0
+rt_sigaction(0x32, 0x0, ...) = 0x0
+rt_sigaction(0x32, 0x1000489840, ...) = 0x0
+rt_sigaction(0x33, 0x0, ...) = 0x0
+rt_sigaction(0x33, 0x1000489840, ...) = 0x0
+rt_sigaction(0x34, 0x0, ...) = 0x0
+rt_sigaction(0x34, 0x1000489840, ...) = 0x0
+rt_sigaction(0x35, 0x0, ...) = 0x0
+rt_sigaction(0x35, 0x1000489840, ...) = 0x0
+rt_sigaction(0x36, 0x0, ...) = 0x0
+rt_sigaction(0x36, 0x1000489840, ...) = 0x0
+rt_sigaction(0x37, 0x0, ...) = 0x0
+rt_sigaction(0x37, 0x1000489840, ...) = 0x0
+rt_sigaction(0x38, 0x0, ...) = 0x0
+rt_sigaction(0x38, 0x1000489840, ...) = 0x0
+rt_sigaction(0x39, 0x0, ...) = 0x0
+rt_sigaction(0x39, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3a, 0x0, ...) = 0x0
+rt_sigaction(0x3a, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3b, 0x0, ...) = 0x0
+rt_sigaction(0x3b, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3c, 0x0, ...) = 0x0
+rt_sigaction(0x3c, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3d, 0x0, ...) = 0x0
+rt_sigaction(0x3d, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3e, 0x0, ...) = 0x0
+rt_sigaction(0x3e, 0x1000489840, ...) = 0x0
+rt_sigaction(0x3f, 0x0, ...) = 0x0
+rt_sigaction(0x3f, 0x1000489840, ...) = 0x0
+rt_sigaction(0x40, 0x0, ...) = 0x0
+rt_sigaction(0x40, 0x1000489840, ...) = 0x0
+mmap(NULL, 262144, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, fd:-1, 0) = va:0x1047080000
+rt_sigprocmask(0x2, 0x1000489ac0, ...) = 0x0
+rt_sigaction(0x21, 0x1000489780, ...) = 0x0
+rt_sigprocmask(0x1, 0x1000489938, ...) = 0x0
+mmap(NULL, 69632, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, fd:-1, 0) = va:0x10470c0000
+madvise(0x10470c0000, 0x1000, ...) = 0x0
+rt_sigprocmask(0x0, 0x418419a18, ...) = 0x0
+clone3(0x1000489830, 0x58, ...) = Function not implemented (-38)
+[    0.429365] ERR:  [libposix_process] <events.c @   57> posix_clone 0x41a77d020 (igkmf-go): Unsupported clone flags requested: 0x3d0f00
+clone(CLONE_NEWTIME|CLONE_FS|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_CHILD_SETTID|CLONE_NEWCGROUP|CLONE_NEWUTS|CLONE_NEWNET|0x70, va:0x10470d0990, <ref:0x10470d0ce8>va:0x3, va:0x10470d0               ð@8    ·b            ¡ÿÿÿÿÿÿÿ      rt_sigprocmask(0x2, 0x1000489928, ...) = 0x0
+rt_sigprocmask(0x2, 0x1000489b40, ...) = 0x0
+runtime/cgo: write(fd:2, "runtime/cgo: ", 13) = 13
+pthread_create failed: Operation not supportedwrite(fd:2, "pthread_create failed: O"..., 46) = 46
+
+write(fd:2, "\x0A", 1) = 1
+gettid() = pid:2
+getpid() = pid:1
+[    0.440986] Warn: [libposix_process] <tgkill.c @   31> __uk_syscall_r_tgkill() stubbed
+tgkill(0x1, 0x2, ...) = 0x0
+rt_sigprocmask(0x0, 0x418419a18, ...) = 0x0
+rt_sigaction(0x6, 0x1000489760, ...) = 0x0
+gettid() = pid:2
+getpid() = pid:1
+tgkill(0x1, 0x2, ...) = 0x0
+rt_sigprocmask(0x1, 0x10004898b8, ...) = 0x0
+[    0.927003] Info: [libukboot] <shutdown_req.c @   50> Shutdown requested (0)
+[    0.928817] Info: [libukboot] <boot.c @  430> Shutting down system (0)
+[    0.
+===== firecracker stderr =====
+
+===== firecracker log =====
+2026-09-29T11:08:24.885386479 [igkm-f:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-29T11:08:24.885609254 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-29T11:08:24.885653501 [igkm-f:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-29T11:08:24.901009523 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901028301 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901042883 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901057225 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901071657 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901085788 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901100079 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901114211 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901128422 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901142533 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901156795 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901170886 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901185137 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T11:08:24.901199289 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T11:08:25.027994810 [igkm-f:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Vsock:vsock] notifying queues
+2026-09-29T11:08:25.035232894 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/devices/virtio/device.rs:159] Received acknowledge request for unknown feature: 0x202089a3
+2026-09-29T11:08:25.044294162 [igkm-f:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Net:net0] notifying queues
+2026-09-29T11:08:25.832987528 [igkm-f:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-29T11:08:25.833036031 [igkm-f:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-29T11:08:25.833054970 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:409] Requested a vCPU run with immediate_exit enabled. The operation was skipped
+2026-09-29T11:08:25.864399637 [igkm-f:main:INFO:src/firecracker/src/main.rs:116] Firecracker exiting successfully. exit_code=0
+
+===== firecracker metrics (non-zero vsock/net/i8042 counters) =====
+   line2 i8042.missed_write_count = 1
+   line2 i8042.read_count = 2
+   line2 i8042.reset_count = 1
+   line2 i8042.write_count = 4
+   line2 net.no_tx_avail_buffer = 1
+   line2 net.rx_queue_event_count = 3
+   line2 net.rx_tap_event_count = 2
+   line2 net.rx_bytes_count = 204
+   line2 net.rx_packets_count = 2
+   line2 net.rx_count = 2
+   line2 net.tap_write_agg.sum_us = 28
+   line2 net.tx_bytes_count = 54
+   line2 net.tx_count = 1
+   line2 net.tx_packets_count = 1
+   line2 net.tx_queue_event_count = 2
+   line2 vsock.tx_queue_event_count = 1
+
+===== initrd identity: host file vs the bytes the guest hashed before app-elfloader loaded them =====
+host  sha256=1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651
+guest sha256=1d39ec35bf7e0d1e7252ddf454c73990e026814a20e46a4e3c3d10a8d7c52651
+initrd sha256 match: yes
+
+===== tcpdump =====
+tcpdump: listening on igkf29110823, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+3 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+-rw-r--r-- 1 root root 294 Sep 29 11:08 <metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/tap.pcap
+171d859a7090ce1ca14441e2623a319351c5eb00552bb8e85f1581346488ed5c  <metal-home>/igkm-spike-a/runs-igkmf/20260929T110823Z-340257/tap.pcap
+
+===== tap capture scan =====
+SCAN totals:
+SCAN   tls streams: 0 bytes, marker(IGKM-E-) occurrences=0, marker(IGKM-F-) occurrences=0, marker(igkm-f) occurrences=0
+SCAN     tls: b'IGKM-E-EARLY must-not-leave guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-PLAIN-REQ pass-through guest->host\n' occurrences=0
+SCAN     tls: b'IGKM-E-PLAIN-RESP pass-through host->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-GREETING server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQS server-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPS server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQI inbound peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPI inbound guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ1 nb-client-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP1 nb-client-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQB et-bulk guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPB et-bulk peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQP poll-1byte guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPP poll-1byte peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQK1 keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPK1 keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQK3 keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPK3 keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-GREETING raw-nst peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQR raw-nst guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPR raw-nst peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQR2 after-keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPR2 after-keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-SHOULD-NOT-ARRIVE raw-bad peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ1 client-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP1 client-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ2 after-relay-kill guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP2 after-relay-kill peer->guest\n' occurrences=0
+SCAN     tls: b'GET /igkm-f-http' occurrences=0
+SCAN     tls: b'IGKM-F-HTTP-BODY served by the host peer over the mesh (TLS terminated at the peer)\n' occurrences=0
+SCAN     tls: b'HTTP/1.1 200 OK' occurrences=0
+SCAN   plain streams: 0 bytes, marker(IGKM-E-) occurrences=0, marker(IGKM-F-) occurrences=0, marker(igkm-f) occurrences=0
+
+===== tap capture (base64, for the evidence tree) =====
+----- BEGIN tap.pcap base64 -----
+1MOyoQIABAAAAAAAAAAAAAAABAABAAAAKJy7ar5vDQBaAAAAWgAAADMzAAAAFiJ3dAC2P4bdYAAA
+AAAkAAEAAAAAAAAAAAAAAAAAAAAA/wIAAAAAAAAAAAAAAAAAFjoABQIAAAEAjwC5SgAAAAEEAAAA
+/wIAAAAAAAAAAAAB/wC2Pymcu2qLzwAAKgAAACoAAAD///////9SVAAaBAYIBgABCAAGBAABUlQA
+GgQGwKjMAgAAAAAAAMCozAIpnLtqkKgMAFoAAABaAAAAMzMAAAAWInd0ALY/ht1gAAAAACQAAQAA
+AAAAAAAAAAAAAAAAAAD/AgAAAAAAAAAAAAAAAAAWOgAFAgAAAQCPALlKAAAAAQQAAAD/AgAAAAAA
+AAAAAAH/ALY/
+----- END tap.pcap base64 -----
+
+===== run verdict =====
+
+===== cleanup =====
+deleting tap igkf29110823
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkf29110823 present: no
+192.168.204.x on host: 0
+listeners on 5001/6443-6451: []
+igkmf processes left: []
+run dir present: no

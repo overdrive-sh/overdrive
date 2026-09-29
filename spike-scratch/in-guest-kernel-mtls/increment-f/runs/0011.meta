@@ -1,0 +1,10 @@
+run_id=0011
+label=build-guest-main-archprctl
+started_utc=2026-09-29T10:57:30Z
+ended_utc=2026-09-29T10:57:54Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-guest.sh main
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=1295d01cf30209cb9a38367edbd59b98156bd521671894db73974d66f3ae60bb
+stderr_sha256=c852431e4890d7f38a9f74fa7c5bdce9d82d9630c563648d5b32ed21698d3c7b

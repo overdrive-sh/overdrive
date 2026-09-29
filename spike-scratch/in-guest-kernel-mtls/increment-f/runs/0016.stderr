@@ -1,0 +1,8 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-busybox.sh`
+xtask: running metal run (one bootstrap lease session)
+In file included from scripts/kconfig/zconf.tab.c:2168:
+scripts/kconfig/confdata.c: In function ‘conf_write’:
+scripts/kconfig/confdata.c:357:35: warning: assignment discards ‘const’ qualifier from pointer target type [-Wdiscarded-qualifiers]
+  357 |                 } else if ((slash = strrchr(name, '/'))) {
+      |                                   ^

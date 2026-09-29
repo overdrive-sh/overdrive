@@ -1,0 +1,10 @@
+run_id=0004
+label=build-binary-gnu-source
+started_utc=2026-09-29T10:50:08Z
+ended_utc=2026-09-29T10:50:23Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- bash spike-scratch/in-guest-kernel-mtls/increment-f/build-binary.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=1fb3c39dca2bfce2e7209d5f92809f8062064f1a81bae0268179e7d2508a9659
+stderr_sha256=e21b65e5f0d8a89d11c682494821765acd0a610c15d61d746b5565601befea20

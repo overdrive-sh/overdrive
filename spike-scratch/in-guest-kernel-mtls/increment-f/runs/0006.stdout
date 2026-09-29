@@ -1,0 +1,320 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=617eb9ad21430fcf65a0e0b0 pid=298739
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 169,696 bytes  received 3,246 bytes  115,294.67 bytes/sec
+total size is 159,268,256  speedup is 920.93
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+===== pre-run host state =====
+links: eno12399np0 eno12409np1 eno8303 lo 
+firecracker processes: []
+
+===== versions / artifacts =====
+7.0.0-29-generic
+Firecracker v1.17.0
+unikraft-igkmf  eb8fa2368618cea11c9bde196f79e6e6b9caeed5
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+lib-lwip-igkmf  ec55ae17618feeb57c8c10109bcf5c42723e8e95
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+app-elfloader   a6c9dc2b655572bee1f9657cbcc2d1eca8f6cb73
+lib-libelf      c03d4ceb22a2b9e9799238f9c277a14284d313ad
+99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5  <metal-home>/igkm-spike-a/firecracker/v1.17.0/release-v1.17.0-x86_64/firecracker-v1.17.0-x86_64
+273d7744fd8939abab831234bc574036b3412e6bd541b42cde2ed72c9d4a9e4f  <metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-main_fc-x86_64
+21d496d7b67acf11e726bacbfa4c5a42f2335dcbfe0d62a46a0ca46d51149f4e  <metal-home>/igkm-spike-a/igkmf-host-target/release/peer
+ad9c0b483db3702f6be04d1ce394d50b6e1b94633c560f460e626e9873b5cad4  <metal-home>/igkm-spike-a/igkmf-host-target/release/relay
+da30d240aac45c2dad035b67ec6ebc2e39ca6ed469f86ffd829667fa179083b4  <metal-home>/igkm-spike-a/igkmf-host-target/release/inclient
+e3b35083cba6adf3def8328105dfbe3cd289714f34df61814ae852600969dfae  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-d/patches/0001-posix-socket-connect-post-hook.patch
+9c798cce6ffca36e6d379f7a6463c9d7f5cb31fd3ac2c46228860c0ee13b10f4  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-d/patches/0002-posix-socket-accept-post-hook.patch
+a4857fcef29d354dce2c55d6d4d019098cf4c9cfd3414cfe5aa521cd952302ff  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/../increment-e/patches/0003-lib-lwip-readiness-interposition.patch
+--- the application: an unmodified Linux ELF, given to Firecracker as the initrd
+<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=26c851e4aeacd249f7423092e71484c3c46c20e0, for GNU/Linux 3.2.0, not stripped
+initrd (host) sha256=043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179 size=890080
+preset=mesh boot_args="igkmf netdev.ip=192.168.204.2/24:192.168.204.1 mtlsguard.mesh=192.168.204.1:6443-6451 mtlsguard.mesh_in=192.168.204.2:7443 mtlsguard.agent_port=7100 -- igkmf-app run"
+
+===== create tap igkf29105328 (the only host network change) =====
+igkf29105328     DOWN           192.168.204.1/24 
+
+===== start capture, peer, relay =====
+tcpdump: listening on igkf29105328, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+tcpdump pid=299145 peer pid=299154 relay pid=299167 t+0.289778s
+LISTEN 0      128    192.168.204.1:6443 0.0.0.0:* users:(("peer",pid=299154,fd=3))                          
+LISTEN 0      128    192.168.204.1:6446 0.0.0.0:* users:(("peer",pid=299154,fd=7))                          
+LISTEN 0      128    192.168.204.1:6447 0.0.0.0:* users:(("peer",pid=299154,fd=10))                         
+LISTEN 0      128    192.168.204.1:6444 0.0.0.0:* users:(("peer",pid=299154,fd=4))                          
+LISTEN 0      128    192.168.204.1:6445 0.0.0.0:* users:(("peer",pid=299154,fd=6))                          
+LISTEN 0      128    192.168.204.1:6450 0.0.0.0:* users:(("peer",pid=299154,fd=15))                         
+LISTEN 0      128    192.168.204.1:6451 0.0.0.0:* users:(("peer",pid=299154,fd=17))                         
+LISTEN 0      128    192.168.204.1:6448 0.0.0.0:* users:(("peer",pid=299154,fd=12))                         
+LISTEN 0      128    192.168.204.1:6449 0.0.0.0:* users:(("peer",pid=299154,fd=14))                         
+LISTEN 0      128    192.168.204.1:5001 0.0.0.0:* users:(("peer",pid=299154,fd=19))                         
+u_str LISTEN 0      4096   <metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/vsock.sock_7100 52319223 * 0 users:(("relay",pid=299167,fd=3))                                                                                                    
+
+===== the SAME ELF natively on the host Linux: igkmf-app native (plain pass-through to 192.168.204.1:5001 over host-local routing, not the tap) =====
+native binary sha256=043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179
+IGKM-F: BOOT-MARKER app started t=3965015.705838
+IGKM-F: uname(2): sysname="Linux" release="7.0.0-29-generic" version="#29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026" machine="x86_64"
+IGKM-F: libc: glibc 2.43 (stable), statically linked into this ELF; pid=299178 ppid=299177
+IGKM-F: auxv: AT_ENTRY=0x712cb4677840 AT_PHDR=0x712cb466f040 AT_BASE=0 AT_PAGESZ=4096 AT_SYSINFO_EHDR=0x712cb466d000 AT_RANDOM=set AT_EXECFN="<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app"
+IGKM-F: wall clock CLOCK_REALTIME=1790679208.872383 s since 1970-01-01
+IGKM-F: argv[0]="<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app"
+IGKM-F: argv[1]="native"
+IGKM-F: A pass-through blocking connect(192.168.204.1:5001) t=3965015.705896
+IGKM-F: A pass-through connect() returned 0 errno=0 (-) after 115 us t=3965015.706013
+IGKM-F: A pass-through wrote 42 bytes: IGKM-E-PLAIN-REQ pass-through guest->host
+IGKM-F: A pass-through read 43 bytes: IGKM-E-PLAIN-RESP pass-through host->guest
+IGKM-F: VERDICT native A pass-through=PASS
+IGKM-F: app returning t=3965015.706130
+native exit=0
+
+===== firecracker config =====
+{
+  "boot-source": {
+    "kernel_image_path": "<metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-main_fc-x86_64",
+    "initrd_path": "<metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-f/out/bin/igkmf-app",
+    "boot_args": "igkmf netdev.ip=192.168.204.2/24:192.168.204.1 mtlsguard.mesh=192.168.204.1:6443-6451 mtlsguard.mesh_in=192.168.204.2:7443 mtlsguard.agent_port=7100 -- igkmf-app run"
+  },
+  "drives": [],
+  "machine-config": { "vcpu_count": 1, "mem_size_mib": 512 },
+  "network-interfaces": [
+    { "iface_id": "net0", "guest_mac": "52:54:00:1a:04:06", "host_dev_name": "igkf29105328" }
+  ],
+  "vsock": { "vsock_id": "vsock0", "guest_cid": 3, "uds_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/vsock.sock" },
+  "logger": { "log_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/fc.log", "level": "Info", "show_level": true, "show_log_origin": true },
+  "metrics": { "metrics_path": "<metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/fc.metrics" }
+}
+
+===== launch =====
+firecracker pid=299183 t+0.513053s
+firecracker exited on its own: exit=0 t+0.763547s
+RUNNER: relay was NOT killed (trigger never seen)
+tcpdump pid 299145 still running -> SIGINT
+peer pid 299154 still running -> SIGTERM
+relay pid 299167 still running -> SIGTERM
+
+===== inbound caller log =====
+cat: <metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/inclient.log: No such file or directory
+
+===== relay log =====
+RELAY listening on unix <metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/vsock.sock_7100 pid=299167 client identity=spiffe://overdrive.test/ns/default/sa/guest-client server identity=spiffe://overdrive.test/ns/default/sa/guest-server (keys: client PKCS#8 138 B, guest-server PKCS#8 138 B, P-256 scalars 32 B, held in this process only; one thread per vsock connection) t+0.277591s
+
+===== peer log =====
+PEER listening tls 192.168.204.1:6443 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Echo tickets=2 (rustls default) t+0.272835s
+PEER listening tls 192.168.204.1:6444 identity=spiffe://overdrive.test/ns/default/sa/peer-denied mode=Echo tickets=2 (rustls default) t+0.272995s
+PEER listening tls 192.168.204.1:6445 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=ServerFirst tickets=2 (rustls default) t+0.273106s
+PEER listening tls 192.168.204.1:6446 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=KeyUpdateEcho tickets=2 (rustls default) t+0.273203s
+PEER listening tls 192.168.204.1:6447 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Bulk tickets=2 (rustls default) t+0.273294s
+PEER listening tls 192.168.204.1:6448 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=RawOk tickets=0 via rustls (crafted by the raw record layer) t+0.273383s
+PEER listening tls 192.168.204.1:6449 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=RawBad tickets=0 via rustls (crafted by the raw record layer) t+0.273474s
+PEER listening tls 192.168.204.1:6450 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Echo tickets=2 (rustls default) t+0.273562s
+PEER listening tls 192.168.204.1:6451 identity=spiffe://overdrive.test/ns/default/sa/peer-allowed mode=Http tickets=2 (rustls default) t+0.273656s
+PEER listening plain 192.168.204.1:5001 (non-mesh pass-through) t+0.273695s
+PEER ready t+0.273724s
+PEER[5001#1] accepted tcp from 192.168.204.1:56236 t+0.347909s
+PEER[5001#1] rx plaintext line 1 (42 bytes): IGKM-E-PLAIN-REQ pass-through guest->host\n t+0.347934s
+PEER[5001#1] tx plaintext line 1 (43 bytes): IGKM-E-PLAIN-RESP pass-through host->guest\n t+0.347968s
+PEER[5001#1] EOF t+0.347999s
+
+===== guest serial console (Unikraft + the unmodified ELF) =====
+2026-09-29T10:53:29.026636051 [igkm-f:main] Running Firecracker v1.17.0
+[    0.000000] Info: [libukrandom] <swrand.c @  111> Initializing the random number generator...
+[    0.000000] Info: [libukrandom] <random.c @  108> CSPRNG seed source: CPU
+[    0.000000] Info: [libkvmplat] <setup.c @   94> SYSCALL entrance @ 0x101000
+[    0.000000] Info: [libkvmplat] <setup.c @  179> Switch from bootstrap stack to stack @0x11000
+[    0.000000] Info: [libukboot] <boot.c @  279> Unikraft constructor table at 0x1e7000 - 0x1e7048
+[    0.000000] Info: [libukboot] <boot.c @  288> Initialize memory allocator...
+[    0.000000] Info: [libukallocbbuddy] <bbuddy.c @  659> Initialize binary buddy allocator 400000000
+[    0.000000] Info: [libukboot] <boot.c @  347> Initialize the IRQ subsystem...
+[    0.000000] Info: [libukboot] <boot.c @  354> Initialize platform time...
+[    0.000000] Info: [libkvmplat] <tscclock.c @  258> Calibrating TSC clock against i8254 timer
+[    0.100001] Info: [libkvmplat] <tscclock.c @  279> Clock source: TSC, frequency estimate is 2396542800 Hz
+[    0.101846] Info: [libukboot] <boot.c @  358> Initialize scheduling...
+[    0.103092] Info: [libukschedcoop] <schedcoop.c @  289> Initializing cooperative scheduler
+[    0.104902] Info: [libukboot] <boot.c @  391> Init Table @ 0x1e7048 - 0x1e7148
+[    0.106420] Info: [libukbus] <bus.c @  133> Initialize bus handlers...
+[    0.107660] Info: [libukbus] <bus.c @  135> Probe buses...
+[    0.108698] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0001000:5
+[    0.110479] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x41fc52020 initialized
+[    0.112117] Info: [libuknetdev] <netdev.c @  198> Registered netdev0: 0x41fc53030 (virtio-net)
+[    0.113752] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.115326] Info: [libvirtio_mmio] <virtio_mmio_cmdl.c @   93> virtio-mmio device 4K@0xc0002000:6
+[    0.117104] Info: [libvirtio_bus] <virtio_bus.c @  128> Virtio device 0x41fc57020 initialized
+[    0.121973] Info: [libukvsockdev] <vsockdev.c @  176> vsockdev: Configured event queue
+[    0.123595] Info: [libukvsockdev] <vsockdev.c @  152> vsockdev: Configured receive queue
+[    0.125183] Info: [libvirtio_vsock] <virtio_vsock.c @ 2073> Started virtio-vsock device
+[    0.126695] Info: [libvirtio_mmio] <virtio_mmio.c @  548> finish probing a virtio mmio dev
+[    0.128381] Info: [liblwip] <init.c @  174> Initializing lwip
+[    0.129691] Info: [liblwip] <init.c @  225> Attach network device 0 to lwIP...
+  1: Set IPv4 address 192.168.204.2 mask 255.255.255.0 gw 192.168.204.1
+[    0.132490] Warn: [libvirtio_mmio] <virtio_mmio.c @  173> Unaligned io read: 6 bytes
+[    0.134060] Info: [libuknetdev] <netdev.c @  407> netdev0: Configured interface
+[    0.138398] Info: [libuknetdev] <netdev.c @  554> netdev0: Configured receive queue 0
+[    0.140005] Info: [libuknetdev] <netdev.c @  587> netdev0: Configured transmit queue 0
+[    0.141594] Info: [libvirtio_net] <virtio_net.c @ 1403> virtio-net: 0 started
+[    0.142951] Info: [libuknetdev] <netdev.c @  606> netdev0: Started interface
+en1: Added
+[    0.144484] Info: [liblwip] <init.c @  345> en1: Hardware address: 52:54:00:1a:04:06
+[    0.145959] Info: [liblwip] <init.c @  352> en1: Check checksums:
+[    0.147110] Info: [liblwip] <init.c @  371> en1: Generate checksums: IP UDP TCP ICMP ICMP6
+[    0.148671] Info: [liblwip] <init.c @  442> en1: Set as default interface
+en1: Interface is up
+[    0.150434] Warn: [libposix_process] <clone.c @  193> uk_posix_clone_sighand() stubbed
+[    0.151938] Warn: [libuklock] <semaphore.c @   23> uk_posix_clone_sysvsem() stubbed
+MTLSGUARD: evidence: initrd0 (the ELF app-elfloader will load) vbase=0x1ff26000 pg_off=0 len=890080 sha256=043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179
+Powered by
+o.   .o       _ _               __ _
+Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
+oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
+oOo oOO| | | | |   (| | | (_) |  _) :_
+ OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
+          Ijiraq 0.21.0~eb8fa236-custom
+[    0.164639] Info: [libukboot] <boot.c @  470> Pre-init table at 0x1e7238 - 0x1e7238
+[    0.166094] Info: [libukboot] <boot.c @  481> Constructor table at 0x1e7238 - 0x1e7240
+[    0.167598] Info: [libukboot] <boot.c @  496> Environment variables:
+[    0.168801] Info: [libukboot] <boot.c @  498> 	PATH=/bin
+[    0.169809] Info: [libukboot] <boot.c @  504> Calling main(3, ['igkmf', 'igkmf-app', 'run'])
+[    0.171427] Info: [appelfloader] <main.c @  299> Image at 0x1ff26000, len 890080 bytes
+[    0.174256] Info: [appelfloader] <main.c @  358> igkmf-app: ELF program loaded to 0x41f801000-0x41f8d4000 (864256 B), entry at 0x41f809840
+Fatal glibc error: Cannot allocate TLS block
+[    0.177486] Info: [libukboot] <shutdown_req.c @   50> Shutdown requested (0)
+[    0.178839] Info: [libukboot] <boot.c @  430> Shutting down system (0)
+[    0
+===== firecracker stderr =====
+
+===== firecracker log =====
+2026-09-29T10:53:29.032188077 [igkm-f:main:INFO:src/vmm/src/device_manager/mod.rs:387] Artificially kick devices
+2026-09-29T10:53:29.032380237 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/vstate/vcpu.rs:323] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-29T10:53:29.032420737 [igkm-f:main:INFO:src/firecracker/src/main.rs:610] Successfully started microvm that was configured from one single json
+2026-09-29T10:53:29.047908278 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047927187 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047941608 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047955820 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047970161 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047984202 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.047998334 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048012335 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048026416 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048040497 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048054679 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048068700 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048083031 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:774] vcpu: IO write @ 0x70:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.048097082 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/arch/x86_64/vcpu.rs:764] vcpu: IO read @ 0x71:0x1 failed: Failed to find address range.
+2026-09-29T10:53:29.174885014 [igkm-f:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Vsock:vsock] notifying queues
+2026-09-29T10:53:29.182143569 [igkm-f:fc_vcpu 0:WARN:src/vmm/src/devices/virtio/device.rs:159] Received acknowledge request for unknown feature: 0x202089a3
+2026-09-29T10:53:29.191299781 [igkm-f:fc_vcpu 0:INFO:src/vmm/src/devices/virtio/device.rs:228] [Net:net0] notifying queues
+2026-09-29T10:53:29.229870204 [igkm-f:main:INFO:src/vmm/src/lib.rs:693] Vmm is stopping.
+2026-09-29T10:53:29.229905557 [igkm-f:main:INFO:src/vmm/src/lib.rs:768] Killing vCPU threads
+2026-09-29T10:53:29.248792424 [igkm-f:main:INFO:src/firecracker/src/main.rs:116] Firecracker exiting successfully. exit_code=0
+
+===== firecracker metrics (non-zero vsock/net/i8042 counters) =====
+   line2 i8042.missed_write_count = 1
+   line2 i8042.read_count = 2
+   line2 i8042.reset_count = 1
+   line2 i8042.write_count = 4
+   line2 net.no_tx_avail_buffer = 1
+   line2 net.rx_queue_event_count = 2
+   line2 net.rx_tap_event_count = 1
+   line2 net.rx_bytes_count = 102
+   line2 net.rx_packets_count = 1
+   line2 net.rx_count = 1
+   line2 net.tap_write_agg.sum_us = 32
+   line2 net.tx_bytes_count = 54
+   line2 net.tx_count = 1
+   line2 net.tx_packets_count = 1
+   line2 net.tx_queue_event_count = 2
+   line2 vsock.tx_queue_event_count = 1
+
+===== initrd identity: host file vs the bytes the guest hashed before app-elfloader loaded them =====
+host  sha256=043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179
+guest sha256=043e34e746ef86eb2a97c3334920edc1022ef34e54186213eb33571f6357b179
+initrd sha256 match: yes
+
+===== tcpdump =====
+tcpdump: listening on igkf29105328, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+4 packets captured
+4 packets received by filter
+0 packets dropped by kernel
+-rw-r--r-- 1 root root 400 Sep 29 10:53 <metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/tap.pcap
+f28aba2d55204f3e2c8ac559fcdb0e330c4f5db970b614172c817aa02daf04d9  <metal-home>/igkm-spike-a/runs-igkmf/20260929T105328Z-299090/tap.pcap
+
+===== tap capture scan =====
+SCAN totals:
+SCAN   tls streams: 0 bytes, marker(IGKM-E-) occurrences=0, marker(IGKM-F-) occurrences=0, marker(igkm-f) occurrences=0
+SCAN     tls: b'IGKM-E-EARLY must-not-leave guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-PLAIN-REQ pass-through guest->host\n' occurrences=0
+SCAN     tls: b'IGKM-E-PLAIN-RESP pass-through host->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-GREETING server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQS server-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPS server-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQI inbound peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPI inbound guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ1 nb-client-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP1 nb-client-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQB et-bulk guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPB et-bulk peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQP poll-1byte guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPP poll-1byte peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQK1 keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPK1 keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQK3 keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPK3 keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-GREETING raw-nst peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQR raw-nst guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPR raw-nst peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQR2 after-keyupdate guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESPR2 after-keyupdate peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-SHOULD-NOT-ARRIVE raw-bad peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ1 client-first guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP1 client-first peer->guest\n' occurrences=0
+SCAN     tls: b'IGKM-E-REQ2 after-relay-kill guest->peer\n' occurrences=0
+SCAN     tls: b'IGKM-E-RESP2 after-relay-kill peer->guest\n' occurrences=0
+SCAN     tls: b'GET /igkm-f-http' occurrences=0
+SCAN     tls: b'IGKM-F-HTTP-BODY served by the host peer over the mesh (TLS terminated at the peer)\n' occurrences=0
+SCAN     tls: b'HTTP/1.1 200 OK' occurrences=0
+SCAN   plain streams: 0 bytes, marker(IGKM-E-) occurrences=0, marker(IGKM-F-) occurrences=0, marker(igkm-f) occurrences=0
+
+===== tap capture (base64, for the evidence tree) =====
+----- BEGIN tap.pcap base64 -----
+1MOyoQIABAAAAAAAAAAAAAAABAABAAAAqZi7ao1zAABaAAAAWgAAADMzAAAAFrps1eH3qIbdYAAA
+AAAkAAEAAAAAAAAAAAAAAAAAAAAA/wIAAAAAAAAAAAAAAAAAFjoABQIAAAEAjwB3AAAAAAEEAAAA
+/wIAAAAAAAAAAAAB/+H3qKmYu2rpDQMAKgAAACoAAAD///////9SVAAaBAYIBgABCAAGBAABUlQA
+GgQGwKjMAgAAAAAAAMCozAKpmLtqrdYDAFoAAABaAAAAMzMAAAAWumzV4feoht1gAAAAACQAAQAA
+AAAAAAAAAAAAAAAAAAD/AgAAAAAAAAAAAAAAAAAWOgAFAgAAAQCPAHcAAAAAAQQAAAD/AgAAAAAA
+AAAAAAH/4feoqZi7au98CQBaAAAAWgAAADMzAAAAFrps1eH3qIbdYAAAAAAkAAEAAAAAAAAAAAAA
+AAAAAAAA/wIAAAAAAAAAAAAAAAAAFjoABQIAAAEAjwB3AAAAAAEEAAAA/wIAAAAAAAAAAAAB/+H3
+qA==
+----- END tap.pcap base64 -----
+
+===== run verdict =====
+
+===== cleanup =====
+deleting tap igkf29105328
+
+===== post-run host state (must match pre-run) =====
+links added:   
+links removed: 
+firecracker processes before: [] after: []
+tap igkf29105328 present: no
+192.168.204.x on host: 0
+listeners on 5001/6443-6451: []
+igkmf processes left: []
+run dir present: no

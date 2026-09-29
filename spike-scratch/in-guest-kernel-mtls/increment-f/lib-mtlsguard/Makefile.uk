@@ -1,0 +1,35 @@
+# Spike B2 (GH #303, increment-e): in-guest mTLS hook for Unikraft, with
+# non-blocking sockets, poll/epoll readiness, NewSessionTicket and KeyUpdate.
+# Throwaway probe.
+#
+# Needs the patched core `lib/posix-socket` connect/accept post-hooks
+# (increment-d patches 0001 + 0002), the patched lib-lwip readiness hook
+# (increment-e patch 0003), and an unpacked, sha256-pinned Mbed TLS 3.6.7 LTS
+# tree passed as MTLSGUARD_MBEDTLS_DIR=<dir>. Only AES-128-GCM plus SHA-256 /
+# HMAC / HKDF of Mbed TLS are compiled (config: include/).
+$(eval $(call addlib_s,libmtlsguard,$(CONFIG_LIBMTLSGUARD)))
+
+ifeq ($(CONFIG_LIBMTLSGUARD),y)
+ifeq ($(MTLSGUARD_MBEDTLS_DIR),)
+$(error MTLSGUARD_MBEDTLS_DIR must point at an unpacked mbedtls-3.6.7 tree)
+endif
+endif
+
+LIBMTLSGUARD_MBEDTLS = $(MTLSGUARD_MBEDTLS_DIR)
+
+LIBMTLSGUARD_CFLAGS-y += -I$(LIBMTLSGUARD_BASE)/include
+LIBMTLSGUARD_CFLAGS-y += -I$(LIBMTLSGUARD_MBEDTLS)/include
+LIBMTLSGUARD_CFLAGS-y += -I$(LIBMTLSGUARD_MBEDTLS)/library
+LIBMTLSGUARD_CFLAGS-y += -DMBEDTLS_CONFIG_FILE='"igkme_mbedtls_config.h"'
+LIBMTLSGUARD_CFLAGS-y += -DUK_LIBPARAM_LIBPREFIX=mtlsguard
+
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_BASE)/guard.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/aes.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/aesni.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/gcm.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/block_cipher.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/constant_time.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/platform_util.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/sha256.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/md.c
+LIBMTLSGUARD_SRCS-y += $(LIBMTLSGUARD_MBEDTLS)/library/hkdf.c

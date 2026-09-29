@@ -1,0 +1,10 @@
+run_id=0021
+label=boot-http-go-trace
+started_utc=2026-09-29T11:08:09Z
+ended_utc=2026-09-29T11:08:27Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-go-strace_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-f/run-boot-fc.sh http-go-trace
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=ac700130acc2bdb99f9e0184fd4961b2b56d6c6ac2417db6acf236681e4c4fb9
+stderr_sha256=c39e30e13396623a0200c2dbee963bb0a53fd16cb690c532683c018c281794c1

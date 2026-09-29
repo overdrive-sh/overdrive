@@ -1,0 +1,10 @@
+run_id=0017
+label=boot-http-busybox-wget
+started_utc=2026-09-29T11:03:48Z
+ended_utc=2026-09-29T11:04:04Z
+exit_code=0
+local_commit=bfbb45af2bca649df087c5508347e6388916e3a7
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out-igkmf/igkmf-main_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-f/run-boot-fc.sh http-busybox
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=fddcbf3594905e7a41d15cc8e5bae59775b1934c1d122ef20cd2519a88743ccd
+stderr_sha256=941455abc84a7d130c1137ef3d87016eb5b1726a9ab3bdec8fd08d42b17c5cc8
