@@ -1,0 +1,97 @@
+From c1611b10c93da07acc90b48694f3fee23a97eb25 Mon Sep 17 00:00:00 2001
+From: Overdrive spike <spike@invalid>
+Date: Tue, 29 Sep 2026 11:45:19 +0200
+Subject: [PATCH] sockets: let an interposed socket driver decide readiness
+ (Overdrive GH #303 spike B2)
+
+---
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+ create mode 100644 include/uk/lwip_readiness.h
+
+diff --git a/include/uk/lwip_readiness.h b/include/uk/lwip_readiness.h
+new file mode 100644
+index 0000000..e5c2e8b
+--- /dev/null
++++ b/include/uk/lwip_readiness.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: BSD-3-Clause */
++/* Readiness interposition for lwIP sockets (Overdrive GH #303 spike B2). */
++#ifndef __UK_LWIP_READINESS_H__
++#define __UK_LWIP_READINESS_H__
++
++#include <uk/socket_driver.h>
++
++/**
++ * lwIP pushes poll/epoll readiness for its sockets straight into the socket's
++ * uk_file. When another library has installed its own posix_socket_driver on
++ * a socket (posix_sock_get_node(sock)->driver is not lwIP's), lwIP passes the
++ * events it computed to this hook and assigns the events the hook returns.
++ * Called from lwIP's event callback with interrupts disabled, and from
++ * poll_setup: it must not block. The weak default returns lwip_events.
++ */
++unsigned int lwip_posix_socket_events_hook(posix_sock *sock,
++					   unsigned int lwip_events);
++
++#endif /* __UK_LWIP_READINESS_H__ */
+diff --git a/sockets.c b/sockets.c
+index 258957f..6d5f657 100644
+--- a/sockets.c
++++ b/sockets.c
+@@ -38,6 +38,7 @@
+ #include <uk/print.h>
+ #include <uk/essentials.h>
+ #include <uk/socket_driver.h>
++#include <uk/lwip_readiness.h>
+ 
+ #include <lwip/sockets.h>
+ #include <sys/socket.h>
+@@ -464,6 +465,25 @@ get_lwip_socket_events(struct lwip_sock *sock)
+ 	return events;
+ }
+ 
++__weak unsigned int
++lwip_posix_socket_events_hook(posix_sock *sock __unused, unsigned int events)
++{
++	return events;
++}
++
++static struct posix_socket_ops lwip_posix_socket_ops;
++
++/* Readiness the application sees: lwIP's own, unless another library has
++ * installed its driver on this socket, in which case that library decides.
++ */
++static inline unsigned int
++lwip_posix_socket_readiness(posix_sock *sockobj, unsigned int events)
++{
++	if (posix_sock_get_driver(sockobj)->ops != &lwip_posix_socket_ops)
++		return lwip_posix_socket_events_hook(sockobj, events);
++	return events;
++}
++
+ void
+ lwip_posix_socket_event_callback(struct lwip_sock *sock,
+ 				 enum netconn_evt evt __unused,
+@@ -480,7 +500,8 @@ lwip_posix_socket_event_callback(struct lwip_sock *sock,
+ 	UK_ASSERT(_lwip_getfd(sockobj) == sock->conn->socket);
+ 
+ 	events = get_lwip_socket_events(sock);
+-	posix_sock_event_assign(sockobj, events);
++	posix_sock_event_assign(sockobj,
++				lwip_posix_socket_readiness(sockobj, events));
+ }
+ 
+ static void
+@@ -505,7 +526,7 @@ lwip_posix_socket_poll_setup(posix_sock *file)
+ 	revents = get_lwip_socket_events(sock);
+ 	sock->sock_data = (void *)file;
+ 	SYS_ARCH_UNPROTECT(lev);
+-	posix_sock_event_assign(file, revents);
++	posix_sock_event_assign(file, lwip_posix_socket_readiness(file, revents));
+ }
+ 
+ static struct posix_socket_ops lwip_posix_socket_ops = {
+-- 
+2.52.0
+

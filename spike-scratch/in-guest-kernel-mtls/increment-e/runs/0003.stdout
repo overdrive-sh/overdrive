@@ -1,0 +1,704 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to <redacted-metal-target>
+
+########## [bootstrap] remote user=ubuntu home=<metal-home> sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=823076c37c053d9c65eaa54e pid=275849
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/bordeaux-v2 -> <redacted-metal-target>:<metal-home>/overdrive
+cannot delete non-empty directory: spike-scratch/increment-u-netns-density-295-default-offload-20260913T2302
+cannot delete non-empty directory: spike-scratch/increment-t-netns-density-295-bridge-local-20260913T2259
+cannot delete non-empty directory: spike-scratch/increment-s-netns-density-295-bridge-dns-20260913T2257
+cannot delete non-empty directory: spike-scratch/increment-r-netns-density-295-offload-20260913T2254
+cannot delete non-empty directory: spike-scratch/increment-q-netns-density-295-broute-host-20260913T2252
+cannot delete non-empty directory: spike-scratch/increment-p-netns-density-295-metal-20260913T2237
+
+sent 153,621 bytes  received 1,971 bytes  44,454.86 bytes/sec
+total size is 158,017,614  speedup is 1,015.59
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+
+##### [build-guest] pristine sources (Spike A3 clones; must be clean at the pinned SHAs)  (10:17:04)
+unikraft (pristine) HEAD=eb8fa2368618cea11c9bde196f79e6e6b9caeed5 dirty=0
+lib-lwip (pristine) HEAD=ec55ae17618feeb57c8c10109bcf5c42723e8e95 dirty=0
+--- Spike B worktree (must still be exactly patches 0001+0002)
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+
+##### [build-guest] patches  (10:17:04)
+e3b35083cba6adf3def8328105dfbe3cd289714f34df61814ae852600969dfae  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-e/../increment-d/patches/0001-posix-socket-connect-post-hook.patch
+9c798cce6ffca36e6d379f7a6463c9d7f5cb31fd3ac2c46228860c0ee13b10f4  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-e/../increment-d/patches/0002-posix-socket-accept-post-hook.patch
+a4857fcef29d354dce2c55d6d4d019098cf4c9cfd3414cfe5aa521cd952302ff  <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-e/patches/0003-lib-lwip-readiness-interposition.patch
+
+##### [build-guest] Unikraft worktree <metal-home>/igkm-spike-a/unikraft/unikraft-igkme = eb8fa236 + increment-d 0001 + 0002  (10:17:04)
+HEAD is now at eb8fa236 lib/ukprint: Fix uk_pr_* logs
+ lib/posix-socket/exportsyms.uk       |  2 ++
+ lib/posix-socket/include/uk/socket.h | 24 ++++++++++++++++++++++++
+ lib/posix-socket/socket.c            | 23 +++++++++++++++++++++++
+ 3 files changed, 49 insertions(+)
+
+##### [build-guest] lib-lwip worktree <metal-home>/igkm-spike-a/unikraft/lib-lwip-igkme = ec55ae17 + increment-e 0003  (10:17:04)
+HEAD is now at ec55ae1 sockets: Remove redundant set of SOCK_NONBLOCK
+--- git diff --stat (lib-lwip worktree vs ec55ae17618feeb57c8c10109bcf5c42723e8e95, incl. the new header)
+ include/uk/lwip_readiness.h | 19 +++++++++++++++++++
+ sockets.c                   | 25 +++++++++++++++++++++++--
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+--- full diff
+diff --git a/include/uk/lwip_readiness.h b/include/uk/lwip_readiness.h
+new file mode 100644
+index 0000000..e5c2e8b
+--- /dev/null
++++ b/include/uk/lwip_readiness.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: BSD-3-Clause */
++/* Readiness interposition for lwIP sockets (Overdrive GH #303 spike B2). */
++#ifndef __UK_LWIP_READINESS_H__
++#define __UK_LWIP_READINESS_H__
++
++#include <uk/socket_driver.h>
++
++/**
++ * lwIP pushes poll/epoll readiness for its sockets straight into the socket's
++ * uk_file. When another library has installed its own posix_socket_driver on
++ * a socket (posix_sock_get_node(sock)->driver is not lwIP's), lwIP passes the
++ * events it computed to this hook and assigns the events the hook returns.
++ * Called from lwIP's event callback with interrupts disabled, and from
++ * poll_setup: it must not block. The weak default returns lwip_events.
++ */
++unsigned int lwip_posix_socket_events_hook(posix_sock *sock,
++					   unsigned int lwip_events);
++
++#endif /* __UK_LWIP_READINESS_H__ */
+diff --git a/sockets.c b/sockets.c
+index 258957f..6d5f657 100644
+--- a/sockets.c
++++ b/sockets.c
+@@ -38,6 +38,7 @@
+ #include <uk/print.h>
+ #include <uk/essentials.h>
+ #include <uk/socket_driver.h>
++#include <uk/lwip_readiness.h>
+ 
+ #include <lwip/sockets.h>
+ #include <sys/socket.h>
+@@ -464,6 +465,25 @@ get_lwip_socket_events(struct lwip_sock *sock)
+ 	return events;
+ }
+ 
++__weak unsigned int
++lwip_posix_socket_events_hook(posix_sock *sock __unused, unsigned int events)
++{
++	return events;
++}
++
++static struct posix_socket_ops lwip_posix_socket_ops;
++
++/* Readiness the application sees: lwIP's own, unless another library has
++ * installed its driver on this socket, in which case that library decides.
++ */
++static inline unsigned int
++lwip_posix_socket_readiness(posix_sock *sockobj, unsigned int events)
++{
++	if (posix_sock_get_driver(sockobj)->ops != &lwip_posix_socket_ops)
++		return lwip_posix_socket_events_hook(sockobj, events);
++	return events;
++}
++
+ void
+ lwip_posix_socket_event_callback(struct lwip_sock *sock,
+ 				 enum netconn_evt evt __unused,
+@@ -480,7 +500,8 @@ lwip_posix_socket_event_callback(struct lwip_sock *sock,
+ 	UK_ASSERT(_lwip_getfd(sockobj) == sock->conn->socket);
+ 
+ 	events = get_lwip_socket_events(sock);
+-	posix_sock_event_assign(sockobj, events);
++	posix_sock_event_assign(sockobj,
++				lwip_posix_socket_readiness(sockobj, events));
+ }
+ 
+ static void
+@@ -505,7 +526,7 @@ lwip_posix_socket_poll_setup(posix_sock *file)
+ 	revents = get_lwip_socket_events(sock);
+ 	sock->sock_data = (void *)file;
+ 	SYS_ARCH_UNPROTECT(lev);
+-	posix_sock_event_assign(file, revents);
++	posix_sock_event_assign(file, lwip_posix_socket_readiness(file, revents));
+ }
+ 
+ static struct posix_socket_ops lwip_posix_socket_ops = {
+
+##### [build-guest] Mbed TLS 3.6.7 (sha256-pinned, shared with Spike B)  (10:17:04)
+<metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7.tar.bz2: OK
+#define MBEDTLS_VERSION_STRING         "3.6.7"
+f30e6b7139527b41c32f68cc5430ceafa213e7fdf7a39bf4981f6a20cd0e77a1  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/aes.c
+a49c2513f08b692dcdfc612cbbb520a009d7b3bd22f9e1a00c5c4f2d54057770  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/aesni.c
+202ac639d0c3ce4d34025c68614023c1ac9381e80f0b210acf3204ff4a97f8b3  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/gcm.c
+90d8a053a836d747d5ead61890e711f7150987017912fafc00c4ba08d6a80796  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/block_cipher.c
+1a573edd420fece73f996b70cdf6bb58a05a468e434a6ac0c562df592048d3c6  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/constant_time.c
+83051fddcd37171831ff5706613dc3d336b2e53c42e6515f2f14ac0f8aa649f1  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/platform_util.c
+632672d0c954d8bc0e20fdc8370c9f1725f3ffc5fcdaacc14949e42a1b5424d7  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/sha256.c
+5ba79d51ff85951cb4001a22b2428568e4bc1072b367222808f3eac1ad91884d  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/md.c
+c23ddf951e5037cf279a8974a6b228711ecdc0e7ada33b0eb3937f540079391c  <metal-home>/igkm-spike-a/unikraft/mbedtls/mbedtls-3.6.7/library/hkdf.c
+
+##### [build-guest] lib-mtlsguard + app sources  (10:17:04)
+8c023b3e6d9faeba5c56f05b9545ad468fddadac55f7d0876bbb50d9ea3b4c80  lib-mtlsguard/guard.c
+d6e700d9ba59b1f69af03549630392d60dcaf97d05e2df3777860241490bc5ca  lib-mtlsguard/Makefile.uk
+c5c472b6ee4a93077eb0968395aece7dde3ecb0dd8846ca355bae8097f10d6d0  lib-mtlsguard/Config.uk
+33998acc3c00fbc07e3638e92e4ddf95ecedba2ee1845dc4a80642dfa6e99e2e  lib-mtlsguard/include/igkme_mbedtls_config.h
+d1401ab4009905105be8f2b58358c0b8e283831b9f775ec0ae8d291e10d48a18  app/main.c
+a9733a3095ed62d62a373093177afd8b70829ddf1cc1e8eec0d85a57ef6032e9  app/defconfig
+00519e0a6303fd899c16bb71c0a1f1a66771b1c2cc150ecd3c1425baae6a264a  app/Makefile.uk
+ 1834 <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-e/lib-mtlsguard/guard.c
+  983 <metal-home>/overdrive/spike-scratch/in-guest-kernel-mtls/increment-e/app/main.c
+ 2817 total
+gcc    /usr/bin/gcc  gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+make   /usr/bin/make  GNU Make 4.4.1
+ld     /usr/bin/ld  GNU ld (GNU Binutils for Ubuntu) 2.46
+flex   <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/flex  flex 2.6.4
+bison  <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/bison  bison (GNU Bison) 3.8.2
+m4     <metal-home>/igkm-spike-a/unikraft/tools/prefix/bin/m4  m4 (GNU M4) 1.4.19
+
+##### [build-guest] clean build dir  (10:17:04)
+
+##### [build-guest] configure: make defconfig  (10:17:04)
+# configuration written to <metal-home>/igkm-spike-a/unikraft/app-igkme/.config
+#
+make: Leaving directory '<metal-home>/igkm-spike-a/unikraft/unikraft-igkme'
+
+##### [build-guest] required symbols  (10:17:06)
+  CONFIG_PLAT_KVM=y
+  CONFIG_KVM_VMM_FIRECRACKER=y
+  CONFIG_KVM_BOOT_PROTO_LXBOOT=y
+  CONFIG_LIBVIRTIO_MMIO=y
+  CONFIG_LIBVIRTIO_NET=y
+  CONFIG_LIBVIRTIO_VSOCK=y
+  CONFIG_LIBUKVSOCKDEV=y
+  CONFIG_LIBUKNETDEV=y
+  CONFIG_LIBUKLIBPARAM=y
+  CONFIG_LIBPOSIX_SOCKET=y
+  CONFIG_LIBLWIP=y
+  CONFIG_LWIP_SOCKET=y
+  CONFIG_LWIP_TCP=y
+  CONFIG_LIBMTLSGUARD=y
+  CONFIG_LIBPOSIX_TIME=y
+  CONFIG_LIBUKPS2_SYSRESET=y
+  CONFIG_LIBPOSIX_POLL=y
+  CONFIG_LIBUKFILE_CHAINUPDATE=y
+  CONFIG_LIBUKLOCK_MUTEX=y
+  CONFIG_LIBUKSCHEDCOOP=y
+
+##### [build-guest] full resolved .config (sha256 37b077fb48fee81532f943e6a64aa9bed8528b6efad581f0f7645061e73d35ab)  (10:17:06)
+----- BEGIN .config -----
+#
+# Automatically generated file; DO NOT EDIT.
+# Unikraft/0.21.0~eb8fa236-custom Configuration
+#
+CONFIG_UK_FULLVERSION="0.21.0~eb8fa236-custom"
+CONFIG_UK_CODENAME="Ijiraq"
+CONFIG_UK_ARCH="x86_64"
+CONFIG_HOST_ARCH="x86_64"
+CONFIG_UK_BASE="<metal-home>/igkm-spike-a/unikraft/unikraft-igkme"
+CONFIG_UK_APP="<metal-home>/igkm-spike-a/unikraft/app-igkme"
+CONFIG_UK_DEFNAME="app-igkme"
+
+#
+# Architecture Selection
+#
+CONFIG_ARCH_X86_64=y
+# CONFIG_ARCH_ARM_64 is not set
+# CONFIG_ARCH_ARM_32 is not set
+# CONFIG_MARCH_X86_64_NATIVE is not set
+CONFIG_MARCH_X86_64_GENERIC=y
+# CONFIG_MARCH_X86_64_NOCONA is not set
+# CONFIG_MARCH_X86_64_CORE2 is not set
+# CONFIG_MARCH_X86_64_COREI7 is not set
+# CONFIG_MARCH_X86_64_COREI7AVX is not set
+# CONFIG_MARCH_X86_64_COREI7AVXI is not set
+# CONFIG_MARCH_X86_64_ATOM is not set
+# CONFIG_MARCH_X86_64_K8 is not set
+# CONFIG_MARCH_X86_64_K8SSE3 is not set
+# CONFIG_MARCH_X86_64_AMDFAM10 is not set
+# CONFIG_MARCH_X86_64_BTVER1 is not set
+# CONFIG_MARCH_X86_64_BDVER1 is not set
+# CONFIG_MARCH_X86_64_BDVER2 is not set
+# CONFIG_MARCH_X86_64_BDVER3 is not set
+# CONFIG_MARCH_X86_64_BTVER2 is not set
+CONFIG_STACK_SIZE_PAGE_ORDER=4
+CONFIG_CPU_EXCEPT_STACK_SIZE_PAGE_ORDER=4
+CONFIG_AUXSTACK_SIZE_PAGE_ORDER=4
+# end of Architecture Selection
+
+#
+# Platform Configuration
+#
+CONFIG_PLAT_KVM=y
+CONFIG_KVM_BOOT_PROTO_LXBOOT=y
+# CONFIG_KVM_VMM_QEMU is not set
+CONFIG_KVM_VMM_FIRECRACKER=y
+CONFIG_LIBUKPLAT_NATIVE_PAL=y
+CONFIG_LIBUKPLAT_NATIVE=y
+CONFIG_LIBUKPLAT_NATIVE_ADDR=y
+CONFIG_LIBUKPLAT_NATIVE_PAGE=y
+CONFIG_LIBUKPLAT_NATIVE_PT=y
+CONFIG_LIBUKPLAT_NATIVE_TLB=y
+CONFIG_LIBUKPLAT_NATIVE_ECTX=y
+# CONFIG_LIBUKPLAT_NATIVE_ECTX_ISR_ASSERTIONS is not set
+CONFIG_LIBUKPLAT_NATIVE_AUXSP=y
+CONFIG_LIBUKPLAT_NATIVE_LCPU=y
+CONFIG_LIBUKPLAT_NATIVE_REGS=y
+CONFIG_LIBUKPLAT_NATIVE_EXCEPT=y
+CONFIG_LIBUKPLAT_NATIVE_SYSCTX=y
+CONFIG_LIBUKPLAT_NATIVE_LCPU_PM=y
+CONFIG_LIBUKPLAT_NATIVE_START=y
+# CONFIG_PLAT_XEN is not set
+
+#
+# Platform Interface Options
+#
+# CONFIG_UKPLAT_MEMRNAME is not set
+CONFIG_UKPLAT_MEMREGION_MAX_COUNT=128
+CONFIG_UKPLAT_CPU_MAXCOUNT=1
+# end of Platform Interface Options
+
+CONFIG_HZ=100
+CONFIG_HAVE_SHUTDOWN_DISPATCHER=y
+CONFIG_HAVE_PAGING=y
+CONFIG_HAVE_CPU_MULTI_PHASE_STARTUP=y
+# end of Platform Configuration
+
+#
+# Device Drivers
+#
+
+#
+# Real Time Clock
+#
+# end of Real Time Clock
+
+CONFIG_VIRTIO_DEVICE=y
+
+#
+# Bus drivers
+#
+CONFIG_LIBUKBUS_PLATFORM=y
+# end of Bus drivers
+
+#
+# Interrupt controller
+#
+CONFIG_HAVE_APIC=y
+CONFIG_LIBUKINTCTLR_XPIC=y
+# CONFIG_LIBUKINTCTLR_APIC is not set
+# end of Interrupt controller
+
+#
+# Platform
+#
+
+#
+# Input devices
+#
+CONFIG_HAVE_IBMPC_PS2=y
+CONFIG_LIBUKPS2=y
+CONFIG_LIBUKPS2_KBD=y
+CONFIG_LIBUKPS2_SYSRESET=y
+# end of Input devices
+
+#
+# Random Number Generator
+#
+CONFIG_LIBUKRANDOM_LCPU=y
+# end of Random Number Generator
+
+#
+# Serial console
+#
+CONFIG_HAVE_IBMPC_NS16550=y
+CONFIG_LIBNS16550=y
+CONFIG_LIBNS16550_EARLY_CONSOLE=y
+CONFIG_LIBNS16550_COM_AVAIL=y
+CONFIG_LIBNS16550_COM1=y
+CONFIG_LIBNS16550_COM1_BAUD_115200=y
+# CONFIG_LIBNS16550_COM1_BAUD_57600 is not set
+# CONFIG_LIBNS16550_COM1_BAUD_38400 is not set
+# CONFIG_LIBNS16550_COM1_BAUD_19200 is not set
+# CONFIG_LIBNS16550_COM2 is not set
+# CONFIG_LIBNS16550_COM3 is not set
+# CONFIG_LIBNS16550_COM4 is not set
+CONFIG_LIBNS16550_COM1_EARLY=y
+# end of Serial console
+
+#
+# Virtio
+#
+CONFIG_LIBVIRTIO_BUS=y
+# CONFIG_LIBVIRTIO_CONSOLE is not set
+# CONFIG_LIBVIRTIO_FS is not set
+CONFIG_HAVE_MMIO=y
+CONFIG_LIBVIRTIO_MMIO=y
+CONFIG_VIRTIO_MMIO_MAX_DEV_CMDLINE=4
+CONFIG_VIRTIO_MMIO_LINUX_COMPAT_CMDLINE=y
+CONFIG_LIBVIRTIO_NET=y
+CONFIG_LIBVIRTIO_RING=y
+CONFIG_LIBVIRTIO_VSOCK=y
+# end of Virtio
+
+#
+# Xen
+#
+# CONFIG_LIBXENEMGCONS is not set
+# end of Xen
+
+#
+# Firmware
+#
+# CONFIG_LIBUKACPI is not set
+# CONFIG_LIBUKEFI is not set
+# end of Firmware
+# end of Device Drivers
+
+#
+# Library Configuration
+#
+CONFIG_LIBISRLIB=y
+CONFIG_LIBNOLIBC=y
+CONFIG_LIBNOLIBC_UKDEBUG_ASSERT=y
+# CONFIG_LIBNOLIBC_SYSLOG is not set
+CONFIG_LIBNOLIBC_FD_SETSIZE=64
+# CONFIG_LIBPOSIX_ENVIRON is not set
+# CONFIG_LIBPOSIX_EVENTFD is not set
+CONFIG_LIBPOSIX_FD=y
+CONFIG_LIBPOSIX_FD_HEAPOFD=y
+CONFIG_LIBPOSIX_FDIO=y
+CONFIG_LIBPOSIX_FDTAB=y
+CONFIG_LIBPOSIX_FDTAB_MAXFDS=1024
+CONFIG_LIBPOSIX_FDTAB_LEGACY_SHIM=y
+# CONFIG_LIBPOSIX_FUTEX is not set
+# CONFIG_LIBPOSIX_LIBDL is not set
+# CONFIG_LIBPOSIX_NETLINK is not set
+# CONFIG_LIBPOSIX_PIPE is not set
+CONFIG_LIBPOSIX_POLL=y
+# CONFIG_LIBPOSIX_POLL_YIELD is not set
+# CONFIG_LIBPOSIX_PROCESS is not set
+CONFIG_LIBPOSIX_SOCKET=y
+# CONFIG_LIBPOSIX_SOCKET_PRINT_ERRORS is not set
+# CONFIG_LIBPOSIX_SOCKET_EVENTS is not set
+# CONFIG_LIBPOSIX_SYSINFO is not set
+CONFIG_LIBPOSIX_TIME=y
+# CONFIG_LIBPOSIX_TIMERFD is not set
+# CONFIG_LIBPOSIX_TTY is not set
+# CONFIG_LIBPOSIX_UNIXSOCKET is not set
+# CONFIG_LIBPOSIX_USER is not set
+# CONFIG_LIBPOSIX_VFS is not set
+# CONFIG_LIBPOSIX_VFS_FSTAB is not set
+# CONFIG_LIBSYSCALL_SHIM is not set
+# CONFIG_LIBUBSAN is not set
+# CONFIG_LIBUK9P is not set
+CONFIG_LIBUKALLOC=y
+# CONFIG_LIBUKALLOC_IFMALLOC is not set
+# CONFIG_LIBUKALLOC_IFSTATS is not set
+CONFIG_LIBUKALLOCBBUDDY=y
+# CONFIG_LIBUKALLOCBBUDDY_FREELIST_SANITY is not set
+# CONFIG_LIBUKALLOCPOOL is not set
+# CONFIG_LIBUKALLOCREGION is not set
+CONFIG_LIBUKALLOCSTACK=y
+CONFIG_LIBUKARGPARSE=y
+# CONFIG_LIBUKARGPARSE_TEST is not set
+CONFIG_LIBUKATOMIC=y
+# CONFIG_LIBUKBINFMT is not set
+CONFIG_LIBUKBITOPS=y
+# CONFIG_LIBUKBLKDEV is not set
+CONFIG_LIBUKBOOT=y
+# CONFIG_LIBUKBOOT_BANNER_NONE is not set
+# CONFIG_LIBUKBOOT_BANNER_MINIMAL is not set
+# CONFIG_LIBUKBOOT_BANNER_CLASSIC is not set
+CONFIG_LIBUKBOOT_BANNER_POWEREDBY=y
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_ANSI is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_ANSI2 is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_EA is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_EAANSI is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_EAANSI2 is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_U8 is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_U8ANSI is not set
+# CONFIG_LIBUKBOOT_BANNER_POWEREDBY_U8ANSI2 is not set
+CONFIG_LIBUKBOOT_CMDLINE_MAX_LEN=4096
+CONFIG_LIBUKBOOT_MAXNBARGS=60
+CONFIG_LIBUKBOOT_INITALLOC=y
+CONFIG_LIBUKBOOT_INITBBUDDY=y
+# CONFIG_LIBUKBOOT_INITREGION is not set
+# CONFIG_LIBUKBOOT_INITNOALLOC is not set
+CONFIG_LIBUKBOOT_INITSCHED=y
+CONFIG_LIBUKBOOT_INITSCHEDCOOP=y
+# CONFIG_LIBUKBOOT_INITNOSCHED is not set
+CONFIG_LIBUKBOOT_MAINTHREAD=y
+# CONFIG_LIBUKBOOT_MAINTHREAD_NOHALT is not set
+CONFIG_LIBUKBOOT_SHUTDOWNREQ_HANDLER=y
+CONFIG_LIBUKBOOT_ALLOCSTACK=y
+CONFIG_LIBUKBUS=y
+CONFIG_LIBUKCONSOLE=y
+CONFIG_LIBUKCONSOLE_DEVICES_MAXCOUNT=16
+# CONFIG_LIBUKCONSOLE_TEST is not set
+CONFIG_LIBUKDEBUG=y
+CONFIG_LIBUKDEBUG_ENABLE_ASSERT=y
+CONFIG_LIBUKDEBUG_CRASH_SCREEN=y
+# CONFIG_LIBUKDEBUG_CRASH_PRINT_STACK is not set
+# CONFIG_LIBUKDEBUG_CRASH_PRINT_CALL_TRACE is not set
+# CONFIG_LIBUKDEBUG_TRACEPOINTS is not set
+# CONFIG_LIBUKDEBUG_GDBSTUB is not set
+# CONFIG_LIBUKFALLOC is not set
+# CONFIG_LIBUKFALLOCBUDDY is not set
+CONFIG_LIBUKFILE=y
+CONFIG_LIBUKFILE_CHAINUPDATE=y
+CONFIG_LIBUKFILE_FINALIZERS=y
+# CONFIG_LIBUKFILE_CONSOLE is not set
+# CONFIG_LIBUKFILE_PSEUDO is not set
+# CONFIG_LIBUKFS is not set
+# CONFIG_LIBUKFS_DEVFS is not set
+# CONFIG_LIBUKFS_RAMFS is not set
+# CONFIG_LIBUKFS_VIRTIOFS is not set
+# CONFIG_LIBUKGCOV is not set
+CONFIG_HAVE_INTCTLR=y
+CONFIG_LIBUKINTCTLR=y
+CONFIG_LIBUKINTCTLR_MAX_HANDLERS_PER_IRQ=8
+CONFIG_LIBUKLCPU=y
+CONFIG_LIBUKLIBID=y
+CONFIG_LIBUKLIBID_INFO=y
+
+#
+# Global metadata
+#
+CONFIG_LIBUKLIBID_INFO_UKFULLVERSION=y
+# CONFIG_LIBUKLIBID_INFO_UKCODENAME is not set
+# CONFIG_LIBUKLIBID_INFO_COMPILER is not set
+CONFIG_LIBUKLIBID_INFO_COMPILEDATE=y
+# CONFIG_LIBUKLIBID_INFO_UKCONFIGGZ is not set
+# end of Global metadata
+
+#
+# Per library metadata
+#
+# CONFIG_LIBUKLIBID_INFO_LIB_UKVERSION is not set
+# CONFIG_LIBUKLIBID_INFO_LIB_UKCODENAME is not set
+CONFIG_LIBUKLIBID_INFO_LIB_COMPILER=y
+# CONFIG_LIBUKLIBID_INFO_LIB_COMPILEDATE is not set
+# end of Per library metadata
+
+# CONFIG_LIBUKLIBID_INFO_COMPILEDBY is not set
+# CONFIG_LIBUKLIBID_INFO_BOOTDUMP is not set
+CONFIG_LIBUKLIBPARAM=y
+CONFIG_LIBUKLOCK=y
+CONFIG_LIBUKLOCK_SEMAPHORE=y
+CONFIG_LIBUKLOCK_MUTEX=y
+CONFIG_LIBUKLOCK_MUTEX_ATOMIC=y
+# CONFIG_LIBUKLOCK_MUTEX_METRICS is not set
+CONFIG_LIBUKLOCK_RWLOCK=y
+# CONFIG_LIBUKMMAP is not set
+CONFIG_LIBUKMPI=y
+CONFIG_LIBUKMPI_MBOX=y
+CONFIG_LIBUKNETDEV=y
+CONFIG_LIBUKNETDEV_MAXNBQUEUES=1
+CONFIG_LIBUKNETDEV_DISPATCHERTHREADS=y
+CONFIG_LIBUKNETDEV_EINFO_LIBPARAM=y
+CONFIG_LIBUKNETDEV_EINFO_LIBPARAM_MAXCOUNT=4
+# CONFIG_LIBUKNETDEV_STATS is not set
+# CONFIG_LIBUKNOFAULT is not set
+# CONFIG_LIBUKPAGING is not set
+CONFIG_LIBUKPAL=y
+CONFIG_LIBUKPCPUVAR=y
+CONFIG_LIBUKPM=y
+# CONFIG_LIBUKPOD is not set
+CONFIG_LIBUKPRINT=y
+CONFIG_LIBUKPRINT_PRINTK=y
+# CONFIG_LIBUKPRINT_NOCARRIAGERETURN is not set
+CONFIG_LIBUKPRINT_PRINT_TIME=y
+# CONFIG_LIBUKPRINT_PRINT_THREAD is not set
+# CONFIG_LIBUKPRINT_PRINT_CALLER is not set
+CONFIG_LIBUKPRINT_PRINT_SRCNAME=y
+# CONFIG_LIBUKPRINT_ANSI_COLOR is not set
+# CONFIG_LIBUKPRINT_PRINTK_UKSTORE is not set
+# CONFIG_LIBUKPRINT_KLVL_DEBUG is not set
+CONFIG_LIBUKPRINT_KLVL_INFO=y
+# CONFIG_LIBUKPRINT_KLVL_WARN is not set
+# CONFIG_LIBUKPRINT_KLVL_ERR is not set
+# CONFIG_LIBUKPRINT_KLVL_CRIT is not set
+# CONFIG_LIBUKPRINT_LOGBUF is not set
+CONFIG_LIBUKRANDOM=y
+# CONFIG_LIBUKRANDOM_CMDLINE_SEED is not set
+CONFIG_LIBUKRANDOM_RESEED=y
+CONFIG_LIBUKRANDOM_RESEED_INTERVAL=300
+# CONFIG_LIBUKRANDOM_TEST is not set
+# CONFIG_LIBUKRING is not set
+# CONFIG_LIBUKRUST is not set
+CONFIG_LIBUKSCHED=y
+# CONFIG_LIBUKSCHED_DEBUG is not set
+CONFIG_LIBUKSCHEDCOOP=y
+CONFIG_LIBUKSGLIST=y
+# CONFIG_LIBUKSP is not set
+# CONFIG_LIBUKSPARSEBUF is not set
+# CONFIG_LIBUKSTORE is not set
+# CONFIG_LIBUKSTREAMBUF is not set
+# CONFIG_LIBUKTEST is not set
+CONFIG_LIBUKTIMECONV=y
+# CONFIG_LIBUKVMEM is not set
+CONFIG_LIBUKVSOCKDEV=y
+CONFIG_LIBUKVSOCKDEV_VSOCK_BUF_SIZE=65536
+CONFIG_LIBUKVSOCKDEV_VSOCK_BUF_MAX_SIZE=65536
+CONFIG_LIBUKVSOCKDEV_DISPATCHERTHREADS=y
+# CONFIG_LIBVFSCORE is not set
+CONFIG_HAVE_BOOTENTRY=y
+CONFIG_HAVE_TIME=y
+CONFIG_HAVE_SCHED=y
+CONFIG_HAVE_NW_STACK=y
+CONFIG_LIBLWIP=y
+# CONFIG_LWIP_RELEASE212 is not set
+# CONFIG_LWIP_LATEST21X is not set
+CONFIG_LWIP_UNIKRAFT21X=y
+
+#
+# Netif drivers
+#
+# CONFIG_LWIP_LOOPIF is not set
+CONFIG_LWIP_UKNETDEV=y
+# CONFIG_LWIP_UKNETDEV_POLLONLY is not set
+CONFIG_LWIP_UKNETDEV_SCRATCH=64
+# end of Netif drivers
+
+CONFIG_LWIP_AUTOIFACE=y
+# CONFIG_LWIP_FAILNOIFACE is not set
+# CONFIG_LWIP_NOTHREADS is not set
+CONFIG_LWIP_THREADS=y
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_32 is not set
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_64 is not set
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_128 is not set
+CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_256=y
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_512 is not set
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_1024 is not set
+# CONFIG_LWIP_STACKTHREAD_MBOX_SIZE_2048 is not set
+CONFIG_LWIP_STACKTHREAD_MBOX_SIZE=256
+CONFIG_LWIP_HEAP=y
+# CONFIG_LWIP_POOLS is not set
+CONFIG_LWIP_NETIF_EXT_STATUS_CALLBACK=y
+CONFIG_LWIP_NETIF_STATUS_PRINT=y
+CONFIG_LWIP_RCVBUF=y
+CONFIG_LWIP_LINGER=y
+CONFIG_LWIP_LOOPBACK=y
+CONFIG_LWIP_IPV4=y
+# CONFIG_LWIP_IPV6 is not set
+
+#
+# IP Configuration
+#
+CONFIG_LWIP_IP_REASS_MAX_PBUFS=10
+# end of IP Configuration
+
+CONFIG_LWIP_UDP=y
+# CONFIG_LWIP_RAW is not set
+CONFIG_LWIP_TCP=y
+CONFIG_LWIP_TCP_MSS=1460
+CONFIG_LWIP_WND_SCALE=y
+# CONFIG_LWIP_TCP_KEEPALIVE is not set
+# CONFIG_LWIP_TCP_TIMESTAMPS is not set
+CONFIG_LWIP_NUM_TCPCON=64
+CONFIG_LWIP_NUM_TCPLISTENERS=64
+CONFIG_LWIP_ICMP=y
+# CONFIG_LWIP_IGMP is not set
+# CONFIG_LWIP_SNMP is not set
+# CONFIG_LWIP_DHCP is not set
+CONFIG_LWIP_DNS=y
+CONFIG_LWIP_DNS_MAX_SERVERS=2
+CONFIG_LWIP_DNS_TABLE_SIZE=32
+CONFIG_LWIP_SOCKET=y
+CONFIG_LWIP_UDP_RECVMBOX_FACTOR=2
+CONFIG_LWIP_TCP_RECVMBOX_FACTOR=2
+# CONFIG_LWIP_DEBUG is not set
+CONFIG_LIBMTLSGUARD=y
+# end of Library Configuration
+
+#
+# Application Options
+#
+
+#
+# Build Options
+#
+# CONFIG_OPTIMIZE_NONE is not set
+CONFIG_OPTIMIZE_PERF=y
+# CONFIG_OPTIMIZE_SIZE is not set
+
+#
+# Hint: Specify a CPU type to get most benefits from performance optimization
+#
+CONFIG_OPTIMIZE_NOOMITFP=y
+# CONFIG_OPTIMIZE_DEADELIM is not set
+# CONFIG_OPTIMIZE_LTO is not set
+# CONFIG_OPTIMIZE_PIE is not set
+# CONFIG_DEBUG_SYMBOLS_LVL0 is not set
+# CONFIG_DEBUG_SYMBOLS_LVL1 is not set
+# CONFIG_DEBUG_SYMBOLS_LVL2 is not set
+CONFIG_DEBUG_SYMBOLS_LVL3=y
+# CONFIG_ELF_PHDRS_IN_PT_LOAD is not set
+# CONFIG_OPTIMIZE_WARNISERROR is not set
+# CONFIG_OPTIMIZE_SYMFILE is not set
+# CONFIG_OPTIMIZE_COMPRESS is not set
+# CONFIG_RECORD_BUILDTIME is not set
+CONFIG_CROSS_COMPILE=""
+CONFIG_LLVM_TARGET_ARCH=""
+# end of Build Options
+
+CONFIG_UK_NAME="igkme"
+----- END .config -----
+
+##### [build-guest] build: make -j16  (10:17:06)
+compiler warnings: 1
+~/igkm-spike-a/unikraft/unikraft-igkme/lib/uksched/include/uk/sched.h:257:41: warning: passing argument 2 of ‘uk_sched_thread_create_fn1’ makes ‘__attribute__((noreturn))’ qualified function pointer from unqualified [-Wdiscarded-qualifiers]
+  LD      libukplat_native.ld.o
+  OBJCOPY libukplat_native.o
+  LD      igkme_fc-x86_64.dbg
+  UKPCPUVAR igkme_fc-x86_64.dbg.uk_pcpuvar.bin
+  SCSTRIP igkme_fc-x86_64
+  UKBI    igkme_fc-x86_64.bootinfo
+  COMPDB  compile_commands.json
+make: Leaving directory '<metal-home>/igkm-spike-a/unikraft/unikraft-igkme'
+
+##### [build-guest] image identity  (10:17:11)
+9f485f5d3fe5607d2912248f98a5c6b7f8722418f2c09fc55747b65106413cc8  <metal-home>/igkm-spike-a/unikraft/out-igkme/igkme_fc-x86_64
+339f18491f7093387f920da5d53bc3c7e3525e867e04034e7c044682343d1f79  <metal-home>/igkm-spike-a/unikraft/out-igkme/igkme_fc-x86_64.dbg
+total 5140
+-rwxr-xr-x 1 ubuntu ubuntu  685792 Sep 29 10:17 igkme_fc-x86_64
+-rwxr-xr-x 1 ubuntu ubuntu 4573080 Sep 29 10:17 igkme_fc-x86_64.dbg
+  Class:                             ELF64
+  Type:                              EXEC (Executable file)
+  Entry point address:               0x18577a
+--- uk_socket_connect_hook: definitions (must be ONE strong 'T', from lib-mtlsguard; a local 't' means a weak default was localized)
+0000000000171f60 T uk_socket_connect_hook
+--- uk_socket_accept_hook: definitions (must be ONE strong 'T', from lib-mtlsguard; a local 't' means a weak default was localized)
+00000000001724b0 T uk_socket_accept_hook
+--- lwip_posix_socket_events_hook: definitions (must be ONE strong 'T', from lib-mtlsguard; a local 't' means a weak default was localized)
+0000000000171e10 T lwip_posix_socket_events_hook
+--- call sites must target the strong definitions
+  __uk_syscall_r_connect -> uk_socket_connect_hook (strong at 0x0000000000171f60):
+  12f511:	call   171f60 <uk_socket_connect_hook>
+  uk_sys_accept -> uk_socket_accept_hook (strong at 0x00000000001724b0):
+  129ed4:	call   1724b0 <uk_socket_accept_hook>
+  lwip_posix_socket_event_callback -> lwip_posix_socket_events_hook (strong at 0x0000000000171e10):
+  151863:	call   171e10 <lwip_posix_socket_events_hook>
+  lwip_posix_socket_poll_setup -> lwip_posix_socket_events_hook (strong at 0x0000000000171e10):
+  151743:	call   171e10 <lwip_posix_socket_events_hook>
+--- guard + Mbed TLS symbols present
+0000000000174120 T mbedtls_aesni_has_support
+00000000001755d0 T mbedtls_gcm_auth_decrypt
+0000000000175540 T mbedtls_gcm_crypt_and_tag
+0000000000178150 T mbedtls_hkdf_expand
+0000000000177530 T mbedtls_sha256_self_test
+00000000001392d0 T uk_pollq_assign_n
+--- object sizes
+   text	   data	    bss	    dec	    hex	filename
+  61830	      4	   8872	  70706	  11432	<metal-home>/igkm-spike-a/unikraft/build-igkme/libmtlsguard.o
+ 132493	    224	  13728	 146445	  23c0d	<metal-home>/igkm-spike-a/unikraft/build-igkme/liblwip.o
+
+##### [build-guest] done  (10:17:11)
+IMAGE=<metal-home>/igkm-spike-a/unikraft/out-igkme/igkme_fc-x86_64

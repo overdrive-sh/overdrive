@@ -1,0 +1,10 @@
+run_id=0006
+label=boot-stretch-fc1.17.0
+started_utc=2026-09-29T10:22:30Z
+ended_utc=2026-09-29T10:22:47Z
+exit_code=0
+local_commit=07c3089733cd1d18813c3e48650dba886a019ed6
+command=OVERDRIVE_METAL_KERNEL=<metal-home>/igkm-spike-a/unikraft/out-igkme/igkme_fc-x86_64 OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- bash spike-scratch/in-guest-kernel-mtls/increment-e/run-boot-fc.sh stretch
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=6ab8e8c6405eb5fc89fa5f94be6ed5dbcc99dd55bae508961fbc1ca6108c9db8
+stderr_sha256=c8a800cb5c60484862a60f2cf4f2e77d17a4463d1c66e46cc810a2f3e3a7eaf3
