@@ -624,7 +624,7 @@ rejection:
 | D-295-R11 | A row-neutral `ReclaimAllocationNetwork` action retries cleanup of every leased Failed/Terminated allocation no other action owns, computed on every reconcile path. **Retry-forever user-approved 2026-09-24 (ruling 7)**, at a constant one-second cadence until GH #137. | `WorkloadLifecycle` and the action shim | ADR-0136 | 5 |
 | D-295-R12 | The intercept owner converges dynamic members to empty in the fresh-process boot branch. | Worker and `MtlsIntercept` | ADR-0137 | 6 |
 | D-295-R13 | A recovery attempt is the converge of every failing component's owner, one full audit, and then, only if that audit is clean, the restore of quiesced TAPs (ADR-0124 over the S19 journal). | Control-plane supervisor and the shared guest-network owner | — (ADR-0124) | 2 |
-| D-295-R14 | A complete component matrix: component-specific quiescence, bounded owner calls, and DNS loss closes EXEC. **Kill scope user-approved 2026-09-24 (rulings 2 and 8):** a VM whose TAP could not be confirmed down, or whose own attachment parts are damaged, is killed alone, its parts leave the audit and restore universes, and repair continues; the whole workloads slice is killed and the process fail-stops only when the failing set cannot be determined or a per-VM kill cannot be written. The supervisor holds a kill-only capability. | Control-plane supervisor | — (ADR-0124) | 2 |
+| D-295-R14 | A complete component matrix: component-specific quiescence, bounded owner calls, and DNS loss closes EXEC. **Kill scope user-approved 2026-09-24 (rulings 2 and 8):** a VM whose TAP could not be confirmed down, or whose own attachment parts are damaged, is killed alone, its parts leave the audit and restore universes, and repair continues; the whole workloads slice is killed and the process fail-stops only when the failing set cannot be determined or a per-VM kill cannot be written within its bound. The supervisor holds a kill-only capability. **Kill loop, user decision 1 of 2026-09-30:** a report's kills run to their end before any further owner call or fail-stop, each write bounded. | Control-plane supervisor | — (ADR-0124) | 2 |
 | D-295-R15 | The worker audits the constant program, the policy route, the guard table, and the dynamic members against its registry, and repairs them through the same port; `converge_shared` observes the program identity without regard to dynamic members, and the worker relinquishes, never drops, the prior node guard. | Worker and `MtlsIntercept` | — (ADR-0124/0125) | 3 |
 | D-295-R16 | `ServerConfig` requires intercept and guest-DNS ports; the mTLS worker, DNS owner, and supervisor are always composed. | Serve composition | ADR-0138 | 2 |
 | D-295-R17 | The serve lifetime port is pinned as built (user-approved). | CLI | — (ruling) | 4 |
@@ -1439,8 +1439,14 @@ Both are plain `pub`, like their siblings `disable_tx_offload` and
 control plane consumes.
 
 - **Transport.** The existing hand-rolled `GenlSock` in `ethtool.rs`, whose
-  `recv` is blocking. Both functions therefore run their socket exchange on
-  `tokio::task::spawn_blocking`, so a read never blocks a runtime worker. The
+  `recv` is blocking. Both functions therefore run their socket exchange on a
+  thread created with `std::thread::Builder::spawn` and await its result, so a
+  read never blocks a runtime worker and a dropped caller leaves the thread to
+  finish alone. The socket carries a receive timeout, chosen by the crafter and
+  at most 1 s per read, so an abandoned thread ends. `spawn_blocking` is not
+  used: it panics when the OS refuses a thread and the blocking pool has no
+  idle one (user decision 2 of 2026-09-30, § *Runtime shared-network
+  supervisor*, *No panic on any owner, kill, or supervisor path*). The
   `ethtool` crate (0.2.9) has no debug-message handle.
 - **Cost shape.** The audit makes one dump exchange per pass, whatever the
   allocation count, rather than one socket, family resolution, and request per
@@ -1460,11 +1466,13 @@ control plane consumes.
   - `"debug-get-socket"`;
   - `"resolve-family"`;
   - `"debug-get"`, for a kernel NACK, whose errno (for example `ENODEV`) is
-    preserved;
+    preserved, or a receive timeout on the single-interface read;
   - `"debug-get-decode"`, for a reply without the mask (and, in the dump, a
     reply without a device index);
-  - `"debug-dump"`, for a dump NACK or a multipart read failure;
-  - `"debug-blocking-join"`, for a `spawn_blocking` join failure.
+  - `"debug-dump"`, for a dump NACK or a multipart read failure, a receive
+    timeout included;
+  - `"debug-thread"`, for a thread the OS refused (the spawn's `io::Error`) or
+    one that ended without a result.
 
   Every error keeps its original source (rust.md § Errors): no read failure is
   absorbed into a default mask.
@@ -1791,9 +1799,11 @@ E12 (h) observes each step.
     back up, absent, or incompatible (`PostconditionMismatch`), and a set-down
     or read-back that could not obtain a netlink session. The last is
     `NetlinkError::Connect`, which the tree returns when a netlink socket cannot
-    be opened (`overdrive-netlink/src/error.rs:35-42`), and also when the host
-    netlink bridge cannot build its runtime or its worker thread panics
-    (`overdrive-netlink/src/runtime.rs:35-38`, `:61-63`). Its entry is
+    be opened (`overdrive-netlink/src/error.rs:35-42`) or the host netlink
+    bridge cannot build its runtime (`overdrive-netlink/src/runtime.rs:35-38`),
+    and which, under user decision 2 of 2026-09-30, it also returns when the
+    OS refuses the thread a call needs (§ *Runtime shared-network supervisor*,
+    *No panic on any owner, kill, or supervisor path*). Its entry is
     `Netlink { operation: TapSetDown, source }`, with `source` the `Connect`
     error. The host therefore returns no `Err`, and production reaches the
     undetermined branch only through a call that misses its bound, the case
@@ -1802,11 +1812,12 @@ E12 (h) observes each step.
   - *Why (DR-08 (b)-A).* Ruling 2 kills only the VMs whose TAP could not be
     confirmed down, and a TAP whose confirmation could not run is one of them.
     Ending the pass at a `Connect` would instead turn one TAP's failed session
-    (for example, a worker-thread panic on its reply) into a workloads-slice
-    kill and a fail-stop. A netlink failure common to every TAP makes every
-    `Active` TAP unconfirmed, and the supervisor kills each of those VMs, with
-    `VmKillFailed` taking over if a kill write fails (kill-scope table,
-    § *Runtime shared-network supervisor*).
+    (for example, a thread the OS refused for that TAP's call) into a
+    workloads-slice kill and a fail-stop. A netlink failure common to every
+    TAP makes every `Active` TAP unconfirmed, and the supervisor kills each of
+    those VMs in one kill loop, with `VmKillFailed` taking over if a kill write
+    fails or misses its bound (kill-scope table and *Kill loop*, § *Runtime
+    shared-network supervisor*).
   - Which D12A leaf surfaces a failure is internal structure.
 - **The bound applies to every adapter** (pinned 2026-09-30 on evidence). The
   call makes no synchronous blocking wait on the task that awaits it, and it
@@ -1816,7 +1827,15 @@ E12 (h) observes each step.
   and a call that blocks inside `poll` would stall the supervisor's race
   against `clock.sleep` instead of missing its bound (§ *Runtime shared-network
   supervisor*, *Quiescence*). This makes the accepted race realizable and
-  changes no outcome.
+  changes no outcome. The realization also creates no thread through a
+  primitive that panics when the OS refuses one (user decision 2 of
+  2026-09-30): `tokio::task::spawn_blocking`, and `tokio::fs`, which is built
+  on it, panic when the blocking pool has no thread to reuse and the OS refuses
+  a new one (tokio 1.52.1, `runtime/blocking/pool.rs:324-325`, `:428-438`), so
+  moving the staged `block_on_host_netlink` call onto the blocking pool is not
+  a realization. The D12A leaves, which run on the ambient runtime and create
+  no thread, are one that is (`guest_network.rs:1975-2032`). A refused thread
+  is that TAP's `Connect` entry, as above.
 - **Repeat call while latched** (the owner half of the re-quiescence after a
   part-way restore, user-approved 2026-09-30; § *Runtime shared-network
   supervisor*, *Quiescence*). Activation defers while latched, so no
@@ -1865,8 +1884,9 @@ H1).** An allocation reaches `Condemned` only when the owner reports it, in
 the supervisor is the only caller of either operation, and it is one task (a
 boot-time call sees no allocation, so it can report none). Between
 receiving a report and its next owner call, it writes the kill for every
-reported allocation. If any kill write fails, it makes no further owner call and
-fail-stops (R14). The exclusion is therefore observed only by calls made after
+reported allocation. If any kill write fails or misses its bound, it makes no
+further owner call and fail-stops (R14; § *Runtime shared-network supervisor*,
+*Kill loop*). The exclusion is therefore observed only by calls made after
 every reported kill has succeeded. A seeded test asserts this ordering on the
 owner call journal. A quiescence pass cancelled at its bound can leave an
 allocation `Condemned` that no report named; the supervisor's answer to the
@@ -3385,6 +3405,73 @@ The worker passes only two kinds of target:
 - `delete_shared_ip_intercept_elements_atomically` keeps its signature and
   gains convergent semantics: it deletes the present subset and reports members
   that were already absent.
+
+**Evidence for the two element-batch failure rules (DISTILL gap H14; user
+decision 3 of 2026-09-30).** The two DESIGN-02-03 rules above — a batch the
+kernel rejects leaves every member unchanged; a failed or mismatched
+post-commit read-back restores the prior state and keeps both causes — have
+no deterministic real-kernel stimulus. Each needs a concurrent writer inside
+the microseconds between the pre-observation and the batch, or between the
+commit and the read-back. Their evidence is split between the kernel's
+guarantee and a source-local lane:
+
+- **The kernel's part: a rejected batch commits nothing.**
+  `nfnetlink_rcv_batch` marks the whole batch failed when any message in it
+  fails, and then calls the subsystem's `abort` instead of `commit`; it
+  commits only a batch with no failure, and a failed commit aborts too
+  (`net/netfilter/nfnetlink.c:553-558`, `:566-601`). nf_tables' abort undoes
+  every queued element transaction, `NEWSETELEM` and `DELSETELEM` included
+  (`net/netfilter/nf_tables_api.c`, `__nf_tables_abort`, `:11388-11416`).
+  Lines are from the local v7.2 tree; the 07-01 review confirms the same
+  functions in the pinned 6.18 source. On a failed batch the kernel still
+  acknowledges its other `NLM_F_ACK` messages with 0 (`nfnetlink.c:536-559`),
+  so a zero acknowledgement is not a per-message commit, and the adapter treats
+  any error acknowledgement as the rejection of the whole batch
+  (`collect_atomic_rule_acks`). A send or acknowledgement-read failure is not a
+  rejection: that batch may have committed. The first rule does not describe
+  it; the adapter returns its typed error, and convergence resolves whatever
+  committed (R10's removal is convergent on retry, and the R15 member audit
+  finds an unexpected member).
+- **The adapter's part: the handling of both outcomes.** No existing seam
+  reaches it. `mutate_and_readback` calls the socket functions directly
+  (`overdrive-netlink/src/nft.rs:4234-4280`), and the worker's seams
+  (`SharedInterceptProgramIo`, program observe and replace only;
+  `SimMtlsIntercept`) sit above the netlink call, so they reach the worker's
+  handling of the returned `Err`, not the adapter's restore. One
+  module-private seam, in the pattern of D-295-DISTILL-2's
+  `SharedInterceptProgramIo`, makes it reachable:
+
+  ```rust
+  // overdrive-netlink::nft, inside the private `shared_ip` module.
+  // Module-private: no `pub`, no `pub(crate)`, no re-export.
+  trait SharedIpElementIo {
+      /// Send one element batch and read its acknowledgements. `Err` is an
+      /// error acknowledgement or a send/receive failure.
+      fn send_element_transaction(&self, mutations: &[ElementMutation])
+          -> Result<(), NetlinkError>;
+      /// One generation-bracketed observation of the owned program and members.
+      fn collect_state(&self) -> Result<Option<SharedIpInterceptState>, NetlinkError>;
+  }
+
+  /// The real implementation: today's two functions over `NfSock`.
+  struct NfSharedIpElementIo;
+
+  fn mutate_and_readback(
+      io: &dyn SharedIpElementIo,
+      expected: &SharedIpInterceptIdentity,
+      before: SharedIpInterceptState,
+      mutations: &[ElementMutation],
+      expected_after: &SharedIpInterceptState,
+  ) -> Result<SharedIpInterceptState, NetlinkError>;
+  ```
+
+  Every public element function keeps its signature and passes
+  `&NfSharedIpElementIo`. The seam adds no public surface; its test double is
+  DISTILL's, source-local in `nft.rs`, in the default lane. The pre-observation
+  and set-id reads stay outside the seam: R10's present-subset removal keeps
+  its Lima real-nft evidence.
+- **The worker's part** is unchanged: its handling of both failures is
+  S-ND295-07B, through a test-local `MtlsIntercept` double.
 
 **Worker.**
 
@@ -5250,19 +5337,19 @@ The no-worker branch (`lib.rs:4445-4447`) is deleted, because the worker is
 always composed (R16). The private constants are
 `SHARED_NETWORK_AUDIT_PERIOD = 1 s`, `SHARED_NETWORK_RETRY_PERIOD = 250 ms`,
 `SHARED_NETWORK_RECOVERY_DEADLINE = 5 s`,
-`SHARED_NETWORK_RECOVERY_ATTEMPTS = 20`, `SHARED_NETWORK_AUDIT_CALL_BOUND`, and
-`SHARED_NETWORK_QUIESCE_CALL_BOUND`; the last two take their values from E18 as
-described under *Full audit* and *Quiescence*. All are measured on the injected
-clock.
+`SHARED_NETWORK_RECOVERY_ATTEMPTS = 20`, `SHARED_NETWORK_AUDIT_CALL_BOUND`,
+`SHARED_NETWORK_QUIESCE_CALL_BOUND`, and `SHARED_NETWORK_VM_KILL_CALL_BOUND`;
+the last three take their values from E18 as described under *Full audit*,
+*Quiescence*, and *Kill loop*. All are measured on the injected clock.
 
-- **Home and visibility.** All six are private `const` items (no `pub`, no
+- **Home and visibility.** All seven are private `const` items (no `pub`, no
   re-export) of the module that defines `SharedNetworkSupervisorHandle`, the
-  `overdrive-control-plane` crate root (`src/lib.rs`). The five durations are
+  `overdrive-control-plane` crate root (`src/lib.rs`). The six durations are
   `std::time::Duration`; `SHARED_NETWORK_RECOVERY_ATTEMPTS` is `u32`.
   Source-local tests reach them by name through `super::`, never by literal.
 - **How the in-process lane bounds time without naming them.** The in-process
   `tests/` lane cannot name a private constant, and no constant is widened for
-  it. That lane never depends on either E18-derived call bound:
+  it. That lane never depends on any E18-derived call bound:
   - It advances the injected clock (`ServerConfig.clock`) in steps and polls
     its non-blocking observations (`claim_release`, `recovery_progress`,
     `shutdown_requested`) after each step. A case fails if detection has not
@@ -5275,7 +5362,11 @@ clock.
     keeps L at or below 1 s (a longer full audit at T1-PORT4 is surfaced to the
     user), so that bound is at most 4 s. Every owner call made during recovery,
     the quiescence call included, is capped by the remaining recovery
-    deadline.
+    deadline. A kill write is not an owner call: it is capped by its own bound,
+    and a report's kill loop runs to its end even past the deadline (*Kill
+    loop*). The lane's `SimCgroupFs` writes complete without advancing the
+    injected clock, so a loop adds no injected time and the 5 s horizon
+    holds.
   - The cadence values the lane asserts are the 1 s audit period, the 250 ms
     attempt period, the 5 s recovery deadline, and 20 attempts. These are
     ADR-0124's accepted contract, which E18 does not set, and the lane's oracle
@@ -5299,14 +5390,17 @@ clock.
   - `SHARED_NETWORK_QUIESCE_CALL_BOUND`'s rustdoc holds its rule, the
     `quiesce_managed_taps` and `restore_quiesced_taps` wall-time maxima, and the
     time the last TAP read back down, at both populations.
+  - `SHARED_NETWORK_VM_KILL_CALL_BOUND`'s rustdoc holds its rule, the per-VM
+    and workloads-slice kill-write maxima, and the kill-loop time K at
+    T1-PORT4 (*Kill loop*).
   - The rustdoc of the worker's `element_effects` field holds the member-audit
     hold time that decides R15's mutex choice.
 
   Each also names the receipt id M-ND295-E18, the host, `uname -r`, the Cloud
   Hypervisor version, and the SHA of the measured source. It names no
   `docs/feature/**` path, because finalize archives that tree. No other
-  artifact records the values the code uses: the two bounds, the measured
-  maxima their rules consume, and the hold time.
+  artifact records the values the code uses: the three bounds, the measured
+  maxima their rules consume, K, and the hold time.
 - **The benchmark report is permitted, as evidence, not as a record (pinned
   2026-09-29 on evidence, DISTILL review DR-19).** M-ND295-E18 is a benchmark
   under `testing.md` § "Classify external execution before writing it", whose
@@ -5383,9 +5477,10 @@ never read, and per-TAP problems are reported as Bridge.
    the damaged parts. For each damaged allocation, in `AllocationId` order, the
    supervisor calls `vm_kill.kill_allocation(alloc)` and emits
    `guest_network.shared_owner_vm_killed { alloc, cause: "attachment_damaged",
-   error }`. A kill write that fails other than with an absent scope is
-   handled as in the kill-scope table below. No owner call happens between the
-   audit and these kills.
+   error }`. A kill write that fails other than with an absent scope, or
+   misses its bound, is handled as in the kill-scope table below. No owner call
+   happens between the audit and these kills, which run as one kill loop
+   (*Kill loop*).
 
 **Quiescence** is component-specific:
 
@@ -5417,9 +5512,9 @@ owner's reports decide what is killed:
 | `Ok(TapQuiescence { unconfirmed })`, `unconfirmed` empty | none | continues |
 | `Ok(TapQuiescence { unconfirmed })`, `unconfirmed` non-empty (a set-down or read-back failed, a deleted TAP and a netlink session failure included; DR-08 (b)-A) | For each allocation in `unconfirmed`, in `AllocationId` order: `vm_kill.kill_allocation(alloc)`, then emit `guest_network.shared_owner_vm_killed { alloc, cause: "quiescence_unconfirmed", error }`. | continues for every other allocation, within the same window |
 | `Ok(SharedGuestNetworkAudit { damaged })`, `damaged` non-empty, while Open or during an attempt | For each allocation in `damaged`: `vm_kill.kill_allocation(alloc)`, then emit the same event with `cause: "attachment_damaged"`. | while Open: stays Open; during recovery: the attempt continues to step 3 |
-| a per-VM kill write returns `Ok`, including an absent scope | counted as confirmed; the allocation is `Condemned` and outside every later audit and restore universe | as above |
-| a per-VM kill write fails other than `NotFound` | `vm_kill.kill_workloads_slice()`; then `exec.fail_stop(VmKillFailed)` and send the request. From Open the request carries the existing no-recovery values (component `Supervisor`, zero attempts, zero elapsed); the cause identifies it. | ends |
-| quiescence `Err(_)`, or the call missed its bound (the failing set is undetermined) | `vm_kill.kill_workloads_slice()`; then `exec.fail_stop(TapQuiescenceUndetermined)` and send the request. | ends |
+| a per-VM kill write returns `Ok` within its bound, including an absent scope | counted as confirmed; the allocation is `Condemned` and outside every later audit and restore universe | as above |
+| a per-VM kill write fails other than `NotFound`, or misses `SHARED_NETWORK_VM_KILL_CALL_BOUND` | `vm_kill.kill_workloads_slice()`, itself bounded by `SHARED_NETWORK_VM_KILL_CALL_BOUND`; then `exec.fail_stop(VmKillFailed)` and send the request. From Open the request carries the existing no-recovery values (component `Supervisor`, zero attempts, zero elapsed); the cause identifies it. | ends |
+| quiescence `Err(_)`, or the call missed its bound (the failing set is undetermined) | `vm_kill.kill_workloads_slice()`, bounded as above; then `exec.fail_stop(TapQuiescenceUndetermined)` and send the request. | ends |
 
 A killed VM can no longer emit frames: its queue closes at process exit, and
 the kernel drops carrier. Its allocation then follows the normal crash path
@@ -5432,13 +5527,58 @@ reopen. If the killed allocation was still `ProvisionedDown`, because its guest
 had not reached READY, its start fails through the existing VMM-exit start
 rejection and start-failure teardown. If it had reached READY and its dispatch
 is waiting to activate, `activate` refuses the `Condemned` allocation and the
-activation failure projection cleans it up. The kill outcome of a slice kill is
-recorded as `vm_kill` in `guest_network.shared_owner_fail_stop` and never delays
-the fail-stop; the next boot's VMM reclamation is the backstop. Scoping
+activation failure projection cleans it up. The kill outcome of a slice kill
+(`Ok`, the write's error, or its missed bound) is recorded as `vm_kill` in
+`guest_network.shared_owner_fail_stop`. A failed slice kill, or one that misses
+its bound, never prevents the fail-stop, and delays it by at most the slice
+write's bound; the
+next boot's VMM reclamation is the backstop. Scoping
 remediation to the affected workloads is Istio's repair-controller posture; no
 surveyed system kills every node workload locally (research F8.2). That is why
 the whole-slice kill is kept only for the cases where the affected set cannot be
 determined, or a VM known to be affected cannot be killed.
+
+**Kill loop (user decision 1 of 2026-09-30, option (a)).** The per-VM kills
+that answer one owner report — `TapQuiescence::unconfirmed` or
+`SharedGuestNetworkAudit::damaged` — are one kill loop:
+
+- **Order and completion.** The loop writes each reported allocation's kill in
+  `AllocationId` order, then emits its `shared_owner_vm_killed` event. It runs
+  to its end before the supervisor makes any further owner call and before any
+  fail-stop: either every reported allocation's kill write returned `Ok`
+  within its bound, or one failed or missed its bound and the loop ended in the
+  workloads-slice kill, which kills every remaining VM.
+  `RecoveryDeadlineExceeded` never cuts a loop short: the deadline check runs
+  after the loop, so the request can follow the 5 s deadline by the rest of the
+  loop in progress. The per-VM kill is what stops a VM that may still forward
+  frames; a fail-stop that interrupted the loop would leave that VM running
+  through the drain and the CLI's ten-second bound. Intentional shutdown
+  (SIGINT or SIGTERM) likewise cancels the supervisor only between loops: a
+  loop in progress runs to its end, each write bounded, before the supervisor
+  observes cancellation. If the process ends before the loop does, the next
+  boot's VMM reclamation is the backstop, as for a slice kill.
+- **The bound.** Every kill write, per-VM and slice, races
+  `clock.sleep(SHARED_NETWORK_VM_KILL_CALL_BOUND)` on the injected clock. The
+  bound caps one write, not the loop, and the recovery deadline does not cap
+  it. A write still pending at its bound counts as a failed kill: per-VM, the
+  slice kill and then `VmKillFailed`; slice, its recorded `vm_kill` outcome
+  and then the fail-stop. A write that lands after its bound was missed changes
+  no outcome: its VM was being killed, and the slice kill that follows kills it
+  anyway. For the race to be realizable the write makes no synchronous blocking
+  wait on the task that awaits it and tolerates being dropped at any await
+  (*Bounded calls* below).
+- **The bound's value.** `SHARED_NETWORK_VM_KILL_CALL_BOUND` is
+  `max(1 s, 4 × W)`, where W is the largest single kill write, per-VM or slice,
+  that E18 observes at T1-PORT4; it holds the 1 s floor until E18 sets it, and
+  is recorded as the constants above state. There is no measured W yet: the
+  kernel serializes every `cgroup.kill` write on the global `cgroup_mutex`
+  (`cgroup_kill_write` → `cgroup_kn_lock_live`, then `cgroup_kill` signals each
+  process in every live descendant; `kernel/cgroup/cgroup.c`, local 7.2 tree
+  `:1697-1719`, `:4281-4344`), so a write can wait on any other cgroup
+  operation on the host, and only a measurement bounds it.
+- **Evidence.** The seeded E12 cells prove the order, the no-owner-call
+  window, the bound miss, and the loop running past the deadline (§
+  *Evidence-lane matrix*, E12 (c2) and (i)). E18 measures W and K.
 
 **A common-cause loss classified per allocation kills every VM with EXEC left
 Open (review finding L7).** The per-allocation classification has a sharp
@@ -5457,24 +5597,48 @@ not re-asked. ADR-0124's Decision states the same.
 Part C measured about 7.6 ms per TAP for attach plus pin; there is no
 measurement of set-down or set-up plus read-back across the placeholder
 population. E18 therefore also measures `quiesce_managed_taps` and
-`restore_quiesced_taps` wall time at T1-BASE and T1-PORT4. The rules:
+`restore_quiesced_taps` wall time at T1-BASE and T1-PORT4, and the kill loop
+(user decision 1 of 2026-09-30):
+
+- **K and W.** T1-PORT4 has no VMM population, so for the kill measurement E18
+  creates each allocation's scope under the workloads slice, each holding one
+  process, so no write takes the absent-scope shortcut. It times the loop's
+  write sequence for a report naming every allocation —
+  `CgroupManager::cgroup_kill(&CgroupPath::for_alloc(alloc))` for each, in
+  `AllocationId` order, over the production `RealCgroupFs` — as K, records the
+  largest single write, and times one workloads-slice write over the populated
+  slice. The largest of those single writes is W.
+
+The rules:
 
 - `SHARED_NETWORK_QUIESCE_CALL_BOUND` is `max(1 s, 4 × Q)`, where Q is the
   largest `quiesce_managed_taps` wall time observed at T1-PORT4, so a slow but
   working pass is not misread as undetermined. A false timeout would turn every
   kernel-path fault into a whole-slice kill. The measured value and the derived
   bound are recorded as described under the constants above.
-- The design holds only if that bound plus one complete attempt at measured
-  latency (owner converge, full audit, restore) fits inside the 5 s recovery
-  window.
+- `SHARED_NETWORK_VM_KILL_CALL_BOUND` is `max(1 s, 4 × W)` (*Kill loop*).
+- The design holds only if the quiescence bound, plus K, plus one complete
+  attempt at measured latency (owner converge, full audit, restore) fits inside
+  the 5 s recovery window. K enters because a netlink failure common to every
+  TAP makes every `Active` allocation unconfirmed (DR-08 (b)-A), and that
+  report's loop runs to its end before the first attempt.
 - ADR-0124's accepted double-loss exposure ("at most the one-second audit
   interval before TAP quiescence") is restated with the measured time for the
-  last TAP to go down.
+  last TAP to go down, and, for a TAP quiescence could not confirm down, with
+  the quiescence call's time plus K: such a TAP can forward until its VM's kill
+  write lands, and the loop reaches every reported VM within K.
 
-If either measurement breaks those rules, the first response is batching: issue
-the set-downs (or set-ups) pipelined on one netlink socket and confirm them with
-one filtered `RTM_GETLINK` dump over the bridge's ports, which still yields the
-per-TAP outcomes ruling 2 needs. If batched latency still breaks them, the next
+If a quiescence or restore measurement breaks those rules, the first response
+is batching: issue the set-downs (or set-ups) pipelined on one netlink socket
+and confirm them with one filtered `RTM_GETLINK` dump over the bridge's ports,
+which still yields the per-TAP outcomes ruling 2 needs. If K breaks the fit,
+the response is concurrent kill writes: the loop issues its writes
+concurrently, and every *Kill loop* rule holds unchanged (every write returns
+or misses its bound before the next owner call, each event still names its
+allocation, and any failure ends in the slice kill). Concurrency overlaps each
+write's userspace, open, and close cost; the kernel still serializes the kills
+themselves on `cgroup_mutex`, so E18 re-measures K with concurrent writes. If
+batched latency, or K with concurrent writes, still breaks the rules, the next
 response is a quiescence budget outside the 5 s recovery window; that changes
 ADR-0124's accepted timing, and a materially longer double-loss exposure changes
 an accepted security outcome, so either is surfaced to the user rather than
@@ -5501,9 +5665,11 @@ deadline:
 either succeeded or was not needed. A TAP is therefore never raised while any
 owner's component is still failing. Each owner call races the remaining
 deadline; a call still pending at the deadline is abandoned and counts as
-incomplete. At 20 attempts
+incomplete. Kill writes are not owner calls and are not abandoned at the
+deadline (*Kill loop*). At 20 attempts
 or 5 s the supervisor calls `exec.fail_stop(RecoveryDeadlineExceeded)` once,
-sends the request, and parks, as today. A late completion cannot reopen EXEC.
+sends the request, and parks, as today; a kill loop in progress at that point
+runs to its end first. A late completion cannot reopen EXEC.
 
 **Core addition.** `SharedGuestNetworkFailStopCause` gains two variants, placed
 in this order after `RecoveryDeadlineExceeded`:
@@ -5511,7 +5677,7 @@ in this order after `RecoveryDeadlineExceeded`:
 - `TapQuiescenceUndetermined`, used only when the set of TAPs that failed to go
   down cannot be determined;
 - `VmKillFailed`, used only when a per-VM kill write for a known allocation
-  failed other than with an absent scope.
+  failed other than with an absent scope, or missed its bound.
 
 They are distinct because their causes and remedies differ (rust.md,
 "Distinct failure modes get distinct error variants"). The enum is not
@@ -5528,6 +5694,111 @@ persisted.
 
 DISTILL rewrites the S19-B body. S19-A's no-rewrite adapter contract is
 unchanged.
+
+**Bounded calls (pinned on evidence 2026-09-30, changing no outcome).** Every
+call the supervisor races against a bound or the recovery deadline — each
+owner's audit, the owners' converge, `quiesce_managed_taps`,
+`restore_quiesced_taps`, and each kill write — makes no synchronous blocking
+wait on the task that awaits it, and tolerates being dropped at any await. A
+call that blocks inside `poll` stalls the race against `clock.sleep` instead of
+missing its bound, so neither the bound nor the deadline would hold. The
+quiescence clause of § *Driven port — TAP activation gate* is this rule's first
+instance. Known staged violations, each a DELIVER review item (§ *Required
+downstream changes*, *No-panic and bounded-call review items*): the host
+`audit_shared` and `converge_shared` wait in `block_on_host_netlink`'s thread
+join (`guest_network.rs:3993`, `:4007`, `:4051`, `:4212`) and run the nft
+observation and convergence synchronously (`:4093-4103`, `:4261`); `set_tap_up`,
+on the restore and `activate` paths, waits in `GenlSock::recv`, which has no
+receive timeout (`overdrive-netlink/src/ethtool.rs`, `disable_tx_offload`); the
+worker's `audit_shared_owner` and `converge_shared_owner` are `async` with no
+await (`mtls_intercept_worker.rs:2361-2395`): they run the nft observation
+through `NfSock` synchronously, and `converge_shared_owner` reaches
+`ensure_fwmark_rule` and `ensure_local_route`, which wait in
+`block_on_host_netlink`'s join (`mtls_intercept.rs:1010`, `:1026`, through
+`mtls_intercept_port.rs:1062-1063`). Every realization also follows the
+thread-creation rule below.
+
+**No panic on any owner, kill, or supervisor path (user decision 2 of
+2026-09-30).** In the user's words: "OUR CODE MUST NEVER PANIC. IT MUST ALWAYS
+BE RECOVERABLE AND/OR SELF HEALING."
+
+- **Why it is load-bearing.** The release profile sets `panic = "abort"`
+  (`Cargo.toml:268`). A panic anywhere in `serve` ends the process at once:
+  no unwind, no `Drop`, no recovery attempt, no fail-stop request, no drain,
+  and no status 1 from the serve lifetime (D-295-R17). The classifications
+  that turn a task panic into `SupervisorPanicked`, `TaskPanicked`, or a
+  `Connect` (`lib.rs:1432-1434`, the worker's exit classifier,
+  `overdrive-netlink/src/runtime.rs:61-63`) run only in builds that unwind,
+  such as tests. The recovery this section specifies exists only if these
+  paths do not panic.
+- **The contract.** No call on the shared owner (its six node methods and
+  `provision`, `activate`, `teardown`), no call the supervisor makes on the
+  worker or the DNS task owner, no kill write, and neither the supervisor nor
+  its handle ever panics. Every failure is a typed result that an existing
+  rule already maps to an outcome:
+  - a quiescence set-down or read-back failure: that TAP's `unconfirmed`
+    entry (DR-08 (b)-A);
+  - any other owner call: its existing typed error (`GuestNetworkError`,
+    `SharedGuestNetworkAuditError`, `MtlsSharedOwnerError`,
+    `DnsResponderError`), which the supervisor handles as that call's failure:
+    a failed audit is detection or a failing component, a failed converge or
+    restore leaves the attempt incomplete, and the deadline then fail-stops;
+  - a kill write: its `std::io::Error`, handled by the kill-scope table;
+  - a boot call (`probe_startup`, `sweep_stale`, boot convergence): its typed
+    error, which refuses startup with `health.startup.refused` as today.
+- **Thread creation.** A call that needs an OS thread creates it through a
+  primitive that returns the failure, `std::thread::Builder::spawn` or
+  `spawn_scoped`. It never uses `std::thread::spawn` or
+  `std::thread::Scope::spawn`, which panic when the OS refuses a thread (std
+  1.95 `thread/functions.rs:46-49`, `:125-131`; `thread/scoped.rs:194-206`),
+  nor `tokio::task::spawn_blocking` or `tokio::fs`, which panic when the OS
+  refuses a thread and the blocking pool has no idle thread to take the task
+  (tokio 1.52.1 `runtime/blocking/pool.rs:324-325`, `:428-438`). On a path
+  under *Bounded calls* only `Builder::spawn` with an awaited result qualifies,
+  because a scoped thread's join is a synchronous wait; `spawn_scoped` serves
+  synchronous callers such as the bridge below. The refusal is the call's
+  typed failure:
+  - The host netlink bridge `block_on_host_netlink` returns
+    `NetlinkError::Connect { source }`, `source` the spawn's `io::Error`, when
+    the OS refuses its worker thread; its signature is unchanged and its
+    `# Errors` names the case. *(Explicit amendment 2026-09-30 of the
+    implemented bridge, `overdrive-netlink/src/runtime.rs:54-65`, whose
+    `Scope::spawn` panics in that case.)* The bridge stays a synchronous
+    helper; a bounded call does not wait in it on the task that awaits the
+    call. Under DR-08 (b)-A a set-down or read-back that could not get a thread
+    is therefore that TAP's `unconfirmed` entry, and the pass continues.
+  - A kill write whose write path cannot get a thread returns the refusal as
+    its `std::io::Error`, a failed kill. `RealCgroupFs::write`, which the kill
+    capability reaches through `CgroupManager::cgroup_kill`, uses `tokio::fs`
+    today (`overdrive-host/src/cgroup_fs.rs:98-100`) and changes accordingly.
+- **Logical invariants.** On these paths a branch a prior guard makes
+  unreachable is written so that no panic is reachable: carry the value the
+  guard established, make the match total (for example, treat every
+  non-panic `JoinError` as cancelled instead of keeping an `unreachable!`
+  arm), or return the owning typed error. No `unwrap`, `expect`, `panic!`,
+  `unreachable!`, `assert!`, unchecked `Instant`/integer arithmetic, or
+  unchecked index on external data remains on them. Under `panic = "abort"` a
+  violated invariant there would end every workload's network owner, so the
+  user's decision takes precedence over the rust.md `unreachable!()` idiom on
+  these paths.
+- **Outside the contract.** Memory-allocation failure: the standard allocator
+  aborts on it (`handle_alloc_error`), which is not a panic and which no Rust
+  code recovers from. A primitive that panics only on a misuse the composition
+  rules out, such as `tokio::spawn` outside a runtime, is not a failure path;
+  the DELIVER review confirms each such call site runs inside the serve
+  runtime.
+- **Enforcement.** The items that hold these paths carry
+  `#[deny(clippy::unwrap_used, clippy::expect_used, clippy::panic,
+  clippy::unreachable)]` on their module or `impl` block, never on a crate
+  root where it would reach unrelated code, with `#[cfg(test)]` items exempt,
+  so a new site fails the existing clippy gate. Thread primitives,
+  arithmetic, and indexes on external data are review items: the parsers
+  already guard most indexes, and `clippy::indexing_slicing` cannot tell a
+  guarded index from an unguarded one. The sites found in the
+  staged code, each with the typed failure it becomes and the step that owns
+  it, are listed in § *Required downstream changes*, *No-panic and
+  bounded-call review items*. The runtime evidence for a refused thread is E23
+  (§ *Evidence-lane matrix*).
 
 ### [REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24
 
@@ -5885,21 +6156,22 @@ No test spawns the `overdrive` binary.
 | E5 | Launch failure, VMM exit, and teardown complement; teardown converges on absence (M2) | Start-failure ordering releases the lease last | A `SimVmm` create failure tears down before release; on the spawn-error and no-pid branches the queue descriptor is closed before the clone-removal await (F19). D12A source-local teardown tables: each of the TAP, TCX attachment, link pin, endpoint entry, and guard member absent before teardown (singly and all together) yields `Ok` with no write for the absent part and set-down skipped when the TAP is absent; a non-absence kernel failure keeps its typed error | A missing-kernel launch leaves the TAP deleted with no holder; stop reads the TAP down before `RTM_DELLINK`; the complement is empty. Out-of-band deletion of the TAP, then separately of the link pin and of the guard member, before `StopAllocation` still reaches the empty complement and releases the lease | — |
 | E6 | Held (Admitted + Retiring) ≤ cap at every `assign` (R6, R7) | The §3.2 proof re-targeted to held-population semantics: NA-1, NA-2, NA-4a, NA-4b, and NA-G GREEN; NA-5 GREEN; OBS-OVERLAP's retiring-plus-replacement peak never exceeds the cap; concurrent-evaluation races; printed seeds | Pure pool properties, source-local: cap over held, idempotence, monotonic retire, a Retiring lease still counted, release frees, `LeaseRetiring`; one pool per server (a killed-mode restart starts with an empty pool) | The T1 receipts report the held and retiring counts | — |
 | E7 | No hot retry loop and recreate ordering at the cap (R7, R8, R11) | Dispatch count at the cap: at most one refused dispatch per contended slot. At the cap, a due crash replacement whose predecessor holds a lease emits `ReclaimAllocationNetwork` for the predecessor and no restart; after release, the next evaluation emits the restart and it is admitted. A failing reclaim backs off. Below the cap, the successor is admitted before the predecessor's cleanup (ADR-0106). A raced restart refusal leaves the predecessor's ceiling and backoff inputs unchanged and the successor id reserved. | Pool source-local: `PoolExhausted` unreachable below the cap | — | — |
-| E8 | Retry-retaining cleanup (R10) | A failing removal keeps the lease held and counted, admits no successor on the address, and a retry converges | Proof §3.4 through an `MtlsIntercept` port fault on the real `stop_alloc` and StopAllocation arm; all ten assertions GREEN | Lima real nft: convergent removal with a pre-absent member; batch rejection preserves state | — |
+| E8 | Retry-retaining cleanup (R10) | A failing removal keeps the lease held and counted, admits no successor on the address, and a retry converges | Proof §3.4 through an `MtlsIntercept` port fault on the real `stop_alloc` and StopAllocation arm; all ten assertions GREEN. The adapter's handling of a rejected element batch and of a failed post-commit read-back: source-local, default lane, over the module-private `SharedIpElementIo` seam; that a rejected batch commits nothing is the kernel's batch abort (§ *Driven port — intercept element release…*, *Evidence for the two element-batch failure rules*) | Lima real nft: convergent removal with a pre-absent member. No real-kernel case for either failure rule: neither has a deterministic stimulus | — |
 | E9 | Reclaim on every path, forever, at the constant cadence (R11, F9, L4, M2) | A restart predecessor's cleanup fails, then Reclaim is emitted with backoff and eventually releases; no row is rewritten. Boundary scenarios: a leased Failed allocation of a workload that is then **stopped** (Stop branch) and of one that is **deleted** (GC branch) is reclaimed; so are leased allocations behind the Job terminal fence, the Running guard, the Draining guard, the operator-stop veto, and the Job natural-exit handler. A reclaim that fails N times re-dispatches no sooner than one second after each failure and never stops retrying while the lease exists. At the cap, a current allocation whose restart is pending but not yet due gets no reclaim; the reclaim appears only once the restart is due. | The shim arm and the validator conflict rule; a reclaim whose parts were removed out of band releases the lease | — | — |
 | E10 | Boot after process loss (R12) | S-ND295-13 extended to: reclamation ≺ sweep ≺ member clear ≺ constant program and policy route ≺ open | — | Proof §3.5 in killed mode: V0–V6 GREEN | — |
 | E11 | Supervisor component matrix (R13, R14, R16) and the latch invariant (L9) | Source-local, all 12 components and task classes, printed seeds. Includes: an `IpRules`-only and an `IpSets`-only loss that quiesce, repair, restore, and reopen; a policy-route-only loss detected as `IpRules` and repaired through `converge_shared` with live members, in which the prior node guard is relinquished and not dropped (host targets survive, and a later `install_outbound` succeeds); a double failure (shared-owner component plus `IpRules`) in which no TAP comes up before the worker repair and full audit pass; an activation in flight when a kernel-path detection latches quiescence, which waits and then raises exactly once after reopen. **Invariant, every schedule:** whenever the test-local owner's latch is set (the bit its `activate` consults, never re-derived from a call log; DISTILL exposes it as `latched()`), the supervisor capability reports Recovering (`recovery_progress().is_some()`) or FailStop has been requested; the gate is never Open | Proof §3.3 through `run_server_with_obs_and_driver(s)` and the required ports: C0–C8 GREEN, with C6 re-targeted to the per-TAP kill scope | S-ND295-37 (double loss); one native `IpRules` table-deletion case | — |
-| E12 | Per-VM kill scope (R14, user rulings 2 and 8 of 2026-09-24; review finding H1) | Sim `CgroupFs` records writes; the owner call journal shows no owner call between a report and its kill writes. Cases: (a) `unconfirmed = {A}`: exactly A's scope `cgroup.kill` is written, no slice kill, recovery continues and reopens; (b) the quiescence call returns `Err` or hangs past its bound: the workloads-slice `cgroup.kill` is written before the `TapQuiescenceUndetermined` request; (c) a per-VM kill write fails with an I/O error other than `NotFound`: slice kill, then `VmKillFailed`; (d) a per-VM kill write returns `NotFound` (the scope was removed by a concurrent stop or exit watcher): counted as confirmed, no slice kill, recovery reopens; (e) `unconfirmed = {A}` because A's TAP was deleted: A is killed, is never reported by later audits, and recovery reopens for the rest; (f) a `ProvisionedDown` allocation whose TAP vanished is reported damaged by the audit while Open: only its VM is killed, EXEC stays Open, its start is rejected through the VMM-exit path, teardown converges on absence, and the lease is released; (g) audit damage while Open for each per-allocation part (TAP deleted, TCX ingress attachment detached, ingress link pin removed, **TCX egress attachment detached, egress link pin removed**, endpoint entry deleted, guard member removed, TAP raised while `ProvisionedDown`, owner uid or persistence changed, **host-side MAC equal to a reserved address** (another held allocation's guest MAC, its own guest MAC, or `GUEST_BRIDGE_MAC`; D-295-R21), **debug message mask non-zero** (D-295-R22)): only that VM is killed, EXEC stays Open, and no fail-stop occurs; the contrast, a host-side MAC changed to an unreserved address, is not damage: nothing is killed | Through `run_server_with_obs_and_driver(s)` with the required ports, the sim owner, and a `CgroupManager` over `SimCgroupFs` (proof §3.3, C6 re-targeted to the per-TAP kill scope): `Unconfirmed({A})` emits `guest_network.shared_owner_vm_killed` for A alone, the snapshot holds A's scope `cgroup.kill` write and no workloads-slice write, and recovery reopens; audit damage while Open kills only that VM and EXEC stays Open; quiescence `Fail` and quiescence `Hang` each end in exactly one `TapQuiescenceUndetermined` request through `ServerHandle::shutdown_requested`, with the workloads-slice `cgroup.kill` write in the snapshot when it is received | Native cases through `serve` + `deploy`: an injected per-TAP set-down failure kills only that VM and the node recovers; (e) deleting one `Active` TAP during an unrelated `IpRules` fault kills only that VM and recovery reopens; (f) deleting the TAP of an allocation held `ProvisionedDown` (a guest image that delays READY) kills only that VM; (g) out-of-band detach of one TAP's TCX ingress link, separately of its TCX egress link, and separately removal of one guard member, kills only that VM with EXEC open; **(h) R5-H1 host-side-MAC hijack (D-295-R21). Pre-control RED oracle: the increment-z native reproduction (`spike/findings-mac-fdb-isolation.md` STEPs 4–6: uid 4200 with `CapEff=0`, holding only its own queue fd, moved the victim's guest MAC to its port as `LOCAL\|STATIC` and read the victim's host-to-guest frames from that fd; the unknown-unicast flood also reached it). The production composition always has the control, so no uncontrolled production run is rebuilt. Production-composed GREEN through `serve` + `deploy`, with two `Active` allocations, attacker A and victim V: a process running as uid 4200 with no capabilities, holding a duplicate of A's queue descriptor, sets A's host-side MAC to V's guest MAC with `SIOCSIFHWADDR` (this test process is not launched through the VMM adapter, so it runs outside the D-295-R22 launch filter and models a change the filter does not see; the prevention itself is E21); the test then sends host-originated unicast to V's guest MAC. Oracles: (1) A's TAP transmits zero frames addressed to V (exact-ifindex capture on A's TAP plus a read on the held queue descriptor; this is the primary oracle), and the node-wide `EgressDestinationDrop` slot, which every TAP's egress program shares, rises by at least the frames sent; (2) positive controls: host unicast to A's own guest MAC still reaches A's guest, and a host broadcast reaches every guest; (3) while the entry is poisoned (after the change, before A's teardown), V receives no host unicast (exact-ifindex capture on V's TAP); (4) the next audit reports A's host-side MAC, now V's guest MAC and so a reserved address, as per-allocation damage (`TapHostMac` with `address: Reserved(<V's guest MAC>)`) and kills only A's VM; EXEC stays Open, and V and every other allocation are untouched; A's teardown is then performed by its ordinary lifecycle cleanup (its restart's predecessor cleanup after the one-second restart backoff, or FinalizeFailed or R11 reclaim), with no test-installed effect, and the kill→teardown interval is recorded; (5) after A's teardown returns its empty complement, `bridge fdb show` lists V's MAC on no port except V's own, a host→V ICMP echo sent then is answered (whether the host first re-resolves V by broadcast ARP or sends straight into the empty FDB entry, only V's egress classifier admits a unicast to V's MAC), and V's reply re-learns V's MAC as a learned, non-permanent entry on V's port. Bounds: (4) within one audit period (1 s, subject to E18) of the change; (5) the echo answered and the re-learned entry observed within 1 s of teardown's complement read-back**. No native case exercises the whole-call branch (see *E12 whole-call branch* below) | — |
+| E12 | Per-VM kill scope (R14, user rulings 2 and 8 of 2026-09-24; review finding H1) | Sim `CgroupFs` records writes; the owner call journal shows no owner call between a report and its kill writes. Cases: (a) `unconfirmed = {A}`: exactly A's scope `cgroup.kill` is written, no slice kill, recovery continues and reopens; (b) the quiescence call returns `Err` or hangs past its bound: the workloads-slice `cgroup.kill` is written before the `TapQuiescenceUndetermined` request; (c) a per-VM kill write fails with an I/O error other than `NotFound`: slice kill, then `VmKillFailed`; (c2) a per-VM kill write stays pending past `SHARED_NETWORK_VM_KILL_CALL_BOUND`: slice kill, then `VmKillFailed`, with no owner call in between, and a slice write that also misses its bound is recorded as the `vm_kill` outcome and the request follows it (user decision 1 of 2026-09-30); (d) a per-VM kill write returns `NotFound` (the scope was removed by a concurrent stop or exit watcher): counted as confirmed, no slice kill, recovery reopens; (e) `unconfirmed = {A}` because A's TAP was deleted: A is killed, is never reported by later audits, and recovery reopens for the rest; (f) a `ProvisionedDown` allocation whose TAP vanished is reported damaged by the audit while Open: only its VM is killed, EXEC stays Open, its start is rejected through the VMM-exit path, teardown converges on absence, and the lease is released; (g) audit damage while Open for each per-allocation part (TAP deleted, TCX ingress attachment detached, ingress link pin removed, **TCX egress attachment detached, egress link pin removed**, endpoint entry deleted, guard member removed, TAP raised while `ProvisionedDown`, owner uid or persistence changed, **host-side MAC equal to a reserved address** (another held allocation's guest MAC, its own guest MAC, or `GUEST_BRIDGE_MAC`; D-295-R21), **debug message mask non-zero** (D-295-R22)): only that VM is killed, EXEC stays Open, and no fail-stop occurs; the contrast, a host-side MAC changed to an unreserved address, is not damage: nothing is killed; (i) a report naming at least two allocations whose kill loop is still running when the recovery deadline passes (for example, kill writes through a test-local `CgroupFs` that park on the injected clock, which is also how (c2) holds a write past its bound): every reported scope's `cgroup.kill` is written, in `AllocationId` order, before the one `RecoveryDeadlineExceeded` request, with no owner call in between (user decision 1 of 2026-09-30) | Through `run_server_with_obs_and_driver(s)` with the required ports, the sim owner, and a `CgroupManager` over `SimCgroupFs` (proof §3.3, C6 re-targeted to the per-TAP kill scope): `Unconfirmed({A})` emits `guest_network.shared_owner_vm_killed` for A alone, the snapshot holds A's scope `cgroup.kill` write and no workloads-slice write, and recovery reopens; audit damage while Open kills only that VM and EXEC stays Open; quiescence `Fail` and quiescence `Hang` each end in exactly one `TapQuiescenceUndetermined` request through `ServerHandle::shutdown_requested`, with the workloads-slice `cgroup.kill` write in the snapshot when it is received | Native cases through `serve` + `deploy`: an injected per-TAP set-down failure kills only that VM and the node recovers; (e) deleting one `Active` TAP during an unrelated `IpRules` fault kills only that VM and recovery reopens; (f) deleting the TAP of an allocation held `ProvisionedDown` (a guest image that delays READY) kills only that VM; (g) out-of-band detach of one TAP's TCX ingress link, separately of its TCX egress link, and separately removal of one guard member, kills only that VM with EXEC open; **(h) R5-H1 host-side-MAC hijack (D-295-R21). Pre-control RED oracle: the increment-z native reproduction (`spike/findings-mac-fdb-isolation.md` STEPs 4–6: uid 4200 with `CapEff=0`, holding only its own queue fd, moved the victim's guest MAC to its port as `LOCAL\|STATIC` and read the victim's host-to-guest frames from that fd; the unknown-unicast flood also reached it). The production composition always has the control, so no uncontrolled production run is rebuilt. Production-composed GREEN through `serve` + `deploy`, with two `Active` allocations, attacker A and victim V: a process running as uid 4200 with no capabilities, holding a duplicate of A's queue descriptor, sets A's host-side MAC to V's guest MAC with `SIOCSIFHWADDR` (this test process is not launched through the VMM adapter, so it runs outside the D-295-R22 launch filter and models a change the filter does not see; the prevention itself is E21); the test then sends host-originated unicast to V's guest MAC. Oracles: (1) A's TAP transmits zero frames addressed to V (exact-ifindex capture on A's TAP plus a read on the held queue descriptor; this is the primary oracle), and the node-wide `EgressDestinationDrop` slot, which every TAP's egress program shares, rises by at least the frames sent; (2) positive controls: host unicast to A's own guest MAC still reaches A's guest, and a host broadcast reaches every guest; (3) while the entry is poisoned (after the change, before A's teardown), V receives no host unicast (exact-ifindex capture on V's TAP); (4) the next audit reports A's host-side MAC, now V's guest MAC and so a reserved address, as per-allocation damage (`TapHostMac` with `address: Reserved(<V's guest MAC>)`) and kills only A's VM; EXEC stays Open, and V and every other allocation are untouched; A's teardown is then performed by its ordinary lifecycle cleanup (its restart's predecessor cleanup after the one-second restart backoff, or FinalizeFailed or R11 reclaim), with no test-installed effect, and the kill→teardown interval is recorded; (5) after A's teardown returns its empty complement, `bridge fdb show` lists V's MAC on no port except V's own, a host→V ICMP echo sent then is answered (whether the host first re-resolves V by broadcast ARP or sends straight into the empty FDB entry, only V's egress classifier admits a unicast to V's MAC), and V's reply re-learns V's MAC as a learned, non-permanent entry on V's port. Bounds: (4) within one audit period (1 s, subject to E18), the full audit that follows it, and the one per-VM kill write (at most `SHARED_NETWORK_VM_KILL_CALL_BOUND`; the event follows the write) after the change; (5) the echo answered and the re-learned entry observed within 1 s of teardown's complement read-back**. No native case exercises the whole-call branch (see *E12 whole-call branch* below) | — |
 | E13 | Member, policy-route, and guard audit and repair (R15, F18, H2) | Sim intercept; the worker hands over the guard without dropping the prior one | Lima real nft and routing, **with live allocations** (non-empty dynamic sets): delete one member, the whole table, the fwmark rule, the table-100 route, or the guard table; detection within 1 s; repair restores exactly the deleted object; after every repair the recorded targets are intact and a new allocation installs its elements | — | — |
 | E14 | Intercept-marked TCP fails closed (R18, R19) | — | — | Native RED first, then GREEN, with the bridge guard intact. The pre-test value of host `net.ipv4.ip_forward` is recorded; oracle (a) runs with forwarding enabled as a declared environment precondition. **R18** (`table ip overdrive-mtls` deleted): (a) forwarding: a peer-TAP capture shows zero forwarded intercept-marked frames for a guest SYN to the peer's address; (b) host-local: a guest SYN to the bridge gateway address, and one to another host interface address, at the port of a host listener bound to `0.0.0.0`, gets no SYN-ACK, and that listener accepts nothing. **R19** (program present, listener absent; outbound rule 1 → rule 2): (c) with the leg-F listener closed and the TAP up, and (d) in killed mode with Cloud Hypervisor alive and the TAP up, a guest SYN to the gateway address and one to an external address outside every managed and registered set, each at the port of a host listener bound to `0.0.0.0`, get no SYN-ACK and that listener accepts nothing. An inbound control (leg C closed; SYN to a registered destination) is dropped by rule 4 under both orders. **`TIME_WAIT` side door (L3, preconditions per research A2):** (e) complete one leg-F connection from guest source port P to destination D:p, and make the **guest complete its own close** so the entry is in the true `TIME_WAIT` substate (a `FIN_WAIT2` substate answers the SYN with RST), then close leg F (and, separately, kill `serve` in killed mode — which closes every leg-F socket at once, opening the door per flow for ~60 s), and within the `TIME_WAIT` interval send a guest SYN from P to D:p **carrying a sequence number above the old `rcv_nxt` (or a newer `TSval`)** with a host listener bound to `0.0.0.0:p`: record whether it gets a SYN-ACK. Two controls run first and do not depend on the door. Both target one `TIME_WAIT` entry held by a host listener on a path the TPROXY program does not handle (for example a test-owned veth peer namespace under the `TestCidrLease` discipline, connecting to a host listener bound to `0.0.0.0:p`): the listener's accepted socket closes first, then the peer closes, so the host side holds the true `TIME_WAIT` substate. **Negative control (first):** the probe generator sends, from the same peer 4-tuple, a SYN with a stale ISN and no timestamp option (or a TSval no newer than the entry's), and gets a bare ACK (`TCP_TW_ACK`, research A2) and no SYN-ACK, proving the substate and sequence gates; the entry survives. **Positive control (second; review defect D9):** after an interval longer than `tcp_invalid_ratelimit`, the same generator sends a SYN with a sequence number above the old `rcv_nxt`, meets the sequence precondition, and receives the SYN-ACK (a reopen consumes the entry, which is why it runs second). Only then does (e) run against the guest's leg-F entry. **Healthy baseline (the guard's non-interference control), before any fault:** with both tables present, leg F listening, and the guard table read back present (`observe_intercept_mark_guard` returns `Ok(true)`), each guest SYN of the R18 cases (to the peer's address, to the bridge gateway address, and to another host interface address, at the port of a host listener bound to `0.0.0.0`) receives a SYN-ACK, and that host listener accepts nothing: the intercept answered it and the guard dropped nothing on the healthy path. The guard rule carries no counter (§ *R18-B contract*). A further fault deletes only the guard table and shows the intercept program still catches or drops. **In-run ingress witness (every R18 GREEN case and the guard-only case):** each probe SYN appears in an exact-ifindex capture on its sender's TAP, which reads back administratively up when the SYN is sent; the node-wide TCX `Intercept` counter (`GuestTcxCounter::Intercept`) rises by at least the SYNs sent; and the bridge guard's default-drop counter does not change. A run in which the TAP was already quiesced (the `IpRules` loss quiesces managed TAPs) is void, not GREEN. | — |
 | E15 | The CLI consumes fail-stop (R17) | — | `serve_lifetime_fail_stop` (in-process `serve`, injected signals and clock): the internal request beats a ready SIGINT or SIGTERM; the 10 s bound is measured on the injected clock; `exit_code()==1`; drained and abandoned cases | The same test runs on metal, because its real fault needs the kernel | — |
 | E16 | Required ports (R16) | — | Compile-time check plus a source scan: no `Option` field or parameter gates mTLS, DNS, shared guest-network, or supervisor composition, including `AppState.mtls_worker`, `AppState.shared_guest_network`, `ServerHandle.mtls_worker_owner` and `mtls_resolve_owner`, and the action-shim lifecycle parameters; no method replaces a composed worker after boot | — | — |
 | E17 | DNS loss closes EXEC | Source-local supervisor over a test-local `GuestDns` and `GuestDnsFactory` | Through `run_server_with_obs_and_driver(s)` with the sim DNS factory | S-ND295-34 real bind | — |
-| E18 | Audit, quiescence, and restore latency and element-mutex hold at the placeholder population (F7) | — | — | At T1-BASE and T1-PORT4, with every attachment activated through the owner: full-audit latency per owner; `quiesce_managed_taps` and `restore_quiesced_taps` wall time and the time the last TAP reads back down; and the worker member audit's `element_effects` hold time. These pin `SHARED_NETWORK_AUDIT_CALL_BOUND` and `SHARED_NETWORK_QUIESCE_CALL_BOUND`, test the recovery-window fit, restate the double-loss exposure, and decide R15's mutex choice. | — |
+| E18 | Audit, quiescence, and restore latency and element-mutex hold at the placeholder population (F7) | — | — | At T1-BASE and T1-PORT4, with every attachment activated through the owner: full-audit latency per owner; `quiesce_managed_taps` and `restore_quiesced_taps` wall time and the time the last TAP reads back down; the worker member audit's `element_effects` hold time; and, at T1-PORT4 with one scope holding one process per allocation, the kill-loop time K for a report naming every allocation, the largest per-VM kill write, and one workloads-slice write (W is the larger write; § *Runtime shared-network supervisor*, *Quiescence and restore latency at density*). These pin `SHARED_NETWORK_AUDIT_CALL_BOUND`, `SHARED_NETWORK_QUIESCE_CALL_BOUND`, and `SHARED_NETWORK_VM_KILL_CALL_BOUND`, test the recovery-window fit (quiescence bound + K + one attempt ≤ 5 s), restate the double-loss exposure with K, and decide R15's mutex choice. | — |
 | E19 | Creation-time close-on-exec (obligation OBL-295-CLOEXEC, L2) | — | The `xtask` source gate over every first-party `serve` crate: zero raw descriptor-creating calls without the close-on-exec flag; one planted violation per row of the gate's call table (including an `F_DUPFD`, an `epoll_create`, a `recvmsg` without `MSG_CMSG_CLOEXEC`, a `use libc::socket as s` rename, and a `nix`/`rustix` wrapper) fails it; an unparseable file fails the scan rather than being skipped; planted rows pin the test-only boundary (DR-10): a violation inside an item under `#[cfg(all(test, feature = "…"))]` followed by another attribute (as `launch_seccomp_kernel` is written), under `all(feature = "…", test)`, under a nested `all(…, all(test, …))`, and on an item carrying `#[cfg(test)]` beside a second `#[cfg(…)]` is not reported; the same violation under `any(test, …)`, under `not(test)`, and on an item whose only `test` is in a `cfg_attr(test, …)` is reported | — | — |
 | E20 | Cleanup-pending status (R20, user ruling 6 of 2026-09-24) | Pure predicate: `cleanup_pending` over every lease × row-state pair matches the table in § *Operator status* | In-process through `run_server` and the HTTP API, with an `MtlsIntercept` element-removal fault: a `StopAllocation` whose cleanup fails leaves the row `Running` and `GET /v1/allocs` reports `network_cleanup_pending: true`, excluded from `replicas_running`; after the retry converges the row is `Terminated` and the field is false. A crashed allocation (Failed row, Admitted lease) and a reclaim in progress report true. CLI live-path render tests (`render::workload_describe`): a pending row renders `CleanupPending` plus the lifecycle detail line and never `Running`, in both the Service and Job tables; every non-pending row renders byte-identically | — | — |
 | E21 | VMM launch seccomp filter (R22, ADR-0143): every Cloud Hypervisor thread carries it, each denied request returns `EPERM`, every other ABI route fails closed, and CH still boots and passes traffic | — | **Pure, default lane (no I/O).** On an x86_64 build, the program `VmmLaunchSeccompFilter::for_target` builds, evaluated over synthetic `seccomp_data`, yields this verdict partition. (a) Each of the 13 requests as `ioctl` `args[1]` → `ERRNO\|EPERM`, including with `args[1]`'s upper 32 bits set. (b) The six `fd=`-path requests, a read-only request, and a non-`ioctl` syscall carrying a denied value in `args[1]` → `ALLOW`. (c) A foreign audit architecture → `KILL_PROCESS`. (d) `nr = 0x4000_0000 + 514` (x32 `ioctl`), `0x4000_0000 + 16`, and any other `nr ≥ 0x4000_0000` except `-1` → `KILL_PROCESS`; `nr = -1` → `ALLOW`. Also: the 13 derived values equal the increment-aa numbers; the composed audit value and the x32 bit are pinned; `VMM_LAUNCH_DENIED_IOCTLS` is exactly the table. Source-local mapping tables: an unsupported-architecture value maps to `ConfinementUnavailable { control: Seccomp }`, and each probe cause maps to its `LaunchSeccomp*` variant. On any other build target (an aarch64 build, such as an Apple Silicon Lima VM) the arm with no program is the compiled arm: `for_target` returns `LaunchSeccompUnsupportedArch` naming the architecture, and `create`'s filter-first refusal on that arm can be executed there (ruling 10; GH #302). On an x86_64 build that arm is reviewed, not executed. **Lima root (real kernel; the source-local `launch_seccomp_kernel` module of § *Testability boundary*).** On an x86_64 VM, a process launched through `register_launch_child_hook` with the production program (a re-exec of the crate's test binary) holds an attached queue of a scratch persistent TAP at descriptor 3. Each of the 13 requests returns `EPERM` from its main thread and from three threads created after exec. None of the six `fd=`-path requests returns `EPERM`. `/proc/self/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`. The descriptor table is exactly 0–3. The probe's `check_launch_seccomp` passes. On any other architecture, such as an Apple Silicon Lima VM, `check_launch_seccomp` returns `LaunchSeccompUnsupportedArch` naming it, and the production-program cases are proven on metal by (f). | **x86_64 native metal, production launcher, through `serve` + `deploy`:** (e) CH reaches READY and passes bidirectional traffic (S-ND295-01 and E3 run with the filter in force). At READY and again after traffic, every thread in `/proc/<ch>/task/*/status` reports `NoNewPrivs: 1` and `Seccomp: 2`, and each thread's `Seccomp_filters` equals the shipped Cloud Hypervisor build's own count for that thread plus 1: leader 1, `vmm` and `http-server` 2, every other thread 3 (the increment-aa control table, measured on the audited v53.0 build; OBL-295-SECCOMP-REVERIFY re-measures it when the shipped build changes). The leader's count is the discriminating check, because CH's own filters never cover it; worker coverage follows from it together with kernel inheritance. (f) The whole Lima-root block repeated on metal, plus the fail-closed ABI routes under the production program. The block is the `EPERM` cases, the per-thread `NoNewPrivs`/`Seccomp` reads, the exact 0–3 descriptor table, and a passing `check_launch_seccomp`. The fail-closed ABI routes are: an x32 `syscall(0x4000_0000 + 514, …)` ends the process with `SIGSYS`, and so does an i386 `int 0x80` `ioctl` where the kernel provides the i386 entry. (g) OBL-295-SECCOMP-REVERIFY: the source audit and (e) on any of that obligation's triggers (a change to the shipped Cloud Hypervisor build, to the `--net` launch shape, or to the Cloud Hypervisor net-device paths the platform uses). It is a review obligation; no runtime version check exists (user ruling of 2026-09-25). There is no aarch64 case: aarch64 microVM launches are refused (user ruling 10), and proving the filter and enabling them is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302). | — |
 | E22 | Managed-link identity independent of host link configuration (fresh-host RCA; user rulings of 2026-09-28) | — | **Source-local, deterministic:** the host-side MAC invariant through the D12A allocation I/O, at provision, at `activate`, and in the audit. (i1) Each reserved class, set on one TAP, breaks the invariant with `PostconditionMismatch { operation: TapObserve }` over `TapHostMac` (observed `Reserved(<mac>)`, or `Missing` for a read without an address): another held allocation's guest MAC, including one held `ProvisionedDown`; the TAP's own guest MAC; and `GUEST_BRIDGE_MAC`. At provision it refuses publication; at `activate` it refuses before any mutation; in the audit it names exactly that allocation. The ordering case: a TAP that took a guest MAC before that guest's allocation was held passes every audit until the allocation is provisioned, and the first audit after that names the TAP. (i2) The contrast: a host-side MAC changed to an unreserved address passes all three, and in the audit a TAP holding a `Condemned` allocation's guest MAC is not damage. **Lima root, real kernel.** (a) `ensure_bridge` on an absent name: the first observation after the call reads `addr_assign_type` 3 and the address `mac`, with the link down and no set issued in between. This oracle is deterministic, and it holds with or without the host policy. A create-then-set control in the same session shows the race the fix removes on a host without the policy; it is supporting evidence, not a gate. (b) `ensure_bridge` on a present link of any kind writes nothing: its ifindex, address, `addr_assign_type`, and administrative state are unchanged. (c) A fresh-host `run_server` boot with `ovd-gbr0` absent passes the bridge read-back, and the read-back MAC is `GUEST_BRIDGE_MAC` (S-ND295-00's bridge-identity leg). Repeated fresh-host boots print their iteration count; one run is not a gate for a timing race. A run that ends in the RCA's unexplained `StartupProbe` timeout (RCA § 8: "detached guard packet did not reach the exact drop transition") is recorded as that outcome. It counts neither for nor against the bridge fix. (d) A bridge identity mismatch reports the observed MAC and up state, not two equal facts. The real-kernel stimulus is the audit leg: an out-of-band MAC write on `ovd-gbr0`, then `audit_shared`. After the fix, the boot read-back has no deterministic real-kernel stimulus, and it shares the audit's fact construction. (e) At 06-02, with two allocations provisioned by the production owner: after systemd-udevd, where the substrate runs it, has initialized the first TAP (the test may wait with `udevadm wait`; production never runs it), the audit reports no damage for it, whatever address udev left; an out-of-band write of an unreserved address on that TAP is still no damage; an out-of-band write of the second allocation's guest MAC is that TAP's `TapHostMac` damage alone (observed `Reserved(<mac>)`), and the second allocation and the node stay healthy. No case installs or requires a host `.link` file. | (c) and (e) on the metal host as it is provisioned, with the host's `systemd --version` recorded. No host link configuration is installed or required. | — |
+| E23 | A refused OS thread is a typed failure, never a panic (user decision 2 of 2026-09-30) | The supervisor's handling of each typed failure is the E11 and E12 cells (scripted owner `Err`, per-TAP entries, kill-write errors) | **Lima root, source-local, real kernel.** The test process moves itself into a scratch cgroup whose `pids.max` equals its current task count, so every thread creation fails with `EAGAIN` (the kernel's `pids` controller, `kernel/cgroup/pids.c:197`); nextest runs each test in its own process. Then: `block_on_host_netlink` returns `NetlinkError::Connect` carrying the spawn's `io::Error`, and the process continues; a kill write through the kill capability either lands through a realization that needs no new thread or returns an `io::Error`, and never aborts; the host `quiesce_managed_taps` over one `Active` TAP returns `Ok`, with that TAP confirmed down by a realization that needs no thread or listed `unconfirmed` with `Connect`, and never aborts. A control run without the limit confirms the TAP down | — | — |
 
 **E12 whole-call branch.** When the owner cannot determine per-TAP outcomes
 (quiescence returns `Err`, or the call misses
@@ -5922,7 +6194,9 @@ production-faithful native stimulus exists:
   because `RealCgroupFs::write` opens the file
   (`overdrive-host/src/cgroup_fs.rs:98-100`): the supervisor then attempts the
   workloads-slice kill, which fails too while the exhaustion lasts, and
-  fail-stops with `VmKillFailed`. *(A consequence of DR-08 (b)-A, pinned
+  fail-stops with `VmKillFailed`. Thread exhaustion ends the same way when the
+  write path needs a thread: under user decision 2 of 2026-09-30 the refusal
+  is the write's `io::Error`, never a panic. *(A consequence of DR-08 (b)-A, pinned
   2026-09-30 on evidence; it changes no outcome the kill-scope table states.)*
 - Holding the call past its bound needs RTNL held or the process frozen, and
   freezing stalls the supervisor as well.
@@ -6266,6 +6540,24 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     check is not implemented even on the feature branch, where
     `GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` code,
     so there is nothing to amend.
+39. **ADR-0124, the five-second fail-stop, and G-295-5.** ADR-0124 said: *"At
+    five seconds the internal supervisor sends one typed fail-stop request to
+    the CLI-owned serve handle."* The 20-attempt / 5 s fail-stop is operative
+    in code on the feature branch (`run_mtls_owner`). Replaced by user decision
+    1 of 2026-09-30 (§ *Runtime shared-network supervisor*, *Kill loop*): a kill
+    loop in progress at the deadline runs to its end first, so the request can
+    follow the deadline by the rest of that loop; every kill write is bounded,
+    and a missed bound is a failed kill. ADR-0124 states the amendment
+    explicitly.
+40. **The host netlink bridge's thread creation.** `block_on_host_netlink`
+    says (`overdrive-netlink/src/runtime.rs:50-53`): *"[`NetlinkError::Connect`]
+    when the worker thread panics"*, and it creates that thread through
+    `Scope::spawn`, which panics when the OS refuses it. Replaced by user
+    decision 2 of 2026-09-30 (§ *Runtime shared-network supervisor*, *No panic
+    on any owner, kill, or supervisor path*): a refused thread is
+    `NetlinkError::Connect`; the signature is unchanged. Under the release
+    profile's `panic = "abort"` the documented panic mapping never runs in
+    production. No ADR states the bridge's error contract, so none changes.
 
 ### [REF] Reuse Analysis — replacement delta
 
@@ -6408,9 +6700,10 @@ DESIGN created no issue. No other deferral is proposed.
     `TIME_WAIT` case (e) with its true-`TIME_WAIT`/newer-sequence preconditions,
     its door-independent positive control (a host listener's own `TIME_WAIT`
     entry on a path TPROXY does not handle), and its stale-ISN negative control,
-    both run before (e); the E18 native audit, quiescence, restore, and
-    mutex-hold measurement, which pins `SHARED_NETWORK_AUDIT_CALL_BOUND` and
-    `SHARED_NETWORK_QUIESCE_CALL_BOUND`; and E20's cleanup-pending projection
+    both run before (e); the E18 native audit, quiescence, restore,
+    mutex-hold, and kill-loop measurement (K and W), which pins
+    `SHARED_NETWORK_AUDIT_CALL_BOUND`, `SHARED_NETWORK_QUIESCE_CALL_BOUND`, and
+    `SHARED_NETWORK_VM_KILL_CALL_BOUND`; and E20's cleanup-pending projection
     and live-path render cases (`tests/acceptance/render_workload_describe.rs`).
   - Remove every v2 control-frame clause.
   - Decide how the §3.2 to §3.6 proof tests land.
@@ -6442,8 +6735,9 @@ DESIGN created no issue. No other deferral is proposed.
   build refuses on it by design (L7). DELIVER clears it once, like any leaked
   node-global nft state, before running R19-build suites on such a host.
 - **E18-derived bounds (B-5).** The later of two DELIVER steps sets
-  `SHARED_NETWORK_AUDIT_CALL_BOUND` and `SHARED_NETWORK_QUIESCE_CALL_BOUND` and
-  records the M-ND295-E18 measurement: the step that captures M-ND295-E18, or
+  `SHARED_NETWORK_AUDIT_CALL_BOUND`, `SHARED_NETWORK_QUIESCE_CALL_BOUND`, and
+  `SHARED_NETWORK_VM_KILL_CALL_BOUND` and records the M-ND295-E18 measurement,
+  K included: the step that captures M-ND295-E18, or
   the step that introduces the constants. The record's one home is the source
   rustdoc named in § *Runtime shared-network supervisor*. In the current
   DISTILL plan (capture at 08-04, constants at 09-01), 09-01 is that step. So:
@@ -7092,8 +7386,9 @@ DESIGN created no issue. No other deferral is proposed.
       `Err`.
     - The host call makes no synchronous blocking wait on the awaiting task:
       the staged body's `block_on_host_netlink` path blocks in its thread join
-      (`overdrive-netlink/src/runtime.rs:60-64`). Which leaf or helper the host
-      uses stays with the crafter. DISTILL decides whether a source-local case
+      (`overdrive-netlink/src/runtime.rs:60-64`). The realization creates no
+      thread through `spawn_blocking` or `tokio::fs` (user decision 2 of
+      2026-09-30). Which leaf or helper the host uses stays with the crafter. DISTILL decides whether a source-local case
       pins it, for example a set-down leaf that never completes, raced against
       a timer.
   - *Close-on-exec gate (DR-10).* DISTILL adds E19's test-only-boundary
@@ -7117,6 +7412,89 @@ DESIGN created no issue. No other deferral is proposed.
     `:3602` assert. DR-19: the committed E18 benchmark report stands, as
     evidence. DR-20: S-ND295-47's dropped short-frame row stands. L6: the L8
     latch oracle stands; `latched()` is DISTILL's test support.
+- **User decisions of 2026-09-30 (kill loop, no panic, H14): DISTILL
+  follow-ups.**
+  - *Kill loop (decision 1).* E12 gains seeded cells (c2) (a per-VM kill write
+    pending past its bound: slice kill, `VmKillFailed`, no owner call between;
+    a slice write that also misses its bound is recorded and the request
+    follows), (i) (a loop carried past the recovery deadline completes, in
+    `AllocationId` order, before the one `RecoveryDeadlineExceeded` request),
+    and a shutdown-token cancellation mid-loop (every reported kill is written
+    before the supervisor returns), in the S-ND295-30A / S-ND295-29B matrix at
+    09-01. S-ND295-67 (4): the kill
+    follows the audit and the event follows the kill write, so the horizon is
+    one audit period + the full-audit ceiling + one per-VM kill write; the
+    body cannot name `SHARED_NETWORK_VM_KILL_CALL_BOUND`, so DISTILL states
+    the write's share as the bound's 1 s floor and 09-01, which sets the bound
+    from E18, re-checks the horizon. S-ND295-30B (f): the kill while Open is a
+    one-write loop; the survivor oracle also asserts that no workloads-slice
+    kill and no fail-stop request occurred (a missed kill-write bound would
+    slice-kill the survivor), and the inner-bounds sum gains one kill-write
+    bound. S-ND295-30B (e) is unchanged in outcome; its loop is one write.
+    The E18 receipt (08-04) gains K and W with its method (one scope holding
+    one process per T1-PORT4 allocation). The in-process horizons stand
+    (§ *Runtime shared-network supervisor*, the in-process lane).
+  - *No panic (decision 2).* E23 is a new Lima-root source-local cell (a
+    `pids.max` limit refuses every thread): `block_on_host_netlink` returns
+    `Connect` (06-02), the kill write path returns an `io::Error` (09-01), and
+    the host quiescence returns `Ok` with the TAP confirmed or `unconfirmed`
+    with `Connect` (06-04, beside S-ND295-51's per-TAP `Connect` bodies).
+    S-ND295-32's bound cells gain the kill-write bound.
+  - *H14 (decision 3).* S-ND295-54's two R10 failure clauses become
+    source-local, default-lane bodies in `overdrive-netlink/src/nft.rs` over a
+    test double of the module-private `SharedIpElementIo`, activated at 07-01.
+    Minimum cells: an error acknowledgement returns that error after exactly
+    one send, with no observation and no inverse; a committed batch whose
+    read-back fails, and one whose read-back mismatches, sends exactly one
+    inverse batch (every mutation inverted) and one verification, and returns
+    the primary error when the verification equals the pre-state; an inverse
+    send that fails, and a verification that fails or mismatches, return an
+    error retaining both causes as sources; a read-back equal to the expected
+    state returns it with no inverse. The kernel's part rests on the cited
+    batch abort (§ *Driven port — intercept element release…*, *Evidence for
+    the two element-batch failure rules*). DISTILL's Required Adapter
+    Coverage row for `HostMtlsIntercept` and its Completeness Audit row H14
+    change accordingly.
+- **No-panic and bounded-call review items (user decisions 1 and 2 of
+  2026-09-30).** Each site below is in staged code on a #295 owner, kill, or
+  supervisor path. The DELIVER reviewer of the named step confirms it
+  becomes the stated typed failure; every outcome is already decided by the
+  kill-scope table, the recovery rules, the owning port's contract, or the
+  boot refusal (§ *Runtime shared-network supervisor*, *Bounded calls* and
+  *No panic on any owner, kill, or supervisor path*).
+
+  | Step | Site | Becomes |
+  |---|---|---|
+  | 06-02 | `overdrive-netlink/src/runtime.rs:60-61`, `block_on_host_netlink`: `Scope::spawn` panics when the OS refuses the thread. Also reached from the worker's `converge_shared` (`mtls_intercept.rs:1010`, `:1026`) | `Builder::spawn_scoped`; a refusal is `NetlinkError::Connect { source }` (Changed Assumption 40). This fixes the panic for synchronous callers only; a bounded call must not wait in the bridge on its awaiting task (*Bounded calls*) |
+  | 06-02 | `guest_network.rs:1379` (`remove_file`) and `:2831` (`read_to_string`, whose error is absorbed by `.ok()` … `.unwrap_or_default()`), both `tokio::fs` on the `probe_startup` path | no `tokio::fs`; a refused thread or failed read is the probe's typed failure, refusing startup; the ifindex read's error is kept, not defaulted |
+  | 06-02 | `guest_network.rs:3841-3899`, `sweep_stale`: `tokio::fs` on the bridge thread's current-thread runtime, whose blocking pool starts empty | no `tokio::fs` there; a refused thread or failed read is its typed error, refusing startup |
+  | 06-02 | `guest_network.rs:3993`, `:4007`, `:4051`, `:4212` (bridge joins in `converge_shared` and `audit_shared`); `:4093-4103`, `:4261` (synchronous nft) | *Bounded calls*; errors typed as today |
+  | 06-02 | `guest_network.rs:2323`, `guard_spec` `unwrap_or_else(unreachable!)` in `new()`; `:2698`, `scratch_plan` `.expect` | built without a fallible step, or a typed startup refusal |
+  | 06-02 | `guest_network.rs:1593`, `:1643`, `unreachable!()` in the scratch `exercise` | a total match |
+  | 06-02 | `guest_network.rs:1096`, `Instant::now() + Duration`; `:1119`, `:1671`, counter `+ 1` | `checked_add`; `None` is the probe's typed failure |
+  | 06-03 | `guest_network.rs:555`, `GuestAddressPool::assign`: `clamp` panics when the prefix has no assignable host address | the existing typed pool-exhaustion refusal; `GuestAddressPool::new` keeps its signature |
+  | 06-04 | `overdrive-netlink/src/ethtool.rs:462`, `features_set_off`, reached by `set_tap_up` (restore, `activate`): the `< 16` check guards a read at bytes 16..19 | every read inside the received length; a short reply is `NetlinkError::Ethtool` |
+  | 06-04 | `set_tap_up`'s `GenlSock::recv`, no receive timeout | *Bounded calls* |
+  | 06-04 | the rustdoc of `SharedGuestNetworkOwner` and `GuestNetworkProvisioner` (`guest_network.rs:160-161` and each method) | states that no method panics and that a refused thread is the method's typed failure, as the trait's contract for every adapter |
+  | 06-01 | the debug-mask reads (`ethtool.rs`, scaffolds; their rustdoc at `:251`, `:273` still names the `"debug-blocking-join"` op) | the same length rule as above; the pinned `Builder::spawn` transport with a receive timeout and the `"debug-thread"` op (§ *Driven port — VMM launch seccomp filter (D-295-R22)*); the audit's dump meets *Bounded calls* |
+  | 06-01, 07-01 | `code.abs()` on a reply's errno: `ethtool.rs:466`; `nft.rs:1065`, `:1774`, `:1831`, `:2468`, `:2890`, `:2893` (overflows on `i32::MIN` in builds with overflow checks) | `unsigned_abs` or `checked_abs`, the failure typed |
+  | 07-01 | `nft.rs:4371`, `:4377`, `delete_elements`: `.expect("… set id")` | `ok_or_else` into `NetlinkError::Nft`, as `member_mutations` does; `clear_elements`' `:4405`, `:4413` go with it at 08-02, and its converge replacement follows the same rule |
+  | 07-01 | `nft.rs:3569`, `:3614`, `:3707`, `:3715`, `.expect("validated …")`; `:3658`, `:780`, `:806`, `unreachable!` (`shared_ip::collect_once`, the rule builders) | carry the validated value, or return `NetlinkError::Nft` |
+  | 07-01 | `nft.rs:2248`, `:2310`, `:2379`, `:2851`, `Instant::now() + OBSERVATION_DEADLINE` | `checked_add`, the failure typed |
+  | 08-03 | `mtls_intercept_worker.rs:2361-2395`, `audit_shared_owner` and `converge_shared_owner`: synchronous nft through `NfSock` under the owner lock, and `converge_shared_owner`'s wait in `block_on_host_netlink` (`mtls_intercept_port.rs:1062-1063`) | *Bounded calls*: no synchronous wait on the awaiting task; errors typed as today |
+  | 07-01 | `mtls_intercept_worker.rs:1974`, `:1993`, `OwnerStop::wait` / `AllocStop::wait` `unreachable!`: the fence opens in the guard's `Drop`, which also runs when the stop task is dropped before storing its result | the fence opens only after a result is stored; no path reaches `unreachable!` |
+  | 05-01 | `mtls_intercept_worker.rs:1351`, shared listener `spawn_blocking`; `:3534-3535`, `Handle::current().block_on`; `:1382-1383`, `AllocationId::new(<literal>).unwrap_or_else(unreachable!)` | B-7's async accept and awaited resolve create no thread; the literal id is built without a fallible step; a listener failure is `TaskFailed { leg }` |
+  | 05-01 | `lib.rs:1700`, `:1707`, `:1715`, `DnsServeTaskOwner::wait_failure`: the task is taken before the await, then `unreachable!`; a `JoinError` fallback `unreachable!` | a `wait_failure` dropped at any await leaves the task retained; a total `JoinError` match |
+  | 05-01 | `dns_responder/responder.rs:307`, the responder's `serve` `spawn_blocking` | fallible thread creation; a refusal ends the serve task with its typed error, component `Dns` |
+  | 09-01 | `lib.rs:1414-1458`, `SharedNetworkSupervisorHandle::shutdown_requested`: `:1416` on a second call; `:1438`, a `JoinError` fallback; `:1441`, `:1452`, when `fail_stop` returns `None`. `:1441` is reachable today: `run_mtls_owner` writes FailStop and queues its request, then the task ends through the DNS branch before the request is read | a request already returned is kept and returned unchanged on a later call; the `JoinError` match is total; when `fail_stop` returns `None` the supervisor's queued request is returned. The supervisor writes FailStop and enqueues its request with no await between them (for example, it reserves the channel slot first), so a FailStop it wrote always has its request queued; if none is queued, the handle returns the join-classified request with the no-recovery values, and the gate is already FailStop |
+  | 09-01 | `overdrive-host/src/cgroup_fs.rs:98-100`, `RealCgroupFs::write` (`tokio::fs`), reached by both kill methods through `CgroupManager::cgroup_kill` | no `tokio::fs`; a refused thread is the write's `io::Error`; the write meets *Bounded calls* |
+  | 09-01 | `lib.rs:1608`, `run_mtls_owner` `unreachable!` | its replacement contains none |
+  | 09-01 | the rustdoc of `VmKillCapability::kill_allocation` and `kill_workloads_slice` (`lib.rs:1365-1391`, scaffolds) | states that neither panics, that a refused thread is the returned `io::Error`, and that the caller bounds each write (*Kill loop*) |
+- **`.claude/rules/rust.md`** § "Logically unreachable `None` / `Err` — use
+  `unreachable!()`" prescribes `unreachable!()` for a guarded branch. User
+  decision 2 of 2026-09-30 forbids any panic on the #295 owner, kill, and
+  supervisor paths, `unreachable!()` included. The rule file does not yet
+  state that; DESIGN does not edit rule files.
 - **`.claude/rules/reconcilers.md`** § "Deferred Bar-2 promotions" names
   GH #234 as the home of the shared inbound-TPROXY routing infrastructure. When
   #295 lands that bullet becomes stale (GH #234 is superseded and closes), and
@@ -11892,6 +12270,11 @@ abandonment evidence and calls `std::process::exit(1)`; runtime/task teardown
 cannot extend the bound. Thus task-exit detection to process exit is at most
 15 seconds and an audited kernel mismatch to process exit at most 16 seconds
 (one-second detection + five-second repair + ten-second outer shutdown).
+*(Refined by D-295-R14 and user decision 1 of 2026-09-30, § *Runtime
+shared-network supervisor*: detection of an audited mismatch takes up to one
+audit period plus `SHARED_NETWORK_AUDIT_CALL_BOUND`, and the request can follow
+the five-second deadline by the rest of a kill loop in progress. The bound to
+process exit is the sum of those terms and the ten-second outer shutdown.)*
 
 On detection, new EXEC release closes immediately. Retry the exact failed owner
 through the same production converge/read-back path every 250 ms for at most
@@ -12386,11 +12769,16 @@ changes meaning.
   rulings 2 and 8), which is also done while Open for damage alone; or of every
   workload VMM only when the failing set is undetermined or a known VM cannot
   be killed.
-- **Failure projection:** `RecoveryDeadlineExceeded` at 20 attempts or 5 s;
-  `TapQuiescenceUndetermined` or `VmKillFailed` after the workloads-slice kill;
-  D8's abnormal-exit causes. The typed request goes to the CLI owner
-  (D-295-R17). A per-VM kill is not a fail-stop: recovery continues for the
-  rest, and a kill write that finds the scope already removed counts as done.
+- **Failure projection:** `RecoveryDeadlineExceeded` at 20 attempts or 5 s,
+  after any kill loop in progress has run to its end;
+  `TapQuiescenceUndetermined` or `VmKillFailed` after the workloads-slice kill,
+  `VmKillFailed` including a per-VM kill write that missed
+  `SHARED_NETWORK_VM_KILL_CALL_BOUND`; D8's abnormal-exit causes. The typed
+  request goes to the CLI owner (D-295-R17). A per-VM kill is not a fail-stop:
+  recovery continues for the rest, and a kill write that finds the scope
+  already removed counts as done. No owner, kill, or supervisor call panics; a
+  refused OS thread is the call's typed failure (user decision 2 of
+  2026-09-30).
 - **Explicitly unaffected:** READY, Running, and intercept-live of existing
   allocations whose TAPs were confirmed down and whose parts are intact;
   already-written EXEC commands; the EXEC gate itself when the only finding is
@@ -12398,13 +12786,16 @@ changes meaning.
 - **Ordering:** detection (immediate task loss, or the periodic audit) →
   `begin_recovery` for a node-level failure → quiescence for kernel-path
   components only, bounded by `SHARED_NETWORK_QUIESCE_CALL_BOUND` → per-VM kills
-  for unconfirmed TAPs, before any further owner call → attempts every 250 ms
-  within the 5 s window. Each attempt is: converge the failing owners → full
-  audit → kills for audited damage → TAP restore if the audit is clean →
-  `complete_attempt`. Each owner call is bounded by the remaining window. This
-  consumes RUN-295-B's existing 5 s budget and adds none, subject to E18's
-  fit check. Per-allocation damage found while Open is killed at once, and the
-  gate stays Open.
+  for unconfirmed TAPs, one kill loop run to its end before any further owner
+  call or fail-stop, each write bounded by `SHARED_NETWORK_VM_KILL_CALL_BOUND`
+  → attempts every 250 ms within the 5 s window. Each attempt is: converge the
+  failing owners → full audit → kills for audited damage → TAP restore if the
+  audit is clean → `complete_attempt`. Each owner call is bounded by the
+  remaining window; kill writes are bounded by their own bound, not the window.
+  This consumes RUN-295-B's existing 5 s budget, subject to E18's fit check
+  (quiescence bound + K + one attempt ≤ 5 s); the only overrun is a kill loop
+  in progress at the deadline, which the request follows. Per-allocation damage
+  found while Open is killed at once, and the gate stays Open.
 - **Counterexamples:**
   - Reopening after a converge whose audit has not yet returned reopens on
     partial repair.
@@ -12419,9 +12810,16 @@ changes meaning.
     H1).
   - Treating a per-VM damaged part as a node-level component makes one detached
     link or deleted TAP fail-stop the node (user ruling 8 of 2026-09-24).
+  - Cutting a kill loop short at the recovery deadline leaves a VM whose TAP
+    could not be confirmed down running through the drain and the CLI's
+    ten-second bound (user decision 1 of 2026-09-30).
+  - An unbounded kill write lets one hung `cgroup.kill` stall recovery and the
+    fail-stop indefinitely, since the kernel serializes the write on the
+    global `cgroup_mutex`.
 - **Evidence lane:** the seeded source-local supervisor matrix (E11, including
   the worker-only, policy-route-only, double-failure, and latch-invariant cases,
-  and E12's cases (a) to (g)); in-process proof §3.3 C0–C8 through
+  and E12's cases (a) to (g), (c2), and (i)); E23's refused-thread case;
+  E18's K and W; in-process proof §3.3 C0–C8 through
   `run_server`, including E12's in-process kill-scope and undetermined-quiescence
   cases; native S-ND295-37, the `IpRules` deletion case, and E12's native
   per-TAP, deleted-TAP, `ProvisionedDown`, damaged-part, and
@@ -12434,9 +12832,9 @@ changes meaning.
 | Scenario | G-295-0 admission | G-295-1 startup (member clear, R12) | G-295-2 EXEC release | G-295-3 activation | G-295-4 queue attach | G-295-5 reopen |
 |---|---|---|---|---|---|---|
 | 1 gate available | `assign` below the cap proceeds; a below-cap restart admits the successor before predecessor cleanup | stale members converged to empty and read back; fresh listeners bound; policy route and guard converged; `open_after_boot` | released after activation read-back | TAP up and read back after the event | CH spawned with fd 3 and no other inherited descriptor above 2, every thread under the launch seccomp filter (R22); parent copy closed | clean full audit, then restore succeeds → Open |
-| 2 unavailable / timeout | typed refusal carrying held and retiring counts; no row, no event, no restart budget consumed; at the cap a due restart reclaims its predecessor first | member-converge failure → `BootMemberClear` → `health.startup.refused`; EXEC stays BootClosed; nothing published | withheld; typed failure lands in the owning domain | Recovering: waits, then proceeds; genuine error or `Condemned`: set-down attempted where applicable, dominating Failed | typed `VmmError`, including a failed launch-hook step (close, `no_new_privs`, or filter load) and `ConfinementUnavailable { Seccomp }` for an architecture with no program (every target but x86_64); teardown and release-last | deadline → typed fail-stop request; per-TAP unconfirmed quiescence or per-allocation damage → only that VM killed, recovery continues (an absent scope counts as killed); undetermined quiescence → slice kill and `TapQuiescenceUndetermined`; a failed per-VM kill write → slice kill and `VmKillFailed` |
+| 2 unavailable / timeout | typed refusal carrying held and retiring counts; no row, no event, no restart budget consumed; at the cap a due restart reclaims its predecessor first | member-converge failure → `BootMemberClear` → `health.startup.refused`; EXEC stays BootClosed; nothing published | withheld; typed failure lands in the owning domain | Recovering: waits, then proceeds; genuine error or `Condemned`: set-down attempted where applicable, dominating Failed | typed `VmmError`, including a failed launch-hook step (close, `no_new_privs`, or filter load) and `ConfinementUnavailable { Seccomp }` for an architecture with no program (every target but x86_64); teardown and release-last | deadline → typed fail-stop request; per-TAP unconfirmed quiescence or per-allocation damage → only that VM killed, recovery continues (an absent scope counts as killed); undetermined quiescence → slice kill and `TapQuiescenceUndetermined`; a failed per-VM kill write, or one that misses its bound → slice kill and `VmKillFailed`; a kill loop running at the deadline completes before `RecoveryDeadlineExceeded`; a refused OS thread → the call's typed failure, never a panic |
 | 3 unrelated state | READY, Running, and CPU/memory checks unchanged; a stopped or deleted workload's leftover leased allocation is still reclaimed | allocation Running, READY, and Service Stable are not gated by startup; foreign nft objects untouched | Running and READY meanings unchanged | Running, READY, and intercept-live unchanged; `restart_counts` unchanged by any recovery wait the allocation observes | network-owner TAP state unchanged | existing allocations whose TAPs were confirmed down and whose parts are intact, and written EXEC, unchanged; per-allocation damage while Open leaves the gate Open; the `CleanupPending` status gates nothing |
-| 4 late success | a raced refusal leaves the successor id reserved in the View and never re-minted; a later `assign` of a released id is prevented upstream by View reservation, not by the pool | a member clear that commits after a refused boot publishes nothing: the gate stays BootClosed and the process exits | a late install success cannot resurrect a newer terminal (existing) | activation after the quiescence latch returns `QuiescenceLatched`, raises nothing, and runs once after reopen; after FailStop it never runs | a spawn completing after stop is reaped by the existing VMM owner | `complete_attempt` after FailStop is ignored; a quiescence result arriving after its bound is ignored (the slice kill already fired) |
+| 4 late success | a raced refusal leaves the successor id reserved in the View and never re-minted; a later `assign` of a released id is prevented upstream by View reservation, not by the pool | a member clear that commits after a refused boot publishes nothing: the gate stays BootClosed and the process exits | a late install success cannot resurrect a newer terminal (existing) | activation after the quiescence latch returns `QuiescenceLatched`, raises nothing, and runs once after reopen; after FailStop it never runs | a spawn completing after stop is reaped by the existing VMM owner | `complete_attempt` after FailStop is ignored; a quiescence result arriving after its bound is ignored (the slice kill already fired); a kill write landing after its bound was missed changes no outcome (the slice kill already fired) |
 | 5 disconnect / reconnect | process restart, including killed mode in-process, starts with an empty per-server pool; boot reclaims all leases | killed-mode restart (proof §3.5): residue members from the prior process are cleared before the constant-program read, and no token is adopted | VMM exit before release → start rejection | runtime quiesce, then `restore_quiesced_taps` raises only activation-complete TAPs | CH exit releases the queue; the TAP is torn down and never reattached; meanwhile no process without `CAP_NET_ADMIN` can attach it, and the former holder could not have changed the owner (`TUNSETOWNER` returns `EPERM` under R22; an owner change made anyway is detected by the audit as per-allocation damage) | DNS or listener task loss → exact-port or replacement recovery, with guest TCP dropped meanwhile by R19, **subject to E14 (e)**: if the `TIME_WAIT` side door reproduces, leg-F/leg-C loss becomes TAP-quiescing and the killed-`serve` residue (every leg-F socket closed at once, each flow's door open ~60 s) goes to the user |
 | 6 feature disabled | not applicable: post-Exec single cut, no disabled branch | not applicable | not applicable | not applicable | not applicable | not applicable |
 
@@ -12563,7 +12961,7 @@ production-composition tests.
 | Fresh start / restart successor *(PROPOSED D-295-R1 to R8)* | Placement advisory over the authoritative held count (at the cap a due restart reclaims its predecessor first) → pool `assign`, the admission linearization point → down TAP (owner uid 0) attached to bridge → guard membership → endpoint entry → TCX attach/pin/query → **read back TAP DOWN** → VMM builds the launch seccomp program (R22), attaches one vnet-header queue with the TAP down, and spawns CH with `--net fd=[3]`, no other inherited descriptor above 2, and the filter loaded in the child before its first exec → READY → accepted Running row → Pending capability + `2 + P` shared IP-set elements → atomic Active publication/read-back → synchronous `mtls.intercept.install.success` → **EXEC-gate wait while Recovering, then awaited `activate` + up/master/protection read-back** → (restart: the predecessor's one cleanup attempt, retiring then releasing its lease) → action shim invokes existing release hook → `VmDriver` claims EXEC gate before taking pending state → deferred EXEC acknowledgement | Running remains pre-intercept and pre-activation. The administratively down TAP, not guest sysctl intent, guarantees zero guest frames before the event barrier. After activation, every capture and drop effect is already live. |
 | Guest-to-guest TCP | Source TAP TCX validation/mark/rewrite → bridge proof-mark guard → IP TPROXY leg F → immutable source capability claim + original-destination resolution → outbound TLS/kTLS/splice → output divert leg C → destination capability/allowed-port claim → inbound TLS/kTLS/splice → marked leg S → destination TAP | The shared switch never selects a Service backend; each accepted connection is attributed once and never re-resolved to an address-reuse successor. |
 | Allocation teardown *(PROPOSED D-295-R7/R10/R11)* | Driver quiescence → retire lease → remove capability indexes and mark exact generation Retiring → wait its in-flight claims → tear down late returned handles and drain its published handles → **grouped awaited convergent element removal; failure keeps record, guards, and lease, and stop returns typed `ElementRemoval`** → endpoint delete → TCX unpin/detach → TAP down + read-back → delete TAP while still guarded → remove guard membership (each step treating an already-absent part as removed) → release address → existing terminal commit | Shared listeners and unrelated capabilities/handles remain. Release-last prevents predecessor/successor aliasing. Every failure retains cleanup ownership for exactly one level-triggered retry owner: Stop replay, Finalize replay, the restart's one-shot predecessor cleanup, or row-neutral Reclaim. Until release, `describe` shows the allocation `CleanupPending` (R20). |
-| Runtime owner loss *(PROPOSED D-295-R13 to R16)* | Immediate task-join signal (listeners, DNS) or one-second full audit (shared owner → worker → DNS) → **per-allocation damage only:** that VM's `cgroup.kill` through the kill-only capability, gate stays Open → **node-level failure:** locked Open→Recovering before the unhealthy event → **kernel-path component only:** quiesce managed TAPs with per-TAP outcomes; each unconfirmed TAP → that VM's `cgroup.kill` before any further owner call, recovery continues; undetermined quiescence → workloads-slice `cgroup.kill` + `TapQuiescenceUndetermined` fail-stop; a failed per-VM kill write → slice kill + `VmKillFailed` (D-295-R14, user-approved 2026-09-24) → every 250 ms: converge every failing component's owner + one full audit + kills for audited damage; attempt counted after all → one locked Recovering→Open only after complete success with no quiesced TAP, otherwise typed request at 20 attempts / five seconds → CLI-bound shutdown/status 1 within ten further seconds | Recovery snapshot and EXEC admission share one lock. Owner calls are bounded by the remaining window. Partial or late success cannot reopen after FailStop. A killed VM's parts leave the audit and restore universes. |
+| Runtime owner loss *(PROPOSED D-295-R13 to R16)* | Immediate task-join signal (listeners, DNS) or one-second full audit (shared owner → worker → DNS) → **per-allocation damage only:** that VM's `cgroup.kill` through the kill-only capability, gate stays Open → **node-level failure:** locked Open→Recovering before the unhealthy event → **kernel-path component only:** quiesce managed TAPs with per-TAP outcomes; each unconfirmed TAP → that VM's `cgroup.kill` before any further owner call, recovery continues; undetermined quiescence → workloads-slice `cgroup.kill` + `TapQuiescenceUndetermined` fail-stop; a failed per-VM kill write, or one that misses its bound → slice kill + `VmKillFailed` (D-295-R14, user-approved 2026-09-24; kill loop per user decision 1 of 2026-09-30) → every 250 ms: converge every failing component's owner + one full audit + kills for audited damage; attempt counted after all → one locked Recovering→Open only after complete success with no quiesced TAP, otherwise typed request at 20 attempts / five seconds, after any kill loop in progress → CLI-bound shutdown/status 1 within ten further seconds | Recovery snapshot and EXEC admission share one lock. Owner calls are bounded by the remaining window. Partial or late success cannot reopen after FailStop. A killed VM's parts leave the audit and restore universes. |
 
 #### D-295-DELIVER-04-01 — same-node protected-transport boundary (pre-event oracle WITHDRAWN)
 
@@ -12766,7 +13164,8 @@ not gain write methods.
 | Classifier entrypoint removal | TCX link → bridge guard | Unmarked managed-TAP frames drop at the independent bridge guard. Arbitrary near-simultaneous external loss of both controls retains only the explicitly accepted one-second detection/TAP-quiesce exposure. |
 | Cleartext escape or wrong peer identity | IP TPROXY → shared F/C listeners → enforcement | Constant fallback-drop rules, exact source/destination membership, immutable generation/SPIFFE capability, existing guest-mesh resolution, and TLS 1.3/kTLS publish fencing fail closed. On the distinct public-ingress path, the existing selected-`BackendId` receipt remains the exact-peer identity source. |
 | Address reuse / stale in-flight completion | Capability registry and guest-address pool | Remove predecessor indexes before reuse, wait its claims, destroy late handles, drain its handles, remove kernel effects, then release the address. |
-| Kernel-object tampering or drift | Privileged host adapter boundary | One-second normalized read-back audits close EXEC first. A kernel-path mismatch downs managed TAPs before repair. Unconfirmed quiescence kills affected VMM cgroups. *(PROPOSED D-295-R14/R15: the audit covers every component, including dynamic members, pins, and the policy route, and attributes per-allocation parts to their allocation; the kill scope, user-approved 2026-09-24, is the VMs whose TAPs could not be confirmed down or whose own parts are damaged, with repair continuing and those VMs' parts removed from the audit and restore universes; the workloads slice is killed and the process fail-stops only when that set cannot be determined (`TapQuiescenceUndetermined`) or a known VM cannot be killed (`VmKillFailed`).)* |
+| Kernel-object tampering or drift | Privileged host adapter boundary | One-second normalized read-back audits close EXEC first. A kernel-path mismatch downs managed TAPs before repair. Unconfirmed quiescence kills affected VMM cgroups. *(PROPOSED D-295-R14/R15: the audit covers every component, including dynamic members, pins, and the policy route, and attributes per-allocation parts to their allocation; the kill scope, user-approved 2026-09-24, is the VMs whose TAPs could not be confirmed down or whose own parts are damaged, with repair continuing and those VMs' parts removed from the audit and restore universes; the workloads slice is killed and the process fail-stops only when that set cannot be determined (`TapQuiescenceUndetermined`) or a known VM cannot be killed within the kill-write bound (`VmKillFailed`); a report's kill loop runs to its end before any fail-stop, user decision 1 of 2026-09-30.)* |
+| Host thread or descriptor exhaustion on an owner, kill, or supervisor path *(user decision 2 of 2026-09-30)* | Supervisor, shared owner, worker, DNS owner, and kill capability → OS thread and descriptor creation | Never panic (the release profile aborts on panic, which would end every workload's network owner). A refused thread or descriptor is the call's typed failure: a quiescence TAP's `unconfirmed` entry, an owner call's error, or a failed kill write, each mapped by the existing recovery and kill-scope rules. |
 | Resource exhaustion — attachment population *(PROPOSED D-295-R6 to R8; R7 user-approved)* | Concurrent evaluations, restart, resume → pool | Admission linearizes at `assign` on the per-server pool; held (Admitted plus Retiring) ≤ the placeholder cap; refusal is typed, non-terminal, carries the retiring count, and writes no row. |
 | Stale-process listener targets or foreign nft identity at boot | Retained kernel rules → fresh listener owner | Keep EXEC BootClosed; require zero managed TAPs; identify either absence or the complete owned prior program before fresh bind; atomically create or replace only owned target registers; rollback/read back to that optional prior on mismatch; refuse without mutating foreign/conflicting objects. |
 | Shared task crash or bind theft | Listener/DNS task boundary | Observe retained joins immediately; rebind only the exact recorded endpoint. `EADDRINUSE` or wrong read-back consumes the bounded retry and never rewrites rule targets. |
@@ -14906,6 +15305,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-R22 launch seccomp filter | **ACCEPTED 2026-09-24 (user ruling 9; native evidence increment-aa):** every Cloud Hypervisor launch loads, in the forked child before its first exec and as the last effect of the one ADR-0129 hook, a hand-built classic-BPF seccomp deny-list returning `EPERM` for the 13 TAP-mutating ioctl requests (values from `libc`, low 32 bits) on any descriptor, killing the process on a foreign audit architecture or an x32 syscall; every CH thread inherits it. **x86_64 only (user ruling 10, 2026-09-24):** every other target, aarch64 included, has no program; its startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect; aarch64 is GH #302. `seccompiler` not chosen, on evidence; the ADR-0142 egress check and the ADR-0130 read-back (now including the TAP debug message mask) stay as independent layers; resolves Open Questions 8 and 10 by prevention | [ADR-0143](../../product/architecture/adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md) (Accepted) |
 | Managed-link identity independent of host link configuration (fresh-host RCA) | **ACCEPTED (user rulings of 2026-09-28; the bridge contract pinned on evidence 2026-09-26):** a managed bridge is created with its address; a TAP's host-side MAC is judged by the D-295-R21 invariant (not a reserved address: `GUEST_BRIDGE_MAC` or a held allocation's guest MAC outside `Condemned`, the TAP's own included), never against a recorded value; no host link-configuration requirement, host probe, or startup-probe scratch-TAP condition. The reserved set is pinned on evidence, as ruling 2 asked. The `TapHostMac { ifindex, address: TapHostAddress }` fact shape and the set's exclusion of `Condemned` allocations are **USER-APPROVED 2026-09-28** (rulings 6 and 7) | This feature delta § *Managed-link identity independent of host link configuration* and § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*; [ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md) (Accepted); ADR-0130 read-back set |
 | DISTILL review iteration-1 pins (2026-09-29) and the user decisions of 2026-09-30 | **DR-06 USER-DECIDED 2026-09-29:** operators lose no diagnostic detail; `MtlsInterceptStopError`'s `Display` renders every per-connection cause (`<alloc>#<counter>: <message>`), an explicit amendment of the phase-B Display; **its extension to `ElementRemoval`, which names its removal cause in the same Failed-row detail, USER-APPROVED 2026-09-30.** **DR-08 (b)-A USER-APPROVED 2026-09-30:** the host classifies every failure of one TAP's set-down or read-back, a netlink session it cannot obtain (`NetlinkError::Connect`) included, as that TAP's `unconfirmed` entry and returns no `Err`, so production reaches the undetermined branch only through a call that misses its bound. **USER-APPROVED 2026-09-30:** a repeat quiescence while latched sets down allocations a part-way restore left `Active`, and the supervisor re-quiesces after a part-way restore. **Pinned on evidence 2026-09-30, changing no outcome:** every adapter's quiescence call makes no synchronous blocking wait on the awaiting task and tolerates being dropped at any await, so a hang is a bound miss; a netlink failure common to every TAP caused by descriptor exhaustion also fails the first per-VM `cgroup.kill` write and ends in `VmKillFailed`. **Pinned on evidence 2026-09-29:** `local_route_present` at 07-01, `intercept_mark_guard` `false` before 08-01 (DR-07); `PolicyRouteAbsent`, `InterceptMarkGuardAbsent`, `MembersRemain` as the observation checks' causes (DR-08 (a)); quiescence's `Err` means per-TAP outcomes cannot be determined, with an adapter-specific variant, and each `unconfirmed` entry is one TAP's own failure (DR-08 (b)); until 08-01 the `intercept_mark_guard` rustdoc states its not-observed meaning, and the rustdoc of the three new `InterceptError` variants states that no adapter returns them; a `cfg` predicate requiring `test`, including `all(test, …)`, marks a test-only item the close-on-exec gate skips (DR-10); the PORT-295-C listener projection owned by 07-01 (H2); per-IP listener ports (DR-16); emission-counted reclaim attempts (DR-17); the E18 benchmark report as evidence (DR-19); the short-frame egress row guaranteed by the verifier bounds check (DR-20); the E11 latch read as the bit `activate` consults, never derived from a call log (L6); 06-02, and 06-01 as its evidence stands, depend on 05-03 (DR-01). No ADR changes | This feature delta § *Driven port — intercept element release…*, § *Driven port — TAP activation gate*, § *Runtime shared-network supervisor* (*Quiescence*), § *Evidence-lane matrix* (*E12 whole-call branch*), § *Driven port — VMM TAP queue attachment*, § *C-295-A*, § *Required downstream changes* |
+| Kill loop, no-panic contract, and the H14 evidence lane (user decisions of 2026-09-30) | **Decision 1, USER-APPROVED 2026-09-30 (option (a)):** a report's per-VM kill loop runs to its end before any further owner call and any fail-stop, `RecoveryDeadlineExceeded` included; every kill write, per-VM and slice, is bounded by the private `SHARED_NETWORK_VM_KILL_CALL_BOUND`, and a missed bound is a failed kill (per-VM: slice kill, then `VmKillFailed`); E18 measures the loop time K and the largest single write W at T1-PORT4; the fit rule is quiescence bound + K + one attempt ≤ 5 s, the double-loss exposure is restated with K, and if K breaks the fit the loop's writes go concurrent. **Decision 2, USER-APPROVED 2026-09-30:** no owner, kill, or supervisor call panics; a refused OS thread is the call's typed failure, `NetlinkError::Connect` from the host netlink bridge and so one TAP's `unconfirmed` entry under DR-08 (b)-A; the staged panic sites are DELIVER review items. **Decision 3, USER-APPROVED 2026-09-30:** R10's two element-batch failure rules rest on the kernel's batch abort and on a source-local lane. **Decided under the user's 2026-09-30 delegation:** the kill bound's value is set by E18 as `max(1 s, 4 × W)`, 1 s until then; K is measured with one scope holding one process per allocation, since T1-PORT4 has no VMMs; the kill write meets the bounded-call rule; the bounded-call rule covers every call the supervisor races (pinned on evidence, changing no outcome); a module-private `SharedIpElementIo` seam in `overdrive-netlink::nft` is pinned, because no real-kernel stimulus or existing seam reaches the adapter's handling; an unacknowledged batch is not a rejection and is left to convergence; `GuestAddressPool::assign` refuses a prefix without hosts with the existing exhaustion refusal; the supervisor handle returns a request it already returned, or the supervisor's queued one, instead of panicking; the no-panic lint set leaves out `clippy::indexing_slicing`; E23 proves a refused thread through a `pids.max` limit; intentional shutdown cancels the supervisor only between kill loops; on a bounded path only `Builder::spawn` with an awaited result may create a thread; the D-295-R22 debug-mask transport moves from `spawn_blocking` to that primitive with a receive timeout, and its `"debug-blocking-join"` error op becomes `"debug-thread"`. ADR-0124 states the decision-1 amendment | This feature delta § *Runtime shared-network supervisor* (*Kill loop*, *Quiescence and restore latency at density*, *Bounded calls*, *No panic on any owner, kill, or supervisor path*), § *Driven port — intercept element release…* (*Evidence for the two element-batch failure rules*), § *Evidence-lane matrix* (E8, E12, E18, E23), § *Lifecycle Gate Ownership* (G-295-5), Changed Assumptions 39 and 40, § *Required downstream changes*; [ADR-0124](../../product/architecture/adr-0124-bounded-shared-network-owner-recovery.md) (explicit 2026-09-30 amendment) |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
@@ -14933,12 +15333,12 @@ measured outcome. System-design acceptance does not itself authorize registry mu
    E14 (e), the `TIME_WAIT` side door, is judged separately; if it reproduces,
    listener loss becomes kernel-path (quiesces TAPs), and the killed-mode
    residue exposure is surfaced to the user.
-3. **Latency at the placeholder population (E18).** The audit and quiescence
-   call bounds, the recovery-window fit, the double-loss exposure statement,
-   and R15's mutex choice depend on native measurement at T1-PORT4. If a full
-   audit takes longer than 1 s, or quiescence plus one attempt does not fit the
-   5 s window after batching, an accepted security or timing outcome changes and
-   the user decides.
+3. **Latency at the placeholder population (E18).** The audit, quiescence, and
+   kill-write call bounds, the recovery-window fit (quiescence bound + kill-loop
+   time K + one attempt ≤ 5 s), the double-loss exposure statement, and R15's
+   mutex choice depend on native measurement at T1-PORT4. If a full audit takes
+   longer than 1 s, or the fit fails after batching and concurrent kill writes,
+   an accepted security or timing outcome changes and the user decides.
 4. **Native proof of the production descriptor (E2).** The spikes proved
    descriptor 50 from a blocking open; descriptor 3 with `O_NONBLOCK` is proven
    only by the native lane.

@@ -8,8 +8,8 @@ D-295-DISTILL-11 component/task/S37 evidence is autonomously authorized and
 pending the trusted-checkpoint review.** This
 records RUN-295-B.
 
-**Amended 2026-09-24** by the accepted #295 correctness-recovery replacement
-DESIGN. This decision is operative in code committed at HEAD `db3af700` on the
+**Amended 2026-09-24**, and on 2026-09-30 by user decision 1 of that date, by
+the accepted #295 correctness-recovery replacement DESIGN. This decision is operative in code committed at HEAD `db3af700` on the
 #295 feature branch (`lib.rs:1406`, `:1412`, `:1449`, `:1458-1459`: quiescence,
 the 250 ms retry, and the 20-attempt / 5 s fail-stop; not merged to `main`), and
 that implementation does not realize it (#295 `recovery/proof-findings.md`
@@ -33,7 +33,7 @@ live in the #295 feature delta:
 - ADR-0131: the action shim waits on the release claim before raising a TAP;
   it gains no recovery, reopen, or fail-stop authority.
 
-Two parts of the Decision below are rewritten to user rulings:
+Three parts of the Decision below are rewritten to user rulings:
 
 - **Kill scope (D-295-R14, user rulings 2 and 8 of 2026-09-24).** As accepted
   on 2026-09-17 the Decision read: *"Kernel-path mismatch also quiesces managed
@@ -42,10 +42,17 @@ Two parts of the Decision below are rewritten to user rulings:
   confirmed down or whose own network parts are damaged, and continues repair
   for the rest. The whole workloads slice is killed, and the process
   fail-stops, only when the failing set cannot be determined or a per-VM kill
-  cannot be written.
+  cannot be written within its bound.
 - **SIGTERM (D-295-R17, user ruling of 2026-09-23).** The CLI selects the
   fail-stop request ahead of SIGTERM as well as SIGINT, and a normal SIGTERM
   exits status 0.
+- **Kill loop before the deadline fail-stop (user decision 1 of 2026-09-30).**
+  As accepted, and operative on the #295 branch, the Decision read: *"At five
+  seconds the internal supervisor sends one typed fail-stop request to the
+  CLI-owned serve handle."* A per-VM kill loop in progress at that point now
+  runs to its end first, so the request can follow the five-second deadline
+  by the rest of that loop. Stopping a VM whose TAP could not be confirmed
+  down outranks the exact moment of the request.
 
 ## Context
 
@@ -88,12 +95,14 @@ its TCX ingress or egress link or classifier detached; or its link pin,
 endpoint entry, or bridge-guard member gone) is handled the same way: only its
 VM is killed, and the node is not fail-stopped for it. A host-side MAC that
 changed to an unreserved address is not damage. A killed VM's parts are no
-longer audited or restored, so recovery can reopen for the rest. When the
-platform cannot determine which TAPs are down (the quiescence call fails as a
-whole or misses its bound), or a per-VM kill cannot be written, the whole
-workloads slice is killed and the fail-stop path is taken. Whole-node
-fail-stop otherwise remains only for node-level components that fail bounded
-repair.
+longer audited or restored, so recovery can reopen for the rest. The kills
+that answer one report form one loop, which runs to its end before any further
+owner call and any fail-stop. Every kill write is bounded, and a write that
+misses its bound has failed. When the platform cannot determine which TAPs are
+down (the quiescence call fails as a whole or misses its bound), or a per-VM
+kill cannot be written within its bound, the whole workloads slice is killed
+and the fail-stop path is taken. Whole-node fail-stop otherwise remains only
+for node-level components that fail bounded repair.
 
 A consequence of the per-allocation classification, stated so it is not
 mistaken for a repair path: a single common-cause loss that manifests as
@@ -175,8 +184,9 @@ port. It never selects a new ephemeral port or rewrites nft targets. Exact-port
 bind/read-back failure retries within the same five-second window and then
 fail-stops. A pure listener failure does not quiesce TAPs or existing commands.
 
-At five seconds the internal supervisor sends one typed fail-stop request to the
-CLI-owned serve handle. The CLI selects that request ahead of SIGINT and
+At five seconds, once any kill loop in progress has run to its end, the
+internal supervisor sends one typed fail-stop request to the CLI-owned serve
+handle. The CLI selects that request ahead of SIGINT and
 SIGTERM, bounds the entire graceful shutdown attempt to ten more seconds, and
 exits status 1 on completion, shutdown error, or hard timeout. Timeout uses
 immediate process exit so an unbounded owner teardown cannot extend the bound.
@@ -246,6 +256,16 @@ persist to the deadline and fail-stop every workload on the node for one VM's
 loss. Killing that VM removes its only frame source, and its lifecycle replaces
 it.
 
+### Let the recovery deadline cut a kill loop short
+
+Rejected by user decision 1 of 2026-09-30. A fail-stop that interrupted the
+loop would leave a VM whose TAP could not be confirmed down, or whose parts are
+damaged, running through the drain and the CLI's ten-second bound. That VM is
+the one that can still emit frames. Leaving a kill write unbounded instead
+would let one hung `cgroup.kill`, serialized by the kernel on the global cgroup
+lock, stall recovery and the fail-stop indefinitely; a missed bound is
+therefore a failed kill.
+
 ## Consequences
 
 Positive: every shared owner has a detection signal, fail-closed admission
@@ -259,4 +279,9 @@ healthy state and any single owned-component loss. Arbitrary near-simultaneous
 external deletion of both a TAP's TCX entrypoint and the independent bridge
 guard can restore ordinary forwarding for at most the one-second audit interval
 before managed TAP quiescence; this bounded double-loss exposure is an accepted
-RUN-295-B downside, not described as fail-closed.
+RUN-295-B downside, not described as fail-closed. A TAP that quiescence cannot
+confirm down stays exposed until its VM's kill write lands, which the kill
+loop reaches within its measured time; the feature delta restates the bound
+with the placeholder-population measurements. A kill loop in progress at the
+deadline can delay the fail-stop request past five seconds by the rest of that
+loop.
