@@ -171,6 +171,11 @@ mod integration {
     /// netns-density-295 recovery proof §3.4 — lower element deletion /
     /// read-back failure through the real `StopAllocation` owner path.
     mod shared_element_cleanup_failure;
+
+    /// GH #295 S-ND295-13D, composed — the fresh-process boot member clear's
+    /// refusal through `run_server_with_obs_and_driver` (G-295-1 rows 2 and 4).
+    mod boot_member_clear_refusal;
+
     /// GH #295 S-ND295-00 — composed production-startup ordering and
     /// scratch-probe refusal through the accepted shared-owner port.
     mod shared_guest_network_startup;

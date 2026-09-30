@@ -41,6 +41,9 @@
 //! | NA-RECREATE | safety   | At the cap, the crashed predecessor's `guest_network.lease_released` precedes its successor's `provision`. |
 //! | NA-OVERLAP  | safety   | The peak held population, retiring predecessors and their replacements included, never exceeds 16,384 (formerly the observation OBS-OVERLAP). |
 //! | NA-G        | safety   | The peak held population at any lease acquisition over the whole run is at most 16,384. |
+//! | NA-VIEW     | safety   | Each at-cap placement window (NA-1 twice, NA-2) holds no `guest_network.admission_refused`: placement over the production `GuestAttachmentView` returns `NoCapacity` before any dispatch, so the pool's own refusal is never what stops the overflow. A refusal there means the view under-reported occupancy (DR-12). |
+//! | NA-E7       | safety   | At most one refused dispatch per contended slot (E7): every allocation, and every workload, sees at most one `guest_network.admission_refused` over the run. Each workload in this schedule contends for at most one slot, and a raced restart refusal advances the successor id, so the count is taken per workload as well as per allocation. |
+//! | NA-E7-C     | safety   | One contended slot (the `Contended` block): two new workloads are placed on the one free slot before either dispatches; exactly one wins it, the other's dispatch is refused exactly once (`guest_network.admission_refused` naming its allocation — the witness that NA-E7 is not vacuous), and its immediate re-evaluation is refused by placement with no second refused dispatch. |
 //!
 //! # Production owner path (causes are driven, consequences are observed)
 //!
@@ -87,6 +90,18 @@
 //!   `CONVERGENCE_MAX_IN_FLIGHT = 8` evaluations on distinct targets at once.
 //!   The decorator controls ordering only. It never authors a row, a lease, a
 //!   gate transition, or a decision.
+//! - **Contended slot** (NA-E7-C): the runtime's `ViewStore` is the fixture's
+//!   `SimViewStore` behind [`OrderingViewStore`], a test-local decorator that,
+//!   on request, parks one evaluation's view write-through. The tick persists
+//!   the next view after `reconcile` has placed the workload and before the
+//!   action shim dispatches (ADR-0035 §5 step 7 before step 9), and a fresh
+//!   placement always changes the view (it reserves the allocation id), so
+//!   the park holds evaluation A between its placement and its dispatch.
+//!   Evaluation B of another workload then runs whole on the same free slot.
+//!   Production reaches the same interleaving: `spawn_convergence_loop` runs
+//!   up to eight evaluations on distinct targets at once, and each
+//!   write-through is a real fsync await. Like the ledger, the decorator
+//!   controls ordering only; every write it parks is delegated unchanged.
 //! - **Crash stimulus**: `SimDriver::inject_exit_after(.., Crashed)`, consumed
 //!   by the production `worker::exit_observer`, which authors the `Failed`
 //!   row. No row is seeded. The crash victim is a Service because a crashed
@@ -102,25 +117,31 @@
 //! captures `lease_released`, `lease_retired`, and `admission_refused` and
 //! appends them, with each `provision`, to one ordered journal. The held
 //! count at each acquisition is the NA-1..NA-G measure; the journal order is
-//! the NA-RECREATE oracle. Each placement report also carries the census
-//! (Running, in flight, terminal predecessor) read from the observation store.
+//! the NA-RECREATE oracle; the `admission_refused` entries inside each
+//! placement window are the NA-VIEW oracle, and their counts over the run the
+//! NA-E7 oracle. Each placement report also carries the census (Running, in
+//! flight, terminal predecessor) read from the observation store.
 //!
 //! # Evidence tier, bounds, and reproduction
 //!
 //! Tier 1: in-process, current-thread runtime, explicit interleaving, seeded
 //! victims, fill order, and block order. The run is bounded by the fill
 //! (16,384 evaluations), four blocks, and fixed settle budgets, and creates no
-//! kernel object. Filling one node to 16,384 is quadratic in the cap (about
-//! 190 s), which is why this body sits in the integration binary with a
-//! nextest timeout override for this test alone. Until the DELIVER step that
+//! kernel object. No wall time is read: the only time source is the fixture's
+//! `SimClock`, advanced by the harness, and every wait yields to the runtime.
+//! Filling one node to 16,384 is quadratic in the cap (about 190 s per seed),
+//! which is why this body sits in the integration binary with a nextest
+//! timeout override for this test alone. Until the DELIVER step that
 //! carries B-7 (05-01 at the latest), `SimMtlsIntercept`'s bind still opens a
 //! plain loopback listener for the worker's two shared legs; after it the
 //! worker binds nothing (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the effect on D-295-R16, E16, and lane classification)). The worker's shared-leg tasks end when
 //! the last worker reference drops.
 //!
-//! The seed comes from `OVERDRIVE_ND295_ADMISSION_SEED` (default
-//! `186055177052160001` = `0x0295_0032_A0D1_0001`; the recovery run also
-//! recorded `295032`) and is printed with every verdict. Reproduce with
+//! The seeds come from `OVERDRIVE_ND295_ADMISSION_SEED`, a comma-separated
+//! list of `u64` (defaults `186055177052160001` = `0x0295_0032_A0D1_0001` and
+//! `295032`, the two seeds the recovery run recorded). The body runs each seed
+//! on a fresh node, in order, and prints the seed with every verdict. Reproduce
+//! one seed with
 //! `OVERDRIVE_ND295_ADMISSION_SEED=<seed> cargo xtask lima run -- cargo nextest run -p overdrive-sim --test integration --features integration-tests --run-ignored all --no-capture -E 'test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)'`.
 
 #![allow(
@@ -135,7 +156,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::guest_network::{
@@ -147,6 +168,7 @@ use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
+use overdrive_control_plane::view_store::{ProbeError, Result as ViewStoreResult, ViewStore};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, workload_lifecycle};
 use overdrive_core::aggregate::{
@@ -213,8 +235,9 @@ const NODE: &str = "local";
 /// Per-workload memory demand; see `SimNode::operator_deploys`.
 const DEMAND_MEMORY_BYTES: u64 = 256 * 1024;
 const SEED_ENV: &str = "OVERDRIVE_ND295_ADMISSION_SEED";
-/// `186055177052160001`.
-const DEFAULT_SEED: u64 = 0x0295_0032_A0D1_0001;
+/// `186055177052160001` and `295032`, the two seeds the recovery run recorded
+/// (TS S-ND295-05D).
+const DEFAULT_SEEDS: [u64; 2] = [0x0295_0032_A0D1_0001, 295_032];
 /// Bounded convergence retries for release, replacement, and resume settling.
 const SETTLE_TICKS: usize = 6;
 /// Bounded clock nudges while waiting for the exit observer.
@@ -224,6 +247,23 @@ const LEASE_RETIRED: &str = "guest_network.lease_retired";
 const LEASE_RELEASED: &str = "guest_network.lease_released";
 const ADMISSION_REFUSED: &str = "guest_network.admission_refused";
 const LEASE_EVENTS: [&str; 3] = [LEASE_RETIRED, LEASE_RELEASED, ADMISSION_REFUSED];
+
+/// The seeds to run, in order: `OVERDRIVE_ND295_ADMISSION_SEED` as a
+/// comma-separated `u64` list, or [`DEFAULT_SEEDS`].
+fn seeds() -> Vec<u64> {
+    std::env::var(SEED_ENV).ok().map_or_else(
+        || DEFAULT_SEEDS.to_vec(),
+        |raw| {
+            raw.split(',')
+                .map(|seed| {
+                    seed.trim().parse().unwrap_or_else(|_| {
+                        panic!("{SEED_ENV} must be a comma-separated list of u64 seeds: {raw}")
+                    })
+                })
+                .collect()
+        },
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Lease observation: the owner port, decorated, plus the pinned lease events.
@@ -487,8 +527,9 @@ impl LeaseLedger {
         (state.held_peak, state.held_peak_at.clone(), state.lease_peak, state.overlap_peak.clone())
     }
 
-    /// Journal entries the harness cannot account for: malformed lease events
-    /// and releases of leases the ledger never saw provisioned.
+    /// Journal entries the harness cannot account for: malformed lease events,
+    /// releases of leases the ledger never saw provisioned, and refusals that
+    /// name no parseable allocation (NA-E7 could not attribute them).
     fn unaccounted(&self) -> Vec<LeaseEvent> {
         self.state
             .lock()
@@ -497,7 +538,9 @@ impl LeaseLedger {
             .filter(|event| {
                 matches!(
                     event,
-                    LeaseEvent::Malformed { .. } | LeaseEvent::Released { was_held: false, .. }
+                    LeaseEvent::Malformed { .. }
+                        | LeaseEvent::Released { was_held: false, .. }
+                        | LeaseEvent::Refused { alloc: None, .. }
                 )
             })
             .cloned()
@@ -567,6 +610,29 @@ impl SharedGuestNetworkOwner for LeaseLedger {
 /// `mint_alloc_id` grammar: `alloc-<workload>-<attempt>`.
 fn workload_of(alloc: &AllocationId) -> Option<&str> {
     alloc.as_str().strip_prefix("alloc-")?.rsplit_once('-').map(|(workload, _)| workload)
+}
+
+/// The `guest_network.admission_refused` entries of `events`.
+fn refusals(events: &[LeaseEvent]) -> Vec<LeaseEvent> {
+    events.iter().filter(|event| matches!(event, LeaseEvent::Refused { .. })).cloned().collect()
+}
+
+/// NA-E7 counts: refusals per allocation and per workload. A refusal that
+/// names no allocation is a harness failure caught by
+/// [`LeaseLedger::unaccounted`] before the verdicts, so it is not counted here.
+fn refusal_counts(
+    events: &[LeaseEvent],
+) -> (BTreeMap<AllocationId, usize>, BTreeMap<String, usize>) {
+    let mut per_alloc: BTreeMap<AllocationId, usize> = BTreeMap::new();
+    let mut per_workload: BTreeMap<String, usize> = BTreeMap::new();
+    for event in events {
+        if let LeaseEvent::Refused { alloc: Some(alloc), .. } = event {
+            *per_alloc.entry(alloc.clone()).or_default() += 1;
+            let workload = workload_of(alloc).unwrap_or_else(|| alloc.as_str()).to_owned();
+            *per_workload.entry(workload).or_default() += 1;
+        }
+    }
+    (per_alloc, per_workload)
 }
 
 /// NA-RECREATE over the journal of one replacement: the predecessor's release
@@ -653,6 +719,9 @@ struct Decision {
     admitted: bool,
     acquired: Vec<AllocationId>,
     held_at_acquisition: Option<usize>,
+    /// The `guest_network.admission_refused` entries journaled during this
+    /// placement's evaluation (the NA-VIEW oracle).
+    refused: Vec<LeaseEvent>,
     dispatch: Result<(), String>,
 }
 
@@ -661,7 +730,7 @@ impl Decision {
         format!(
             "before: held={} (Running {}, in flight {}, terminal predecessor {}; {} retired by \
              event); node-wide Running rows={}; acquired attachment={} {:?}; held population at \
-             that acquisition={:?}; dispatch={:?}",
+             that acquisition={:?}; {ADMISSION_REFUSED} in the window=[{}]; dispatch={:?}",
             self.before.held(),
             self.before.running,
             self.before.in_flight,
@@ -671,6 +740,7 @@ impl Decision {
             self.admitted,
             self.acquired,
             self.held_at_acquisition,
+            render_events(&self.refused),
             self.dispatch,
         )
     }
@@ -690,9 +760,88 @@ struct HeldForAppState {
     guest_pool: Arc<GuestAddressPool>,
 }
 
+/// One parked view write-through: the evaluation's target, the signal that
+/// it parked, and the handle that releases it.
+struct ParkedWrite {
+    target: TargetResource,
+    entered: oneshot::Sender<()>,
+    release: oneshot::Receiver<()>,
+}
+
+/// Test-local ordering decorator over the fixture's `SimViewStore` (the NA-E7-C
+/// contended-slot stimulus). On request it parks the next write-through for
+/// one target — the tick's step between `reconcile` and dispatch — until the
+/// harness releases it, then delegates the write unchanged. Every other call
+/// delegates at once. It authors no view, row, lease, or decision.
+struct OrderingViewStore {
+    inner: SimViewStore,
+    park_next: Mutex<Option<ParkedWrite>>,
+}
+
+impl OrderingViewStore {
+    fn new() -> Self {
+        Self { inner: SimViewStore::new(), park_next: Mutex::new(None) }
+    }
+
+    /// Park the next write-through for `target`; returns the signal that it
+    /// parked and the handle that releases it.
+    fn arm_park(&self, target: TargetResource) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered, entered_rx) = oneshot::channel();
+        let (release_tx, release) = oneshot::channel();
+        let previous = self.park_next.lock().replace(ParkedWrite { target, entered, release });
+        assert!(previous.is_none(), "one view write-through park at a time");
+        (entered_rx, release_tx)
+    }
+}
+
+#[async_trait::async_trait]
+impl ViewStore for OrderingViewStore {
+    async fn bulk_load_bytes(
+        &self,
+        reconciler: &'static str,
+    ) -> ViewStoreResult<BTreeMap<TargetResource, Vec<u8>>> {
+        self.inner.bulk_load_bytes(reconciler).await
+    }
+
+    async fn write_through_bytes(
+        &self,
+        reconciler: &'static str,
+        target: &TargetResource,
+        cbor: &[u8],
+    ) -> ViewStoreResult<()> {
+        let parked = {
+            let mut slot = self.park_next.lock();
+            if slot.as_ref().is_some_and(|park| &park.target == target) {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(park) = parked {
+            park.entered.send(()).expect("the harness is awaiting the view-park signal");
+            park.release.await.expect("the harness releases the parked view write-through");
+        }
+        self.inner.write_through_bytes(reconciler, target, cbor).await
+    }
+
+    async fn delete(
+        &self,
+        reconciler: &'static str,
+        target: &TargetResource,
+    ) -> ViewStoreResult<()> {
+        self.inner.delete(reconciler, target).await
+    }
+
+    async fn probe(&self) -> std::result::Result<(), ProbeError> {
+        self.inner.probe().await
+    }
+}
+
 struct SimNode {
     _tmp: TempDir,
     state: AppState,
+    /// The runtime's `ViewStore`: the ordering decorator over `SimViewStore`.
+    views: Arc<OrderingViewStore>,
     driver: Arc<SimDriver>,
     clock: Arc<SimClock>,
     /// The one owner instance: the seams' `provisioner` and `AppState`'s owner.
@@ -708,8 +857,10 @@ impl SimNode {
     /// This file's seam fixture helper (TS § *Seam fixture*).
     async fn compose(seed: u64, owner: Arc<LeaseLedger>) -> Self {
         let tmp = TempDir::new().expect("tempdir");
-        let mut runtime = ReconcilerRuntime::new(tmp.path(), Arc::new(SimViewStore::new()))
-            .expect("reconciler runtime");
+        let views = Arc::new(OrderingViewStore::new());
+        let mut runtime =
+            ReconcilerRuntime::new(tmp.path(), Arc::clone(&views) as Arc<dyn ViewStore>)
+                .expect("reconciler runtime");
         runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("intent store"));
@@ -793,6 +944,7 @@ impl SimNode {
         Self {
             _tmp: tmp,
             state,
+            views,
             driver,
             clock,
             owner,
@@ -1004,6 +1156,7 @@ impl SimNode {
         let (before, node_running_rows, _) = self.census().await;
         let retired_before = self.owner.retired_count();
         self.owner.begin_window();
+        let journal_start = self.owner.journal_len();
         let dispatch = self.converge(workload).await;
         let (held_at_acquisition, acquired) = self.owner.window();
         let decision = Decision {
@@ -1013,6 +1166,7 @@ impl SimNode {
             admitted: self.owner.holds_for(workload),
             acquired,
             held_at_acquisition,
+            refused: refusals(&self.owner.journal_since(journal_start)),
             dispatch,
         };
         self.note(format!("placement {workload}: {}", decision.evidence()));
@@ -1066,17 +1220,23 @@ impl SimNode {
             Duration::ZERO,
             ExitKind::Crashed { exit_code: None, signal: Some(9) },
         );
+        // Every step yields to the current-thread runtime (the exit-injection
+        // task and the exit observer run on it) and advances only the sim
+        // clock; no wall time is read, so the step count is a function of the
+        // seed and the tasks' own await points.
         for _ in 0..CRASH_POLL_BUDGET {
             tokio::task::yield_now().await;
             self.clock.tick(Duration::from_millis(1));
-            tokio::time::sleep(Duration::from_millis(1)).await;
             let row = self.state.obs.alloc_status_row(&alloc).await.expect("row read");
             if row.is_some_and(|row| row.state == AllocState::Failed) {
                 self.note(format!("crashed {workload} ({alloc}) -> Failed row by exit observer"));
                 return alloc;
             }
         }
-        self.harness_failure(&format!("exit observer never published Failed for {alloc}"));
+        self.harness_failure(&format!(
+            "exit observer never published Failed for {alloc} within {CRASH_POLL_BUDGET} \
+             yield-and-tick steps"
+        ));
     }
 }
 
@@ -1101,6 +1261,26 @@ impl Report {
         eprintln!("seed={} [{label}] {id}: {evidence}", node.seed);
         self.verdicts.push(Verdict { id, green, evidence });
     }
+
+    /// NA-VIEW (DR-12): an at-cap placement over the production
+    /// `GuestAttachmentView` returns `NoCapacity` before any dispatch, so its
+    /// window holds no `guest_network.admission_refused`. A refusal there
+    /// means the view under-reported occupancy and the pool's own `assign`
+    /// stopped the overflow instead, which NA-1 and NA-2 alone cannot tell
+    /// apart from a correct placement refusal.
+    fn view_verdict(&mut self, node: &SimNode, id: &'static str, decision: &Decision) {
+        self.verdict(
+            node,
+            id,
+            decision.refused.is_empty(),
+            format!(
+                "{ADMISSION_REFUSED} events in this at-cap placement window: [{}] (placement \
+                 over the read-port must refuse before any dispatch); {}",
+                render_events(&decision.refused),
+                decision.evidence(),
+            ),
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1109,6 +1289,7 @@ enum Block {
     InFlight,
     Retiring,
     Resume,
+    Contended,
 }
 
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
@@ -1117,13 +1298,20 @@ enum Block {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 07-03 (S-ND295-05D)"]
 async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads() {
-    let seed = std::env::var(SEED_ENV)
-        .ok()
-        .map_or(DEFAULT_SEED, |raw| raw.parse().expect("seed env var must be a u64"));
+    for seed in seeds() {
+        eprintln!(
+            "seed={seed} body=node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads"
+        );
+        Box::pin(node_wide_admission(seed)).await;
+    }
+}
+
+/// One seed of S-ND295-05D on a fresh node.
+async fn node_wide_admission(seed: u64) {
     eprintln!("seed={seed} invariant=node_wide_held_attachment_admission cap={CAP}");
     let mut rng = StdRng::seed_from_u64(seed);
     let owner = Arc::new(LeaseLedger::new());
-    // Thread-local capture of the pinned lease events for the whole body.
+    // Thread-local capture of the pinned lease events for this seed's run.
     let _lease_events =
         tracing::subscriber::set_default(Registry::default().with(owner.event_layer()));
     let node = SimNode::compose(seed, Arc::clone(&owner)).await;
@@ -1132,7 +1320,6 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
     //     reconciler evaluation, each reaching Running with one lease. ---
     let mut fillers: Vec<String> = (0..CAP).map(|index| format!("f{index:05}")).collect();
     fillers.shuffle(&mut rng);
-    let fill_started = Instant::now();
     for (index, workload) in fillers.iter().enumerate() {
         node.operator_deploys(workload).await;
         if let Err(error) = node.converge(workload).await {
@@ -1145,33 +1332,30 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
             ));
         }
         if (index + 1) % 4_096 == 0 {
-            eprintln!(
-                "seed={seed} fill progress {}/{CAP} after {:?}",
-                index + 1,
-                fill_started.elapsed()
-            );
+            eprintln!("seed={seed} fill progress {}/{CAP}", index + 1);
         }
     }
     let baseline = Census { running: CAP, in_flight: 0, terminal: 0 };
     node.expect_census(baseline, "after fill").await;
     node.owner.start_measuring();
-    eprintln!("seed={seed} fill: {CAP} distinct workloads Running in {:?}", fill_started.elapsed());
+    eprintln!("seed={seed} fill: {CAP} distinct workloads Running");
 
     // Seeded victims (distinct fillers) and block order.
     let mut victim_indices = BTreeSet::new();
-    while victim_indices.len() < 3 {
+    while victim_indices.len() < 4 {
         victim_indices.insert(rng.gen_range(0..CAP));
     }
     let mut victims: Vec<String> =
         victim_indices.into_iter().map(|index| fillers[index].clone()).collect();
     victims.shuffle(&mut rng);
-    let (released_victim, displaced_victim, resumed_victim) =
-        (victims[0].clone(), victims[1].clone(), victims[2].clone());
-    let mut blocks = [Block::Placement, Block::InFlight, Block::Retiring, Block::Resume];
+    let (released_victim, displaced_victim, resumed_victim, contended_victim) =
+        (victims[0].clone(), victims[1].clone(), victims[2].clone(), victims[3].clone());
+    let mut blocks =
+        [Block::Placement, Block::InFlight, Block::Retiring, Block::Resume, Block::Contended];
     blocks.shuffle(&mut rng);
     let plan = format!(
         "victims release={released_victim} displace-for-service={displaced_victim} \
-         resume={resumed_victim}; block order {blocks:?}"
+         resume={resumed_victim} contended-slot={contended_victim}; block order {blocks:?}"
     );
     node.note(plan.clone());
     eprintln!("seed={seed} {plan}");
@@ -1190,6 +1374,7 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
                     !decision.admitted,
                     decision.evidence(),
                 );
+                report.view_verdict(&node, "NA-VIEW (NA-1, 16,384 Running)", &decision);
                 node.operator_stops("na1-probe").await;
                 node.settle_released("na1-probe").await;
             }
@@ -1234,6 +1419,7 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
                 );
                 let decision = node.probe_placement("na2-probe").await;
                 report.verdict(&node, "NA-2", !decision.admitted, decision.evidence());
+                report.view_verdict(&node, "NA-VIEW (NA-2, one admission in flight)", &decision);
                 release.send(()).expect("parked provision is still waiting");
                 if let Err(error) = held.await {
                     node.harness_failure(&format!("na2-held completion failed: {error}"));
@@ -1277,6 +1463,11 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
                     "NA-1 (16,383 Running + 1 crashed predecessor still held)",
                     !decision.admitted,
                     format!("crashed predecessor {crashed_alloc}; {}", decision.evidence()),
+                );
+                report.view_verdict(
+                    &node,
+                    "NA-VIEW (NA-1, 16,383 Running + 1 crashed predecessor still held)",
+                    &decision,
                 );
 
                 // Replace the crashed Service. At the cap the due restart
@@ -1342,6 +1533,87 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
                          still holds a lease={predecessor_held}; census {after:?}"
                     ),
                 );
+            }
+            Block::Contended => {
+                // NA-E7-C: one free slot; two new workloads are both placed on
+                // it before either dispatches. The first evaluation parks
+                // between its placement and its dispatch (its view
+                // write-through); the second runs whole and takes the slot.
+                node.operator_stops(&contended_victim).await;
+                node.settle_released(&contended_victim).await;
+                node.expect_census(
+                    Census { running: CAP - 1, in_flight: 0, terminal: 0 },
+                    "after releasing the contended slot",
+                )
+                .await;
+                node.operator_deploys("na5-parked").await;
+                node.operator_deploys("na5-winner").await;
+                let journal_start = node.owner.journal_len();
+                let (entered, release) = node
+                    .views
+                    .arm_park(TargetResource::new("workload/na5-parked").expect("target"));
+                let parked = node.converge("na5-parked");
+                let mut parked = std::pin::pin!(parked);
+                tokio::select! {
+                    biased;
+                    outcome = &mut parked => {
+                        node.harness_failure(&format!(
+                            "na5-parked's evaluation finished without reaching its view \
+                             write-through, so it was never placed before dispatch: {outcome:?}"
+                        ));
+                    }
+                    signal = entered => signal.expect("view-park signal"),
+                }
+                node.note(
+                    "na5-parked placed on the free slot and parked before dispatch".to_owned(),
+                );
+                let winner = node.converge("na5-winner").await;
+                let winner_admitted = node.owner.holds_for("na5-winner");
+                release.send(()).expect("the parked view write-through is still waiting");
+                let parked_dispatch = parked.await;
+                let window = refusals(&node.owner.journal_since(journal_start));
+                let parked_refusals = window
+                    .iter()
+                    .filter(|event| {
+                        matches!(
+                            event,
+                            LeaseEvent::Refused { alloc: Some(alloc), .. }
+                                if workload_of(alloc) == Some("na5-parked")
+                        )
+                    })
+                    .count();
+                report.verdict(
+                    &node,
+                    "NA-E7-C (witness: the contended slot's loser is refused exactly once)",
+                    winner_admitted
+                        && !node.owner.holds_for("na5-parked")
+                        && window.len() == 1
+                        && parked_refusals == 1,
+                    format!(
+                        "na5-winner admitted={winner_admitted} (dispatch {winner:?}); na5-parked \
+                         holds a lease={}; its dispatch after the winner: {parked_dispatch:?}; \
+                         {ADMISSION_REFUSED} in the window: [{}]",
+                        node.owner.holds_for("na5-parked"),
+                        render_events(&window),
+                    ),
+                );
+
+                // The runtime's immediate re-evaluation of the refused
+                // workload sees the node at the cap: placement refuses and
+                // nothing is dispatched, so no second refusal is journaled.
+                let reevaluation = node.converge("na5-parked").await;
+                let after = refusals(&node.owner.journal_since(journal_start));
+                report.verdict(
+                    &node,
+                    "NA-E7-C (no second refused dispatch for the contended slot)",
+                    after.len() == window.len() && !node.owner.holds_for("na5-parked"),
+                    format!(
+                        "re-evaluation of na5-parked: {reevaluation:?}; {ADMISSION_REFUSED} since \
+                         the contention began: [{}]",
+                        render_events(&after),
+                    ),
+                );
+                node.operator_stops("na5-parked").await;
             }
             Block::Resume => {
                 // A restartable Service takes the freed attachment and is
@@ -1436,11 +1708,30 @@ async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workload
     let unaccounted = node.owner.unaccounted();
     if !unaccounted.is_empty() {
         node.harness_failure(&format!(
-            "lease events the ledger cannot account for (malformed, or a release of a lease \
-             never provisioned): {}",
+            "lease events the ledger cannot account for (malformed, a release of a lease never \
+             provisioned, or a refusal naming no allocation): {}",
             render_events(&unaccounted)
         ));
     }
+
+    // E7 (H13): at most one refused dispatch per contended slot, counted over
+    // the whole run per allocation and per workload.
+    let run_refusals = refusals(&node.owner.journal_since(0));
+    let (per_alloc, per_workload) = refusal_counts(&run_refusals);
+    let worst_alloc = per_alloc.values().copied().max().unwrap_or(0);
+    let worst_workload = per_workload.values().copied().max().unwrap_or(0);
+    report.verdict(
+        &node,
+        "NA-E7 (at most one refused dispatch per contended slot)",
+        worst_alloc <= 1 && worst_workload <= 1,
+        format!(
+            "{ADMISSION_REFUSED} over the run: {} event(s); per allocation {per_alloc:?} (max \
+             {worst_alloc}); per workload {per_workload:?} (max {worst_workload}); events: [{}]",
+            run_refusals.len(),
+            render_events(&run_refusals),
+        ),
+    );
+
     let (held_peak, held_peak_at, lease_peak, overlap_peak) = node.owner.peaks();
     report.verdict(
         &node,

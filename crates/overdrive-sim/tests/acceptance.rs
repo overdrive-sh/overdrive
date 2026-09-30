@@ -142,8 +142,9 @@ mod acceptance {
     // EXEC gate: activation waits out a recovery or a latched quiescence and
     // never turns it into a failure (D-295-R5).
     mod netns_density_activation_order;
-    // netns-density-295 S-ND295-57 — seeded reclaim of leftover guest networks
-    // across restart predecessors, stopped and deleted workloads, and at the
-    // cap (D-295-R11).
-    mod netns_density_reclaim;
+    // netns-density-295 S-ND295-07 (E8 seeded) — seeded interleavings of a
+    // stopping allocation's element-removal failure, its retries, and
+    // same-address successor starts: the address is never reassigned while
+    // the predecessor's lease is held (D-295-R7, R10).
+    mod netns_density_retiring_cleanup;
 }

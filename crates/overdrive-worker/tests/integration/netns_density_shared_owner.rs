@@ -446,7 +446,9 @@ impl RecordingSharedIntercept {
         let listener = self.listener_clones.lock().remove(index);
         // SAFETY: `listener` owns a live TCP socket. `shutdown` changes socket
         // state but does not steal fd ownership; dropping closes it once.
-        let _ = unsafe { libc::shutdown(listener.as_raw_fd(), libc::SHUT_RDWR) };
+        let status = unsafe { libc::shutdown(listener.as_raw_fd(), libc::SHUT_RDWR) };
+        let error = std::io::Error::last_os_error();
+        assert_eq!(status, 0, "shutting the listener task's socket down failed: {error}");
         drop(listener);
     }
 
@@ -617,11 +619,21 @@ impl Drop for RecordingNodeGuard {
     }
 }
 
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener
+/// (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent`
+/// signature)). `ActivationBarrierIntercept` delegates to
+/// `RecordingSharedIntercept` and is unchanged by that step; the recording's
+/// own bind then returns a `LoopbackInterceptListener` (TS § "When the port
+/// changes", line 3).
+type BoundListener = std::net::TcpListener;
+
 impl MtlsIntercept for RecordingSharedIntercept {
     fn bind_transparent(
         &self,
         addr: SocketAddrV4,
-    ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+    ) -> overdrive_worker::mtls_intercept::Result<BoundListener> {
         self.record(InterceptCall::BindTransparent(addr));
         let call = self.bind_calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_bind_at == Some(call) {
@@ -1101,7 +1113,7 @@ impl MtlsIntercept for ActivationBarrierIntercept {
     fn bind_transparent(
         &self,
         addr: SocketAddrV4,
-    ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+    ) -> overdrive_worker::mtls_intercept::Result<BoundListener> {
         self.shared.bind_transparent(addr)
     }
 
@@ -1763,6 +1775,19 @@ async fn a_fresh_owner_clears_stale_members_before_reading_the_program() {
     worker.shutdown_owner().await.expect("the owner drains");
 }
 
+/// The worker-level half of G-295-1 row 2: a boot member clear that fails, or
+/// that returns `Ok` with members left, refuses the fresh owner with
+/// `BootMemberClear` whose source is the clear's own error or
+/// `MembersRemain { observed }` naming the members left (FD § "[REF] Driven
+/// port — intercept element release, member convergence, boot clear …" (the
+/// typed causes of the observation checks, boot step 6.2)), binds no listener,
+/// arms no node guard, and publishes nothing. It asserts no component:
+/// `component()` lands at 08-03, and S-ND295-61's component table carries
+/// `BootMemberClear`'s. The composed `run_server` evidence for rows 2 and 4
+/// (`health.startup.refused`, EXEC BootClosed, a clear that commits after the
+/// refusal publishing nothing) is not this body's: the worker holds no task
+/// after a refused start, so nothing here could observe a late commit.
+///
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-13D — The fresh intercept owner refuses to start when stale members cannot be cleared.
 /// CONTRACT_SHAPE: bounded-change.
@@ -1796,11 +1821,20 @@ async fn a_failed_member_clear_refuses_startup_without_publication() {
             }
             (
                 ConvergeElementsScript::LeaveMembers,
-                MtlsSharedOwnerError::BootMemberClear { .. },
-            ) => {}
+                MtlsSharedOwnerError::BootMemberClear {
+                    source: InterceptError::MembersRemain { observed },
+                },
+            ) => {
+                assert_eq!(
+                    *observed,
+                    intercept_members(&stale_members),
+                    "a clear that returns Ok with members left names exactly the stale members"
+                );
+            }
             (script, error) => {
                 panic!(
-                    "{script:?}: expected BootMemberClear carrying the clear's cause, got {error:?}"
+                    "{script:?}: expected BootMemberClear carrying the clear's own error, or \
+                     MembersRemain naming the members left, got {error:?}"
                 )
             }
         }
@@ -1833,15 +1867,6 @@ async fn a_failed_member_clear_refuses_startup_without_publication() {
             intercept_members(&stale_members),
             "{script:?}: the refused clear changed no member"
         );
-
-        // The clear's batch lands after the refusal. Nothing the refused start
-        // left behind may react to it by publishing.
-        intercept.land_member_batch(&InterceptMembers::default());
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            matches!(worker.audit_shared_owner().await, Err(MtlsSharedOwnerError::NotStarted)),
-            "{script:?}: a clear that commits after the refusal publishes nothing"
-        );
         worker.shutdown_owner().await.expect("an Absent owner's shutdown is idempotent");
         let journal = intercept.journal();
         assert!(
@@ -1849,7 +1874,8 @@ async fn a_failed_member_clear_refuses_startup_without_publication() {
                 call,
                 InterceptCall::BindTransparent(_) | InterceptCall::ConvergeShared { .. }
             )),
-            "{script:?}: no listener or guard follows the late clear; journal: {journal:?}"
+            "{script:?}: shutting the refused owner down binds no listener and arms no guard; \
+             journal: {journal:?}"
         );
         assert!(intercept.listener_addresses().is_empty(), "{script:?}");
         assert_eq!(intercept.recorded_identity(), None, "{script:?}");
@@ -1983,9 +2009,26 @@ async fn policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_
         let Err(detection) = worker.audit_shared_owner().await else {
             panic!("{loss:?}: the loss must fail the audit");
         };
+        // The audit's typed cause for each lost object (FD § "[REF] Driven port
+        // — intercept element release, member convergence, boot clear …" (the
+        // typed causes of the observation checks)): the program is intact, so
+        // the policy-route check or the guard check is the first to fail.
+        let cause_matches = match loss {
+            ProtectionLoss::PolicyRoute => matches!(
+                detection,
+                MtlsSharedOwnerError::Intercept { source: InterceptError::PolicyRouteAbsent }
+            ),
+            ProtectionLoss::InterceptMarkGuard => matches!(
+                detection,
+                MtlsSharedOwnerError::Intercept {
+                    source: InterceptError::InterceptMarkGuardAbsent
+                }
+            ),
+        };
         assert!(
-            matches!(detection, MtlsSharedOwnerError::Intercept { .. }),
-            "{loss:?}: a program-family loss is an Intercept failure, got {detection:?}"
+            cause_matches,
+            "{loss:?}: the audit reports Intercept with the lost object's typed cause, got \
+             {detection:?}"
         );
         assert_eq!(detection.component(), SharedGuestNetworkComponent::IpRules, "{loss:?}");
 
@@ -2083,8 +2126,17 @@ async fn a_differently_targeted_program_is_never_rewritten() {
         panic!("a differently targeted program must fail the audit");
     };
     assert!(
-        matches!(detection, MtlsSharedOwnerError::Intercept { .. }),
-        "a program mismatch is an Intercept failure, got {detection:?}"
+        matches!(
+            &detection,
+            MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch {
+                    expected,
+                    observed: Some(observed),
+                },
+            } if *expected == recorded && *observed == wrong
+        ),
+        "a program mismatch is Intercept over PostconditionMismatch naming the recorded and the \
+         observed program, got {detection:?}"
     );
     assert_eq!(detection.component(), SharedGuestNetworkComponent::IpRules);
 
@@ -2126,8 +2178,14 @@ async fn a_differently_targeted_program_is_never_rewritten() {
         panic!("an absent program must fail the audit");
     };
     assert!(
-        matches!(absent, MtlsSharedOwnerError::Intercept { .. }),
-        "an absent program is an Intercept failure, got {absent:?}"
+        matches!(
+            &absent,
+            MtlsSharedOwnerError::Intercept {
+                source: InterceptError::PostconditionMismatch { expected, observed: None },
+            } if *expected == recorded
+        ),
+        "an absent program is Intercept over PostconditionMismatch with nothing observed, got \
+         {absent:?}"
     );
     assert_eq!(absent.component(), SharedGuestNetworkComponent::IpRules);
     let recreate_from = intercept.journal_len();

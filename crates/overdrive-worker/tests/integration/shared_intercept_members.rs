@@ -341,8 +341,12 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 /// stopping allocation's destinations is deleted out of band with
 /// `nft delete element`, so it is absent before removal runs. Then:
 ///
-/// 1. two rejected batches — a duplicate destination and a zero-port
-///    destination — each return `Err` and leave every owned table byte-equal;
+/// 1. two argument-refused requests — a duplicate destination and a zero-port
+///    destination — are refused by the adapter's argument validation before
+///    any netlink I/O ("Rejects duplicate or zero-port destinations before any
+///    I/O"), each returning `Err` and leaving every owned table byte-equal. No
+///    batch reaches the kernel, so these rows are not evidence of a kernel
+///    batch rejection;
 /// 2. an adapter that has recorded no program (a fresh `HostMtlsIntercept`
 ///    whose `converge_shared` never ran) is refused with
 ///    `SharedProgramNotConverged` (DISTILL gap B-8, removal refusal 2, after
@@ -357,11 +361,14 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 /// 4. the removal retired the stopping allocation's element tokens: dropping
 ///    its guards changes nothing.
 ///
-/// A commit the kernel itself rejects, and a post-commit read-back failure,
-/// cannot be produced on demand against a real kernel without racing the
-/// adapter's observation; the source-local scripted seam
-/// (`mtls_intercept_port::shared_program_rollback_acceptance::remove_allocation_elements_deletes_only_present_requested_members`)
-/// owns those two arms.
+/// Not asserted by this body or any other: R10's two netlink-failure arms — a
+/// delete batch the kernel itself rejects leaving every member unchanged, and
+/// a post-commit read-back failure performing one inverse transition and
+/// keeping both causes. Neither has a deterministic real-kernel stimulus, and
+/// the adapter's only private seam (`SharedInterceptProgramIo`) carries the
+/// program's observe and replace, not the element batch or its read-back.
+/// The body keeps its name; its argument-refused rows are the only
+/// "rejection" it proves.
 ///
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
@@ -437,21 +444,29 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
     );
     let before = owned_tables_snapshot();
 
-    // 1. Rejected batches preserve the pre-state.
-    for (batch, destinations) in [
-        ("duplicate-destination", vec![REMOVAL_STOPPING_PRESENT, REMOVAL_STOPPING_PRESENT]),
+    // 1. Argument-refused requests preserve the pre-state. The adapter refuses
+    //    them before any netlink I/O, so no batch reaches the kernel: this is
+    //    argument validation, not a kernel batch rejection.
+    for (request, destinations) in [
         (
-            "zero-port-destination",
+            "argument-refused-duplicate-destination",
+            vec![REMOVAL_STOPPING_PRESENT, REMOVAL_STOPPING_PRESENT],
+        ),
+        (
+            "argument-refused-zero-port-destination",
             vec![REMOVAL_STOPPING_PRESENT, SocketAddrV4::new(REMOVAL_STOPPING_SOURCE, 0)],
         ),
     ] {
         let refused = host.remove_allocation_elements(REMOVAL_STOPPING_SOURCE, &destinations);
-        evidence.record(batch, "refusal", format_args!("{refused:?}"));
-        assert!(refused.is_err(), "[{batch}] an invalid destination batch is refused");
+        evidence.record(request, "argument-refusal", format_args!("{refused:?}"));
+        assert!(
+            refused.is_err(),
+            "[{request}] a duplicate or zero-port destination is refused before any I/O"
+        );
         assert_eq!(
             owned_tables_snapshot(),
             before,
-            "[{batch}] a rejected removal batch leaves every owned table byte-equal"
+            "[{request}] an argument-refused removal leaves every owned table byte-equal"
         );
     }
 
@@ -727,6 +742,42 @@ impl InterceptLoss {
             }
         }
     }
+
+    /// Whether `detected` is the audit's one typed cause for this loss (FD §
+    /// "[REF] Driven port — intercept element release, member convergence, boot
+    /// clear …" (the typed causes of the observation checks): program, then
+    /// policy route, then guard, then members, the first failure reported).
+    /// The program the audit expects is the one the worker recorded, which is
+    /// the healthy `baseline` program.
+    fn is_reported_by(self, detected: &MtlsSharedOwnerError, baseline: &InterceptState) -> bool {
+        match self {
+            Self::Member => {
+                let after_loss =
+                    self.observed_loss(baseline).expect("a member loss keeps the program");
+                matches!(
+                    detected,
+                    MtlsSharedOwnerError::MemberMismatch { expected, observed }
+                        if *expected == baseline.members && *observed == after_loss.members
+                )
+            }
+            Self::ProgramTable => matches!(
+                detected,
+                MtlsSharedOwnerError::Intercept {
+                    source: InterceptError::PostconditionMismatch { expected, observed: None },
+                } if *expected == baseline.program
+            ),
+            Self::FwmarkRule | Self::LocalRoute => matches!(
+                detected,
+                MtlsSharedOwnerError::Intercept { source: InterceptError::PolicyRouteAbsent }
+            ),
+            Self::MarkGuardTable => matches!(
+                detected,
+                MtlsSharedOwnerError::Intercept {
+                    source: InterceptError::InterceptMarkGuardAbsent
+                }
+            ),
+        }
+    }
 }
 
 const fn first_destination() -> SocketAddrV4 {
@@ -831,22 +882,10 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
     let detected = detected.expect_err("the audit reports the lost object");
     assert!(detection < Duration::from_secs(1), "the loss is detected within a second");
     assert_eq!(detected.component(), loss.component(), "the audit names the lost component");
-    if loss == InterceptLoss::Member {
-        let after_loss = loss.observed_loss(&baseline).expect("a member loss keeps the program");
-        assert!(
-            matches!(
-                &detected,
-                MtlsSharedOwnerError::MemberMismatch { expected, observed }
-                    if *expected == baseline.members && *observed == after_loss.members
-            ),
-            "a member loss is a MemberMismatch naming the registry and the kernel members"
-        );
-    } else {
-        assert!(
-            matches!(detected, MtlsSharedOwnerError::Intercept { .. }),
-            "a program, policy-route, or guard loss is an Intercept failure"
-        );
-    }
+    assert!(
+        loss.is_reported_by(&detected, &baseline),
+        "[{row}] the audit reports the lost object's typed cause, got {detected:?}"
+    );
 
     worker.converge_shared_owner().await.expect("repair converges with live allocations");
     worker.audit_shared_owner().await.expect("the repaired owner audits clean");
@@ -900,12 +939,15 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
 }
 
 /// Each intercept object deleted from under live allocations is detected by
-/// the worker's audit within a second, attributed to its one component, and
-/// restored exactly by `converge_shared_owner` (feature delta *Runtime member
-/// audit (R15)*, *Runtime repair contract*; E13's Lima column, E11's
+/// the worker's audit within a second, attributed to its one component with
+/// its one typed cause, and restored exactly by `converge_shared_owner`
+/// (feature delta *Runtime member audit (R15)*, *Runtime repair contract*, *The
+/// typed causes of the observation checks*; E13's Lima column, E11's
 /// policy-route case). Rows, each on a freshly scrubbed kernel with two live
-/// allocations: one member (`IpSets`), the whole program table, the fwmark
-/// rule, and table 100's local route (each `IpRules`). After every repair the
+/// allocations: one member (`IpSets`, `MemberMismatch`), the whole program
+/// table (`IpRules`, `Intercept` over `PostconditionMismatch` with nothing
+/// observed), the fwmark rule, and table 100's local route (each `IpRules`,
+/// `Intercept` over `PolicyRouteAbsent`). After every repair the
 /// port's `observe_shared_state` equals the pre-loss state, the fwmark rule
 /// and local route are present exactly once (`Client::local_route_present`),
 /// the RPDB and table-100 complements are unchanged, an intact program keeps
@@ -935,7 +977,8 @@ async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations
 
 /// The D-295-R18 intercept-mark guard table deleted from under live
 /// allocations is detected by the audit within a second as an `IpRules`
-/// failure and restored exactly by `converge_shared_owner`, without rewriting
+/// failure (`Intercept` over `InterceptMarkGuardAbsent`) and restored exactly
+/// by `converge_shared_owner`, without rewriting
 /// the intact program; afterwards a new allocation installs (feature delta
 /// *Runtime member audit (R15)*, *Runtime repair contract*, R18 guard
 /// presence; E13's guard case). R18-conditional: DELIVER step 08-01 removes

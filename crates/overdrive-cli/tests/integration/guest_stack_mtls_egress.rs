@@ -70,8 +70,9 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use super::serve_lifetime_support::kill_serve_owner;
 use super::vm_walking_skeleton::{
-    build_spin_binary, config_path, poll_until_running, poll_until_terminal, shared_staging_root,
-    stage_rootfs_with_extra_binaries, stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
+    PACKET_SOCKET_SEAL_SETTLE, TeardownBound, build_spin_binary, config_path, poll_until_running,
+    poll_until_terminal, seal_packet_socket, shared_staging_root, stage_rootfs_with_extra_binaries,
+    stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
 };
 
 pub(super) const SERVICE_PORT: u16 = 18_951;
@@ -1025,6 +1026,13 @@ struct PacketStatistics {
 struct CaptureBatch {
     frames: Vec<CapturedFrame>,
     statistics: PacketStatistics,
+    /// One entry per pending `ENETDOWN` the socket reported, in order: the
+    /// number of frames already captured when it was reported. A capture bound
+    /// while its device is down reports exactly one, at zero frames.
+    link_down_reports: Vec<usize>,
+    /// The bound ifindex stopped resolving after a link-down report, so the
+    /// kernel had unhooked the socket for good and reading ended early.
+    interface_removed: bool,
 }
 
 /// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
@@ -1207,7 +1215,7 @@ impl WireCapture {
         let fd = open_bound_packet_socket(ifindex).expect("open bound AF_PACKET capture");
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
+        let handle = std::thread::spawn(move || capture_fd(fd, ifindex, &stop_thread));
         Self { stop, handle: Some(handle), port }
     }
 
@@ -1233,19 +1241,20 @@ impl WireCapture {
             .expect("open the exact-ifindex link-layer AF_PACKET capture");
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || capture_fd(fd, &stop_thread));
+        let handle = std::thread::spawn(move || capture_fd(fd, ifindex, &stop_thread));
         Self { stop, handle: Some(handle), port: 0 }
     }
 
-    /// Stop and return the batch; kernel-reported loss and a failed capture
-    /// thread are evidence the caller asserts, never a panic here.
+    /// Stop and return the batch; kernel-reported loss, a counted frame the
+    /// reader never read, and a failed capture thread are evidence the caller
+    /// asserts, never a panic here (see [`capture_is_fully_accounted`]).
     fn stop_accounted(mut self) -> Result<CaptureBatch, String> {
         self.stop.store(true, Ordering::SeqCst);
         let handle = self.handle.take().ok_or("the capture thread was already joined")?;
         let capture = handle.join().map_err(|payload| {
             format!("the capture thread failed: {}", panic_evidence(payload.as_ref()))
         })?;
-        capture_statistics_are_lossless(capture.statistics)?;
+        capture_is_fully_accounted(&capture)?;
         Ok(capture)
     }
 
@@ -1284,6 +1293,29 @@ fn capture_statistics_are_lossless(statistics: PacketStatistics) -> Result<(), S
     }
 }
 
+/// Loss accounting over one sealed capture: the kernel dropped nothing, and
+/// every packet it counted for this socket was read. For a socket without a
+/// ring, `PACKET_STATISTICS.tp_packets` is the number of frames the kernel
+/// queued plus the number it dropped (`tp_drops`), so a lossless, fully read
+/// capture has `tp_packets == frames read` exactly. Either inequality fails
+/// closed: "no frame" is evidence only when the reader provably saw every
+/// frame the kernel delivered to it.
+fn capture_is_fully_accounted(capture: &CaptureBatch) -> Result<(), String> {
+    capture_statistics_are_lossless(capture.statistics)?;
+    let counted = u64::from(capture.statistics.packets);
+    let read = u64::try_from(capture.frames.len()).expect("frame count fits u64");
+    if counted == read + u64::from(capture.statistics.drops) {
+        Ok(())
+    } else {
+        Err(format!(
+            "PACKET_STATISTICS counted {counted} packets (tp_drops {}) but the capture read {read} \
+             frames; a frame the kernel delivered was never read (link-down reports {:?}, \
+             interface removed {})",
+            capture.statistics.drops, capture.link_down_reports, capture.interface_removed
+        ))
+    }
+}
+
 fn open_bound_packet_socket(ifindex: u32) -> std::io::Result<std::os::fd::RawFd> {
     open_packet_socket(ifindex, libc::SOCK_DGRAM)
 }
@@ -1293,8 +1325,12 @@ fn open_packet_socket(
     socket_type: libc::c_int,
 ) -> std::io::Result<std::os::fd::RawFd> {
     // SAFETY: create and bind one AF_PACKET socket. An ifindex of zero is the
-    // documented all-interface binding used by `start_all`.
-    let fd = unsafe { libc::socket(libc::AF_PACKET, socket_type, ETH_P_ALL.to_be()) };
+    // documented all-interface binding used by `start_all`. The socket is
+    // created with protocol 0, which hooks it into no receive path; the bind
+    // below names `ETH_P_ALL` and the interface together. A socket created
+    // with `ETH_P_ALL` is hooked on every interface until the bind, so an
+    // exact-ifindex capture could queue frames of other interfaces first.
+    let fd = unsafe { libc::socket(libc::AF_PACKET, socket_type, 0) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -1348,33 +1384,91 @@ fn open_packet_socket(
     Ok(fd)
 }
 
-fn capture_fd(fd: std::os::fd::RawFd, stop: &AtomicBool) -> CaptureBatch {
+/// Read one AF_PACKET capture until the caller stops it.
+///
+/// `ENETDOWN` is a pending link-down report, never the end of the capture. A
+/// packet socket bound to a device that is down is not hooked into that
+/// device's receive path, and the kernel records the refusal as a pending
+/// socket error (`packet_do_bind` sets `sk_err = ENETDOWN`); the device going
+/// down later records the same error (`packet_notifier`, `NETDEV_DOWN`). The
+/// next `recvmsg` reports it once, before any queued frame, and clears it.
+/// When the device comes up the kernel hooks the socket to the same ifindex
+/// again (`NETDEV_UP`) and delivery resumes. Each report is recorded with the
+/// number of frames captured before it, and reading continues.
+///
+/// Consequence for callers: while its device is down an exact-ifindex capture
+/// is blind. A zero-frame count over a down interval is therefore no evidence
+/// on its own; the TAP counters and the link history witness that interval.
+///
+/// Only a genuine removal ends the reading early. When an exact-ifindex
+/// capture receives a report and its ifindex no longer resolves
+/// (`if_indextoname` → `ENXIO`), the kernel has unhooked the socket for good
+/// (`NETDEV_UNREGISTER` resets its ifindex) and nothing more can arrive. A
+/// device removed while already down produces no report; that capture reads
+/// nothing more and ends at the caller's stop. An all-interface capture
+/// (ifindex 0) is bound to no single device and receives no report.
+///
+/// At the end the socket is sealed ([`seal_packet_socket`]), settled, and drained,
+/// and `PACKET_STATISTICS` is read over that closed population.
+fn capture_fd(fd: std::os::fd::RawFd, bound_ifindex: u32, stop: &AtomicBool) -> CaptureBatch {
     let mut frames = Vec::new();
+    let mut link_down_reports = Vec::new();
+    let mut interface_removed = false;
     let mut buf = vec![0_u8; 65_535];
-    while !stop.load(Ordering::SeqCst) {
+    while !stop.load(Ordering::SeqCst) && !interface_removed {
         match receive_captured_frame(fd, &mut buf) {
             Ok(Some(frame)) => frames.push(frame),
             Ok(None) => std::thread::sleep(Duration::from_micros(200)),
-            Err(error) if capture_interface_was_removed(&error) => break,
+            Err(error) if error.raw_os_error() == Some(libc::ENETDOWN) => {
+                link_down_reports.push(frames.len());
+                interface_removed = bound_ifindex != 0
+                    && !ifindex_resolves(bound_ifindex).unwrap_or_else(|error| {
+                        panic!(
+                            "resolve capture ifindex {bound_ifindex} after a link-down report: \
+                             {error}"
+                        )
+                    });
+            }
             Err(error) => panic!("AF_PACKET receive failed: {error}"),
         }
     }
+    seal_packet_socket(fd).unwrap_or_else(|error| {
+        panic!("seal the AF_PACKET capture before its final drain: {error}")
+    });
+    std::thread::sleep(PACKET_SOCKET_SEAL_SETTLE);
     loop {
         match receive_captured_frame(fd, &mut buf) {
             Ok(Some(frame)) => frames.push(frame),
             Ok(None) => break,
-            Err(error) if capture_interface_was_removed(&error) => break,
+            Err(error) if error.raw_os_error() == Some(libc::ENETDOWN) => {
+                link_down_reports.push(frames.len());
+            }
             Err(error) => panic!("AF_PACKET final drain failed: {error}"),
         }
     }
     let statistics = packet_statistics(fd).expect("read PACKET_STATISTICS");
     // SAFETY: close exactly the fd created for this capture.
     unsafe { libc::close(fd) };
-    CaptureBatch { frames, statistics }
+    CaptureBatch { frames, statistics, link_down_reports, interface_removed }
 }
 
-fn capture_interface_was_removed(error: &std::io::Error) -> bool {
-    matches!(error.raw_os_error(), Some(libc::ENETDOWN | libc::ENODEV | libc::ENXIO))
+/// Whether `ifindex` names a live interface in this network namespace.
+/// `ENXIO` (glibc's mapping of the kernel's `ENODEV`) is the absent answer;
+/// any other failure is returned, never read as absence.
+fn ifindex_resolves(ifindex: u32) -> std::io::Result<bool> {
+    let mut name: [libc::c_char; libc::IF_NAMESIZE] = [0; libc::IF_NAMESIZE];
+    // SAFETY: `name` is writable storage of IF_NAMESIZE bytes, the size
+    // `if_indextoname` requires; libc retains no pointer after the call.
+    let resolved = unsafe { libc::if_indextoname(ifindex, name.as_mut_ptr()) };
+    if !resolved.is_null() {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if matches!(error.raw_os_error(), Some(libc::ENXIO | libc::ENODEV)) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
 }
 
 fn packet_statistics(fd: std::os::fd::RawFd) -> std::io::Result<PacketStatistics> {
@@ -2925,9 +3019,26 @@ fn arm_failure_capture_from_config(config: &VmConfig) -> ArmedFailureCapture {
     }
 }
 
+/// A fail-closed VM's TAP is never raised, so its capture — bound while the
+/// TAP was down — is blind for the whole run (see `capture_fd`), and a zero
+/// frame count alone proves nothing (DISTILL review B1). The claim is
+/// therefore witnessed by the capture's link history: exactly one link-down
+/// report, the bind-time one at zero frames, and no removal while hooked. A
+/// TAP raised at any point while watched adds a second report when it next
+/// goes down or is deleted (`NETDEV_DOWN` on a hooked socket), and a TAP left
+/// up delivers the guest's frames to this capture. Loss accounting and the
+/// zero guest-frame count are then evaluated over that closed population.
 fn assert_zero_guest_originated_frames(capture: ArmedFailureCapture) {
-    let tap = capture.tap_wire.stop();
-    assert_eq!(tap.statistics.drops, 0, "tap failure capture is lossless");
+    let tap = capture.tap_wire.stop_accounted().unwrap_or_else(|error| {
+        panic!("the fail-closed TAP capture is not fully loss-accounted: {error}")
+    });
+    assert_eq!(
+        (tap.link_down_reports.as_slice(), tap.interface_removed),
+        ([0].as_slice(), false),
+        "the fail-closed TAP {} was never raised while captured: exactly the bind-time link-down \
+         report at zero frames and no removal while hooked",
+        capture.tap
+    );
     let tap_guest_frames = tap
         .frames
         .iter()
@@ -4183,6 +4294,7 @@ struct MeshResult {
 }
 
 async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
+    let _teardown = TeardownBound::arm();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -4392,8 +4504,28 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         service_address,
         &BTreeSet::from([bridge_ifindex, service_tap_ifindex, tap_ifindex]),
     );
-    let tap_capture = tap_wire.stop();
+    let tap_capture = tap_wire.stop_accounted().unwrap_or_else(|error| {
+        panic!("the exact TAP capture is not fully loss-accounted: {error}")
+    });
     let link_layer = link_layer_capture.stop_accounted();
+    // Positive witness first: the TAP capture was bound while the TAP was down
+    // (a blind interval, see `capture_fd`), so its zero-frame count below is
+    // evidence only once the same capture has seen the guest's own traffic
+    // after the event. The audit panics unless exactly one guest attempt
+    // carries the complete byte-exact exchange.
+    let guest_egress =
+        audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
+    assert!(
+        guest_egress
+            .segments
+            .iter()
+            .any(|segment| { segment.kernel_event_at.is_some_and(|at| at > intercept_live_at) }),
+        "no evidence: the exact TAP capture holds no guest segment after the caller's \
+         intercept-install event at {intercept_live_at:?}, so its zero pre-event count proves \
+         nothing (link-down reports {:?}, interface removed {}): {guest_egress:#?}",
+        tap_capture.link_down_reports,
+        tap_capture.interface_removed,
+    );
     let pre_intercept_tap_frames = tap_capture
         .frames
         .iter()
@@ -4405,8 +4537,6 @@ async fn run_mesh_guest_scenario(id: &str) -> MeshResult {
         pre_intercept_tap_frames.is_empty(),
         "the exact direct-host TAP observes zero guest-originated frames with missing SO_TIMESTAMPNS or time <= the caller's sole intercept-install event at {intercept_live_at:?}: {pre_intercept_tap_frames:#?}",
     );
-    let guest_egress =
-        audit_guest_egress_boundary(&tap_capture.frames, &readiness, guest_addr, mesh_destination);
     // Terminal publication and host-resource reclamation are separate
     // production events. Bound the cleanup observation independently instead
     // of treating the first terminal row as an instantaneous deletion fence.
@@ -4641,19 +4771,79 @@ fn assert_empty_complement_after_stop(result: &MeshResult) {
     }
 }
 
+/// The positive witness the zero-frame oracle needs before it means anything:
+/// the number of guest-originated frames on the exact capture's TAP, strictly
+/// after the event, that decode as well-formed guest frames. Zero is "no
+/// evidence" (a capture that ended early, was never hooked, or saw nothing),
+/// never "zero frames", so it fails closed.
+fn post_event_guest_witness(
+    capture: &CaptureBatch,
+    ifindex: u32,
+    event: KernelRealtime,
+    guest_mac: [u8; 6],
+    guest_address: Ipv4Addr,
+) -> Result<usize, String> {
+    let witnessed = capture
+        .frames
+        .iter()
+        .filter(|frame| {
+            frame.ifindex == ifindex
+                && frame.packet_type != libc::PACKET_OUTGOING
+                && frame.kernel_event_at.is_some_and(|at| at > event)
+                && decode_guest_frame(frame, guest_mac, guest_address).is_ok()
+        })
+        .count();
+    if witnessed == 0 {
+        Err(format!(
+            "no evidence: the exact capture holds no well-formed guest frame after the event \
+             {event:?} ({} frames, link-down reports {:?}, interface removed {}, {:?})",
+            capture.frames.len(),
+            capture.link_down_reports,
+            capture.interface_removed,
+            capture.statistics
+        ))
+    } else {
+        Ok(witnessed)
+    }
+}
+
 /// E1's zero-frame half: the exact loss-accounted capture holds no caller-TAP
 /// frame at or before the event, and all six TAP counters read zero both
 /// before Cloud Hypervisor exists and at the event, with the TAP down.
+///
+/// The capture is bound while the TAP is down, so it is blind until the TAP
+/// comes up (see `capture_fd`): the down interval's zero is witnessed by the
+/// counters and the link history, and the capture's zero at or before the
+/// event is evaluated only after the capture's positive witness (well-formed
+/// guest frames after the event) and its full loss accounting.
 fn assert_zero_caller_frames_through_intercept_live(result: &MeshResult) {
     let born = &result.born;
     let capture = born
         .link_layer
         .as_ref()
         .unwrap_or_else(|error| panic!("the exact link-layer capture is not loss-free: {error}"));
+    assert_eq!(
+        capture.link_down_reports.first(),
+        Some(&0),
+        "the exact capture was bound while the caller TAP was down, so its first report is the \
+         bind-time pending ENETDOWN, consumed before any frame; reports={:?}",
+        capture.link_down_reports
+    );
+    let witnessed = post_event_guest_witness(
+        capture,
+        born.tap_ifindex,
+        result.intercept_live_at,
+        born.guest_mac,
+        born.guest_address,
+    )
+    .unwrap_or_else(|error| panic!("the zero-frame oracle has no positive witness: {error}"));
     let post_event =
         frames_strictly_after_event(capture, born.tap_ifindex, result.intercept_live_at)
             .unwrap_or_else(|error| panic!("a caller-TAP frame precedes protection: {error}"));
-    assert!(post_event > 0, "the exact capture observes the post-activation journey");
+    assert!(
+        post_event >= witnessed,
+        "every witnessed guest frame is in the post-event population: {post_event} < {witnessed}"
+    );
     let pre = born
         .pre_create
         .as_ref()
@@ -4689,6 +4879,243 @@ fn assert_post_event_guest_frames_are_well_formed(result: &MeshResult) {
     )
     .unwrap_or_else(|error| panic!("a post-event guest frame is not well-formed: {error}"));
     eprintln!("S-ND295-01 post-event guest frame population: {population:?}");
+}
+
+// ---------------------------------------------------------------------
+// S-ND295-01 harness evidence: the capture helpers against a scratch TAP.
+// ---------------------------------------------------------------------
+
+/// Distinct frames the capture self-test writes into the scratch TAP's queue.
+const CAPTURE_SELF_TEST_FRAMES: u8 = 16;
+/// IEEE 802 local experimental EtherType 1: no host protocol handler claims
+/// it, so the frames reach the packet taps and are then discarded.
+const CAPTURE_SELF_TEST_ETHERTYPE: u16 = 0x88b5;
+
+fn is_root() -> bool {
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    unsafe { libc::geteuid() == 0 }
+}
+
+/// One distinct minimum-length broadcast frame for the capture self-test.
+fn capture_self_test_frame(index: u8) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(ETHERNET_MIN_FRAME_LEN);
+    frame.extend_from_slice(&[0xff; 6]);
+    frame.extend_from_slice(&[0x02, 0x95, 0x01, 0xca, 0x70, index]);
+    frame.extend_from_slice(&CAPTURE_SELF_TEST_ETHERTYPE.to_be_bytes());
+    frame.extend_from_slice(format!("ND295-S01-CAPTURE-SELF-TEST-{index:02}").as_bytes());
+    frame.resize(ETHERNET_MIN_FRAME_LEN, index);
+    frame
+}
+
+/// A persistent scratch TAP created down by the production creator
+/// ([`overdrive_netlink::create_persistent_tap`], owner uid 0), named outside
+/// the managed `ovd-tp-` and bridge `ovd-gbr` spaces, and deleted on drop.
+struct CaptureScratchTap {
+    name: String,
+}
+
+impl CaptureScratchTap {
+    fn create() -> Self {
+        let name = format!("nd295cap{:x}", std::process::id());
+        assert!(name.len() < libc::IFNAMSIZ, "scratch TAP name {name} fits IFNAMSIZ");
+        let lookup = std::ffi::CString::new(name.as_str()).expect("TAP name has no NUL");
+        // SAFETY: the NUL-terminated name remains live for this lookup.
+        let existing = unsafe { libc::if_nametoindex(lookup.as_ptr()) };
+        assert_eq!(
+            existing, 0,
+            "scratch TAP {name} already exists; an interrupted earlier run left it behind \
+             (remove it with `ip link del {name}`)"
+        );
+        overdrive_netlink::create_persistent_tap(&name, 0)
+            .unwrap_or_else(|error| panic!("create the persistent scratch TAP {name}: {error}"));
+        Self { name }
+    }
+
+    fn raise(&self) {
+        let name = self.name.clone();
+        overdrive_netlink::block_on_host_netlink(move || async move {
+            overdrive_netlink::Client::new()?.set_link_up(&name).await
+        })
+        .unwrap_or_else(|error| panic!("raise the scratch TAP {}: {error}", self.name));
+    }
+
+    /// Attach one queue to the persistent TAP with a raw `TUNSETIFF`: the
+    /// device's own flags (`IFF_TAP | IFF_NO_PI`, single queue), so a write is
+    /// exactly one Ethernet frame the TAP receives.
+    fn open_queue(&self) -> std::fs::File {
+        let queue = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")
+            .expect("open /dev/net/tun (close-on-exec)");
+        // SAFETY: an all-zero `ifreq` is a valid initial value; the name and
+        // flags are populated below.
+        let mut request: libc::ifreq = unsafe { std::mem::zeroed() };
+        for (slot, byte) in request.ifr_name.iter_mut().zip(self.name.bytes()) {
+            *slot = libc::c_char::from_ne_bytes([byte]);
+        }
+        request.ifr_ifru.ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI)
+            .expect("TAP queue flags fit ifr_flags");
+        // SAFETY: `queue` is an open `/dev/net/tun` descriptor and `request`
+        // is a live, initialised `ifreq` for the whole call.
+        let rc = unsafe {
+            libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&queue), libc::TUNSETIFF, &raw mut request)
+        };
+        assert_eq!(
+            rc,
+            0,
+            "attach a queue to the scratch TAP {}: {}",
+            self.name,
+            std::io::Error::last_os_error()
+        );
+        queue
+    }
+}
+
+impl Drop for CaptureScratchTap {
+    fn drop(&mut self) {
+        let name = self.name.clone();
+        let deleted = overdrive_netlink::block_on_host_netlink(move || async move {
+            overdrive_netlink::Client::new()?.del_link(&name).await
+        });
+        if let Err(error) = deleted {
+            if std::thread::panicking() {
+                eprintln!("cleanup: deleting the scratch TAP {} failed: {error}", self.name);
+            } else {
+                panic!("delete the scratch TAP {}: {error}", self.name);
+            }
+        }
+    }
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-01 — Two VM workloads reach each other by name with no frame before protection
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Harness evidence for S-ND295-01's oracles (2) and (3): the two capture
+/// shapes the journey binds to the caller TAP while it is down (the exact
+/// link-layer capture and the datagram TAP capture) are validated here
+/// against a scratch TAP with no VM. Each capture is bound while the TAP is
+/// down, so its socket holds the kernel's pending `ENETDOWN`; it must consume
+/// that report once and keep reading. The TAP is then raised, a queue is
+/// attached, and 16 distinct frames are written into it. Each capture must
+/// return exactly those frames, byte-exact and in order, every captured frame
+/// strictly after the up transition and none at or before it, with zero
+/// kernel drops and `tp_packets` equal to the frames read.
+///
+/// Host-originated frames the kernel sends on the raised TAP (IPv6 neighbour
+/// discovery, for example) are outside this harness's control; they are
+/// covered by the timing and loss oracles and reported, but the exactness
+/// oracle is over the guest direction, which is the population S-ND295-01's
+/// zero-frame and E3 oracles read.
+#[test]
+fn a_capture_bound_to_a_down_tap_reads_every_frame_after_the_up_transition_and_none_before() {
+    assert!(
+        is_root(),
+        "the capture self-test creates a kernel TAP and binds AF_PACKET sockets; run it as root \
+         (cargo xtask metal run)"
+    );
+    let tap = CaptureScratchTap::create();
+    assert!(
+        !interface_is_administratively_up(&tap.name),
+        "the persistent scratch TAP {} is created down",
+        tap.name
+    );
+    let ifindex = interface_index(&tap.name);
+    let link_layer = WireCapture::start_link_layer(ifindex);
+    let datagram = WireCapture::start(&tap.name, 0);
+    // The capture threads reach their first receive, and so consume the
+    // bind-time pending error, while the TAP is still down; the previous
+    // capture ended there.
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !interface_is_administratively_up(&tap.name),
+        "nothing raised the scratch TAP {} while the captures started",
+        tap.name
+    );
+
+    let up_at = KernelRealtime::now();
+    tap.raise();
+    assert!(
+        interface_is_administratively_up(&tap.name),
+        "the scratch TAP {} reads up after the raise",
+        tap.name
+    );
+    let written = (0..CAPTURE_SELF_TEST_FRAMES).map(capture_self_test_frame).collect::<Vec<_>>();
+    let queue = {
+        let mut queue = tap.open_queue();
+        for frame in &written {
+            let count = queue.write(frame).unwrap_or_else(|error| {
+                panic!("write a frame into the scratch TAP queue: {error}")
+            });
+            assert_eq!(count, frame.len(), "the TAP queue takes each frame whole");
+        }
+        queue
+    };
+    // A queue write is received synchronously on the TAP; the settle only
+    // bounds how long a straggler may take before the captures are sealed.
+    std::thread::sleep(Duration::from_millis(200));
+    let link_layer = link_layer
+        .stop_accounted()
+        .unwrap_or_else(|error| panic!("the link-layer capture is not fully accounted: {error}"));
+    let datagram = datagram
+        .stop_accounted()
+        .unwrap_or_else(|error| panic!("the datagram capture is not fully accounted: {error}"));
+    drop(queue);
+
+    for (label, capture) in [("link-layer", &link_layer), ("datagram", &datagram)] {
+        assert_eq!(
+            capture.link_down_reports,
+            vec![0],
+            "the {label} capture reports the bind-time ENETDOWN exactly once, before any frame, \
+             and keeps reading: {capture:#?}"
+        );
+        assert!(!capture.interface_removed, "the {label} capture's TAP was never removed");
+        frames_strictly_after_event(capture, ifindex, up_at).unwrap_or_else(|error| {
+            panic!("the {label} capture holds a frame at or before the up transition: {error}")
+        });
+        eprintln!(
+            "S-ND295-01 capture self-test ({label}): {} frames ({} host-originated), {:?}",
+            capture.frames.len(),
+            capture.frames.iter().filter(|f| f.packet_type == libc::PACKET_OUTGOING).count(),
+            capture.statistics
+        );
+    }
+    let received = |capture: &CaptureBatch| -> Vec<(u16, Vec<u8>)> {
+        capture
+            .frames
+            .iter()
+            .filter(|frame| frame.packet_type != libc::PACKET_OUTGOING)
+            .map(|frame| {
+                assert!(
+                    !frame.truncated
+                        && !frame.control_truncated
+                        && frame.bytes.len() == frame.wire_len
+                        && frame.aux.is_some_and(|aux| {
+                            usize::try_from(aux.len).ok() == Some(frame.wire_len)
+                        }),
+                    "a received frame is complete, with matching PACKET_AUXDATA: {frame:?}"
+                );
+                (frame.protocol, frame.bytes.clone())
+            })
+            .collect()
+    };
+    assert_eq!(
+        received(&link_layer),
+        written
+            .iter()
+            .map(|frame| (CAPTURE_SELF_TEST_ETHERTYPE, frame.clone()))
+            .collect::<Vec<_>>(),
+        "the link-layer capture returns exactly the written frames, byte-exact and in order"
+    );
+    assert_eq!(
+        received(&datagram),
+        written
+            .iter()
+            .map(|frame| (CAPTURE_SELF_TEST_ETHERTYPE, frame[ETHERNET_HEADER_LEN..].to_vec()))
+            .collect::<Vec<_>>(),
+        "the datagram capture returns exactly the written frames' payloads, in order"
+    );
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -6383,7 +6810,36 @@ async fn observe_fresh_replacement_mesh_flow_unchecked(
         .map_err(|error| format!("replacement intercept-live event proof failed: {error}"))?;
     let ktls_candidates = ktls_journal.finish();
     let splice = splice_probe.finish();
-    let tap_capture = tap_wire.stop();
+    // The replacement TAP was down when this capture was bound, so the capture
+    // was blind until activation raised it (see `capture_fd`). Its pre-event
+    // count below means something only after the capture is fully
+    // loss-accounted, its first link-down report is the bind-time one (at zero
+    // frames), and it holds guest frames after the event (the positive
+    // witness; DISTILL review B1).
+    let tap_capture = tap_wire
+        .stop_accounted()
+        .map_err(|error| format!("the replacement TAP capture is not loss-accounted: {error}"))?;
+    if tap_capture.link_down_reports.first() != Some(&0) {
+        return Err(format!(
+            "the replacement TAP capture was bound while the TAP was down, so its first report \
+             must be the bind-time ENETDOWN at zero frames; reports={:?}",
+            tap_capture.link_down_reports
+        ));
+    }
+    if !tap_capture.frames.iter().any(|frame| {
+        frame.ifindex == tap_ifindex
+            && frame.packet_type != libc::PACKET_OUTGOING
+            && frame.kernel_event_at.is_some_and(|at| at > intercept_live_at)
+    }) {
+        return Err(format!(
+            "no evidence: the replacement TAP capture holds no guest frame after the \
+             intercept-live event {intercept_live_at:?}, so its pre-event count proves nothing \
+             ({} frames, link-down reports {:?}, interface removed {})",
+            tap_capture.frames.len(),
+            tap_capture.link_down_reports,
+            tap_capture.interface_removed
+        ));
+    }
     let pre_ready = tap_capture
         .frames
         .iter()

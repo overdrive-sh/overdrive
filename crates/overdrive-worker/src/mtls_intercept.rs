@@ -233,6 +233,35 @@ pub enum InterceptError {
         expected: InterceptPostcondition,
         observed: Option<InterceptPostcondition>,
     },
+    /// The worker's verdict over an observation whose `policy_route` is
+    /// `false`: the fwmark `0x1` rule to table 100, or table 100's
+    /// `local 0.0.0.0/0` route on `lo`, is missing. Source-less: it is a
+    /// finding about a read, not a failed operation. No adapter returns it;
+    /// only `MtlsInterceptWorker`'s boot read-back and runtime audit construct
+    /// it (FD § "[REF] Driven port — intercept element release, member
+    /// convergence, boot clear" (the typed causes of the observation checks)).
+    // RED scaffold (DR-08 (a)): not constructed before DELIVER step 08-02.
+    #[error(
+        "shared mTLS policy route is absent: the fwmark 0x1 rule to table 100 or table 100's local 0.0.0.0/0 route on lo is missing"
+    )]
+    PolicyRouteAbsent,
+    /// The worker's verdict over an observation whose `intercept_mark_guard`
+    /// is `false`: the guard table `ip overdrive-mtls-guard` is absent.
+    /// Source-less. No adapter returns it; only `MtlsInterceptWorker`'s boot
+    /// read-back and runtime audit construct it. Conditional on D-295-R18:
+    /// DELIVER step 08-01 removes it if the native RED withdraws R18.
+    // RED scaffold (DR-08 (a)): not constructed before DELIVER step 08-02.
+    #[error("shared mTLS intercept-mark guard table ip overdrive-mtls-guard is absent")]
+    InterceptMarkGuardAbsent,
+    /// The worker's verdict when converging the dynamic member sets to the
+    /// empty set returned `Ok` but the read-back still holds `observed`
+    /// (boot step 6.2), or when boot step 6.6's read-back holds members.
+    /// Source-less. No adapter returns it; only `MtlsInterceptWorker`'s boot
+    /// member clear and boot read-back construct it, as the source of
+    /// `MtlsSharedOwnerError::BootMemberClear`.
+    // RED scaffold (DR-08 (a)): not constructed before DELIVER step 08-02.
+    #[error("shared mTLS dynamic members remain after convergence to the empty set: {observed:?}")]
+    MembersRemain { observed: crate::mtls_intercept_port::InterceptMembers },
     /// An allocation element method ran before this process recorded a program
     /// through a successful `converge_shared` (DISTILL gap B-8). Source-less:
     /// no lower operation ran.

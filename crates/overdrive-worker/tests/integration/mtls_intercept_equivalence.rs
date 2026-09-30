@@ -80,9 +80,13 @@
 //! through the `LegListener` bridge (`leg_listener.rs`), so each scenario keeps
 //! its assertions whichever listener type the port returns.
 //!
-//! A non-root run SKIPs (it does not fail) — **and a run that skips every
-//! scenario proves nothing**. Run via `cargo xtask lima run -- cargo nextest run
-//! -p overdrive-worker --features integration-tests`. NEVER `--no-run`.
+//! The S-MIF-09 and S-MIF-10 scenarios SKIP on a non-root run (they do not
+//! fail) — **and a run that skips every scenario proves nothing**. Every GH #295
+//! scenario (S-ND295-70, including S-MIF-11 and S-MIF-12, and S-ND295-71)
+//! asserts root instead, so a non-root run fails it rather than passing it
+//! vacuously. Run via `cargo xtask lima run -- cargo
+//! nextest run -p overdrive-worker --features integration-tests`. NEVER
+//! `--no-run`.
 //!
 //! ## Parametrisation
 //!
@@ -258,10 +262,12 @@ fn bound_ipv4_port(listener: &impl LegListener, scenario: &str, adapter: &str) -
 /// fail-closed stages exist for.
 #[test]
 fn bound_leg_reports_a_non_zero_kernel_assigned_port() {
-    if !is_root() {
-        eprintln!("SKIP bound_leg_reports_a_non_zero_kernel_assigned_port: not root");
-        return;
-    }
+    // S-ND295-70 evidence needs root: a silent skip would pass off root
+    // (DISTILL review M6).
+    assert!(
+        is_root(),
+        "bound_leg_reports_a_non_zero_kernel_assigned_port requires root (S-ND295-70 Lima evidence)"
+    );
     record_uname("05-01-S-MIF-09");
 
     for adapter in ADAPTERS {
@@ -299,10 +305,12 @@ fn bound_leg_reports_a_non_zero_kernel_assigned_port() {
 /// after the first was closed.
 #[test]
 fn two_bound_legs_never_share_a_port() {
-    if !is_root() {
-        eprintln!("SKIP two_bound_legs_never_share_a_port: not root");
-        return;
-    }
+    // S-ND295-70 evidence needs root: a silent skip would pass off root
+    // (DISTILL review M6).
+    assert!(
+        is_root(),
+        "two_bound_legs_never_share_a_port requires root (S-ND295-70 Lima evidence)"
+    );
     record_uname("05-01-S-MIF-10");
 
     for adapter in ADAPTERS {
@@ -351,12 +359,11 @@ fn two_bound_legs_never_share_a_port() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
-    if !is_root() {
-        eprintln!(
-            "SKIP a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops: not root"
-        );
-        return;
-    }
+    assert!(
+        is_root(),
+        "S-ND295-70 host evidence requires root and CAP_NET_ADMIN (IP_TRANSPARENT on the host \
+         adapter's listener)"
+    );
     record_uname("S-ND295-70-held-address");
 
     for adapter in ADAPTERS {
@@ -439,10 +446,11 @@ fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn both_installs_hand_back_a_guard_that_releases_cleanly() {
-    if !is_root() {
-        eprintln!("SKIP both_installs_hand_back_a_guard_that_releases_cleanly: not root");
-        return;
-    }
+    assert!(
+        is_root(),
+        "S-ND295-70: the host adapter needs CAP_NET_ADMIN for IP_TRANSPARENT and real nft; \
+         run as root through `cargo xtask lima run --`"
+    );
     record_uname("05-01-S-MIF-11");
     let _kernel_lock = KernelStateLock::acquire();
     let _sweep = SharedInfraSweep::create();
@@ -511,13 +519,11 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
-    if !is_root() {
-        eprintln!(
-            "SKIP re_installing_the_same_capture_converges_and_both_guards_release_cleanly: not \
-             root"
-        );
-        return;
-    }
+    assert!(
+        is_root(),
+        "S-ND295-70: the host adapter needs CAP_NET_ADMIN for IP_TRANSPARENT and real nft; \
+         run as root through `cargo xtask lima run --`"
+    );
     record_uname("05-01-S-MIF-12");
     let _kernel_lock = KernelStateLock::acquire();
     let _sweep = SharedInfraSweep::create();

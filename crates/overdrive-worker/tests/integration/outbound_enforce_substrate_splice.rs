@@ -1709,8 +1709,17 @@ impl MetalSharedIntercept {
     }
 }
 
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener
+/// (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent`
+/// signature)); `MetalSharedIntercept` delegates to `HostMtlsIntercept` and
+/// reads the bound address through `LegListener`, so that step changes only
+/// this line here.
+type BoundListener = std::net::TcpListener;
+
 impl MtlsIntercept for MetalSharedIntercept {
-    fn bind_transparent(&self, address: SocketAddrV4) -> InterceptResult<TcpListener> {
+    fn bind_transparent(&self, address: SocketAddrV4) -> InterceptResult<BoundListener> {
         let listener = self.inner.bind_transparent(address)?;
         let bound = listener.bound_v4().expect("bound shared-listener IPv4 address");
         self.binds.fetch_add(1, Ordering::SeqCst);
@@ -2018,10 +2027,7 @@ impl Drop for SharedMetalCleanup {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops() {
-    if !is_root() {
-        eprintln!("SKIP S-ND295-25 native evidence: not root");
-        return;
-    }
+    assert!(is_root(), "S-ND295-25 native evidence requires root and CAP_NET_ADMIN");
     let _ = rustls::crypto::ring::default_provider().install_default();
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
@@ -2103,10 +2109,7 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle() {
-    if !is_root() {
-        eprintln!("SKIP S-ND295-26 native evidence: not root");
-        return;
-    }
+    assert!(is_root(), "S-ND295-26 native evidence requires root and CAP_NET_ADMIN");
     let _ = rustls::crypto::ring::default_provider().install_default();
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();

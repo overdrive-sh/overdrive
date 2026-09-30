@@ -5028,8 +5028,9 @@ mod admission_refusal_acceptance {
     /// A restart whose successor is refused at the cap still runs the
     /// predecessor's one cleanup attempt (ADR-0106): the predecessor's
     /// `lease_retired`, its one `Teardown`, then its `lease_released`, exactly
-    /// once each, while the successor gets no owner call, no driver start, and
-    /// no row, and the one refusal event names it.
+    /// once each, while the successor gets no owner call, no driver start, no
+    /// row, no lifecycle occurrence, and no lifecycle event, and the one
+    /// refusal event names it.
     #[tokio::test]
     #[ignore = "pending DELIVER step 06-03 (S-ND295-05E)"]
     async fn a_refused_restart_successor_still_cleans_up_its_predecessor_once() {
@@ -5040,6 +5041,7 @@ mod admission_refusal_acceptance {
             fixture.pool.snapshot().contains_key(&alloc_id(PREDECESSOR)),
             "the predecessor holds an Admitted lease"
         );
+        let mut lifecycle = fixture.state.lifecycle_events.subscribe();
 
         let result = fixture
             .dispatch(Action::RestartAllocation {
@@ -5092,6 +5094,30 @@ mod admission_refusal_acceptance {
                 .expect("row readable")
                 .is_none(),
             "the refused successor has no row"
+        );
+        assert!(
+            fixture
+                .state
+                .obs
+                .alloc_lifecycle_occurrences(&alloc_id(SUCCESSOR))
+                .await
+                .expect("occurrences readable")
+                .is_empty(),
+            "the refused successor has no lifecycle occurrence"
+        );
+        let mut published = Vec::new();
+        loop {
+            match lifecycle.try_recv() {
+                Ok(event) => published.push(event.alloc_id),
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+                Err(TryRecvError::Lagged(missed)) => {
+                    panic!("the lifecycle bus lagged by {missed}: its events cannot be checked")
+                }
+            }
+        }
+        assert!(
+            !published.contains(&alloc_id(SUCCESSOR)),
+            "no lifecycle event names the refused successor: {published:?}"
         );
         let observed = fixture.pool.observe(&[alloc_id(PREDECESSOR), alloc_id(SUCCESSOR)]);
         assert_eq!(

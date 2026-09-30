@@ -1,8 +1,16 @@
-//! GH #295 D-295-R20 — the operator's cleanup-pending projection is a pure
-//! function of the allocation's guest-network lease and its row state.
+//! GH #295 D-295-R20 — the operator's cleanup-pending predicate is a pure
+//! function of an allocation's guest-network lease and its row state.
 //!
-//! The table is exhaustive over every lease state (`None`, `Admitted`,
-//! `Retiring`) × every `AllocState` (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (`cleanup_pending` and its table)).
+//! `GuestAttachmentLease::cleanup_pending(self, row_state)` is a method on a
+//! held lease, so its contract is the table's leased rows: every lease state
+//! the type has (`Admitted`, `Retiring`) × every `AllocState` (FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (`cleanup_pending` and its table)).
+//!
+//! The table's "no lease" row is not a row of this predicate: there is no
+//! lease to call it on. It belongs to the server projection
+//! (`handlers::alloc_status` → `AllocStatusRowBody::network_cleanup_pending`),
+//! whose S-ND295-59 bodies read it through the HTTP API once a lease is
+//! released (`overdrive-control-plane/tests/integration/network_cleanup_pending_status.rs`),
+//! so it is not asserted here.
 
 #![allow(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
 
@@ -21,16 +29,18 @@ const ALL_ROW_STATES: [AllocState; 6] = [
     AllocState::Failed,
 ];
 
-/// The cleanup-pending table of FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)", written as the decision the operator reads.
-const fn expected_cleanup_pending(lease: Option<GuestAttachmentLease>, row: AllocState) -> bool {
+/// Every lease state. `expected_cleanup_pending` matches the lease with no
+/// wildcard, so a new lease state breaks this file at compile time.
+const ALL_LEASES: [GuestAttachmentLease; 2] =
+    [GuestAttachmentLease::Admitted, GuestAttachmentLease::Retiring];
+
+/// The leased rows of the cleanup-pending table of FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)", written as the decision the operator reads.
+const fn expected_cleanup_pending(lease: GuestAttachmentLease, row: AllocState) -> bool {
     match lease {
-        // No lease: cleanup finished and the lease was released, or no network
-        // was ever leased.
-        None => false,
         // A retiring lease is pending whatever the row says — a failed stop
         // leaves the row Running (R10).
-        Some(GuestAttachmentLease::Retiring) => true,
-        Some(GuestAttachmentLease::Admitted) => match row {
+        GuestAttachmentLease::Retiring => true,
+        GuestAttachmentLease::Admitted => match row {
             AllocState::Pending
             | AllocState::Running
             | AllocState::Draining
@@ -47,12 +57,15 @@ const fn expected_cleanup_pending(lease: Option<GuestAttachmentLease>, row: Allo
 #[test]
 #[ignore = "pending DELIVER step 07-04 (S-ND295-58)"]
 fn cleanup_pending_matches_the_lease_and_row_state_table() {
-    let leases = [None, Some(GuestAttachmentLease::Admitted), Some(GuestAttachmentLease::Retiring)];
-    let mut rows = Vec::with_capacity(leases.len() * ALL_ROW_STATES.len());
-    for lease in leases {
+    let mut rows = Vec::with_capacity(ALL_LEASES.len() * ALL_ROW_STATES.len());
+    for lease in ALL_LEASES {
         for row in ALL_ROW_STATES {
-            let observed = lease.is_some_and(|held| held.cleanup_pending(row));
-            rows.push((lease, row, observed, expected_cleanup_pending(lease, row)));
+            rows.push((
+                lease,
+                row,
+                lease.cleanup_pending(row),
+                expected_cleanup_pending(lease, row),
+            ));
         }
     }
 

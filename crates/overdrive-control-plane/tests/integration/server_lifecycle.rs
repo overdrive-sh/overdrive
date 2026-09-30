@@ -167,6 +167,12 @@ fn injected_removal_error(source_addr: Ipv4Addr) -> InterceptError {
     }
 }
 
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
+/// unchanged by that step.
+type BoundListener = std::net::TcpListener;
+
 /// Test-local `MtlsIntercept` (the required `ServerConfig.mtls_intercept`)
 /// delegating to an inner `SimMtlsIntercept`; `remove_allocation_elements`
 /// fails with [`injected_removal_error`] while armed and records each source.
@@ -177,7 +183,7 @@ struct RemovalFaultIntercept {
 }
 
 impl MtlsIntercept for RemovalFaultIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<BoundListener> {
         self.sim.bind_transparent(addr)
     }
 

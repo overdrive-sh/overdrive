@@ -42,7 +42,7 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverType, ExitEvent, GuestNetworkAssignment, Resources, VmPayload,
+    DriverType, ExitEvent, ExitKind, GuestNetworkAssignment, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
@@ -451,6 +451,31 @@ impl RecordingIntercept {
     fn script_removal_failure(&self, armed: bool) {
         self.removal_fault.store(armed, Ordering::SeqCst);
     }
+
+    /// The members the double's model holds now.
+    fn members(&self) -> InterceptMembers {
+        self.inner
+            .observe_shared_state()
+            .expect("the intercept model is observable")
+            .expect("the shared program is in the intercept model")
+            .members
+    }
+
+    /// Another actor deletes `source`'s members and the inbound
+    /// `destinations` from the double's model, out of band: the model changes
+    /// directly, with no port call of the production path and no trace entry.
+    fn remove_members_out_of_band(&self, source: Ipv4Addr, destinations: &BTreeSet<SocketAddrV4>) {
+        let mut members = self.members();
+        members.managed_guest_ips.remove(&source);
+        members.outbound_sources.remove(&source);
+        for destination in destinations {
+            members.inbound_destinations.remove(destination);
+        }
+        self.inner
+            .converge_allocation_elements(&members)
+            .expect("the out-of-band delete lands in the intercept model")
+            .expect("the shared program is in the intercept model");
+    }
 }
 
 impl MtlsIntercept for RecordingIntercept {
@@ -532,11 +557,28 @@ struct ActivationFaultOwner {
     inner: Arc<SimSharedGuestNetworkOwner>,
     trace: Arc<StepTrace>,
     refuse_activation: AtomicBool,
+    /// The owner's model of attachment parts: the allocations whose parts
+    /// exist. A successful provision adds one; a successful teardown, or
+    /// another actor out of band, removes it.
+    attached: Mutex<BTreeSet<AllocationId>>,
+    /// Every successful teardown, with whether the allocation's parts were
+    /// present when it ran (`false`: it converged on parts already gone).
+    teardowns: Mutex<Vec<(AllocationId, bool)>>,
 }
 
 impl ActivationFaultOwner {
     fn script_activation_failure(&self, armed: bool) {
         self.refuse_activation.store(armed, Ordering::SeqCst);
+    }
+
+    /// Another actor removes every attachment part of `alloc` out of band.
+    /// Returns whether the parts were present.
+    fn remove_parts_out_of_band(&self, alloc: &AllocationId) -> bool {
+        self.attached.lock().remove(alloc)
+    }
+
+    fn teardowns(&self) -> Vec<(AllocationId, bool)> {
+        self.teardowns.lock().clone()
     }
 }
 
@@ -546,7 +588,9 @@ impl GuestNetworkProvisioner for ActivationFaultOwner {
         &self,
         plan: &GuestNetworkPlan,
     ) -> overdrive_control_plane::guest_network::Result<()> {
-        self.inner.provision(plan).await
+        self.inner.provision(plan).await?;
+        self.attached.lock().insert(plan.alloc().clone());
+        Ok(())
     }
 
     async fn activate(
@@ -563,11 +607,16 @@ impl GuestNetworkProvisioner for ActivationFaultOwner {
         self.inner.activate(plan).await
     }
 
+    /// Converges on absence: removes the allocation's parts if present, and
+    /// succeeds when they are already gone.
     async fn teardown(
         &self,
         plan: &GuestNetworkPlan,
     ) -> overdrive_control_plane::guest_network::Result<()> {
-        self.inner.teardown(plan).await
+        self.inner.teardown(plan).await?;
+        let present = self.attached.lock().remove(plan.alloc());
+        self.teardowns.lock().push((plan.alloc().clone(), present));
+        Ok(())
     }
 }
 
@@ -643,6 +692,8 @@ impl SeamFixture<ActivationFaultOwner> {
                 inner: Arc::clone(sim_owner),
                 trace: Arc::clone(trace),
                 refuse_activation: AtomicBool::new(false),
+                attached: Mutex::new(BTreeSet::new()),
+                teardowns: Mutex::new(Vec::new()),
             })
         })
         .await
@@ -1250,4 +1301,170 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
         ],
         "the protection is already gone, so teardown → lease_released"
     );
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH
+/// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// E9: a reclaim whose parts were removed out of band releases the lease. The
+/// finished allocation's attachment parts leave the owner double's model and
+/// its protection members leave the intercept double's model, each out of
+/// band. The reclaim's element removal and teardown converge on that absence,
+/// and the lease is released last.
+#[tokio::test]
+#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
+async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
+    const FINISHED: &str = "nd295-reclaim-out-of-band";
+    let fixture = SeamFixture::with_activation_fault_owner().await;
+    let address = fixture.finished_allocation_with_a_retiring_lease(FINISHED).await;
+
+    // Out of band: another actor removes the finished allocation's attachment
+    // parts and its protection members.
+    assert!(
+        fixture.owner.remove_parts_out_of_band(&alloc_id(FINISHED)),
+        "precondition: the finished allocation's attachment parts were present"
+    );
+    let members_before = fixture.intercept.members();
+    assert!(
+        members_before.managed_guest_ips.contains(&address)
+            && members_before.outbound_sources.contains(&address)
+            && destinations(address)
+                .iter()
+                .all(|destination| members_before.inbound_destinations.contains(destination)),
+        "precondition: the failed removal left the allocation's members in place: \
+         {members_before:?}"
+    );
+    fixture.intercept.remove_members_out_of_band(address, &destinations(address));
+    let members_after = fixture.intercept.members();
+    assert!(
+        !members_after.managed_guest_ips.contains(&address)
+            && !members_after.outbound_sources.contains(&address)
+            && destinations(address)
+                .iter()
+                .all(|destination| !members_after.inbound_destinations.contains(destination)),
+        "the out-of-band delete removed the allocation's members: {members_after:?}"
+    );
+
+    let reclaim = fixture.trace.mark();
+    fixture
+        .reclaim_without_row_or_event(FINISHED)
+        .await
+        .expect("a reclaim whose parts were removed out of band completes");
+
+    assert_eq!(
+        without_noop_retire(fixture.trace.since(&reclaim), FINISHED),
+        vec![
+            Step::DriverStop { alloc: FINISHED.to_owned(), outcome: StopOutcome::NotFound },
+            Step::ElementRemoval {
+                source: address,
+                destinations: destinations(address),
+                outcome: RemovalOutcome::Removed,
+            },
+            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::LeaseReleased { alloc: FINISHED.to_owned() },
+        ],
+        "the removal and teardown converge on the absent parts, then lease_released"
+    );
+    assert_eq!(
+        fixture.owner.teardowns(),
+        vec![(alloc_id(FINISHED), false)],
+        "the one teardown found the parts already gone"
+    );
+    assert_eq!(fixture.row_state(FINISHED).await, Some(AllocState::Failed));
+}
+
+/// Outcome anchor: OUT-ND295-SHARED-SWITCH
+/// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The reclaim retires an Admitted lease. A started allocation crashes: its
+/// VMM exits through the driver port, and the production exit observer writes
+/// its Failed row. Nothing retires the lease, so it is still Admitted. The
+/// reclaim records `lease_retired` before the element removal and the owner's
+/// teardown, and `lease_released` after them.
+#[tokio::test]
+#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
+async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it_after() {
+    const CRASHED: &str = "nd295-reclaim-crashed";
+    let fixture = SeamFixture::with_sim_owner().await;
+    fixture.start_protection_and_open_exec().await;
+    let observer_shutdown = tokio_util::sync::CancellationToken::new();
+    let observer = overdrive_control_plane::worker::exit_observer::spawn_with_runtime(
+        Arc::clone(&fixture.state.obs),
+        Arc::clone(&fixture.driver) as Arc<dyn Driver>,
+        Arc::clone(&fixture.state.lifecycle_events),
+        Arc::clone(&fixture.state.clock),
+        None,
+        observer_shutdown.clone(),
+    );
+
+    let start = fixture.trace.mark();
+    fixture.dispatch(start_action(CRASHED)).await.expect("the allocation starts");
+    let address = fixture.started_assignment(0).address;
+    assert_eq!(fixture.row_state(CRASHED).await, Some(AllocState::Running));
+
+    // The VMM crashes; the production exit observer writes the Failed row.
+    let mut lifecycle = fixture.state.lifecycle_events.subscribe();
+    fixture.driver.inner.inject_exit_after(
+        &alloc_id(CRASHED),
+        Duration::ZERO,
+        ExitKind::Crashed { exit_code: Some(1), signal: None },
+    );
+    let crash = tokio::time::timeout(Duration::from_secs(5), lifecycle.recv())
+        .await
+        .expect("the exit observer records the crash within five seconds")
+        .expect("the lifecycle bus stays open");
+    assert_eq!(
+        crash.alloc_id,
+        alloc_id(CRASHED),
+        "the observed transition is the crash: {crash:?}"
+    );
+    assert_eq!(
+        fixture.row_state(CRASHED).await,
+        Some(AllocState::Failed),
+        "precondition: the crash wrote the allocation's Failed row"
+    );
+    let before_reclaim = fixture.trace.since(&start);
+    assert!(
+        !before_reclaim.iter().any(|step| matches!(
+            step,
+            Step::LeaseRetired { alloc } | Step::LeaseReleased { alloc } if alloc == CRASHED
+        )),
+        "precondition: the start and the crash leave the lease Admitted: {before_reclaim:#?}"
+    );
+
+    let reclaim = fixture.trace.mark();
+    fixture
+        .reclaim_without_row_or_event(CRASHED)
+        .await
+        .expect("the reclaim of a crashed, Admitted allocation completes");
+    let steps = fixture.trace.since(&reclaim);
+    let stop = steps
+        .iter()
+        .find_map(|step| match step {
+            Step::DriverStop { alloc, outcome } if alloc == CRASHED => Some(*outcome),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the reclaim confirms the VMM gone: {steps:#?}"));
+    assert_ne!(stop, StopOutcome::Failed, "the VMM stop succeeds or finds it gone: {steps:#?}");
+    assert_eq!(
+        steps,
+        vec![
+            Step::LeaseRetired { alloc: CRASHED.to_owned() },
+            Step::DriverStop { alloc: CRASHED.to_owned(), outcome: stop },
+            Step::ElementRemoval {
+                source: address,
+                destinations: destinations(address),
+                outcome: RemovalOutcome::Removed,
+            },
+            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::LeaseReleased { alloc: CRASHED.to_owned() },
+        ],
+        "lease_retired precedes the removal and the teardown; lease_released follows them"
+    );
+    assert_eq!(fixture.row_state(CRASHED).await, Some(AllocState::Failed));
+
+    observer_shutdown.cancel();
+    observer.await.expect("the exit observer stops cooperatively");
 }

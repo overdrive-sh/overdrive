@@ -31,15 +31,21 @@
 //!   `health.startup.refused` event whose `reason` is `dns.responder.probe` —
 //!   killing the "delete the `return Err(DnsResponderBoot)`" + "flatten the
 //!   reason mapping" mutants the `probe()`-level tests cannot reach.
+//!   DELIVER 05-01 deletes that body together with the `dns_probe_fault`
+//!   field; its successor is the S-ND295-34 composition-root body below.
 //! - **S-ND295-34 (GH #295, D-295-R16)** — the production `GuestDns` port,
 //!   built through `HostGuestDnsFactory::responder(deps)`: `audit` reads back
 //!   the socket identities `probe` recorded without mutating them, and fails
-//!   once the responder's socket is gone.
+//!   once the responder's socket is lost out of band. The composition-root
+//!   successor boots `run_server_with_obs_and_driver` with the required
+//!   `ServerConfig.guest_dns` port set to the pinned `SimGuestDnsFactory`
+//!   scripted to refuse its probe, and asserts the same refusal contract.
 //!
 //! Root + Lima (the `:53` bind needs CAP_NET_BIND_SERVICE / root; the
 //! composition-root test additionally needs the real `EbpfDataplane` XDP attach
-//! + the mTLS kTLS-arm probe); a non-root run SKIPs cleanly (the K1 root gate).
-//! `uname -r` is recorded.
+//! + the mTLS kTLS-arm probe). The S-DBN-BIND bodies SKIP cleanly without root
+//! (the K1 root gate); the S-ND295-34 bodies assert root. `uname -r` is
+//! recorded.
 
 #![allow(
     clippy::expect_used,
@@ -399,31 +405,105 @@ async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
 // S-ND295-34 — the GuestDns audit reads back its socket and fails after loss
 // ---------------------------------------------------------------------------
 
+/// The socket inodes this process's descriptors refer to, from
+/// `/proc/self/fd`. Every read error ends the body, except a descriptor that
+/// closed between the directory listing and its link read (another runtime
+/// thread's short-lived descriptor), which refers to no socket any more.
+fn our_socket_inodes() -> BTreeSet<u64> {
+    let mut inodes = BTreeSet::new();
+    for entry in std::fs::read_dir("/proc/self/fd").expect("read /proc/self/fd") {
+        let entry = entry.expect("read a /proc/self/fd entry");
+        let target = match std::fs::read_link(entry.path()) {
+            Ok(target) => target,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read the link of {}: {error}", entry.path().display()),
+        };
+        let target = target.to_string_lossy();
+        if let Some(inode) = target.strip_prefix("socket:[").and_then(|rest| rest.strip_suffix(']'))
+        {
+            inodes.insert(
+                inode.parse().unwrap_or_else(|error| panic!("socket inode in {target:?}: {error}")),
+            );
+        }
+    }
+    inodes
+}
+
+/// Every IPv4 UDP socket the kernel lists in `/proc/net/udp`, as
+/// `(bound address, bound port, socket inode)`. A malformed line ends the body.
+fn kernel_udp_sockets() -> BTreeSet<(Ipv4Addr, u16, u64)> {
+    let table = std::fs::read_to_string("/proc/net/udp").expect("read /proc/net/udp");
+    let mut sockets = BTreeSet::new();
+    for line in table.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let (Some(local), Some(inode)) = (fields.get(1), fields.get(9)) else {
+            panic!("malformed /proc/net/udp line: {line:?}");
+        };
+        let (address, port) =
+            local.split_once(':').unwrap_or_else(|| panic!("malformed local address in {line:?}"));
+        let address = u32::from_str_radix(address, 16)
+            .unwrap_or_else(|error| panic!("local address in {line:?}: {error}"));
+        let port = u16::from_str_radix(port, 16)
+            .unwrap_or_else(|error| panic!("local port in {line:?}: {error}"));
+        let inode: u64 =
+            inode.parse().unwrap_or_else(|error| panic!("socket inode in {line:?}: {error}"));
+        sockets.insert((Ipv4Addr::from(address.to_ne_bytes()), port, inode));
+    }
+    sockets
+}
+
 /// The UDP `:53` sockets this process holds, as `(bound address, socket
 /// inode)`: the `/proc/net/udp` entries on port 53 whose inode is one of this
 /// process's open socket descriptors. A read-only kernel-state observation.
 fn our_udp53_sockets() -> BTreeSet<(Ipv4Addr, u64)> {
-    let ours: BTreeSet<u64> = std::fs::read_dir("/proc/self/fd")
-        .expect("read /proc/self/fd")
-        .filter_map(|entry| std::fs::read_link(entry.ok()?.path()).ok())
-        .filter_map(|target| {
-            let target = target.to_string_lossy().into_owned();
-            target.strip_prefix("socket:[")?.strip_suffix(']')?.parse().ok()
-        })
-        .collect();
-    std::fs::read_to_string("/proc/net/udp")
-        .expect("read /proc/net/udp")
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            let (address, port) = fields.get(1)?.split_once(':')?;
-            let inode: u64 = fields.get(9)?.parse().ok()?;
-            let port = u16::from_str_radix(port, 16).ok()?;
-            let address = Ipv4Addr::from(u32::from_str_radix(address, 16).ok()?.to_ne_bytes());
-            (port == 53 && ours.contains(&inode)).then_some((address, inode))
-        })
+    let ours = our_socket_inodes();
+    kernel_udp_sockets()
+        .into_iter()
+        .filter(|(_, port, inode)| *port == 53 && ours.contains(inode))
+        .map(|(address, _, inode)| (address, inode))
         .collect()
+}
+
+/// Lose the socket `inode` out of band: every descriptor of this process that
+/// refers to it is replaced with `/dev/null` (`dup3`), so the kernel releases
+/// the socket once no call still holds it. Nothing tells the responder; its
+/// descriptors now name `/dev/null`, and it still owns and closes them.
+/// Returns the number of descriptors replaced.
+fn lose_socket_out_of_band(inode: u64) -> usize {
+    use std::os::fd::AsRawFd as _;
+
+    let null = std::fs::File::open("/dev/null").expect("open /dev/null");
+    let socket_link = format!("socket:[{inode}]");
+    let mut replaced = 0;
+    for entry in std::fs::read_dir("/proc/self/fd").expect("read /proc/self/fd") {
+        let entry = entry.expect("read a /proc/self/fd entry");
+        let target = match std::fs::read_link(entry.path()) {
+            Ok(target) => target,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read the link of {}: {error}", entry.path().display()),
+        };
+        if target.to_string_lossy() != socket_link {
+            continue;
+        }
+        let name = entry.file_name();
+        let descriptor: std::os::fd::RawFd = name
+            .to_str()
+            .unwrap_or_else(|| panic!("descriptor name {} is UTF-8", name.display()))
+            .parse()
+            .unwrap_or_else(|error| panic!("descriptor name {}: {error}", name.display()));
+        // SAFETY: both descriptors are open. `dup3` atomically makes
+        // `descriptor` refer to `/dev/null`; the responder keeps owning it and
+        // closes it, so no descriptor is closed twice or leaked.
+        let result = unsafe { libc::dup3(null.as_raw_fd(), descriptor, libc::O_CLOEXEC) };
+        assert_eq!(
+            result,
+            descriptor,
+            "replace descriptor {descriptor} of socket {inode}: {}",
+            std::io::Error::last_os_error()
+        );
+        replaced += 1;
+    }
+    replaced
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED; OUT-ND295-SHARED-SWITCH
@@ -432,15 +512,14 @@ fn our_udp53_sockets() -> BTreeSet<(Ipv4Addr, u64)> {
 ///
 /// The production responder, built through `HostGuestDnsFactory::responder`,
 /// audits clean after `probe` and while serving; its audits leave the bound
-/// `:53` socket identity unchanged and the served socket still answers; once
-/// the responder's socket is gone the audit fails.
+/// `:53` socket identity unchanged and the served socket still answers. The
+/// socket is then lost out of band, from outside the responder: every
+/// descriptor that refers to it is replaced, and the kernel is read until it
+/// lists the socket no more. The audit then fails.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER step 05-01 (S-ND295-34)"]
 async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
-    if !is_root() {
-        eprintln!("SKIP the_responder_audit_reads_back_its_socket_and_fails_after_loss: not root");
-        return;
-    }
+    assert!(is_root(), "S-ND295-34 binds the real :53 socket and must run as root");
     record_kernel();
 
     // GIVEN a responder built by the production factory over a resolvable name.
@@ -466,7 +545,7 @@ async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
     dns.probe().await.expect("probe binds :53 and List-seeds");
     let recorded = our_udp53_sockets();
     assert_eq!(recorded.len(), 1, "probe binds exactly one :53 socket: {recorded:?}");
-    let (bound, _) = *recorded.first().expect("the recorded socket");
+    let (bound, inode) = *recorded.first().expect("the recorded socket");
 
     // WHEN it is audited after probe and while serving, THEN each audit reads
     // back the recorded socket and changes nothing.
@@ -504,17 +583,36 @@ async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
         .collect();
     assert_eq!(answered, vec![f], "the audited responder still answers the stable frontend F");
 
-    // WHEN the responder's socket is lost: its serve loop ends and releases it.
+    // WHEN the responder's socket is lost out of band — not through its own
+    // `stop` — THEN the kernel releases it: no descriptor of this process
+    // refers to it, and `/proc/net/udp` no longer lists it.
+    let replaced = lose_socket_out_of_band(inode);
+    assert!(replaced >= 1, "at least one descriptor referred to the recorded socket {inode}");
+    let released_by = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let listed = kernel_udp_sockets().into_iter().any(|(_, _, listed)| listed == inode);
+        if !listed {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < released_by,
+            "the kernel still lists the lost socket {inode} after {replaced} descriptor(s) \
+             were replaced"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(our_udp53_sockets().is_empty(), "this process holds no :53 socket after the loss");
+
+    // THEN the audit fails.
+    let error = dns.audit().await.expect_err("the audit fails after the socket is lost");
+    eprintln!("dns_responder_bind: audit after out-of-band socket loss: {error}");
+
+    // Cleanup: the serve loop ends within its poll window once stopped.
     dns.stop();
     tokio::time::timeout(Duration::from_secs(5), serve)
         .await
         .expect("the serve loop ends within its poll window")
-        .expect("the serve task joins");
-    assert!(our_udp53_sockets().is_empty(), "the responder's :53 socket is gone");
-
-    // THEN the audit fails.
-    let error = dns.audit().await.expect_err("the audit fails after the socket is lost");
-    eprintln!("dns_responder_bind: audit after socket loss: {error}");
+        .expect("the serve task joins without panicking");
 }
 
 /// An `ObservationStore` whose `all_service_backends_rows` always errors (the
@@ -840,6 +938,10 @@ fn mint_server_leaf(
 /// harness (the DNS responder block is gated on `mtls_worker.is_some()`, so the
 /// composed mTLS worker is required to REACH it; the armed `dns_probe_fault`
 /// then refuses the boot at the DNS responder's `probe()`).
+///
+/// DELIVER 05-01 deletes this body together with the `dns_probe_fault` field
+/// it arms; its successor is
+/// `run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
     if !is_root() {
@@ -941,5 +1043,129 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
     assert!(
         dns_refusal,
         "expected health.startup.refused with reason=dns.responder.probe; got: {events:?}",
+    );
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED; OUT-ND295-SHARED-SWITCH
+/// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands until a fresh responder is serving
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The successor of `run_server_refuses_boot_on_dns_probe_fault_with_probe_reason`
+/// (DISTILL review B6 (b), DR-03). From DELIVER 05-01 every boot builds its DNS
+/// responder through the required `ServerConfig.guest_dns` port, so the probe
+/// fault enters through the pinned `SimGuestDnsFactory`, scripted with
+/// `script_probe_failure(true)`, not through the removed `dns_probe_fault`
+/// field. The boot refuses with the typed probe cause
+/// (`ControlPlaneError::DnsResponderBoot(DnsResponderError::Probe { .. })`,
+/// carrying the factory's scripted reason), records `health.startup.refused`
+/// with reason `dns.responder.probe`, and admits nothing: the EXEC gate stays
+/// BootClosed, the owner made no guest attachment, and the factory built
+/// exactly the one responder whose probe refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER step 05-01 (S-ND295-34)"]
+async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port() {
+    use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
+    use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
+
+    assert!(
+        is_root(),
+        "S-ND295-34's composition-root body boots the production composition, whose \
+         always-composed mTLS worker probes enforcement on the real kernel; it runs as root"
+    );
+    record_kernel();
+
+    let collector = EventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    // GIVEN the required DNS port is the pinned sim factory, scripted to refuse
+    // every responder's probe.
+    let factory = Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default());
+    factory.script_probe_failure(true);
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let cfg_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("mkdir data");
+    std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir,
+        operator_config_dir: cfg_dir,
+        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
+        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
+        ..ServerConfig::new(
+            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+            Arc::clone(&factory) as Arc<dyn GuestDnsFactory>,
+        )
+    };
+    let wiring =
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let supervisor = wiring.supervisor();
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let owner_port: Arc<dyn SharedGuestNetworkOwner> = owner.clone();
+    let obs: Arc<dyn ObservationStore> = fresh_store();
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
+
+    // WHEN the production composition boots.
+    let result = run_server_with_obs_and_driver(
+        config,
+        obs,
+        driver,
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
+        owner_port,
+        wiring,
+        overdrive_worker::cgroup_manager::CgroupManager::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+        ),
+    )
+    .await;
+
+    // THEN it refuses with the typed probe cause the factory scripted.
+    let error = match result {
+        Err(error) => error,
+        Ok(handle) => {
+            handle
+                .shutdown(Duration::from_secs(10))
+                .await
+                .expect("an unexpectedly published server still shuts down");
+            panic!(
+                "run_server must refuse boot when the guest DNS probe fails; it published a server"
+            );
+        }
+    };
+    assert!(
+        matches!(
+            &error,
+            ControlPlaneError::DnsResponderBoot(DnsResponderError::Probe { reason })
+                if reason == "scripted sim DNS probe refusal"
+        ),
+        "a refused guest DNS probe is ControlPlaneError::DnsResponderBoot(Probe) carrying the \
+         scripted reason; got {error:?}"
+    );
+    let events = collector.snapshot();
+    assert!(
+        events.iter().any(|row| {
+            row.name == "health.startup.refused"
+                && row.fields.get("reason").map(String::as_str) == Some("dns.responder.probe")
+        }),
+        "the refusal records health.startup.refused with reason dns.responder.probe; got \
+         {events:?}"
+    );
+
+    // AND nothing is admitted.
+    assert!(supervisor.is_boot_closed(), "the EXEC gate never opens on a refused boot");
+    let calls = owner.calls();
+    assert!(
+        !calls.iter().any(|call| {
+            matches!(call, GuestNetworkOperation::TapCreate | GuestNetworkOperation::TapSetUp)
+        }),
+        "a refused boot makes no guest attachment: {calls:?}"
+    );
+    assert_eq!(
+        factory.responders().len(),
+        1,
+        "the boot built exactly the one responder whose probe refused"
     );
 }

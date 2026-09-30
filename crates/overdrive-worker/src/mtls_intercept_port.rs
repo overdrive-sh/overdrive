@@ -266,6 +266,15 @@ impl Drop for SharedElementGuard {
 /// better diagnosis, not a new safety property, at the cost of a production
 /// behaviour change out of GH #250's scope. Do NOT add one back without
 /// superseding that decision.
+///
+/// # Errors the worker constructs, not an adapter
+///
+/// [`InterceptError::PolicyRouteAbsent`], [`InterceptError::InterceptMarkGuardAbsent`],
+/// and [`InterceptError::MembersRemain`] are the worker's verdicts over an
+/// observation this port returned (FD § "[REF] Driven port — intercept element
+/// release, member convergence, boot clear" (the typed causes of the
+/// observation checks)). No adapter returns them: none of the methods below
+/// lists them among its errors.
 pub trait MtlsIntercept: Send + Sync + 'static {
     /// Bind ONE TCP listener at `addr`, suitable for accepting the intercept
     /// leg the caller is standing up.

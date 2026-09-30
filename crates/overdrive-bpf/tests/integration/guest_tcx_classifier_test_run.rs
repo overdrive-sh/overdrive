@@ -207,12 +207,21 @@ fn arp_frame(sender_mac: [u8; 6], sender_ip: [u8; 4], opcode: u16) -> Vec<u8> {
     frame
 }
 
-fn assert_single_counter(counters: &Array<&mut aya::maps::MapData, u64>, expected: u32) {
-    for slot in 0..8 {
+/// The ingress classifier's eight counter slots (0-7), the slots every
+/// ingress partition row reads today.
+const INGRESS_COUNTER_SLOTS: u32 = 8;
+
+fn assert_single_counter(
+    counters: &Array<&mut aya::maps::MapData, u64>,
+    counter_slots: u32,
+    name: &str,
+    expected: u32,
+) {
+    for slot in 0..counter_slots {
         assert_eq!(
             counters.get(&slot, 0).expect("read classifier counter"),
             u64::from(slot == expected),
-            "only counter slot {expected} advances"
+            "{name}: only counter slot {expected} advances (slot {slot})"
         );
     }
 }
@@ -221,9 +230,36 @@ fn assert_single_counter(counters: &Array<&mut aya::maps::MapData, u64>, expecte
 #[test]
 #[serial(env)]
 fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
+    assert_ingress_partitions("guest-tcx", INGRESS_COUNTER_SLOTS, None);
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+/// S-ND295-08 / S-ND295-09 — Ingress classification: valid traffic enters the
+/// protected path once; malformed or impersonated traffic cannot escape (the
+/// shared counter array has nine slots and the ingress program never touches
+/// slot 8).
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// The nine-slot form of the active ingress partition body above: once the
+/// shared `COUNTERS` array grows to nine slots (D-295-R21), every ingress row
+/// still advances exactly its own slot, and `EgressDestinationDrop` (slot 8)
+/// stays 0 across every row.
+#[test]
+#[serial(env)]
+#[ignore = "pending DELIVER step 06-01 (S-ND295-08)"]
+fn ingress_partitions_leave_the_ninth_egress_slot_untouched() {
+    assert_ingress_partitions("guest-tcx-nine", COUNTER_SLOTS, Some(COUNTER_SLOTS));
+}
+
+/// Run every ingress partition row through the production endpoint
+/// classifier. Before each row the first `counter_slots` counters are reset;
+/// after it exactly the row's own slot among them reads 1. With
+/// `required_array_len`, the shared counter array's length is asserted first.
+#[allow(clippy::too_many_lines, reason = "one closed ingress partition table is audited intact")]
+fn assert_ingress_partitions(pin_tag: &str, counter_slots: u32, required_array_len: Option<u32>) {
     let artifact = super::bpf_artifact::path();
     let pin_dir = std::path::PathBuf::from(format!(
-        "/sys/fs/bpf/overdrive-test-guest-tcx-{}",
+        "/sys/fs/bpf/overdrive-test-{pin_tag}-{}",
         std::process::id()
     ));
     remove_pin_dir(&pin_dir).expect("remove stale isolated bpffs pin directory");
@@ -265,6 +301,13 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
         let mut counters: Array<_, u64> =
             Array::try_from(bpf.map_mut("COUNTERS").expect("production counter map"))
                 .expect("typed counter array");
+        if let Some(required) = required_array_len {
+            assert_eq!(
+                counters.len(),
+                required,
+                "the shared counter array has {required} slots (slot 8 is EgressDestinationDrop)"
+            );
+        }
 
         let mut cases = vec![
             (
@@ -413,7 +456,7 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
         }
 
         for (name, frame, ifindex, action, counter, mark) in cases {
-            for slot in 0..8 {
+            for slot in 0..counter_slots {
                 counters.set(slot, 0, 0).expect("reset classifier counter");
             }
             let result = test_run(&program_fd, &frame, ifindex)
@@ -430,7 +473,7 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
                     "peer TCP preserves source MAC, EtherType, original IPv4 addresses and ports"
                 );
             }
-            assert_single_counter(&counters, counter);
+            assert_single_counter(&counters, counter_slots, name, counter);
         }
     }));
     let cleanup = remove_pin_dir(&pin_dir);

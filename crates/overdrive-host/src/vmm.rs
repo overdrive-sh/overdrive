@@ -1032,12 +1032,16 @@ mod tests {
     /// probe runs reflink, cloud-hypervisor, prlimit, setpriv, launch-seccomp,
     /// kvm, run-dir in that order, and never executes `ip`).
     /// CONTRACT_SHAPE: pure-function.
+    ///
+    /// It activates at 05-03, the step that removes `ip` from the launch
+    /// tools; the `launch-seccomp` stage it also expects lands earlier, at
+    /// 05-02.
     #[allow(
         clippy::doc_markdown,
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-44)"]
+    #[ignore = "pending DELIVER step 05-03 (S-ND295-44)"]
     async fn vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure() {
         // An injected `ip` execution failure can no longer reject the probe:
         // the launcher needs no `ip`, so the probe never executes it.
@@ -1293,6 +1297,14 @@ mod tests {
 /// E21's real-kernel cases (D-295-R22, ADR-0143) and S-ND295-40's queue
 /// release: a scratch persistent TAP named outside `ovd-tp-` (never bridged,
 /// deleted on drop) and re-execs of this test binary (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the testability boundary)).
+///
+/// Lanes. The launch filter exists only for x86_64, so every
+/// `#[cfg(target_arch = "x86_64")]` case builds and runs only on an x86_64
+/// host: the native metal host (`cargo xtask metal run`), never the aarch64
+/// Lima VM, which builds and runs only the `not(x86_64)` refusal case.
+/// S-ND295-40's spawn-failure case also needs a reflink-capable staging root
+/// (`create` clones the rootfs by `FICLONE`), which the metal host's XFS
+/// `/srv/vm` provides.
 #[cfg(all(test, feature = "integration-tests"))]
 #[allow(unsafe_code)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
@@ -1504,6 +1516,19 @@ mod launch_seccomp_kernel {
     /// The libtest path of [`launch_seccomp_child_role`].
     #[cfg(target_arch = "x86_64")]
     const CHILD_ROLE_TEST: &str = "vmm::launch_seccomp_kernel::launch_seccomp_child_role";
+    /// The libtest arguments that run exactly [`launch_seccomp_child_role`].
+    #[cfg(target_arch = "x86_64")]
+    const CHILD_ROLE_ARGS: [&str; 5] =
+        [CHILD_ROLE_TEST, "--exact", "--include-ignored", "--nocapture", "--test-threads=1"];
+    /// The file a hook-step case's launch target creates when it runs.
+    #[cfg(target_arch = "x86_64")]
+    const CHILD_MARKER_ENV: &str = "OVERDRIVE_LAUNCH_SECCOMP_MARKER";
+    /// The launch target of the hook-step cases: it creates the marker file.
+    #[cfg(target_arch = "x86_64")]
+    const MARKER_ROLE: &str = "marker";
+    /// The hook-step control: the intermediate refuses no hook step.
+    #[cfg(target_arch = "x86_64")]
+    const NO_STIMULUS_ROLE: &str = "hook-step-none";
 
     /// The thirteen TAP-mutating requests (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the thirteen-row deny-list table)), in table order.
     #[cfg(target_arch = "x86_64")]
@@ -1575,6 +1600,19 @@ mod launch_seccomp_kernel {
                         .map(|(key, value)| (key.to_owned(), value.to_owned()))
                         .collect();
                     Some(fields)
+                })
+                .collect()
+        }
+
+        /// The free text after the tag of every report record of `kind`, for
+        /// records whose payload is prose rather than `k=v` fields. Matched
+        /// wherever the tag appears on a line, as in [`Self::records`].
+        fn texts(&self, kind: &str) -> Vec<String> {
+            String::from_utf8_lossy(&self.output.stdout)
+                .lines()
+                .filter_map(|line| line.find(REPORT).map(|at| &line[at + REPORT.len()..]))
+                .filter_map(|record| {
+                    record.trim_start().strip_prefix(kind)?.strip_prefix(' ').map(str::to_owned)
                 })
                 .collect()
         }
@@ -1990,6 +2028,275 @@ mod launch_seccomp_kernel {
         report(format_args!("i386_control getpid={returned} pid={}", std::process::id()));
     }
 
+    // ------------------------------------------------------------------
+    // x86_64: a failed launch-hook step is a launch error (S-ND295-41)
+    // ------------------------------------------------------------------
+
+    /// One of the launch hook's three child steps (FD § "[REF] Driven port —
+    /// VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the three
+    /// child steps of `register_launch_child_hook`)).
+    #[cfg(target_arch = "x86_64")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum HookStep {
+        /// Step 1: `close_range(first_closed, ~0U, CLOSE_RANGE_CLOEXEC)`.
+        CloseRange,
+        /// Step 2: `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)`.
+        NoNewPrivs,
+        /// Step 3: `seccomp(SECCOMP_SET_MODE_FILTER, 0, &fprog)`.
+        LoadFilter,
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    impl HookStep {
+        const ALL: [Self; 3] = [Self::CloseRange, Self::NoNewPrivs, Self::LoadFilter];
+
+        /// The intermediate child role that refuses this step.
+        const fn role(self) -> &'static str {
+            match self {
+                Self::CloseRange => "hook-step-close-range",
+                Self::NoNewPrivs => "hook-step-no-new-privs",
+                Self::LoadFilter => "hook-step-load-filter",
+            }
+        }
+
+        fn from_role(role: &str) -> Option<Self> {
+            Self::ALL.into_iter().find(|step| step.role() == role)
+        }
+
+        /// The field naming this step in a `stimulus` report record.
+        const fn key(self) -> &'static str {
+            match self {
+                Self::CloseRange => "close_range",
+                Self::NoNewPrivs => "no_new_privs",
+                Self::LoadFilter => "seccomp",
+            }
+        }
+
+        /// The system call number the stimulus refuses for this step, and the
+        /// low word of the first argument it must also carry (`prctl` is
+        /// refused only for `PR_SET_NO_NEW_PRIVS`).
+        fn refused_call(self) -> (u32, Option<u32>) {
+            let number =
+                |nr: libc::c_long| u32::try_from(nr).expect("x86_64 syscall numbers fit u32");
+            match self {
+                Self::CloseRange => (number(libc::SYS_close_range), None),
+                Self::NoNewPrivs => (
+                    number(libc::SYS_prctl),
+                    Some(u32::try_from(libc::PR_SET_NO_NEW_PRIVS).expect("the prctl option fits")),
+                ),
+                Self::LoadFilter => (number(libc::SYS_seccomp), None),
+            }
+        }
+    }
+
+    /// `AUDIT_ARCH_X86_64` (`linux/audit.h`); the locked `libc` does not
+    /// export it.
+    #[cfg(target_arch = "x86_64")]
+    const STIMULUS_AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+
+    #[cfg(target_arch = "x86_64")]
+    const fn bpf_insn(code: u16, jt: u8, jf: u8, k: u32) -> libc::sock_filter {
+        libc::sock_filter { code, jt, jf, k }
+    }
+
+    /// The fault stimulus of the hook-step cases (test support): a
+    /// classic-BPF program that returns `ERRNO(EPERM)` for exactly `step`'s
+    /// system call (for `prctl`, only with `PR_SET_NO_NEW_PRIVS` as its first
+    /// argument) and allows every other call. The intermediate installs it
+    /// before it registers the production hook, so the forked launch child
+    /// inherits it and that one hook step fails with `EPERM`.
+    #[cfg(target_arch = "x86_64")]
+    fn step_refusal_program(step: HookStep) -> Vec<libc::sock_filter> {
+        let code = |bits: u32| u16::try_from(bits).expect("classic-BPF opcodes fit u16");
+        let offset = |at: usize| u32::try_from(at).expect("seccomp_data offsets fit u32");
+        let load = code(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS);
+        let jeq = code(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K);
+        let ret = code(libc::BPF_RET | libc::BPF_K);
+        let allow = libc::SECCOMP_RET_ALLOW;
+        let refuse =
+            libc::SECCOMP_RET_ERRNO | u32::try_from(libc::EPERM).expect("EPERM is positive");
+        let (nr, first_argument) = step.refused_call();
+        let mut program = vec![
+            bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, arch))),
+            // A foreign ABI is outside the stimulus: allow it.
+            bpf_insn(jeq, 1, 0, STIMULUS_AUDIT_ARCH_X86_64),
+            bpf_insn(ret, 0, 0, allow),
+            bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, nr))),
+        ];
+        match first_argument {
+            None => program.extend([
+                bpf_insn(jeq, 0, 1, nr),
+                bpf_insn(ret, 0, 0, refuse),
+                bpf_insn(ret, 0, 0, allow),
+            ]),
+            // `args[0]`'s low word: the target is little-endian.
+            Some(argument) => program.extend([
+                bpf_insn(jeq, 0, 3, nr),
+                bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, args))),
+                bpf_insn(jeq, 0, 1, argument),
+                bpf_insn(ret, 0, 0, refuse),
+                bpf_insn(ret, 0, 0, allow),
+            ]),
+        }
+        program
+    }
+
+    /// Set `no_new_privs` on this process, as seccomp(2) requires before an
+    /// unprivileged filter load.
+    #[cfg(target_arch = "x86_64")]
+    fn set_no_new_privs() {
+        let (on, unused) = (libc::c_ulong::from(1_u32), libc::c_ulong::from(0_u32));
+        // SAFETY: `prctl` with integer arguments only.
+        let rc = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, on, unused, unused, unused) };
+        assert_eq!(rc, 0, "set no_new_privs: {}", io::Error::last_os_error());
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn install_step_refusal(step: HookStep) {
+        let program = step_refusal_program(step);
+        let fprog = libc::sock_fprog {
+            len: u16::try_from(program.len()).expect("the stimulus program fits sock_fprog"),
+            filter: program.as_ptr().cast_mut(),
+        };
+        // SAFETY: `fprog` points at `program`, live and unmodified for the
+        // whole call; the kernel copies the instructions before returning.
+        let rc = unsafe {
+            libc::syscall(
+                libc::SYS_seccomp,
+                libc::c_ulong::from(libc::SECCOMP_SET_MODE_FILTER),
+                libc::c_ulong::from(0_u32),
+                &raw const fprog,
+            )
+        };
+        assert_eq!(rc, 0, "install the {step:?} refusal: {}", io::Error::last_os_error());
+    }
+
+    /// Issue `step`'s system call in this process in a form that changes
+    /// nothing, and return its errno (0 on success): an empty close-on-exec
+    /// range, a `no_new_privs` that is already set, and a read-only seccomp
+    /// action query. Run after the stimulus is installed, it witnesses that
+    /// exactly the targeted step is refused.
+    #[cfg(target_arch = "x86_64")]
+    fn probe_hook_step(step: HookStep) -> i32 {
+        let (none, on) = (libc::c_ulong::from(0_u32), libc::c_ulong::from(1_u32));
+        let last = libc::c_ulong::from(u32::MAX);
+        let allow_action: u32 = libc::SECCOMP_RET_ALLOW;
+        // SAFETY: each call passes integer arguments or a pointer to the live
+        // stack value `allow_action`, which the kernel only reads.
+        let rc = unsafe {
+            match step {
+                HookStep::CloseRange => libc::syscall(
+                    libc::SYS_close_range,
+                    last,
+                    last,
+                    libc::c_ulong::from(libc::CLOSE_RANGE_CLOEXEC),
+                ),
+                HookStep::NoNewPrivs => {
+                    libc::c_long::from(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, on, none, none, none))
+                }
+                HookStep::LoadFilter => libc::syscall(
+                    libc::SYS_seccomp,
+                    libc::c_ulong::from(libc::SECCOMP_GET_ACTION_AVAIL),
+                    none,
+                    &raw const allow_action,
+                ),
+            }
+        };
+        if rc == -1 { io::Error::last_os_error().raw_os_error().expect("an OS error") } else { 0 }
+    }
+
+    /// The hook-step intermediate: sets `no_new_privs`, installs `step`'s
+    /// refusal (none for the control), reports which steps its own probes
+    /// see refused, then launches this binary as [`MARKER_ROLE`] through the
+    /// production hook with the production program (`first_closed = 3`, a
+    /// launch without a queue). A spawn error is classified by the adapter's
+    /// own `classify_launch_spawn_error` and reported; a spawned target is
+    /// awaited and its exit status reported.
+    #[cfg(target_arch = "x86_64")]
+    fn child_hook_step(step: Option<HookStep>) {
+        use std::process::Stdio;
+
+        let marker =
+            std::env::var_os(CHILD_MARKER_ENV).expect("the parent names the target's marker file");
+        set_no_new_privs();
+        if let Some(step) = step {
+            install_step_refusal(step);
+        }
+        let probes: Vec<String> = HookStep::ALL
+            .iter()
+            .map(|probe| format!("{}={}", probe.key(), probe_hook_step(*probe)))
+            .collect();
+        report(format_args!("stimulus {}", probes.join(" ")));
+
+        let target = std::env::current_exe().expect("locate this test binary");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("launcher runtime");
+        runtime.block_on(async {
+            let mut cmd = tokio::process::Command::new(&target);
+            cmd.args(CHILD_ROLE_ARGS)
+                .env(CHILD_ROLE_ENV, MARKER_ROLE)
+                .env(CHILD_MARKER_ENV, marker.as_os_str())
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let filter = super::launch_seccomp::VmmLaunchSeccompFilter::for_target()
+                .expect("the 64-bit x86_64 target has a launch seccomp program");
+            super::register_launch_child_hook(&mut cmd, 3, filter);
+            match cmd.output().await {
+                Ok(output) => {
+                    let status = output
+                        .status
+                        .code()
+                        .map_or_else(|| "signal".to_owned(), |code| code.to_string());
+                    report(format_args!("launch spawned=true status={status}"));
+                    eprintln!(
+                        "launch target stdout:\n{}\nlaunch target stderr:\n{}",
+                        String::from_utf8_lossy(&output.stdout),
+                        String::from_utf8_lossy(&output.stderr),
+                    );
+                }
+                Err(spawn_error) => {
+                    let wrapper = [target.to_string_lossy().into_owned()];
+                    let classified = super::classify_launch_spawn_error(
+                        target.as_os_str(),
+                        &wrapper,
+                        &spawn_error,
+                    );
+                    let errno = spawn_error
+                        .raw_os_error()
+                        .map_or_else(|| "none".to_owned(), |errno| errno.to_string());
+                    match &classified {
+                        super::VmmError::Create { detail } => {
+                            report(format_args!(
+                                "launch spawned=false errno={errno} variant=create"
+                            ));
+                            report(format_args!("launch_detail {detail}"));
+                        }
+                        other => {
+                            report(format_args!(
+                                "launch spawned=false errno={errno} variant=other"
+                            ));
+                            report(format_args!("launch_detail {other:?}"));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// The hook-step cases' launch target: it creates the marker file, so the
+    /// file exists exactly when the target ran.
+    #[cfg(target_arch = "x86_64")]
+    fn child_marker() {
+        let marker =
+            std::env::var_os(CHILD_MARKER_ENV).expect("the launcher names the marker file");
+        std::fs::File::create_new(&marker).unwrap_or_else(|error| {
+            panic!("create the target marker {}: {error}", Path::new(&marker).display())
+        });
+    }
+
     /// The re-exec child role of the x86_64 cases. It does nothing unless a
     /// parent case re-executes this binary with `OVERDRIVE_LAUNCH_SECCOMP_CHILD`
     /// set; it then observes itself and prints `OVERDRIVE_LAUNCH_SECCOMP_REPORT`
@@ -2001,15 +2308,22 @@ mod launch_seccomp_kernel {
         let Some(role) = std::env::var_os(CHILD_ROLE_ENV) else {
             return;
         };
-        let tap = std::env::var(CHILD_TAP_ENV).expect("the parent names the scratch TAP");
         match role.to_str() {
             Some("descriptors") => child_descriptors(),
-            Some("requests") => child_requests(&tap),
+            Some("requests") => {
+                let tap = std::env::var(CHILD_TAP_ENV).expect("the parent names the scratch TAP");
+                child_requests(&tap);
+            }
             Some("tasks") => child_tasks(),
             Some("x32") => child_x32(),
             Some("i386") => child_i386_ioctl(),
             Some("i386-control") => child_i386_control(),
-            other => panic!("unknown launch_seccomp child role {other:?}"),
+            Some(MARKER_ROLE) => child_marker(),
+            Some(NO_STIMULUS_ROLE) => child_hook_step(None),
+            other => match other.and_then(HookStep::from_role) {
+                Some(step) => child_hook_step(Some(step)),
+                None => panic!("unknown launch_seccomp child role {other:?}"),
+            },
         }
     }
 
@@ -2041,6 +2355,154 @@ mod launch_seccomp_kernel {
             );
         }
         inheritable.assert_inheritable();
+    }
+
+    /// Re-exec this test binary as the hook-step intermediate: `step`'s
+    /// refusal installed (none for the control), then one launch through the
+    /// production hook of a target that creates `marker`.
+    #[cfg(target_arch = "x86_64")]
+    fn run_hook_step_intermediate(step: Option<HookStep>, marker: &Path) -> ChildRun {
+        let role = step.map_or(NO_STIMULUS_ROLE, HookStep::role);
+        let binary = std::env::current_exe().expect("locate this test binary");
+        let output = std::process::Command::new(binary)
+            .args(CHILD_ROLE_ARGS)
+            .env(CHILD_ROLE_ENV, role)
+            .env(CHILD_MARKER_ENV, marker)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("spawn the hook-step intermediate");
+        ChildRun { role, output }
+    }
+
+    /// Whether the launch target ran: its marker file exists. A failed read
+    /// other than absence is a harness failure, never "did not run".
+    #[cfg(target_arch = "x86_64")]
+    fn target_ran(marker: &Path) -> bool {
+        match std::fs::symlink_metadata(marker) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => panic!("stat the target marker {}: {error}", marker.display()),
+        }
+    }
+
+    /// The intermediate's own probes must see exactly `refused` refused with
+    /// `EPERM` and every other hook step succeed, so the stimulus targets one
+    /// step and no other.
+    #[cfg(target_arch = "x86_64")]
+    fn assert_stimulus(run: &ChildRun, refused: Option<HookStep>) {
+        let records = run.records("stimulus");
+        assert_eq!(records.len(), 1, "one stimulus report: {run}");
+        for step in HookStep::ALL {
+            let expected = if Some(step) == refused { libc::EPERM } else { 0 };
+            assert_eq!(
+                records[0].get(step.key()),
+                Some(&expected.to_string()),
+                "with {refused:?} refused, the {step:?} probe must return errno {expected}: {run}",
+            );
+        }
+    }
+
+    /// The S-ND295-41 hook-step oracle: with no step refused the hooked
+    /// launch runs its target (the control); with `step` refused the spawn
+    /// fails, `classify_launch_spawn_error` maps it to `VmmError::Create`
+    /// carrying `EPERM`, and the target never runs.
+    #[cfg(target_arch = "x86_64")]
+    fn assert_a_failed_hook_step_is_a_launch_error(step: HookStep) {
+        let workspace = tempfile::tempdir().expect("per-case directory for the target markers");
+        let target = std::env::current_exe().expect("locate this test binary");
+
+        // Control: nothing refused, so the same hooked launch runs its target.
+        let control_marker = workspace.path().join("control-target-ran");
+        let control = run_hook_step_intermediate(None, &control_marker);
+        control.assert_completed();
+        assert_stimulus(&control, None);
+        let launches = control.records("launch");
+        assert_eq!(launches.len(), 1, "one launch report: {control}");
+        assert_eq!(
+            (launches[0]["spawned"].as_str(), launches[0].get("status").map(String::as_str)),
+            ("true", Some("0")),
+            "with no hook step refused, the hooked launch spawns and its target succeeds: {control}",
+        );
+        assert!(target_ran(&control_marker), "the control's target must run: {control}");
+
+        // The step refused: the launch is an error and the target never runs.
+        let marker = workspace.path().join("target-ran");
+        let refused = run_hook_step_intermediate(Some(step), &marker);
+        refused.assert_completed();
+        assert_stimulus(&refused, Some(step));
+        let launches = refused.records("launch");
+        assert_eq!(launches.len(), 1, "one launch report: {refused}");
+        assert_eq!(
+            launches[0]["spawned"], "false",
+            "a failed {step:?} hook step must fail the spawn, never launch silently: {refused}",
+        );
+        assert_eq!(
+            launches[0]["errno"],
+            libc::EPERM.to_string(),
+            "the spawn error must carry the child's errno from the failed {step:?} step: {refused}",
+        );
+        assert_eq!(
+            launches[0]["variant"], "create",
+            "classify_launch_spawn_error must map a hook failure to VmmError::Create: {refused}",
+        );
+        let details = refused.texts("launch_detail");
+        assert_eq!(details.len(), 1, "one classified detail: {refused}");
+        let eperm = io::Error::from_raw_os_error(libc::EPERM).to_string();
+        let executable = target.to_string_lossy();
+        assert!(
+            details[0].contains(&eperm) && details[0].contains(&*executable),
+            "the Create detail must name the launched executable and carry {eperm:?}: {refused}",
+        );
+        assert!(
+            !target_ran(&marker),
+            "the {step:?} failure must stop the target running: {refused}"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
+    /// failed close-on-exec step turns into a launch error, never a silent
+    /// launch).
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
+    /// seccomp filter refusing `close_range` with `EPERM`; no root and no TAP
+    /// are needed.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
+    fn a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_hook_step_is_a_launch_error(HookStep::CloseRange);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
+    /// failed no-new-privileges step turns into a launch error, never a silent
+    /// launch).
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
+    /// seccomp filter refusing `prctl(PR_SET_NO_NEW_PRIVS)` with `EPERM`.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
+    fn a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_hook_step_is_a_launch_error(HookStep::NoNewPrivs);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
+    /// failed filter-load step turns into a launch error, never a silent
+    /// launch).
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
+    /// seccomp filter refusing `seccomp(2)` with `EPERM`.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
+    fn a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_hook_step_is_a_launch_error(HookStep::LoadFilter);
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -2338,6 +2800,11 @@ mod launch_seccomp_kernel {
     /// failures in their own terms (a failed spawn releases the queue before
     /// any cleanup await).
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// Lane: native x86_64 metal, not the Lima kernel lane. The case is
+    /// x86_64-only (the launch hook takes the x86_64 launch program), and its
+    /// `create` clones the rootfs by `FICLONE`, so `assert_reflink_capable`
+    /// requires a reflink-capable staging root (the metal `/srv/vm`).
     #[cfg(target_arch = "x86_64")]
     #[test]
     #[serial_test::serial(env)]

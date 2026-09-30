@@ -46,6 +46,16 @@
 //! quiescence is taken, and how many failed recovery attempts precede the
 //! outcome.
 //!
+//! # Time
+//!
+//! No wall time is read. The runtime is current-thread and the test polls the
+//! dispatch future itself; every poll yields once so spawned tasks run, and the
+//! only clock is the fixture's `SimClock`, which the test advances by a fixed
+//! step per pending poll while it waits for completion. The start arm's path
+//! awaits no blocking-pool work, so the poll counts, and with them the clock,
+//! are a function of the seed and the dispatch's own await points. A wait that
+//! exhausts its poll budget is a harness failure, reported with the seed.
+//!
 //! Reproduce with `OVERDRIVE_ND295_ACTIVATION_SEEDS=<seed>[,<seed>…] cargo
 //! xtask lima run -- cargo nextest run -p overdrive-sim --test acceptance
 //! --run-ignored ignored-only --no-capture -E 'test(/netns_density_activation_order/)'`.
@@ -139,17 +149,17 @@ const NODE: &str = "local";
 const GUEST_PREFIX: &str = "100.95.0.0/16";
 const GUEST_BRIDGE: &str = "ovd-gbr0";
 const GUEST_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
-/// Bounded poll budget for a dispatch that must complete; each poll yields to
-/// the runtime and advances the sim clock by [`COMPLETION_TICK`].
+/// Bounded poll budget for a dispatch that must complete; each pending poll
+/// yields to the runtime once and advances the sim clock by
+/// [`COMPLETION_TICK`]. No wall time is read.
 const COMPLETION_POLL_BUDGET: usize = 256;
 const COMPLETION_TICK: Duration = Duration::from_millis(5);
-/// Bounded poll budget for a dispatch to reach the parked `activate`.
+/// Bounded poll budget for a dispatch to reach the parked `activate`; each
+/// poll yields to the runtime once.
 const PARK_POLL_BUDGET: usize = 64;
-/// Bounded poll budget for the parked dispatch's Running write to land.
+/// Bounded poll budget for the parked dispatch's Running write to land; each
+/// poll yields to the runtime once.
 const ROW_POLL_BUDGET: usize = 64;
-/// Real time granted between polls that wait for progress, so work the
-/// dispatch hands to another thread can finish.
-const REAL_TIME_SLICE: Duration = Duration::from_millis(1);
 const ACTIVATION_WITHHELD: &str = "guest_network.activation_withheld";
 /// Components a supervisor may report as first failing while recovering.
 const RECOVERY_COMPONENTS: [SharedGuestNetworkComponent; 5] = [
@@ -775,7 +785,9 @@ impl Fixture {
         }
     }
 
-    /// Poll the dispatch until it completes, within a bounded budget.
+    /// Poll the dispatch until it completes, within a bounded budget. Each
+    /// pending poll has already yielded once (see [`step`]) and advances only
+    /// the sim clock; budget exhaustion is a harness failure.
     async fn run_to_completion<F>(
         &self,
         dispatch: &mut Pin<Box<F>>,
@@ -786,10 +798,7 @@ impl Fixture {
     {
         for poll in 0..COMPLETION_POLL_BUDGET {
             match step(dispatch).await {
-                Step::Pending => {
-                    self.clock.tick(COMPLETION_TICK);
-                    tokio::time::sleep(REAL_TIME_SLICE).await;
-                }
+                Step::Pending => self.clock.tick(COMPLETION_TICK),
                 Step::Done(result) => return result,
                 Step::Panicked(message) => panic!(
                     "seed={}: the dispatch panicked {after} (poll {poll}): {message}",
@@ -797,13 +806,12 @@ impl Fixture {
                 ),
             }
         }
-        panic!(
-            "seed={}: the dispatch did not complete within {COMPLETION_POLL_BUDGET} polls {after}; \
-             owner calls {:?}; journal {:?}",
-            self.seed,
+        self.harness_failure(&format!(
+            "the dispatch did not complete within {COMPLETION_POLL_BUDGET} yield-and-tick polls \
+             {after}; owner calls {:?}; journal {:?}",
             self.owner.calls(),
             self.journal.entries(),
-        );
+        ));
     }
 
     fn exec_releases(&self, alloc: &AllocationId) -> Vec<usize> {
@@ -1026,7 +1034,8 @@ async fn latched_activation_retries(seed: u64) {
                 parked = true;
                 break;
             }
-            Step::Pending => tokio::time::sleep(REAL_TIME_SLICE).await,
+            // `step` already yielded once; poll again.
+            Step::Pending => {}
             Step::Done(result) => fixture.harness_failure(&format!(
                 "the dispatch completed before reaching activate (poll {poll}): {result:?}"
             )),
@@ -1036,7 +1045,9 @@ async fn latched_activation_retries(seed: u64) {
         }
     }
     if !parked {
-        fixture.harness_failure("the dispatch never reached the parked activate call");
+        fixture.harness_failure(&format!(
+            "the dispatch never reached the parked activate call within {PARK_POLL_BUDGET} polls"
+        ));
     }
 
     // Recovery begins and the latch is set while that activation is in flight.
@@ -1118,13 +1129,13 @@ async fn fail_stop_withholds(seed: u64) {
             break;
         }
         fixture.wait_parked(&mut dispatch, 1, "the gate is Recovering").await;
-        tokio::time::sleep(REAL_TIME_SLICE).await;
         parked_row = fixture.row(&alloc).await;
     }
     assert_eq!(
         parked_row.as_ref().map(|row| row.state),
         Some(AllocState::Running),
-        "seed={seed}: the Running row precedes the activation wait: {parked_row:?}"
+        "seed={seed}: the Running row precedes the activation wait (read after up to \
+         {ROW_POLL_BUDGET} polls of the parked dispatch): {parked_row:?}"
     );
     if quiesce {
         let quiescence = fixture.quiesce().await;

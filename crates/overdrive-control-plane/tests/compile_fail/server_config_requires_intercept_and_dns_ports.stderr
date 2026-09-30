@@ -1,15 +1,10 @@
-error[E0061]: this function takes 3 arguments but 1 argument was supplied
- --> tests/compile_fail/server_config_requires_intercept_and_dns_ports.rs:16:5
-  |
-  16 |     ServerConfig::new(kek)
-     |     ^^^^^^^^^^^^^^^^^----- two arguments of type `Arc<(dyn overdrive_worker::mtls_intercept_port::MtlsIntercept + 'static)>` and `Arc<(dyn overdrive_control_plane::dns_responder::GuestDnsFactory + 'static)>` are missing
-     |
-note: associated function defined here
-    --> src/lib.rs
-     |
-     |     pub fn new(
-     |            ^^^
-help: provide the arguments
-     |
-  16 |     ServerConfig::new(kek, /* Arc<(dyn overdrive_worker::mtls_intercept_port::MtlsIntercept + 'static)> */, /* Arc<(dyn overdrive_control_plane::dns_responder::GuestDnsFactory + 'static)> */)
-     |                          +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+error[E0308]: mismatched types
+  --> tests/compile_fail/server_config_requires_intercept_and_dns_ports.rs:20:65
+   |
+20 |     let _from_the_kek_alone: fn(Arc<dyn Kek>) -> ServerConfig = ServerConfig::new;
+   |                              --------------------------------   ^^^^^^^^^^^^^^^^^ incorrect number of function parameters
+   |                              |
+   |                              expected due to this
+   |
+   = note: expected fn pointer `fn(Arc<dyn Kek>) -> ServerConfig`
+                 found fn item `fn(Arc<(dyn Kek + 'static)>, Arc<(dyn overdrive_worker::mtls_intercept_port::MtlsIntercept + 'static)>, Arc<(dyn overdrive_control_plane::dns_responder::GuestDnsFactory + 'static)>) -> ServerConfig {ServerConfig::new}`

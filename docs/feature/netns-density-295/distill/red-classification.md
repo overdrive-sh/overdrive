@@ -725,3 +725,351 @@ above). Both substrates were checked clean afterwards. After the second review,
 the node-level audit body and the unreserved-pass body (which now uses a third,
 udev-shaped unreserved address) were rerun once serially (`2 tests run: 0
 passed, 2 failed`, each at guest_network.rs:6842:37).
+
+
+## Phase G — DISTILL fix pass of review iteration 1 (2026-09-30)
+
+The fix pass answers DISTILL review iteration 1
+(`.context/netns-density-295-distill-review-iteration-1.md`) against the DESIGN as
+pinned on 2026-09-29 and the user decisions of 2026-09-29/30. It ran over three
+sessions; their evidence logs are under `target/phase-g-295/` (`G-*`, `G3-*`,
+`G4-*`, never overwritten, not committed). **This phase cites only the `G4-*`
+logs**, captured on HEAD `de149f28` plus the fix pass's uncommitted working
+tree after its last code edit that could change a result (later edits touched
+comments, one nextest budget, and documents only). Earlier phases are unchanged
+(this file is append-only); where they are now stale, this phase says so below.
+
+### Substrates
+
+| Substrate | Identity (this phase) |
+|---|---|
+| Lima VM `overdrive` | aarch64, kernel `7.0.0-34-generic` (`uname -srm`, G4-ENV-lima-uname) |
+| Native metal | x86_64, kernel `7.0.0-29-generic`, `systemd-detect-virt`: `none`, `cloud-hypervisor v53.0` (G4-ENV-metal-idle-b, through the `cargo xtask metal run` preflight and lease) |
+
+### Environment and cleanup
+
+- Lima had no cargo, nextest, or Cloud Hypervisor process before G4-L03. Two
+  workload scopes left by an earlier run (`alloc-nd295-teardown-keep-0.scope`,
+  `alloc-nd295-teardown-named-0.scope`) were present during G4-L03 and were
+  killed and removed right after it (G4-ENV-cleanup-1); no G4-L03 failure
+  touches a cgroup scope. After G4-L03 the VM still held `ovd-gbr0`,
+  `ovd-tp-0002`, `ovd-tp-0003`, and `table bridge overdrive-mtls` from the
+  startup bodies; later runs select no body that reads them.
+- Metal was idle before the first native run (no CH process, scope, or netns)
+  and clean after G4-N10 (G4-ENV-metal-after-N10). Every metal run held the
+  canonical metal lease; runs went one at a time.
+
+### Runs
+
+| Run | Substrate | Command (all through `cargo xtask {lima,metal} run --`) | Result |
+|---|---|---|---|
+| G4-C01 | Lima | `cargo check --workspace --all-targets --features integration-tests` | exit 0 |
+| G4-C02 | Lima | `cargo check -p overdrive-cli --all-targets --features integration-tests,kvm-tests` | exit 0 |
+| G4-L01 | Lima | `TRYBUILD=overwrite cargo nextest run -p overdrive-control-plane --test compile_fail` | exit 0; the S-ND295-65 `.stderr` regenerated (DR-18) |
+| G4-L02 | Lima | `cargo nextest run -p overdrive-control-plane --test compile_fail` | `1 test run: 1 passed` |
+| G4-L03 | Lima | control-plane lib (`shared_network_task_owner_acceptance`, `allocation_owner_acceptance`, `shared_network_test_ports`, the 05E body), acceptance (`netns_density_guest_network`, `required_serve_ports_source_scan`), integration (`boot_member_clear_refusal`, `shared_network_supervisor_recovery`, `mtls_install_fail_closed`, `network_cleanup_pending_status`, `shared_guest_network_startup`, `dns_responder_bind`, `shared_element_cleanup_failure`, `server_lifecycle`), `--features integration-tests --run-ignored all` | `129 tests run: 38 passed, 91 failed` — every failure pending-marked except four baselines (below) |
+| G4-L04 | Lima | worker lib (`mtls_intercept_worker::tests`, `shared_program_rollback_acceptance`, `mtls_intercept_port`) and integration (`netns_density_shared_owner`, `shared_intercept_members`, `mtls_intercept_equivalence`, `mtls_intercept_install`, `egress_tproxy_capture`, `name_resolve_enforce_consistency`), `--run-ignored all` | `93 tests run: 57 passed, 36 failed` — every failure pending-marked |
+| G4-L05 | Lima | sim lib (`netns_density_boot_order`), acceptance (`netns_density_activation_order`, `netns_density_retiring_cleanup`), integration (`netns_density_reclaim`), `--run-ignored all` | `7 tests run: 0 passed, 7 failed` — all pending-marked |
+| G4-L06 | Lima | sim integration `node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads`, `--run-ignored all --no-capture` | `1 test run: 0 passed, 1 failed` in 288 s |
+| G4-L07 | Lima | core `netns_density_cleanup_pending`; reconcilers `workload_lifecycle`; `xtask` `cloexec_lint`; host `vmm::` (lib) and integration; netlink `tap_queue_attach`, `tap_debug_msg_mask`, `ensure_bridge`, `local_route`; bpf `guest_tcx_classifier`; dataplane `guest_tcx::`, `--run-ignored all` | `66 tests run: 35 passed, 31 failed` — every failure pending-marked |
+| G4-L08b | Lima | `-p overdrive-system-conformance --features integration-tests --run-ignored all` | `2 tests run: 0 passed, 2 failed` — both pending 10-03 |
+| G4-L09 / G4-L10 | Lima | `cargo nextest show-config test-groups --profile {default,ci}` | both profiles put `package(overdrive-control-plane) & kind(lib)` (242 tests) and `package(overdrive-host) & binary(integration)` in `host-kernel-shared` (DISTILL review B5, M4) |
+| G4-N01 | metal | `-p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(/a_capture_bound_to_a_down_tap…/)'` | `1 test run: 1 passed` |
+| G4-N02…N06, N08, N12 | metal | one guest-booting body per fixture path (below) | each `FAIL` on the guest-boot baseline, in 11.5–32 s |
+| G4-N07 | metal | `…-E 'test(/both_time_wait_controls_prove_the_substate_and_sequence_gates/)'` | `1 test run: 1 passed` (2.4 s) |
+| G4-N09 | metal | `-p overdrive-host --lib --features integration-tests --run-ignored all -E 'test(/launch_seccomp\|vmm::tests::/)'` | `15 tests run: 1 passed, 14 failed` — all failures pending-marked |
+| G4-N10 | metal | `-p overdrive-host --test integration --features integration-tests,kvm-tests --run-ignored all -E 'test(/vmm_tap_queue_errors/)'` | `1 test run: 0 passed, 1 failed` (pending 05-03) |
+| G4-N11 | metal | `-p overdrive-worker --test integration --features integration-tests --run-ignored all -E 'test(/outbound_enforce_substrate_splice/)'` | `10 tests run: 9 passed, 1 failed` — the failure is the N-03 baseline |
+
+### Guest-boot diagnosis — BASELINE: the named-TAP launch under the confined VMM
+
+**Verdict: baseline, not a #295 DISTILL defect.** No guest reaches Running on
+today's code, so every guest-dependent native body fails before its own oracle.
+
+- *Observed* (G4-N02, `two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces`;
+  the same text in N03, N04, N05, N08, N12):
+
+  ```
+  workload nd295-a reached the terminal state Failed and can never reach Running; observed row:
+  AllocStatusRowBody { alloc_id: "alloc-nd295-a-0", … state: Failed,
+  reason: Some(VmGuestExitUnreported { vmm_exit_code: Some(1), vmm_signal: None }), …
+  error: Some("  3: Cannot create virtio-net device\n  4: Failed to open taps\n  5: Enabling tap interface failed\n  6: Ioctl failed (35092)\n  7: Operation not permitted (os error 1)"), … }
+  ```
+
+- *Mechanism.* Ioctl 35092 is `0x8914`, `SIOCSIFFLAGS`. Cloud Hypervisor is
+  started with the named-TAP argument (G4-L07,
+  `mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher`:
+  `left: "tap=ovd-tap-002a,mac=02:00:00:00:00:2a,offload_tso=off,offload_ufo=off,offload_csum=off"`
+  `right: "fd=[3],mac=…"`), opens the TAP by name, and its `Tap::enable` sets
+  `IFF_UP`, which the confined VMM uid may not do. Until `c60cdd3b` (step 02-01,
+  before `b5ef001b`) the launch ran inside `ip netns exec`, as root; that commit
+  dropped the wrap:
+
+  ```
+  -    let Some(attachment) = network else {
+  -        return (wrapper[0].clone(), wrapper[1..].to_vec());
+  -    };
+  -    let mut args =
+  -        vec!["netns".to_owned(), "exec".to_owned(), attachment.netns.as_str().to_owned()];
+  -    args.extend_from_slice(wrapper);
+  -    ("ip".to_owned(), args)
+  +    (wrapper[0].clone(), wrapper[1..].to_vec())
+  ```
+
+  DELIVER 05-03's fd handoff replaces the named open (`--net fd=[3]`), and the
+  TAP is raised by the host owner at activation (R5), so the baseline ends at
+  05-03.
+- *Classification.* Every guest-dependent #295 body marked after 05-03 is
+  **RED — preceding-step gap (05-03)**; S-ND295-45 (marked 05-03) is RED at its
+  own step. Active pre-#295 guest bodies (the S-GTI bodies and the D7 witness in
+  `guest_stack_mtls_egress.rs`) fail on the same baseline and are not #295
+  bodies. The native bodies were not re-proved one by one: one representative
+  ran per fixture path — the walking-skeleton VM fixture (N02), the mesh-guest
+  scenario (N03), the spin VM of the native-fault module (N04), the
+  delayed-READY survivor path (N05), the power-off-before-READY fixture (N06),
+  the killed-mode serve (N08), and the E14 probe guest (N12).
+- *Harness.* Each representative ended in 11.5–32 s: the VM poll panics on the
+  first terminal row it cannot use, and `TeardownBound` ended the failed body's
+  teardown after 30 s where the in-process serve was never shut down (N03:
+  `teardown bound: … killed the workload scopes it created: ["alloc-server-1.scope"]; ending the test process`).
+- *The delayed-READY fixture.* G4-N06 staged the power-off-before-READY image
+  (loop mount, holding init) and deployed it; the TAP was created and then
+  removed when the VMM failed: `nd295-66-power-off's TAP ovd-tp-0002 disappeared
+  before its booting attachment was witnessed (last observation: TAP ovd-tp-0002
+  administratively_up=Some(false) queue_holder=None holder_alloc=None
+  console_holding=false)` (shared_network_native_faults.rs:956:13). The fixture
+  staged without error; its hold markers are unobservable until a guest boots.
+
+### Production defect found and fixed in DISTILL (DISTILL review DR-05)
+
+`e496722c` (DISTILL phase B) changed production code on the serve boot path:
+`GuestTcxBpfTestAttr` carried 4 bytes of uninitialized trailing padding that
+reached `BPF_PROG_TEST_RUN`, whose attribute check rejects any non-zero byte
+after `test.batch_size` with `EINVAL`, so the startup probe could refuse
+`run_server` depending on stack contents. The fix is an explicit zeroed tail
+(`_pad: [u8; 4]`, initialized `[0; 4]`), the shape `sys::prog_test_run` already
+uses. It changes no interface. The fix pass pins the layout with
+`crates/overdrive-dataplane/src/guest_tcx.rs::tests::bpf_test_run_attribute_ends_in_an_explicit_zeroed_tail`
+(`offset_of!(batch_size) == 72`, `offset_of!(_pad) == 76`, `size_of == 80`):
+**PASS** in G4-L07.
+
+### Re-verification of the rewritten S-ND295-51 whole-call body (Phase C, line 414)
+
+DR-08 (b)-A removed the whole-call `Err` that
+`quiescence_reports_every_unconfirmed_tap_and_condemns_it` asserted; the body now
+asserts the per-TAP `Connect` partition. As the DESIGN predicted, it is still RED
+in the shared fixture's provision, before the rewritten section runs (G4-L03):
+`fixture provisions the attachment down: PostconditionMismatch { operation:
+TapObserve, expected: Tap { name: "t295-q1", ifindex: Some(295), link_kind: Tap,
+persistent: true, up: false, owner_uid: Some(4200) }, observed: Some(Tap { … owner_uid:
+Some(0) }) }` (guest_network.rs:6882:37) — **RED — preceding-step gap (06-02)**.
+
+### Per-body results — every body the fix pass changed or added
+
+Vocabulary as in Phase C. "own step" means the activating step's own scaffold
+or oracle; a preceding-step gap names the earlier step whose missing behaviour
+the body meets first. A body "by representative" was not run on its own; the
+fixture path it shares was (above). Bodies whose file moved appear once, at
+their new home.
+
+| Scenario | Step | Body | Change | Run | Result | Classification | Evidence |
+|---|---|---|---|---|---|---|---|
+| S-ND295-00 | active | `guest_tcx.rs::bpf_test_run_attribute_ends_in_an_explicit_zeroed_tail` | + | G4-L07 | PASS | PASS (active) — layout pin of the phase-B defect fix `e496722c` | — |
+| S-ND295-01 | active | `guest_stack_mtls_egress.rs::a_capture_bound_to_a_down_tap_reads_every_frame_after_the_up_transition_and_none_before` | + | G4-N01 | PASS | PASS (active) — harness self-test | `S-ND295-01 capture self-test (link-layer): 19 frames (3 host-originated), PacketStatistics { packets: 19, drops: 0 }`; datagram the same |
+| S-ND295-05D | 07-03 | `netns_density_node_admission.rs::node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads` | ~ | G4-L06 | FAIL | RED — preceding-step gap (06-03) | `seed=186055177052160001: harness precondition failed (not a contract verdict): f14823's lease was never released after stop: no guest_network.lease_released { alloc } event … within 6 evaluations` (fill of 16,384 completed first, ~280 s); NA-VIEW/NA-E7/NA-E7-C not reached |
+| S-ND295-05E | 06-03 | `mod.rs::a_refused_restart_successor_still_cleans_up_its_predecessor_once` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `guest_network.rs:622:9 :: not yet implemented: RED scaffold: D-295-R7 GuestAddressPool::retire — DELIVER step 06-03` |
+| S-ND295-06 | 06-03 | `mtls_install_fail_closed.rs::restart_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:1546:9 :: assertion `left == right` failed: restart: exactly one LeaseRetired for running-write-reject-restart-successor; journal [Provision, DriverStart, DriverStop, Teardown] left: 0 right: 1` |
+| S-ND295-06 | 06-03 | `mtls_install_fail_closed.rs::start_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:1546:9 :: assertion `left == right` failed: fresh start: exactly one LeaseRetired for running-write-reject-start; journal [Provision, DriverStart, DriverStop, Teardown] left: 0 right: 1` |
+| S-ND295-07 | 07-01 | `netns_density_retiring_cleanup.rs::a_failed_element_removal_keeps_the_address_until_a_retry_converges` | + | G4-L05 | FAIL | RED — preceding-step gap (05-01) | `netns_density_retiring_cleanup.rs:652:9 :: seed=186054989670514689: [RED] E8-REMOVAL-REACHED (first stop): the first stop of alloc-e8p-0295000700000001-0 did not reach remove_allocation_elements for its source 100.95.0.2: the remo…` |
+| S-ND295-08 | 06-01 | `guest_tcx_classifier_test_run.rs::ingress_partitions_leave_the_ninth_egress_slot_untouched` | + | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `guest_tcx_classifier_test_run.rs:305:13 :: assertion `left == right` failed: the shared counter array has 9 slots (slot 8 is EgressDestinationDrop) left: 8 right: 9` |
+| S-ND295-10 | 09-01 | `shared_guest_network_startup.rs::deliberate_link_loss_reaches_default_drop_and_the_exact_production_audit_cause` | ~ | G4-L03 | FAIL | RED — preceding-step gap (06-01) | `ethtool.rs:257:5 :: not yet implemented: RED scaffold: D-295-R22 debug_msg_mask — DELIVER step 06-01` |
+| S-ND295-11 | 06-02 | `shared_guest_network_startup.rs::ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start` | ~ | G4-L03 | FAIL | RED — preceding-step gap (06-01) | `ethtool.rs:257:5 :: not yet implemented: RED scaffold: D-295-R22 debug_msg_mask — DELIVER step 06-01` |
+| S-ND295-12 | 06-02 | `guest_network.rs::every_teardown_leaf_failure_continues_cleanup_and_retry_reaches_the_exact_complement` | ~ | G4-L03 | FAIL | RED — own step (fixture precondition, oracle unexercised) | `guest_network.rs:6882:37 :: fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "ovd-tp-0002", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: So…` |
+| S-ND295-12 | 06-02 | `shared_guest_network_startup.rs::two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal` | ~ | G4-L03 | FAIL | RED — preceding-step gap (06-01) | `ethtool.rs:257:5 :: not yet implemented: RED scaffold: D-295-R22 debug_msg_mask — DELIVER step 06-01` |
+| S-ND295-13A | 08-02 | `netns_density_boot_order.rs::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm` | ~ | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_boot_order.rs:323:9 :: seed=18172322451430199064: boot never cleared the stale intercept members InterceptMembers { managed_guest_ips: {100.95.14.253}, outbound_sources: {100.95.14.253}, inbound_destinations: {10.98.…` |
+| S-ND295-13C | 08-02 | `serve_killed_restart_boot_clear.rs::a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits` | ~ | G4-N08 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline | `row Failed VmGuestExitUnreported; CH: Cannot create virtio-net device / Failed to open taps / Enabling tap interface failed / Ioctl failed (35092) / Operation not permitted (os error 1)` (11.5 s) |
+| S-ND295-13D | 08-02 | `boot_member_clear_refusal.rs::a_boot_member_clear_that_commits_after_the_refusal_publishes_nothing` | + | G4-L03 | FAIL | RED — preceding-step gap (05-01): `ServerConfig.mtls_intercept` is not consumed before 05-01 (journal empty) | `boot_member_clear_refusal.rs:419:13 :: a fresh-process boot whose member clear fails must refuse; it published a server (journal [])` |
+| S-ND295-13D | 08-02 | `boot_member_clear_refusal.rs::a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_observed` | + | G4-L03 | FAIL | RED — preceding-step gap (05-01): the port is not consumed (journal empty) | `boot_member_clear_refusal.rs:419:13 :: a fresh-process boot whose member clear fails must refuse; it published a server (journal [])` |
+| S-ND295-13D | 08-02 | `boot_member_clear_refusal.rs::a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cause` | + | G4-L03 | FAIL | RED — preceding-step gap (05-01): the port is not consumed (journal empty) | `boot_member_clear_refusal.rs:419:13 :: a fresh-process boot whose member clear fails must refuse; it published a server (journal [])` |
+| S-ND295-13D | 08-02 | `netns_density_shared_owner.rs::a_failed_member_clear_refuses_startup_without_publication` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_shared_owner.rs:1835:17 :: Refuse { errno: 16 }: expected BootMemberClear carrying the clear's own error, or MembersRemain naming the members left, got Intercept { source: NftSharedReplaceFailed { prior: Some(Constan…` |
+| S-ND295-13D | 08-02 | `netns_density_shared_owner.rs::a_fresh_owner_clears_stale_members_before_reading_the_program` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_shared_owner.rs:1744:5 :: assertion `left == right` failed: the fresh owner converges the members to empty before any other port call, so before it reads the program; journal: [ObserveShared, BindTransparent(127.0.0.…` |
+| S-ND295-19 | 09-01 | `lib.rs::published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [deterministic schedule s19-wrong-leg-f-target]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | 09-01 | `lib.rs::a_double_failure_raises_no_tap_before_every_owner_is_repaired` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell Bridge+ProgramDeleted/heal-2-3]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | 09-01 | `lib.rs::a_kernel_path_failure_after_a_part_way_restore_quiesces_again_before_any_restore` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell requiesce/ProgramDeleted-then-Owner(EndpointMap)/raised-1/offset-655ms]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | 09-01 | `lib.rs::a_worker_only_repair_still_restores_quiesced_taps_and_reopens` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell ProgramDeleted/worker-only-0]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | 09-01 | `lib.rs::dns_task_loss_closes_new_commands_and_recovers_through_a_fresh_responder` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell DnsServeReturned/refused-probes-2]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | 09-01 | `lib.rs::the_gate_is_never_open_while_quiescence_is_latched` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell restore-fails-twice]: the supervisor wakes and registers its next wait` |
+| S-ND295-29A | active | `shared_network_test_ports.rs::a_part_way_restore_raises_some_and_a_repeat_quiescence_sets_them_down` | + | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::a_failed_restore_keeps_admission_closed_until_a_later_restore_succeeds` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C4b-failed-restore-keeps-admission-closed violated in 16 of 16 cells (red=0, unreached=16); first: seed=0x2953300000000001 cell=Bridge@phase=250ms Unreached("precondition arm…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::an_activation_in_flight_waits_for_reopen_and_raises_once` | + | G4-L03 | FAIL | RED — preceding-step gap (05-01) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C9-activation-waits-for-reopen-and-raises-once violated in 4 of 4 cells (red=0, unreached=4); first: seed=0x2953300000000001 cell=InFlight/Bridge@phase=830ms Unreached("preco…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::every_component_loss_is_detected_within_one_audit_and_closes_admission` | ~ | G4-L03 | FAIL | RED — preceding-step gap (05-01) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C2-detection-and-admission-closure violated in 28 of 28 cells (red=0, unreached=28); first: seed=0x2953300000000001 cell=Component(Bridge)@phase=600ms Unreached("precondition…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::healed_owner_after_fail_stop_cannot_reopen_admission` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C7a-post-fail-stop-heal-cannot-reopen violated in 26 of 26 cells (red=0, unreached=26); first: seed=0x2953300000000001 cell=Component(Bridge)/linger=9s Unreached("preconditio…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::healthy_node_audits_the_shared_owner_every_second` | ~ | G4-L03 | FAIL | RED — preceding-step gap (05-01): required ports not composed at boot | `shared_network_supervisor_recovery.rs:1424:13 :: clause C1-one-second-audit-cadence violated in 2 of 2 cells (red=0, unreached=2); first: seed=0x2953300000000001 cell=healthy-10s Unreached("precondition R16: required ports not com…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::in_flight_success_after_the_deadline_cannot_reopen_admission` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C7b-in-flight-late-success-cannot-reopen violated in 26 of 26 cells (red=0, unreached=26); first: seed=0x2953300000000001 cell=Component(Bridge)/hung_attempt=17 Unreached("pr…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::kernel_path_loss_quiesces_once_before_repair_and_listener_or_dns_loss_never_does` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C3-component-quiescence-rules violated in 26 of 26 cells (red=0, unreached=26); first: seed=0x2953300000000001 cell=Component(Bridge)/kernel_path=true/failed_attempts=0 Unrea…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::repair_runs_through_the_owning_component_on_the_attempt_cadence_and_reopens_once` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C4-exact-owner-repair-cadence-reopen violated in 26 of 26 cells (red=0, unreached=26); first: seed=0x2953300000000001 cell=Component(Bridge)/owner=SharedGuestNetworkOwner/fai…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::supervisor_task_loss_is_observed_immediately_and_fail_stops_with_the_latest_snapshot` | ~ | G4-L03 | FAIL | RED — preceding-step gap (05-01) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C8-supervisor-task-loss-fail-stop violated in 28 of 28 cells (red=0, unreached=28); first: seed=0x2953300000000001 cell=panic-in-periodic-audit@phase=580ms Unreached("precond…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::unconfirmed_quiescence_kills_only_the_affected_vm_and_recovery_reopens` | ~ | G4-L03 | FAIL | RED — preceding-step gap (05-01): required ports not composed at boot | `shared_network_supervisor_recovery.rs:1424:13 :: clause C6a-unconfirmed-quiescence-kills-only-that-vm violated in 16 of 16 cells (red=0, unreached=16); first: seed=0x2953300000000001 cell=Bridge Unreached("precondition R16: requir…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::undetermined_quiescence_fails_the_node_with_one_typed_request` | ~ | G4-L03 | FAIL | RED — preceding-step gap (05-01) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C6b-undetermined-quiescence-slice-kill-and-fail-stop violated in 32 of 32 cells (red=0, unreached=32); first: seed=0x2953300000000001 cell=Bridge/quiesce=Fail Unreached("prec…` |
+| S-ND295-29B | 09-01 | `shared_network_supervisor_recovery.rs::unrepaired_loss_fail_stops_with_one_typed_request_at_the_deadline` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `shared_network_supervisor_recovery.rs:1424:13 :: clause C5-deadline-typed-fail-stop violated in 26 of 26 cells (red=0, unreached=26); first: seed=0x2953300000000001 cell=Component(Bridge) Unreached("precondition arm: precondition …` |
+| S-ND295-30A | 09-01 | `lib.rs::a_failed_per_vm_stop_stops_every_workload_vm_then_fails_the_node` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell kill-write-fails/during-recovery-true]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::a_killed_vm_leaves_every_later_audit_and_restore_universe` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell killed-once]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::a_quiescence_naming_every_active_vm_stops_each_in_order_and_recovery_reopens` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell all-unconfirmed-2/offset-183ms]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::an_already_removed_scope_counts_as_stopped` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell scope-gone/during-recovery-true]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::an_unconfirmed_tap_stops_only_its_vm_and_recovery_reopens` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell unconfirmed-A/offset-764ms]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::an_undetermined_quiescence_stops_every_workload_vm_then_fails_the_node` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell undetermined-Fail]: the supervisor wakes and registers its next wait` |
+| S-ND295-30A | 09-01 | `lib.rs::every_damaged_per_vm_part_stops_only_that_vm_while_admission_stays_open` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell damage-while-open/[]]: the supervisor wakes and registers its next wait` |
+| S-ND295-30B | 10-02 | `shared_network_native_faults.rs::a_booting_vms_deleted_tap_stops_only_that_vm` | ~ | G4-N05 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline (at the Active survivor's boot) | `row Failed VmGuestExitUnreported; CH: Cannot create virtio-net device / Failed to open taps / Enabling tap interface failed / Ioctl failed (35092) / Operation not permitted (os error 1)` |
+| S-ND295-30B | 10-02 | `shared_network_native_faults.rs::a_removed_ingress_link_egress_link_or_guard_member_stops_only_that_vm` | ~ | — (by G4-N04) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N04 ran | — |
+| S-ND295-30B | 10-02 | `shared_network_native_faults.rs::a_tap_lost_during_quiescence_stops_only_its_vm_and_the_node_recovers` | ~ | — (by G4-N04) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N04 ran | — |
+| S-ND295-32 | 09-01 | `lib.rs::a_quiescence_result_after_its_bound_is_ignored` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the spawned supervisor panics at the 09-01 `run_shared_network_supervisor` scaffold, lib.rs:1478) | `lib.rs:3028:13 :: [OVERDRIVE_SUPERVISOR_SEEDS=0x2953300000000001 cell late-quiescence-result]: the supervisor wakes and registers its next wait` |
+| S-ND295-32 | active | `shared_network_test_ports.rs::a_late_quiescence_resolves_only_after_its_delay_on_the_owner_clock` | + | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-33 | 10-03 | `shared_guest_network_fail_stop_recovery.rs::undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh_handler_reopens` | ~ | G4-L08b | FAIL | RED — preceding-step gap (09-01) | `shared_guest_network_fail_stop_recovery.rs:155:28 :: admission closes once the loss is detected: Trajectory { observations: [StepObservation { at: 50ms, request: None, admission: Open, recovery: None, boot_closed: false }, StepObs…` |
+| S-ND295-34 | 05-01 | `dns_responder_bind.rs::run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `dns_responder_bind.rs:1133:13 :: run_server must refuse boot when the guest DNS probe fails; it published a server` |
+| S-ND295-34 | 05-01 | `dns_responder_bind.rs::the_responder_audit_reads_back_its_socket_and_fails_after_loss` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mod.rs:118:9 :: not yet implemented: RED scaffold: D-295-R16 DnsResponder::audit — DELIVER step 05-01` |
+| S-ND295-35 | 10-01 | `vm_walking_skeleton.rs::each_vmm_holds_only_its_own_tap_queue_at_descriptor_three` | ~ | — (by G4-N02) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N02 ran | — |
+| S-ND295-35 | 10-01 | `vm_walking_skeleton.rs::two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces` | ~ | G4-N02 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline | `row Failed VmGuestExitUnreported; CH: Cannot create virtio-net device / Failed to open taps / Enabling tap interface failed / Ioctl failed (35092) / Operation not permitted (os error 1)` (31.4 s: fail-fast poll) |
+| S-ND295-37 | 10-02 | `vm_walking_skeleton.rs::simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second` | ~ | — (by G4-N02) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N02 ran | — |
+| S-ND295-39 | 05-03 | `tap_queue_attach.rs::a_root_owned_tap_refuses_an_unprivileged_attach_with_eperm` | ~ | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `client.rs:378:5 :: not yet implemented: RED scaffold: D-295-R2 attach_tap_queue — DELIVER step 05-03` |
+| S-ND295-41 | 05-02 | `vmm.rs::a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs` | + | G4-N09 | FAIL | RED — MISSING_FUNCTIONALITY (own step: the no-stimulus control child reaches the 05-02 `VmmLaunchSeccompFilter::for_target` scaffold) | `vmm.rs:1625:13 :: child role hook-step-none did not complete: status ExitStatus(unix_wait_status(25856)) --- stdout ---` |
+| S-ND295-41 | 05-02 | `vmm.rs::a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs` | + | G4-N09 | FAIL | RED — MISSING_FUNCTIONALITY (own step: control child at the 05-02 `for_target` scaffold) | `vmm.rs:1625:13 :: child role hook-step-none did not complete: status ExitStatus(unix_wait_status(25856)) --- stdout ---` |
+| S-ND295-41 | 05-02 | `vmm.rs::a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs` | + | G4-N09 | FAIL | RED — MISSING_FUNCTIONALITY (own step: control child at the 05-02 `for_target` scaffold) | `vmm.rs:1625:13 :: child role hook-step-none did not complete: status ExitStatus(unix_wait_status(25856)) --- stdout ---` |
+| S-ND295-44 | 05-03 | `vmm.rs::vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure` | ~ | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `vmm.rs:1054:13 :: an armed NotFound failure of the removed ip tool must never be reached: Err(LaunchToolUnavailable { tool: "ip", source: Custom { kind: NotFound, error: "injected NotFound" } })` |
+| S-ND295-45 | 05-03 | `vm_walking_skeleton.rs::every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters` | ~ | — (by G4-N02) | not run | RED — own step (05-03), by representative: no guest reaches READY before the fd handoff | — |
+| S-ND295-46 | 05-04 | `cloexec_lint.rs::only_a_cfg_predicate_that_requires_test_exempts_an_item` | + | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `cloexec_lint.rs:62:5 :: not yet implemented: RED scaffold: OBL-295-CLOEXEC cloexec_lint::scan_source — DELIVER step 05-04` |
+| S-ND295-48 | active | `guest_tcx.rs::absent_real_objects_preserve_the_operation_specific_source_family` | ~ | G4-L07 | PASS | PASS (active) | — |
+| S-ND295-49 | 06-01 | `tap_debug_msg_mask.rs::a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump` | ~ | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `tap_debug_msg_mask.rs:79:38 :: a fresh TAP's mask reads: Connect { source: Custom { kind: Other, error: "host netlink worker thread panicked" } }` |
+| S-ND295-51 | 06-04 | `guest_network.rs::a_netlink_session_failure_is_one_taps_unconfirmed_entry_and_the_pass_continues` | + | G4-L03 | FAIL | RED — preceding-step gap (06-02) | `guest_network.rs:6882:37 :: fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-rba", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: Some(…` |
+| S-ND295-51 | 06-04 | `guest_network.rs::a_quiescence_whose_set_down_never_completes_is_a_bound_miss_not_a_blocked_caller` | + | G4-L03 | FAIL | RED — preceding-step gap (06-02) | `thread 'nd295-s51-quiesce-bound' panicked at guest_network.rs:6882:37: fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-nba", … owner_uid: Some(4200) }, observed: Some(Tap { … owner_uid: Some(0) }) }` |
+| S-ND295-51 | 06-04 | `guest_network.rs::a_repeat_quiescence_while_latched_sets_down_what_a_partial_restore_raised` | + | G4-L03 | FAIL | RED — preceding-step gap (06-02) | `guest_network.rs:6882:37 :: fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-rqa", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: Some(…` |
+| S-ND295-51 | 06-04 | `guest_network.rs::quiescence_reports_every_unconfirmed_tap_and_condemns_it` | ~ | G4-L03 | FAIL | RED — preceding-step gap (06-02) | `guest_network.rs:6882:37 :: fixture provisions the attachment down: PostconditionMismatch { operation: TapObserve, expected: Tap { name: "t295-q1", ifindex: Some(295), link_kind: Tap, persistent: true, up: false, owner_uid: Some(4…` |
+| S-ND295-52 | 06-04 | `mtls_install_fail_closed.rs::activation_of_a_condemned_allocation_takes_the_failure_projection` | ~ | G4-L03 | FAIL | RED — preceding-step gap (06-03): the journal lacks only the lease events | `mtls_install_fail_closed.rs:1766:5 :: assertion `left == right` failed: condemned allocation: an activation failure stops the VMM, retires the lease, stops protection, tears down, and releases the lease last, never releasing EXEC …` |
+| S-ND295-52 | active | `mtls_install_fail_closed.rs::cancelling_dispatch_while_the_exec_release_is_held_drops_that_release` | ~ | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-52 | 06-04 | `mtls_install_fail_closed.rs::tap_activation_failure_retires_the_lease_and_releases_it_last` | + | G4-L03 | FAIL | RED — preceding-step gap (06-03): the journal lacks only the lease events | `mtls_install_fail_closed.rs:1766:5 :: assertion `left == right` failed: typed activation error: an activation failure stops the VMM, retires the lease, stops protection, tears down, and releases the lease last, never releasing EXE…` |
+| S-ND295-52 | active | `mtls_install_fail_closed.rs::tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running` | ~ | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-52 | active | `mtls_install_fail_closed.rs::tap_activation_occurs_after_intercept_success_and_before_exec_release` | ~ | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-52 | 06-04 | `mtls_install_fail_closed.rs::tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reopen` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:1896:5 :: the start waits on the recovering EXEC gate` |
+| S-ND295-53 | 06-04 | `netns_density_activation_order.rs::a_latched_activation_retries_after_reopen` | ~ | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mod.rs:1693:13 :: not yet implemented: RED scaffold: D-295-R5 activation wait on a latched quiescence — DELIVER step 06-04` |
+| S-ND295-53 | 06-04 | `netns_density_activation_order.rs::activation_during_recovery_runs_once_after_reopen_without_a_failed_row` | ~ | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_activation_order.rs:764:13 :: seed=186055316088029185: activation ran while the gate is Recovering (poll 0): TapSetUp at owner call indices [1] outside the test's quiesce/restore brackets []; calls [TapCreate, TapSet…` |
+| S-ND295-53 | 06-04 | `netns_density_activation_order.rs::fail_stop_withholds_activation_and_the_command` | ~ | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_activation_order.rs:764:13 :: seed=186055316088029185: activation ran while the gate is Recovering (poll 0): TapSetUp at owner call indices [1] outside the test's quiesce/restore brackets []; calls [TapCreate, TapSet…` |
+| S-ND295-53 | active | `shared_network_test_ports.rs::activate_reports_raised_latched_or_condemned` | ~ | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-53 | active | `shared_network_test_ports.rs::restore_failure_slot_keeps_the_latch` | ~ | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-54 | 07-01 | `mtls_install_fail_closed.rs::restart_abort_detail_names_every_failed_handle_teardown_cause` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:2917:9 :: the detail names `restart-stop-fault-handleteardown-1#3: teardown of connection restart-stop-fault-handleteardown-1#3 failed: Bad file descriptor (os error 9)`: primary rejection: injected res…` |
+| S-ND295-54 | 07-01 | `mtls_install_fail_closed.rs::restart_abort_detail_names_the_element_removal_cause` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:2942:5 :: the detail names the removal cause `shared intercept element removal failed: shared mTLS set element update failed: nft shared-element-remove failed: Device or resource busy (os error 16)`: pr…` |
+| S-ND295-54 | 07-01 | `mtls_intercept_worker.rs::allocation_stop_surfaces_teardown_failure_and_retry_converges` | ~ | G4-L04 | FAIL | RED — preceding-step gap (05-01): B-7 not landed (the port owns no shared listener) | `mtls_intercept_worker.rs:6209:9 :: assertion `left == right` failed: the port owns exactly the two shared listeners (none before B-7): [] left: 0 right: 2` |
+| S-ND295-54 | 07-01 | `mtls_intercept_worker.rs::the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_intercept_worker.rs:6483:50 :: the first attempt fails: ()` |
+| S-ND295-54 | 07-01 | `shared_intercept_members.rs::convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_intercept_port.rs:1130:9 :: not yet implemented: RED scaffold: D-295-R10 remove_allocation_elements — DELIVER step 07-01` |
+| S-ND295-55 | 07-03 | `workload_lifecycle.rs::every_return_path_reclaims_leased_unowned_finished_allocations` | ~ | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `workload_lifecycle.rs:3446:5 :: Test failed: assertion failed: `(left == right)` left: `[]`, right: `[AllocationId("alloc-nd295-svc-0")]`: StopBranchStopping: reclaim set at crates/overdrive-reconcilers/src/workload_lifecycle.rs:3…` |
+| S-ND295-56 | 07-02 | `netns_density_guest_network.rs::a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it_after` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mod.rs:3463:13 :: not yet implemented: RED scaffold: D-295-R11 ReclaimAllocationNetwork dispatch — DELIVER step 07-02` |
+| S-ND295-56 | 07-02 | `netns_density_guest_network.rs::a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease` | + | G4-L03 | FAIL | RED — preceding-step gap (06-03): the Retiring-lease precondition needs the lease events | `netns_density_guest_network.rs:1127:9 :: precondition: the lease is retired and still held (steps [ Owner( TapCreate, ), ActivateRefused { alloc: "nd295-reclaim-out-of-band", },` |
+| S-ND295-57 | 07-03 | `netns_density_reclaim.rs::a_not_yet_due_restart_keeps_its_predecessor_at_the_cap` | + | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_reclaim.rs:1120:13 :: seed=186055333267898369: at the cap, a successor of v57-0295005700000001 was admitted (journal index 16387) while its predecessor alloc-v57-0295005700000001-1 still held its lease (released at […` |
+| S-ND295-57 | 07-03 | `netns_density_reclaim.rs::leftover_networks_are_reclaimed_until_released_on_every_path` | + | G4-L05 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_reclaim.rs:885:13 :: seed=186055333267898369: leftover leases were not reclaimed until released within 30s of simulated time (failing attempts before disarm=1, disarmed=None): restart predecessor alloc-r57-0295005700…` |
+| S-ND295-58 | 07-04 | `netns_density_cleanup_pending.rs::cleanup_pending_matches_the_lease_and_row_state_table` | ~ | G4-L07 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `guest_attachment_view.rs:43:9 :: RED scaffold: D-295-R20 cleanup_pending — DELIVER step 07-04` |
+| S-ND295-59 | 07-04 | `network_cleanup_pending_status.rs::crashed_and_reclaiming_allocations_are_reported_cleanup_pending` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `network_cleanup_pending_status.rs:601:5 :: a crashed allocation awaiting cleanup (Failed, admitted lease) is pending: AllocStatusRowBody { alloc_id: "alloc-cleanup-job-0", workload_id: "cleanup-job", node_id: "local", state: Faile…` |
+| S-ND295-61 | 08-03 | `mtls_intercept_worker.rs::every_shared_owner_error_reports_its_one_component` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_intercept_worker.rs:370:9 :: not yet implemented: RED scaffold: D-295-R15 MtlsSharedOwnerError::component — DELIVER step 08-03` |
+| S-ND295-61 | 08-03 | `netns_density_shared_owner.rs::a_differently_targeted_program_is_never_rewritten` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_shared_owner.rs:2126:9 :: a differently targeted program must fail the audit` |
+| S-ND295-61 | 08-03 | `netns_density_shared_owner.rs::policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished` | ~ | G4-L04 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `netns_density_shared_owner.rs:2010:13 :: PolicyRoute: the loss must fail the audit` |
+| S-ND295-61 | 08-03 | `shared_intercept_members.rs::each_deleted_intercept_object_is_restored_exactly_with_live_allocations` | ~ | G4-L04 | FAIL | RED — preceding-step gap (08-02) | `mtls_intercept_port.rs:1111:9 :: not yet implemented: RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02` |
+| S-ND295-61 | 08-03 | `shared_intercept_members.rs::the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations` | ~ | G4-L04 | FAIL | RED — preceding-step gap (08-02) | `mtls_intercept_port.rs:1111:9 :: not yet implemented: RED scaffold: D-295-R15 observe_shared_state — DELIVER step 08-02` |
+| S-ND295-62 | 08-01 | `intercept_mark_fail_closed.rs::marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program` | ~ | G4-N12 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline (at the peer Service's boot) | `row Failed VmGuestExitUnreported; CH: Cannot create virtio-net device / Failed to open taps / Enabling tap interface failed / Ioctl failed (35092) / Operation not permitted (os error 1)` |
+| S-ND295-62 | 08-01 | `intercept_mark_fail_closed.rs::the_intercept_program_still_catches_marked_tcp_without_the_guard_table` | ~ | — (by G4-N12) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N12 ran | — |
+| S-ND295-63 | 08-01 | `intercept_mark_fail_closed.rs::inbound_tcp_to_a_closed_listener_is_dropped` | ~ | — (by G4-N12) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N12 ran | — |
+| S-ND295-63 | 08-01 | `intercept_mark_fail_closed.rs::outbound_tcp_after_a_killed_server_is_dropped_while_the_vm_lives` | ~ | — (by G4-N12) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N12 ran | — |
+| S-ND295-63 | 08-01 | `intercept_mark_fail_closed.rs::outbound_tcp_to_a_closed_listener_is_dropped_not_delivered_locally` | ~ | — (by G4-N12) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N12 ran | — |
+| S-ND295-64 | 08-01 | `intercept_mark_fail_closed.rs::a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user` | ~ | — (by G4-N12) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N12 ran | — |
+| S-ND295-64 | active | `intercept_mark_fail_closed.rs::both_time_wait_controls_prove_the_substate_and_sequence_gates` | ~ | G4-N07 | PASS | PASS (active) — GREEN, KERNEL CONTRACT PIN | `PASS [2.432s]` |
+| S-ND295-65 | active | `compile_fail.rs::compile_fail_cases` | ~ | G4-L02 | PASS | PASS (active) — the regenerated `.stderr` (`E0308`, no source path) | `Summary 1 test run: 1 passed` (after `TRYBUILD=overwrite`, G4-L01) |
+| S-ND295-65 | 05-01 | `required_serve_ports_source_scan.rs::no_optional_switch_gates_protection_dns_or_supervisor_composition` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `required_serve_ports_source_scan.rs:1220:5 :: an optional switch or after-boot replacement gates serve composition (59 files, 112 composition declarations, 11 lifecycle parameters, 3 run_server functions scanned; exempt slots seen…` |
+| S-ND295-65 | active | `required_serve_ports_source_scan.rs::the_scan_reports_optional_ports_only_in_composition_declarations` | + | G4-L03 | PASS | PASS (active) | — |
+| S-ND295-66 | 10-02 | `shared_network_native_faults.rs::a_launch_that_fails_leaves_no_tap_and_no_queue_holder` | ~ | G4-N06 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline | `nd295-66-power-off's TAP ovd-tp-0002 disappeared before its booting attachment was witnessed (last observation: TAP ovd-tp-0002 administratively_up=Some(false) queue_holder=None holder_alloc=None console_holding=false)` (:956:13); the holding rootfs was staged and deployed |
+| S-ND295-66 | 10-02 | `shared_network_native_faults.rs::a_stop_converges_when_attachment_parts_are_already_gone` | ~ | G4-N04 | FAIL | RED — preceding-step gap (05-03): guest-boot baseline | `row Failed VmGuestExitUnreported; CH: Cannot create virtio-net device / Failed to open taps / Enabling tap interface failed / Ioctl failed (35092) / Operation not permitted (os error 1)` |
+| S-ND295-67 | 10-02 | `shared_network_native_faults.rs::a_mac_hijack_from_outside_the_vm_steals_nothing_and_the_victim_recovers` | ~ | — (by G4-N04) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N04 ran | — |
+| S-ND295-69 | 10-02 | `shared_network_native_faults.rs::a_deleted_program_table_is_repaired_with_live_mesh_vms` | ~ | — (by G4-N03) | not run | RED — preceding-step gap (05-03), by representative: the body boots a guest before its oracle, on the fixture path G4-N03 ran | — |
+| S-ND295-70 | active | `mtls_intercept_equivalence.rs::a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops` | ~ | G4-L04 | PASS | PASS (active) | — |
+| S-ND295-70 | active | `mtls_intercept_equivalence.rs::both_installs_hand_back_a_guard_that_releases_cleanly` | ~ | G4-L04 | PASS | PASS (active) | — |
+| S-ND295-70 | active | `mtls_intercept_equivalence.rs::re_installing_the_same_capture_converges_and_both_guards_release_cleanly` | ~ | G4-L04 | PASS | PASS (active) | — |
+| S-ND295-70 | active | `mtls_intercept_equivalence.rs::two_bound_legs_never_share_a_port` | ~ | G4-L04 | PASS | PASS (active) | — |
+| S-ND295-70 | active | `mtls_intercept_install.rs::the_host_listener_reports_a_redirected_outbound_original_destination_as_local` | ~ | G4-L04 | PASS | PASS (active) | — |
+| — | active | `egress_tproxy_capture.rs::workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst` | ~ | G4-L04 | PASS | PASS (active) | — |
+| — | active | `guest_tcx_classifier_test_run.rs::classifier_partitions_return_one_verdict_and_advance_one_exact_counter` | ~ | G4-L07 | PASS | PASS (active) | — |
+| — | active | `mtls_install_fail_closed.rs::restart_running_write_rejection_tears_down_network_and_releases_slot` | ~ | G4-L03 | PASS | PASS (active) | — |
+| — | active | `mtls_install_fail_closed.rs::start_running_write_rejection_tears_down_network_and_releases_slot` | ~ | G4-L03 | PASS | PASS (active) | — |
+| — | active | `mtls_intercept_equivalence.rs::bound_leg_reports_a_non_zero_kernel_assigned_port` | ~ | G4-L04 | PASS | PASS (active) | — |
+| — | active | `mtls_intercept_install.rs::worker_intercept_install_leg_acquire_outbound` | ~ | G4-L04 | PASS | PASS (active) | — |
+| — | active | `name_resolve_enforce_consistency.rs::dns_returned_service_backends_addr_is_recognized_by_mtls_resolve` | ~ | G4-L04 | PASS | PASS (active) | — |
+| — | active | `outbound_enforce_substrate_splice.rs::real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_shared_handle` | ~ | G4-N11 | PASS | PASS (active) | — |
+| — | active | `outbound_enforce_substrate_splice.rs::two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_one_stops` | ~ | G4-N11 | PASS | PASS (active) | — |
+| — | re-exec child role: | `vmm.rs::launch_seccomp_child_role` | ~ | G4-N09 | PASS | PASS (active) | — |
+
+Every pending-marked body in the table is RED for a reason recorded here; none
+is BROKEN. One body moved from active to pending: S-ND295-66's launch-failure
+body (its former missing-kernel stimulus failed the preflight before any TAP
+existed, so it passed vacuously; DISTILL review B4). Five bodies
+moved from pending to active: S-ND295-64's controls (door-independent, PASS on
+metal), S-ND295-52's two retained oracles and the two running-write structural
+siblings (their oracles hold today; DR-13). The new active self-tests (the capture
+self-test, the source-scan self-test, the two test-local-owner self-tests, the
+layout pin) and the regenerated trybuild fixture PASS.
+
+### Active bodies the runs selected that PASS
+
+Beside the changed bodies above, the selected filters ran retained active
+bodies that pass: G4-L03 38, G4-L04 57, G4-L07 35, G4-N09 1, G4-N11 9 (counts
+include the changed active bodies above; the per-test lists are in the
+classified `G4-*-classified.tsv` files).
+
+### Baseline failures seen (not #295 DISTILL bodies)
+
+- C-12 (unchanged text, G4-L03): `mtls_install_fail_closed::{start,restart}_allocation_install_failure_supersedes_running_with_failed`:
+  `S-MIF-04/05 A-1': the Failed row must carry MtlsInterceptInstallFailed(stage=leg_f_bind) … got Some(MtlsInterceptInstallFailed { stage: "shared_owner", detail: "shared mTLS owner unavailable" })`
+  (:1683:5) — the `SharedOwner NotStarted` family.
+- C-12 (unchanged text, G4-L03): `mtls_install_fail_closed::restart_driver_stop_failure_retains_mtls_and_network_protection`:
+  `left: [AllocationId("restart-abort-driverstop-1"), AllocationId("restart-abort-driverstop-0")] right: [AllocationId("restart-abort-driverstop-0")]` (:2666:5).
+- N-03 (unchanged text, G4-N11): `outbound_enforce_substrate_splice::outbound_enforce_substrate_bidirectional_splice_zero_copy`:
+  `start_alloc must install the iifname egress rule in the shared chain, got:` (:1297:5).
+- **Fresh-host bridge race** (G4-L03): the active `shared_guest_network_startup::production_startup_exercises_classifier_and_detached_guard_before_admission`,
+  which passed in Phase C, failed this time with `D14A real classifier and
+  detached-guard probe permit admission: GuestNetworkBoot(PostconditionMismatch
+  { operation: BridgeObserve, expected: BridgeLinkIdentity { name: "ovd-gbr0",
+  ifindex: Some(205), link_kind: Bridge }, observed: Some(BridgeLinkIdentity {
+  name: "ovd-gbr0", ifindex: Some(205), link_kind: Bridge }) })` (:630:10) — the
+  RCA's root cause A (the bridge created with no address and addressed after),
+  intermittent by nature and fixed by 05-00; the pending S-ND295-00 bridge body
+  in the same run refused `5/5` fresh-host boots on the same cause (its own
+  05-00 RED).
+- **Guest boot** (all native runs): the baseline above, for every active
+  pre-#295 guest body.
+- Not selected by these filters, so not observed: `ethtool features-get … No
+  such device`; the scratch-probe "detached guard packet did not reach the exact
+  drop transition" contention failure.
+
+### Observations for DELIVER
+
+- S-ND295-05D: one seed's fill of 16,384 took about 280 s on the loaded Lima VM
+  (Phase C: 186.6 s); the nextest budget is now 25 × 60 s for two seeds. The body
+  reached no NA verdict at RED (the 06-03 lease events are its precondition), so
+  NA-VIEW, NA-E7, and the contended-slot NA-E7-C are first observed at 07-03.
+- S-ND295-57's at-cap body reaches RED in 0.836 s and S-ND295-13A in 0.91 s (the
+  first case fails); both GREEN times are 07-03 / 08-02 review items.
+- `--run-ignored all` over pending proptests writes `proptest-regressions`
+  files that only seed RED cases; the fix pass deleted them and a DELIVER step
+  should not commit them.
+
+### Corrections to earlier phases
+
+- Phase C's S-ND295-64 blocker names `a_newer_sequence_reconnect_into_time_wait_is_recorded_after_both_controls`,
+  a name never committed; the bodies are `both_time_wait_controls_prove_the_substate_and_sequence_gates`
+  (active, PASS on metal, G4-N07) and
+  `a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user`
+  (08-01). Phase D's rows that called the controls body RED without running it
+  are superseded by G4-N07 (DISTILL review B3 (a)).
+- Phase C's summary counts (lines 186-195) predate the fix pass; this phase's
+  table is the current classification of every changed body.
+- Phase C recorded `a_launch_that_fails_leaves_no_tap_and_no_queue_holder`
+  as "PASS (genuine) → marker removed"; that pass was vacuous (the preflight
+  failed before any TAP existed) and the body is pending 10-02 with a new
+  stimulus (DISTILL review B4).
+- The fix pass's open items are recorded in the feature delta's DISTILL
+  § *Completeness Audit*: H14 (a testability boundary returned to DESIGN) and
+  B3 (c) / H3 (BLOCKED, held with the user; `intercept_mark_fail_closed.rs` is
+  unchanged by run 4).

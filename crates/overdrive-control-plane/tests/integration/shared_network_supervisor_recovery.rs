@@ -31,13 +31,22 @@
 //! | `IpRules` | the intercept reports its owned table absent | `converge_shared` refusal lifted |
 //! | `IpSets` | the intercept reports an unexpected managed member | `converge_allocation_elements` refusal lifted |
 //! | `LegF`, `LegC` | `SimAcceptScript::ListenerLost { errno: EINVAL }` at the leg address the worker converged | the exact-port rebind refusal lifted |
-//! | `Dns` | the live `SimGuestDns` serve ends (`Return`) | the factory's standing probe refusal lifted |
+//! | `Dns` (serve return) | the live `SimGuestDns` serve ends (`end_serve(Return)`) | the factory's standing probe refusal lifted |
+//! | `Dns` (serve panic) | the live `SimGuestDns` serve panics (`end_serve(Panic)`) | the factory's standing probe refusal lifted |
+//! | `Dns` (audit refusal) | the live `SimGuestDns` audit refuses (`script_audit_failure(true)`) | the factory's standing probe refusal lifted; a replacement audits clean |
 //!
-//! Plus the owner's scripted quiescence outcome and damage set (C6), and two
-//! test-local owner-adapter faults: an audit held in flight (C7b) and an audit
-//! that panics (C8). Every recovery transition, quiescence, kill, request, and
-//! reopen is authored by production; no gate transition, row, kill, or request
-//! is fabricated.
+//! Plus the owner's scripted quiescence outcome and damage set (C6), its
+//! standing restore refusal (`script_restore_failure`, C4b), and test-local
+//! owner-adapter faults: an audit held in flight (C7b), an audit that panics
+//! (C8), and an `activate` held before it reaches the owner (C9, an activation
+//! in flight). Every recovery transition, quiescence, kill, request, activation
+//! outcome, and reopen is authored by production; no gate transition, row,
+//! kill, or request is fabricated.
+//!
+//! The kill oracles name the literal cgroupfs paths the accepted contract pins
+//! (`<root>/overdrive.slice/workloads.slice/cgroup.kill` for the slice,
+//! `<root>/overdrive.slice/workloads.slice/<alloc>.scope/cgroup.kill` for one
+//! VM), never a path derived from the code under test.
 //!
 //! # Observation (test-scenarios.md § *In-process observation*)
 //!
@@ -46,6 +55,16 @@
 //! each step polls `gate.claim_release()` and `handle.shutdown_requested()`
 //! exactly once with `now_or_never`, dropping each future; `recovery_progress()`
 //! is read directly. Operational events are captured append-only.
+//!
+//! Three test-local decorators wrap the accepted doubles, delegate every call,
+//! and only record: the owner decorator ([`ProofOwner`]) journals each
+//! successful quiescence, each restore outcome, and each `activate` outcome
+//! with the gate state observed when the call reached the owner (the sim
+//! owner's own call log records `TapSetUp` for an activation and for a restore
+//! alike, so it cannot order them); the driver decorator ([`ProofDriver`])
+//! journals each EXEC release into the same journal; and the DNS factory
+//! decorator ([`ProofDnsFactory`]) records each responder `audit` call (C1's
+//! DNS cadence).
 //!
 //! # Oracle
 //!
@@ -84,7 +103,8 @@ use std::time::Duration;
 use base64::Engine;
 use futures::FutureExt;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
-use overdrive_control_plane::dns_responder::GuestDnsFactory;
+use overdrive_control_plane::dns_responder::responder::Result as DnsResult;
+use overdrive_control_plane::dns_responder::{GuestDns, GuestDnsDeps, GuestDnsFactory};
 use overdrive_control_plane::guest_network::{
     GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner, Result as GuestNetworkResult,
     SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
@@ -93,7 +113,6 @@ use overdrive_control_plane::guest_network::{
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::submit::SubmitSpecInput;
-use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_network::{
     GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring, ServeShutdownRequest,
     SharedGuestNetworkComponent, SharedGuestNetworkFailStop, SharedGuestNetworkFailStopCause,
@@ -102,7 +121,10 @@ use overdrive_core::guest_network::{
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::driver::{
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
+    Resources,
+};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -111,8 +133,8 @@ use overdrive_sim::adapters::guest_network::{SimQuiesceOutcome, SimSharedGuestNe
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_sim::adapters::{
-    SimAcceptScript, SimCgroupFs, SimEntry, SimGuestDnsFactory, SimGuestDnsServeExit, SimKek,
-    SimMtlsIntercept,
+    SimAcceptScript, SimCgroupFs, SimEntry, SimGuestDns, SimGuestDnsFactory, SimGuestDnsServeExit,
+    SimKek, SimMtlsIntercept,
 };
 use overdrive_worker::cgroup_manager::CgroupManager;
 use overdrive_worker::mtls_intercept::{
@@ -144,10 +166,18 @@ const ATTEMPT_PERIOD: Duration = Duration::from_millis(250);
 const RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
 /// ADR-0124: completed attempts at the recovery deadline.
 const DEADLINE_ATTEMPTS: u32 = 20;
+/// The floor of the private, E18-derived quiescence call bound, which the
+/// accepted rule pins as `max(1 s, 4 × Q)` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (quiescence and restore
+/// latency at density)). The private constant itself is never named here.
+const QUIESCE_BOUND_FLOOR: Duration = Duration::from_secs(1);
 /// Injected-clock step between observations.
 const STEP: Duration = Duration::from_millis(10);
 /// The simulated cgroupfs root handed to the kill capability's manager.
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+/// The workloads slice under [`CGROUP_ROOT`], as the accepted contract pins it
+/// (test-scenarios.md S-ND295-29B oracle; the canonical
+/// `overdrive.slice/workloads.slice/<alloc>.scope` scope layout).
+const WORKLOADS_SLICE: &str = "overdrive.slice/workloads.slice";
 /// A guest-shaped address no allocation holds: the unexpected intercept member.
 const FOREIGN_MEMBER: Ipv4Addr = Ipv4Addr::new(100, 95, 255, 254);
 
@@ -202,15 +232,59 @@ fn kernel_path_components() -> Vec<SharedGuestNetworkComponent> {
     COMPONENTS.into_iter().filter(|component| is_kernel_path(*component)).collect()
 }
 
-/// The detection cause a stimulus produces (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection, step 1)).
-const fn expected_cause(component: SharedGuestNetworkComponent) -> &'static str {
-    match component {
-        SharedGuestNetworkComponent::LegF
-        | SharedGuestNetworkComponent::LegC
-        | SharedGuestNetworkComponent::Dns => "task_exit",
-        _ => "audit_mismatch",
+/// One injected loss: every stimulus the S-ND295-29B fault-stimulus field
+/// lists (the module's fault table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stimulus {
+    /// The one stimulus of a non-DNS component (the module's fault table).
+    Component(SharedGuestNetworkComponent),
+    /// The live DNS responder's serve ends (`SimGuestDns::end_serve`).
+    DnsServeEnds(SimGuestDnsServeExit),
+    /// The live DNS responder's audit refuses
+    /// (`SimGuestDns::script_audit_failure(true)`).
+    DnsAuditRefused,
+}
+
+impl Stimulus {
+    /// The node-level component the stimulus fails.
+    const fn component(self) -> SharedGuestNetworkComponent {
+        match self {
+            Self::Component(component) => component,
+            Self::DnsServeEnds(_) | Self::DnsAuditRefused => SharedGuestNetworkComponent::Dns,
+        }
+    }
+
+    /// The detection cause the stimulus produces (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (detection, step 1)):
+    /// a listener or DNS task end is a `task_exit`, anything the full audit
+    /// finds is an `audit_mismatch`.
+    const fn expected_cause(self) -> &'static str {
+        match self {
+            Self::Component(
+                SharedGuestNetworkComponent::LegF | SharedGuestNetworkComponent::LegC,
+            )
+            | Self::DnsServeEnds(_) => "task_exit",
+            Self::Component(_) | Self::DnsAuditRefused => "audit_mismatch",
+        }
     }
 }
+
+/// Every stimulus in D8's component order: one per non-DNS component, then
+/// the three DNS losses (serve return, serve panic, audit refusal).
+const STIMULI: [Stimulus; 13] = [
+    Stimulus::Component(SharedGuestNetworkComponent::Bridge),
+    Stimulus::Component(SharedGuestNetworkComponent::TcxLink),
+    Stimulus::Component(SharedGuestNetworkComponent::EndpointMap),
+    Stimulus::Component(SharedGuestNetworkComponent::CounterMap),
+    Stimulus::Component(SharedGuestNetworkComponent::BpffsPin),
+    Stimulus::Component(SharedGuestNetworkComponent::BridgeGuard),
+    Stimulus::Component(SharedGuestNetworkComponent::IpRules),
+    Stimulus::Component(SharedGuestNetworkComponent::IpSets),
+    Stimulus::Component(SharedGuestNetworkComponent::LegF),
+    Stimulus::Component(SharedGuestNetworkComponent::LegC),
+    Stimulus::DnsServeEnds(SimGuestDnsServeExit::Return),
+    Stimulus::DnsServeEnds(SimGuestDnsServeExit::Panic),
+    Stimulus::DnsAuditRefused,
+];
 
 /// Compare a component label as the event renders it (`Debug` or a snake /
 /// kebab label) with the component.
@@ -361,14 +435,67 @@ fn vm_killed_for<'a>(events: &'a [OwnerEvent], alloc: &AllocationId) -> Vec<&'a 
 // Test-local owner-port double: the accepted Sim owner plus two adapter faults.
 // ---------------------------------------------------------------------------
 
+/// What one `activate` returned at the owner port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActivationOutcome {
+    /// `Ok(TapActivation::Raised)`.
+    Raised,
+    /// `Ok(TapActivation::QuiescenceLatched)`: nothing was raised.
+    QuiescenceLatched,
+    /// `Err(_)`: the activation was refused.
+    Refused,
+}
+
+/// One ordered observation of the activation journal, written by the owner
+/// decorator at the owner port and by the driver decorator at the driver port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum JournalStep {
+    /// `quiesce_managed_taps` returned `Ok`: the owner's latch is set.
+    Quiesced,
+    /// `restore_quiesced_taps` returned; `ok` is its outcome.
+    Restored { ok: bool },
+    /// One `activate(alloc)` reached the owner; `recovering` and `admission`
+    /// are the gate state read at that moment.
+    Activated {
+        alloc: AllocationId,
+        outcome: ActivationOutcome,
+        recovering: bool,
+        admission: Admission,
+    },
+    /// `Driver::release_for_exit_emission` for `alloc`: the EXEC release.
+    ExecReleased { alloc: AllocationId },
+}
+
+/// The append-only activation journal shared by [`ProofOwner`] and
+/// [`ProofDriver`].
+type Journal = Arc<Mutex<Vec<JournalStep>>>;
+
+/// One non-blocking release attempt at the VM driver's claim boundary.
+fn admission_of(gate: &GuestNetworkExecGate) -> Admission {
+    match gate.claim_release().now_or_never() {
+        Some(Some(claim)) => {
+            drop(claim);
+            Admission::Open
+        }
+        Some(None) => Admission::FailStopped,
+        None => Admission::Closed,
+    }
+}
+
 /// The one owner instance, delegating every port call to the accepted
-/// `SimSharedGuestNetworkOwner`. Two driven-port faults are layered on top,
-/// neither of which authors a supervisor consequence:
+/// `SimSharedGuestNetworkOwner`. Three driven-port faults are layered on top,
+/// none of which authors a supervisor consequence:
 ///
 /// - when the latch is armed, `audit_shared` awaits one permit before
 ///   delegating, modelling one owner read-back still in flight;
 /// - when the panic slot is armed, `audit_shared` panics, modelling an owner
-///   adapter defect that unwinds the task polling it.
+///   adapter defect that unwinds the task polling it;
+/// - when an activation hold is armed, the next `activate` awaits one permit
+///   before it reaches the owner, modelling an activation still in flight.
+///
+/// It also journals each successful quiescence, each restore outcome, and each
+/// `activate` outcome with the gate state read when the call reached the owner
+/// ([`JournalStep`]).
 #[derive(Default)]
 struct ProofOwner {
     sim: SimSharedGuestNetworkOwner,
@@ -376,9 +503,38 @@ struct ProofOwner {
     audits_in_flight: AtomicUsize,
     audit_panic: AtomicBool,
     audit_panics: AtomicUsize,
+    journal: Journal,
+    activation_hold: Mutex<Option<Arc<Semaphore>>>,
+    activations_held: AtomicUsize,
+    exec: OnceLock<(Arc<GuestNetworkExecGate>, Arc<GuestNetworkExecSupervisor>)>,
 }
 
 impl ProofOwner {
+    /// Bind the gate capabilities of the one EXEC wiring the server boots with,
+    /// read when an `activate` reaches the owner.
+    fn bind_exec(&self, gate: Arc<GuestNetworkExecGate>, exec: Arc<GuestNetworkExecSupervisor>) {
+        assert!(
+            self.exec.set((gate, exec)).is_ok(),
+            "the proof owner is bound to exactly one EXEC wiring"
+        );
+    }
+
+    /// Hold the next `activate` before it reaches the owner until one permit
+    /// is added to the returned semaphore.
+    fn hold_next_activation(&self) -> Arc<Semaphore> {
+        let hold = Arc::new(Semaphore::new(0));
+        *self.activation_hold.lock() = Some(Arc::clone(&hold));
+        hold
+    }
+
+    fn activations_held(&self) -> usize {
+        self.activations_held.load(Ordering::SeqCst)
+    }
+
+    fn journal(&self) -> Vec<JournalStep> {
+        self.journal.lock().clone()
+    }
+
     fn arm_audit_latch(&self) -> Arc<Semaphore> {
         let latch = Arc::new(Semaphore::new(0));
         *self.audit_latch.lock() = Some(Arc::clone(&latch));
@@ -408,7 +564,28 @@ impl GuestNetworkProvisioner for ProofOwner {
         self.sim.provision(plan).await
     }
     async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<TapActivation> {
-        self.sim.activate(plan).await
+        let hold = self.activation_hold.lock().take();
+        if let Some(hold) = hold {
+            self.activations_held.fetch_add(1, Ordering::SeqCst);
+            hold.acquire().await.expect("the proof activation hold is never closed").forget();
+            self.activations_held.fetch_sub(1, Ordering::SeqCst);
+        }
+        let (gate, exec) = self.exec.get().expect("the proof owner is bound at boot");
+        let recovering = exec.recovery_progress().is_some();
+        let admission = admission_of(gate);
+        let result = self.sim.activate(plan).await;
+        let outcome = match &result {
+            Ok(TapActivation::Raised) => ActivationOutcome::Raised,
+            Ok(TapActivation::QuiescenceLatched) => ActivationOutcome::QuiescenceLatched,
+            Err(_) => ActivationOutcome::Refused,
+        };
+        self.journal.lock().push(JournalStep::Activated {
+            alloc: plan.alloc().clone(),
+            outcome,
+            recovering,
+            admission,
+        });
+        result
     }
     async fn teardown(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
         self.sim.teardown(plan).await
@@ -443,10 +620,154 @@ impl SharedGuestNetworkOwner for ProofOwner {
         self.sim.audit_shared().await
     }
     async fn quiesce_managed_taps(&self) -> GuestNetworkResult<TapQuiescence> {
-        self.sim.quiesce_managed_taps().await
+        let result = self.sim.quiesce_managed_taps().await;
+        if result.is_ok() {
+            self.journal.lock().push(JournalStep::Quiesced);
+        }
+        result
     }
     async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
-        self.sim.restore_quiesced_taps().await
+        let result = self.sim.restore_quiesced_taps().await;
+        self.journal.lock().push(JournalStep::Restored { ok: result.is_ok() });
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test-local driver and DNS decorators: delegate every call, record only.
+// ---------------------------------------------------------------------------
+
+/// The server's VM driver: a `SimDriver` whose EXEC release is journalled in
+/// the owner's activation journal. Every call delegates.
+struct ProofDriver {
+    inner: SimDriver,
+    journal: Journal,
+}
+
+#[async_trait::async_trait]
+impl Driver for ProofDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.journal.lock().push(JournalStep::ExecReleased { alloc: handle.alloc.clone() });
+        self.inner.release_for_exit_emission(handle).await;
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.inner.stop(handle).await
+    }
+
+    async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    fn take_exit_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<ExitEvent>> {
+        self.inner.take_exit_receiver()
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        self.inner.on_alloc_running(spec);
+    }
+
+    fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+        self.inner.on_alloc_terminal(alloc_id);
+    }
+
+    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+        self.inner.on_alloc_stable(alloc_id);
+    }
+
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        self.inner.live_allocations()
+    }
+
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        self.inner.try_begin_reclamation(alloc)
+    }
+
+    fn release_supervision(&self, alloc: &AllocationId) {
+        self.inner.release_supervision(alloc);
+    }
+}
+
+/// The required `ServerConfig.guest_dns`: the accepted `SimGuestDnsFactory`,
+/// with every responder it builds wrapped so each `GuestDns::audit` call is
+/// recorded with the responder's build index. Recording is its only addition.
+#[derive(Default)]
+struct ProofDnsFactory {
+    sim: SimGuestDnsFactory,
+    /// The build index of the responder each `audit` call reached, in call
+    /// order.
+    audits: Arc<Mutex<Vec<usize>>>,
+}
+
+impl ProofDnsFactory {
+    /// Every responder built, in build order (the sim's own build log).
+    fn responders(&self) -> Vec<Arc<SimGuestDns>> {
+        self.sim.responders()
+    }
+
+    fn script_probe_failure(&self, armed: bool) {
+        self.sim.script_probe_failure(armed);
+    }
+
+    /// The build indices of the responders audited since `cursor`.
+    fn audits_since(&self, cursor: usize) -> Vec<usize> {
+        self.audits.lock()[cursor..].to_vec()
+    }
+
+    fn audit_calls(&self) -> usize {
+        self.audits.lock().len()
+    }
+}
+
+impl GuestDnsFactory for ProofDnsFactory {
+    fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {
+        let inner = self.sim.responder(deps);
+        let index = self.sim.responders().len() - 1;
+        Arc::new(ProofDns { inner, index, audits: Arc::clone(&self.audits) })
+    }
+}
+
+/// One responder built by [`ProofDnsFactory`]: the sim responder, with its
+/// `audit` calls recorded.
+struct ProofDns {
+    inner: Arc<dyn GuestDns>,
+    index: usize,
+    audits: Arc<Mutex<Vec<usize>>>,
+}
+
+#[async_trait::async_trait]
+impl GuestDns for ProofDns {
+    async fn probe(&self) -> DnsResult<()> {
+        self.inner.probe().await
+    }
+
+    async fn serve(self: Arc<Self>) {
+        Arc::clone(&self.inner).serve().await;
+    }
+
+    async fn audit(&self) -> DnsResult<()> {
+        self.audits.lock().push(self.index);
+        self.inner.audit().await
+    }
+
+    fn stop(&self) {
+        self.inner.stop();
     }
 }
 
@@ -493,6 +814,12 @@ struct InterceptModel {
     /// Every call, in call order.
     calls: Vec<InterceptCall>,
 }
+
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
+/// unchanged by that step.
+type BoundListener = std::net::TcpListener;
 
 /// Test-local `MtlsIntercept` delegating `bind_transparent` (and every effect
 /// it does not fault) to an inner `SimMtlsIntercept`.
@@ -548,7 +875,7 @@ impl ProofIntercept {
 }
 
 impl MtlsIntercept for ProofIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<BoundListener> {
         self.record(InterceptCall::Bind(addr));
         if self.model.lock().binds_blocked {
             return Err(InterceptError::TransparentListener {
@@ -694,7 +1021,9 @@ struct Node {
     clock: Arc<SimClock>,
     owner: Arc<ProofOwner>,
     intercept: Arc<ProofIntercept>,
-    dns: Arc<SimGuestDnsFactory>,
+    dns: Arc<ProofDnsFactory>,
+    /// The responder whose audit slot a `DnsAuditRefused` stimulus armed.
+    dns_audit_refused: Option<Arc<SimGuestDns>>,
     cgroups: SimCgroupFs,
     gate: Arc<GuestNetworkExecGate>,
     exec: Arc<GuestNetworkExecSupervisor>,
@@ -720,20 +1049,25 @@ async fn settle_io() {
 
 impl Node {
     async fn boot(seed: u64) -> Self {
-        let _ = event_store();
-        let dir = tempfile::tempdir().expect("proof tempdir");
+        event_store();
+        let dir = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("seed={seed:#x}: proof tempdir: {error}"));
         let data_dir = dir.path().join("data");
         let config_dir = dir.path().join("operator");
-        std::fs::create_dir_all(&data_dir).expect("proof data dir");
-        std::fs::create_dir_all(&config_dir).expect("proof operator dir");
+        std::fs::create_dir_all(&data_dir)
+            .unwrap_or_else(|error| panic!("seed={seed:#x}: proof data dir: {error}"));
+        std::fs::create_dir_all(&config_dir)
+            .unwrap_or_else(|error| panic!("seed={seed:#x}: proof operator dir: {error}"));
         let clock = Arc::new(SimClock::new());
         let clock_port: Arc<dyn Clock> = clock.clone();
         let intercept = Arc::new(ProofIntercept::new());
         let intercept_port: Arc<dyn MtlsIntercept> = intercept.clone();
-        let dns = Arc::new(SimGuestDnsFactory::default());
+        let dns = Arc::new(ProofDnsFactory::default());
         let dns_port: Arc<dyn GuestDnsFactory> = dns.clone();
         let config = ServerConfig {
-            bind: "127.0.0.1:0".parse().expect("loopback bind"),
+            bind: "127.0.0.1:0"
+                .parse()
+                .unwrap_or_else(|error| panic!("seed={seed:#x}: loopback bind: {error}")),
             data_dir,
             operator_config_dir: config_dir.clone(),
             clock: Arc::clone(&clock_port),
@@ -744,17 +1078,21 @@ impl Node {
         let owner = Arc::new(ProofOwner::default());
         let owner_port: Arc<dyn SharedGuestNetworkOwner> = owner.clone();
         let obs = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("nd295-proof-3-3").expect("node id"),
+            NodeId::new("nd295-proof-3-3")
+                .unwrap_or_else(|error| panic!("seed={seed:#x}: node id: {error}")),
             seed,
         ));
         let obs_port: Arc<dyn ObservationStore> = obs.clone();
-        let driver: Arc<dyn Driver> =
-            Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
+        let driver: Arc<dyn Driver> = Arc::new(ProofDriver {
+            inner: SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)),
+            journal: Arc::clone(&owner.journal),
+        });
         let cgroups = SimCgroupFs::new();
         let vm_cgroups = CgroupManager::new(PathBuf::from(CGROUP_ROOT), Arc::new(cgroups.clone()));
         let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock_port));
         let gate = wiring.gate();
         let exec = wiring.supervisor();
+        owner.bind_exec(Arc::clone(&gate), Arc::clone(&exec));
         let handle = run_server_with_obs_and_driver(
             config,
             obs_port,
@@ -783,6 +1121,7 @@ impl Node {
             owner,
             intercept,
             dns,
+            dns_audit_refused: None,
             cgroups,
             gate,
             exec,
@@ -810,14 +1149,7 @@ impl Node {
 
     /// One non-blocking release attempt at the VM driver's claim boundary.
     fn admission(&self) -> Admission {
-        match self.gate.claim_release().now_or_never() {
-            Some(Some(claim)) => {
-                drop(claim);
-                Admission::Open
-            }
-            Some(None) => Admission::FailStopped,
-            None => Admission::Closed,
-        }
+        admission_of(&self.gate)
     }
 
     fn progress(&self) -> Option<SharedGuestNetworkRecovery> {
@@ -838,7 +1170,11 @@ impl Node {
     /// receipt, and never polled for again.
     fn poll_request(&mut self) -> Option<&ServeShutdownRequest> {
         if self.request.is_none() {
-            let handle = self.handle.as_mut().expect("live server handle");
+            let seed = self.seed;
+            let handle = self
+                .handle
+                .as_mut()
+                .unwrap_or_else(|| panic!("seed={seed:#x}: the server handle is live"));
             if let Some(request) = handle.shutdown_requested().now_or_never() {
                 self.request_snapshot = Some(self.cgroups.snapshot());
                 self.request = Some((self.elapsed, request));
@@ -851,7 +1187,16 @@ impl Node {
         self.clock.tick(STEP);
         self.elapsed += STEP;
         settle().await;
-        let _ = self.poll_request();
+        self.poll_request();
+    }
+
+    /// One injected-clock step with a real-I/O settle, for phases in which an
+    /// HTTPS submit or an intent write must complete (workload deploy).
+    async fn step_io(&mut self) {
+        self.clock.tick(STEP);
+        self.elapsed += STEP;
+        settle_io().await;
+        self.poll_request();
     }
 
     async fn advance(&mut self, duration: Duration) {
@@ -861,10 +1206,29 @@ impl Node {
         }
     }
 
-    /// Inject `component`'s loss together with the blocker that keeps its
-    /// owner's repair failing. `Err` names a precondition production never
-    /// produced.
-    fn inject(&self, component: SharedGuestNetworkComponent) -> Result<(), String> {
+    /// Inject `stimulus` together with the blocker that keeps its owner's
+    /// repair failing. `Err` names a precondition production never produced.
+    fn inject(&mut self, stimulus: Stimulus) -> Result<(), String> {
+        let component = match stimulus {
+            Stimulus::Component(component) => component,
+            Stimulus::DnsServeEnds(exit) => {
+                let Some(live) = self.dns.responders().last().cloned() else {
+                    return Err("no DNS responder was built at boot".to_owned());
+                };
+                self.dns.script_probe_failure(true);
+                live.end_serve(exit);
+                return Ok(());
+            }
+            Stimulus::DnsAuditRefused => {
+                let Some(live) = self.dns.responders().last().cloned() else {
+                    return Err("no DNS responder was built at boot".to_owned());
+                };
+                self.dns.script_probe_failure(true);
+                live.script_audit_failure(true);
+                self.dns_audit_refused = Some(live);
+                return Ok(());
+            }
+        };
         match component {
             SharedGuestNetworkComponent::IpRules => {
                 self.intercept.update(|model| {
@@ -895,14 +1259,6 @@ impl Node {
                     Err(format!("no live sim listener at the recorded {component:?} address {leg}"))
                 }
             }
-            SharedGuestNetworkComponent::Dns => {
-                let Some(live) = self.dns.responders().last().cloned() else {
-                    return Err("no DNS responder was built at boot".to_owned());
-                };
-                self.dns.script_probe_failure(true);
-                live.end_serve(SimGuestDnsServeExit::Return);
-                Ok(())
-            }
             _ => {
                 self.owner.sim.script_component_audit_failure(component, true);
                 Ok(())
@@ -927,29 +1283,31 @@ impl Node {
         }
     }
 
-    /// Make `component` healthy without any owner repair.
-    fn heal(&self, component: SharedGuestNetworkComponent) {
+    /// Make `stimulus`'s component healthy without any owner repair.
+    fn heal(&self, stimulus: Stimulus) {
+        let component = stimulus.component();
         self.unblock(component);
         self.intercept.update(|model| match component {
             SharedGuestNetworkComponent::IpRules => model.program_lost = false,
             SharedGuestNetworkComponent::IpSets => model.foreign_member = None,
             _ => {}
         });
+        if let Some(refused) = &self.dns_audit_refused {
+            refused.script_audit_failure(false);
+        }
     }
 
     /// Create the workloads slice and each allocation's scope directory, with
     /// every ancestor, so a kill write under them lands in the snapshot.
     async fn create_scopes(&self, allocs: &BTreeSet<AllocationId>) {
-        let root = Path::new(CGROUP_ROOT);
-        self.cgroups
-            .create_dir(&CgroupPath::workloads_slice().resolve(root))
-            .await
-            .expect("sim workloads slice");
+        let seed = self.seed;
+        self.cgroups.create_dir(&slice_dir()).await.unwrap_or_else(|error| {
+            panic!("seed={seed:#x}: create the sim workloads slice: {error}")
+        });
         for alloc in allocs {
-            self.cgroups
-                .create_dir(&CgroupPath::for_alloc(alloc).resolve(root))
-                .await
-                .expect("sim allocation scope");
+            self.cgroups.create_dir(&scope_dir(alloc)).await.unwrap_or_else(|error| {
+                panic!("seed={seed:#x}: create the sim scope of {alloc}: {error}")
+            });
         }
     }
 
@@ -972,16 +1330,35 @@ impl Node {
     }
 }
 
-fn kill_path(scope: &CgroupPath) -> PathBuf {
-    scope.resolve(Path::new(CGROUP_ROOT)).join("cgroup.kill")
+/// `<root>/overdrive.slice/workloads.slice`, the literal the contract pins.
+fn slice_dir() -> PathBuf {
+    Path::new(CGROUP_ROOT).join(WORKLOADS_SLICE)
 }
 
-fn killed(snapshot: &CgroupSnapshot, scope: &CgroupPath) -> bool {
-    snapshot.get(&kill_path(scope)) == Some(&(SimEntry::File, b"1\n".to_vec()))
+/// `<root>/overdrive.slice/workloads.slice/<alloc>.scope`.
+fn scope_dir(alloc: &AllocationId) -> PathBuf {
+    slice_dir().join(format!("{alloc}.scope"))
 }
 
-fn touched(snapshot: &CgroupSnapshot, scope: &CgroupPath) -> bool {
-    snapshot.contains_key(&kill_path(scope))
+/// `<root>/overdrive.slice/workloads.slice/cgroup.kill`, the whole-slice kill.
+fn slice_kill_path() -> PathBuf {
+    slice_dir().join("cgroup.kill")
+}
+
+/// `<root>/overdrive.slice/workloads.slice/<alloc>.scope/cgroup.kill`, one
+/// VM's kill.
+fn scope_kill_path(alloc: &AllocationId) -> PathBuf {
+    scope_dir(alloc).join("cgroup.kill")
+}
+
+/// The snapshot holds `1\n` at `kill_path`.
+fn killed(snapshot: &CgroupSnapshot, kill_path: &Path) -> bool {
+    snapshot.get(kill_path) == Some(&(SimEntry::File, b"1\n".to_vec()))
+}
+
+/// The snapshot holds any entry at `kill_path`.
+fn touched(snapshot: &CgroupSnapshot, kill_path: &Path) -> bool {
+    snapshot.contains_key(kill_path)
 }
 
 fn count(calls: &[GuestNetworkOperation], operation: GuestNetworkOperation) -> usize {
@@ -1089,7 +1466,7 @@ impl ArmError {
 
 async fn arm_and_detect(
     node: &mut Node,
-    component: SharedGuestNetworkComponent,
+    stimulus: Stimulus,
     phase: Duration,
 ) -> Result<Detected, ArmError> {
     if let Some(gap) = node.composition_gap() {
@@ -1101,7 +1478,7 @@ async fn arm_and_detect(
     let intercept_calls_at_arm = node.intercept.calls_len();
     let responders_at_arm = node.dns.responders().len();
     let events_at_arm = events_cursor();
-    node.inject(component).map_err(ArmError::Unarmable)?;
+    node.inject(stimulus).map_err(ArmError::Unarmable)?;
     while node.elapsed - armed_at < AUDIT_PERIOD + STEP {
         node.step().await;
         if let Some(progress) = node.progress() {
@@ -1119,7 +1496,7 @@ async fn arm_and_detect(
     }
     let calls_since_arm = node.runtime_calls()[calls_at_arm..].to_vec();
     Err(ArmError::Missed(format!(
-        "no recovery within one audit period (+1 step) of the {component:?} fault: admission={:?} \
+        "no recovery within one audit period (+1 step) of the {stimulus:?} fault: admission={:?} \
          audit_shared_calls_since_arm={} owner_calls_since_arm={calls_since_arm:?} \
          intercept_calls_since_arm={:?}",
         node.admission(),
@@ -1261,8 +1638,10 @@ fn gaps(times: &[Duration], window: Duration) -> Vec<Duration> {
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// C1 — the full audit reads the shared owner (`audit_shared`) exactly once per
-/// 1 s audit period and the intercept owner's state (`observe_shared_state`)
-/// at least once per period.
+/// 1 s audit period, the intercept owner's state (`observe_shared_state`) at
+/// least once per period, and the DNS owner (`GuestDns::audit` of the one live
+/// responder) exactly once per period: each full audit is one pass over the
+/// three owners (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the full audit)).
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
 async fn healthy_node_audits_the_shared_owner_every_second() {
@@ -1275,11 +1654,23 @@ async fn healthy_node_audits_the_shared_owner_every_second() {
             continue;
         }
         let intercept_at_boot = node.intercept.calls_len();
+        let dns_at_boot = node.dns.audit_calls();
         let mut owner_audits = Vec::new();
         let mut intercept_audits = Vec::new();
-        let (mut owner_seen, mut intercept_seen) = (0, 0);
+        let mut dns_audits = Vec::new();
+        let (mut owner_seen, mut intercept_seen, mut dns_seen) = (0, 0, 0);
+        let mut foreign_dns_audits = Vec::new();
         for _ in 0..1_000 {
             node.step().await;
+            let dns_since = node.dns.audits_since(dns_at_boot);
+            for index in &dns_since[dns_seen..] {
+                if *index == 0 {
+                    dns_audits.push(node.elapsed);
+                } else {
+                    foreign_dns_audits.push(*index);
+                }
+            }
+            dns_seen = dns_since.len();
             let owner_now = count(&node.runtime_calls(), GuestNetworkOperation::BridgeObserve);
             for _ in owner_seen..owner_now {
                 owner_audits.push(node.elapsed);
@@ -1302,6 +1693,9 @@ async fn healthy_node_audits_the_shared_owner_every_second() {
         let owner_max = owner_gaps.iter().copied().max().unwrap_or(window);
         let owner_min = owner_audits.windows(2).map(|pair| pair[1] - pair[0]).min();
         let intercept_max = intercept_gaps.iter().copied().max().unwrap_or(window);
+        let dns_gaps = gaps(&dns_audits, window);
+        let dns_max = dns_gaps.iter().copied().max().unwrap_or(window);
+        let dns_min = dns_audits.windows(2).map(|pair| pair[1] - pair[0]).min();
         let verdict = if owner_max > AUDIT_PERIOD + STEP {
             Verdict::Red(format!(
                 "audit_shared calls in {window:?} = {}; largest unaudited interval {owner_max:?} > \
@@ -1318,6 +1712,22 @@ async fn healthy_node_audits_the_shared_owner_every_second() {
                 "observe_shared_state calls in {window:?} = {}; largest unaudited interval \
                  {intercept_max:?} > {AUDIT_PERIOD:?} (times {intercept_audits:?})",
                 intercept_audits.len()
+            ))
+        } else if !foreign_dns_audits.is_empty() {
+            Verdict::Red(format!(
+                "a healthy node audited DNS responders other than its boot responder: build \
+                 indices {foreign_dns_audits:?}"
+            ))
+        } else if dns_max > AUDIT_PERIOD + STEP {
+            Verdict::Red(format!(
+                "DNS audit calls in {window:?} = {}; largest unaudited interval {dns_max:?} > \
+                 {AUDIT_PERIOD:?} (times {dns_audits:?})",
+                dns_audits.len()
+            ))
+        } else if dns_min.is_some_and(|min| min + STEP < AUDIT_PERIOD) {
+            Verdict::Red(format!(
+                "more than one DNS audit per period: smallest interval {dns_min:?} (times \
+                 {dns_audits:?})"
             ))
         } else {
             Verdict::Green
@@ -1340,20 +1750,22 @@ async fn healthy_node_audits_the_shared_owner_every_second() {
 /// audit period, closes new guest-command release, records
 /// `Recovering { component, 0 }`, and emits exactly one
 /// `guest_network.shared_owner_unhealthy { component, cause }` whose cause is
-/// `audit_mismatch` for an audited loss and `task_exit` for a listener or DNS
-/// task end; a shared-owner audit that never answers is detected within 5 s of
-/// injected time as `Bridge` with cause `audit_timeout`.
+/// `audit_mismatch` for an audited loss (a DNS audit refusal included) and
+/// `task_exit` for a listener task end or a DNS serve that returns or panics;
+/// a shared-owner audit that never answers is detected within 5 s of injected
+/// time as `Bridge` with cause `audit_timeout`.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
 async fn every_component_loss_is_detected_within_one_audit_and_closes_admission() {
     let mut report = Report::new("C2-detection-and-admission-closure");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
+            let component = stimulus.component();
             let mut rng = cell_rng(seed, index);
             let phase = seeded_phase(&mut rng);
             let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}@phase={}ms", phase.as_millis());
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell = format!("{stimulus:?}@phase={}ms", phase.as_millis());
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(ArmError::Unarmable(reason)) => Verdict::Unreached(reason),
                 Err(ArmError::Missed(reason)) => Verdict::Red(reason),
                 Ok(detected) => {
@@ -1373,12 +1785,12 @@ async fn every_component_loss_is_detected_within_one_audit_and_closes_admission(
                     {
                         Verdict::Red(format!("unhealthy events {unhealthy:?}"))
                     } else if unhealthy[0].fields.get("cause").map(String::as_str)
-                        != Some(expected_cause(component))
+                        != Some(stimulus.expected_cause())
                     {
                         Verdict::Red(format!(
                             "unhealthy cause {:?}; expected {}",
                             unhealthy[0].fields.get("cause"),
-                            expected_cause(component)
+                            stimulus.expected_cause()
                         ))
                     } else {
                         Verdict::Green
@@ -1457,22 +1869,23 @@ async fn hung_audit_detection(node: &mut Node, phase: Duration) -> Verdict {
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// C3 — a kernel-path loss quiesces managed TAPs exactly once, before the first
-/// repair attempt; a pure listener or DNS loss never quiesces TAPs.
+/// repair attempt; a pure listener or DNS loss (serve return, serve panic, or
+/// audit refusal) never quiesces TAPs.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
 async fn kernel_path_loss_quiesces_once_before_repair_and_listener_or_dns_loss_never_does() {
     let mut report = Report::new("C3-component-quiescence-rules");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
+            let component = stimulus.component();
             let kernel_path = is_kernel_path(component);
             let mut rng = cell_rng(seed, index);
             let phase = seeded_phase(&mut rng);
             let failed_attempts = rng.inclusive(0, 3);
             let mut node = Node::boot(seed).await;
-            let cell = format!(
-                "{component:?}/kernel_path={kernel_path}/failed_attempts={failed_attempts}"
-            );
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell =
+                format!("{stimulus:?}/kernel_path={kernel_path}/failed_attempts={failed_attempts}");
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
                 Ok(detected) => {
                     let mut unreached = None;
@@ -1549,13 +1962,16 @@ async fn kernel_path_loss_quiesces_once_before_repair_and_listener_or_dns_loss_n
 /// every 250 ms; each attempt counts only after convergence plus a full audit;
 /// a partial repair records the first remaining component and never reopens;
 /// a kernel-path recovery restores the quiesced TAPs once after a clean audit;
-/// complete repair reopens admission exactly once.
+/// complete repair reopens admission exactly once. Every DNS loss (serve
+/// return, serve panic, audit refusal) is repaired by a freshly built
+/// responder.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
 async fn repair_runs_through_the_owning_component_on_the_attempt_cadence_and_reopens_once() {
     let mut report = Report::new("C4-exact-owner-repair-cadence-reopen");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
+            let component = stimulus.component();
             let mut rng = cell_rng(seed, index);
             let phase = seeded_phase(&mut rng);
             let failed_attempts = rng.inclusive(0, 12);
@@ -1576,10 +1992,10 @@ async fn repair_runs_through_the_owning_component_on_the_attempt_cadence_and_reo
             });
             let mut node = Node::boot(seed).await;
             let cell = format!(
-                "{component:?}/owner={:?}/failed_attempts={failed_attempts}/partial={partial:?}",
+                "{stimulus:?}/owner={:?}/failed_attempts={failed_attempts}/partial={partial:?}",
                 repair_owner(component)
             );
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
                 Ok(detected) => {
                     recovery_episode(&mut node, component, &detected, failed_attempts, partial)
@@ -1835,6 +2251,152 @@ async fn recovery_episode(
 }
 
 // ---------------------------------------------------------------------------
+// C4b — a failed restore keeps admission closed until a later one succeeds.
+// ---------------------------------------------------------------------------
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-29B — The composed server recovers every component through its required ports
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// C4b — a kernel-path recovery whose restore of the quiesced TAPs fails
+/// (`SimSharedGuestNetworkOwner::script_restore_failure`) records `Bridge` as
+/// the first remaining component and keeps admission closed. The failed restore
+/// ends the TAPs' quiesced count, so a kernel-path loss the next attempt's audit
+/// reveals quiesces them again (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (quiescence), the
+/// user-approved 2026-09-30 rule). Admission reopens exactly once, only after a
+/// later restore succeeds, and no quiescence follows it.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
+async fn a_failed_restore_keeps_admission_closed_until_a_later_restore_succeeds() {
+    let mut report = Report::new("C4b-failed-restore-keeps-admission-closed");
+    for seed in seeds() {
+        for (index, component) in kernel_path_components().into_iter().enumerate() {
+            let mut rng = cell_rng(seed, 700 + index);
+            let phase = seeded_phase(&mut rng);
+            let mut node = Node::boot(seed).await;
+            let stimulus = Stimulus::Component(component);
+            let cell = format!("{component:?}@phase={}ms", phase.as_millis());
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
+                Err(error) => error.into_unreached(),
+                Ok(_) => match restore_failure_episode(&mut node, stimulus).await {
+                    Ok(()) => Verdict::Green,
+                    Err(reason) => Verdict::Red(reason),
+                },
+            };
+            report.record(seed, cell, verdict);
+            node.shutdown().await;
+        }
+    }
+    report.finish();
+}
+
+/// The journal positions of every step `matches` accepts.
+fn journal_positions(
+    journal: &[JournalStep],
+    matches: impl Fn(&JournalStep) -> bool,
+) -> Vec<usize> {
+    journal.iter().enumerate().filter(|(_, step)| matches(step)).map(|(at, _)| at).collect()
+}
+
+async fn restore_failure_episode(node: &mut Node, stimulus: Stimulus) -> Result<(), String> {
+    let component = stimulus.component();
+    // Attempt 1: the repair converges, its full audit is clean, so it restores
+    // the quiesced TAPs, and the restore fails.
+    node.owner.sim.script_restore_failure(true);
+    node.unblock(component);
+    let (_, first) = await_attempt(node, 1).await.ok_or_else(|| {
+        format!(
+            "attempt 1 did not complete; progress {:?} request {:?}",
+            node.progress(),
+            node.request
+        )
+    })?;
+    if first.component != SharedGuestNetworkComponent::Bridge || first.attempts != 1 {
+        return Err(format!(
+            "a failed restore leaves Bridge as the first remaining component: snapshot {first:?}"
+        ));
+    }
+    if node.admission() != Admission::Closed {
+        return Err(format!("admission {:?} after a failed restore", node.admission()));
+    }
+    let journal = node.owner.journal();
+    let failed_restore =
+        journal_positions(&journal, |step| *step == JournalStep::Restored { ok: false })
+            .first()
+            .copied()
+            .ok_or_else(|| {
+                format!("attempt 1 issued no restore after its clean audit: {journal:?}")
+            })?;
+    // The same kernel-path component is lost again; the next attempt's audit
+    // reveals it.
+    node.inject(stimulus).map_err(|reason| format!("re-arm after the failed restore: {reason}"))?;
+    let (_, second) = await_attempt(node, 2).await.ok_or_else(|| {
+        format!(
+            "attempt 2 did not complete; progress {:?} request {:?}",
+            node.progress(),
+            node.request
+        )
+    })?;
+    if node.admission() != Admission::Closed {
+        return Err(format!("admission {:?} during attempt 2 ({second:?})", node.admission()));
+    }
+    let journal = node.owner.journal();
+    let quiesced = journal_positions(&journal, |step| *step == JournalStep::Quiesced);
+    if quiesced.len() != 2 || quiesced[1] < failed_restore {
+        return Err(format!(
+            "a kernel-path loss revealed after a failed restore quiesces the TAPs again, once: \
+             quiescences at {quiesced:?}, failed restore at {failed_restore} (attempt 2 {second:?}): \
+             {journal:?}"
+        ));
+    }
+    // The repair and the restore succeed: admission reopens exactly once.
+    node.owner.sim.script_restore_failure(false);
+    node.unblock(component);
+    let journal_at_unblock = node.owner.journal().len();
+    let deadline = node.elapsed + ATTEMPT_PERIOD + STEP;
+    let mut reopened = false;
+    while node.elapsed < deadline {
+        node.step().await;
+        if node.progress().is_none() {
+            reopened = true;
+            break;
+        }
+        if node.admission() != Admission::Closed {
+            return Err(format!("admission {:?} before the reopen", node.admission()));
+        }
+    }
+    if !reopened {
+        return Err(format!(
+            "no reopen one attempt after the restore was allowed to succeed; progress {:?} \
+             request {:?}",
+            node.progress(),
+            node.request
+        ));
+    }
+    let journal = node.owner.journal();
+    if !journal[journal_at_unblock..].contains(&JournalStep::Restored { ok: true }) {
+        return Err(format!("admission reopened without a successful restore: {journal:?}"));
+    }
+    if node.admission() != Admission::Open || node.request.is_some() {
+        return Err(format!(
+            "after the reopen: admission {:?} request {:?}",
+            node.admission(),
+            node.request
+        ));
+    }
+    node.advance(Duration::from_secs(1)).await;
+    let journal = node.owner.journal();
+    let quiesced = journal_positions(&journal, |step| *step == JournalStep::Quiesced).len();
+    if quiesced != 2 || node.admission() != Admission::Open {
+        return Err(format!(
+            "after the reopen: {quiesced} quiescences, admission {:?}: {journal:?}",
+            node.admission()
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // C5 — bounded window ends in one typed fail-stop request.
 // ---------------------------------------------------------------------------
 
@@ -1849,14 +2411,14 @@ async fn recovery_episode(
 async fn unrepaired_loss_fail_stops_with_one_typed_request_at_the_deadline() {
     let mut report = Report::new("C5-deadline-typed-fail-stop");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
             let mut rng = cell_rng(seed, index);
             let phase = seeded_phase(&mut rng);
             let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}");
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell = format!("{stimulus:?}");
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
-                Ok(detected) => deadline_episode(&mut node, component, &detected).await,
+                Ok(detected) => deadline_episode(&mut node, stimulus.component(), &detected).await,
             };
             report.record(seed, cell, verdict);
             node.shutdown().await;
@@ -1918,29 +2480,33 @@ async fn deadline_episode(
 // C6 — kill scope: unconfirmed, undetermined, and damaged-while-open.
 // ---------------------------------------------------------------------------
 
-fn operator_client(config_dir: &Path) -> reqwest::Client {
-    let contents = std::fs::read_to_string(config_dir.join(".overdrive/config"))
-        .expect("operator trust config written at boot");
-    let config: toml::Value = toml::from_str(&contents).expect("operator trust config parses");
+fn operator_client(seed: u64, config_dir: &Path) -> reqwest::Client {
+    let contents =
+        std::fs::read_to_string(config_dir.join(".overdrive/config")).unwrap_or_else(|error| {
+            panic!("seed={seed:#x}: operator trust config written at boot: {error}")
+        });
+    let config: toml::Value = toml::from_str(&contents)
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: operator trust config parses: {error}"));
     let encoded = config["contexts"]
         .as_array()
-        .expect("contexts array")
-        .iter()
-        .find(|entry| entry["name"].as_str() == Some("local"))
-        .expect("local context")["ca"]
-        .as_str()
-        .expect("ca field");
-    let pem = base64::engine::general_purpose::STANDARD.decode(encoded).expect("ca base64");
+        .and_then(|contexts| contexts.iter().find(|entry| entry["name"].as_str() == Some("local")))
+        .and_then(|context| context["ca"].as_str())
+        .unwrap_or_else(|| panic!("seed={seed:#x}: the trust config names the local context's ca"));
+    let pem = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: the local ca is base64: {error}"));
+    let certificate = reqwest::Certificate::from_pem(&pem)
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: the local ca is PEM: {error}"));
     reqwest::Client::builder()
-        .add_root_certificate(reqwest::Certificate::from_pem(&pem).expect("ca pem"))
+        .add_root_certificate(certificate)
         .https_only(true)
         .use_rustls_tls()
         .timeout(Duration::from_secs(5))
         .build()
-        .expect("operator client")
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: build the operator client: {error}"))
 }
 
-async fn submit_vm_job(client: &reqwest::Client, base: &str, id: &str) {
+async fn submit_vm_job(seed: u64, client: &reqwest::Client, base: &str, id: &str) {
     let body = SubmitWorkloadRequest {
         spec: SubmitSpecInput::Job(JobSpecInput {
             id: id.to_owned(),
@@ -1954,46 +2520,64 @@ async fn submit_vm_job(client: &reqwest::Client, base: &str, id: &str) {
             }),
         }),
     };
-    let response = client
-        .post(format!("{base}/v1/workloads"))
-        .json(&body)
-        .send()
+    let response =
+        client.post(format!("{base}/v1/workloads")).json(&body).send().await.unwrap_or_else(
+            |error| panic!("seed={seed:#x}: submit {id} reaches the public API: {error}"),
+        );
+    assert!(response.status().is_success(), "seed={seed:#x}: submit {id}: {response:?}");
+    let _: SubmitWorkloadResponse = response
+        .json()
         .await
-        .expect("submit reaches the public API");
-    assert!(response.status().is_success(), "submit {id}: {response:?}");
-    let _: SubmitWorkloadResponse = response.json().await.expect("submit response");
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: submit {id} response body: {error}"));
 }
 
-async fn running_allocations(obs: &SimObservationStore) -> BTreeSet<AllocationId> {
+/// Every allocation whose current row is `state`.
+async fn allocations_in(
+    seed: u64,
+    obs: &SimObservationStore,
+    state: AllocState,
+) -> BTreeSet<AllocationId> {
     obs.alloc_status_rows()
         .await
-        .expect("sim observation rows")
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: read the sim observation rows: {error}"))
         .into_iter()
-        .filter(|row| row.state == AllocState::Running)
+        .filter(|row| row.state == state)
         .map(|row| row.alloc_id)
         .collect()
+}
+
+async fn running_allocations(seed: u64, obs: &SimObservationStore) -> BTreeSet<AllocationId> {
+    allocations_in(seed, obs, AllocState::Running).await
+}
+
+impl Node {
+    /// Submit one VM job through the public HTTPS API.
+    async fn submit_through_api(&self, id: &str) {
+        let seed = self.seed;
+        let bound = self
+            .handle
+            .as_ref()
+            .unwrap_or_else(|| panic!("seed={seed:#x}: the server handle is live"))
+            .local_addr()
+            .await
+            .unwrap_or_else(|| panic!("seed={seed:#x}: the server reports its bound address"));
+        let client = operator_client(seed, &self.config_dir);
+        let base = format!("https://localhost:{}", bound.port());
+        submit_vm_job(seed, &client, &base, id).await;
+    }
 }
 
 /// Deploy `count` VM jobs through the public HTTPS API and return the running
 /// allocation ids once every job is Running.
 async fn deploy_running_vms(node: &mut Node, count: usize) -> BTreeSet<AllocationId> {
-    let bound = node
-        .handle
-        .as_ref()
-        .expect("live handle")
-        .local_addr()
-        .await
-        .expect("server bound address");
-    let client = operator_client(&node.config_dir);
-    let base = format!("https://localhost:{}", bound.port());
     for index in 0..count {
-        submit_vm_job(&client, &base, &format!("nd295-proof-vm-{index}")).await;
+        node.submit_through_api(&format!("nd295-proof-vm-{index}")).await;
     }
     for _ in 0..200 {
         node.clock.tick(Duration::from_millis(100));
         node.elapsed += Duration::from_millis(100);
         settle_io().await;
-        let running = running_allocations(&node.obs).await;
+        let running = running_allocations(node.seed, &node.obs).await;
         if running.len() >= count {
             return running;
         }
@@ -2011,7 +2595,11 @@ async fn deploy_and_pick(
     let running = deploy_running_vms(node, vm_count).await;
     node.create_scopes(&running).await;
     let pick = rng.inclusive(0, running.len() as u32 - 1) as usize;
-    let affected = running.iter().nth(pick).cloned().expect("a running allocation");
+    let affected = running
+        .iter()
+        .nth(pick)
+        .cloned()
+        .unwrap_or_else(|| panic!("seed={:#x}: a running allocation to pick", node.seed));
     let others = running.into_iter().filter(|alloc| *alloc != affected).collect();
     (affected, others)
 }
@@ -2047,20 +2635,21 @@ async fn unconfirmed_quiescence_kills_only_the_affected_vm_and_recovery_reopens(
                     "{component:?}/affected={affected}/others={}/failed_attempts={failed_attempts}",
                     others.len()
                 );
-                let verdict = match arm_and_detect(&mut node, component, phase).await {
-                    Err(error) => error.into_unreached(),
-                    Ok(detected) => {
-                        unconfirmed_episode(
-                            &mut node,
-                            component,
-                            &detected,
-                            failed_attempts,
-                            &affected,
-                            &others,
-                        )
-                        .await
-                    }
-                };
+                let verdict =
+                    match arm_and_detect(&mut node, Stimulus::Component(component), phase).await {
+                        Err(error) => error.into_unreached(),
+                        Ok(detected) => {
+                            unconfirmed_episode(
+                                &mut node,
+                                component,
+                                &detected,
+                                failed_attempts,
+                                &affected,
+                                &others,
+                            )
+                            .await
+                        }
+                    };
                 (cell, verdict)
             };
             report.record(seed, verdict.0, verdict.1);
@@ -2099,15 +2688,13 @@ async fn unconfirmed_episode(
     let snapshot = node.cgroups.snapshot();
     let events = events_since(detected.events_at_arm);
     let kills = vm_killed_for(&events, affected);
-    if !killed(&snapshot, &CgroupPath::for_alloc(affected)) {
+    if !killed(&snapshot, &scope_kill_path(affected)) {
         return Verdict::Red(format!("no `1\\n` at {affected}'s scope cgroup.kill: {snapshot:?}"));
     }
-    if let Some(other) =
-        others.iter().find(|other| touched(&snapshot, &CgroupPath::for_alloc(other)))
-    {
+    if let Some(other) = others.iter().find(|other| touched(&snapshot, &scope_kill_path(other))) {
         return Verdict::Red(format!("unaffected allocation {other} was killed: {snapshot:?}"));
     }
-    if touched(&snapshot, &CgroupPath::workloads_slice()) {
+    if touched(&snapshot, &slice_kill_path()) {
         return Verdict::Red(format!("the whole workloads slice was killed: {snapshot:?}"));
     }
     if kills.len() != 1
@@ -2129,53 +2716,121 @@ async fn unconfirmed_episode(
     Verdict::Green
 }
 
+/// The two undetermined quiescence outcomes C6b runs on every seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Undetermined {
+    /// The quiescence call returns `Err` (`SimQuiesceOutcome::Fail`).
+    Fail,
+    /// The quiescence call never answers (`SimQuiesceOutcome::Hang`).
+    Hang,
+}
+
+impl Undetermined {
+    const fn scripted(self) -> SimQuiesceOutcome {
+        match self {
+            Self::Fail => SimQuiesceOutcome::Fail,
+            Self::Hang => SimQuiesceOutcome::Hang,
+        }
+    }
+}
+
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED
 /// S-ND295-29B — The composed server recovers every component through its required ports
 /// CONTRACT_SHAPE: bounded-change.
 ///
-/// C6b — when a kernel-path loss's quiescence fails or does not answer (the
-/// failing set is undetermined), the node sends exactly one typed request
-/// `TapQuiescenceUndetermined` within the 5 s window, and when that request is
-/// received the snapshot holds `1\n` at the workloads slice's `cgroup.kill`.
+/// C6b — with allocation A deployed through the API, when a kernel-path loss's
+/// quiescence fails or does not answer (the failing set is undetermined), the
+/// node sends exactly one typed request `TapQuiescenceUndetermined`, and when
+/// that request is received the snapshot holds `1\n` at
+/// `<root>/overdrive.slice/workloads.slice/cgroup.kill`. Both outcomes run on
+/// every seed. A failed call ends promptly: the request follows detection
+/// within one injected-clock step. A call that never answers is abandoned only
+/// when its bound elapses, so its request arrives no earlier than the bound's
+/// pinned floor (`max(1 s, 4 × Q)`, so at least 1 s) and within the 5 s window.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
 async fn undetermined_quiescence_fails_the_node_with_one_typed_request() {
     let mut report = Report::new("C6b-undetermined-quiescence-slice-kill-and-fail-stop");
     for seed in seeds() {
         for (index, component) in kernel_path_components().into_iter().enumerate() {
-            let mut rng = cell_rng(seed, 150 + index);
-            let phase = seeded_phase(&mut rng);
-            let (label, outcome) = if (index + usize::from(rng.coin())) % 2 == 0 {
-                ("Fail", SimQuiesceOutcome::Fail)
-            } else {
-                ("Hang", SimQuiesceOutcome::Hang)
-            };
-            let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}/quiesce={label}");
-            let verdict = if let Some(gap) = node.composition_gap() {
-                Verdict::Unreached(gap)
-            } else {
-                node.create_scopes(&BTreeSet::new()).await;
-                node.owner.sim.script_quiesce_outcome(outcome);
-                match arm_and_detect(&mut node, component, phase).await {
-                    Err(error) => error.into_unreached(),
-                    Ok(detected) => undetermined_episode(&mut node, component, &detected).await,
-                }
-            };
-            report.record(seed, cell, verdict);
-            node.shutdown().await;
+            for (offset, outcome) in
+                [Undetermined::Fail, Undetermined::Hang].into_iter().enumerate()
+            {
+                let mut rng = cell_rng(seed, 150 + 2 * index + offset);
+                let phase = seeded_phase(&mut rng);
+                let mut node = Node::boot(seed).await;
+                let (cell, verdict) = if let Some(gap) = node.composition_gap() {
+                    (format!("{component:?}/quiesce={outcome:?}"), Verdict::Unreached(gap))
+                } else {
+                    let (affected, others) = deploy_and_pick(&mut node, &mut rng).await;
+                    let cell = format!(
+                        "{component:?}/quiesce={outcome:?}/affected={affected}/others={}",
+                        others.len()
+                    );
+                    node.owner.sim.script_quiesce_outcome(outcome.scripted());
+                    let mut deployed = others;
+                    deployed.insert(affected);
+                    (
+                        cell,
+                        undetermined_episode(&mut node, component, outcome, phase, &deployed).await,
+                    )
+                };
+                report.record(seed, cell, verdict);
+                node.shutdown().await;
+            }
         }
     }
     report.finish();
 }
 
+/// Arm `component`'s loss at `phase` and follow the undetermined quiescence to
+/// its request. Detection is read from the recovery snapshot or, when the
+/// whole undetermined branch completes inside one step and the snapshot has
+/// already turned into FailStop, from the one `shared_owner_unhealthy` event.
+/// `deployed` is every allocation the cell deployed (A among them): when the
+/// request arrives each one's scope still sits under the killed workloads
+/// slice, so the slice kill reaches it, and none of them carries a per-VM
+/// `cgroup.kill` (the undetermined branch knows no failing set; FD § E12 (b)).
 async fn undetermined_episode(
     node: &mut Node,
     component: SharedGuestNetworkComponent,
-    detected: &Detected,
+    outcome: Undetermined,
+    phase: Duration,
+    deployed: &BTreeSet<AllocationId>,
 ) -> Verdict {
-    while node.elapsed < detected.at + RECOVERY_DEADLINE + STEP * 3 && node.request.is_none() {
+    node.advance(phase).await;
+    let armed_at = node.elapsed;
+    let events_at_arm = events_cursor();
+    if let Err(reason) = node.inject(Stimulus::Component(component)) {
+        return Verdict::Unreached(format!("precondition arm: {reason}"));
+    }
+    let horizon = armed_at + AUDIT_PERIOD + STEP + RECOVERY_DEADLINE + STEP * 3;
+    let mut detected_at = None;
+    while node.elapsed < horizon && node.request.is_none() {
         node.step().await;
+        if detected_at.is_none()
+            && (node.progress().is_some()
+                || !named(&events_since(events_at_arm), "guest_network.shared_owner_unhealthy")
+                    .is_empty())
+        {
+            detected_at = Some(node.elapsed);
+        }
+        if detected_at.is_some() && node.admission() == Admission::Open {
+            return Verdict::Red(format!(
+                "admission Open {:?} after arming, after detection",
+                node.elapsed - armed_at
+            ));
+        }
+    }
+    let Some(detected_at) = detected_at else {
+        return Verdict::Red(format!(
+            "the {component:?} loss was not detected; admission {:?} request {:?}",
+            node.admission(),
+            node.request
+        ));
+    };
+    if detected_at - armed_at > AUDIT_PERIOD + STEP {
+        return Verdict::Red(format!("detection latency {:?}", detected_at - armed_at));
     }
     let Some((at, request)) = node.request.clone() else {
         return Verdict::Red(format!(
@@ -2188,20 +2843,62 @@ async fn undetermined_episode(
     if fail_stop.cause != SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined
         || fail_stop.component != component
         || fail_stop.attempts != 0
-        || fail_stop.elapsed > RECOVERY_DEADLINE
-        || at - detected.at > RECOVERY_DEADLINE + STEP
     {
         return Verdict::Red(format!(
-            "request {request:?} {:?} after detection; expected {component:?} / \
-             TapQuiescenceUndetermined / 0 attempts within {RECOVERY_DEADLINE:?}",
-            at - detected.at
+            "request {request:?}; expected {component:?} / TapQuiescenceUndetermined / 0 attempts"
         ));
     }
-    let snapshot = node.request_snapshot.clone().unwrap_or_default();
-    if !killed(&snapshot, &CgroupPath::workloads_slice()) {
+    let observed = at - detected_at;
+    if !within_one_step(observed, fail_stop.elapsed) {
         return Verdict::Red(format!(
-            "no `1\\n` at the workloads slice cgroup.kill when the request was received: {snapshot:?}"
+            "request received {observed:?} after detection but reports {:?} elapsed",
+            fail_stop.elapsed
         ));
+    }
+    let timing = match outcome {
+        Undetermined::Fail => (fail_stop.elapsed > STEP).then(|| {
+            format!(
+                "a failed quiescence must end in the request promptly; it came {:?} after \
+                 detection",
+                fail_stop.elapsed
+            )
+        }),
+        Undetermined::Hang => (fail_stop.elapsed < QUIESCE_BOUND_FLOOR
+            || fail_stop.elapsed > RECOVERY_DEADLINE)
+            .then(|| {
+                format!(
+                    "a hung quiescence is abandoned only when its bound (at least \
+                     {QUIESCE_BOUND_FLOOR:?}) elapses, within {RECOVERY_DEADLINE:?}; the \
+                     request came {:?} after detection",
+                    fail_stop.elapsed
+                )
+            }),
+    };
+    if let Some(reason) = timing {
+        return Verdict::Red(reason);
+    }
+    let Some(snapshot) = node.request_snapshot.clone() else {
+        return Verdict::Red("no cgroup snapshot was taken when the request arrived".to_owned());
+    };
+    if !killed(&snapshot, &slice_kill_path()) {
+        return Verdict::Red(format!(
+            "no `1\\n` at {} when the request was received: {snapshot:?}",
+            slice_kill_path().display()
+        ));
+    }
+    for alloc in deployed {
+        if snapshot.get(&scope_dir(alloc)).map(|(entry, _)| entry) != Some(&SimEntry::Dir) {
+            return Verdict::Red(format!(
+                "deployed allocation {alloc}'s scope is not under the killed workloads slice when \
+                 the request was received, so the slice kill does not reach it: {snapshot:?}"
+            ));
+        }
+        if touched(&snapshot, &scope_kill_path(alloc)) {
+            return Verdict::Red(format!(
+                "the undetermined branch wrote a per-VM kill for {alloc}; it knows no failing set \
+                 and kills only the workloads slice"
+            ));
+        }
     }
     if node.admission() != Admission::FailStopped {
         return Verdict::Red(format!("admission {:?} after fail-stop", node.admission()));
@@ -2280,15 +2977,13 @@ async fn damage_episode(
             "vm_killed events for {affected} (a killed VM is never named again): {kills:?}"
         ));
     }
-    if !killed(&snapshot, &CgroupPath::for_alloc(affected)) {
+    if !killed(&snapshot, &scope_kill_path(affected)) {
         return Verdict::Red(format!("no `1\\n` at {affected}'s scope cgroup.kill: {snapshot:?}"));
     }
-    if let Some(other) =
-        others.iter().find(|other| touched(&snapshot, &CgroupPath::for_alloc(other)))
-    {
+    if let Some(other) = others.iter().find(|other| touched(&snapshot, &scope_kill_path(other))) {
         return Verdict::Red(format!("undamaged allocation {other} was killed: {snapshot:?}"));
     }
-    if touched(&snapshot, &CgroupPath::workloads_slice()) {
+    if touched(&snapshot, &slice_kill_path()) {
         return Verdict::Red(format!("the whole workloads slice was killed: {snapshot:?}"));
     }
     if node.admission() != Admission::Open || node.progress().is_some() || node.request.is_some() {
@@ -2319,13 +3014,13 @@ async fn damage_episode(
 async fn healed_owner_after_fail_stop_cannot_reopen_admission() {
     let mut report = Report::new("C7a-post-fail-stop-heal-cannot-reopen");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
             let mut rng = cell_rng(seed, 200 + index);
             let phase = seeded_phase(&mut rng);
             let linger = Duration::from_secs(u64::from(rng.inclusive(1, 10)));
             let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}/linger={linger:?}");
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell = format!("{stimulus:?}/linger={linger:?}");
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
                 Ok(detected) => {
                     node.advance(RECOVERY_DEADLINE + STEP * 3).await;
@@ -2334,7 +3029,7 @@ async fn healed_owner_after_fail_stop_cannot_reopen_admission() {
                         let calls_at_heal = node.call_count();
                         let intercept_at_heal = node.intercept.calls_len();
                         let responders_at_heal = node.dns.responders().len();
-                        node.heal(component);
+                        node.heal(stimulus);
                         let mut violation = None;
                         let until = node.elapsed + linger;
                         while node.elapsed < until {
@@ -2423,16 +3118,16 @@ async fn healed_owner_after_fail_stop_cannot_reopen_admission() {
 async fn in_flight_success_after_the_deadline_cannot_reopen_admission() {
     let mut report = Report::new("C7b-in-flight-late-success-cannot-reopen");
     for seed in seeds() {
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
             let mut rng = cell_rng(seed, 300 + index);
             let phase = seeded_phase(&mut rng);
             let hung_attempt = rng.inclusive(16, DEADLINE_ATTEMPTS);
             let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}/hung_attempt={hung_attempt}");
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell = format!("{stimulus:?}/hung_attempt={hung_attempt}");
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
                 Ok(detected) => {
-                    in_flight_episode(&mut node, component, &detected, hung_attempt).await
+                    in_flight_episode(&mut node, stimulus, &detected, hung_attempt).await
                 }
             };
             report.record(seed, cell, verdict);
@@ -2444,10 +3139,11 @@ async fn in_flight_success_after_the_deadline_cannot_reopen_admission() {
 
 async fn in_flight_episode(
     node: &mut Node,
-    component: SharedGuestNetworkComponent,
+    stimulus: Stimulus,
     detected: &Detected,
     hung_attempt: u32,
 ) -> Verdict {
+    let component = stimulus.component();
     for attempt in 1..hung_attempt {
         if await_attempt(node, attempt).await.is_none() {
             return Verdict::Unreached(format!(
@@ -2463,7 +3159,7 @@ async fn in_flight_episode(
     let hung = node.owner.audits_in_flight();
     let request = node.request.clone();
     // Heal the component and let the in-flight read-back finish successfully.
-    node.heal(component);
+    node.heal(stimulus);
     node.owner.disarm_audit_latch();
     latch.add_permits(64);
     let events_at_release = events_cursor();
@@ -2580,16 +3276,17 @@ async fn supervisor_task_loss_is_observed_immediately_and_fail_stops_with_the_la
         }
         // (b) In-progress recovery for every snapshot component: the panic
         // fires inside the full audit of attempt `failed + 1`.
-        for (index, component) in COMPONENTS.into_iter().enumerate() {
+        for (index, stimulus) in STIMULI.into_iter().enumerate() {
             let mut rng = cell_rng(seed, 500 + index);
             let phase = seeded_phase(&mut rng);
             let failed = rng.inclusive(1, 6);
             let mut node = Node::boot(seed).await;
-            let cell = format!("{component:?}/panic-after-{failed}-failed-attempts");
-            let verdict = match arm_and_detect(&mut node, component, phase).await {
+            let cell = format!("{stimulus:?}/panic-after-{failed}-failed-attempts");
+            let verdict = match arm_and_detect(&mut node, stimulus, phase).await {
                 Err(error) => error.into_unreached(),
                 Ok(detected) => {
-                    in_progress_panic_episode(&mut node, component, &detected, failed).await
+                    in_progress_panic_episode(&mut node, stimulus.component(), &detected, failed)
+                        .await
                 }
             };
             report.record(seed, cell, verdict);
@@ -2653,4 +3350,281 @@ async fn in_progress_panic_episode(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// C9 — an activation that meets a kernel-path recovery waits and raises once.
+// ---------------------------------------------------------------------------
+
+/// When the allocation's activation meets the kernel-path recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActivationTiming {
+    /// The action shim claimed while Open and its `activate` reaches the owner
+    /// only after the detection latched quiescence (held at the owner port).
+    InFlight,
+    /// The allocation is deployed after the detection latched quiescence.
+    DuringRecovery,
+}
+
+/// The injected time an activation or a Running write is given to happen.
+const DEPLOY_HORIZON: Duration = Duration::from_secs(20);
+/// After detection, the deploy of [`ActivationTiming::DuringRecovery`] must
+/// reach its Running write within this, leaving the rest of the 5 s window
+/// for the wait and the reopen.
+const DEPLOY_DURING_RECOVERY: Duration = Duration::from_secs(3);
+
+/// `(outcome, recovering, admission)` of every `activate` that reached the
+/// owner for `alloc`, in journal order.
+fn activations_for(
+    journal: &[JournalStep],
+    alloc: &AllocationId,
+) -> Vec<(ActivationOutcome, bool, Admission)> {
+    journal
+        .iter()
+        .filter_map(|step| match step {
+            JournalStep::Activated { alloc: named, outcome, recovering, admission }
+                if named == alloc =>
+            {
+                Some((*outcome, *recovering, *admission))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The allocation's current row state, if it has a row.
+async fn row_state(
+    seed: u64,
+    obs: &SimObservationStore,
+    alloc: &AllocationId,
+) -> Option<AllocState> {
+    obs.alloc_status_rows()
+        .await
+        .unwrap_or_else(|error| panic!("seed={seed:#x}: read the sim observation rows: {error}"))
+        .into_iter()
+        .find(|row| row.alloc_id == *alloc)
+        .map(|row| row.state)
+}
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-29B — The composed server recovers every component through its required ports
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// C9 — an allocation deployed through the public API meets a kernel-path
+/// detection that latches quiescence, and the real action shim activates it
+/// (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order; waiting on the EXEC gate; no
+/// Failed row for an observed recovery)). Two cells per seed: an activation
+/// already in flight when the detection latches (its `activate` reaches the
+/// owner after the quiescence, returns `QuiescenceLatched`, and raises nothing)
+/// and a deploy made while the node is recovering (its dispatch waits on the
+/// EXEC gate and never reaches the owner while Recovering). In both, the
+/// allocation's TAP is raised exactly once, by an `activate` that reaches the
+/// owner with admission Open after a successful restore; its command is
+/// released exactly once, after that raise and never while Recovering; and it
+/// never has a Failed row. The durable Running write precedes activation by the
+/// pinned order, so the Running row alone is not evidence of a released
+/// command; the EXEC release is.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER step 09-01 (S-ND295-29B)"]
+async fn an_activation_in_flight_waits_for_reopen_and_raises_once() {
+    let mut report = Report::new("C9-activation-waits-for-reopen-and-raises-once");
+    for seed in seeds() {
+        for (index, timing) in
+            [ActivationTiming::InFlight, ActivationTiming::DuringRecovery].into_iter().enumerate()
+        {
+            let mut rng = cell_rng(seed, 800 + index);
+            let phase = seeded_phase(&mut rng);
+            let mut node = Node::boot(seed).await;
+            let cell = format!("{timing:?}/Bridge@phase={}ms", phase.as_millis());
+            let verdict = if let Some(gap) = node.composition_gap() {
+                Verdict::Unreached(gap)
+            } else {
+                activation_episode(&mut node, timing, phase).await
+            };
+            report.record(seed, cell, verdict);
+            node.shutdown().await;
+        }
+    }
+    report.finish();
+}
+
+async fn activation_episode(node: &mut Node, timing: ActivationTiming, phase: Duration) -> Verdict {
+    let seed = node.seed;
+    let stimulus = Stimulus::Component(SharedGuestNetworkComponent::Bridge);
+    let workload = "nd295-proof-activating";
+    let hold = (timing == ActivationTiming::InFlight).then(|| node.owner.hold_next_activation());
+    match timing {
+        ActivationTiming::InFlight => {
+            node.submit_through_api(workload).await;
+            let until = node.elapsed + DEPLOY_HORIZON;
+            while node.owner.activations_held() == 0 && node.elapsed < until {
+                node.step_io().await;
+            }
+            if node.owner.activations_held() != 1 {
+                return Verdict::Unreached(format!(
+                    "precondition: the deployed allocation's activation never reached the owner \
+                     within {DEPLOY_HORIZON:?}; journal {:?}",
+                    node.owner.journal()
+                ));
+            }
+            if node.admission() != Admission::Open {
+                return Verdict::Unreached(format!(
+                    "precondition: admission {:?} when the activation reached the owner",
+                    node.admission()
+                ));
+            }
+            if let Err(error) = arm_and_detect(node, stimulus, phase).await {
+                return error.into_unreached();
+            }
+        }
+        ActivationTiming::DuringRecovery => {
+            let detected = match arm_and_detect(node, stimulus, phase).await {
+                Err(error) => return error.into_unreached(),
+                Ok(detected) => detected,
+            };
+            node.submit_through_api(workload).await;
+            let until = detected.at + DEPLOY_DURING_RECOVERY;
+            while running_allocations(seed, &node.obs).await.is_empty() && node.elapsed < until {
+                node.step_io().await;
+            }
+        }
+    }
+    if !node.owner.journal().contains(&JournalStep::Quiesced) {
+        return Verdict::Unreached(format!(
+            "precondition: the {stimulus:?} detection latched no quiescence; journal {:?}",
+            node.owner.journal()
+        ));
+    }
+    let running = running_allocations(seed, &node.obs).await;
+    let Some(alloc) = running.iter().next().cloned().filter(|_| running.len() == 1) else {
+        return Verdict::Unreached(format!(
+            "precondition: exactly one allocation reached its Running write before the wait; \
+             running {running:?}"
+        ));
+    };
+    if let Some(hold) = &hold {
+        hold.add_permits(1);
+    }
+    // While Recovering the activation raises nothing and no command is released.
+    let wait_until = node.elapsed + ATTEMPT_PERIOD * 2;
+    while node.elapsed < wait_until {
+        node.step().await;
+        if row_state(seed, &node.obs, &alloc).await == Some(AllocState::Failed) {
+            return Verdict::Red(format!("{alloc} has a Failed row while the node recovers"));
+        }
+    }
+    if node.progress().is_none() || node.admission() != Admission::Closed {
+        return Verdict::Unreached(format!(
+            "precondition: the node is still recovering; progress {:?} admission {:?} request {:?}",
+            node.progress(),
+            node.admission(),
+            node.request
+        ));
+    }
+    let journal = node.owner.journal();
+    let expected_before = match timing {
+        ActivationTiming::InFlight => {
+            vec![(ActivationOutcome::QuiescenceLatched, true, Admission::Closed)]
+        }
+        ActivationTiming::DuringRecovery => Vec::new(),
+    };
+    if activations_for(&journal, &alloc) != expected_before {
+        return Verdict::Red(format!(
+            "while Recovering the activations of {alloc} are {:?}; expected {expected_before:?} \
+             (journal {journal:?})",
+            activations_for(&journal, &alloc)
+        ));
+    }
+    if journal.contains(&JournalStep::ExecReleased { alloc: alloc.clone() }) {
+        return Verdict::Red(format!(
+            "{alloc}'s command was released while Recovering: {journal:?}"
+        ));
+    }
+    // The repair succeeds: the next attempt audits clean, restores, and reopens.
+    node.unblock(SharedGuestNetworkComponent::Bridge);
+    let deadline = node.elapsed + ATTEMPT_PERIOD + STEP;
+    let mut reopened = false;
+    while node.elapsed < deadline {
+        node.step().await;
+        if row_state(seed, &node.obs, &alloc).await == Some(AllocState::Failed) {
+            return Verdict::Red(format!("{alloc} has a Failed row before the reopen"));
+        }
+        if node.progress().is_none() {
+            reopened = true;
+            break;
+        }
+    }
+    if !reopened {
+        return Verdict::Red(format!(
+            "no reopen one attempt after the repair was unblocked; progress {:?} request {:?}",
+            node.progress(),
+            node.request
+        ));
+    }
+    let release = JournalStep::ExecReleased { alloc: alloc.clone() };
+    let settle_until = node.elapsed + ATTEMPT_PERIOD;
+    while !node.owner.journal().contains(&release) && node.elapsed < settle_until {
+        node.step().await;
+    }
+    let journal = node.owner.journal();
+    let mut expected = expected_before;
+    expected.push((ActivationOutcome::Raised, false, Admission::Open));
+    if activations_for(&journal, &alloc) != expected {
+        return Verdict::Red(format!(
+            "the activations of {alloc} are {:?}; expected {expected:?} (journal {journal:?})",
+            activations_for(&journal, &alloc)
+        ));
+    }
+    let raised = journal_positions(&journal, |step| {
+        matches!(
+            step,
+            JournalStep::Activated { alloc: named, outcome: ActivationOutcome::Raised, .. }
+                if *named == alloc
+        )
+    });
+    let restored = journal_positions(&journal, |step| *step == JournalStep::Restored { ok: true });
+    let latched = journal_positions(&journal, |step| {
+        matches!(
+            step,
+            JournalStep::Activated {
+                alloc: named,
+                outcome: ActivationOutcome::QuiescenceLatched,
+                ..
+            } if *named == alloc
+        )
+    });
+    let quiesced = journal_positions(&journal, |step| *step == JournalStep::Quiesced);
+    let released = journal_positions(&journal, |step| *step == release);
+    let ordered = matches!(
+        (quiesced.first(), restored.last(), raised.as_slice(), released.as_slice()),
+        (Some(quiesce), Some(restore), [raise], [exec])
+            if quiesce < restore && restore < raise && raise < exec
+    ) && latched.iter().all(|latch| {
+        quiesced.first().is_some_and(|quiesce| quiesce < latch)
+            && restored.last().is_some_and(|restore| latch < restore)
+    });
+    if !ordered {
+        return Verdict::Red(format!(
+            "expected quiescence < (latched activation) < successful restore < the one raise < \
+             the one EXEC release for {alloc}: {journal:?}"
+        ));
+    }
+    if row_state(seed, &node.obs, &alloc).await != Some(AllocState::Running) {
+        return Verdict::Red(format!(
+            "{alloc}'s row after the raise is {:?}; expected Running",
+            row_state(seed, &node.obs, &alloc).await
+        ));
+    }
+    if node.admission() != Admission::Open || node.request.is_some() {
+        return Verdict::Red(format!(
+            "after the reopen: admission {:?} request {:?}",
+            node.admission(),
+            node.request
+        ));
+    }
+    let failed = allocations_in(seed, &node.obs, AllocState::Failed).await;
+    if !failed.is_empty() {
+        return Verdict::Red(format!("Failed rows after an observed recovery: {failed:?}"));
+    }
+    Verdict::Green
 }

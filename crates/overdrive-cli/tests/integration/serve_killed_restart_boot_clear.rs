@@ -58,9 +58,17 @@
 //!   and guard-table mutations, sweep deletions, and admissions are ordered and
 //!   attributed to this process without trusting any product log. Only the
 //!   owned tables are replayed: `ip overdrive-mtls`, `ip overdrive-mtls-guard`,
-//!   and `bridge overdrive-mtls`.
+//!   and `bridge overdrive-mtls`. Its stderr is read for the whole run, and
+//!   verdict M0 fails the run closed if the monitor wrote anything to stderr,
+//!   reported a receive failure (nft reports a netlink overrun as
+//!   `# ERROR: We lost some netlink events!`), or exited before it was
+//!   stopped: a stream with lost commits cannot order anything.
 //! * The typed `overdrive_netlink::nft::observe_shared_ip_intercept_state`
-//!   read-back, sampled independently every 10 ms and once at the end.
+//!   read-back (members and program identity), sampled independently every
+//!   10 ms and once at the end; the policy route (`ip rule`, routing table 100)
+//!   and, while D-295-R18 stands, its guard, sampled about every 50 ms. V4a,
+//!   V4b, and V4c each require a read that started after the clear batch and
+//!   before admission to show its part converged.
 //! * `/proc` liveness of the dead owner's Cloud Hypervisor PIDs, the
 //!   allocation cgroup scope, the dead TAP by ifindex, its TCX link pins by
 //!   inode, and its endpoint-map entry by ifindex, sampled every 2-10 ms.
@@ -91,14 +99,15 @@
 //! `health.startup.refused` event, reason `mtls.shared_owner` (V0 RED); the
 //! boot-one Cloud Hypervisor PIDs are dead (V1 GREEN); no boot-two batch
 //! deletes the stale members (V2, V3, V6 RED); no program convergence and no
-//! admission follow (V4, V5, A1 RED). If the tree's deferred TAP activation
+//! admission follow (V4a, V4b, V4c, V5, A1 RED). If the tree's deferred TAP activation
 //! keeps boot one's mesh VM from reaching Running (proof findings §3.5,
 //! gap 7), the body stops at boot one's `poll_until_running` before any
 //! residue exists; every step 08-02 depends on lands before it.
 //! Falsification: one boot-two batch deletes exactly the three stale members
-//! before any program mutation, the program converges in the R19 order, boot
-//! two returns `Ok`, and a replacement is admitted at `100.95.0.2` with every
-//! predecessor object already absent.
+//! before any program mutation, the program, policy route, and guard are read
+//! back converged after it and before admission, boot two returns `Ok`, and a
+//! replacement is admitted at `100.95.0.2` with every predecessor object
+//! already absent, over a complete commit stream (M0).
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(
@@ -486,10 +495,18 @@ fn observe_state() -> Result<Option<SharedIpInterceptState>, String> {
 /// instead of aborting the proof's other verdicts.
 fn observe_intercept_mark_guard() -> Result<bool, String> {
     std::panic::catch_unwind(nft::observe_intercept_mark_guard)
-        .map_err(|panic| {
-            format!("R18 observation surface panicked: {}", panic_text(panic.as_ref()))
-        })?
+        .map_err(|panic| format!("{R18_SURFACE_PANICKED}: {}", panic_text(panic.as_ref())))?
         .map_err(|error| format!("{error}"))
+}
+
+/// The prefix [`observe_intercept_mark_guard`] gives a panicked surface.
+const R18_SURFACE_PANICKED: &str = "R18 observation surface panicked";
+
+/// The policy route read back through `ip`: present, absent, or a failed read.
+fn policy_route_observation() -> Result<bool, String> {
+    let ip_rules = command_stdout("ip", &["rule", "show"])?;
+    let route_table_100 = command_stdout("ip", &["route", "show", "table", "100"])?;
+    Ok(policy_route_present(&ip_rules, &route_table_100))
 }
 
 /// Each rule of a kernel listing of `table ip overdrive-mtls` that TPROXYs,
@@ -598,7 +615,33 @@ where
 struct NftMonitor {
     child: Child,
     lines: Arc<Mutex<Vec<MonitorLine>>>,
+    stderr_lines: Arc<Mutex<Vec<String>>>,
     reader: Option<thread::JoinHandle<()>>,
+    stderr_reader: Option<thread::JoinHandle<()>>,
+}
+
+/// Everything the `nft monitor` subscription delivered, plus what decides
+/// whether its commit stream can be trusted (verdict M0).
+struct MonitorTranscript {
+    lines: Vec<MonitorLine>,
+    /// Every line the monitor wrote to stderr.
+    stderr: Vec<String>,
+    /// The monitor's exit status when it had already exited before the proof
+    /// stopped it.
+    exited_early: Option<String>,
+}
+
+impl MonitorTranscript {
+    /// The stdout lines in which `nft monitor` reports its own failure. nft
+    /// prints a receive failure, including the netlink overrun it reports as
+    /// `# ERROR: We lost some netlink events!`, on its output stream.
+    fn reported_errors(&self) -> Vec<&str> {
+        self.lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .filter(|text| text.starts_with("# ERROR") || text.contains("lost some netlink events"))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -619,6 +662,32 @@ impl NftMonitor {
             .spawn()
             .expect("spawn nft monitor");
         let stdout = child.stdout.take().expect("nft monitor stdout");
+        let stderr = child.stderr.take().expect("nft monitor stderr");
+        let stderr_lines = Arc::new(Mutex::new(Vec::new()));
+        let stderr_sink = Arc::clone(&stderr_lines);
+        let evidence_for_stderr = evidence.clone();
+        // Read stderr for the whole run: an unread pipe could block the
+        // monitor, and any complaint it prints fails the proof closed (M0).
+        let stderr_reader = thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let text = match line {
+                    Ok(text) => text,
+                    Err(error) => format!("<stderr read failed: {error}>"),
+                };
+                evidence_for_stderr.append_file(
+                    "nft-monitor.stderr.log",
+                    &format!(
+                        "elapsed_ms={:>8} {text}\n",
+                        evidence_for_stderr.elapsed().as_millis()
+                    ),
+                );
+                let failed = text.starts_with("<stderr read failed");
+                stderr_sink.lock().expect("monitor stderr lock").push(text);
+                if failed {
+                    break;
+                }
+            }
+        });
         let lines = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&lines);
         let evidence_for_reader = evidence.clone();
@@ -634,7 +703,13 @@ impl NftMonitor {
                 sink.lock().expect("monitor lock").push(MonitorLine { at, text, tgid });
             }
         });
-        let monitor = Self { child, lines, reader: Some(reader) };
+        let monitor = Self {
+            child,
+            lines,
+            stderr_lines,
+            reader: Some(reader),
+            stderr_reader: Some(stderr_reader),
+        };
         // Readiness is proven, not assumed: a test-owned probe table must be
         // reported by the subscription before the observed window begins.
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -672,15 +747,25 @@ impl NftMonitor {
         self.lines.lock().expect("monitor lock").iter().any(|line| line.text.contains(needle))
     }
 
-    fn stop(mut self) -> Vec<MonitorLine> {
+    fn stop(mut self) -> MonitorTranscript {
+        // A monitor that exited on its own stopped delivering commits.
+        let exited_early = match self.child.try_wait() {
+            Ok(Some(status)) => Some(format!("{status}")),
+            Ok(None) => None,
+            Err(error) => Some(format!("try_wait on nft monitor failed: {error}")),
+        };
         // Stopping the diagnostic subscriber: its kill/wait outcome carries no
-        // evidence, and the reader thread ends with the pipe.
+        // evidence, and the reader threads end with the pipes.
         let _ = self.child.kill();
         let _ = self.child.wait();
-        if let Some(reader) = self.reader.take() {
+        for reader in [self.reader.take(), self.stderr_reader.take()].into_iter().flatten() {
             let _ = reader.join();
         }
-        self.lines.lock().expect("monitor lock").clone()
+        MonitorTranscript {
+            lines: self.lines.lock().expect("monitor lock").clone(),
+            stderr: self.stderr_lines.lock().expect("monitor stderr lock").clone(),
+            exited_early,
+        }
     }
 }
 
@@ -1011,6 +1096,35 @@ fn retire(stale: &mut BTreeSet<String>, batch: &Batch) {
 struct MemberSample {
     at: Duration,
     members: Result<Option<BTreeSet<String>>, String>,
+    /// The program identity fingerprint, when the typed observer accepted a
+    /// canonical program.
+    identity: Option<u64>,
+}
+
+/// One typed member read, stamped with the time the read started, naming the
+/// distinct state it returned (an index into `PollHistory::member_samples`).
+/// Every read is kept, so an oracle can ask whether any read inside a window
+/// saw a given state, even when that state was first recorded earlier.
+#[derive(Debug, Clone, Copy)]
+struct MemberRead {
+    at: Duration,
+    sample: usize,
+}
+
+/// One policy-route read-back (`ip rule` + routing table 100), stamped with
+/// the time the read started.
+#[derive(Debug, Clone)]
+struct RouteSample {
+    at: Duration,
+    present: Result<bool, String>,
+}
+
+/// One read-back through the provisional D-295-R18 guard observation surface,
+/// stamped with the time the read started.
+#[derive(Debug, Clone)]
+struct GuardSample {
+    at: Duration,
+    observed: Result<bool, String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1029,6 +1143,14 @@ struct PollHistory {
     endpoint_gone_at: Option<Duration>,
     /// Typed member read-backs, recorded on change.
     member_samples: Vec<MemberSample>,
+    /// Every typed member read, in order.
+    member_reads: Vec<MemberRead>,
+    /// Every policy-route read-back (about every 50 ms).
+    route_samples: Vec<RouteSample>,
+    /// Every R18 guard read-back (about every 50 ms). Sampling stops after the
+    /// first read whose surface panicked (the RED scaffold until DELIVER step
+    /// 08-01), so one panic is recorded rather than one per sample.
+    guard_samples: Vec<GuardSample>,
 }
 
 struct Poller {
@@ -1114,12 +1236,47 @@ impl Poller {
                             Err(text) => error("poll_endpoint_error", text),
                         }
                     }
-                    let members = observe_state().map(|state| state.as_ref().map(state_members));
-                    let summary = format!("{members:?}");
+                    let read_at = evidence.elapsed();
+                    let observed = observe_state();
+                    let identity = match &observed {
+                        Ok(Some(state)) => Some(identity_fingerprint(state)),
+                        Ok(None) | Err(_) => None,
+                    };
+                    let members = observed.map(|state| state.as_ref().map(state_members));
+                    let summary = format!("{members:?} identity={identity:x?}");
                     if last_members.as_ref() != Some(&summary) {
                         evidence.record("poll_intercept_members", &summary);
-                        history.member_samples.push(MemberSample { at, members });
+                        history.member_samples.push(MemberSample {
+                            at: read_at,
+                            members,
+                            identity,
+                        });
                         last_members = Some(summary);
+                    }
+                    history
+                        .member_reads
+                        .push(MemberRead { at: read_at, sample: history.member_samples.len() - 1 });
+                }
+                if tick.is_multiple_of(25) {
+                    let read_at = evidence.elapsed();
+                    let present = policy_route_observation();
+                    if history.route_samples.last().map(|sample| &sample.present) != Some(&present)
+                    {
+                        evidence.record("poll_policy_route", &format!("{present:?}"));
+                    }
+                    history.route_samples.push(RouteSample { at: read_at, present });
+                    let surface_panicked = history.guard_samples.last().is_some_and(|sample| {
+                        matches!(&sample.observed, Err(text) if text.starts_with(R18_SURFACE_PANICKED))
+                    });
+                    if !surface_panicked {
+                        let read_at = evidence.elapsed();
+                        let observed = observe_intercept_mark_guard();
+                        if history.guard_samples.last().map(|sample| &sample.observed)
+                            != Some(&observed)
+                        {
+                            evidence.record("poll_r18_guard", &format!("{observed:?}"));
+                        }
+                        history.guard_samples.push(GuardSample { at: read_at, observed });
                     }
                 }
                 tick += 1;
@@ -1410,8 +1567,23 @@ fn evaluate(
     events: &[TracedEvent],
     boot_two_batches: &[Batch],
     poll: &PollHistory,
+    monitor: &MonitorTranscript,
 ) -> Verdicts {
     let mut verdicts = Verdicts { rows: Vec::new() };
+
+    // M0 — the kernel commit stream every ordering verdict replays is complete:
+    // the monitor stayed up for the whole window, wrote nothing to stderr, and
+    // reported no receive failure (a netlink overrun loses commits). Otherwise
+    // the run fails closed, whatever the other verdicts read.
+    let reported_errors = monitor.reported_errors();
+    verdicts.push(
+        "M0 nft_monitor_commit_stream_is_complete",
+        monitor.exited_early.is_none() && monitor.stderr.is_empty() && reported_errors.is_empty(),
+        format!(
+            "exited_early={:?}; stderr={:?}; reported_errors={reported_errors:?}",
+            monitor.exited_early, monitor.stderr
+        ),
+    );
     let order = commit_order(residue, boot_two_batches);
     let closed_at = |index: usize| boot_two_batches[index].closed_at;
     let describe_batch = |index: Option<usize>| {
@@ -1533,54 +1705,126 @@ fn evaluate(
         ),
     );
 
-    // V4 — after the clear, the constant program converges in the R19 order,
-    // with the policy route and (while R18 stands) the guard table.
+    // V4 — after the clear, and before admission, the program, the policy
+    // route, and (while R18 stands) the guard table are observed converged.
+    // Each is its own verdict. A read counts only if it started after the
+    // clear batch closed and before the first effect of a new allocation.
     let final_program = &boot_two.final_program;
+    let admission_bound = admission_at.unwrap_or(boot_two.final_state_at);
     // The typed observer accepts only the canonical owned program shape.
     let canonical = matches!(&boot_two.final_state, Ok(Some(_)));
+    let final_identity = match &boot_two.final_state {
+        Ok(Some(state)) => Some(identity_fingerprint(state)),
+        _ => None,
+    };
     let tproxy_rules = final_program
         .listing
         .as_ref()
         .map(|listing| tproxy_rule_orders(listing))
         .unwrap_or_default();
     let r19_order = tproxy_rules.len() == 2 && tproxy_rules.iter().all(|(_, r19)| *r19);
-    let policy_route = match (&final_program.ip_rules, &final_program.route_table_100) {
-        (Ok(rules), Ok(table)) => policy_route_present(rules, table),
-        _ => false,
-    };
-    // R18 (conditional, FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts and the shape without R18)): asserted only through its provisional
-    // observation surface; if 08-01 withdraws R18 it deletes that surface and
-    // this clause.
-    let intercept_mark_guard = matches!(final_program.intercept_mark_guard, Ok(true));
-    let v4 = boot_two.result.is_ok()
+
+    // V4a — the fresh listeners bind new ephemeral ports, so boot two must
+    // rewrite the program (both ports coinciding with the dead server's is the
+    // one case that needs no rewrite; the detail line names both identities):
+    // at least one program batch, every one after the clear, and a typed read
+    // that started after the last of them and before admission shows the
+    // canonical program with the final identity and zero members.
+    let last_program_at = order.program.last().map(|index| closed_at(*index));
+    let program_read_back = last_program_at.and_then(|converged| {
+        poll.member_reads
+            .iter()
+            .filter(|read| read.at > converged && read.at < admission_bound)
+            .map(|read| &poll.member_samples[read.sample])
+            .find(|sample| {
+                sample.identity.is_some()
+                    && sample.identity == final_identity
+                    && matches!(&sample.members, Ok(Some(members)) if members.is_empty())
+            })
+    });
+    let v4a = boot_two.result.is_ok()
+        && !order.program.is_empty()
         && no_program_before_clear
+        && program_read_back.is_some()
         && canonical
-        && r19_order
-        && policy_route
-        && intercept_mark_guard;
-    let final_identity = match &boot_two.final_state {
-        Ok(Some(state)) => Some(identity_fingerprint(state)),
-        _ => None,
-    };
+        && r19_order;
     verdicts.push(
-        "V4 program_converges_after_the_clear_in_r19_order_with_policy_route_and_r18_guard",
-        v4,
+        "V4a program_converges_after_the_clear_in_r19_order",
+        v4a,
         format!(
-            "typed_final_state={}; boot_one_identity={:016x}; final_identity={final_identity:x?} \
-             (fresh listeners: expected to differ); tproxy_rules={tproxy_rules:?}; \
-             r19_order={r19_order}; policy_route={policy_route}; ip_rules={:?}; \
-             route_table_100={:?}; r18_intercept_mark_guard={:?}; program_or_guard_batches={}",
+            "clear_ms={:?}; program_batches_ms={:?}; post_convergence_read={:?}; \
+             admission_bound_ms={}; typed_final_state={}; boot_one_identity={:016x}; \
+             final_identity={final_identity:x?} (fresh listeners: expected to differ); \
+             tproxy_rules={tproxy_rules:?}; r19_order={r19_order}; program_or_guard_batches={}",
+            clear_at.map(|at| at.as_millis()),
+            order.program.iter().map(|index| closed_at(*index).as_millis()).collect::<Vec<_>>(),
+            program_read_back.map(|sample| (&sample.members, sample.identity)),
+            admission_bound.as_millis(),
             summarize_state(&boot_two.final_state),
             residue.identity,
-            final_program.ip_rules,
-            final_program.route_table_100,
-            final_program.intercept_mark_guard,
             order
                 .program
                 .iter()
                 .map(|index| boot_two_batches[*index].describe())
                 .collect::<Vec<_>>()
                 .join(" || ")
+        ),
+    );
+
+    // V4b — the policy route: the last read that started after the clear and
+    // before admission shows it present, and so does the final read-back.
+    let final_policy_route = match (&final_program.ip_rules, &final_program.route_table_100) {
+        (Ok(rules), Ok(table)) => policy_route_present(rules, table),
+        _ => false,
+    };
+    let route_after_clear = clear_at.and_then(|clear| {
+        poll.route_samples
+            .iter()
+            .rev()
+            .find(|sample| sample.at > clear && sample.at < admission_bound)
+    });
+    let v4b = route_after_clear.is_some_and(|sample| matches!(sample.present, Ok(true)))
+        && final_policy_route;
+    verdicts.push(
+        "V4b policy_route_converged_after_the_clear",
+        v4b,
+        format!(
+            "last_read_after_clear={:?}; final_policy_route={final_policy_route}; \
+             ip_rules={:?}; route_table_100={:?}",
+            route_after_clear.map(|sample| (sample.at.as_millis(), &sample.present)),
+            final_program.ip_rules,
+            final_program.route_table_100,
+        ),
+    );
+
+    // V4c — D-295-R18 stands until DELIVER step 08-01 withdraws it (FD § "[REF]
+    // Driven port — intercept element release, member convergence, boot clear
+    // (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19
+    // conditional on native RED)"). While it stands, the guard table must read
+    // present by the last read that started after the clear and before
+    // admission, and at the end. The guard is read only through its
+    // provisional observation surface; withdrawing R18 deletes that surface,
+    // and this verdict with it.
+    let final_guard = matches!(final_program.intercept_mark_guard, Ok(true));
+    let guard_after_clear = clear_at.and_then(|clear| {
+        poll.guard_samples
+            .iter()
+            .rev()
+            .find(|sample| sample.at > clear && sample.at < admission_bound)
+    });
+    let v4c =
+        guard_after_clear.is_some_and(|sample| matches!(sample.observed, Ok(true))) && final_guard;
+    verdicts.push(
+        "V4c r18_guard_converged_after_the_clear",
+        v4c,
+        format!(
+            "last_read_after_clear={:?}; final={:?}; guard_samples={:?}",
+            guard_after_clear.map(|sample| (sample.at.as_millis(), &sample.observed)),
+            final_program.intercept_mark_guard,
+            poll.guard_samples
+                .iter()
+                .map(|sample| (sample.at.as_millis(), &sample.observed))
+                .collect::<Vec<_>>(),
         ),
     );
 
@@ -1654,7 +1898,7 @@ fn evaluate(
 
     // A2 — the dead allocation's TAP, TCX link pins, endpoint entry, and
     // bridge-guard member are gone before any new allocation takes effect.
-    let bound = admission_at.unwrap_or(boot_two.final_state_at);
+    let bound = admission_bound;
     let tap_gone = poll.tap_gone_at.is_some_and(|gone| gone < bound);
     let pins_gone = !residue.link_pins.is_empty()
         && residue
@@ -1749,15 +1993,17 @@ struct ProofOutcome {
 /// data and config roots, must reclaim the VM before any owned-table commit
 /// (V1), sweep the attachment and delete exactly the three stale members in
 /// one batch before any program mutation (V2), read back zero members (V3),
-/// converge the program in the D-295-R19 order with the policy route and the
-/// guard table (V4), boot (V0), and only then admit (V5) a replacement at
-/// `100.95.0.2` (A1) with every predecessor object already gone (A2); no stale
-/// member survives (V6).
+/// and only after that clear converge the program in the D-295-R19 order
+/// (V4a), the policy route (V4b), and the guard table (V4c), each read back
+/// converged after the clear and before admission; boot (V0), and only then
+/// admit (V5) a replacement at `100.95.0.2` (A1) with every predecessor object
+/// already gone (A2); no stale member survives (V6). All ordering is judged
+/// over a complete `nft monitor` commit stream (M0).
 ///
-/// D-295-R18 is conditional on DELIVER step 08-01's native RED. V4's guard
-/// clause reads the guard only through its provisional observation surface,
+/// D-295-R18 is conditional on DELIVER step 08-01's native RED. V4c reads the
+/// guard only through its provisional observation surface,
 /// `overdrive_netlink::nft::observe_intercept_mark_guard` (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the R18-B contract: the provisional guard observe and converge functions)): if
-/// 08-01 withdraws R18 it deletes that surface and this clause with it
+/// 08-01 withdraws R18 it deletes that surface and verdict V4c with it
 /// (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional-parts table, column "Shape without R18")). D-295-R19 is conditional in the same
 /// way (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the conditional parts: the E14 withdrawal conditions)); the order clause expects the R19 tail the scenario
 /// names.
@@ -1768,6 +2014,12 @@ struct ProofOutcome {
 #[ignore = "pending DELIVER step 08-02 (S-ND295-13C)"]
 #[serial(cgroup)]
 fn a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits() {
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    assert_eq!(
+        euid, 0,
+        "the §3.5 proof runs as root under `cargo xtask metal run --` (euid {euid})"
+    );
     let start = Instant::now();
     let root = tempfile::Builder::new()
         .prefix("killed-serve-boot-clear-")
@@ -2100,10 +2352,10 @@ fn run_proof(
     });
 
     let poll = poller.finish();
-    let lines = monitor.stop();
+    let transcript = monitor.stop();
     let events = trace.events.lock().expect("trace lock").clone();
 
-    let boot_two_batches: Vec<Batch> = batches(&lines)
+    let boot_two_batches: Vec<Batch> = batches(&transcript.lines)
         .into_iter()
         .filter(|batch| {
             batch.closed_at >= boot_two.started_at
@@ -2133,7 +2385,8 @@ fn run_proof(
 
     let boot_two_events: Vec<TracedEvent> =
         events.into_iter().filter(|event| event.at >= boot_two.started_at).collect();
-    let verdicts = evaluate(&residue, &boot_two, &boot_two_events, &boot_two_batches, &poll);
+    let verdicts =
+        evaluate(&residue, &boot_two, &boot_two_events, &boot_two_batches, &poll, &transcript);
     let rendered = verdicts.render();
     evidence.append_file("verdicts.txt", &rendered);
     evidence.record("verdicts", &rendered.replace('\n', " | "));

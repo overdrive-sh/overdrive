@@ -1,15 +1,25 @@
 //! Tier-3 EGRESS capture walking proof (step 03-03) — the egress half of the
-//! ADR-0071 § Enforcement Tier-3 obligations (a)+(b), composing production
-//! surfaces on the live kernel:
+//! ADR-0071 § Enforcement Tier-3 obligations (a)+(b), composing these surfaces
+//! on the live kernel:
 //!
-//!   - `install_outbound_tproxy(host_veth, leg_f_port)` (03-01) — appends an
-//!     `iifname <host_veth> meta l4proto tcp tproxy to 127.0.0.1:<leg_f>` rule to
-//!     the shared `overdrive-mtls` PREROUTING chain (after the F5 exemption) and
-//!     ensures the shared fwmark rule / local route / table idempotently.
+//!   - the production outbound divert of the GH #295 shared design, composed on
+//!     the host veth by the shared fixture `SharedOutboundDivert`
+//!     (`mtls_intercept_install.rs`): `HostMtlsIntercept::converge_shared` at
+//!     the two bound legs' targets (the node's constant `overdrive-mtls`
+//!     program, plus the fwmark rule and the table-100 local route),
+//!     `HostMtlsIntercept::install_outbound(workload, leg_f_port)` (the
+//!     workload's managed-guest and outbound-source elements), and the guest
+//!     TCX ingress classifier (`GuestTcxProgram`, test-scoped pins) attached
+//!     first at the host veth with the workload's endpoint registered. Shared
+//!     prerouting rule 1 TPROXYs TCP that carries the classifier's intercept
+//!     mark `0x295a` from an admitted source to leg F. No per-interface rule is
+//!     installed;
 //!   - `HostMtlsIntercept::bind_transparent(addr)` — the `MtlsIntercept` port's
-//!     leg-F listener. Leg-F MUST be `IP_TRANSPARENT` because TPROXY delivers
-//!     packets whose dst is the orig-dst (NOT leg-F's bound addr); a
-//!     non-transparent socket cannot receive them.
+//!     leg-F (and leg-C) listener. Leg-F MUST be `IP_TRANSPARENT` because TPROXY
+//!     delivers packets whose dst is the orig-dst (NOT leg-F's bound addr); a
+//!     non-transparent socket cannot receive them. The listener also marks its
+//!     sockets with the leg-S mark, so its replies to the managed guest pass the
+//!     shared output chain's exemption;
 //!   - the port listener's accept, read through the `LegListener` bridge
 //!     (`leg_listener.rs`, GH #295 S-ND295-70) — the accepted connection's local
 //!     address is the workload's dialed orig-dst (`getsockname` on the
@@ -19,39 +29,47 @@
 //!     `accept`. The body is the same on both sides.
 //!
 //! NO new production code — this step is test-only, composing the above on a
-//! REAL kernel through the real netns + veth + nft + ip-rule topology proven by
-//! the increment-b spike (`docs/feature/.../spike/findings-egress-tproxy.md`,
-//! VERDICT WORKS, kernel 7.0.0-22-generic).
+//! REAL kernel through the real netns + veth topology proven by the increment-b
+//! spike (`docs/feature/.../spike/findings-egress-tproxy.md`, VERDICT WORKS,
+//! kernel 7.0.0-22-generic).
 //!
-//! Topology (mirrors the spike EXACTLY):
+//! Topology:
 //!
-//!   netns nsW:  workload client; vethW <lease workload>/24; default via <lease gateway>
+//!   netns nsW:  workload client; vethW <lease workload>/24, MAC 02:00:<workload
+//!                 octets>; default via <lease gateway>
 //!                 connect(10.200.0.1:18777)
 //!     <== veth ==>
 //!   host netns: vethH <lease gateway>/24
-//!                 PREROUTING (priority mangle):
-//!                   meta mark 0x2 accept            <- F5 exemption (chain head)
-//!                   iifname vethH meta l4proto tcp tproxy to 127.0.0.1:<legF>
-//!                                                   meta mark set 0x1 accept
+//!                 TCX ingress: guest classifier; endpoint {workload, its MAC,
+//!                   bridge MAC}; guest TCP -> meta mark 0x295a
+//!                 table ip overdrive-mtls (converge_shared):
+//!                   prerouting 0: meta mark 0x2 accept          <- leg-S exemption
+//!                   prerouting 1: meta mark 0x295a, saddr @outbound_sources, tcp
+//!                                 -> tproxy to 127.0.0.1:<legF>, meta mark set 0x1
+//!                   output 0:     meta mark 0x2 accept          <- leg-S exemption
+//!                   output 2:     daddr @managed_guest_ips, tcp -> drop
+//!                   @managed_guest_ips = @outbound_sources = { <workload> }
 //!                 ip rule fwmark 0x1 lookup 100
 //!                 ip route local 0.0.0.0/0 dev lo table 100
-//!                 leg-F IP_TRANSPARENT 127.0.0.1:<legF>
+//!                 leg-F IP_TRANSPARENT 127.0.0.1:<legF>, SO_MARK 0x2
 //!                 real backend 10.200.0.1:18777    (host lo)
 //!
-//! Port-to-port: every assertion enters through public production surfaces
-//! (`install_outbound_tproxy`, and the `MtlsIntercept` port's
-//! `bind_transparent` listener and its accept) and asserts at the kernel/socket
-//! boundary: `getsockname` orig-dst recovery, the accepted-socket peer, and which
-//! listener (leg-F vs the real backend) received the connection. Litmus:
+//! Port-to-port: every assertion enters through public surfaces (the
+//! `MtlsIntercept` port's `converge_shared`, `install_outbound`, and
+//! `bind_transparent` listener and its accept; the dataplane's guest TCX
+//! classifier) and asserts at the kernel/socket boundary: `getsockname`
+//! orig-dst recovery, the classifier's intercept count, and which listener
+//! received the connection. Litmus:
 //!   - gut the port listener's accept-side orig-dst recovery (the accepted
 //!     connection's `local`) → the `getsockname == dialed-dst` assertion goes RED
 //!     (the orig-dst is recovered by production code, not the fixture);
-//!   - remove the `iifname` rule append in `install_outbound_tproxy` → the
-//!     redirect assertion goes RED (the without-TPROXY control proves this — the
-//!     workload reaches the backend directly instead of leg-F).
+//!   - drop the outbound-source element from `install_outbound`, or the
+//!     classifier's intercept mark → the leg-F accept times out (RED): shared
+//!     rule 1 needs both, and the without-divert control shows the dial
+//!     otherwise reaches the backend directly.
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (IP_TRANSPARENT, nft, ip netns,
-//! ip rule). A non-root run SKIPs. Run via
+//! ip rule, BPF TCX attach); the body asserts it. Run via
 //! `cargo xtask lima run -- cargo nextest run -p overdrive-worker
 //! --features integration-tests`. NEVER `--no-run` (a compile-only gate is
 //! green even when every fixture refuses at boot).
@@ -59,7 +77,12 @@
 //! Hygiene: the shared `overdrive-mtls` routing infra PERSISTS by design (it is
 //! node-global converge-on-boot), so each test scrubs ALL `overdrive-mtls` nft
 //! state + the fwmark rule/route + the test netns/veth/lo-backend at START
-//! (tolerate pre-existing) AND END. A cross-PROCESS `flock(2)` lock
+//! (tolerate pre-existing) AND, through the [`EgressTopology`] guard, at END —
+//! also when the body panics. The divert's release asserts each of its own
+//! steps (classifier detached and pins removed, elements removed, program
+//! removed). The node-global sysctls the topology relaxes
+//! (`net.ipv4.ip_forward`, `net.ipv4.conf.{all,lo}.rp_filter`) are snapshotted
+//! and restored by the same guard. A cross-PROCESS `flock(2)` lock
 //! (`KernelStateLock`) serialises the kernel-touching tests — nextest runs each
 //! `#[test]` in a separate process, so an in-process `serial_test` lock cannot
 //! serialise node-global kernel state.
@@ -86,10 +109,12 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_testing::cidr_lease::TestCidrLease;
-use overdrive_worker::mtls_intercept::install_outbound_tproxy;
 use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
 
 use super::leg_listener::{LegListener, accept_leg_within};
+use super::mtls_intercept_install::{
+    NodeSysctls, SharedOutboundDivert, mac_text, set_link_sysctl, workload_mac,
+};
 
 // ---- topology constants (mirror the increment-b spike recipe) ----
 const NS_W: &str = "nsW-egr0303";
@@ -143,8 +168,8 @@ impl Drop for KernelStateLock {
 }
 
 /// True iff this process is uid 0 (root). IP_TRANSPARENT, nft, `ip netns`, and
-/// `ip rule` all need root + CAP_NET_ADMIN/CAP_SYS_ADMIN; a non-root run cannot
-/// stand up the fixture, so we SKIP rather than fail.
+/// `ip rule` all need root + CAP_NET_ADMIN/CAP_SYS_ADMIN; the body asserts it,
+/// so a non-root run fails rather than passing vacuously.
 fn is_root() -> bool {
     // SAFETY: getuid is always safe; takes no args and never fails.
     unsafe { libc::getuid() == 0 }
@@ -181,24 +206,28 @@ fn ip_quiet(args: &[&str]) {
     let _ = Command::new("ip").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
-/// Best-effort `sysctl -w <kv>` for host-side routing hygiene.
-fn sysctl_w(kv: &str) {
-    let _ = Command::new("sysctl")
-        .args(["-w", kv])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-/// `nft list table ip overdrive-mtls` (verbatim dump) for evidence.
+/// `nft list table ip overdrive-mtls` (verbatim dump). The listing must
+/// succeed: an unreadable table is not an empty one.
 fn nft_dump_table() -> String {
-    Command::new("nft")
+    let output = Command::new("nft")
         .args(["list", "table", "ip", "overdrive-mtls"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
+        .expect("spawn the nft table listing");
+    assert!(
+        output.status.success(),
+        "listing table ip overdrive-mtls failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// `uname -r`, which pins the verdict to a kernel (spike.md discipline).
+fn kernel_release() -> String {
+    let output = Command::new("uname").arg("-r").output().expect("spawn uname -r");
+    assert!(output.status.success(), "uname -r failed");
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
 /// Scrub ALL `overdrive-mtls` nft state + the shared fwmark rule/route so a
@@ -235,10 +264,51 @@ fn teardown_topology() {
     ip_quiet(&["addr", "del", &format!("{BACKEND_IP}/32"), "dev", "lo"]);
 }
 
-/// Stand up the netns + veth pair + addresses + host routing hygiene EXACTLY as
-/// the increment-b spike does. The real backend lives on host `lo`; the workload
-/// routes to it via the gateway so its egress ingresses vethH and hits
-/// PREROUTING.
+/// The per-test topology and the node-global state it relaxes, owned for the
+/// body's duration. `Drop` tears the topology down and scrubs the shared
+/// intercept infra, then (field order) releases the CIDR lease and restores
+/// the node-global sysctls, so a panic mid-body leaves nothing behind.
+struct EgressTopology {
+    _lease: TestCidrLease,
+    _node_sysctls: NodeSysctls,
+}
+
+impl EgressTopology {
+    /// Stand up the topology of `setup_topology` on the leased `/24`.
+    fn provision(lease: TestCidrLease) -> Self {
+        setup_topology(&lease);
+        // Host-side routing hygiene (NOT a TPROXY concession; spike § Edge
+        // cases): forwarding so the host routes the workload's packet to the
+        // lo-bound backend; rp_filter relaxation so the asymmetric ingress is
+        // not dropped (which would mask the test as a false "no fire"). The
+        // node-global keys are restored on drop; the host veth's key goes with
+        // the veth.
+        let node_sysctls = NodeSysctls::set(
+            "03-03",
+            &[
+                ("net.ipv4.ip_forward", "1"),
+                ("net.ipv4.conf.all.rp_filter", "0"),
+                ("net.ipv4.conf.lo.rp_filter", "0"),
+            ],
+        );
+        set_link_sysctl("03-03", &format!("net.ipv4.conf.{VETH_H}.rp_filter"), "0");
+        Self { _lease: lease, _node_sysctls: node_sysctls }
+    }
+}
+
+impl Drop for EgressTopology {
+    fn drop(&mut self) {
+        teardown_topology();
+        clean_shared_infra();
+    }
+}
+
+/// Stand up the netns + veth pair + addresses as the increment-b spike does,
+/// with the workload veth carrying [`workload_mac`] of its address (the MAC the
+/// guest classifier's endpoint record names). The real backend lives on host
+/// `lo`; the workload routes to it via the gateway so its egress ingresses vethH
+/// — where the classifier runs — and hits PREROUTING. Every step must succeed
+/// ([`ip`]).
 fn setup_topology(lease: &TestCidrLease) {
     // Start from a clean slate (a prior crashed run leaves residue).
     teardown_topology();
@@ -246,9 +316,11 @@ fn setup_topology(lease: &TestCidrLease) {
     let host_gateway = lease.host_gateway().to_string();
     let workload_addr = lease.workload_addr().to_string();
     let prefix_len = lease.prefix_len().to_string();
+    let workload_mac_text = mac_text(workload_mac(lease.workload_addr()));
 
     ip(&["netns", "add", NS_W]);
     ip(&["link", "add", VETH_W, "type", "veth", "peer", "name", VETH_H]);
+    ip(&["link", "set", VETH_W, "address", &workload_mac_text]);
     ip(&["link", "set", VETH_W, "netns", NS_W]);
 
     // Host side: address + up.
@@ -275,23 +347,9 @@ fn setup_topology(lease: &TestCidrLease) {
     // it; the workload routes to it via the gateway.
     ip(&["addr", "add", &format!("{BACKEND_IP}/32"), "dev", "lo"]);
 
-    // Host-side routing hygiene (NOT a TPROXY concession; spike § Edge cases):
-    // forwarding so the host routes the workload's packet to the lo-bound
-    // backend; rp_filter relaxation so the asymmetric ingress is not dropped
-    // (which would mask the test as a false "no fire").
-    sysctl_w("net.ipv4.ip_forward=1");
-    sysctl_w(&format!("net.ipv4.conf.{VETH_H}.rp_filter=0"));
-    sysctl_w("net.ipv4.conf.all.rp_filter=0");
-    sysctl_w("net.ipv4.conf.lo.rp_filter=0");
-
-    // bpf.md Rule 2 / spike: disable TX-checksum-offload on the host veth (the
-    // veth CHECKSUM_PARTIAL invariant). Best-effort — ethtool may be absent, and
-    // for a pure TPROXY redirect (no NAT rewrite) this is belt-and-braces.
-    let _ = Command::new("ethtool")
-        .args(["-K", VETH_H, "tx", "off"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    // No TX-checksum-offload change: the TPROXY divert rewrites no header, so
+    // no checksum base is needed (`.claude/rules/bpf.md` Rule 2 concerns an
+    // incremental checksum after a NAT rewrite).
 }
 
 /// Run a `/dev/tcp` client INSIDE the workload netns: connect to `dst`, send a
@@ -302,8 +360,9 @@ fn setup_topology(lease: &TestCidrLease) {
 /// `so_mark = None` → plain bash `/dev/tcp` client.
 /// `so_mark = Some(m)` → a Python client that sets `SO_MARK = m` before connect,
 ///   proving a workload CANNOT self-exempt: the mark is skb-local metadata that
-///   does not cross the veth/netns boundary, so the host-side `iifname` rule
-///   still captures the connection.
+///   does not cross the veth/netns boundary, and the guest classifier at the
+///   host veth stamps the intercept mark on the guest's TCP, so the shared
+///   divert still captures the connection.
 fn run_client_in_netns(dst: SocketAddrV4, so_mark: Option<u32>) -> String {
     let (prog, script): (&str, String) = match so_mark {
         None => (
@@ -323,8 +382,9 @@ fn run_client_in_netns(dst: SocketAddrV4, so_mark: Option<u32>) -> String {
             "python3",
             // Built line-by-line to avoid backslash-continuation escape pitfalls;
             // SO_MARK is sockopt 36 (SOL_SOCKET). The mark is set INSIDE the
-            // workload netns — it is skb-local and does NOT cross the veth, so
-            // the host-side iifname rule still captures the connection.
+            // workload netns — it is skb-local and does NOT cross the veth, and
+            // the host veth's classifier stamps the intercept mark, so the
+            // shared divert still captures the connection.
             // Success == connect + send succeeded (`WL-MARKED-SENT`); the recv
             // is best-effort (the leg-F side asserts via getsockname and does
             // not echo). A connect failure prints `CLIENT-FAIL`.
@@ -371,7 +431,7 @@ fn accept_with_timeout(
     loop {
         match listener.accept() {
             Ok(pair) => {
-                pair.0.set_nonblocking(false).ok();
+                pair.0.set_nonblocking(false)?;
                 return Ok(pair);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -426,7 +486,7 @@ fn dial_with_so_mark(
         s.sin_addr.s_addr = u32::from_ne_bytes(addr.ip().octets());
         s
     };
-    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout))?;
     // SAFETY: stream owns a live AF_INET socket fd; sa is a correctly-sized
     // sockaddr_in for the connect target.
     let rc = unsafe {
@@ -439,148 +499,162 @@ fn dial_with_so_mark(
     if rc != 0 {
         return Err(std::io::Error::last_os_error());
     }
-    stream.set_nodelay(true).ok();
+    stream.set_nodelay(true)?;
     Ok(stream)
 }
 
-/// THE deliverable (ADR-0071 Tier-3 (a) + (b)): compose `install_outbound_tproxy`
-/// with the `MtlsIntercept` port's leg-F listener
-/// (`HostMtlsIntercept::bind_transparent`) and its accept (through
-/// `LegListener::accept_leg`) on the REAL kernel.
+/// THE deliverable (ADR-0071 Tier-3 (a) + (b)): compose the production shared
+/// outbound divert (`SharedOutboundDivert`: `converge_shared`,
+/// `install_outbound`, and the guest TCX ingress classifier) with the
+/// `MtlsIntercept` port's leg-F listener (`HostMtlsIntercept::bind_transparent`)
+/// and its accept (through `LegListener::accept_leg`) on the REAL kernel.
 ///
 /// Proves, in order:
-///   AC4 (without-TPROXY control): with NO egress rule, the workload's
-///        `connect(backend)` reaches the REAL backend directly — isolating
-///        "fired" from "passed through" (debugging.md §5/§11).
-///   AC1 (with-TPROXY redirect + getsockname recovery): `install_outbound_tproxy`
-///        appends the `iifname <host_veth>` rule; the workload's `connect` is
-///        redirected to the leg-F IP_TRANSPARENT listener; the port listener's
-///        accept recovers orig-dst via getsockname == the dialed (ip,port).
-///   AC2-a (agent HOST dial reaches the backend — by TOPOLOGY, NOT the F5
+///   AC4 (without-divert control): with NO shared program and NO classifier,
+///        the workload's `connect(backend)` reaches the REAL backend directly —
+///        isolating "fired" from "passed through" (debugging.md §5/§11).
+///   AC1 (with-divert redirect + getsockname recovery): with the shared program
+///        converged at the two legs, the workload's source admitted, and the
+///        guest classifier attached at the host veth, the workload's `connect`
+///        is diverted to the leg-F IP_TRANSPARENT listener; the port listener's
+///        accept recovers orig-dst via getsockname == the dialed (ip,port); the
+///        classifier's intercept count advances with the dial.
+///   AC2-a (agent HOST dial reaches the backend — by TOPOLOGY, NOT the leg-S
 ///        exemption): the agent's HOST-netns dial carrying
 ///        `SO_MARK = MTLS_LEG_S_DIAL_MARK` reaches the REAL backend directly
-///        (NOT re-captured to leg-F) because it originates host-side and never
-///        ingresses the workload veth, so the production `iifname <host_veth>`
-///        egress rule cannot match it — WITH OR WITHOUT the F5 exemption. This
-///        path does NOT exercise the egress F5 exemption: the exemption is
-///        irrelevant to the `iifname` rule (it matches on ingress interface, not
-///        destination), and its load-bearing role is on the SHARED chain's
-///        INBOUND `ip daddr`/`tcp dport` rules — where a host-originated marked
-///        dial to a virt DOES match and WOULD loop. See the inline gap note at
-///        the AC2-a block for why a genuinely load-bearing egress F5 *positive*
-///        control is out of 03-03's scope.
+///        (NOT diverted to leg-F) because it originates host-side and never
+///        ingresses the workload veth: the guest classifier never sees it, so it
+///        carries no intercept mark, and its source is no admitted outbound
+///        source, so shared rule 1 cannot match it — WITH OR WITHOUT the leg-S
+///        exemption. Its destination is no managed guest, so no drop rule
+///        applies either. See the inline gap note at the AC2-a block for why a
+///        load-bearing *dial-direction* exemption control is out of 03-03's
+///        scope.
 ///   AC2-b (self-exempt-impossible — the SAFE negative control): a WORKLOAD dial
 ///        that sets `SO_MARK` INSIDE its own netns is STILL captured to leg-F —
-///        the mark is skb-local and does not cross the veth/netns boundary, so a
-///        workload cannot self-exempt against the host-side `iifname` rule.
+///        the mark is skb-local and does not cross the veth/netns boundary, and
+///        the host veth's classifier stamps the intercept mark on the guest's
+///        TCP, so a workload cannot self-exempt against the host-side divert.
 #[test]
 fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
-    if !is_root() {
-        eprintln!(
-            "SKIP workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst: not root"
-        );
-        return;
-    }
+    assert!(
+        is_root(),
+        "the egress capture proof requires root and CAP_NET_ADMIN/CAP_SYS_ADMIN (IP_TRANSPARENT, \
+         nft, ip netns, ip rule)"
+    );
 
     // Pin the verdict to a kernel (spike.md discipline).
-    let kr = Command::new("uname")
-        .arg("-r")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-        .unwrap_or_default();
+    let kr = kernel_release();
     eprintln!("[03-03] uname -r = {kr}");
 
     // Cross-process exclusion: hold the shared-kernel-state lock for the whole
-    // body (the lock is shared with the inbound suite).
+    // body (the lock is shared with the inbound suite). The topology guard is
+    // declared after the lock, so it tears down (and restores the node-global
+    // sysctls) before the lock is released, panic or not.
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
     let lease =
         TestCidrLease::acquire(CIDR_LEASE_NAME).expect("acquire egress topology CIDR lease");
-    setup_topology(&lease);
+    let workload_addr = lease.workload_addr();
+    let _topology = EgressTopology::provision(lease);
 
     let backend = backend_addr();
 
     // ----------------------------------------------------------------
-    // AC4 — WITHOUT-TPROXY control: no egress rule installed yet. The
-    // workload's connect reaches the REAL backend directly. This isolates
-    // "redirect fired" from "passed through" and proves the install (not the
+    // AC4 — WITHOUT-divert control: no shared program and no classifier yet.
+    // The workload's connect reaches the REAL backend directly. This isolates
+    // "redirect fired" from "passed through" and proves the divert (not the
     // topology) is what redirects.
     // ----------------------------------------------------------------
     let control_backend = TcpListener::bind(backend).expect("bind real backend (control)");
     let control_client = std::thread::spawn(move || run_client_in_netns(backend, None));
     let (mut conn, control_peer) = accept_with_timeout(&control_backend, Duration::from_secs(8))
         .expect(
-            "WITHOUT-TPROXY control: workload connect must reach the REAL backend directly \
-             (no rule installed). A timeout here means the topology itself is broken.",
+            "WITHOUT-divert control: workload connect must reach the REAL backend directly \
+             (nothing installed). A timeout here means the topology itself is broken.",
         );
     let mut buf = [0u8; 19];
     conn.read_exact(&mut buf).expect("read control marker");
     assert_eq!(&buf, b"HELLO-FROM-WORKLOAD", "control: backend must receive the workload's bytes");
     let control_out = control_client.join().expect("control client thread");
-    eprintln!("[03-03][AC4 without-TPROXY control] backend accepted peer={control_peer}");
-    eprintln!("[03-03][AC4 without-TPROXY control] client: {control_out}");
+    eprintln!("[03-03][AC4 without-divert control] backend accepted peer={control_peer}");
+    eprintln!("[03-03][AC4 without-divert control] client: {control_out}");
     // The accepted peer is the workload's veth address (it came through the veth,
     // not loopback-to-self) — confirms a genuine remote dial.
     assert!(
-        matches!(control_peer, std::net::SocketAddr::V4(v4) if *v4.ip() == lease.workload_addr()),
-        "control: backend peer must be the workload's veth addr {}, got {control_peer}",
-        lease.workload_addr()
+        matches!(control_peer, std::net::SocketAddr::V4(v4) if *v4.ip() == workload_addr),
+        "control: backend peer must be the workload's veth addr {workload_addr}, got {control_peer}"
     );
     drop(control_backend); // free the port before the redirect phase rebinds it
 
     // ----------------------------------------------------------------
-    // AC1 — WITH-TPROXY: install the egress rule, drive the SAME dial, prove the
-    // redirect to leg-F + getsockname orig-dst recovery.
+    // AC1 — WITH the shared divert: converge the shared program, admit the
+    // workload's source, attach the guest classifier, drive the SAME dial, and
+    // prove the divert to leg-F + getsockname orig-dst recovery.
     // ----------------------------------------------------------------
     // leg-F MUST be IP_TRANSPARENT (TPROXY delivers orig-dst-addressed packets).
-    // It is bound through the `MtlsIntercept` port, whose host adapter owns the
-    // transparent socket; the bound leg is read and accepted through the
+    // Both legs are bound through the `MtlsIntercept` port, whose host adapter
+    // owns the transparent sockets; leg-F is read and accepted through the
     // `LegListener` bridge so this body is unchanged when the port's listener
-    // type changes (gap B-7).
+    // type changes (gap B-7). Leg-C is the shared program's inbound target; no
+    // connection reaches it here.
     let intercept = HostMtlsIntercept::new();
     let leg_f = Arc::new(
         intercept
             .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("HostMtlsIntercept::bind_transparent leg-F"),
     );
-    let leg_f_port = leg_f.bound_v4().expect("leg-F bound IPv4 address").port();
+    let leg_c = intercept
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent leg-C");
+    let outbound_target = leg_f.bound_v4().expect("leg-F bound IPv4 address");
+    let inbound_target = leg_c.bound_v4().expect("leg-C bound IPv4 address");
+    let leg_f_port = outbound_target.port();
 
-    // The driving port under test: install the egress rule matching
-    // `iifname VETH_H` → redirect ALL the workload's egress TCP to leg-F.
-    let guard = install_outbound_tproxy(VETH_H, leg_f_port)
-        .expect("install_outbound_tproxy must append the iifname egress rule + shared infra");
-
-    let dump = nft_dump_table();
-    eprintln!("[03-03] nft table after install_outbound_tproxy:\n{dump}");
-    assert!(
-        dump.contains(&format!("iifname \"{VETH_H}\"")) && dump.contains("tproxy to"),
-        "the iifname egress rule must be installed in the shared chain, got:\n{dump}"
+    // The driving ports under test: `converge_shared` at the two legs,
+    // `install_outbound(workload, leg-F port)`, and the guest classifier at
+    // vethH's TCX ingress with the workload's endpoint. The fixture asserts
+    // each step (program identity, the workload's two elements, the endpoint
+    // read-back, exactly one attached program).
+    let divert = SharedOutboundDivert::install(
+        "03-03",
+        &intercept,
+        outbound_target,
+        inbound_target,
+        workload_addr,
+        workload_mac(workload_addr),
+        VETH_H,
     );
+    let intercepted_before = divert.intercepted();
+    eprintln!("[03-03][AC1] shared divert installed; classifier intercepted {intercepted_before}");
+    eprintln!("[03-03][AC1] nft table after the shared divert:\n{}", nft_dump_table());
 
-    // Re-bind a real backend so that IF the redirect failed to fire, the dial
-    // would land here (the with/without contrast — a hung accept on leg-F with
-    // the backend silent is the unambiguous "redirect fired" signal).
-    let backend_fallback = TcpListener::bind(backend).expect("bind real backend (redirect phase)");
-    backend_fallback.set_nonblocking(true).ok();
-
+    // No listener waits at the backend during the divert phases. A dial the
+    // divert missed could not complete there either — shared output rule 2
+    // drops an unmarked listener's SYN-ACK to the managed guest — so a listener
+    // at the destination cannot tell the two apart. The leg-F accept and the
+    // classifier's intercept count are the witnesses.
     let redirect_client = std::thread::spawn(move || run_client_in_netns(backend, None));
 
     // The port listener's accept drives the production getsockname recovery on
     // the TPROXY-intercepted leg-F socket: the accepted connection's `local` is
     // the recovered orig-dst (the resolve consumer that classifies it is 04-02's
     // default-lane DST job — here we prove the kernel-side capture +
-    // getsockname recovery). The wait is bounded: if the redirect silently
-    // failed (the dial landed on the fallback backend instead of leg-F), the
-    // accept reports a clean timeout after 8 s instead of hanging to the 120 s
-    // slow-timeout SIGKILL.
-    let (leg, _peer, got) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
-        "the port listener's accept must recover orig-dst from the TPROXY redirect. A timeout \
-         here (no connection within 8 s) means the redirect did NOT deliver to leg-F — egress \
-         capture did not fire (the dial reached the fallback backend instead).",
-    );
+    // getsockname recovery). The wait is bounded: if the divert silently
+    // failed, the accept reports a clean timeout after 8 s instead of hanging
+    // to the 120 s slow-timeout SIGKILL.
+    let (leg, _peer, got) =
+        accept_leg_within(&leg_f, Duration::from_secs(8)).unwrap_or_else(|error| {
+            panic!(
+                "the port listener's accept must recover orig-dst from the shared divert. A \
+                 timeout here (no connection within 8 s) means the divert did NOT deliver to \
+                 leg-F ({error}); classifier counters: {}",
+                divert.counter_snapshot()
+            )
+        });
 
-    // AC1: the redirect fired (leg-F accepted, NOT the fallback backend) AND
-    // getsockname recovered the dialed orig-dst.
+    // AC1: the divert fired (leg-F accepted) AND getsockname recovered the
+    // dialed orig-dst.
     eprintln!("[03-03][AC1] getsockname(leg-F accepted) = {got}");
     eprintln!("[03-03][AC1] expected dialed backend    = {backend}");
     assert_eq!(
@@ -598,55 +672,56 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
         "recovered orig-dst must be the backend addr, NOT leg-F's loopback bind addr"
     );
     drop(leg);
-
-    // The fallback backend must NOT have accepted — the redirect took the dial.
-    assert!(
-        backend_fallback.accept().is_err(),
-        "redirect fired: the real backend must NOT have accepted the workload's dial \
-         (it was redirected to leg-F)"
-    );
     let redirect_out = redirect_client.join().expect("redirect client thread");
     eprintln!("[03-03][AC1] redirect-phase client: {redirect_out}");
-    drop(backend_fallback);
+    let intercepted_after_ac1 = divert.intercepted();
+    assert!(
+        intercepted_after_ac1 > intercepted_before,
+        "AC1: the workload's TCP reached leg-F through the classifier's intercept mark — the \
+         Intercept count must advance past {intercepted_before}, got {intercepted_after_ac1}"
+    );
 
     // ----------------------------------------------------------------
-    // AC2-a — agent HOST dial reaches the backend by TOPOLOGY (NOT the F5
+    // AC2-a — agent HOST dial reaches the backend by TOPOLOGY (NOT the leg-S
     // exemption): the agent's HOST-netns dial carrying
     // SO_MARK = MTLS_LEG_S_DIAL_MARK reaches the REAL backend directly (NOT
-    // re-captured to leg-F) because it originates host-side and never ingresses
-    // the workload veth, so the production `iifname VETH_H` egress rule cannot
-    // match it — WITH OR WITHOUT the F5 exemption. The SO_MARK is decorative on
-    // THIS path: the dst (10.200.0.1) lives on host `lo`, so the packet ingresses
-    // with `iif=lo`, never `iif=VETH_H`. This does NOT exercise the egress F5
-    // exemption.
+    // diverted to leg-F) because it originates host-side and never ingresses
+    // the workload veth. The guest classifier never sees it, so it carries no
+    // intercept mark `0x295a`, and its source is no admitted outbound source —
+    // shared rule 1 cannot match it, WITH OR WITHOUT the leg-S exemption. Its
+    // destination (10.200.0.1, on host `lo`) is no managed guest, so neither
+    // managed-guest drop applies. This does NOT exercise the leg-S exemption.
     //
-    // GAP NOTE (honest, per the 03-03 review): the egress F5 exemption's
+    // GAP NOTE (honest, per the 03-03 review): the exemption's
     // load-bearingness FOR THE AGENT'S leg-S re-dial is a SEPARATE, UNPROVEN
     // (possibly inapplicable) claim that touches ADR-0071's obligation-(b)
     // framing and depends on how leg-S is wired in 04-01/04-02. For EGRESS, the
     // ADR-0071 Tier-3 obligation (b) is satisfied HERE by AC2-b
-    // (self-exempt-impossible) alone. A genuinely load-bearing egress F5
-    // *positive* control would require a dial that actually INGRESSES the
-    // workload veth carrying the leg-S mark (the agent's real leg-S dial path,
-    // wired in 04-01/04-02) — a host-`lo` dial cannot match the production
-    // `iifname` rule and so cannot exercise the exemption. That is explicitly out
-    // of 03-03's scope. (The exemption's real load-bearing role is on the SHARED
-    // chain's INBOUND `ip daddr`/`tcp dport` rules, where a host-originated marked
-    // dial to a virt DOES match and WOULD loop without it.)
+    // (self-exempt-impossible) alone. A load-bearing *dial-direction* exemption
+    // control would require a dial that actually INGRESSES the workload veth
+    // carrying the leg-S mark (the agent's real leg-S dial path, wired in
+    // 04-01/04-02) — a host-`lo` dial carries no intercept mark and so cannot
+    // exercise the exemption. That is explicitly out of 03-03's scope. In the
+    // reply direction the exemption IS load-bearing on this path: leg-F's
+    // replies to the workload carry the leg-S mark, and shared output rule 0
+    // accepts them ahead of the managed-guest drop (output rule 2), so AC1's
+    // completed handshake depends on it. (The exemption's other role is on the
+    // shared program's inbound-destination rules, where a host-originated
+    // marked dial to a registered destination DOES match and WOULD loop
+    // without it.)
     let agent_backend = TcpListener::bind(backend).expect("bind real backend (AC2-a topology)");
-    let agent_dial = std::thread::spawn(move || {
-        let s = dial_with_so_mark(backend, MTLS_LEG_S_DIAL_MARK, Duration::from_secs(8));
-        if let Ok(mut s) = s {
-            use std::io::Write as _;
-            let _ = s.write_all(b"AGENT-MARKED");
-            std::thread::sleep(Duration::from_millis(200));
-        }
+    let agent_dial = std::thread::spawn(move || -> std::io::Result<()> {
+        use std::io::Write as _;
+        let mut s = dial_with_so_mark(backend, MTLS_LEG_S_DIAL_MARK, Duration::from_secs(8))?;
+        s.write_all(b"AGENT-MARKED")?;
+        std::thread::sleep(Duration::from_millis(200));
+        Ok(())
     });
     let (mut agent_conn, agent_peer) = accept_with_timeout(&agent_backend, Duration::from_secs(5))
         .expect(
             "AC2-a topology: the agent's HOST dial must reach the REAL backend directly because \
-             it originates host-side and ingresses with iif=lo, so the production `iifname VETH_H` \
-             egress rule cannot match it (with or without the F5 exemption). A timeout here means \
+             it originates host-side and never passes the workload veth's classifier, so shared \
+             rule 1 cannot match it (with or without the leg-S exemption). A timeout here means \
              the host-side routing/topology is broken — NOT that the exemption is broken (this \
              path does not exercise the exemption).",
         );
@@ -654,36 +729,45 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     agent_conn.read_exact(&mut abuf).expect("read agent marker");
     assert_eq!(
         &abuf, b"AGENT-MARKED",
-        "AC2-a topology: backend must receive the agent's marked bytes (host dial never \
-         iifname-matched)"
+        "AC2-a topology: backend must receive the agent's marked bytes (a host dial is never \
+         intercept-marked)"
     );
-    agent_dial.join().expect("agent dial thread");
+    agent_dial
+        .join()
+        .expect("agent dial thread")
+        .expect("AC2-a: the agent's marked HOST dial connects and sends its marker");
     eprintln!(
-        "[03-03][AC2-a topology] agent HOST dial reached backend directly (never iifname-matched, \
-         NOT via the F5 exemption), peer={agent_peer}"
+        "[03-03][AC2-a topology] agent HOST dial reached backend directly (never \
+         intercept-marked, NOT via the leg-S exemption), peer={agent_peer}"
     );
     // The agent dial originates in the HOST netns (NOT via the veth), so its peer
     // is the loopback source the host kernel picks for a lo-bound dst — proving
-    // it never traversed the veth and was never iifname-matched. This is WHY it
-    // reaches the backend: the topology non-match, not the F5 exemption (which is
-    // irrelevant to the egress iifname rule). See the AC2-a gap note above.
+    // it never traversed the veth and never met the classifier. This is WHY it
+    // reaches the backend: the topology non-match, not the leg-S exemption. See
+    // the AC2-a gap note above.
     drop(agent_backend);
 
     // ----------------------------------------------------------------
     // AC2-b — SELF-EXEMPT-IMPOSSIBLE (safe negative control): a WORKLOAD dial
     // that sets SO_MARK INSIDE its own netns is STILL captured to leg-F. SO_MARK
-    // is skb-local metadata that does NOT cross the veth/netns boundary, so the
-    // host-side `iifname VETH_H` rule still matches — a workload cannot
-    // self-exempt. We prove capture by getsockname recovery on leg-F again.
+    // is skb-local metadata that does NOT cross the veth/netns boundary, and
+    // the classifier at vethH stamps the intercept mark on the guest's TCP —
+    // a workload cannot self-exempt. We prove capture by getsockname recovery
+    // on leg-F again, and by the intercept count advancing with the dial.
     // ----------------------------------------------------------------
     let selfexempt_client =
         std::thread::spawn(move || run_client_in_netns(backend, Some(MTLS_LEG_S_DIAL_MARK)));
     // The same bounded accept through the port listener.
-    let (leg2, _peer2, got2) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
-        "self-exempt-impossible: a workload's SO_MARK-stamped dial must STILL be captured to \
-         leg-F (the mark does not cross the netns boundary). A timeout here (no connection \
-         within 8 s) means the workload self-exempted — a security hole.",
-    );
+    let (leg2, _peer2, got2) =
+        accept_leg_within(&leg_f, Duration::from_secs(8)).unwrap_or_else(|error| {
+            panic!(
+                "self-exempt-impossible: a workload's SO_MARK-stamped dial must STILL be \
+                 captured to leg-F (the mark does not cross the netns boundary). A timeout here \
+                 (no connection within 8 s) means the workload self-exempted — a security hole \
+                 ({error}); classifier counters: {}",
+                divert.counter_snapshot()
+            )
+        });
     eprintln!(
         "[03-03][AC2-b self-exempt-impossible] workload marked dial STILL captured; getsockname = {got2}"
     );
@@ -695,19 +779,26 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     drop(leg2);
     let selfexempt_out = selfexempt_client.join().expect("self-exempt client thread");
     eprintln!("[03-03][AC2-b self-exempt-impossible] client: {selfexempt_out}");
-
-    eprintln!(
-        "[03-03] VERDICT: WORKS — egress redirect + getsockname recovery + self-exempt-impossible \
-         (ADR-0071 obligation (b) for egress) validated on kernel {kr}. AC2-a's agent HOST dial \
-         reaches the backend by topology non-match (never iifname-matched), NOT via the F5 \
-         exemption — a load-bearing egress F5 *positive* control needs the real leg-S veth-ingress \
-         dial wired in 04-01/04-02 (out of 03-03 scope)."
+    let intercepted_after_ac2b = divert.intercepted();
+    assert!(
+        intercepted_after_ac2b > intercepted_after_ac1,
+        "AC2-b: the workload's marked dial passed the classifier's intercept mark — the \
+         Intercept count must advance past {intercepted_after_ac1}, got {intercepted_after_ac2b}"
     );
 
-    // Teardown: drop the per-workload guard (removes ONLY the iifname rule), then
-    // scrub the shared infra + topology so a clean-kernel re-run reproduces.
-    drop(guard);
-    drop(leg_f);
-    teardown_topology();
-    clean_shared_infra();
+    eprintln!(
+        "[03-03] VERDICT: WORKS — shared-divert redirect + getsockname recovery + \
+         self-exempt-impossible (ADR-0071 obligation (b) for egress) validated on kernel {kr}. \
+         AC2-a's agent HOST dial reaches the backend by topology non-match (never \
+         intercept-marked), NOT via the leg-S exemption — a load-bearing dial-direction exemption \
+         control needs the real leg-S veth-ingress dial wired in 04-01/04-02 (out of 03-03 scope)."
+    );
+
+    // Teardown: release the divert in reverse, asserting each step (classifier
+    // detached and its pins removed, the workload's elements removed, the
+    // member-free program removed by the node guard's drop), then the legs;
+    // the topology guard then scrubs the shared infra + topology and restores
+    // the node-global sysctls, so a clean-kernel re-run reproduces.
+    divert.release();
+    drop((leg_c, leg_f));
 }

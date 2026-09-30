@@ -4515,11 +4515,21 @@ mod tests {
         }
     }
 
+    /// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+    /// step that carries B-7 (05-01 at the latest) changes it to
+    /// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept
+    /// listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned
+    /// `bind_transparent` signature)), together with the one body that
+    /// `TestSharedIntercept::bind_transparent` then returns
+    /// (`register_listener`'s `TestInterceptListener`; TS § "When the port
+    /// changes", line 2).
+    type BoundListener = TcpListener;
+
     impl MtlsIntercept for TestSharedIntercept {
         fn bind_transparent(
             &self,
             address: SocketAddrV4,
-        ) -> crate::mtls_intercept::Result<TcpListener> {
+        ) -> crate::mtls_intercept::Result<BoundListener> {
             TcpListener::bind(address)
                 .map_err(|source| InterceptError::TransparentListener { addr: address, source })
         }
@@ -5415,17 +5425,25 @@ mod tests {
         counter: std::sync::atomic::AtomicU64,
         teardown_calls: AtomicUsize,
         teardown_ids: Mutex<Vec<EnforcedConnectionId>>,
-        fail_first: AtomicBool,
+        /// Teardown calls still to fail, counted down from the first call.
+        failures_left: AtomicUsize,
     }
 
     impl RetryingSharedEnforcement {
+        /// The first teardown call fails; every later one succeeds.
         fn new() -> Arc<Self> {
+            Self::failing_first(1)
+        }
+
+        /// The first `failures` teardown calls fail, each with its handle's
+        /// typed `TeardownFailed`; every later one succeeds.
+        fn failing_first(failures: usize) -> Arc<Self> {
             Arc::new(Self {
                 enforced: tokio::sync::Notify::new(),
                 counter: std::sync::atomic::AtomicU64::new(0),
                 teardown_calls: AtomicUsize::new(0),
                 teardown_ids: Mutex::new(Vec::new()),
-                fail_first: AtomicBool::new(true),
+                failures_left: AtomicUsize::new(failures),
             })
         }
 
@@ -5461,7 +5479,11 @@ mod tests {
         ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
             self.teardown_calls.fetch_add(1, Ordering::SeqCst);
             self.teardown_ids.lock().push(handle.id().clone());
-            if self.fail_first.swap(false, Ordering::SeqCst) {
+            let fails = self
+                .failures_left
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+                .is_ok();
+            if fails {
                 return Err(
                     overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::TeardownFailed {
                         id: handle.id().clone(),
@@ -5809,19 +5831,27 @@ mod tests {
     /// S-ND295-54 — Protection removal is convergent and its failures are typed.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// A shared allocation's failed enforced-connection teardown is surfaced as
-    /// `HandleTeardown` with one typed failure per connection, in teardown order,
-    /// and a retried stop converges on the retained handle (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's `MtlsInterceptStopError` and its `Arc`-shared typed sources),
-    /// D-295-R10). RETARGETED onto a shared allocation: the per-allocation
-    /// record the original registered is deleted with B-7's step. The
-    /// connection is delivered through the shared leg-F listener
-    /// (`TestSharedIntercept::script_accept`), so the body waits on that step
-    /// as well as on 07-01.
+    /// A shared allocation's failed enforced-connection teardowns are surfaced
+    /// as `HandleTeardown` with one typed failure per connection, in teardown
+    /// order, and a retried stop converges on the retained handles (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's `MtlsInterceptStopError` and its `Arc`-shared typed sources),
+    /// D-295-R10). Two connections fail, so the stop error's `Display` — the
+    /// one rendering every string consumer carries, including the persisted
+    /// Failed-row `detail` — must name both per-connection causes in `failures`
+    /// order (the same section, "`Display`, the text every string consumer
+    /// carries", the user's decision DR-06 of 2026-09-29): `allocation <id>:
+    /// enforced-handle teardown failed for 2 handle(s): <c1>: <e1>; <c2>: <e2>`,
+    /// with `<ci>` the `EnforcedConnectionId` `Display` (`<alloc>#<counter>`)
+    /// and `<ei>` the `Display` of its typed source. RETARGETED onto a shared
+    /// allocation: the per-allocation record the original registered is deleted
+    /// with B-7's step. The connections are delivered through the shared leg-F
+    /// listener (`TestSharedIntercept::script_accept`), one after the other, so
+    /// the teardown order is the publication order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
     async fn allocation_stop_surfaces_teardown_failure_and_retry_converges() {
-        let enforcement = RetryingSharedEnforcement::new();
-        let (leg, orig_dst, _client) = accepted_leg_f();
+        let enforcement = RetryingSharedEnforcement::failing_first(2);
+        let (first_leg, orig_dst, _first_client) = accepted_leg_f();
+        let (second_leg, _second_leg_address, _second_client) = accepted_leg_f();
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
@@ -5839,38 +5869,70 @@ mod tests {
             .await
             .expect("publish one shared allocation");
         let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
-        within_2s("the delivered connection reaches enforcement", || {
-            enforcement.counter.load(Ordering::SeqCst) == 1
-        })
-        .await;
-        wait_published(&worker, &allocation, 1).await;
+        // One connection at a time: each is published before the next is
+        // delivered, so the capability's handle order is #0 then #1.
+        for (published, leg) in [(1, first_leg), (2, second_leg)] {
+            deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+            within_2s("the delivered connection reaches enforcement", || {
+                enforcement.counter.load(Ordering::SeqCst) == published
+            })
+            .await;
+            wait_published(&worker, &allocation, usize::try_from(published).expect("tiny count"))
+                .await;
+        }
 
         let first =
-            worker.stop_alloc(&allocation).await.expect_err("the teardown failure surfaces");
+            worker.stop_alloc(&allocation).await.expect_err("the teardown failures surface");
         let super::MtlsInterceptStopError::HandleTeardown { alloc_id, failures } = &first else {
             panic!("expected a typed per-connection teardown failure, got {first:?}");
         };
-        let expected_connection = EnforcedConnectionId::new(allocation.clone(), 0);
+        let expected_connections = [
+            EnforcedConnectionId::new(allocation.clone(), 0),
+            EnforcedConnectionId::new(allocation.clone(), 1),
+        ];
         assert_eq!(alloc_id, &allocation);
-        assert_eq!(failures.len(), 1, "one failure per failed connection");
-        assert_eq!(failures[0].connection, expected_connection);
-        assert!(
-            matches!(
-                &*failures[0].source,
-                MtlsEnforcementError::TeardownFailed { id, source }
-                    if id == &expected_connection
-                        && source.to_string() == "injected shared teardown failure"
-            ),
-            "the failure keeps the exact typed teardown cause: {:?}",
-            failures[0].source
+        assert_eq!(failures.len(), 2, "one failure per failed connection");
+        for (failure, expected_connection) in failures.iter().zip(&expected_connections) {
+            assert_eq!(&failure.connection, expected_connection, "failures in teardown order");
+            assert!(
+                matches!(
+                    &*failure.source,
+                    MtlsEnforcementError::TeardownFailed { id, source }
+                        if id == expected_connection
+                            && source.to_string() == "injected shared teardown failure"
+                ),
+                "the failure keeps the exact typed teardown cause: {:?}",
+                failure.source
+            );
+        }
+        // DR-06 (user decision 2026-09-29): the rendered text names every
+        // per-connection cause, in `failures` order, joined by "; ". Written out
+        // in full, so a rendering that drops, reorders, or re-renders a cause
+        // fails here rather than in an operator's Failed-row detail.
+        assert_eq!(
+            first.to_string(),
+            "allocation alloc-stop-retry: enforced-handle teardown failed for 2 handle(s): \
+             alloc-stop-retry#0: teardown of connection alloc-stop-retry#0 failed: injected \
+             shared teardown failure; alloc-stop-retry#1: teardown of connection \
+             alloc-stop-retry#1 failed: injected shared teardown failure",
+            "the stop error's Display renders each failed connection and its own cause"
         );
 
         worker.stop_alloc(&allocation).await.expect("the retried stop converges");
         assert_eq!(
             enforcement.teardown_calls.load(Ordering::SeqCst),
-            2,
-            "the retained handle is torn down once more, and only once"
+            4,
+            "each retained handle is torn down once more, and only once"
+        );
+        assert_eq!(
+            *enforcement.teardown_ids.lock(),
+            [
+                expected_connections[0].clone(),
+                expected_connections[1].clone(),
+                expected_connections[0].clone(),
+                expected_connections[1].clone(),
+            ],
+            "the retry tears down exactly the two retained handles, in order"
         );
         worker.shutdown_owner().await.expect("the shared owner joins");
     }
@@ -6382,9 +6444,31 @@ mod tests {
     /// simultaneous `stop_alloc(a)` calls begin exactly one new attempt between
     /// them (`removal_calls()` rises by one, not two), and both receive that
     /// attempt's result — never the error it supersedes.
+    ///
+    /// "Simultaneous" is a real race: each round spawns the two callers on the
+    /// multi-thread runtime behind one `Barrier`, so both pass the barrier
+    /// together and contend for the retry claim from different worker threads.
+    /// A claim that checks for an attempt under one lock acquisition and
+    /// records it under another lets both callers through and begins two
+    /// attempts, which the per-round count catches. The race repeats for
+    /// `RULE_3_ROUNDS` rounds. Every round but the last fails again with a
+    /// fresh scripted cause, so each round's two callers must share that
+    /// round's source `Arc` and neither may hold the one it supersedes. The last
+    /// round's attempt converges, and both callers receive `Ok`. The removal
+    /// hold keeps each round's one attempt in flight until both callers have
+    /// asked; a caller arriving after the attempt ended would be the first stop
+    /// after a failure and would rightly begin its own.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one repeated-race narrative keeps each round's claim count, both callers' \
+                  results, and the superseded source together"
+    )]
     async fn the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers() {
+        /// Races of the two simultaneous callers, each after a failed attempt.
+        const RULE_3_ROUNDS: usize = 16;
+
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
         let address = Ipv4Addr::new(100, 95, 0, 2);
@@ -6395,42 +6479,117 @@ mod tests {
             .await
             .expect("publish one shared allocation");
         intercept.script_removal_failures(1, scripted_element_removal_cause);
-        let superseded = worker.stop_alloc(&allocation).await.expect_err("the first attempt fails");
-        assert!(
-            matches!(superseded, super::MtlsInterceptStopError::ElementRemoval { .. }),
-            "the superseded attempt failed at element removal: {superseded:?}"
-        );
+        let first_failure =
+            worker.stop_alloc(&allocation).await.expect_err("the first attempt fails");
+        let super::MtlsInterceptStopError::ElementRemoval { source: first_source, .. } =
+            &first_failure
+        else {
+            panic!("the superseded attempt failed at element removal: {first_failure:?}");
+        };
+        let mut superseded = Arc::clone(first_source);
         assert_eq!(intercept.removal_calls(), 1);
 
-        intercept.hold_removals(true);
-        let mut left = Box::pin(worker.stop_alloc(&allocation));
-        let mut right = Box::pin(worker.stop_alloc(&allocation));
-        assert_still_pending("the left caller's retry", &mut left).await;
-        assert_still_pending("the right caller", &mut right).await;
-        within_2s("the one new attempt enters element removal", || intercept.removal_calls() == 2)
+        for round in 0..RULE_3_ROUNDS {
+            let converges = round + 1 == RULE_3_ROUNDS;
+            if !converges {
+                intercept.script_removal_failures(1, scripted_element_removal_cause);
+            }
+            let calls_before = intercept.removal_calls();
+            intercept.hold_removals(true);
+            let barrier = Arc::new(tokio::sync::Barrier::new(2));
+            let [left, right] = [(); 2].map(|()| {
+                let worker = Arc::clone(&worker);
+                let allocation = allocation.clone();
+                let barrier = Arc::clone(&barrier);
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    worker.stop_alloc(&allocation).await
+                })
+            });
+            within_2s(&format!("round {round}: the new attempt enters element removal"), || {
+                intercept.removal_calls() > calls_before
+            })
             .await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+            // Both callers are past the barrier and inside `stop_alloc`; give a
+            // second claim every chance to begin before the attempt is released.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(
+                !left.is_finished() && !right.is_finished(),
+                "round {round}: both callers wait on the held attempt"
+            );
+            assert_eq!(
+                intercept.removal_calls(),
+                calls_before + 1,
+                "round {round}: two simultaneous later callers begin one attempt between them"
+            );
+            intercept.hold_removals(false);
+
+            let left = tokio::time::timeout(Duration::from_secs(2), left)
+                .await
+                .unwrap_or_else(|_| panic!("round {round}: the left caller returns within 2 s"))
+                .unwrap_or_else(|error| panic!("round {round}: the left caller joins: {error}"));
+            let right = tokio::time::timeout(Duration::from_secs(2), right)
+                .await
+                .unwrap_or_else(|_| panic!("round {round}: the right caller returns within 2 s"))
+                .unwrap_or_else(|error| panic!("round {round}: the right caller joins: {error}"));
+            assert_eq!(
+                intercept.removal_calls(),
+                calls_before + 1,
+                "round {round}: exactly one attempt ran for both callers"
+            );
+            if converges {
+                left.unwrap_or_else(|error| {
+                    panic!("round {round}: the left caller receives the converged retry: {error:?}")
+                });
+                right.unwrap_or_else(|error| {
+                    panic!(
+                        "round {round}: the right caller receives the converged retry: {error:?}"
+                    )
+                });
+                continue;
+            }
+            let (
+                Err(super::MtlsInterceptStopError::ElementRemoval {
+                    alloc_id: left_alloc,
+                    source: left_source,
+                }),
+                Err(super::MtlsInterceptStopError::ElementRemoval {
+                    alloc_id: right_alloc,
+                    source: right_source,
+                }),
+            ) = (&left, &right)
+            else {
+                panic!(
+                    "round {round}: both callers receive the new attempt's ElementRemoval, got \
+                     {left:?} and {right:?}"
+                );
+            };
+            assert_eq!(left_alloc, &allocation, "round {round}");
+            assert_eq!(right_alloc, &allocation, "round {round}");
+            assert!(
+                Arc::ptr_eq(left_source, right_source),
+                "round {round}: both callers receive the one new attempt's shared source"
+            );
+            assert!(
+                !Arc::ptr_eq(left_source, &superseded),
+                "round {round}: neither caller receives the error the new attempt superseded"
+            );
+            assert!(
+                is_scripted_element_removal_cause(left_source),
+                "round {round}: the typed cause survives: {left_source:?}"
+            );
+            superseded = Arc::clone(left_source);
+        }
+
         assert_eq!(
             intercept.removal_calls(),
-            2,
-            "simultaneous later callers begin one attempt between them"
+            1 + RULE_3_ROUNDS,
+            "one attempt for the first stop and one per round"
         );
-        intercept.hold_removals(false);
-
-        let left = tokio::time::timeout(Duration::from_secs(2), left)
-            .await
-            .expect("the left caller returns within 2 s");
-        let right = tokio::time::timeout(Duration::from_secs(2), right)
-            .await
-            .expect("the right caller returns within 2 s");
-        left.expect("the left caller receives the new attempt's result, not the superseded error");
-        right
-            .expect("the right caller receives the new attempt's result, not the superseded error");
-        assert_eq!(intercept.removal_calls(), 2, "exactly one retry ran");
         assert_eq!(
             intercept.members(),
             InterceptMembers::default(),
-            "the retry removed every member"
+            "the converged retry removed every member"
         );
         worker.shutdown_owner().await.expect("the shared owner joins");
     }
@@ -6541,7 +6700,17 @@ mod tests {
     /// `MtlsSharedOwnerError::component()` is the one SSOT the supervisor
     /// consumes; its table equals FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the component SSOT table) row for row. The exhaustive
     /// `variant_name` match is the closed-set guard: a new variant fails to
-    /// compile here until the table names it.
+    /// compile here until the table names it. The component depends on the
+    /// variant alone, never on its source, so the rows also carry each source
+    /// the observation checks construct (the same section, "The typed causes of
+    /// the observation checks", pinned 2026-09-29): `Intercept` over
+    /// `PostconditionMismatch`, `PolicyRouteAbsent`, and
+    /// `InterceptMarkGuardAbsent` is `IpRules`; `BootMemberClear` over the boot
+    /// clear's own `Err` and over `MembersRemain` is `IpSets`. `component()`
+    /// lands at 08-03, so S-ND295-13D's 08-02 boot bodies assert no component
+    /// and this table carries `BootMemberClear`'s. The
+    /// `InterceptMarkGuardAbsent` row is R18-conditional: DELIVER step 08-01
+    /// removes it with the variant if R18 is withdrawn.
     #[test]
     #[ignore = "pending DELIVER step 08-03 (S-ND295-61)"]
     fn every_shared_owner_error_reports_its_one_component() {
@@ -6590,7 +6759,24 @@ mod tests {
             rows.push((E::TaskPanicked { leg }, leg_component(leg)));
             rows.push((E::TaskCancelled { leg }, leg_component(leg)));
         }
-        rows.push((E::Intercept { source: intercept() }, Component::IpRules));
+        // `Intercept` is `IpRules` whatever its source, including the three
+        // sources the worker's observation checks construct (FD § "[REF] Driven
+        // port — intercept element release, member convergence, boot clear …"
+        // (the typed causes of the observation checks)).
+        let program = InterceptPostcondition::ConstantRules {
+            table_and_chains: Vec::new(),
+            sets: Vec::new(),
+            prerouting: Vec::new(),
+            output: Vec::new(),
+        };
+        for source in [
+            intercept(),
+            InterceptError::PostconditionMismatch { expected: program, observed: None },
+            InterceptError::PolicyRouteAbsent,
+            InterceptError::InterceptMarkGuardAbsent,
+        ] {
+            rows.push((E::Intercept { source }, Component::IpRules));
+        }
         rows.push((
             E::MemberMismatch {
                 expected: InterceptMembers::default(),
@@ -6599,7 +6785,30 @@ mod tests {
             Component::IpSets,
         ));
         rows.push((E::MemberRepair { source: intercept() }, Component::IpSets));
+        // `BootMemberClear` is `IpSets` for both of its sources: the boot clear's
+        // own `Err`, and `MembersRemain` when the clear returned `Ok` with members
+        // still present (boot steps 6.2 and 6.6).
         rows.push((E::BootMemberClear { source: intercept() }, Component::IpSets));
+        rows.push((
+            E::BootMemberClear {
+                source: InterceptError::NftRuleInstallFailed {
+                    op: "converge-shared-members",
+                    source: crate::mtls_intercept::NetlinkError::nft(
+                        "converge-shared-members",
+                        std::io::Error::from_raw_os_error(libc::EBUSY),
+                    ),
+                },
+            },
+            Component::IpSets,
+        ));
+        rows.push((
+            E::BootMemberClear {
+                source: InterceptError::MembersRemain {
+                    observed: allocation_members(Ipv4Addr::new(100, 95, 0, 9), &[8080]),
+                },
+            },
+            Component::IpSets,
+        ));
         rows.push((E::NotStarted, Component::Supervisor));
         rows.push((E::OwnerShutdown, Component::Supervisor));
         rows.push((E::TaskObserverClosed, Component::Supervisor));

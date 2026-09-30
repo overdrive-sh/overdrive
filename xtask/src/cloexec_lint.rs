@@ -536,6 +536,75 @@ fn after_the_test_items(fd: i32) {
         ],
     };
 
+    /// The test-only boundary (FD § "[REF] Driven port — VMM TAP queue
+    /// attachment (D-295-R1, R2, R3, R4) — ACCEPTED 2026-09-24", *Test-only
+    /// items*, pinned 2026-09-29, DR-10): an item is test-only when one of its
+    /// own `#[cfg(…)]` predicates requires `test` — `test` itself, or an
+    /// `all(…)` with an argument that requires `test`, recursively.
+    ///
+    /// Not reported: the same violation under `all(test, feature = …)`
+    /// followed by another attribute (as `overdrive-host`'s
+    /// `launch_seccomp_kernel` module is written, line 9), under
+    /// `all(feature = …, test)` (line 15), under a nested
+    /// `all(…, all(test, …))` (line 20), and on an item whose `#[cfg(test)]`
+    /// follows a second `#[cfg(…)]` (line 26). Reported: under
+    /// `any(test, …)` (line 31), under `not(test)` (line 36), and on an item
+    /// whose only `test` is inside a `cfg_attr(test, …)` (line 41) — none of
+    /// those keeps the item out of a non-test build.
+    const TEST_ONLY_CFG_PREDICATES: Planted = Planted {
+        file: "crates/overdrive-planted/src/test_only_cfg_predicates.rs",
+        source: "\
+fn production(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg(all(test, feature = \"integration-tests\"))]
+#[allow(unsafe_code)]
+mod all_test_first {
+    fn fixture(fd: i32) {
+        libc::dup(fd);
+    }
+}
+
+#[cfg(all(feature = \"integration-tests\", test))]
+fn all_test_last(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg(all(unix, all(test, target_os = \"linux\")))]
+fn nested_all(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg(target_os = \"linux\")]
+#[cfg(test)]
+fn cfg_test_beside_another_cfg(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg(any(test, feature = \"integration-tests\"))]
+fn any_test(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg(not(test))]
+fn not_test(fd: i32) {
+    libc::dup(fd);
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn cfg_attr_test(fd: i32) {
+    libc::dup(fd);
+}
+",
+        expected: &[
+            (2, 5, "libc::dup", AlwaysInheritable),
+            (31, 5, "libc::dup", AlwaysInheritable),
+            (36, 5, "libc::dup", AlwaysInheritable),
+            (41, 5, "libc::dup", AlwaysInheritable),
+        ],
+    };
+
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// S-ND295-46 — every rejected call family is reported with its rule
     /// CONTRACT_SHAPE: pure-function.
@@ -591,6 +660,16 @@ fn after_the_test_items(fd: i32) {
     #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn cfg_test_items_are_not_scanned() {
         assert_scans(&[CFG_TEST_ITEMS]);
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+    /// S-ND295-46 — only a `cfg` predicate that requires `test` exempts an
+    /// item; `any`, `not`, and `cfg_attr` never do
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
+    fn only_a_cfg_predicate_that_requires_test_exempts_an_item() {
+        assert_scans(&[TEST_ONLY_CFG_PREDICATES]);
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.

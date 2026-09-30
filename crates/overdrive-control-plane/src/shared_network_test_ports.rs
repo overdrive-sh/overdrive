@@ -30,9 +30,11 @@ use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::clock::Clock;
 use overdrive_sim::adapters::{SimCgroupFs, SimEntry};
 use overdrive_worker::mtls_intercept_port::InterceptListener;
 use parking_lot::Mutex;
@@ -60,6 +62,10 @@ pub enum TestQuiesceScript {
     Fail,
     /// A future that never resolves.
     Hang,
+    /// The call waits `after` on the owner's clock, then resolves as
+    /// `Unconfirmed(unconfirmed)` would: a result that arrives late. Needs
+    /// the clock given to [`TestSharedOwner::with_cgroup_snapshots`].
+    Late { unconfirmed: BTreeSet<AllocationId>, after: Duration },
 }
 
 impl Default for TestQuiesceScript {
@@ -123,6 +129,9 @@ pub enum TestQuiesceOutcome {
     Failed,
     /// The call never resolved.
     Hung,
+    /// The call began a scripted late result; whether and when that result
+    /// was delivered is not journaled.
+    Late,
 }
 
 /// One port call, its allocation where it has one, and its outcome.
@@ -171,6 +180,14 @@ struct TestOwnerState {
     latched: bool,
     /// Every allocation a returned quiescence or audit result has named.
     condemned: BTreeSet<AllocationId>,
+    /// Allocations whose TAP this double holds raised (`Active`): an
+    /// activation that reported `Raised`, or a restore that raised it.
+    active: BTreeSet<AllocationId>,
+    /// Allocations a returned quiescence set down (`QuiescedActive`).
+    quiesced: BTreeSet<AllocationId>,
+    /// A failing restore raises this many quiesced allocations, in
+    /// `AllocationId` order, before it fails.
+    restore_raises_before_failure: usize,
     quiesce: TestQuiesceScript,
     audit_mode: TestAuditMode,
     damage: BTreeSet<AllocationId>,
@@ -178,8 +195,43 @@ struct TestOwnerState {
     journal: Vec<TestJournalEntry>,
 }
 
+impl TestOwnerState {
+    /// A returned quiescence: condemn each newly named allocation (no longer
+    /// raised), and set every other raised TAP down.
+    fn settle_quiescence(
+        &mut self,
+        named: &BTreeSet<AllocationId>,
+    ) -> BTreeMap<AllocationId, GuestNetworkError> {
+        let unconfirmed = TestSharedOwner::condemn(self, named, GuestNetworkOperation::TapSetDown);
+        let raised = std::mem::take(&mut self.active);
+        for alloc in raised {
+            if !self.condemned.contains(&alloc) {
+                self.quiesced.insert(alloc);
+            }
+        }
+        unconfirmed
+    }
+}
+
+/// What one `quiesce_managed_taps` call does once it has journaled.
+enum QuiesceStep {
+    Resolved(Result<TapQuiescence>),
+    Hang,
+    Late { unconfirmed: BTreeSet<AllocationId>, after: Duration },
+}
+
+/// The clock a [`TestQuiesceScript::Late`] result waits on.
+struct LateClock(Arc<dyn Clock>);
+
+impl std::fmt::Debug for LateClock {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("LateClock")
+    }
+}
+
 /// Test-local shared guest-network owner modelling the latch, the
-/// `Condemned` set, standing refusal slots, and a per-call journal.
+/// `Condemned` set, which TAPs it holds raised or quiesced, standing refusal
+/// slots, and a per-call journal.
 #[derive(Debug, Default)]
 pub struct TestSharedOwner {
     provision_refused: AtomicBool,
@@ -187,6 +239,7 @@ pub struct TestSharedOwner {
     converge_refused: AtomicBool,
     restore_refused: AtomicBool,
     cgroups: Option<SimCgroupFs>,
+    late_clock: Option<LateClock>,
     state: Mutex<TestOwnerState>,
 }
 
@@ -198,9 +251,10 @@ impl TestSharedOwner {
     }
 
     /// As [`Self::new`], but every journal entry carries `fs.snapshot()`
-    /// taken as the call began.
-    pub fn with_cgroup_snapshots(fs: SimCgroupFs) -> Self {
-        Self { cgroups: Some(fs), ..Self::default() }
+    /// taken as the call began, and a [`TestQuiesceScript::Late`] result
+    /// waits on `clock` (the supervisor's injected clock).
+    pub fn with_cgroup_snapshots(fs: SimCgroupFs, clock: Arc<dyn Clock>) -> Self {
+        Self { cgroups: Some(fs), late_clock: Some(LateClock(clock)), ..Self::default() }
     }
 
     pub fn script_provision_failure(&self, armed: bool) {
@@ -212,8 +266,18 @@ impl TestSharedOwner {
     pub fn script_converge_failure(&self, armed: bool) {
         self.converge_refused.store(armed, Ordering::SeqCst);
     }
+    /// Arm or disarm the standing restore refusal; an armed restore raises
+    /// nothing before it fails.
     pub fn script_restore_failure(&self, armed: bool) {
+        self.state.lock().restore_raises_before_failure = 0;
         self.restore_refused.store(armed, Ordering::SeqCst);
+    }
+    /// Arm a standing restore refusal that fails part-way: each failing
+    /// restore first raises up to `raised` quiesced allocations, in
+    /// `AllocationId` order, and keeps the latch.
+    pub fn script_restore_failure_after(&self, raised: usize) {
+        self.state.lock().restore_raises_before_failure = raised;
+        self.restore_refused.store(true, Ordering::SeqCst);
     }
     /// Arm or disarm the standing node-level audit slot of `component`.
     pub fn script_component_audit_failure(
@@ -253,6 +317,10 @@ impl TestSharedOwner {
     pub fn condemned(&self) -> BTreeSet<AllocationId> {
         self.state.lock().condemned.clone()
     }
+    /// The allocations whose TAP this double holds raised.
+    pub fn active(&self) -> BTreeSet<AllocationId> {
+        self.state.lock().active.clone()
+    }
 
     fn record(&self, state: &mut TestOwnerState, call: TestOwnerCall) {
         let cgroups = self.cgroups.as_ref().map(SimCgroupFs::snapshot);
@@ -278,17 +346,24 @@ impl TestSharedOwner {
     }
 
     /// Condemn each not-yet-condemned allocation of `named`; the returned map
-    /// names exactly those, each with a fresh error for `operation`.
+    /// names exactly those, each with a fresh error for `operation`. A
+    /// condemned allocation leaves the raised and quiesced sets, so no later
+    /// restore raises it.
     fn condemn(
         state: &mut TestOwnerState,
         named: &BTreeSet<AllocationId>,
         operation: GuestNetworkOperation,
     ) -> BTreeMap<AllocationId, GuestNetworkError> {
-        named
+        let newly: BTreeMap<AllocationId, GuestNetworkError> = named
             .iter()
             .filter(|alloc| state.condemned.insert((*alloc).clone()))
             .map(|alloc| (alloc.clone(), Self::refusal(operation)))
-            .collect()
+            .collect();
+        for alloc in newly.keys() {
+            state.active.remove(alloc);
+            state.quiesced.remove(alloc);
+        }
+        newly
     }
 }
 
@@ -311,6 +386,9 @@ impl GuestNetworkProvisioner for TestSharedOwner {
         } else {
             TestActivateOutcome::Raised
         };
+        if outcome == TestActivateOutcome::Raised {
+            state.active.insert(plan.alloc().clone());
+        }
         self.record(&mut state, TestOwnerCall::Activate { alloc: plan.alloc().clone(), outcome });
         drop(state);
         match outcome {
@@ -423,34 +501,49 @@ impl SharedGuestNetworkOwner for TestSharedOwner {
         }
     }
 
+    #[allow(clippy::panic, reason = "a Late script on an owner without a clock is fixture misuse")]
     async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
-        let result = {
+        let step = {
             let mut state = self.state.lock();
             state.latched = true;
             match state.quiesce.clone() {
                 TestQuiesceScript::Unconfirmed(named) => {
-                    let unconfirmed =
-                        Self::condemn(&mut state, &named, GuestNetworkOperation::TapSetDown);
+                    let unconfirmed = state.settle_quiescence(&named);
                     let reported = unconfirmed.keys().cloned().collect();
                     self.record(
                         &mut state,
                         TestOwnerCall::Quiesce(TestQuiesceOutcome::Unconfirmed(reported)),
                     );
-                    Some(Ok(TapQuiescence { unconfirmed }))
+                    QuiesceStep::Resolved(Ok(TapQuiescence { unconfirmed }))
                 }
                 TestQuiesceScript::Fail => {
                     self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Failed));
-                    Some(Err(Self::refusal(GuestNetworkOperation::TapSetDown)))
+                    QuiesceStep::Resolved(Err(Self::refusal(GuestNetworkOperation::TapSetDown)))
                 }
                 TestQuiesceScript::Hang => {
                     self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Hung));
-                    None
+                    QuiesceStep::Hang
+                }
+                TestQuiesceScript::Late { unconfirmed, after } => {
+                    self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Late));
+                    QuiesceStep::Late { unconfirmed, after }
                 }
             }
         };
-        match result {
-            Some(result) => result,
-            None => std::future::pending().await,
+        match step {
+            QuiesceStep::Resolved(result) => result,
+            QuiesceStep::Hang => std::future::pending().await,
+            QuiesceStep::Late { unconfirmed, after } => {
+                let Some(LateClock(clock)) = self.late_clock.as_ref() else {
+                    panic!(
+                        "a Late quiescence needs the clock given to \
+                         TestSharedOwner::with_cgroup_snapshots"
+                    );
+                };
+                clock.sleep(after).await;
+                let unconfirmed = self.state.lock().settle_quiescence(&unconfirmed);
+                Ok(TapQuiescence { unconfirmed })
+            }
         }
     }
 
@@ -458,6 +551,15 @@ impl SharedGuestNetworkOwner for TestSharedOwner {
         let outcome = Self::outcome(&self.restore_refused);
         let mut state = self.state.lock();
         self.record(&mut state, TestOwnerCall::Restore(outcome));
+        let raising = match outcome {
+            TestCallOutcome::Ok => state.quiesced.len(),
+            TestCallOutcome::Failed => state.restore_raises_before_failure,
+        };
+        let raised = state.quiesced.iter().take(raising).cloned().collect::<Vec<_>>();
+        for alloc in raised {
+            state.quiesced.remove(&alloc);
+            state.active.insert(alloc);
+        }
         if outcome == TestCallOutcome::Ok {
             state.latched = false;
         }
@@ -617,24 +719,37 @@ impl LegListener for Arc<dyn InterceptListener> {
 // sim-side twin (`SimSharedGuestNetworkOwner`) cannot host them because its
 // `activate(&GuestNetworkPlan)` needs a `GuestNetworkPlan`, and that type is
 // control-plane-private with no cross-crate constructor (FD § "B1 — replace
-// obsolete plan vocabulary"); a plan is built here through the crate-visible
-// `assign_action_plan`. "A failed restore keeps the latch" has no other
-// coverage, so a double that regressed it would pass the SUT proof silently —
-// that is exactly what these guard against (a fixture must not fail before,
-// or lie to, the SUT).
+// obsolete plan vocabulary"); a plan is built here through a test-owned
+// `GuestAddressPool`'s crate-private `assign`, as the source-local supervisor
+// rig does, so no process-global pool is touched. "A failed restore keeps the
+// latch" has no other coverage, so a double that regressed it would pass the
+// SUT proof silently — that is exactly what these guard against (a fixture
+// must not fail before, or lie to, the SUT).
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::TestSharedOwner;
     use crate::guest_network::{
-        GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner, SharedGuestNetworkOwner,
-        TapActivation, assign_action_plan,
+        GuestAddressPool, GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner,
+        SharedGuestNetworkOwner, TapActivation,
     };
     use overdrive_core::id::AllocationId;
 
     fn alloc(name: &str) -> AllocationId {
         AllocationId::new(name).expect("valid allocation id")
+    }
+
+    /// A pool owned by one self-test, over the node guest prefix.
+    fn pool() -> GuestAddressPool {
+        GuestAddressPool::new(
+            ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        )
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH
@@ -649,8 +764,9 @@ mod tests {
     #[tokio::test]
     async fn activate_reports_raised_latched_or_condemned() {
         let owner = TestSharedOwner::new();
-        let plan_a = assign_action_plan(alloc("s53-selftest-a")).expect("plan A");
-        let plan_b = assign_action_plan(alloc("s53-selftest-b")).expect("plan B");
+        let pool = pool();
+        let plan_a = pool.assign(alloc("s53-selftest-a")).expect("plan A");
+        let plan_b = pool.assign(alloc("s53-selftest-b")).expect("plan B");
 
         // Fresh, no latch, not condemned → Raised.
         assert_eq!(
@@ -717,7 +833,7 @@ mod tests {
     #[tokio::test]
     async fn restore_failure_slot_keeps_the_latch() {
         let owner = TestSharedOwner::new();
-        let plan = assign_action_plan(alloc("s53-selftest-restore")).expect("plan");
+        let plan = pool().assign(alloc("s53-selftest-restore")).expect("plan");
 
         owner.quiesce_managed_taps().await.expect("full quiescence latches");
         assert!(owner.latched(), "quiescence sets the latch");
@@ -744,5 +860,111 @@ mod tests {
             owner.activate(&plan).await.expect("activation after the successful restore"),
             TapActivation::Raised
         );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The part-way restore the E11 re-quiescence cell scripts: a failing
+    /// restore raises the scripted number of quiesced allocations, in
+    /// `AllocationId` order, and keeps the latch; a repeat quiescence sets
+    /// them down again; a successful restore raises every quiesced
+    /// allocation and clears the latch; a condemned allocation is never
+    /// raised.
+    #[tokio::test]
+    async fn a_part_way_restore_raises_some_and_a_repeat_quiescence_sets_them_down() {
+        let owner = TestSharedOwner::new();
+        let pool = pool();
+        let names = ["s29a-selftest-a", "s29a-selftest-b", "s29a-selftest-c"];
+        for name in names {
+            let plan = pool.assign(alloc(name)).expect("plan");
+            assert_eq!(
+                owner.activate(&plan).await.expect("a fresh activation raises"),
+                TapActivation::Raised
+            );
+        }
+        let all = names.into_iter().map(alloc).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(owner.active(), all, "every raised TAP is held raised");
+
+        owner.quiesce_managed_taps().await.expect("full quiescence");
+        assert!(owner.active().is_empty(), "quiescence sets every raised TAP down");
+
+        owner.script_restore_failure_after(1);
+        owner.restore_quiesced_taps().await.expect_err("the restore fails part-way");
+        assert_eq!(
+            owner.active(),
+            std::collections::BTreeSet::from([alloc("s29a-selftest-a")]),
+            "the failing restore raised the first quiesced allocation"
+        );
+        assert!(owner.latched(), "a failed restore keeps the latch");
+
+        owner.quiesce_managed_taps().await.expect("a repeat quiescence");
+        assert!(owner.active().is_empty(), "the repeat sets the raised TAP down again");
+        assert!(owner.latched());
+
+        owner.script_restore_failure(false);
+        owner.restore_quiesced_taps().await.expect("a clean restore");
+        assert_eq!(owner.active(), all, "a clean restore raises every quiesced allocation");
+        assert!(!owner.latched(), "and clears the latch");
+
+        owner.script_quiesce(super::TestQuiesceScript::Unconfirmed(
+            std::collections::BTreeSet::from([alloc("s29a-selftest-b")]),
+        ));
+        owner.quiesce_managed_taps().await.expect("a quiescence naming one allocation");
+        owner.restore_quiesced_taps().await.expect("a clean restore");
+        assert_eq!(
+            owner.active(),
+            std::collections::BTreeSet::from([alloc("s29a-selftest-a"), alloc("s29a-selftest-c")]),
+            "a condemned allocation is never raised again"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The late quiescence the S-ND295-32 late-result cell scripts: the call
+    /// sets the latch and journals `Late` at once, stays pending until its
+    /// delay has elapsed on the owner's clock, and only then condemns and
+    /// reports the scripted allocations.
+    #[tokio::test]
+    async fn a_late_quiescence_resolves_only_after_its_delay_on_the_owner_clock() {
+        use futures::FutureExt as _;
+        use overdrive_sim::adapters::clock::SimClock;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let clock = Arc::new(SimClock::new());
+        let owner = TestSharedOwner::with_cgroup_snapshots(
+            overdrive_sim::adapters::SimCgroupFs::new(),
+            Arc::clone(&clock) as Arc<dyn overdrive_core::traits::clock::Clock>,
+        );
+        let late = std::collections::BTreeSet::from([alloc("s32-selftest-late")]);
+        owner.script_quiesce(super::TestQuiesceScript::Late {
+            unconfirmed: late.clone(),
+            after: Duration::from_secs(2),
+        });
+
+        let mut call = owner.quiesce_managed_taps();
+        assert!((&mut call).now_or_never().is_none(), "the call is pending at once");
+        assert!(owner.latched(), "the latch is set as the call begins");
+        assert_eq!(
+            owner.journal().into_iter().map(|entry| entry.call).collect::<Vec<_>>(),
+            [super::TestOwnerCall::Quiesce(super::TestQuiesceOutcome::Late)]
+        );
+        clock.tick(Duration::from_secs(1));
+        assert!((&mut call).now_or_never().is_none(), "still pending before its delay");
+        assert!(owner.condemned().is_empty(), "nothing is condemned before the result");
+        clock.tick(Duration::from_secs(1));
+        let quiescence = (&mut call)
+            .now_or_never()
+            .expect("the result arrives once its delay has elapsed")
+            .expect("the late result is Ok");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<std::collections::BTreeSet<_>>(),
+            late
+        );
+        assert_eq!(owner.condemned(), late);
     }
 }

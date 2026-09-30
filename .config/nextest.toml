@@ -211,8 +211,23 @@ test-group = 'host-kernel-shared'
 # change. The proof lives in the `overdrive-sim` integration binary; the filter
 # names the test so it survives the move. No kernel state (the sim-composed
 # worker binds nothing), so no test group; widened budget only.
+# The body runs both default seeds (`186055177052160001`, `295032`), each on a
+# fresh node, so the budget covers two fills. One seed's fill ran 186.6 s on the
+# Lima VM in the phase-C run and about 280 s in the fix-pass run (G4-L06, both
+# before their RED verdict), so two fills plus five blocks need up to ~10 min
+# on a loaded VM; DELIVER 07-03 records the GREEN time.
 [[profile.default.overrides]]
 filter = 'package(overdrive-sim) & binary(integration) & test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)'
+slow-timeout = { period = "60s", terminate-after = 25 }
+
+# netns-density-295 S-ND295-57: the at-cap reclaim proof fills one simulated
+# node to the fixed 16,384 cap per seed through batched action-shim dispatch.
+# At RED the whole body takes 0.8 s (G4-L05); its GREEN cost (the at-cap reconcile
+# evaluations DELIVER 07-03 enables) is unmeasured, so it moved with its
+# every-path sibling into the `overdrive-sim` integration binary with a widened
+# budget until 07-03 records that time (DISTILL review M16). No kernel state.
+[[profile.default.overrides]]
+filter = 'package(overdrive-sim) & binary(integration) & test(a_not_yet_due_restart_keeps_its_predecessor_at_the_cap)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.default.overrides]]
@@ -535,6 +550,19 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 filter = 'package(overdrive-cli) & binary(integration) & test(a_killed_serve_reboot_reclaims_clears_stale_intercept_members_then_admits)'
 slow-timeout = { period = "60s", terminate-after = 6 }
 
+# netns-density-295 native fault evidence (S-ND295-30B, 62-64, 66, 67, 69): each
+# body boots several real guests (one behind the delayed-READY fixture's 20 s
+# hold), waits for the audit or the supervisor, and then tears every VM and
+# kernel object down through its RAII guards. Each body carries its own
+# documented inner bounds (the largest, S-ND295-30B (f), sums to about 590 s in
+# the worst case); this widens only the outer kill past them so a body's own
+# verdict and cleanup, not the harness, end the run. A failed body cannot hang
+# here: the VM poll fails fast on a terminal row and `TeardownBound` ends a
+# teardown that outlives 30 s. The binary is already in `host-kernel-shared`.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & (test(/shared_network_native_faults::/) | test(/intercept_mark_fail_closed::/))'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
 # `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
 # MODULE. Same TWO reasons as `vm_walking_skeleton.rs` immediately
@@ -717,12 +745,24 @@ test-group = 'host-kernel-shared'
 # node bridge `ovd-gbr0`, its bridge guard table, and the owner's bpffs pins —
 # the same node-global names the control-plane and CLI integration binaries
 # converge. It lives in the crate's library test binary because the host owner's
-# constructor is crate-private. Only this module of that binary touches kernel
-# state; every other library test is in-process and stays in the parallel pool,
-# so the module, not the whole library binary, joins the single-writer group
-# (matched by module path, so a new test in the module joins automatically).
+# constructor is crate-private. `testing.md` § "Node-global kernel state requires
+# a catch-all nextest group": a module filter is easy to leave stale when a new
+# kernel-touching test lands in the same binary, so the WHOLE library test
+# binary joins the single-writer group (DISTILL review B5). This serializes the
+# binary's in-process tests too; that cost is preferred to an unlisted fixture
+# erasing a sibling's live kernel state. (`overdrive-sim` enables
+# `overdrive-control-plane/integration-tests`, so this binary compiles the
+# kernel module in any feature-unified run.)
 [[profile.default.overrides]]
-filter = 'package(overdrive-control-plane) & kind(lib) & test(/shared_owner_link_address_kernel::/)'
+filter = 'package(overdrive-control-plane) & kind(lib)'
+test-group = 'host-kernel-shared'
+
+# GH #295 S-ND295-40: `overdrive-host`'s integration binary
+# (`vmm_tap_queue_errors.rs`, `kvm-tests`) creates real persistent TAPs and
+# launches Cloud Hypervisor through the production `create` path on the metal
+# host. Keep the whole binary in the single-writer domain (DISTILL review M4).
+[[profile.default.overrides]]
+filter = 'package(overdrive-host) & binary(integration)'
 test-group = 'host-kernel-shared'
 
 # Root system-conformance owns exported-handler composition plus typed host

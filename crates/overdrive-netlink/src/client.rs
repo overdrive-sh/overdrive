@@ -448,18 +448,25 @@ impl Client {
 
     /// Create or adopt a host bridge with the requested name.
     ///
-    /// A link already named `name`, of any kind, is adopted without a write.
-    /// Otherwise one bridge is created. `mac` is the link-layer address the
-    /// pinned contract creates the bridge with (REQ-295-LINKMAC); until DELIVER
-    /// step 05-00 it is unused, and a created bridge carries a kernel-assigned
-    /// address that the caller then sets.
+    /// The pinned contract (FD § "[REF] Managed-link identity independent of
+    /// host link configuration (fresh-host RCA) — pinned 2026-09-26; user
+    /// rulings of 2026-09-28", *Bridge creation contract*): with no link named
+    /// `name`, one `RTM_NEWLINK` creates the bridge administratively down with
+    /// link-layer address `mac` (`IFLA_ADDRESS`) from creation; a link already
+    /// named `name`, of any kind, is adopted without any write, and the
+    /// caller's read-back decides. Until DELIVER step 05-00 lands that create
+    /// message, `mac` is unused: a created bridge carries a kernel-assigned
+    /// address that the caller then sets. The adopt branch already behaves as
+    /// pinned.
     ///
     /// # Errors
     ///
     /// [`NetlinkError::Link`] with `op: "get"` for an `RTM_GETLINK` failure
     /// other than `ENODEV`, and with `op: "add-bridge"` for a refused create.
     pub async fn ensure_bridge(&self, name: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
-        // RED scaffold (REQ-295-LINKMAC): consumed in DELIVER step 05-00.
+        // RED scaffold (FD § "[REF] Managed-link identity independent of host
+        // link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings
+        // of 2026-09-28"): `mac` joins the create message in DELIVER step 05-00.
         let _ = mac;
         if self.observe_link(name).await?.is_none() {
             self.handle
@@ -1073,11 +1080,11 @@ impl Client {
     /// # Errors
     ///
     /// [`NetlinkError`] on a route-dump failure.
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-03")]
-    #[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 08-03")]
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-01")]
+    #[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 07-01")]
     pub async fn local_route_present(&self, table: u32, oif: &str) -> Result<bool, NetlinkError> {
         let _ = (table, oif);
-        todo!("RED scaffold: D-295-R15 local_route_present — DELIVER step 08-03")
+        todo!("RED scaffold: D-295-R15 local_route_present — DELIVER step 07-01")
     }
 
     /// Delete the unique local-default route through `oif` in `table`.

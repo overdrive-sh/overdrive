@@ -69,6 +69,15 @@ mod integration {
     /// binary with a nextest timeout override for this test alone.
     mod netns_density_node_admission;
 
+    /// netns-density-295 S-ND295-57 — seeded reclaim of leftover guest
+    /// networks across restart predecessors, stopped and deleted workloads,
+    /// and at the cap (D-295-R11). The at-cap body fills one node to the
+    /// fixed 16,384 cap through the production action shim for each of its
+    /// seeds; its GREEN run time is unmeasured until DELIVER 07-03, so it is
+    /// kept out of the default lane with a widened budget (the module doc).
+    /// Both bodies share one seam fixture, so the file lives in this binary.
+    mod netns_density_reclaim;
+
     /// built-in-ca (GH #28, ADR-0063 D9 review P2) — guards the `SimCa`
     /// fixture leaf cert↔key matched-pair invariant against silent
     /// desync (parses the fixture key/cert via `rcgen` / `x509-parser`,

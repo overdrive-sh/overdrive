@@ -16,6 +16,13 @@
 //! `SimDriver::inject_exit_after(.., Crashed)` ends a VM. Every row, lease
 //! transition, and projection the oracle reads is authored by production.
 //!
+//! The lease state is observed only through the pinned lease events
+//! `guest_network.lease_retired { alloc }` and `guest_network.lease_released
+//! { alloc }` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events)); the pool is crate-private. The
+//! in-process server runs on every worker thread of the multi-thread runtime,
+//! so the capture is the process's global subscriber; nextest runs one test
+//! per process, so exactly one test installs it.
+//!
 //! The convergence loop runs on an injected `SimClock` that the test advances.
 
 #![allow(
@@ -23,10 +30,11 @@
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
@@ -58,6 +66,8 @@ use overdrive_worker::mtls_intercept_port::{
 };
 use parking_lot::Mutex;
 use tempfile::TempDir;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use super::workload_lifecycle::wait::advance_and_settle;
 
@@ -82,6 +92,12 @@ fn injected_removal_error(source_addr: Ipv4Addr) -> InterceptError {
         ),
     }
 }
+
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
+/// unchanged by that step.
+type BoundListener = std::net::TcpListener;
 
 /// Test-local `MtlsIntercept` delegating to an inner `SimMtlsIntercept`;
 /// `remove_allocation_elements` fails with [`injected_removal_error`] while
@@ -111,7 +127,7 @@ impl RemovalFaultIntercept {
 }
 
 impl MtlsIntercept for RemovalFaultIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<std::net::TcpListener> {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> InterceptResult<BoundListener> {
         self.sim.bind_transparent(addr)
     }
 
@@ -166,6 +182,92 @@ impl MtlsIntercept for RemovalFaultIntercept {
         }
         self.sim.remove_allocation_elements(source_addr, destinations)
     }
+}
+
+// ---------------------------------------------------------------------------
+// The pinned lease events, captured process-wide.
+// ---------------------------------------------------------------------------
+
+/// The pinned event a lease retirement emits.
+const LEASE_RETIRED: &str = "guest_network.lease_retired";
+/// The pinned event a lease release emits.
+const LEASE_RELEASED: &str = "guest_network.lease_released";
+
+/// One pinned lease event as production emitted it: its name and the
+/// allocation its `alloc` field names (`None` when the event carried no
+/// `alloc` field, which [`assert_every_lease_event_names_an_allocation`]
+/// rejects).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LeaseEvent {
+    name: &'static str,
+    alloc: Option<String>,
+}
+
+#[derive(Default)]
+struct EventFields(BTreeMap<String, String>);
+
+impl tracing::field::Visit for EventFields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+/// Appends every `guest_network.lease_retired` / `lease_released` event, with
+/// its `alloc` field, to the process-wide log.
+struct LeaseEventLayer(Arc<Mutex<Vec<LeaseEvent>>>);
+
+impl<S: Subscriber> Layer<S> for LeaseEventLayer {
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        let name = match event.metadata().name() {
+            LEASE_RETIRED => LEASE_RETIRED,
+            LEASE_RELEASED => LEASE_RELEASED,
+            _ => return,
+        };
+        let mut fields = EventFields::default();
+        event.record(&mut fields);
+        let alloc = fields.0.remove("alloc");
+        self.0.lock().push(LeaseEvent { name, alloc });
+    }
+}
+
+/// The process-wide, append-only lease-event log, installed as the process's
+/// global subscriber on first use. Call it before boot so no event is missed.
+fn lease_event_log() -> &'static Arc<Mutex<Vec<LeaseEvent>>> {
+    static LOG: OnceLock<Arc<Mutex<Vec<LeaseEvent>>>> = OnceLock::new();
+    LOG.get_or_init(|| {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(LeaseEventLayer(Arc::clone(&log))),
+        )
+        .expect(
+            "the lease-event capture is this test process's one global subscriber \
+             (nextest runs one test per process)",
+        );
+        log
+    })
+}
+
+/// The lease events naming `alloc`, in emission order.
+fn lease_events_for(alloc: &str) -> Vec<&'static str> {
+    lease_event_log()
+        .lock()
+        .iter()
+        .filter(|event| event.alloc.as_deref() == Some(alloc))
+        .map(|event| event.name)
+        .collect()
+}
+
+/// Every captured lease event carries the pinned `alloc` field.
+fn assert_every_lease_event_names_an_allocation() {
+    let log = lease_event_log().lock().clone();
+    assert!(
+        log.iter().all(|event| event.alloc.is_some()),
+        "every pinned lease event names its allocation: {log:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -452,12 +554,22 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
 ///
 /// A crashed allocation (a `Failed` row whose lease is still admitted, before
 /// any cleanup begins) and an allocation being reclaimed (a `Failed` row whose
-/// reclaim cannot remove its protection members) are both reported
-/// `network_cleanup_pending: true`; once the reclaim succeeds the allocation is
-/// no longer pending.
+/// lease is Retiring because its reclaim cannot remove its protection members)
+/// are both reported `network_cleanup_pending: true`; once the reclaim succeeds
+/// the lease is released and the allocation is no longer pending.
+///
+/// The two pending states are told apart by the pinned lease events, never by
+/// the row: the crash state has no `guest_network.lease_retired` for the
+/// allocation (its lease is admitted), and the reclaim in progress has at
+/// least one `lease_retired` and no `lease_released` (its lease is Retiring)
+/// while the row reports pending. Whether a retry's `retire` of an
+/// already-Retiring lease emits `lease_retired` again is not pinned, so the
+/// retired events are not counted exactly; the release is.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER step 07-04 (S-ND295-59)"]
 async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
+    // Installed before boot so no lease event is missed.
+    lease_event_log();
     let node = Node::boot().await;
     node.submit(vm_job("cleanup-job")).await;
     let running = node
@@ -490,9 +602,17 @@ async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
         crashed_row.network_cleanup_pending,
         "a crashed allocation awaiting cleanup (Failed, admitted lease) is pending: {crashed_row:?}"
     );
+    assert_eq!(
+        lease_events_for(&alloc),
+        Vec::<&str>::new(),
+        "before any cleanup begins the crashed allocation's lease is admitted: no lease event \
+         names it"
+    );
 
     // AND WHEN the workload is stopped while its reclaim cannot remove the
-    // protection members, the allocation is being reclaimed.
+    // protection members, the allocation is being reclaimed: its lease is
+    // retired before the removal is attempted, and the failed removal keeps it
+    // Retiring.
     node.intercept.arm(true);
     node.stop("cleanup-job").await;
     let reclaiming = node
@@ -506,9 +626,15 @@ async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
         AllocStateWire::Failed,
         "a reclaim writes no row: {reclaiming_row:?}"
     );
+    let retiring = lease_events_for(&alloc);
+    assert!(
+        !retiring.is_empty() && retiring.iter().all(|name| *name == LEASE_RETIRED),
+        "the reclaim in progress holds the lease Retiring: lease_retired and no \
+         lease_released; got {retiring:?}"
+    );
     assert!(
         reclaiming_row.network_cleanup_pending,
-        "an allocation being reclaimed (retiring lease) is pending: {reclaiming_row:?}"
+        "an allocation being reclaimed (Retiring lease) is pending: {reclaiming_row:?}"
     );
 
     // THEN once a reclaim succeeds the lease is released and nothing is pending.
@@ -522,5 +648,16 @@ async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
         row(&released, &alloc).is_some_and(|row| !row.network_cleanup_pending),
         "a released allocation is not pending: {released:?}"
     );
+    // FD pins that `retire` emits `lease_retired`, not whether a retry's
+    // `retire` of the already-Retiring lease emits it again, so only the
+    // release is counted exactly.
+    let settled = lease_events_for(&alloc);
+    assert!(
+        settled.len() >= 2
+            && settled.last() == Some(&LEASE_RELEASED)
+            && settled[..settled.len() - 1].iter().all(|name| *name == LEASE_RETIRED),
+        "the successful reclaim releases the Retiring lease exactly once, last; got {settled:?}"
+    );
+    assert_every_lease_event_names_an_allocation();
     node.shutdown().await;
 }

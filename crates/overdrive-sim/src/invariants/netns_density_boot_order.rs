@@ -23,6 +23,7 @@
 mod tests {
     use std::collections::BTreeSet;
     use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::ops::Range;
     use std::path::PathBuf;
     use std::sync::{Arc, OnceLock};
     use std::time::Duration;
@@ -331,13 +332,81 @@ mod tests {
         calls.iter().enumerate().skip(from).find(|(_, recorded)| wanted(&recorded.call))
     }
 
-    /// The R12 intercept chain: sweep ≺ `converge_allocation_elements(∅)` ≺
+    /// Fails the chain when a call `forbidden` accepts was recorded at an index
+    /// in `before`, whose end is the index of the chain step `step` that must
+    /// precede every such call.
+    fn forbid_before(
+        seed: u64,
+        calls: &[RecordedCall],
+        before: Range<usize>,
+        step: &str,
+        forbidden: impl Fn(&InterceptCall) -> bool,
+    ) {
+        let end = before.end;
+        if let Some((early, recorded)) = calls
+            .iter()
+            .enumerate()
+            .take(before.end)
+            .skip(before.start)
+            .find(|(_, recorded)| forbidden(&recorded.call))
+        {
+            chain_failure(
+                seed,
+                calls,
+                &format!("{} (#{early}) ran before {step} (#{end})", recorded.call),
+            );
+        }
+    }
+
+    /// The R12 intercept chain: sweep ≺ the shared owner's `converge_shared`
+    /// (step 5, the bridge) ≺ `converge_allocation_elements(∅)` ≺
     /// `observe_shared` ≺ `converge_shared(prior, F, C)` ≺
-    /// `observe_shared_state` (zero members), every call BootClosed. Returns
-    /// the index of the read-back that ends the chain.
+    /// `observe_shared_state` (zero members), every call BootClosed. The order
+    /// is relative, not merely "some later call exists": no `observe_shared`
+    /// or `converge_shared` call precedes the stale-member clear, and no
+    /// `converge_shared` call precedes the `observe_shared` that captured its
+    /// prior identity (FD § "[REF] Boot ordering (D-295-R12)" steps 6.2 to
+    /// 6.5). Returns the index of the read-back that ends the chain.
     fn assert_boot_chain(
         seed: u64,
         calls: &[RecordedCall],
+        owner_ops: &[GuestNetworkOperation],
+        sweep_index: usize,
+        seeded: &InterceptMembers,
+    ) -> usize {
+        let clear = assert_stale_member_clear(seed, calls, owner_ops, sweep_index, seeded);
+
+        let Some((observe, observe_call)) =
+            next_call(calls, clear + 1, |call| matches!(call, InterceptCall::ObserveShared { .. }))
+        else {
+            chain_failure(
+                seed,
+                calls,
+                &format!("no observe_shared call after the stale-member clear (#{clear})"),
+            );
+        };
+        forbid_before(
+            seed,
+            calls,
+            clear + 1..observe,
+            "observe_shared, which captures the prior identity converge_shared must be given",
+            |call| matches!(call, InterceptCall::ConvergeShared { .. }),
+        );
+        let InterceptCall::ObserveShared { observed: Ok(prior) } = &observe_call.call else {
+            chain_failure(seed, calls, &format!("observe_shared (#{observe}) failed"));
+        };
+        assert_converge_and_read_back(seed, calls, observe, prior.as_ref())
+    }
+
+    /// Chain step 6.2: the first `converge_allocation_elements(∅)` began after
+    /// the owner's sweep and after the owner's `converge_shared` (step 5,
+    /// `BridgeConverge`) that follows the sweep, and no `observe_shared` or
+    /// `converge_shared` call precedes it (FD § "[REF] Boot ordering
+    /// (D-295-R12)" steps 4, 5, 6.2). Returns its index.
+    fn assert_stale_member_clear(
+        seed: u64,
+        calls: &[RecordedCall],
+        owner_ops: &[GuestNetworkOperation],
         sweep_index: usize,
         seeded: &InterceptMembers,
     ) -> usize {
@@ -368,20 +437,50 @@ mod tests {
                 ),
             );
         }
-
-        let Some((observe, observe_call)) =
-            next_call(calls, clear + 1, |call| matches!(call, InterceptCall::ObserveShared { .. }))
-        else {
+        let bridge_converge = owner_ops
+            .iter()
+            .enumerate()
+            .skip(sweep_index + 1)
+            .find(|(_, operation)| **operation == GuestNetworkOperation::BridgeConverge)
+            .map(|(index, _)| index);
+        if bridge_converge.is_none_or(|index| index >= clear_call.owner_calls) {
             chain_failure(
                 seed,
                 calls,
-                &format!("no observe_shared call after the stale-member clear (#{clear})"),
+                &format!(
+                    "the shared owner's converge_shared (R12 step 5) must run after the sweep \
+                     (owner call {sweep_index}) and before the stale-member clear (#{clear}, \
+                     which began with {} owner calls recorded); first BridgeConverge after the \
+                     sweep: owner call {bridge_converge:?}; owner calls: {owner_ops:?}",
+                    clear_call.owner_calls
+                ),
             );
-        };
-        let InterceptCall::ObserveShared { observed: Ok(prior) } = &observe_call.call else {
-            chain_failure(seed, calls, &format!("observe_shared (#{observe}) failed"));
-        };
+        }
+        forbid_before(
+            seed,
+            calls,
+            0..clear,
+            "the stale-member clear, which must precede every read or convergence of the program",
+            |call| {
+                matches!(
+                    call,
+                    InterceptCall::ObserveShared { .. } | InterceptCall::ConvergeShared { .. }
+                )
+            },
+        );
+        clear
+    }
 
+    /// Chain steps 6.5 and 6.6, after the `observe_shared` at `observe` that
+    /// captured `prior`: `converge_shared` is given that identity, the
+    /// read-back observes the program with zero members, and every call up to
+    /// the read-back ran BootClosed. Returns the read-back's index.
+    fn assert_converge_and_read_back(
+        seed: u64,
+        calls: &[RecordedCall],
+        observe: usize,
+        prior: Option<&InterceptPostcondition>,
+    ) -> usize {
         let Some((converge, converge_call)) = next_call(calls, observe + 1, |call| {
             matches!(call, InterceptCall::ConvergeShared { .. })
         }) else {
@@ -394,7 +493,7 @@ mod tests {
         let InterceptCall::ConvergeShared { prior: passed, .. } = &converge_call.call else {
             unreachable!("the search matched a ConvergeShared call");
         };
-        if passed != prior {
+        if passed.as_ref() != prior {
             chain_failure(
                 seed,
                 calls,
@@ -543,7 +642,8 @@ mod tests {
             );
         }
 
-        let read_back = assert_boot_chain(seed, &recorded, sweep.call_index, &intercept.seeded);
+        let read_back =
+            assert_boot_chain(seed, &recorded, &calls, sweep.call_index, &intercept.seeded);
         assert!(
             opened,
             "seed={seed}: the EXEC gate is still BootClosed after boot returned; it must open \

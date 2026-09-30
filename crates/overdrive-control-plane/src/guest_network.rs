@@ -6219,6 +6219,8 @@ mod allocation_owner_acceptance {
         faults: parking_lot::Mutex<Vec<LeafFault>>,
         hooks: parking_lot::Mutex<Vec<NodeHook>>,
         guard_expectations: parking_lot::Mutex<Vec<BTreeSet<String>>>,
+        /// Async leaves that never complete once reached (journaled first).
+        hangs: parking_lot::Mutex<BTreeSet<AllocationCall>>,
     }
 
     impl FakeAttachmentKernel {
@@ -6229,7 +6231,28 @@ mod allocation_owner_acceptance {
                 faults: parking_lot::Mutex::new(Vec::new()),
                 hooks: parking_lot::Mutex::new(Vec::new()),
                 guard_expectations: parking_lot::Mutex::new(Vec::new()),
+                hangs: parking_lot::Mutex::new(BTreeSet::new()),
             })
+        }
+
+        /// Every later `call` is journaled (as writing nothing) and then never
+        /// completes: a leaf whose kernel request never returns.
+        fn hang_always(&self, call: AllocationCall) {
+            self.hangs.lock().insert(call);
+        }
+
+        /// Journal `call` and park forever when it is armed to hang; return
+        /// when it is not.
+        async fn hang_if_armed(&self, call: AllocationCall, tap: &str) {
+            let hangs = self.hangs.lock().contains(&call);
+            if hangs {
+                self.journal.lock().push(KernelCall {
+                    call,
+                    tap: Some(tap.to_owned()),
+                    wrote: false,
+                });
+                std::future::pending::<()>().await;
+            }
         }
 
         fn node(&self) -> FakeNode {
@@ -6303,6 +6326,13 @@ mod allocation_owner_acceptance {
             self.arm(call, None, Some(after), None, false);
         }
 
+        /// Fail the first `call` naming `tap` that follows an `after` call
+        /// naming the same `tap` (for example the read-back that follows a
+        /// TAP's own set-down).
+        fn fail_once_for_after(&self, after: AllocationCall, call: AllocationCall, tap: &str) {
+            self.arm(call, Some(tap), Some(after), None, false);
+        }
+
         fn clear_faults(&self) {
             self.faults.lock().clear();
         }
@@ -6335,7 +6365,16 @@ mod allocation_owner_acceptance {
                     continue;
                 }
                 let since = &journal[fault.armed_at..];
-                if fault.after.is_some_and(|after| !since.iter().any(|prior| prior.call == after)) {
+                // A TAP-scoped fault waits for an `after` call on its own TAP.
+                if fault.after.is_some_and(|after| {
+                    !since.iter().any(|prior| {
+                        prior.call == after
+                            && fault
+                                .tap
+                                .as_deref()
+                                .is_none_or(|wanted| prior.tap.as_deref() == Some(wanted))
+                    })
+                }) {
                     continue;
                 }
                 if let Some(nth) = fault.nth {
@@ -6476,6 +6515,7 @@ mod allocation_owner_acceptance {
             plan: &GuestNetworkPlan,
         ) -> std::result::Result<(), NetlinkError> {
             let tap = plan.assignment().tap.clone();
+            self.hang_if_armed(AllocationCall::SetTapDown, &tap).await;
             self.leaf(AllocationCall::SetTapDown, Some(&tap), netlink_failure, |node| {
                 let entry = node
                     .taps
@@ -7834,8 +7874,15 @@ mod allocation_owner_acceptance {
         let healthy_fixture = TwoAttachments::active().await;
         let named_tap = tap_of(&healthy_fixture.named);
         let unrelated_before = healthy_fixture.unrelated_parts();
-        let unrelated_lease =
-            healthy_fixture.pool.snapshot()[healthy_fixture.unrelated.alloc()].clone();
+        let leases_before = healthy_fixture.pool.snapshot();
+        assert_eq!(
+            leases_before.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                healthy_fixture.named.alloc().clone(),
+                healthy_fixture.unrelated.alloc().clone()
+            ]),
+            "the precondition: both allocations hold their leases"
+        );
         let mark = healthy_fixture.kernel.mark();
         healthy_fixture
             .owner
@@ -7890,11 +7937,11 @@ mod allocation_owner_acceptance {
             "the final guard read-back expects exactly the unrelated TAP"
         );
 
-        // The caller releases the lease only after `Ok`; the unrelated lease is untouched.
-        healthy_fixture.pool.release(healthy_fixture.named.alloc());
+        // Teardown releases no lease: releasing is its caller's, after `Ok`.
         assert_eq!(
             healthy_fixture.pool.snapshot(),
-            BTreeMap::from([(healthy_fixture.unrelated.alloc().clone(), unrelated_lease)])
+            leases_before,
+            "the owner's teardown leaves both leases as they were"
         );
 
         let repeat = healthy_fixture.kernel.mark();
@@ -9103,11 +9150,14 @@ mod allocation_owner_acceptance {
     /// past a TAP that is gone (`Netlink { TapSetDown }`) and one that stays
     /// up (`PostconditionMismatch`); it reports exactly those as unconfirmed
     /// and condemns them, confirms the rest, and never touches a
-    /// provisioned-down TAP. A repeat while latched reports nothing and does
-    /// no I/O. Restore raises only the confirmed TAPs; condemned allocations
-    /// stay refused. Teardown accepts quiesced and condemned allocations. A
-    /// whole-call failure (no netlink socket) is `Err`: the latch is set, but
-    /// no allocation is condemned or moved.
+    /// provisioned-down TAP. A repeat while latched with no allocation still
+    /// `Active` reports nothing and does no I/O. Restore raises only the
+    /// confirmed TAPs; condemned allocations stay refused. Teardown accepts
+    /// quiesced and condemned allocations. A netlink session failure
+    /// (`NetlinkError::Connect`) on each TAP is classified per TAP (DR-08
+    /// (b)-A): the pass returns `Ok`, every such TAP is unconfirmed with
+    /// `Netlink { operation: TapSetDown, source: Connect }` and condemned, and
+    /// the latch is set.
     #[tokio::test]
     #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
     async fn quiescence_reports_every_unconfirmed_tap_and_condemns_it() {
@@ -9220,44 +9270,450 @@ mod allocation_owner_acceptance {
         assert!(kernel.node().parts(&gone.assignment().tap, gone_ifindex).is_empty());
         assert!(kernel.node().parts(&stuck.assignment().tap, stuck_ifindex).is_empty());
 
-        // Whole-call failure: no netlink socket can be opened.
+        // A netlink session failure on every TAP (DR-08 (b)-A): each set-down
+        // fails with the fake's `netlink_failure()`, `NetlinkError::Connect`.
+        // It is that TAP's own failure, so the pass continues and returns `Ok`.
         let kernel = FakeAttachmentKernel::healthy();
         let owner = owner_over(&kernel);
-        let first = scratch_plan("nd295-s51-q-whole-first", "t295-w1", 2);
-        let second = scratch_plan("nd295-s51-q-whole-second", "t295-w2", 3);
-        let pending = scratch_plan("nd295-s51-q-whole-pending", "t295-w3", 4);
+        let first = scratch_plan("nd295-s51-q-session-first", "t295-w1", 2);
+        let second = scratch_plan("nd295-s51-q-session-second", "t295-w2", 3);
+        let pending = scratch_plan("nd295-s51-q-session-pending", "t295-w3", 4);
         activated(&owner, &first).await;
         activated(&owner, &second).await;
         provisioned(&owner, &pending).await;
         kernel.fail_always(AllocationCall::SetTapDown);
-        let error =
-            owner.quiesce_managed_taps().await.expect_err("per-TAP outcomes are undetermined");
-        assert!(
-            matches!(
-                &error,
-                GuestNetworkError::Netlink { source: NetlinkError::Connect { .. }, .. }
-            ),
-            "{error:?}"
-        );
-        let node = kernel.node();
-        assert!(node.taps[&first.assignment().tap].up && node.taps[&second.assignment().tap].up);
+        let mark = kernel.mark();
+        let quiescence = owner
+            .quiesce_managed_taps()
+            .await
+            .expect("a netlink session failure is one TAP's outcome, never a whole-call Err");
         assert_eq!(
-            owner.activate(&pending).await.expect("the latch is set"),
-            TapActivation::QuiescenceLatched
+            quiescence.unconfirmed.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([first.alloc().clone(), second.alloc().clone()]),
+            "every Active TAP whose set-down could not obtain a session is unconfirmed"
         );
+        for plan in [&first, &second] {
+            let entry = &quiescence.unconfirmed[plan.alloc()];
+            assert!(
+                matches!(
+                    entry,
+                    GuestNetworkError::Netlink {
+                        operation: GuestNetworkOperation::TapSetDown,
+                        source: NetlinkError::Connect { .. },
+                    }
+                ),
+                "{}: the entry is Netlink {{ operation: TapSetDown, source: Connect }}, got {entry:?}",
+                plan.alloc()
+            );
+        }
+        let trace = kernel.trace_since(mark);
+        for plan in [&first, &second] {
+            assert!(
+                trace.contains(&(AllocationCall::SetTapDown, tap_of(plan))),
+                "both set-downs are attempted: the pass continues past the first: {trace:?}"
+            );
+        }
+        assert!(
+            !trace.iter().any(|(_, tap)| *tap == tap_of(&pending)),
+            "the provisioned-down TAP is untouched: {trace:?}"
+        );
+        assert_eq!(
+            owner.activate(&pending).await.expect("a latched activation is not a failure"),
+            TapActivation::QuiescenceLatched,
+            "the latch is set"
+        );
+
         kernel.clear_faults();
         let restore = kernel.mark();
-        owner.restore_quiesced_taps().await.expect("nothing was quiesced");
-        assert_eq!(kernel.mutations_since(restore), Vec::new(), "no allocation moved to quiesced");
-        let idempotent = kernel.mark();
-        assert_eq!(owner.activate(&first).await.expect("still active"), TapActivation::Raised);
-        assert_eq!(kernel.mutations_since(idempotent), Vec::new(), "still active, not condemned");
-        assert_eq!(owner.activate(&pending).await.expect("latch cleared"), TapActivation::Raised);
-        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
-        assert!(
-            quiescence.unconfirmed.is_empty(),
-            "no allocation was condemned by the whole-call failure"
+        owner
+            .restore_quiesced_taps()
+            .await
+            .expect("a restore with nothing quiesced clears the latch");
+        assert_eq!(
+            kernel.mutations_since(restore),
+            Vec::new(),
+            "neither condemned TAP is raised: nothing was confirmed down"
         );
+        for plan in [&first, &second] {
+            let before = kernel.node();
+            let refused = kernel.mark();
+            let refusal =
+                owner.activate(plan).await.expect_err("an unconfirmed allocation is condemned");
+            assert_refused_as_missing_record(&refusal, plan);
+            assert_eq!(kernel.mutations_since(refused), Vec::new(), "the refusal writes nothing");
+            assert_eq!(kernel.node(), before);
+        }
+        assert_eq!(
+            owner.activate(&pending).await.expect("the latch is cleared"),
+            TapActivation::Raised
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A netlink session failure is one TAP's failure wherever it strikes
+    /// (DR-08 (b)-A). A set-down that lands but whose read-back cannot obtain
+    /// a session (`NetlinkError::Connect`) leaves that TAP unconfirmed with
+    /// `Netlink { operation: TapSetDown, source: Connect }` and condemned,
+    /// while the other TAP is confirmed. In a mixed pass, a `Connect` set-down
+    /// after another TAP's failure of a different kind (a TAP gone out of
+    /// band, `LinkAbsent`) leaves both unconfirmed, each with its own cause,
+    /// and the pass still confirms the TAP after them. Restore raises only
+    /// the confirmed TAPs; the unconfirmed ones stay refused.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn a_netlink_session_failure_is_one_taps_unconfirmed_entry_and_the_pass_continues() {
+        // The read-back of one TAP cannot obtain a session.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let lost = scratch_plan("nd295-s51-rb-a", "t295-rba", 2);
+        let confirmed = scratch_plan("nd295-s51-rb-b", "t295-rbb", 3);
+        activated(&owner, &lost).await;
+        activated(&owner, &confirmed).await;
+        kernel.fail_once_for_after(
+            AllocationCall::SetTapDown,
+            AllocationCall::ObserveTap,
+            &lost.assignment().tap,
+        );
+        let mark = kernel.mark();
+        let quiescence = owner
+            .quiesce_managed_taps()
+            .await
+            .expect("a read-back session failure is one TAP's outcome");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
+            vec![lost.alloc().clone()],
+            "only the TAP whose read-back failed is unconfirmed"
+        );
+        let entry = &quiescence.unconfirmed[lost.alloc()];
+        assert!(
+            matches!(
+                entry,
+                GuestNetworkError::Netlink {
+                    operation: GuestNetworkOperation::TapSetDown,
+                    source: NetlinkError::Connect { .. },
+                }
+            ),
+            "the read-back session failure is Netlink {{ operation: TapSetDown, source: Connect }}, got {entry:?}"
+        );
+        let trace = kernel.trace_since(mark);
+        let set_down = trace
+            .iter()
+            .position(|entry| *entry == (AllocationCall::SetTapDown, tap_of(&lost)))
+            .expect("the unconfirmed TAP was set down");
+        assert!(
+            trace[set_down..].contains(&(AllocationCall::ObserveTap, tap_of(&lost))),
+            "the failed call is the read-back after the set-down: {trace:?}"
+        );
+        let node = kernel.node();
+        assert!(
+            !node.taps[&lost.assignment().tap].up,
+            "the set-down itself landed; only its confirmation failed"
+        );
+        assert!(!node.taps[&confirmed.assignment().tap].up, "the other TAP is confirmed down");
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("the confirmed TAP comes up");
+        let raised = kernel
+            .trace_since(restore)
+            .into_iter()
+            .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+            .map(|(_, tap)| tap)
+            .collect::<Vec<_>>();
+        assert_eq!(raised, vec![tap_of(&confirmed)], "only the confirmed TAP is raised");
+        let refusal =
+            owner.activate(&lost).await.expect_err("an unconfirmed allocation is condemned");
+        assert_refused_as_missing_record(&refusal, &lost);
+
+        // Mixed pass. In `AllocationId` order the `Connect` set-down follows
+        // the gone TAP's failure, and a TAP still to be confirmed follows both.
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let gone = scratch_plan("nd295-s51-mix-a", "t295-mxa", 2);
+        let session = scratch_plan("nd295-s51-mix-b", "t295-mxb", 3);
+        let confirmed = scratch_plan("nd295-s51-mix-c", "t295-mxc", 4);
+        for plan in [&gone, &session, &confirmed] {
+            activated(&owner, plan).await;
+        }
+        let gone_ifindex = kernel.node().taps[&gone.assignment().tap].ifindex;
+        kernel.with_node(|node| {
+            node.remove_part(AttachmentPart::Tap, &gone.assignment().tap, gone_ifindex);
+        });
+        kernel.fail_once_for(AllocationCall::SetTapDown, &session.assignment().tap);
+        let mark = kernel.mark();
+        let quiescence = owner
+            .quiesce_managed_taps()
+            .await
+            .expect("every failure of one TAP is that TAP's outcome");
+        assert_eq!(
+            quiescence.unconfirmed.keys().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([gone.alloc().clone(), session.alloc().clone()]),
+            "both failing TAPs are unconfirmed"
+        );
+        let gone_entry = &quiescence.unconfirmed[gone.alloc()];
+        assert!(
+            matches!(
+                gone_entry,
+                GuestNetworkError::Netlink {
+                    operation: GuestNetworkOperation::TapSetDown,
+                    source: NetlinkError::LinkAbsent { .. },
+                }
+            ),
+            "the gone TAP keeps its own cause: {gone_entry:?}"
+        );
+        let session_entry = &quiescence.unconfirmed[session.alloc()];
+        assert!(
+            matches!(
+                session_entry,
+                GuestNetworkError::Netlink {
+                    operation: GuestNetworkOperation::TapSetDown,
+                    source: NetlinkError::Connect { .. },
+                }
+            ),
+            "the session failure keeps its own cause: {session_entry:?}"
+        );
+        let trace = kernel.trace_since(mark);
+        for plan in [&gone, &session, &confirmed] {
+            assert!(
+                trace.contains(&(AllocationCall::SetTapDown, tap_of(plan))),
+                "the pass continues past both failures: {trace:?}"
+            );
+        }
+        assert!(
+            !kernel.node().taps[&confirmed.assignment().tap].up,
+            "the TAP after the failures is confirmed down"
+        );
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("the confirmed TAP comes up");
+        let raised = kernel
+            .trace_since(restore)
+            .into_iter()
+            .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+            .map(|(_, tap)| tap)
+            .collect::<Vec<_>>();
+        assert_eq!(raised, vec![tap_of(&confirmed)], "only the confirmed TAP is raised");
+        for plan in [&gone, &session] {
+            let refusal =
+                owner.activate(plan).await.expect_err("an unconfirmed allocation is condemned");
+            assert_refused_as_missing_record(&refusal, plan);
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A repeat quiescence while latched sets down what a part-way restore
+    /// raised (the owner half of the re-quiescence after a part-way restore,
+    /// user-approved 2026-09-30). Both `Active` TAPs are confirmed down; a
+    /// restore whose second set-up fails raises the first again (`Active`),
+    /// keeps the second `QuiescedActive`, and keeps the latch; the repeat
+    /// quiescence sets the raised TAP down and reads it back, gives the
+    /// still-quiesced TAP no I/O, reports nothing unconfirmed, and keeps the
+    /// latch. The re-quiesced allocation is `QuiescedActive` again: the next
+    /// restore raises both, in `AllocationId` order, and clears the latch.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    async fn a_repeat_quiescence_while_latched_sets_down_what_a_partial_restore_raised() {
+        let kernel = FakeAttachmentKernel::healthy();
+        let owner = owner_over(&kernel);
+        let first = scratch_plan("nd295-s51-rq-a", "t295-rqa", 2);
+        let second = scratch_plan("nd295-s51-rq-b", "t295-rqb", 3);
+        let waiting = scratch_plan("nd295-s51-rq-waiting", "t295-rqw", 4);
+        activated(&owner, &first).await;
+        activated(&owner, &second).await;
+        provisioned(&owner, &waiting).await;
+
+        let quiescence = owner.quiesce_managed_taps().await.expect("per-TAP outcomes are known");
+        assert!(quiescence.unconfirmed.is_empty(), "both TAPs are confirmed down");
+        let node = kernel.node();
+        assert!(
+            !node.taps[&first.assignment().tap].up && !node.taps[&second.assignment().tap].up,
+            "the precondition: both Active TAPs are quiesced"
+        );
+
+        kernel.fail_once_for(AllocationCall::SetTapUp, &second.assignment().tap);
+        let error =
+            owner.restore_quiesced_taps().await.expect_err("the second set-up fails the restore");
+        assert!(is_netlink_failure(&error, GuestNetworkOperation::TapSetUp), "{error:?}");
+        let node = kernel.node();
+        assert!(node.taps[&first.assignment().tap].up, "the restore raised the first TAP again");
+        assert!(!node.taps[&second.assignment().tap].up, "the second stays quiesced");
+        assert_eq!(
+            owner.activate(&waiting).await.expect("a latched activation is not a failure"),
+            TapActivation::QuiescenceLatched,
+            "the failed restore keeps the latch"
+        );
+
+        let repeat = kernel.mark();
+        let again = owner.quiesce_managed_taps().await.expect("a repeat while latched");
+        let trace = kernel.trace_since(repeat);
+        assert!(
+            again.unconfirmed.is_empty(),
+            "the raised TAP is confirmed down, so nothing is unconfirmed: {:?}",
+            again.unconfirmed
+        );
+        let set_down = trace
+            .iter()
+            .position(|entry| *entry == (AllocationCall::SetTapDown, tap_of(&first)))
+            .expect("the repeat sets the TAP the restore raised down again");
+        assert!(
+            trace[set_down..].contains(&(AllocationCall::ObserveTap, tap_of(&first))),
+            "and reads it back: {trace:?}"
+        );
+        assert!(
+            !trace.iter().any(|(_, tap)| *tap == tap_of(&second)),
+            "the still-quiesced TAP gets no I/O: {trace:?}"
+        );
+        assert!(
+            !trace.iter().any(|(_, tap)| *tap == tap_of(&waiting)),
+            "the provisioned-down TAP is untouched: {trace:?}"
+        );
+        assert!(!kernel.node().taps[&first.assignment().tap].up, "the raised TAP is down again");
+        assert_eq!(
+            owner.activate(&waiting).await.expect("a latched activation is not a failure"),
+            TapActivation::QuiescenceLatched,
+            "the latch stays set"
+        );
+
+        let restore = kernel.mark();
+        owner.restore_quiesced_taps().await.expect("both quiesced TAPs come up");
+        let raised = kernel
+            .trace_since(restore)
+            .into_iter()
+            .filter(|(call, _)| *call == AllocationCall::SetTapUp)
+            .map(|(_, tap)| tap)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            raised,
+            vec![tap_of(&first), tap_of(&second)],
+            "the re-quiesced allocation is QuiescedActive again, raised in AllocationId order"
+        );
+        assert_eq!(
+            owner.activate(&waiting).await.expect("activation after the restore"),
+            TapActivation::Raised,
+            "the latch is cleared"
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
+    /// S-ND295-51 — Only the protected TAP is raised, and quiescence accounts for every TAP
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The bound applies to every adapter (pinned 2026-09-30): the call makes
+    /// no synchronous blocking wait on the task that awaits it. A quiescence
+    /// whose set-down never completes stays pending in that leaf while the
+    /// thread keeps running, so a caller racing it against its bound on a
+    /// `SimClock` sees the bound fire and drops the pending call. The latch
+    /// was set before that first mutation, and the dropped call leaves the
+    /// owner answering: an activation of a provisioned-down allocation
+    /// reports `QuiescenceLatched` and writes nothing. The race runs on its
+    /// own current-thread runtime; a blocking implementation stalls that
+    /// thread, so the bound can never fire, and the wall-clock watchdog turns
+    /// the stall into a failure instead of a hung suite.
+    #[test]
+    #[ignore = "pending DELIVER step 06-04 (S-ND295-51)"]
+    fn a_quiescence_whose_set_down_never_completes_is_a_bound_miss_not_a_blocked_caller() {
+        /// The quiescence bound the caller races; any positive value.
+        const BOUND: std::time::Duration = std::time::Duration::from_secs(1);
+        /// Scheduler turns the ticker waits for the pass to reach its
+        /// set-down before it fires the bound regardless.
+        const YIELD_BUDGET: usize = 1_000;
+        /// Harness guard: how long the awaiting thread may stay stalled.
+        const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(30);
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let racer = std::thread::Builder::new()
+            .name("nd295-s51-quiesce-bound".to_owned())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .expect("a current-thread runtime for the awaiting task");
+                runtime.block_on(async {
+                    let kernel = FakeAttachmentKernel::healthy();
+                    let owner = owner_over(&kernel);
+                    let active = scratch_plan("nd295-s51-nb-active", "t295-nba", 2);
+                    let waiting = scratch_plan("nd295-s51-nb-waiting", "t295-nbw", 3);
+                    activated(&owner, &active).await;
+                    provisioned(&owner, &waiting).await;
+                    kernel.hang_always(AllocationCall::SetTapDown);
+                    let mark = kernel.mark();
+
+                    let clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
+                    let ticker = {
+                        let clock = Arc::clone(&clock);
+                        let kernel = Arc::clone(&kernel);
+                        tokio::spawn(async move {
+                            for _ in 0..YIELD_BUDGET {
+                                if kernel
+                                    .trace_since(mark)
+                                    .iter()
+                                    .any(|(call, _)| *call == AllocationCall::SetTapDown)
+                                {
+                                    break;
+                                }
+                                tokio::task::yield_now().await;
+                            }
+                            clock.tick(BOUND);
+                        })
+                    };
+                    let raced = {
+                        let mut quiescence = owner.quiesce_managed_taps();
+                        let bound =
+                            overdrive_core::traits::clock::Clock::sleep(clock.as_ref(), BOUND);
+                        tokio::select! {
+                            biased;
+                            result = &mut quiescence => Some(format!("{result:?}")),
+                            () = bound => None,
+                        }
+                    };
+                    ticker.await.expect("the ticker fires the bound");
+                    assert_eq!(
+                        raced, None,
+                        "a set-down that never completes keeps the call pending until its bound"
+                    );
+                    let mutations = kernel.mutations_since(mark);
+                    assert_eq!(
+                        mutations,
+                        vec![KernelCall {
+                            call: AllocationCall::SetTapDown,
+                            tap: tap_of(&active),
+                            wrote: false,
+                        }],
+                        "the pass is pending in the Active TAP's set-down and nothing else ran"
+                    );
+                    let answered = kernel.mark();
+                    assert_eq!(
+                        owner
+                            .activate(&waiting)
+                            .await
+                            .expect("the owner answers after the pending call is dropped"),
+                        TapActivation::QuiescenceLatched,
+                        "the latch was set before the first mutation"
+                    );
+                    assert_eq!(
+                        kernel.mutations_since(answered),
+                        Vec::new(),
+                        "the latched activation writes nothing"
+                    );
+                });
+                done_tx.send(()).expect("the watchdog waits for the verdict");
+                runtime.shutdown_background();
+            })
+            .expect("spawn the awaiting thread");
+
+        match done_rx.recv_timeout(WATCHDOG) {
+            Ok(()) => racer.join().expect("the awaiting thread ends after its verdict"),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!(
+                "the quiescence call blocked the thread that awaits it for {WATCHDOG:?}: its \
+                 bound could never fire"
+            ),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => match racer.join() {
+                Ok(()) => panic!("the awaiting thread ended without a verdict"),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
+        }
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH

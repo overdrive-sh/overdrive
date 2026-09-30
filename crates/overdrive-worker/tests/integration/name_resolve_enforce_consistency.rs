@@ -25,13 +25,19 @@
 //! ## What this AT proves (the single-source consistency oracle)
 //!
 //!   1. **Capture + recover** — the netns workload's `connect(B)` ingresses
-//!      vethH → PREROUTING → egress nft-TPROXY redirect → leg-F (IP_TRANSPARENT,
-//!      bound through the `MtlsIntercept` port, `HostMtlsIntercept::bind_transparent`)
+//!      vethH, where the guest TCX ingress classifier stamps the intercept mark
+//!      `0x295a` on the guest's TCP → PREROUTING → the production shared
+//!      program's rule 1 (the workload's source admitted by `install_outbound`,
+//!      the program converged by `converge_shared`; composed on the veth by the
+//!      shared fixture `SharedOutboundDivert` in `mtls_intercept_install.rs`,
+//!      with no per-interface rule) TPROXYs it → leg-F (IP_TRANSPARENT, bound
+//!      through the `MtlsIntercept` port, `HostMtlsIntercept::bind_transparent`)
 //!      → the port listener's accept (read through the `LegListener` bridge,
 //!      `leg_listener.rs`) recovers orig_dst via `getsockname` as the accepted
 //!      connection's `local`. The recovered orig_dst == **B** (the known
 //!      `service_backends` addr the workload dialed; a wrong recovery would
-//!      classify the wrong arm). This is the 03-03 / 05-01 capture half, reused.
+//!      classify the wrong arm), and the classifier's intercept count advances
+//!      with the dial. This is the 03-03 / 05-01 capture half, reused.
 //!   2. **Resolve recognizes the SAME addr** — feed the `getsockname`-recovered
 //!      **B** to `SimMtlsResolve.resolve(B)` (scripted with B → `Mesh`) and it
 //!      returns `Mesh(ResolvedBackend { addr: B, expected_svid: None })`. The
@@ -80,7 +86,7 @@
 //! it is the in-binary pair to the kernel AT, not the default-lane coverage.
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (IP_TRANSPARENT, nft, ip netns,
-//! ip rule, writing `/etc/netns/`). A non-root run SKIPs. Run via
+//! ip rule, BPF TCX attach, writing `/etc/netns/`); the body asserts it. Run via
 //! `cargo xtask lima run -- cargo nextest run -p overdrive-worker
 //! --features integration-tests`. NEVER `--no-run` (a compile-only gate is green
 //! even when every fixture refuses at boot). `uname -r` is recorded.
@@ -88,7 +94,12 @@
 //! Hygiene: the shared `overdrive-mtls` routing infra PERSISTS by design
 //! (node-global converge-on-boot), so the test scrubs ALL `overdrive-mtls` nft
 //! state + the fwmark rule/route + the test netns/veth/lo-addr + the per-netns
-//! `/etc/netns/<netns>/` dir at START (tolerate pre-existing) AND END. A
+//! `/etc/netns/<netns>/` dir at START (tolerate pre-existing) AND, through the
+//! [`ConsistencyTopology`] guard, at END — also when the body panics. The
+//! divert's release asserts each of its own steps (classifier detached and pins
+//! removed, elements removed, program removed). The node-global sysctls the topology relaxes (`net.ipv4.ip_forward`,
+//! `net.ipv4.conf.{all,lo}.rp_filter`) are snapshotted and restored by the same
+//! guard. A
 //! cross-PROCESS `flock(2)` lock (`KernelStateLock`, on the SAME path the sibling
 //! kernel-touching suites use) serialises the kernel-touching tests — nextest
 //! runs each `#[test]` in a separate process, so an in-process lock cannot
@@ -108,7 +119,7 @@
     reason = "Tier-3 single-source-consistency test body; the numbered oracle list in the module docstring is a narrative; skip messages + evidence go to stderr; failures must panic with informative messages; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit; the single scenario is a long composed proof; the per-byte \\xNN python-literal fold reads clearer than a write! accumulator in a test fixture"
 )]
 
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -117,10 +128,12 @@ use std::time::Duration;
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
 use overdrive_sim::adapters::SimMtlsResolve;
 use overdrive_testing::cidr_lease::TestCidrLease;
-use overdrive_worker::mtls_intercept::install_outbound_tproxy;
 use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, MtlsIntercept};
 
 use super::leg_listener::{LegListener, accept_leg_within};
+use super::mtls_intercept_install::{
+    NodeSysctls, SharedOutboundDivert, mac_text, set_link_sysctl, workload_mac,
+};
 
 // ============================================================================
 // topology constants (mirror the increment-b egress spike + egress_tproxy_capture)
@@ -151,9 +164,9 @@ const RESPONDER_ADDR: Ipv4Addr = Ipv4Addr::new(10, 100, 0, 53);
 /// The application bytes the workload sends after connect. Their PRESENCE is the
 /// positive interception signal (debugging.md §11): the netns client prints
 /// `WL-SENT` on a successful connect+send, confirming the producer (the dial) ran.
-/// The bytes are NOT echoed/compared in this topology — the egress redirect starves
-/// the real backend (it never accepts), so there is no reader to compare them
-/// against; the dial's SUCCESS, not a byte-exact echo, is what the oracle asserts.
+/// The bytes are NOT echoed/compared in this topology — no listener exists at B;
+/// the divert delivers the dial to leg-F, which does not read it — so the dial's
+/// SUCCESS, not a byte-exact echo, is what the oracle asserts.
 const WL_MARKER: &[u8] = b"OVERDRIVE_0502_SINGLE_SOURCE_workload_dialed_B";
 
 // ============================================================================
@@ -198,7 +211,8 @@ impl Drop for KernelStateLock {
 
 /// True iff this process is uid 0 (root). IP_TRANSPARENT, nft, `ip netns`,
 /// `ip rule`, and writing `/etc/netns/` all need root + CAP_NET_ADMIN/
-/// CAP_SYS_ADMIN; a non-root run cannot stand up the fixture, so we SKIP.
+/// CAP_SYS_ADMIN; the body asserts it, so a non-root run fails rather than
+/// passing vacuously.
 fn is_root() -> bool {
     // SAFETY: getuid is always safe; takes no args and never fails.
     unsafe { libc::getuid() == 0 }
@@ -227,26 +241,34 @@ fn ip(args: &[&str]) {
     );
 }
 
+/// Best-effort `ip <args>` — failure is the "nothing to clean" signal in
+/// teardown; non-zero exits are intentionally ignored.
 fn ip_quiet(args: &[&str]) {
     let _ = Command::new("ip").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
 }
 
-fn sysctl_w(kv: &str) {
-    let _ = Command::new("sysctl")
-        .args(["-w", kv])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
+/// `nft list table ip overdrive-mtls` (verbatim dump). The listing must
+/// succeed: an unreadable table is not an empty one.
 fn nft_dump_table() -> String {
-    Command::new("nft")
+    let output = Command::new("nft")
         .args(["list", "table", "ip", "overdrive-mtls"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
+        .expect("spawn the nft table listing");
+    assert!(
+        output.status.success(),
+        "listing table ip overdrive-mtls failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// `uname -r`, which pins the verdict to a kernel (spike.md discipline).
+fn kernel_release() -> String {
+    let output = Command::new("uname").arg("-r").output().expect("spawn uname -r");
+    assert!(output.status.success(), "uname -r failed");
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
 /// The host-side per-netns resolv.conf dir (`/etc/netns/<netns>/`) and file —
@@ -320,18 +342,60 @@ fn teardown_topology() {
     let _ = std::fs::remove_dir_all(resolv_conf_dir());
 }
 
-/// Stand up the netns + veth pair + addresses + host routing hygiene EXACTLY as
-/// the increment-b egress spike does, plus the lo-bound service backend B the
-/// workload dials.
+/// The per-test topology and the node-global state it relaxes, owned for the
+/// body's duration. `Drop` tears the topology down (the per-netns resolv.conf
+/// dir included) and scrubs the shared intercept infra, then (field order)
+/// releases the CIDR lease and restores the node-global sysctls, so a panic
+/// mid-body leaves nothing behind.
+struct ConsistencyTopology {
+    _lease: TestCidrLease,
+    _node_sysctls: NodeSysctls,
+}
+
+impl ConsistencyTopology {
+    /// Stand up the topology of `setup_topology` on the leased `/24`.
+    fn provision(lease: TestCidrLease) -> Self {
+        setup_topology(&lease);
+        // Host-side routing hygiene (NOT a TPROXY concession; spike § Edge
+        // cases): forwarding + rp_filter relaxation so the asymmetric ingress
+        // is not dropped. The node-global keys are restored on drop; the host
+        // veth's key goes with the veth.
+        let node_sysctls = NodeSysctls::set(
+            "05-02",
+            &[
+                ("net.ipv4.ip_forward", "1"),
+                ("net.ipv4.conf.all.rp_filter", "0"),
+                ("net.ipv4.conf.lo.rp_filter", "0"),
+            ],
+        );
+        set_link_sysctl("05-02", &format!("net.ipv4.conf.{VETH_H}.rp_filter"), "0");
+        Self { _lease: lease, _node_sysctls: node_sysctls }
+    }
+}
+
+impl Drop for ConsistencyTopology {
+    fn drop(&mut self) {
+        teardown_topology();
+        clean_shared_infra();
+    }
+}
+
+/// Stand up the netns + veth pair + addresses as the increment-b egress spike
+/// does, with the workload veth carrying [`workload_mac`] of its address (the
+/// MAC the guest classifier's endpoint record names), plus the lo-bound address
+/// of the service backend B the workload dials. Every step must succeed
+/// ([`ip`]).
 fn setup_topology(lease: &TestCidrLease) {
     teardown_topology();
 
     let host_gateway = lease.host_gateway().to_string();
     let workload_addr = lease.workload_addr().to_string();
     let prefix_len = lease.prefix_len().to_string();
+    let workload_mac_text = mac_text(workload_mac(lease.workload_addr()));
 
     ip(&["netns", "add", NS_W]);
     ip(&["link", "add", VETH_W, "type", "veth", "peer", "name", VETH_H]);
+    ip(&["link", "set", VETH_W, "address", &workload_mac_text]);
     ip(&["link", "set", VETH_W, "netns", NS_W]);
 
     // Host side: address + up.
@@ -354,23 +418,13 @@ fn setup_topology(lease: &TestCidrLease) {
     ip(&["netns", "exec", NS_W, "ip", "link", "set", VETH_W, "up"]);
     ip(&["netns", "exec", NS_W, "ip", "route", "add", "default", "via", &host_gateway]);
 
-    // The KNOWN service backend B lives on host lo (the host binds+listens on it;
-    // the workload routes to it via the gateway).
+    // The KNOWN service backend B's address lives on host lo; the workload
+    // routes to it via the gateway, so its dial ingresses vethH.
     ip(&["addr", "add", &format!("{SERVICE_BACKEND_IP}/32"), "dev", "lo"]);
 
-    // Host-side routing hygiene (NOT a TPROXY concession; spike § Edge cases):
-    // forwarding + rp_filter relaxation so the asymmetric ingress is not dropped.
-    sysctl_w("net.ipv4.ip_forward=1");
-    sysctl_w(&format!("net.ipv4.conf.{VETH_H}.rp_filter=0"));
-    sysctl_w("net.ipv4.conf.all.rp_filter=0");
-    sysctl_w("net.ipv4.conf.lo.rp_filter=0");
-
-    // bpf.md Rule 2 / spike: disable TX-checksum-offload on the host veth.
-    let _ = Command::new("ethtool")
-        .args(["-K", VETH_H, "tx", "off"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    // No TX-checksum-offload change: the TPROXY divert rewrites no header, so
+    // no checksum base is needed (`.claude/rules/bpf.md` Rule 2 concerns an
+    // incremental checksum after a NAT rewrite).
 }
 
 /// STAGE the per-netns resolv.conf for Oracle 3: create `/etc/netns/<netns>/` and
@@ -450,27 +504,25 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// in the netns even though the responder is the #243 stub.
 #[test]
 fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
-    if !is_root() {
-        eprintln!(
-            "SKIP dns_returned_service_backends_addr_is_recognized_by_mtls_resolve: not root"
-        );
-        return;
-    }
+    assert!(
+        is_root(),
+        "the single-source consistency proof requires root and CAP_NET_ADMIN/CAP_SYS_ADMIN \
+         (IP_TRANSPARENT, nft, ip netns, ip rule, /etc/netns)"
+    );
 
     // Pin the verdict to a kernel (spike.md discipline).
-    let kr = Command::new("uname")
-        .arg("-r")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-        .unwrap_or_default();
+    let kr = kernel_release();
     eprintln!("[05-02] uname -r = {kr}");
 
-    // Cross-process exclusion + clean baseline.
+    // Cross-process exclusion + clean baseline. The topology guard is declared
+    // after the lock, so it tears down (and restores the node-global sysctls)
+    // before the lock is released, panic or not.
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
     let lease =
         TestCidrLease::acquire(CIDR_LEASE_NAME).expect("acquire name-resolve topology CIDR lease");
-    setup_topology(&lease);
+    let workload_addr = lease.workload_addr();
+    let _topology = ConsistencyTopology::provision(lease);
 
     // The single source: the KNOWN `service_backends` addr B. DNS would return
     // it (headless v1, D-TME-10); the workload dials it directly (DNS stubbed).
@@ -499,13 +551,18 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     // And the namespace bind-mounts it: `ip netns exec` reading /etc/resolv.conf
     // inside the netns sees the SAME injected line (the stock per-netns
     // convention; the injection is observable from WITHIN the workload's view).
-    let in_ns = Command::new("ip")
+    let in_ns_read = Command::new("ip")
         .args(["netns", "exec", NS_W, "cat", "/etc/resolv.conf"])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
+        .expect("spawn the in-netns /etc/resolv.conf read");
+    assert!(
+        in_ns_read.status.success(),
+        "Oracle 3: reading /etc/resolv.conf inside {NS_W} failed: {}",
+        String::from_utf8_lossy(&in_ns_read.stderr).trim()
+    );
+    let in_ns = String::from_utf8_lossy(&in_ns_read.stdout).into_owned();
     eprintln!("[05-02][Oracle 3] in-netns /etc/resolv.conf = {in_ns:?}");
     assert!(
         in_ns.contains(&format!("nameserver {RESPONDER_ADDR}")),
@@ -514,54 +571,73 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     );
 
     // ----------------------------------------------------------------
-    // Oracle 1 (capture + recover): install the egress nft-TPROXY rule, the
-    // workload dials B (DNS stubbed), the port listener's accept recovers orig_dst
-    // via getsockname. The recovered orig_dst MUST equal B.
+    // Oracle 1 (capture + recover): compose the production shared divert, the
+    // workload dials B (DNS stubbed), the port listener's accept recovers
+    // orig_dst via getsockname. The recovered orig_dst MUST equal B.
     // ----------------------------------------------------------------
     // leg-F MUST be IP_TRANSPARENT (TPROXY delivers orig-dst-addressed packets).
-    // It is bound through the `MtlsIntercept` port and read/accepted through the
-    // `LegListener` bridge, so this body is unchanged when the port's listener
-    // type changes (gap B-7).
+    // Both legs are bound through the `MtlsIntercept` port; leg-F is read and
+    // accepted through the `LegListener` bridge, so this body is unchanged when
+    // the port's listener type changes (gap B-7). Leg-C is the shared program's
+    // inbound target; no connection reaches it here.
     let intercept = HostMtlsIntercept::new();
     let leg_f = Arc::new(
         intercept
             .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("HostMtlsIntercept::bind_transparent leg-F"),
     );
-    let leg_f_port = leg_f.bound_v4().expect("leg-F bound IPv4 address").port();
+    let leg_c = intercept
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent leg-C");
+    let outbound_target = leg_f.bound_v4().expect("leg-F bound IPv4 address");
+    let inbound_target = leg_c.bound_v4().expect("leg-C bound IPv4 address");
+    let leg_f_port = outbound_target.port();
 
-    let guard = install_outbound_tproxy(VETH_H, leg_f_port)
-        .expect("install_outbound_tproxy must append the iifname egress rule + shared infra");
-    let dump = nft_dump_table();
-    eprintln!("[05-02] nft table after install_outbound_tproxy:\n{dump}");
-    assert!(
-        dump.contains(&format!("iifname \"{VETH_H}\"")) && dump.contains("tproxy to"),
-        "the iifname egress rule must be installed in the shared chain, got:\n{dump}"
+    // The production shared divert: `converge_shared` at the two legs,
+    // `install_outbound(workload, leg-F port)`, and the guest classifier at
+    // vethH's TCX ingress with the workload's endpoint. The fixture asserts
+    // each step (program identity, the workload's two elements, the endpoint
+    // read-back, exactly one attached program).
+    let divert = SharedOutboundDivert::install(
+        "05-02",
+        &intercept,
+        outbound_target,
+        inbound_target,
+        workload_addr,
+        workload_mac(workload_addr),
+        VETH_H,
     );
+    let intercepted_before = divert.intercepted();
+    eprintln!("[05-02] nft table after the shared divert:\n{}", nft_dump_table());
 
-    // A real backend on B so the captured dial genuinely landed (POSITIVE
-    // interception signal): if the redirect FAILED to fire, the dial would land
-    // here instead of leg-F. Non-blocking so a no-arrival is observable.
-    let backend = TcpListener::bind(b).expect("bind real service backend B");
-    backend.set_nonblocking(true).ok();
-
+    // No listener waits at B: a dial the divert missed could not complete
+    // there either — shared output rule 2 drops an unmarked listener's SYN-ACK
+    // to the managed guest — so a listener at B cannot tell the two apart. The
+    // leg-F accept, the client's completed connect, and the classifier's
+    // intercept count are the witnesses.
+    //
     // The workload dials B directly (DNS stubbed — the #243 getaddrinfo→connect
-    // step). Its egress ingresses vethH → PREROUTING → egress TPROXY → leg-F.
+    // step). Its egress ingresses vethH → classifier → PREROUTING → shared
+    // rule 1 → leg-F.
     let client = std::thread::spawn(move || run_client_in_netns(b, WL_MARKER));
 
     // Drive the production getsockname recovery on the TPROXY-intercepted leg-F
     // socket through the port listener's accept. The wait is bounded so a silent
-    // redirect failure clean-fails after 8 s instead of hanging to the 120 s
+    // divert failure clean-fails after 8 s instead of hanging to the 120 s
     // slow-timeout SIGKILL.
-    let (leg, _peer, recovered) = accept_leg_within(&leg_f, Duration::from_secs(8)).expect(
-        "the port listener's accept must recover orig_dst from the TPROXY redirect. A timeout \
-         here (no connection within 8 s) means the redirect did NOT deliver to leg-F — egress \
-         capture did not fire (the dial reached the real backend instead).",
-    );
+    let (leg, _peer, recovered) =
+        accept_leg_within(&leg_f, Duration::from_secs(8)).unwrap_or_else(|error| {
+            panic!(
+                "the port listener's accept must recover orig_dst from the shared divert. A \
+                 timeout here (no connection within 8 s) means the divert did NOT deliver to \
+                 leg-F ({error}); classifier counters: {}",
+                divert.counter_snapshot()
+            )
+        });
 
-    // Oracle 1: the redirect fired (leg-F accepted, NOT the real backend) AND the
-    // recovered orig_dst == B (the known service_backends addr the workload
-    // dialed). This is the addr DNS would have returned (headless v1, stubbed).
+    // Oracle 1: the divert fired (leg-F accepted) AND the recovered orig_dst ==
+    // B (the known service_backends addr the workload dialed). This is the addr
+    // DNS would have returned (headless v1, stubbed).
     eprintln!("[05-02][Oracle 1] getsockname-recovered orig_dst = {recovered}");
     eprintln!("[05-02][Oracle 1] dialed service_backends addr B  = {b}");
     assert_eq!(
@@ -577,8 +653,8 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     drop(leg);
 
     // POSITIVE interception signal (debugging.md §11): confirm the workload's
-    // dial genuinely happened (it connected; a CLIENT-FAIL would mean no dial) and
-    // that the real backend did NOT accept (the redirect took it to leg-F).
+    // dial genuinely happened (it connected; a CLIENT-FAIL would mean no dial),
+    // and that it passed the classifier's intercept mark.
     let client_out = client.join().expect("netns client thread");
     eprintln!("[05-02][Oracle 1] netns client: {client_out}");
     assert!(
@@ -586,12 +662,12 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
         "Oracle 1 POSITIVE signal: the workload's connect+send to B must SUCCEED (a CLIENT-FAIL \
          means the dial never happened, so the capture proved nothing), got {client_out}"
     );
+    let intercepted_after = divert.intercepted();
     assert!(
-        backend.accept().is_err(),
-        "Oracle 1: the redirect fired — the real service backend B must NOT have accepted the \
-         workload's dial (it was redirected to leg-F)"
+        intercepted_after > intercepted_before,
+        "Oracle 1: the workload's TCP reached leg-F through the classifier's intercept mark — the \
+         Intercept count must advance past {intercepted_before}, got {intercepted_after}"
     );
-    drop(backend);
 
     // ----------------------------------------------------------------
     // Oracle 2 (THE single-source invariant): feed the SAME getsockname-recovered
@@ -643,12 +719,13 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
          byte-consistent). resolv.conf injection (02-03) wired; authn-only (expected_svid None)."
     );
 
-    // Teardown: drop the per-workload guard (removes ONLY the iifname rule), then
-    // scrub the shared infra + topology + resolv.conf dir so a re-run reproduces.
-    drop(guard);
-    drop(leg_f);
-    teardown_topology();
-    clean_shared_infra();
+    // Teardown: release the divert in reverse, asserting each step (classifier
+    // detached and its pins removed, the workload's elements removed, the
+    // member-free program removed by the node guard's drop), then the legs;
+    // the topology guard then scrubs the shared infra + topology + resolv.conf
+    // dir and restores the node-global sysctls, so a re-run reproduces.
+    divert.release();
+    drop((leg_c, leg_f));
 }
 
 // ============================================================================

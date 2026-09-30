@@ -45,9 +45,26 @@
 //! released once, after the disarm, and never touched again; the leftover
 //! allocation's row is byte-equal before and after its reclaims.
 //!
+//! # Lane and time
+//!
+//! Integration binary. The at-cap body reaches the fixed
+//! `MAX_GUEST_NETWORK_ATTACHMENTS` = 16,384 cap (D-295-R6) by admitting
+//! filler allocations through the production action shim for every seed; the
+//! cap is a constant, so no smaller node can exercise it. At RED the fill
+//! dispatches in batches and is cheap (the whole at-cap body reached its RED
+//! verdict in 0.8 s, `red-classification.md` Phase G, run G4-L05), but its cost once
+//! DELIVER 07-03 makes the at-cap reconcile evaluations run is unmeasured, so
+//! the body stays out of the 60 s default lane with a widened nextest budget
+//! until 07-03 records its GREEN run time (a 07-03 review item: move it back
+//! to the acceptance binary if that time fits the default lane). The
+//! every-path body shares this file's seam fixture. No wall time is read: the only clock is the
+//! fixture's `SimClock`, advanced by the harness, and every wait yields to the
+//! current-thread runtime, so each trajectory is a function of its seed.
+//!
 //! Reproduce with `OVERDRIVE_ND295_RECLAIM_SEEDS=<seed>[,<seed>…] cargo xtask
-//! lima run -- cargo nextest run -p overdrive-sim --test acceptance
-//! --run-ignored ignored-only --no-capture -E 'test(/netns_density_reclaim/)'`.
+//! lima run -- cargo nextest run -p overdrive-sim --test integration
+//! --features integration-tests --run-ignored ignored-only --no-capture
+//! -E 'test(/netns_density_reclaim/)'`.
 
 #![allow(
     clippy::print_stderr,
@@ -62,7 +79,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use overdrive_control_plane::action_shim::{
     ShimError, dispatch_with_guest_network_provisioner_for_test,
@@ -502,8 +519,8 @@ impl Fixture {
             "seed={}: harness precondition failed (not a contract verdict): {what}\n\
              trace:\n  {}\n\
              reproduce: {SEEDS_ENV}={} cargo xtask lima run -- cargo nextest run -p overdrive-sim \
-             --test acceptance --run-ignored ignored-only --no-capture \
-             -E 'test(/netns_density_reclaim/)'",
+             --test integration --features integration-tests --run-ignored ignored-only \
+             --no-capture -E 'test(/netns_density_reclaim/)'",
             self.seed,
             self.trace(),
             self.seed
@@ -670,10 +687,13 @@ impl Fixture {
                 ExitKind::Crashed { exit_code: None, signal: Some(9) },
             );
         }
+        // Every step yields to the current-thread runtime (the exit-injection
+        // tasks and the exit observer run on it) and advances only the sim
+        // clock; no wall time is read, so the step count is a function of the
+        // seed and the tasks' own await points.
         for _ in 0..CRASH_POLL_BUDGET {
             tokio::task::yield_now().await;
             self.clock.tick(Duration::from_millis(1));
-            tokio::time::sleep(Duration::from_millis(1)).await;
             let mut failed = 0;
             for alloc in allocs {
                 if self.row(alloc).await.is_some_and(|row| row.state == AllocState::Failed) {
@@ -685,7 +705,10 @@ impl Fixture {
                 return;
             }
         }
-        self.harness_failure(&format!("exit observer never published Failed for {allocs:?}"));
+        self.harness_failure(&format!(
+            "exit observer never published Failed for {allocs:?} within {CRASH_POLL_BUDGET} \
+             yield-and-tick steps"
+        ));
     }
 
     fn arm_teardown_failure(&self) {
@@ -992,7 +1015,6 @@ async fn not_yet_due_restart_at_the_cap(seed: u64) {
 
     // Fill the node to two below the cap through the production action
     // owner: every filler lease comes from the shim's own admission.
-    let fill_started = Instant::now();
     let fillers: Vec<Action> = (0..cap - 2).map(|index| filler_action(&tag, index)).collect();
     for (batch_index, batch) in fillers.chunks(FILL_BATCH).enumerate() {
         if let Err(error) = fixture.dispatch(batch.to_vec()).await {
@@ -1009,7 +1031,7 @@ async fn not_yet_due_restart_at_the_cap(seed: u64) {
         fixture
             .harness_failure(&format!("fill acquired {filled} attachments, expected {}", cap - 2));
     }
-    eprintln!("seed={seed} fill: {filled} attachments in {:?}", fill_started.elapsed());
+    eprintln!("seed={seed} fill: {filled} attachments");
 
     // A Service below the cap crashes and is restarted with room: its
     // successor carries the restart backoff (only a successor's failure has a

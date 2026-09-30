@@ -2722,18 +2722,34 @@ mod tests {
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// S-ND295-48 — An absent real interface or pin keeps its operation's
-    /// own sourced failure family at both TCX attach points and for the
-    /// egress drop counter; absence is never a fabricated success.
+    /// own sourced failure family at both TCX attach points and for a counter
+    /// read; absence is never a fabricated success.
     /// CONTRACT_SHAPE: bounded-change.
     ///
     /// Real bpffs and TCX syscalls, so the body runs only in the
     /// `integration-tests` lane (Lima root).
+    ///
+    /// The absent interface is named within `IFNAMSIZ`, so the query reaches
+    /// the kernel's name lookup rather than a length refusal. The counter rows
+    /// read an absent pin: each fails at the map open, whatever its slot, so
+    /// the `EgressDestinationDrop` row shows only that a counter read keeps the
+    /// map source. It is not evidence for the ninth (egress) slot; S-ND295-48's
+    /// slot-vocabulary and egress-lifecycle bodies carry that.
     #[cfg(feature = "integration-tests")]
     #[test]
     fn absent_real_objects_preserve_the_operation_specific_source_family() {
         let missing = format!("/sys/fs/bpf/overdrive/absent-{}", std::process::id());
+        let absent_interface = format!("nd295ab{:x}", std::process::id());
+        assert!(
+            absent_interface.len() < libc::IFNAMSIZ,
+            "the absent interface name {absent_interface} fits IFNAMSIZ"
+        );
+        match std::fs::symlink_metadata(format!("/sys/class/net/{absent_interface}")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            other => panic!("precondition: interface {absent_interface} must be absent: {other:?}"),
+        }
         for attach_point in [TcxAttachPoint::Ingress, TcxAttachPoint::Egress] {
-            let observed = query_attachment("overdrive-absent-interface", attach_point);
+            let observed = query_attachment(&absent_interface, attach_point);
             assert!(
                 matches!(&observed, Err(GuestTcxError::Program { .. })),
                 "{attach_point:?} query of an absent interface keeps the program source: {observed:?}"
@@ -2749,5 +2765,37 @@ mod tests {
                 "{counter:?} read of an absent counter pin keeps the map source: {observed:?}"
             );
         }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// S-ND295-00 — The node refuses work when its shared-network proof is
+    /// incomplete (the startup probe's `BPF_PROG_TEST_RUN` attribute carries no
+    /// implicit tail, so the probe cannot refuse boot on stack contents).
+    /// CONTRACT_SHAPE: pure-function.
+    ///
+    /// Pins the DISTILL-phase fix of `e496722c`. The kernel's `CHECK_ATTR`
+    /// rejects any non-zero byte after `test.batch_size` with `EINVAL`. The
+    /// struct is 8-byte aligned, so after `batch_size` (bytes 72-75) it would
+    /// end in 4 bytes of implicit padding, which `attr.test = test` copies in
+    /// uninitialised. The explicit zeroed `_pad` must occupy exactly those
+    /// bytes, leaving no implicit padding.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bpf_test_run_attribute_ends_in_an_explicit_zeroed_tail() {
+        assert_eq!(
+            std::mem::offset_of!(GuestTcxBpfTestAttr, batch_size),
+            72,
+            "batch_size is the last UAPI field of the test arm"
+        );
+        assert_eq!(
+            std::mem::offset_of!(GuestTcxBpfTestAttr, _pad),
+            76,
+            "the explicit tail starts right after batch_size"
+        );
+        assert_eq!(
+            std::mem::size_of::<GuestTcxBpfTestAttr>(),
+            80,
+            "the explicit tail ends the struct, so it carries no implicit padding"
+        );
     }
 }

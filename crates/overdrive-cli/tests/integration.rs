@@ -166,6 +166,9 @@ mod integration {
     //     teardown, host-side MAC hijack, and in-place program repair;
     //   * S-ND295-62 / 63 / 64 — intercept-marked and absent-listener guest
     //     TCP fails closed, and the TIME_WAIT side door with both controls.
+    // `delayed_ready_guest` is their test-support guest image whose holding
+    // init delays READY (S-ND295-30B (f)) or powers off before it (S-ND295-66).
+    mod delayed_ready_guest;
     mod intercept_mark_fail_closed;
     mod shared_network_native_faults;
 }

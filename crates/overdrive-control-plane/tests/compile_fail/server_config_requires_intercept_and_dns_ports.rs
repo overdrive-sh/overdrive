@@ -5,17 +5,17 @@
 //! `GuestDnsFactory` port as required parameters. A configuration built from
 //! the KEK alone — the shape that let a server boot without composing
 //! protection or DNS — MUST NOT compile. The sibling `.stderr` is the
-//! assertion: the one error is the missing two arguments.
+//! assertion: the one error is that the constructor is not a function of the
+//! KEK alone. The fixture coerces the constructor to a KEK-only function
+//! pointer rather than calling it, so the diagnostic names the constructor's
+//! parameters and not the source file that declares it: file placement is not
+//! part of the contract (DISTILL review DR-18).
 
 use std::sync::Arc;
 
 use overdrive_control_plane::ServerConfig;
 use overdrive_core::ca::kek::Kek;
 
-fn server_config_from_the_kek_alone(kek: Arc<dyn Kek>) -> ServerConfig {
-    ServerConfig::new(kek)
-}
-
 fn main() {
-    let _ = server_config_from_the_kek_alone;
+    let _from_the_kek_alone: fn(Arc<dyn Kek>) -> ServerConfig = ServerConfig::new;
 }

@@ -8,7 +8,8 @@
 //! - S-ND295-13B: boot-phase telemetry across ordinary `run_server`.
 //! - S-ND295-10, 11, 12 (Lima root, real kernel): ordinary `run_server` over
 //!   the injected recording VMM of the accepted `ServerConfig.vmm_override`
-//!   port. The real owner provisions, activates, audits, and tears down; the
+//!   port. The real owner provisions, activates, audits, and tears down, and
+//!   the production supervisor kills a VM whose attachment is damaged; the
 //!   tests observe the kernel and mutate it only from outside.
 
 #![allow(clippy::doc_markdown)]
@@ -816,9 +817,13 @@ struct AttachmentReadBack {
     guard_member: Result<bool, String>,
     endpoint_entry: Option<Result<bool, String>>,
     ingress: Result<overdrive_dataplane::guest_tcx::GuestTcxAttachment, String>,
-    ingress_pin: bool,
+    /// Whether the ingress link pin exists; a failed existence check is an
+    /// `Err`, never read as absence.
+    ingress_pin: Result<bool, String>,
     egress: Result<overdrive_dataplane::guest_tcx::GuestTcxAttachment, String>,
-    egress_pin: bool,
+    /// Whether the egress link pin exists; a failed existence check is an
+    /// `Err`, never read as absence.
+    egress_pin: Result<bool, String>,
 }
 
 impl AttachmentReadBack {
@@ -870,14 +875,59 @@ async fn read_attachment(tap: &str) -> AttachmentReadBack {
         endpoint_entry: None,
         ingress: query_attachment(tap, TcxAttachPoint::Ingress)
             .map_err(|error| format!("{error:?}")),
-        ingress_pin: link_pin(tap, "ingress").exists(),
+        ingress_pin: std::fs::exists(link_pin(tap, "ingress"))
+            .map_err(|error| format!("{error:?}")),
         egress: query_attachment(tap, TcxAttachPoint::Egress).map_err(|error| format!("{error:?}")),
-        egress_pin: link_pin(tap, "egress").exists(),
+        egress_pin: std::fs::exists(link_pin(tap, "egress")).map_err(|error| format!("{error:?}")),
     };
     readback.endpoint_entry = readback.ifindex().map(|ifindex| {
         endpoint_present(ENDPOINT_MAP_PIN, ifindex).map_err(|error| format!("{error:?}"))
     });
     readback
+}
+
+/// Require that every read of `readback` succeeded and found a present
+/// persistent TAP, so a comparison of two read-backs compares kernel facts,
+/// never two identical read failures.
+fn assert_complete_readback(readback: &AttachmentReadBack, context: &str) {
+    assert!(
+        matches!(
+            readback.identity,
+            Ok(overdrive_netlink::PersistentTapIdentity::Persistent { .. })
+        ),
+        "{context}: the TAP identity read found a persistent TAP: {:?}",
+        readback.identity
+    );
+    assert!(
+        matches!(readback.bridge, Ok(Some(_))),
+        "{context}: the shared bridge read succeeded: {:?}",
+        readback.bridge
+    );
+    assert!(
+        readback.debug_msg_mask.is_ok(),
+        "{context}: the debug message mask read succeeded: {:?}",
+        readback.debug_msg_mask
+    );
+    assert!(
+        readback.guard_member.is_ok(),
+        "{context}: the guard observation succeeded: {:?}",
+        readback.guard_member
+    );
+    assert!(
+        matches!(readback.endpoint_entry, Some(Ok(_))),
+        "{context}: the endpoint entry read succeeded: {:?}",
+        readback.endpoint_entry
+    );
+    assert!(
+        readback.ingress.is_ok(),
+        "{context}: the ingress TCX query succeeded: {:?}",
+        readback.ingress
+    );
+    assert!(
+        readback.egress.is_ok(),
+        "{context}: the egress TCX query succeeded: {:?}",
+        readback.egress
+    );
 }
 
 /// One VM launch as the injected VMM observed it.
@@ -1306,6 +1356,14 @@ impl VmNode {
         }
     }
 
+    /// Assert the production supervisor sends no shutdown request within
+    /// `window`: the node is not failing stop.
+    async fn assert_no_shutdown_request(&mut self, window: Duration, context: &str) {
+        let handle = self.handle.as_mut().expect("the node is running");
+        let requested = tokio::time::timeout(window, handle.shutdown_requested()).await;
+        assert!(requested.is_err(), "{context}: the supervisor requested shutdown: {requested:?}");
+    }
+
     async fn shutdown(mut self) {
         if let Some(handle) = self.handle.take() {
             handle.shutdown(Duration::from_secs(10)).await.expect("production owner drains");
@@ -1321,14 +1379,16 @@ async fn wait_for_absent_attachment(tap: &str, ifindex: u32) -> AttachmentReadBa
     let deadline = tokio::time::Instant::now() + VM_WAIT;
     loop {
         let readback = read_attachment(tap).await;
-        let endpoint =
-            overdrive_dataplane::guest_tcx::endpoint_present(ENDPOINT_MAP_PIN, ifindex).ok();
+        let endpoint = overdrive_dataplane::guest_tcx::endpoint_present(ENDPOINT_MAP_PIN, ifindex)
+            .unwrap_or_else(|error| {
+                panic!("read the endpoint entry for ifindex {ifindex} of {tap}: {error:?}")
+            });
         let absent = matches!(
             readback.identity,
             Ok(overdrive_netlink::PersistentTapIdentity::Absent { .. })
-        ) && endpoint == Some(false)
-            && !readback.ingress_pin
-            && !readback.egress_pin
+        ) && !endpoint
+            && readback.ingress_pin == Ok(false)
+            && readback.egress_pin == Ok(false)
             && readback.guard_member == Ok(false);
         if absent || tokio::time::Instant::now() >= deadline {
             return readback;
@@ -1348,10 +1408,10 @@ fn is_root() -> bool {
 #[tokio::test]
 #[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
 async fn ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start() {
-    if !is_root() {
-        eprintln!("SKIP ordinary_provision_reads_back_the_complete_attachment_down: root required");
-        return;
-    }
+    assert!(
+        is_root(),
+        "S-ND295-11 provisions real TAPs, links, and guard members and must run as root"
+    );
     let node = VmNode::boot().await;
     let vm = node.deploy("nd295-provision-down").await;
     let at_create =
@@ -1387,10 +1447,10 @@ async fn ordinary_provision_reads_back_the_complete_attachment_down_before_injec
     );
     let ingress = at_create.ingress.clone().expect("ingress TCX query succeeds");
     assert_eq!(ingress.program_ids.len(), 1, "exactly the ingress classifier is attached");
-    assert!(at_create.ingress_pin, "the ingress link is pinned");
+    assert_eq!(at_create.ingress_pin, Ok(true), "the ingress link is pinned");
     let egress = at_create.egress.clone().expect("egress TCX query succeeds");
     assert_eq!(egress.program_ids.len(), 1, "exactly the egress classifier is attached");
-    assert!(at_create.egress_pin, "the egress link is pinned");
+    assert_eq!(at_create.egress_pin, Ok(true), "the egress link is pinned");
     assert_ne!(
         ingress.program_ids, egress.program_ids,
         "the ingress and egress attach points hold their two distinct programs"
@@ -1412,10 +1472,7 @@ async fn ordinary_provision_reads_back_the_complete_attachment_down_before_injec
 #[tokio::test]
 #[ignore = "pending DELIVER step 06-02 (S-ND295-12)"]
 async fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal() {
-    if !is_root() {
-        eprintln!("SKIP two_attachment_teardown_releases_last: root required");
-        return;
-    }
+    assert!(is_root(), "S-ND295-12 provisions and deletes real TAPs and must run as root");
     let node = VmNode::boot().await;
     let unrelated = node.deploy("nd295-teardown-keep").await;
     let named = node.deploy("nd295-teardown-named").await;
@@ -1423,6 +1480,7 @@ async fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attac
     let named_before = read_attachment(named.tap()).await;
     eprintln!("[S-ND295-12] unrelated before: {unrelated_before:#?}");
     eprintln!("[S-ND295-12] named before: {named_before:#?}");
+    assert_complete_readback(&unrelated_before, "the unrelated attachment before the teardown");
     let named_ifindex = named_before.ifindex().expect("the named TAP exists before teardown");
 
     // Out of band: the named allocation's TAP is deleted before the stop. The
@@ -1458,12 +1516,15 @@ async fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attac
         Ok(false),
         "no endpoint entry remains for the named TAP's ifindex"
     );
-    assert!(!named_after.ingress_pin, "the named ingress link pin is gone");
-    assert!(!named_after.egress_pin, "the named egress link pin is gone");
+    assert_eq!(named_after.ingress_pin, Ok(false), "the named ingress link pin is gone");
+    assert_eq!(named_after.egress_pin, Ok(false), "the named egress link pin is gone");
     assert_eq!(named_after.guard_member, Ok(false), "the named guard member is gone");
 
-    // The unrelated attachment is unchanged in every observed fact.
+    // The unrelated attachment is unchanged in every observed fact. Both
+    // read-backs succeeded, so the equality compares kernel facts.
     let unrelated_after = read_attachment(unrelated.tap()).await;
+    eprintln!("[S-ND295-12] unrelated after: {unrelated_after:#?}");
+    assert_complete_readback(&unrelated_after, "the unrelated attachment after the teardown");
     assert_eq!(
         unrelated_after, unrelated_before,
         "the unrelated attachment is byte-equal across the named teardown"
@@ -1476,9 +1537,14 @@ async fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attac
     assert_eq!(successor.tap(), named.tap(), "the successor's TAP carries the released name");
     let successor_at_create =
         successor.launch.at_create.clone().expect("the successor's attachment was read");
+    let successor_ifindex = successor_at_create.ifindex().unwrap_or_else(|| {
+        panic!(
+            "the successor's TAP is present when its VMM is started: {:?}",
+            successor_at_create.identity
+        )
+    });
     assert_ne!(
-        successor_at_create.ifindex(),
-        Some(named_ifindex),
+        successor_ifindex, named_ifindex,
         "the successor owns a new TAP, not a survivor of the named teardown"
     );
 
@@ -1560,8 +1626,15 @@ fn packet_socket(ifindex: u32) -> std::io::Result<std::os::fd::OwnedFd> {
 }
 
 /// Read every frame available on `fd` for `window`, counting those that carry
-/// `marker`.
-async fn frames_with_marker(fd: std::os::fd::RawFd, marker: &[u8], window: Duration) -> usize {
+/// `marker`. An empty non-blocking read waits and retries; any other read
+/// failure ends the body naming `capture`, so a dead capture can never read as
+/// "no frame".
+async fn frames_with_marker(
+    capture: &str,
+    fd: std::os::fd::RawFd,
+    marker: &[u8],
+    window: Duration,
+) -> usize {
     let deadline = tokio::time::Instant::now() + window;
     let mut seen = 0;
     let mut buffer = [0_u8; 2048];
@@ -1569,16 +1642,35 @@ async fn frames_with_marker(fd: std::os::fd::RawFd, marker: &[u8], window: Durat
         // SAFETY: `buffer` is valid for `buffer.len()` writable bytes and `fd`
         // is an open descriptor owned by the caller for this call's duration.
         let read = unsafe { libc::read(fd, buffer.as_mut_ptr().cast(), buffer.len()) };
-        match usize::try_from(read) {
-            Ok(length) if length > 0 => {
-                if buffer[..length].windows(marker.len()).any(|window| window == marker) {
-                    seen += 1;
-                }
+        if let Ok(length) = usize::try_from(read) {
+            if length == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            } else if buffer[..length].windows(marker.len()).any(|window| window == marker) {
+                seen += 1;
             }
-            _ => tokio::time::sleep(Duration::from_millis(10)).await,
+            continue;
+        }
+        let error = std::io::Error::last_os_error();
+        match error.kind() {
+            std::io::ErrorKind::WouldBlock => tokio::time::sleep(Duration::from_millis(10)).await,
+            std::io::ErrorKind::Interrupted => {}
+            _ => panic!("the {capture} capture failed to read: {error}"),
         }
     }
     seen
+}
+
+/// Send one frame out of the shared bridge from the host through a bound
+/// packet socket.
+fn send_on_bridge(bridge_ifindex: u32, frame: &[u8]) {
+    use std::os::fd::AsRawFd as _;
+
+    let socket = packet_socket(bridge_ifindex).expect("open a sending socket on the bridge");
+    // SAFETY: `frame` is valid for `frame.len()` readable bytes and `socket`
+    // is an open, bound packet socket.
+    let sent = unsafe { libc::send(socket.as_raw_fd(), frame.as_ptr().cast(), frame.len(), 0) };
+    assert!(sent >= 0, "the host sends a frame on the bridge: {}", std::io::Error::last_os_error());
+    assert_eq!(sent.unsigned_abs(), frame.len(), "the host sends the whole frame on the bridge");
 }
 
 fn ipv4_checksum(header: &[u8]) -> u16 {
@@ -1655,12 +1747,45 @@ fn guard_shape(
     )
 }
 
+/// The node's shared bridge gateway address (the production pool constant), the
+/// source of the host broadcast that proves the S-ND295-10 captures live.
+const BRIDGE_GATEWAY: std::net::Ipv4Addr = std::net::Ipv4Addr::new(100, 95, 0, 1);
+
+/// Every `guest_network.shared_owner_vm_killed` event recorded so far.
+fn vm_killed_events(collector: &EventCollector) -> Vec<EventRow> {
+    collector
+        .snapshot()
+        .into_iter()
+        .filter(|event| event.name == "guest_network.shared_owner_vm_killed")
+        .collect()
+}
+
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-10 — A removed ingress link is still blocked by the guard and condemns only that VM
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// E12 (g), Lima half, through the supervisor's per-VM kill (DELIVER 09-01).
+/// Ordinary `run_server` provisions two VM allocations, the victim and a peer.
+/// An external actor detaches the victim's production-pinned ingress link, and
+/// one valid frame is sent from the victim's TAP to the peer's guest. Oracles:
+///
+/// 1. the D9 bridge guard keeps its exact shape, and its `DefaultDrop`
+///    counter rises by exactly one: the unmarked frame is counted and dropped;
+/// 2. no copy of the frame appears on the peer's TAP or on the host's bridge
+///    capture; the peer TAP's capture is proven live by a host broadcast it
+///    sees, and the host capture by a frame the healthy peer guest sends to
+///    the gateway (an inbound frame, not the host's own outgoing one);
+/// 3. the supervisor kills exactly the victim's VM: the only
+///    `guest_network.shared_owner_vm_killed { alloc, cause:
+///    "attachment_damaged", error }` names the victim, and its error is the
+///    missing ingress attachment or pin;
+/// 4. the damage is not a node failure: no
+///    `guest_network.shared_owner_unhealthy` event and no fail-stop request;
+/// 5. EXEC stays Open: a workload deployed after the kill is admitted and its
+///    guest receives EXEC, and the peer stays Running.
 #[allow(
     clippy::too_many_lines,
-    reason = "one example keeps the external mutation, the frame, and all three oracles in order"
+    reason = "one example keeps the external mutation, the frame, and every oracle in order"
 )]
 #[tokio::test]
 #[ignore = "pending DELIVER step 09-01 (S-ND295-10)"]
@@ -1668,22 +1793,22 @@ async fn deliberate_link_loss_reaches_default_drop_and_the_exact_production_audi
     use std::io::Write as _;
     use std::os::fd::AsRawFd as _;
 
-    if !is_root() {
-        eprintln!("SKIP deliberate_link_loss_reaches_default_drop: root required");
-        return;
-    }
+    assert!(
+        is_root(),
+        "S-ND295-10 detaches real TCX links and attaches TAP queues and must run as root"
+    );
     let collector = EventCollector::default();
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let node = VmNode::boot().await;
+    let mut node = VmNode::boot().await;
     let victim = node.deploy("nd295-link-loss").await;
     let peer = node.deploy("nd295-link-peer").await;
     let expected_members = BTreeSet::from([victim.tap().to_owned(), peer.tap().to_owned()]);
 
-    // Test-held queues: the victim's to send as its guest, the peer's so the
-    // bridge could deliver to it; a packet socket on the bridge sees anything
-    // delivered to the host.
+    // Test-held queues: the victim's to send as its guest, the peer's to see
+    // what the bridge delivers to that guest; a packet socket on the bridge
+    // sees anything delivered to the host.
     let mut victim_queue = attach_test_queue(victim.tap()).expect("attach a queue to the victim");
     let peer_queue = attach_test_queue(peer.tap()).expect("attach a queue to the peer");
     let bridge_ifindex = read_attachment(victim.tap())
@@ -1716,8 +1841,8 @@ async fn deliberate_link_loss_reaches_default_drop_and_the_exact_production_audi
         guest_frame(victim.guest_mac(), victim.address, peer.guest_mac(), peer.address, marker);
     victim_queue.write_all(&frame).expect("the victim guest transmits one frame");
 
-    // The guard counts and drops the unmarked frame; read it at once, before
-    // the owner's next audit can condemn the victim and start its cleanup.
+    // (1) The guard counts and drops the unmarked frame; read it at once,
+    // before the supervisor's next audit condemns the victim.
     let counted_by = tokio::time::Instant::now() + Duration::from_secs(1);
     let (guard_classification, guard_after) = loop {
         let observation = overdrive_netlink::nft::bridge::observe(&guard, &expected_members)
@@ -1741,54 +1866,132 @@ async fn deliberate_link_loss_reaches_default_drop_and_the_exact_production_audi
         drops_before + 1,
         "the unmarked frame is counted by the guard's DefaultDrop and dropped"
     );
+
+    // (2) No escaped frame, on captures a host broadcast proves live.
     let escaped_to_peer =
-        frames_with_marker(peer_queue.as_raw_fd(), marker, Duration::from_millis(500)).await;
-    let escaped_to_host =
-        frames_with_marker(host_capture.as_raw_fd(), marker, Duration::from_millis(500)).await;
+        frames_with_marker("peer TAP", peer_queue.as_raw_fd(), marker, Duration::from_millis(500))
+            .await;
+    let escaped_to_host = frames_with_marker(
+        "host bridge",
+        host_capture.as_raw_fd(),
+        marker,
+        Duration::from_millis(500),
+    )
+    .await;
     assert_eq!(escaped_to_peer, 0, "the frame never reaches the peer guest");
     assert_eq!(escaped_to_host, 0, "the frame never reaches the host");
+    // Each capture is proven live on the direction it guards. The peer TAP's
+    // capture sees a host broadcast the bridge delivers to the peer guest. The
+    // host's bridge capture sees a frame the healthy peer guest sends to the
+    // gateway: its classifier accepts it and the bridge delivers it to the
+    // host, the same inbound path the victim's frame would have escaped by. A
+    // host-sent frame cannot prove the host capture, because a packet socket
+    // also sees its host's own outgoing frames.
+    let witness_to_peer = b"nd295-deliberate-link-loss-peer-capture-witness";
+    send_on_bridge(
+        bridge_ifindex,
+        &guest_frame(
+            overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+            BRIDGE_GATEWAY,
+            [0xff; 6],
+            std::net::Ipv4Addr::BROADCAST,
+            witness_to_peer,
+        ),
+    );
+    let witnessed_by_peer = frames_with_marker(
+        "peer TAP",
+        peer_queue.as_raw_fd(),
+        witness_to_peer,
+        Duration::from_millis(500),
+    )
+    .await;
+    let witness_to_host = b"nd295-deliberate-link-loss-host-capture-witness";
+    (&peer_queue)
+        .write_all(&guest_frame(
+            peer.guest_mac(),
+            peer.address,
+            overdrive_core::dataplane::GUEST_BRIDGE_MAC,
+            BRIDGE_GATEWAY,
+            witness_to_host,
+        ))
+        .expect("the healthy peer guest transmits one frame to the gateway");
+    let witnessed_by_host = frames_with_marker(
+        "host bridge",
+        host_capture.as_raw_fd(),
+        witness_to_host,
+        Duration::from_millis(500),
+    )
+    .await;
+    assert!(
+        witnessed_by_peer >= 1 && witnessed_by_host >= 1,
+        "both captures see a frame on the direction they guard, so their zero counts are \
+         observations: peer TAP (host broadcast) {witnessed_by_peer}, host bridge (peer guest \
+         to the gateway) {witnessed_by_host}"
+    );
 
-    // The production audit names only the victim, by a per-allocation
-    // ingress cause, and reports no node-level failure.
+    // (3) The supervisor kills the victim's VM for its damaged attachment.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let killed = loop {
-        let events = collector.snapshot();
-        if let Some(event) = events.iter().find(|event| {
-            event.name == "guest_network.shared_owner_vm_killed"
-                && event.fields.get("alloc").map(String::as_str) == Some(victim.alloc.as_str())
-        }) {
-            break event.clone();
+        let killed = vm_killed_events(&collector);
+        if !killed.is_empty() {
+            break killed;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the production audit never reported the victim's damage; events {:?}",
-            events.iter().map(|event| &event.name).collect::<Vec<_>>()
+            "the supervisor never killed the damaged VM; events {:?}",
+            collector.snapshot().iter().map(|event| event.name.clone()).collect::<Vec<_>>()
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    eprintln!("[S-ND295-10] audit report: {:?}", killed.fields);
-    assert_eq!(required_field(&killed, "cause"), "attachment_damaged");
-    let cause = required_field(&killed, "error");
+    eprintln!("[S-ND295-10] per-VM kills: {killed:?}");
+    assert_eq!(killed.len(), 1, "exactly one VM is killed: {killed:?}");
+    assert_eq!(required_field(&killed[0], "alloc"), victim.alloc, "the kill names the victim");
+    assert_eq!(required_field(&killed[0], "cause"), "attachment_damaged");
+    let cause = required_field(&killed[0], "error");
     assert!(
         cause.contains("TcxQuery") || cause.contains("TcxLinkPin"),
         "the damage names the missing ingress attachment or pin: {cause}"
     );
-    let events = collector.snapshot();
+
+    // (4) Not a node failure.
+    node.assert_no_shutdown_request(Duration::from_secs(2), "after the per-VM kill").await;
     assert!(
-        !events.iter().any(|event| event.name == "guest_network.shared_owner_unhealthy"),
+        !collector
+            .snapshot()
+            .iter()
+            .any(|event| event.name == "guest_network.shared_owner_unhealthy"),
         "the link loss is per-allocation damage, never a node failure"
     );
+
+    // (5) EXEC stays Open: a later workload is admitted and receives EXEC.
+    let after = node.deploy("nd295-link-after").await;
+    assert!(after.launch.exec_received, "the workload admitted after the kill receives EXEC");
+    let peer_rows = node.rows(&peer.workload).await;
     assert!(
-        !events.iter().any(|event| {
-            event.name == "guest_network.shared_owner_vm_killed"
-                && event.fields.get("alloc").map(String::as_str) == Some(peer.alloc.as_str())
+        peer_rows.iter().any(|row| {
+            row.alloc_id == peer.alloc
+                && row.state == overdrive_control_plane::api::AllocStateWire::Running
         }),
-        "the peer allocation is not condemned"
+        "the peer allocation stays Running: {peer_rows:?}"
+    );
+    let killed = vm_killed_events(&collector);
+    assert_eq!(
+        killed.iter().map(|event| required_field(event, "alloc")).collect::<Vec<_>>(),
+        [victim.alloc.as_str()],
+        "the victim is the only VM ever killed"
+    );
+    assert!(
+        !collector
+            .snapshot()
+            .iter()
+            .any(|event| event.name == "guest_network.shared_owner_unhealthy"),
+        "no node failure follows the per-VM kill"
     );
 
     drop(victim_queue);
     drop(peer_queue);
     drop(host_capture);
+    node.stop(&after).await;
     node.stop(&peer).await;
     node.stop(&victim).await;
     node.shutdown().await;

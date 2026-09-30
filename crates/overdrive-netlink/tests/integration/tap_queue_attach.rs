@@ -239,7 +239,7 @@ fn every_attach_precondition_violation_is_refused_with_its_own_typed_cause() {
 /// permitted.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-02 (S-ND295-39)"]
+#[ignore = "pending DELIVER step 05-03 (S-ND295-39)"]
 fn a_root_owned_tap_refuses_an_unprivileged_attach_with_eperm() {
     require_root("a_root_owned_tap_refuses_an_unprivileged_attach_with_eperm");
     let tap = ScratchTap::create("qe");

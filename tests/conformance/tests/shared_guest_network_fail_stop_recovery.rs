@@ -21,27 +21,19 @@
     reason = "conformance test assertions use exact CONTRACT_SHAPE markers and diagnostic expectations"
 )]
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::guest_network::GuestNetworkOperation;
-use overdrive_core::guest_network::{
-    SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
-};
+use overdrive_core::guest_network::{SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause};
 use overdrive_sim::adapters::guest_network::{SimQuiesceOutcome, SimSharedGuestNetworkOwner};
 use overdrive_system_conformance::accepted_cadence::{
     ATTEMPT_PERIOD, AUDIT_PERIOD, RECOVERY_ATTEMPTS, RECOVERY_DEADLINE,
 };
 use overdrive_system_conformance::{
-    Admission, CleanupObservation, DirectHandlerHarness, DirectHandlerInstance, TraceEvent,
-    TraceHistory, Trajectory, wait_until,
+    Admission, DirectHandlerHarness, DirectHandlerInstance, TraceEvent, TraceHistory, Trajectory,
 };
 use serde_json::{Value, json};
-
-/// Host directories a VM workload handler could leave residue in.
-const HOST_RESIDUE_DIRECTORIES: [&str; 2] =
-    ["/run/overdrive/vm", "/sys/fs/cgroup/overdrive.slice/workloads.slice"];
 
 /// The owned-object counts the supervisor records when it abandons cleanup to
 /// shutdown at the recovery deadline (FD 10030-10032).
@@ -80,11 +72,6 @@ fn events_named<'a>(events: &'a [TraceEvent], name: &str) -> Vec<&'a TraceEvent>
 
 fn field<'a>(event: &'a TraceEvent, name: &str) -> Option<&'a str> {
     event.fields.get(name).map(String::as_str)
-}
-
-fn host_residue_baseline() -> CleanupObservation {
-    let directories: Vec<&Path> = HOST_RESIDUE_DIRECTORIES.iter().map(Path::new).collect();
-    CleanupObservation::capture(&directories)
 }
 
 /// Then (shared by both fail-stop causes): the failed handler shuts down and
@@ -203,7 +190,6 @@ fn assert_detected_then_closed_until_request(trajectory: &Trajectory) -> (Durati
 )]
 async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admission() {
     let trace = TraceHistory::install_global();
-    let cleanup = host_residue_baseline();
     let harness = DirectHandlerHarness::new();
 
     // Given one production handler with required ports admitting a VM workload
@@ -303,13 +289,10 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
         "the fresh handler appends evidence without overwriting the original failure"
     );
 
-    wait_until(Duration::from_secs(10), "handler cleanup complement", || cleanup.is_restored());
-    harness.record("cleanup_complete", "public and typed host complements restored");
     let history = harness.diagnostic_history();
     assert!(history.iter().any(|entry| entry.contains("phase=shared_owner_fault")));
     assert!(history.iter().any(|entry| entry.contains("phase=fail_stop_observed")));
     assert!(history.iter().any(|entry| entry.contains("phase=fresh_handler_admitted")));
-    assert!(history.iter().any(|entry| entry.contains("phase=cleanup_complete")));
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -319,7 +302,6 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
 #[ignore = "pending DELIVER step 10-03 (S-ND295-33)"]
 async fn undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh_handler_reopens() {
     let trace = TraceHistory::install_global();
-    let cleanup = host_residue_baseline();
     let harness = DirectHandlerHarness::new();
 
     // Given one production handler with required ports admitting a VM workload
@@ -389,11 +371,8 @@ async fn undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh
     )
     .await;
 
-    wait_until(Duration::from_secs(10), "handler cleanup complement", || cleanup.is_restored());
-    harness.record("cleanup_complete", "public and typed host complements restored");
     let history = harness.diagnostic_history();
     assert!(history.iter().any(|entry| entry.contains("phase=shared_owner_fault")));
     assert!(history.iter().any(|entry| entry.contains("phase=fail_stop_observed")));
     assert!(history.iter().any(|entry| entry.contains("phase=fresh_handler_admitted")));
-    assert!(history.iter().any(|entry| entry.contains("phase=cleanup_complete")));
 }

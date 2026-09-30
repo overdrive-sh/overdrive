@@ -245,6 +245,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -426,16 +427,13 @@ fn build_empty_rootfs(tmp: &Path) -> PathBuf {
 // Server composition
 // ---------------------------------------------------------------------
 
-/// Spawns a real in-process `overdrive serve` with the given real VM
-/// boot artifacts composed, injecting `SimDataplane` (functional
-/// correctness scenarios — S-VM-01/02/03/04 do not need the real
-/// `EbpfDataplane` / mTLS composition; that is what
-/// [`spawn_vm_server_mtls_composed`] is for).
 /// Spawns a real in-process `overdrive serve` through the UNGATED
-/// [`overdrive_cli::commands::serve::run_with_dataplane`] entrypoint — no
-/// node-level artifact argument anywhere. Every VM allocation booted
-/// against this handle must source its kernel and rootfs from its own
-/// `[vm]` spec.
+/// [`overdrive_cli::commands::serve::run_with_dataplane`] entrypoint,
+/// injecting `SimDataplane` as the Service dataplane (functional correctness
+/// scenarios — S-VM-01/02/03/04 do not need the real `EbpfDataplane`; that is
+/// what [`spawn_vm_server_mtls_composed`] is for). No node-level artifact
+/// argument anywhere: every VM allocation booted against this handle must
+/// source its kernel and rootfs from its own `[vm]` spec.
 async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -454,13 +452,16 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     (handle, tmp)
 }
 
-/// Spawns a real in-process `overdrive serve` with `dataplane_override`
-/// left UNSET — production `run_server` therefore composes the REAL
-/// `EbpfDataplane` and `compose_mtls = dataplane_override.is_none()`
-/// evaluates `true`, exactly as it does on the production `run` path
-/// (GH #248 / ADR-0074 trap). Current VM allocations join the
-/// `MtlsInterceptWorker` through their TAP-fed host veth; the guest-stack
-/// S-GTI-01/S-GTI-03 metal scenarios own that end-to-end behavior proof.
+/// Spawns a real in-process `overdrive serve` through
+/// [`overdrive_cli::commands::serve::run_with_kek`] with `dataplane_override`
+/// left UNSET, exactly as the production `run` path composes it (GH #248 /
+/// ADR-0074 trap): `run_server` builds the REAL `EbpfDataplane` for the
+/// Service dataplane. Under D-295-R16 the mTLS intercept worker, its resolver,
+/// the guest DNS owner, and the shared guest-network supervisor are composed on
+/// every boot, whatever the Service dataplane (FD § "[REF] Serve-boundary ports
+/// (D-295-R16) — ACCEPTED 2026-09-24"). VM allocations join that worker
+/// through their host TAP on the node's shared bridge; the guest-stack metal
+/// scenarios (S-ND295-01) own the end-to-end behavior proof.
 pub(super) async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -554,6 +555,13 @@ pub(super) async fn poll_until_running(
 
 /// The ONE row-selection rule and the ONE timeout message every poller in
 /// this file shares (the shape `vm_boot_failure_vocabulary.rs` settled on).
+///
+/// Fails fast on a terminal first row it does not want. An allocation never
+/// leaves `Terminated` or `Failed` (`AllocState::is_terminal`; a restart is a
+/// fresh allocation, never this row), and this poller reads only the first
+/// row, so such a row can never become wanted. Waiting out `max_wait` would
+/// only delay the same verdict (a baseline guest-boot failure otherwise cost
+/// each body its full 90 s).
 async fn poll_until_state(
     cfg: &Path,
     workload_id: &str,
@@ -570,6 +578,17 @@ async fn poll_until_state(
         if out.snapshot.rows.first().is_some_and(|row| wanted(row.state)) {
             return out;
         }
+        if let Some(row) =
+            out.snapshot.rows.first().filter(|row| {
+                matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
+            })
+        {
+            panic!(
+                "workload {workload_id} reached the terminal state {:?} and can never reach \
+                 {wanted_label}; observed row: {row:?}",
+                row.state,
+            );
+        }
         assert!(
             tokio::time::Instant::now() < deadline,
             "workload {workload_id} did not reach {wanted_label} within {max_wait:?}; \
@@ -577,6 +596,113 @@ async fn poll_until_state(
             out.snapshot.rows.first(),
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// How long a failed native body's teardown may run before [`TeardownBound`]
+/// ends the test process.
+const TEARDOWN_BOUND: Duration = Duration::from_secs(30);
+
+/// Bounds the teardown of a native body that boots an in-process `serve` and
+/// then fails.
+///
+/// After such a body panics, `#[tokio::test]` drops its runtime, and tokio's
+/// runtime drop waits without limit for blocking-pool work. The in-process
+/// serve's DNS responder loop runs there and stops only on the graceful
+/// `ServeHandle::shutdown` the panicking body never reaches, so the test
+/// otherwise hangs until nextest's `terminate-after` (600 s for the #295
+/// native-fault modules, `.config/nextest.toml`).
+///
+/// Declare it as a body's FIRST statement so it drops last. When it drops
+/// while the thread is unwinding, it arms a watchdog thread. After
+/// [`TEARDOWN_BOUND`] the watchdog writes `cgroup.kill` for every workload
+/// scope the body created (so no Cloud Hypervisor outlives the run; the
+/// module is in `host-kernel-shared`, so no other test's scope can be new),
+/// reports what it killed, and exits the process with libtest's failure
+/// status 101. The panic message is already on stderr by then. A body that
+/// passes, or whose teardown ends inside the bound, is unaffected: the
+/// process exits first.
+pub(super) struct TeardownBound {
+    baseline: BTreeSet<String>,
+}
+
+impl TeardownBound {
+    const WORKLOAD_SCOPES: &'static str = "/sys/fs/cgroup/overdrive.slice/workloads.slice";
+
+    /// Records the workload scopes that exist before the body runs.
+    pub(super) fn arm() -> Self {
+        Self { baseline: Self::workload_scopes() }
+    }
+
+    fn workload_scopes() -> BTreeSet<String> {
+        match std::fs::read_dir(Self::WORKLOAD_SCOPES) {
+            Ok(entries) => entries
+                .map(|entry| {
+                    entry
+                        .expect("read a workload scope entry")
+                        .file_name()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .filter(|name| {
+                    name.starts_with("alloc-")
+                        && Path::new(name).extension().is_some_and(|extension| extension == "scope")
+                })
+                .collect(),
+            Err(error) if error.kind() == ErrorKind::NotFound => BTreeSet::new(),
+            Err(error) => panic!("read {}: {error}", Self::WORKLOAD_SCOPES),
+        }
+    }
+}
+
+impl Drop for TeardownBound {
+    #[allow(
+        clippy::print_stderr,
+        reason = "the watchdog runs after the body panicked; stderr, which the harness captures, \
+                  is its only channel for saying what it killed and why the process ends"
+    )]
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        let baseline = std::mem::take(&mut self.baseline);
+        std::thread::spawn(move || {
+            std::thread::sleep(TEARDOWN_BOUND);
+            let created: Vec<String> = match std::fs::read_dir(Self::WORKLOAD_SCOPES) {
+                Ok(entries) => entries
+                    .filter_map(|entry| match entry {
+                        Ok(entry) => Some(entry.file_name().to_string_lossy().into_owned()),
+                        Err(error) => {
+                            eprintln!("teardown bound: read a workload scope entry: {error}");
+                            None
+                        }
+                    })
+                    .filter(|name| {
+                        name.starts_with("alloc-")
+                            && Path::new(name)
+                                .extension()
+                                .is_some_and(|extension| extension == "scope")
+                            && !baseline.contains(name)
+                    })
+                    .collect(),
+                Err(error) => {
+                    eprintln!("teardown bound: cannot list {}: {error}", Self::WORKLOAD_SCOPES);
+                    Vec::new()
+                }
+            };
+            for scope in &created {
+                let kill = Path::new(Self::WORKLOAD_SCOPES).join(scope).join("cgroup.kill");
+                if let Err(error) = std::fs::write(&kill, "1") {
+                    eprintln!("teardown bound: write {}: {error}", kill.display());
+                }
+            }
+            eprintln!(
+                "teardown bound: the failed body's teardown exceeded {TEARDOWN_BOUND:?} (the \
+                 in-process serve was never shut down); killed the workload scopes it created: \
+                 {created:?}; ending the test process"
+            );
+            std::process::exit(101);
+        });
     }
 }
 
@@ -1322,6 +1448,7 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 #[serial(cgroup)]
 #[ignore = "pending DELIVER step 05-03 (S-ND295-45)"]
 async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
+    let _teardown = TeardownBound::arm();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -1589,7 +1716,40 @@ fn main() {{
     out
 }
 
-pub(super) struct PacketCapture(RawFd);
+/// The marker every identifiable frame of the S-ND295-37 emitter carries.
+const IDENTIFIABLE_MARKER: &[u8] = b"ND295-S37-IDENTIFIABLE";
+
+/// An exact-ifindex `AF_PACKET` capture with loss accounting.
+///
+/// The socket is created with protocol 0, which hooks it into no receive
+/// path, and bound with `ETH_P_ALL` to one interface; a socket created with
+/// `ETH_P_ALL` is hooked on every interface until its bind and could queue
+/// another interface's frames first. Every drain counts the frames it reads,
+/// so [`PacketCapture::seal_and_account`] can reconcile the socket's
+/// `PACKET_STATISTICS` against everything read over its whole life.
+pub(super) struct PacketCapture {
+    fd: RawFd,
+    /// Frames read from the socket by every drain so far.
+    frames_read: AtomicU64,
+    /// Pending `ENETDOWN` reports consumed so far (the bound device went down).
+    link_down_reports: AtomicU64,
+}
+
+/// The final drain of a sealed [`PacketCapture`] and its loss accounting.
+#[derive(Debug)]
+pub(super) struct SealedCapture {
+    /// Frames the final drain read after the seal (complete frames up to the
+    /// drain buffer), for the caller to classify.
+    pub(super) final_frames: Vec<Vec<u8>>,
+    /// Frames read over the socket's whole life, the final drain included.
+    pub(super) frames_read: u64,
+    /// `PACKET_STATISTICS.tp_packets`: frames the kernel queued plus dropped.
+    pub(super) kernel_packets: u32,
+    /// `PACKET_STATISTICS.tp_drops`.
+    pub(super) kernel_drops: u32,
+    /// Pending `ENETDOWN` reports consumed over the socket's whole life.
+    pub(super) link_down_reports: u64,
+}
 
 impl PacketCapture {
     pub(super) fn open(interface: &str) -> Self {
@@ -1598,12 +1758,13 @@ impl PacketCapture {
         // SAFETY: `name` is a live NUL-terminated string for this call.
         let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
         assert_ne!(ifindex, 0, "capture interface {interface} exists");
-        // SAFETY: AF_PACKET raw socket; the returned fd is owned by PacketCapture.
+        // SAFETY: AF_PACKET raw socket with protocol 0 (no receive hook until
+        // the bind below); the returned fd is owned by PacketCapture.
         let fd = unsafe {
             libc::socket(
                 libc::AF_PACKET,
                 libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                i32::from(ETH_P_ALL.to_be()),
+                0,
             )
         };
         assert!(fd >= 0, "open AF_PACKET capture: {}", std::io::Error::last_os_error());
@@ -1622,43 +1783,211 @@ impl PacketCapture {
             )
         };
         if bound != 0 {
+            let error = std::io::Error::last_os_error();
             // SAFETY: fd was returned by socket and is closed exactly here on bind failure.
             unsafe { libc::close(fd) };
-            panic!("bind AF_PACKET capture: {}", std::io::Error::last_os_error());
+            panic!("bind AF_PACKET capture: {error}");
         }
-        Self(fd)
+        Self { fd, frames_read: AtomicU64::new(0), link_down_reports: AtomicU64::new(0) }
     }
 
-    pub(super) fn drain_identifiable(&self) -> usize {
-        const NEEDLE: &[u8] = b"ND295-S37-IDENTIFIABLE";
-        let mut matched = 0;
+    /// Reads every queued frame. A pending `ENETDOWN` (the bound device went
+    /// down; the kernel reports it once, before any queued frame, and hooks
+    /// the socket again when the device comes up) is counted and reading
+    /// continues when `across_link_state`; otherwise it is a failure, like any
+    /// other receive error.
+    fn drain_frames(&self, across_link_state: bool) -> Vec<Vec<u8>> {
+        let mut frames = Vec::new();
         loop {
             let mut frame = [0_u8; 2048];
-            // SAFETY: frame is a live writable buffer and self.0 is an owned socket fd.
+            // SAFETY: frame is a live writable buffer and self.fd is an owned socket fd.
             let read = unsafe {
-                libc::recv(self.0, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
+                libc::recv(self.fd, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
             };
             if read > 0 {
                 let length = usize::try_from(read).expect("positive recv length");
-                matched += usize::from(frame[..length].windows(NEEDLE.len()).any(|w| w == NEEDLE));
+                self.frames_read.fetch_add(1, AtomicOrdering::SeqCst);
+                frames.push(frame[..length].to_vec());
                 continue;
             }
             if read == 0 {
-                return matched;
+                return frames;
             }
             let error = std::io::Error::last_os_error();
             if error.kind() == ErrorKind::WouldBlock {
-                return matched;
+                return frames;
+            }
+            if across_link_state && error.raw_os_error() == Some(libc::ENETDOWN) {
+                self.link_down_reports.fetch_add(1, AtomicOrdering::SeqCst);
+                continue;
             }
             panic!("capture recv failed: {error}");
         }
+    }
+
+    pub(super) fn drain_identifiable(&self) -> usize {
+        count_frames_containing(&self.drain_frames(false), IDENTIFIABLE_MARKER)
+    }
+
+    /// Seals the capture and accounts for it: a reject-all socket filter stops
+    /// the kernel from counting or queuing any later frame, a short settle
+    /// lets a delivery already past the old filter land, the final drain
+    /// reads what remains, and `PACKET_STATISTICS` is reconciled against every
+    /// frame read over the socket's life. Kernel drops, or a counted frame no
+    /// drain read, fail closed: a zero-frame count is evidence only from a
+    /// capture that provably read everything the kernel gave it.
+    pub(super) async fn seal_and_account(&self) -> Result<SealedCapture, String> {
+        seal_packet_socket(self.fd)
+            .map_err(|error| format!("seal the capture with a reject-all filter: {error}"))?;
+        tokio::time::sleep(PACKET_SOCKET_SEAL_SETTLE).await;
+        let final_frames = self.drain_frames(true);
+        let statistics = packet_socket_statistics(self.fd)
+            .map_err(|error| format!("read PACKET_STATISTICS: {error}"))?;
+        let sealed = SealedCapture {
+            final_frames,
+            frames_read: self.frames_read.load(AtomicOrdering::SeqCst),
+            kernel_packets: statistics.tp_packets,
+            kernel_drops: statistics.tp_drops,
+            link_down_reports: self.link_down_reports.load(AtomicOrdering::SeqCst),
+        };
+        if sealed.kernel_drops != 0 {
+            return Err(format!("the kernel dropped frames for this capture: {sealed:?}"));
+        }
+        if u64::from(sealed.kernel_packets) != sealed.frames_read + u64::from(sealed.kernel_drops) {
+            return Err(format!(
+                "PACKET_STATISTICS counted frames no drain read (or read frames it never \
+                 counted): {sealed:?}"
+            ));
+        }
+        Ok(sealed)
     }
 }
 
 impl Drop for PacketCapture {
     fn drop(&mut self) {
         // SAFETY: PacketCapture exclusively owns this socket fd.
-        unsafe { libc::close(self.0) };
+        unsafe { libc::close(self.fd) };
+    }
+}
+
+/// The number of `frames` that contain `marker`.
+pub(super) fn count_frames_containing(frames: &[Vec<u8>], marker: &[u8]) -> usize {
+    frames.iter().filter(|frame| frame.windows(marker.len()).any(|window| window == marker)).count()
+}
+
+/// How long a sealed capture waits before its final drain. A delivery that
+/// passed the socket's filter before the seal completes inside the receive
+/// path's RCU read section; the settle lets such a frame land in the queue so
+/// the final drain reads it. A frame that still lands later is counted but
+/// unread, and the reconciliation fails it closed; it never passes.
+pub(super) const PACKET_SOCKET_SEAL_SETTLE: Duration = Duration::from_millis(50);
+
+/// Seals an `AF_PACKET` socket before its final drain: attach a
+/// one-instruction classic BPF program that accepts nothing. `packet_rcv`
+/// rejects a frame the filter refuses before it counts or queues it, so after
+/// the seal the queue and `PACKET_STATISTICS.tp_packets` describe the same
+/// closed population.
+pub(super) fn seal_packet_socket(fd: RawFd) -> std::io::Result<()> {
+    let mut reject_all = [libc::sock_filter {
+        code: u16::try_from(libc::BPF_RET | libc::BPF_K).expect("BPF_RET|BPF_K fits u16"),
+        jt: 0,
+        jf: 0,
+        k: 0,
+    }];
+    let program = libc::sock_fprog { len: 1, filter: reject_all.as_mut_ptr() };
+    // SAFETY: `program` points at one live instruction for the duration of the
+    // call; the kernel copies the program before returning.
+    let result = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ATTACH_FILTER,
+            std::ptr::from_ref(&program).cast(),
+            libc::socklen_t::try_from(std::mem::size_of::<libc::sock_fprog>())
+                .expect("sock_fprog size fits socklen_t"),
+        )
+    };
+    if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+}
+
+/// Reads (and so resets) a ring-less packet socket's `PACKET_STATISTICS`.
+fn packet_socket_statistics(fd: RawFd) -> std::io::Result<libc::tpacket_stats> {
+    let mut statistics = libc::tpacket_stats { tp_packets: 0, tp_drops: 0 };
+    let mut length = libc::socklen_t::try_from(std::mem::size_of::<libc::tpacket_stats>())
+        .expect("tpacket_stats size fits socklen_t");
+    // SAFETY: `statistics` and `length` are writable storage of the declared size.
+    let result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_PACKET,
+            libc::PACKET_STATISTICS,
+            std::ptr::from_mut(&mut statistics).cast(),
+            std::ptr::from_mut(&mut length),
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if usize::try_from(length).ok() != Some(std::mem::size_of::<libc::tpacket_stats>()) {
+        return Err(std::io::Error::other("partial PACKET_STATISTICS response"));
+    }
+    Ok(statistics)
+}
+
+/// Sends `count` host-originated broadcast frames carrying `marker` out of
+/// `interface` through an `AF_PACKET` socket: the positive control of a
+/// zero-frame capture on that interface, sent at the end of its window. A
+/// frame sent out of a bridge port or the bridge device reaches the packet
+/// taps on the transmit path of that device; every managed TAP's egress
+/// classifier delivers broadcast (D-295-R21), and the IEEE local experimental
+/// ethertype is claimed by no host or guest protocol.
+fn send_host_canary_frames(interface: &str, marker: &[u8], count: usize) {
+    const CANARY_ETHERTYPE: u16 = 0x88b5;
+    let name = std::ffi::CString::new(interface).expect("interface has no NUL");
+    // SAFETY: `name` is a live NUL-terminated string for this call.
+    let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
+    assert_ne!(ifindex, 0, "positive-control interface {interface} exists");
+    // SAFETY: a send-only AF_PACKET raw socket (protocol 0 registers no
+    // receive hook); ownership moves into the OwnedFd immediately.
+    let raw = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW | libc::SOCK_CLOEXEC, 0) };
+    assert!(raw >= 0, "open AF_PACKET canary sender: {}", std::io::Error::last_os_error());
+    // SAFETY: `raw` is a freshly created descriptor owned by nothing else.
+    let socket = unsafe { OwnedFd::from_raw_fd(raw) };
+    let mut frame = Vec::with_capacity(64);
+    frame.extend_from_slice(&[0xff; 6]);
+    frame.extend_from_slice(&[0x02, 0x95, 0x02, 0x95, 0x00, 0x37]);
+    frame.extend_from_slice(&CANARY_ETHERTYPE.to_be_bytes());
+    frame.extend_from_slice(marker);
+    if frame.len() < 60 {
+        frame.resize(60, 0);
+    }
+    // SAFETY: zero is a valid initialization for sockaddr_ll before fields are populated.
+    let mut address: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+    address.sll_family = u16::try_from(libc::AF_PACKET).expect("AF_PACKET fits u16");
+    address.sll_protocol = CANARY_ETHERTYPE.to_be();
+    address.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits i32");
+    address.sll_halen = 6;
+    address.sll_addr[..6].copy_from_slice(&[0xff; 6]);
+    for _ in 0..count {
+        // SAFETY: `frame` and `address` are live, fully initialized buffers of the
+        // supplied lengths, and `socket` is an owned open descriptor.
+        let sent = unsafe {
+            libc::sendto(
+                socket.as_raw_fd(),
+                frame.as_ptr().cast(),
+                frame.len(),
+                0,
+                std::ptr::from_ref(&address).cast(),
+                libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>())
+                    .expect("sockaddr_ll length fits socklen_t"),
+            )
+        };
+        assert_eq!(
+            usize::try_from(sent).ok(),
+            Some(frame.len()),
+            "send a positive-control frame out of {interface}: {}",
+            std::io::Error::last_os_error()
+        );
     }
 }
 
@@ -1676,9 +2005,13 @@ pub(super) fn guard_default_drop_packets(observation: &BridgeGuardObservation) -
                 rule.fact.identity,
                 BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop)
             )
-            .then_some(rule.counter.map_or(0, |counter| counter.packets))
+            .then_some(rule.counter.map(|counter| counter.packets))
         })
         .expect("one semantic default-drop rule occurrence")
+        // A default-drop rule read without its counter is no evidence of zero
+        // drops: an unchanged-counter oracle over it would pass vacuously
+        // (DISTILL review M11).
+        .expect("the default-drop rule carries its packet counter")
 }
 
 // ---------------------------------------------------------------------
@@ -2700,6 +3033,46 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
     handle.shutdown().await.expect("clean shutdown");
 }
 
+/// How long S-ND295-35 waits for a Running allocation's TAP to read up.
+/// Activation follows the accepted Running write (FD § "Gate G-295-2 —
+/// existing guest command release, narrowed to the new switch": Running →
+/// capability registration → the install-success event → activate → EXEC
+/// release), so a read taken when the Running row appears may still see the
+/// TAP down. The TAP is therefore polled, not read once. Ten seconds is
+/// generous for a healthy node, where activation follows Running directly.
+const TAP_ACTIVATION_BOUND: Duration = Duration::from_secs(10);
+
+/// Polls the typed netlink link read until `tap` is administratively up.
+/// A TAP that vanishes or a read that fails ends the poll at once, and an
+/// expired bound names the last observation.
+async fn poll_until_tap_activated(tap: &str, bound: Duration) {
+    let client = overdrive_netlink::Client::new().expect("open typed host-netlink client");
+    let deadline = tokio::time::Instant::now() + bound;
+    let mut observations = 0_u32;
+    loop {
+        let observed = client
+            .observe_link(tap)
+            .await
+            .unwrap_or_else(|error| panic!("observe the production TAP {tap}: {error}"));
+        observations += 1;
+        match observed {
+            Some(true) => return,
+            Some(false) => {}
+            None => panic!(
+                "the production TAP {tap} vanished while its allocation is Running \
+                 (observation {observations})"
+            ),
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the TAP {tap} of a Running allocation becomes administratively up through the \
+             post-intercept activation within {bound:?}; last observation (#{observations}): \
+             present and down"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH
 /// S-ND295-35 — Each VMM holds exactly its own TAP queue and nothing of the server
 /// CONTRACT_SHAPE: bounded-change.
@@ -2720,6 +3093,7 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
 #[serial(cgroup)]
 #[ignore = "pending DELIVER step 10-01 (S-ND295-35)"]
 async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespaces() {
+    let _teardown = TeardownBound::arm();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -2780,12 +3154,7 @@ async fn two_vm_allocations_share_the_node_bridge_without_per_workload_namespace
             assert_ne!(ifindex, 0, "the production TAP is live while the VM is Running");
             ifindex
         };
-        let client = overdrive_netlink::Client::new().expect("open typed host-netlink client");
-        assert_eq!(
-            client.observe_link(&tap).await.expect("observe activated production TAP"),
-            Some(true),
-            "the same TAP becomes administratively up only through the awaited post-intercept activation"
-        );
+        poll_until_tap_activated(&tap, TAP_ACTIVATION_BOUND).await;
         let link_pin = PathBuf::from("/sys/fs/bpf/overdrive/mtls-endpoints/links")
             .join(format!("{tap}-ingress"));
         assert!(link_pin.exists(), "the production TCX link is pinned for {tap}");
@@ -3061,6 +3430,7 @@ fn shared_kernel_object(target: &str) -> Option<&str> {
 #[serial(cgroup)]
 #[ignore = "pending DELIVER step 10-01 (S-ND295-35)"]
 async fn each_vmm_holds_only_its_own_tap_queue_at_descriptor_three() {
+    let _teardown = TeardownBound::arm();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -3212,6 +3582,13 @@ const DOUBLE_LOSS_SINK_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 2);
 /// The emitter guest's address: the second lease, and the source identity
 /// its frames are compiled with (see [`build_identifiable_datagram_emitter`]).
 const DOUBLE_LOSS_EMITTER_ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 3);
+/// Marker of the host positive-control frames sent out of the sink TAP at the
+/// end of the S-ND295-37 window. It does not contain [`IDENTIFIABLE_MARKER`].
+const S37_PEER_CANARY: &[u8] = b"ND295-S37-CANARY-PEER-TAP";
+/// Marker of the host positive-control frames sent out of the shared bridge.
+const S37_BRIDGE_CANARY: &[u8] = b"ND295-S37-CANARY-HOST-BRIDGE";
+/// Positive-control frames sent per captured interface.
+const S37_CANARY_FRAMES: usize = 4;
 
 /// The production shared bridge guard specification.
 fn canonical_bridge_guard() -> BridgeGuardSpec {
@@ -3249,31 +3626,7 @@ fn managed_bridge_ports(bridge: &str) -> BTreeSet<String> {
 /// here. The shared bridge itself is never set down, so its capture keeps
 /// [`PacketCapture::drain_identifiable`].
 fn drain_identifiable_across_link_state(capture: &PacketCapture) -> usize {
-    const NEEDLE: &[u8] = b"ND295-S37-IDENTIFIABLE";
-    let mut matched = 0;
-    loop {
-        let mut frame = [0_u8; 2048];
-        // SAFETY: frame is a live writable buffer and capture.0 is the capture's owned socket fd.
-        let read = unsafe {
-            libc::recv(capture.0, frame.as_mut_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
-        };
-        if read > 0 {
-            let length = usize::try_from(read).expect("positive recv length");
-            matched += usize::from(frame[..length].windows(NEEDLE.len()).any(|w| w == NEEDLE));
-            continue;
-        }
-        if read == 0 {
-            return matched;
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() == ErrorKind::WouldBlock {
-            return matched;
-        }
-        if error.raw_os_error() == Some(libc::ENETDOWN) {
-            continue;
-        }
-        panic!("capture recv failed: {error}");
-    }
+    count_frames_containing(&capture.drain_frames(true), IDENTIFIABLE_MARKER)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -3422,7 +3775,14 @@ fn field_names_alloc(value: Option<&String>, alloc: &AllocationId) -> bool {
 ///   managed TAP reads down within one second of the deletion;
 /// - no identifiable guest frame reaches the peer TAP or ordinary host-bridge
 ///   forwarding after quiescence; frames seen before it are the accepted
-///   exposure and are only reported, never called fail-closed;
+///   exposure and are only reported, never called fail-closed. The zero is
+///   read only from captures shown live at the end of the window (host
+///   positive-control frames sent out of the sink TAP and the bridge are each
+///   read exactly) and sealed with exact loss accounting (no kernel drop, and
+///   `PACKET_STATISTICS` equal to every frame read). While the sink TAP is
+///   quiesced its capture is blind; a down TAP also forwards nothing to its
+///   guest, so over that interval the evidence is the bridge capture and the
+///   TAP's read-down state;
 /// - after the guard is repaired, the recovery attempt kills the damaged
 ///   allocation alone (`guest_network.shared_owner_vm_killed`, cause
 ///   `attachment_damaged`, read with the guard present), restores the
@@ -3447,6 +3807,7 @@ fn field_names_alloc(value: Option<&String>, alloc: &AllocationId) -> bool {
 #[serial(cgroup)]
 #[ignore = "pending DELIVER step 10-02 (S-ND295-37)"]
 async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_within_one_second() {
+    let _teardown = TeardownBound::arm();
     let trace = SupervisorTrace::install_global();
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision native-metal VM fixture");
@@ -3815,6 +4176,49 @@ async fn simultaneous_external_tcx_and_guard_loss_quiesces_the_managed_tap_withi
     );
     post_quiescence_frames += drain_identifiable_across_link_state(&peer_capture);
     post_quiescence_frames += host_capture.drain_identifiable();
+
+    // Positive control and loss accounting before the zero verdict. The host
+    // sends marker frames (never the identifiable marker) out of the restored
+    // sink TAP and out of the bridge; each capture must read exactly its own,
+    // proving it was still hooked and read at the end of the window (the peer
+    // capture across the sink TAP's quiescence and restore). Both captures are
+    // then sealed and reconciled against PACKET_STATISTICS: zero identifiable
+    // frames is evidence only from a live capture that lost nothing.
+    send_host_canary_frames(&sink_tap, S37_PEER_CANARY, S37_CANARY_FRAMES);
+    send_host_canary_frames(&bridge_name, S37_BRIDGE_CANARY, S37_CANARY_FRAMES);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let peer_sealed = peer_capture
+        .seal_and_account()
+        .await
+        .unwrap_or_else(|error| panic!("the peer TAP capture is not fully accounted: {error}"));
+    let host_sealed = host_capture
+        .seal_and_account()
+        .await
+        .unwrap_or_else(|error| panic!("the host-bridge capture is not fully accounted: {error}"));
+    post_quiescence_frames +=
+        count_frames_containing(&peer_sealed.final_frames, IDENTIFIABLE_MARKER);
+    post_quiescence_frames +=
+        count_frames_containing(&host_sealed.final_frames, IDENTIFIABLE_MARKER);
+    assert_eq!(
+        count_frames_containing(&peer_sealed.final_frames, S37_PEER_CANARY),
+        S37_CANARY_FRAMES,
+        "positive control: the peer TAP capture reads every host frame sent out of the restored \
+         sink TAP {sink_tap}; without it its zero count is no evidence: {peer_sealed:?}"
+    );
+    assert_eq!(
+        count_frames_containing(&host_sealed.final_frames, S37_BRIDGE_CANARY),
+        S37_CANARY_FRAMES,
+        "positive control: the host-bridge capture reads every host frame sent out of \
+         {bridge_name}; without it its zero count is no evidence: {host_sealed:?}"
+    );
+    eprintln!(
+        "S-ND295-37 capture accounting: peer TAP {} frames read, {} link-down report(s); host \
+         bridge {} frames read, {} link-down report(s); no kernel drops",
+        peer_sealed.frames_read,
+        peer_sealed.link_down_reports,
+        host_sealed.frames_read,
+        host_sealed.link_down_reports
+    );
     assert_eq!(
         post_quiescence_frames, 0,
         "after quiescence no identifiable guest frame reaches the peer TAP or ordinary \

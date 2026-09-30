@@ -109,7 +109,7 @@
 //! --features integration-tests -E 'test(shared_element_cleanup_failure)'`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -333,6 +333,12 @@ impl Drop for ElementGuard {
     }
 }
 
+/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
+/// step that carries B-7 (05-01 at the latest) changes it to
+/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
+/// unchanged by that step.
+type BoundListener = std::net::TcpListener;
+
 struct ElementFaultIntercept {
     program: SimMtlsIntercept,
     model: Arc<ElementModel>,
@@ -342,7 +348,7 @@ impl MtlsIntercept for ElementFaultIntercept {
     fn bind_transparent(
         &self,
         addr: SocketAddrV4,
-    ) -> overdrive_worker::mtls_intercept::Result<TcpListener> {
+    ) -> overdrive_worker::mtls_intercept::Result<BoundListener> {
         self.program.bind_transparent(addr)
     }
 

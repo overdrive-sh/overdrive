@@ -65,6 +65,14 @@
 //! (`worker_intercept_install_leg_acquire_outbound`,
 //! `worker_inbound_tproxy_redirect_recovers_orig_dst`) if that step deletes
 //! the helpers.
+//!
+//! Both redirects are the production shared program's. The inbound body
+//! registers a destination member; the outbound body composes the outbound
+//! divert on a hand-built veth through [`SharedOutboundDivert`]
+//! (`converge_shared`, `install_outbound`, and the guest TCX ingress
+//! classifier whose intercept mark shared prerouting rule 1 requires). That
+//! fixture is shared with `egress_tproxy_capture.rs` and
+//! `name_resolve_enforce_consistency.rs`.
 
 #![allow(
     clippy::doc_markdown,
@@ -77,24 +85,31 @@
     reason = "Test bodies; skip messages go to stderr; failures must panic with informative messages; size_of/AF_INET casts are FFI-width on compile-time constants; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit"
 )]
 
+use std::collections::BTreeSet;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::os::fd::{AsRawFd as _, FromRawFd as _};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use overdrive_core::AllocationId;
-use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+use overdrive_core::dataplane::{GUEST_BRIDGE_MAC, MTLS_LEG_S_DIAL_MARK};
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
-use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
+use overdrive_dataplane::DEFAULT_PIN_DIR;
+use overdrive_dataplane::guest_tcx::{
+    GuestTcxCounter, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxProgram, TcxAttachPoint,
+    detach_pinned_link, query_attachment, read_counter,
+};
+use overdrive_netlink::nft::{self, SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{
     InterceptPostcondition, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
     install_inbound_tproxy, install_outbound_tproxy, make_transparent_listener,
 };
 use overdrive_worker::mtls_intercept_port::{
-    HostMtlsIntercept, InterceptAcceptError, MtlsIntercept,
+    HostMtlsIntercept, InterceptAcceptError, InterceptGuard, MtlsIntercept,
 };
 
 use super::leg_listener::{LegListener, accept_failure_of, accept_leg_within, spawn_accept_leg};
@@ -951,7 +966,7 @@ fn alloc(name: &str) -> AllocationId {
 /// needs no IP_TRANSPARENT), so this scenario stands up a plain
 /// `std::net::TcpListener` on `127.0.0.1:0`, dials it, and drives
 /// `accept_outbound_and_recover_orig_dst`. The recovered `orig_dst` is the
-/// dialed addr (== the listener's `leg_f_addr`) and the leg is handed by value
+/// dialed addr (== the listener's `outbound_target`) and the leg is handed by value
 /// (an OwnedFd) — the worker's resolve consumer (04-02) then classifies
 /// `orig_dst` and stamps the resolved backend addr into `Routed::Outbound` on
 /// the `Mesh` arm; the routing peer is NO LONGER built here.
@@ -965,7 +980,7 @@ fn worker_intercept_install_leg_acquire_outbound() {
     // leg-F listener: plain loopback, no IP_TRANSPARENT (per D-MTLS-14).
     let leg_f = std::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .expect("bind leg-F loopback listener");
-    let leg_f_addr = match leg_f.local_addr().expect("leg-F local_addr") {
+    let outbound_target = match leg_f.local_addr().expect("leg-F local_addr") {
         std::net::SocketAddr::V4(a) => a,
         other => panic!("expected V4 leg-F addr, got {other}"),
     };
@@ -974,7 +989,7 @@ fn worker_intercept_install_leg_acquire_outbound() {
     // pending connection. The byte exchange proves the returned OwnedFd is the
     // genuine accepted leg (we write through it and the client reads it back).
     let client = std::thread::spawn(move || {
-        let mut s = dial(leg_f_addr, Duration::from_secs(5)).expect("dial leg-F");
+        let mut s = dial(outbound_target, Duration::from_secs(5)).expect("dial leg-F");
         let mut buf = [0u8; 4];
         s.read_exact(&mut buf).expect("read leg-F probe byte");
         buf
@@ -983,11 +998,11 @@ fn worker_intercept_install_leg_acquire_outbound() {
     let (leg, orig_dst) = accept_outbound_and_recover_orig_dst(&leg_f)
         .expect("accept_outbound_and_recover_orig_dst must recover orig-dst");
 
-    // AC1/AC3: the recovered orig-dst is the dialed addr (== leg_f_addr) via
+    // AC1/AC3: the recovered orig-dst is the dialed addr (== outbound_target) via
     // getsockname on the accepted socket.
     assert_eq!(
-        orig_dst, leg_f_addr,
-        "recovered orig_dst must be the getsockname-recovered dialed addr (leg_f_addr)"
+        orig_dst, outbound_target,
+        "recovered orig_dst must be the getsockname-recovered dialed addr (outbound_target)"
     );
 
     // Prove the owned leg is the genuine accepted socket: write through a dup
@@ -1440,6 +1455,529 @@ fn accept_with_timeout(
 }
 
 // ===========================================================================
+// Node-global sysctls of a hand-built veth topology (shared fixture)
+// ===========================================================================
+
+/// The `/proc/sys` path of the dotted sysctl `key`.
+fn sysctl_path(key: &str) -> std::path::PathBuf {
+    std::path::Path::new("/proc/sys").join(key.replace('.', "/"))
+}
+
+/// Read the sysctl `key`, trimmed.
+fn read_sysctl(key: &str) -> std::io::Result<String> {
+    std::fs::read_to_string(sysctl_path(key)).map(|value| value.trim().to_owned())
+}
+
+/// Write `value` to the sysctl `key`, then read it back: a write the kernel
+/// accepted but did not apply is an error too.
+fn write_sysctl(key: &str, value: &str) -> std::io::Result<()> {
+    std::fs::write(sysctl_path(key), value)?;
+    let applied = read_sysctl(key)?;
+    if applied == value {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("{key} reads back {applied:?} after writing {value:?}")))
+    }
+}
+
+/// Set a per-link sysctl of a link the fixture created (for example
+/// `net.ipv4.conf.<veth>.rp_filter`). The link, and the setting with it, goes
+/// when the fixture deletes the link, so nothing needs restoring; the write and
+/// its read-back must succeed.
+pub(super) fn set_link_sysctl(scenario: &str, key: &str, value: &str) {
+    write_sysctl(key, value).unwrap_or_else(|error| {
+        panic!("[{scenario}] setting the fixture link's sysctl {key}={value} failed: {error}")
+    });
+    eprintln!("[{scenario}][sysctl] {key} = {value} (fixture link; removed with the link)");
+}
+
+/// Node-global sysctls a hand-built veth topology relaxes (forwarding and
+/// reverse-path filtering), snapshotted before the first write and restored on
+/// `Drop` — also when the body panics — so the fixture leaves no node-global
+/// routing policy behind for a later test or workspace. Every read, write, and
+/// read-back is asserted, and every change and restoration is one appended
+/// evidence line.
+///
+/// Consumers: the host-listener topology below, `egress_tproxy_capture.rs`, and
+/// `name_resolve_enforce_consistency.rs`.
+pub(super) struct NodeSysctls {
+    scenario: &'static str,
+    /// Each changed key with the value it held before this guard wrote it, in
+    /// write order; restored in reverse.
+    saved: Vec<(&'static str, String)>,
+}
+
+impl NodeSysctls {
+    /// Snapshot and set each `(key, value)` in order. A key is recorded for
+    /// restoration before it is written, so a failed write still restores the
+    /// keys written before it.
+    pub(super) fn set(scenario: &'static str, settings: &[(&'static str, &str)]) -> Self {
+        let mut guard = Self { scenario, saved: Vec::with_capacity(settings.len()) };
+        for (key, value) in settings {
+            let prior = read_sysctl(key).unwrap_or_else(|error| {
+                panic!("[{scenario}] reading the node-global sysctl {key} failed: {error}")
+            });
+            guard.saved.push((key, prior.clone()));
+            write_sysctl(key, value).unwrap_or_else(|error| {
+                panic!("[{scenario}] setting the node-global sysctl {key}={value} failed: {error}")
+            });
+            eprintln!("[{scenario}][sysctl] {key}: {prior} -> {value} (restored on drop)");
+        }
+        guard
+    }
+}
+
+impl Drop for NodeSysctls {
+    fn drop(&mut self) {
+        let scenario = self.scenario;
+        for (key, prior) in self.saved.iter().rev() {
+            match write_sysctl(key, prior) {
+                Ok(()) => eprintln!("[{scenario}][sysctl] {key} restored to {prior}"),
+                // Already unwinding from the body's failure: record the
+                // restoration failure beside it rather than aborting.
+                Err(error) if std::thread::panicking() => eprintln!(
+                    "[{scenario}][sysctl] restoring {key} to {prior} failed during unwind: {error}"
+                ),
+                Err(error) => {
+                    panic!(
+                        "[{scenario}] restoring the node-global sysctl {key} to {prior} failed: {error}"
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// The production outbound divert on a hand-built veth topology (shared fixture)
+// ===========================================================================
+
+/// A locally administered unicast MAC derived from a workload address:
+/// `02:00` followed by the address's four octets. A hand-built topology gives
+/// its workload-side veth this MAC, so the guest classifier's endpoint record
+/// names the source MAC of every frame the workload sends.
+pub(super) const fn workload_mac(address: Ipv4Addr) -> [u8; 6] {
+    let [a, b, c, d] = address.octets();
+    [0x02, 0x00, a, b, c, d]
+}
+
+/// The `ip link ... address` text form of `mac` (`02:00:0a:fa:00:02`).
+pub(super) fn mac_text(mac: [u8; 6]) -> String {
+    mac.iter().map(|octet| format!("{octet:02x}")).collect::<Vec<_>>().join(":")
+}
+
+/// Remove `path` and everything below it. An absent path is already removed.
+fn remove_pin_tree(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+/// A cleanup failure fails the body. When the body is already unwinding from
+/// its own failure, both are kept: the primary panic, and this line on stderr.
+fn report_divert_cleanup_failure(scenario: &str, message: &str) {
+    if std::thread::panicking() {
+        eprintln!("[{scenario}][divert] cleanup failed during unwind: {message}");
+    } else {
+        panic!("[{scenario}] divert cleanup failed: {message}");
+    }
+}
+
+/// The ifindex of the host link `interface`; the read must succeed.
+fn link_ifindex(scenario: &str, interface: &str) -> u32 {
+    let path = format!("/sys/class/net/{interface}/ifindex");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("[{scenario}] reading {path} failed: {error}"));
+    text.trim()
+        .parse()
+        .unwrap_or_else(|error| panic!("[{scenario}] parsing {path} ({text:?}) failed: {error}"))
+}
+
+/// The node's guest TCX ingress classifier (`gh295c_endpoint`), loaded from
+/// the embedded object and attached first at one host-side veth's TCX ingress,
+/// with the workload's endpoint registered for that veth. It runs in the
+/// guest-network owner's provision order for a TAP: load, pin both maps, insert
+/// and read back the endpoint, attach first-ingress, pin the link, and query
+/// that exactly this program is attached.
+///
+/// Its pins sit under a test-scoped root,
+/// `<DEFAULT_PIN_DIR>/test-worker-divert-<interface>-<pid>`, never under the
+/// node's production `mtls-endpoints` pins. [`Self::detach`] detaches the
+/// pinned link, requires the attach point to be empty, and removes the pin
+/// root, asserting each; `Drop` does the same best-effort when the body did not
+/// reach [`Self::detach`]. Loading the object uses the production loader, which
+/// reuses (or briefly pins and then removes) the node's `SERVICE_MAP` pin under
+/// `DEFAULT_PIN_DIR`; the worker integration binary is `host-kernel-shared`.
+struct GuestIngressClassifier {
+    scenario: &'static str,
+    interface: String,
+    pin_root: PathBuf,
+    link_pin: PathBuf,
+    program: Option<GuestTcxProgram>,
+    released: bool,
+}
+
+impl GuestIngressClassifier {
+    fn attach(scenario: &'static str, interface: &str, endpoint: GuestTcxEndpoint) -> Self {
+        let pin_root = Path::new(DEFAULT_PIN_DIR)
+            .join(format!("test-worker-divert-{interface}-{}", std::process::id()));
+        remove_pin_tree(&pin_root).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] removing the stale divert pin root {} failed: {error}",
+                pin_root.display()
+            )
+        });
+        let link_pin = pin_root.join(format!("links/{interface}-ingress"));
+        // Constructed before the first pin is written, so a failure below
+        // still removes the pin root through `Drop`.
+        let mut classifier = Self {
+            scenario,
+            interface: interface.to_owned(),
+            pin_root,
+            link_pin,
+            program: None,
+            released: false,
+        };
+        let endpoint_pin = classifier.pin_root.join("maps/endpoints");
+        let counter_pin = classifier.pin_root.join("maps/counters");
+        let (identity, disposition) =
+            GuestTcxInventoryIdentity::capture(endpoint_pin.clone(), counter_pin.clone())
+                .into_parts();
+        disposition.unwrap_or_else(|error| {
+            panic!("[{scenario}] the classifier's BPF inventory baseline capture failed: {error:?}")
+        });
+        let mut program = GuestTcxProgram::load(&identity).unwrap_or_else(|error| {
+            panic!("[{scenario}] loading the guest TCX classifier failed: {error:?}")
+        });
+        program.pin_endpoint_map(&endpoint_pin).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] pinning the endpoint map at {} failed: {error:?}",
+                endpoint_pin.display()
+            )
+        });
+        program.pin_counter_map(&counter_pin).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] pinning the counter map at {} failed: {error:?}",
+                counter_pin.display()
+            )
+        });
+        let ifindex = link_ifindex(scenario, interface);
+        program.insert_endpoint(ifindex, endpoint).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] registering the workload endpoint for {interface} failed: {error:?}"
+            )
+        });
+        assert_eq!(
+            program.read_endpoint(ifindex).unwrap_or_else(|error| {
+                panic!("[{scenario}] reading back the endpoint of {interface} failed: {error:?}")
+            }),
+            Some(endpoint),
+            "[{scenario}] the endpoint map holds exactly the registered workload endpoint for \
+             {interface} (ifindex {ifindex})"
+        );
+        let link = program.attach_first_ingress(interface).unwrap_or_else(|error| {
+            panic!("[{scenario}] attaching the classifier first at {interface} ingress failed: {error:?}")
+        });
+        let program_id = link.program_id();
+        link.pin(&classifier.link_pin).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] pinning the ingress link at {} failed: {error:?}",
+                classifier.link_pin.display()
+            )
+        });
+        let attached =
+            query_attachment(interface, TcxAttachPoint::Ingress).unwrap_or_else(|error| {
+                panic!("[{scenario}] querying the TCX ingress of {interface} failed: {error:?}")
+            });
+        assert_eq!(
+            attached.program_ids,
+            vec![program_id],
+            "[{scenario}] exactly the loaded classifier is attached at {interface}'s TCX ingress"
+        );
+        eprintln!(
+            "[{scenario}][divert] classifier program {program_id} attached first at {interface} \
+             ingress (ifindex {ifindex}); endpoint {endpoint:?}; pins under {}",
+            classifier.pin_root.display()
+        );
+        classifier.program = Some(program);
+        classifier
+    }
+
+    /// The classifier's count of one semantic outcome; the read must succeed.
+    fn counter(&self, counter: GuestTcxCounter) -> u64 {
+        let scenario = self.scenario;
+        read_counter(self.pin_root.join("maps/counters"), counter).unwrap_or_else(|error| {
+            panic!("[{scenario}] reading the classifier's {counter:?} counter failed: {error:?}")
+        })
+    }
+
+    /// Every loaded counter slot, for the evidence of a failed divert.
+    fn counter_snapshot(&self) -> String {
+        [
+            GuestTcxCounter::GatewayHostPass,
+            GuestTcxCounter::Intercept,
+            GuestTcxCounter::EndpointMapMiss,
+            GuestTcxCounter::SourceMacSpoof,
+            GuestTcxCounter::SourceIpArpSpoof,
+            GuestTcxCounter::DirectBypassDrop,
+            GuestTcxCounter::ArpPass,
+            GuestTcxCounter::MalformedDrop,
+        ]
+        .into_iter()
+        .map(|counter| format!("{counter:?}={}", self.counter(counter)))
+        .collect::<Vec<_>>()
+        .join(" ")
+    }
+
+    fn detach(mut self) {
+        let scenario = self.scenario;
+        let interface = self.interface.clone();
+        let program = self.program.take();
+        detach_pinned_link(&self.link_pin).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] detaching the pinned ingress link {} failed: {error:?}",
+                self.link_pin.display()
+            )
+        });
+        let attached =
+            query_attachment(&interface, TcxAttachPoint::Ingress).unwrap_or_else(|error| {
+                panic!("[{scenario}] querying the TCX ingress of {interface} failed: {error:?}")
+            });
+        assert!(
+            attached.program_ids.is_empty(),
+            "[{scenario}] detaching the classifier empties {interface}'s TCX ingress, got {:?}",
+            attached.program_ids
+        );
+        drop(program);
+        remove_pin_tree(&self.pin_root).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] removing the divert pin root {} failed: {error}",
+                self.pin_root.display()
+            )
+        });
+        self.released = true;
+        eprintln!(
+            "[{scenario}][divert] classifier detached from {interface}; pin root {} removed",
+            self.pin_root.display()
+        );
+    }
+}
+
+impl Drop for GuestIngressClassifier {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        let scenario = self.scenario;
+        drop(self.program.take());
+        match self.link_pin.try_exists() {
+            Ok(true) => {
+                if let Err(error) = detach_pinned_link(&self.link_pin) {
+                    report_divert_cleanup_failure(
+                        scenario,
+                        &format!(
+                            "detaching the pinned ingress link {}: {error:?}",
+                            self.link_pin.display()
+                        ),
+                    );
+                }
+            }
+            Ok(false) => {}
+            Err(error) => report_divert_cleanup_failure(
+                scenario,
+                &format!("probing the ingress link pin {}: {error}", self.link_pin.display()),
+            ),
+        }
+        if let Err(error) = remove_pin_tree(&self.pin_root) {
+            report_divert_cleanup_failure(
+                scenario,
+                &format!("removing the pin root {}: {error}", self.pin_root.display()),
+            );
+        }
+    }
+}
+
+/// The complete shared program state; it must be readable and present.
+fn shared_program_state(scenario: &str) -> SharedIpInterceptState {
+    nft::observe_shared_ip_intercept_state()
+        .unwrap_or_else(|error| {
+            panic!("[{scenario}] observing the shared program's members failed: {error:?}")
+        })
+        .unwrap_or_else(|| panic!("[{scenario}] the shared program is absent"))
+}
+
+/// The canonical identity of the shared program at the two legs' targets.
+fn shared_ip_identity(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> SharedIpInterceptIdentity {
+    SharedIpInterceptIdentity::for_listener_ports(leg_f.port(), leg_c.port())
+        .expect("two bound legs report non-zero ports, which form one canonical identity")
+}
+
+/// The production outbound divert under the GH #295 shared design, composed on
+/// a hand-built veth topology in place of the guest-network owner's TAP
+/// provisioning (which lives in the control plane, outside this crate's
+/// dependency graph):
+///
+/// 1. `HostMtlsIntercept::converge_shared` converges the node's constant
+///    program at the two bound legs' targets, from an observed absence;
+/// 2. `HostMtlsIntercept::install_outbound(source, leg F's port)` admits the
+///    workload's source: one managed-guest and one outbound-source element;
+/// 3. the guest TCX ingress classifier is attached first at the host-side
+///    veth with the workload's endpoint (source address, source MAC, and the
+///    node bridge MAC `GUEST_BRIDGE_MAC`) — [`GuestIngressClassifier`].
+///
+/// Shared prerouting rule 1 then diverts the workload's TCP to leg F: the
+/// classifier stamps the intercept mark `0x295a` on every guest TCP frame it
+/// passes, and the source is an admitted outbound source. No per-interface rule is
+/// installed. Leg F's replies reach the guest because the transparent listener
+/// marks its sockets with the leg-S mark, which output rule 0 exempts ahead of
+/// the managed-guest drop.
+///
+/// Every setup step is asserted. [`Self::release`] undoes them in reverse and
+/// asserts each: the classifier detached and its pins removed; the source's
+/// elements removed with the program unchanged; then the member-free program
+/// removed by the node guard's drop (the feature delta's guard ordering: every
+/// element guard before the node guard). On an unwinding panic the fields drop
+/// in the same order.
+pub(super) struct SharedOutboundDivert {
+    scenario: &'static str,
+    host: HostMtlsIntercept,
+    leg_f: SocketAddrV4,
+    leg_c: SocketAddrV4,
+    // Field order is the unwinding drop order: the classifier, then the
+    // source's elements, then the program.
+    classifier: Option<GuestIngressClassifier>,
+    admission: Option<Box<dyn InterceptGuard>>,
+    program: Option<Box<dyn InterceptGuard>>,
+}
+
+impl SharedOutboundDivert {
+    /// Compose the divert for `source` (whose frames carry `source_mac`)
+    /// arriving on the host-side veth `interface`, to leg F at `leg_f`; `leg_c`
+    /// is the program's inbound target.
+    pub(super) fn install(
+        scenario: &'static str,
+        host: &HostMtlsIntercept,
+        leg_f: SocketAddrV4,
+        leg_c: SocketAddrV4,
+        source: Ipv4Addr,
+        source_mac: [u8; 6],
+        interface: &str,
+    ) -> Self {
+        let prior = host.observe_shared().unwrap_or_else(|error| {
+            panic!("[{scenario}] observing the shared program before convergence failed: {error:?}")
+        });
+        assert_eq!(
+            prior, None,
+            "[{scenario}] the sandbox leaves no shared program, so convergence starts from an \
+             observed absence"
+        );
+        let program = host.converge_shared(prior.as_ref(), leg_f, leg_c).unwrap_or_else(|error| {
+            panic!(
+                "[{scenario}] converge_shared at leg F {leg_f} and leg C {leg_c} failed: {error:?}"
+            )
+        });
+        assert_eq!(
+            host.observe_shared().unwrap_or_else(|error| {
+                panic!("[{scenario}] observing the converged shared program failed: {error:?}")
+            }),
+            Some(expected_shared_identity(leg_f, leg_c)),
+            "[{scenario}] converge_shared installs the constant program at the two legs' targets"
+        );
+        let admission = host.install_outbound(source, leg_f.port()).unwrap_or_else(|error| {
+            panic!("[{scenario}] install_outbound({source}, {}) failed: {error:?}", leg_f.port())
+        });
+        let admitted = shared_program_state(scenario);
+        assert_eq!(
+            admitted.identity(),
+            &shared_ip_identity(leg_f, leg_c),
+            "[{scenario}] admitting the source leaves the constant program unchanged"
+        );
+        assert_eq!(
+            admitted.managed_guest_ips(),
+            &BTreeSet::from([source]),
+            "[{scenario}] install_outbound adds the source as the one managed guest"
+        );
+        assert_eq!(
+            admitted.outbound_sources(),
+            &BTreeSet::from([source]),
+            "[{scenario}] install_outbound adds the source as the one outbound source"
+        );
+        assert!(
+            admitted.inbound_destinations().is_empty(),
+            "[{scenario}] an outbound admission registers no inbound destination: {admitted:?}"
+        );
+        eprintln!(
+            "[{scenario}][divert] shared program converged at leg F {leg_f} / leg C {leg_c}; \
+             source {source} admitted"
+        );
+        let classifier = GuestIngressClassifier::attach(
+            scenario,
+            interface,
+            GuestTcxEndpoint { source_ipv4: source, source_mac, bridge_mac: GUEST_BRIDGE_MAC },
+        );
+        Self {
+            scenario,
+            host: host.clone(),
+            leg_f,
+            leg_c,
+            classifier: Some(classifier),
+            admission: Some(admission),
+            program: Some(program),
+        }
+    }
+
+    fn classifier(&self) -> &GuestIngressClassifier {
+        self.classifier
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("the classifier is held until release consumes self"))
+    }
+
+    /// How many guest TCP frames the classifier has stamped with the intercept
+    /// mark so far.
+    pub(super) fn intercepted(&self) -> u64 {
+        self.classifier().counter(GuestTcxCounter::Intercept)
+    }
+
+    /// Every classifier counter, for the evidence of a failed divert.
+    pub(super) fn counter_snapshot(&self) -> String {
+        self.classifier().counter_snapshot()
+    }
+
+    /// Undo the divert in reverse, asserting each step.
+    pub(super) fn release(mut self) {
+        let scenario = self.scenario;
+        if let Some(classifier) = self.classifier.take() {
+            classifier.detach();
+        }
+        drop(self.admission.take());
+        let released = shared_program_state(scenario);
+        assert_eq!(
+            released.identity(),
+            &shared_ip_identity(self.leg_f, self.leg_c),
+            "[{scenario}] releasing the admission leaves the constant program unchanged"
+        );
+        assert!(
+            released.managed_guest_ips().is_empty()
+                && released.outbound_sources().is_empty()
+                && released.inbound_destinations().is_empty(),
+            "[{scenario}] releasing the admission removes the source's two elements: {released:?}"
+        );
+        drop(self.program.take());
+        assert_eq!(
+            self.host.observe_shared().unwrap_or_else(|error| {
+                panic!("[{scenario}] observing the shared program after release failed: {error:?}")
+            }),
+            None,
+            "[{scenario}] the node guard's drop removes the member-free program"
+        );
+        eprintln!(
+            "[{scenario}][divert] released: classifier detached, elements removed, program removed"
+        );
+    }
+}
+
+// ===========================================================================
 // S-ND295-70 — the host listener's obligations (GH #295, gap B-7)
 // ===========================================================================
 
@@ -1447,7 +1985,8 @@ fn accept_with_timeout(
 const HOST_LISTENER_NS: &str = "nsW-hlo70";
 /// The workload-side veth (moved into [`HOST_LISTENER_NS`]).
 const HOST_LISTENER_VETH_W: &str = "vethW-hlo70";
-/// The host-side veth the outbound TPROXY rule matches.
+/// The host-side veth: the guest's dial ingresses it, and the guest classifier
+/// runs at its TCX ingress.
 const HOST_LISTENER_VETH_H: &str = "vethH-hlo70";
 /// The topology's `/24` comes from overdrive-testing's `10.250.0.0/16` pool
 /// under this stable owner name; the pool is disjoint from production's
@@ -1455,7 +1994,8 @@ const HOST_LISTENER_VETH_H: &str = "vethH-hlo70";
 const HOST_LISTENER_LEASE: &str = "worker-mtls-intercept-install-host-listener";
 /// The destination the guest dials on the outbound path: a host-lo `/32`
 /// disjoint from production and from every sibling fixture's backend. Nothing
-/// listens on it, so a dial the redirect does not take is refused.
+/// listens on it. A dial the divert missed never completes: the host's reply to
+/// the managed guest carries no leg-S mark, so shared output rule 2 drops it.
 const HOST_LISTENER_OUTBOUND_DESTINATION: SocketAddrV4 =
     SocketAddrV4::new(Ipv4Addr::new(10, 201, 70, 1), 18_770);
 /// The inbound virtual address (a registered destination and declared port).
@@ -1485,11 +2025,14 @@ impl Drop for HostListenerSandbox {
 
 /// A workload netns joined to the host by a veth pair, with the host `lo`
 /// carrying [`HOST_LISTENER_OUTBOUND_DESTINATION`], so the guest's dial to it
-/// ingresses [`HOST_LISTENER_VETH_H`] and meets PREROUTING (the
-/// `egress_tproxy_capture.rs` recipe). Torn down on drop, before the CIDR lease
-/// is released.
+/// ingresses [`HOST_LISTENER_VETH_H`] — where the guest classifier runs — and
+/// meets PREROUTING (the `egress_tproxy_capture.rs` recipe). The workload veth
+/// carries [`workload_mac`] of its address. Torn down on drop, before the CIDR
+/// lease is released and the node-global sysctls are restored.
 struct HostListenerEgressTopology {
     lease: TestCidrLease,
+    /// Restores forwarding and reverse-path filtering after the teardown.
+    _node_sysctls: NodeSysctls,
 }
 
 impl HostListenerEgressTopology {
@@ -1501,6 +2044,7 @@ impl HostListenerEgressTopology {
         let workload = format!("{}/{}", lease.workload_addr(), lease.prefix_len());
         let host_gateway = lease.host_gateway().to_string();
         let destination = format!("{}/32", HOST_LISTENER_OUTBOUND_DESTINATION.ip());
+        let mac = mac_text(workload_mac(lease.workload_addr()));
         adoption_ip(&["netns", "add", HOST_LISTENER_NS]);
         adoption_ip(&[
             "link",
@@ -1512,6 +2056,9 @@ impl HostListenerEgressTopology {
             "name",
             HOST_LISTENER_VETH_H,
         ]);
+        // The workload side carries the MAC the classifier's endpoint record
+        // names, so its frames pass the source-MAC check.
+        adoption_ip(&["link", "set", HOST_LISTENER_VETH_W, "address", &mac]);
         adoption_ip(&["link", "set", HOST_LISTENER_VETH_W, "netns", HOST_LISTENER_NS]);
         adoption_ip(&["addr", "add", &gateway, "dev", HOST_LISTENER_VETH_H]);
         adoption_ip(&["link", "set", HOST_LISTENER_VETH_H, "up"]);
@@ -1550,35 +2097,26 @@ impl HostListenerEgressTopology {
         ]);
         adoption_ip(&["addr", "add", &destination, "dev", "lo"]);
         // Host-side routing hygiene, as `egress_tproxy_capture.rs` sets it:
-        // relaxed reverse-path filtering so the diverted ingress is not dropped,
-        // and TX checksum offload off on the host veth. Each is logged, never
-        // silently discarded.
-        for (program, args) in [
-            ("sysctl", vec!["-w".to_owned(), "net.ipv4.ip_forward=1".to_owned()]),
-            (
-                "sysctl",
-                vec!["-w".to_owned(), format!("net.ipv4.conf.{HOST_LISTENER_VETH_H}.rp_filter=0")],
-            ),
-            ("sysctl", vec!["-w".to_owned(), "net.ipv4.conf.all.rp_filter=0".to_owned()]),
-            ("sysctl", vec!["-w".to_owned(), "net.ipv4.conf.lo.rp_filter=0".to_owned()]),
-            (
-                "ethtool",
-                vec![
-                    "-K".to_owned(),
-                    HOST_LISTENER_VETH_H.to_owned(),
-                    "tx".to_owned(),
-                    "off".to_owned(),
-                ],
-            ),
-        ] {
-            let status = Command::new(program)
-                .args(&args)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            eprintln!("[S-ND295-70][topology] {program} {args:?} -> {status:?}");
-        }
-        Self { lease }
+        // relaxed reverse-path filtering so the diverted ingress is not dropped.
+        // The node-global keys are restored when the topology drops; the host
+        // veth's own key goes with the veth. No TX-checksum-offload change is
+        // made: the divert rewrites no header, so no checksum base is needed
+        // (`.claude/rules/bpf.md` Rule 2 concerns an incremental checksum after
+        // a rewrite).
+        let node_sysctls = NodeSysctls::set(
+            "S-ND295-70",
+            &[
+                ("net.ipv4.ip_forward", "1"),
+                ("net.ipv4.conf.all.rp_filter", "0"),
+                ("net.ipv4.conf.lo.rp_filter", "0"),
+            ],
+        );
+        set_link_sysctl(
+            "S-ND295-70",
+            &format!("net.ipv4.conf.{HOST_LISTENER_VETH_H}.rp_filter"),
+            "0",
+        );
+        Self { lease, _node_sysctls: node_sysctls }
     }
 
     const fn workload_addr(&self) -> Ipv4Addr {
@@ -1651,11 +2189,17 @@ fn reported_workload_source_port(client_output: &str) -> Option<u16> {
 /// accepted `local` is the destination the guest dialled and `peer` is the
 /// guest's own source (feature delta § *Driven port — intercept listener*,
 /// `HostMtlsIntercept` obligations; D-TME-4). The workload dials a host-side
-/// destination through its gateway; the production `install_outbound_tproxy`
-/// rule diverts the SYN to the leg-F listener bound through
-/// `HostMtlsIntercept::bind_transparent`, and the leg is accepted through the
+/// destination through its gateway, and the leg is accepted through the
 /// `LegListener` bridge. The client reports its source port, so `peer` is
 /// checked exactly.
+///
+/// The divert is the production shared program, composed on the host veth by
+/// [`SharedOutboundDivert`]: `converge_shared` at the two legs bound through
+/// `HostMtlsIntercept::bind_transparent`, `install_outbound(workload, leg F's
+/// port)`, and the guest TCX classifier at the host veth's ingress, whose
+/// intercept mark shared prerouting rule 1 requires. No per-interface rule is
+/// installed. The classifier's intercept count must advance with the dial, so
+/// the accepted connection is known to have come through that mark.
 ///
 /// Mutation targets: a listener that reports its own bound address as `local`
 /// (the orig-dst lost), and one that reports the listener side or a rewritten
@@ -1678,12 +2222,24 @@ fn the_host_listener_reports_a_redirected_outbound_original_destination_as_local
         host.bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("HostMtlsIntercept::bind_transparent binds leg F"),
     );
-    let leg_f_port = leg_f.bound_v4().expect("leg F reports its bound IPv4 address").port();
-    let guard = install_outbound_tproxy(HOST_LISTENER_VETH_H, leg_f_port)
-        .expect("the production outbound TPROXY rule installs on the host veth");
+    let leg_c = host
+        .bind_transparent(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("HostMtlsIntercept::bind_transparent binds leg C");
+    let outbound_target = leg_f.bound_v4().expect("leg F reports its bound IPv4 address");
+    let inbound_target = leg_c.bound_v4().expect("leg C reports its bound IPv4 address");
+    let divert = SharedOutboundDivert::install(
+        "S-ND295-70",
+        &host,
+        outbound_target,
+        inbound_target,
+        workload,
+        workload_mac(workload),
+        HOST_LISTENER_VETH_H,
+    );
+    let intercepted_before = divert.intercepted();
     eprintln!(
-        "[S-ND295-70][outbound] leg F 127.0.0.1:{leg_f_port}; workload {workload}; destination \
-         {HOST_LISTENER_OUTBOUND_DESTINATION}"
+        "[S-ND295-70][outbound] leg F {outbound_target}; workload {workload}; destination \
+         {HOST_LISTENER_OUTBOUND_DESTINATION}; intercepted before the dial {intercepted_before}"
     );
 
     let client = std::thread::spawn(|| {
@@ -1692,11 +2248,18 @@ fn the_host_listener_reports_a_redirected_outbound_original_destination_as_local
     let accepted = accept_leg_within(&leg_f, Duration::from_secs(8));
     let client_output = client.join().expect("the workload client thread completes");
     eprintln!("[S-ND295-70][outbound] workload client: {client_output}");
-    let (stream, peer, local) = accepted.expect(
-        "the redirected outbound dial must be accepted on leg F within 8 s; a timeout means the \
-         TPROXY divert did not deliver it",
+    let (stream, peer, local) = accepted.unwrap_or_else(|error| {
+        panic!(
+            "the redirected outbound dial must be accepted on leg F within 8 s; a timeout means \
+             the shared program did not divert it ({error}); classifier counters: {}",
+            divert.counter_snapshot()
+        )
+    });
+    let intercepted_after = divert.intercepted();
+    eprintln!(
+        "[S-ND295-70][outbound] accepted peer={peer} local={local}; intercepted after the dial \
+         {intercepted_after}"
     );
-    eprintln!("[S-ND295-70][outbound] accepted peer={peer} local={local}");
 
     assert_eq!(
         local, HOST_LISTENER_OUTBOUND_DESTINATION,
@@ -1711,10 +2274,15 @@ fn the_host_listener_reports_a_redirected_outbound_original_destination_as_local
         SocketAddrV4::new(workload, source_port),
         "the accepted peer is the guest's own source address and port"
     );
+    assert!(
+        intercepted_after > intercepted_before,
+        "the guest's TCP reached leg F through the classifier's intercept mark: the Intercept \
+         count must advance past {intercepted_before}, got {intercepted_after}"
+    );
 
     drop(stream);
-    drop(guard);
-    drop(leg_f);
+    divert.release();
+    drop((leg_c, leg_f));
     drop(topology);
 }
 

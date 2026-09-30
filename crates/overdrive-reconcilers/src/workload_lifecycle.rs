@@ -3290,10 +3290,16 @@ mod reclaim_emission_acceptance {
         FinalizedAtCeiling,
         FreshPlacement,
         PlacementRefusedAtCap,
+        /// The restart is due at the cap and the predecessor (the current
+        /// allocation) holds no lease: the workload waits for room like any
+        /// placement and emits nothing of its own (FD restart-gating table,
+        /// "`held >= MAX`, the restart is due, and the predecessor holds no
+        /// lease"), while its leased, finished leftovers are still reclaimed.
+        DueRestartAtCapUnleasedPredecessor,
     }
 
     impl ReturnPath {
-        const ALL: [Self; 14] = [
+        const ALL: [Self; 15] = [
             Self::StopBranchStopping,
             Self::StopBranchComplete,
             Self::DeletedStopping,
@@ -3308,6 +3314,7 @@ mod reclaim_emission_acceptance {
             Self::FinalizedAtCeiling,
             Self::FreshPlacement,
             Self::PlacementRefusedAtCap,
+            Self::DueRestartAtCapUnleasedPredecessor,
         ];
 
         const fn intent(self) -> Intent {
@@ -3335,7 +3342,8 @@ mod reclaim_emission_acceptance {
                 Self::StopBranchComplete
                 | Self::JobNaturalExit
                 | Self::DueRestartWithRoom
-                | Self::CeilingFinalize => RowFact::Crashed,
+                | Self::CeilingFinalize
+                | Self::DueRestartAtCapUnleasedPredecessor => RowFact::Crashed,
                 Self::DeletedComplete => RowFact::ExitedCrashed,
                 Self::JobTerminalFence => RowFact::JobCompleted,
                 Self::DrainingGuard => RowFact::Draining,
@@ -3380,7 +3388,12 @@ mod reclaim_emission_acceptance {
         }
 
         const fn at_cap(self) -> bool {
-            matches!(self, Self::PlacementRefusedAtCap)
+            matches!(self, Self::PlacementRefusedAtCap | Self::DueRestartAtCapUnleasedPredecessor)
+        }
+
+        /// The path is defined by its current allocation holding no lease.
+        const fn predecessor_unleased(self) -> bool {
+            matches!(self, Self::DueRestartAtCapUnleasedPredecessor)
         }
     }
 
@@ -3395,16 +3408,38 @@ mod reclaim_emission_acceptance {
     /// A superseded row: its fact and its lease, if any.
     type Leftover = (RowFact, Option<GuestAttachmentLease>);
 
+    /// Up to four superseded rows with any fact and lease; for the
+    /// unleased-predecessor path, the first is always a leased, finished row,
+    /// so that path's reclaim is exercised in every case.
+    fn leftovers_strategy(path: ReturnPath) -> BoxedStrategy<Vec<Leftover>> {
+        let any_leftovers = prop::collection::vec((fact_strategy(path), lease_strategy()), 0..=4);
+        if !path.predecessor_unleased() {
+            return any_leftovers.boxed();
+        }
+        let finished: Vec<RowFact> =
+            path.leftover_facts().into_iter().filter(|fact| fact.is_finished()).collect();
+        let leased = prop::sample::select(vec![
+            GuestAttachmentLease::Admitted,
+            GuestAttachmentLease::Retiring,
+        ]);
+        let first = (prop::sample::select(finished), leased.prop_map(Some));
+        let rest = prop::collection::vec((fact_strategy(path), lease_strategy()), 0..=3);
+        (first, rest)
+            .prop_map(|(first, rest)| std::iter::once(first).chain(rest).collect::<Vec<_>>())
+            .boxed()
+    }
+
+    /// The current row's lease: none on the unleased-predecessor path.
+    fn current_lease_strategy(path: ReturnPath) -> BoxedStrategy<Option<GuestAttachmentLease>> {
+        if path.predecessor_unleased() { Just(None).boxed() } else { lease_strategy().boxed() }
+    }
+
     /// A path, its superseded rows (suffixes `0..n`), and the current row's
     /// lease.
     fn scenario_strategy()
     -> impl Strategy<Value = (ReturnPath, Vec<Leftover>, Option<GuestAttachmentLease>)> {
         prop::sample::select(ReturnPath::ALL.to_vec()).prop_flat_map(|path| {
-            (
-                Just(path),
-                prop::collection::vec((fact_strategy(path), lease_strategy()), 0..=4),
-                lease_strategy(),
-            )
+            (Just(path), leftovers_strategy(path), current_lease_strategy(path))
         })
     }
 
