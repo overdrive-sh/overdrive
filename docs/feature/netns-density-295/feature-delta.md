@@ -582,7 +582,7 @@ evidence; the residuals R21 and R4 had stated become prevented. Revision 7
 | Reuse Analysis, Decisions Table, Open Questions, Author Validation | Extended or rewritten in place. |
 | D-295-DISTILL-6 (`GuestTcxCounter`, eight-index `read_counter`), D-295-DISTILL-12 (`GuestTcxObject`, counter schema, private receipts), D-295-DISTILL-14/14A (eight-counter probe), Reuse Analysis classifier row | Marked in place for D-295-R21 (egress classifier, ninth counter slot, `attach_first_egress`); the exact additions are in § *Driven port — TAP egress guest-MAC delivery*. |
 | VMM TAP queue attachment (launch hook, probe, dependencies), TAP activation gate (debug-mask read-back), TAP egress guest-MAC delivery (residuals), D-295-DISTILL-12A step 7, evidence-lane matrix (E12, new E21), Changed Assumptions 30–35, Reuse Analysis, Evidence Classification, Technology Choices, Earned Trust, Lifecycle Gate G-295-4, Contract Shape, Security, Decisions Table, Open Questions 1, 8, and 10, Author Validation | Revised in place for D-295-R22 (revision 6), and scoped to x86_64 by ruling 10 (revision 7; aarch64 is GH #302); the exact contract is in § *Driven port — VMM launch seccomp filter (D-295-R22)*. |
-| Every `## Wave: DISTILL` section | Not edited by DESIGN. DISTILL rewrote them against these contracts (HEAD `376710c8`); the iteration-1 DISTILL review and the pins of 2026-09-29 route further DISTILL changes (§ *Required downstream changes*). |
+| Every `## Wave: DISTILL` section | Not edited by DESIGN. DISTILL rewrote them against these contracts (HEAD `376710c8`); the iteration-1 DISTILL review, the pins of 2026-09-29, and the user decisions of 2026-09-30 route further DISTILL changes (§ *Required downstream changes*). |
 
 **Artifacts outside this file:**
 
@@ -596,7 +596,7 @@ evidence; the residuals R21 and R4 had stated become prevented. Revision 7
 | `brief.md` #295 sections; `c4-diagrams.md` #295 | Replacement added and marked accepted (2026-09-24). Where the earlier baseline conflicts, including the brief's "exactly `assign`, `release`, and `snapshot`" and "eight constant IP rules" sentences, the replacement governs. |
 | ADR-0144, ADR-0130, `brief.md` | **Revised in present tense 2026-09-28 for the user rulings of 2026-09-28** (accepted, not yet implemented, so no amendment narrative). ADR-0144 is rewritten and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`. ADR-0130's read-back set states the host-side MAC invariant. `brief.md`'s #295 sections state it too, and its host link-policy section and handoff annotation carry no host requirement. |
 | ADR-0122, ADR-0124, ADR-0142, ADR-0143, `c4-diagrams.md` | **Revised in present tense 2026-09-28, on the user's approval of the same date (ruling 8).** ADR-0122's 2026-09-24 addition list names the fact for a host-side MAC that breaks the invariant. ADR-0124's Decision counts a reserved or missing host-side MAC as damage, and a change to an unreserved address as none. ADR-0142's *Detection only* alternative and Consequences bound, and ADR-0143's Consequences, describe detection of a reserved address. The C4 shared-owner container and allocation sequence show no recorded MAC. Code committed on the feature branch counts as landed (the user, 2026-09-28: "we merge commit with linear history"; § *Freeze and inventory*), so ADR-0122 and ADR-0124 are operative, and their 2026-09-24 amendment blocks, like those of ADR-0114, 0115, 0117, 0118, 0121, and 0125, stand as written. The clause revised here, that a changed or recorded host-side MAC is damage, is R21's host-side MAC check, and it is not implemented even on the feature branch: at HEAD `c51ab167`, `GuestNetworkFact::TapHostMac` is declared in production code but constructed only in the `#[cfg(test)]` modules `scratch_probe_acceptance` and `allocation_owner_acceptance` of `guest_network.rs`. No production path can report that damage, and no persisted or wire state or external consumer depends on the clause. With no operative contract there is nothing to amend, so the clause is revised in present tense in all four ADRs, with no amendment narrative. |
-| `distill/test-scenarios.md`, `distill/red-classification.md` | Not edited by DESIGN. DISTILL rewrote both against these contracts (HEAD `376710c8`); the iteration-1 DISTILL review and the pins of 2026-09-29 route further DISTILL changes (§ *Required downstream changes*). |
+| `distill/test-scenarios.md`, `distill/red-classification.md` | Not edited by DESIGN. DISTILL rewrote both against these contracts (HEAD `376710c8`); the iteration-1 DISTILL review, the pins of 2026-09-29, and the user decisions of 2026-09-30 route further DISTILL changes (§ *Required downstream changes*). |
 | `deliver/roadmap.json` | `validation.status` must return to `pending`. Steps 02-01, 02-03, 03-01, 03-03, 04-01, and 04-02 are invalidated in part; see *Required downstream changes*. |
 
 **Alternatives reopened** because native evidence invalidated their
@@ -1517,8 +1517,8 @@ pub enum GuestNetworkFact {
 - **A sourced failure** of a single read (provision, `activate`) is
   `Netlink { operation: TapObserve, source }` for that allocation.
 - **A failed audit dump is a node-level failure, not per-allocation damage.**
-  It is a whole-observation failure, like quiescence's whole-call `Err`, so
-  the audit returns `Err(SharedGuestNetworkAuditError { component:
+  It is one observation over every TAP, so its failure names no allocation,
+  and the audit returns `Err(SharedGuestNetworkAuditError { component:
   SharedGuestNetworkComponent::Bridge, source: GuestNetworkError::Netlink {
   operation: TapObserve, source } })`. The TAPs are that bridge's ports, and
   the dump's own source is retained. The existing bounded recovery (R13/R14)
@@ -1775,60 +1775,65 @@ E12 (h) observes each step.
   TAP. `unconfirmed` empty means full quiescence.
 - **`Err(GuestNetworkError)`** means the owner could not determine per-TAP
   outcomes at all.
-- **The partition between the two results** (pinned 2026-09-29 on evidence,
-  DISTILL review DR-08 (b); it states precisely the accepted example "no
-  netlink socket could be opened", and changes no accepted outcome):
+- **The partition between the two results** (DR-08 (b), pinned 2026-09-29 on
+  evidence; the host's per-TAP classification of a netlink session failure is
+  the user's decision DR-08 (b)-A, approved 2026-09-30):
   - *Port contract.* `Err` means the owner cannot determine per-TAP outcomes.
     Its variant is the adapter's: `SimSharedGuestNetworkOwner`'s scripted
     `Fail` is `Err(GuestNetworkError::Io { operation: TapSetDown, .. })`
     (§ *D-295-DISTILL-10*). No owner branches on the variant: the supervisor
     treats every `Err`, and every call that misses its bound, as undetermined.
     Each `unconfirmed` entry is one TAP's own failure.
-  - *Host, whole-call `Err`:* the host cannot obtain a netlink session for a
-    set-down or read-back in the pass. That is `NetlinkError::Connect`, which
-    the tree returns when a netlink socket cannot be opened
-    (`overdrive-netlink/src/error.rs:35-42`), and also when the host netlink
-    bridge cannot build its runtime or its worker thread panics
-    (`overdrive-netlink/src/runtime.rs:35-38`, `:61-63`). The host stops the
-    pass at that call and returns `Err(GuestNetworkError::Netlink { operation:
-    TapSetDown, source })`, with `source` the `Connect` error. The latch stays
-    set. An allocation already read back down in this pass stays
-    `QuiescedActive`, and every other `Active` allocation stays `Active`,
-    including one whose set-down or read-back failed earlier in the pass. No
-    allocation moves to `Condemned`, because the `Err` reports no per-TAP
-    outcome, and the supervisor's answer, the workloads-slice kill and the
-    fail-stop, covers every VM.
-  - *Host, per-TAP `unconfirmed`:* every other failure of one TAP's set-down
-    or read-back, and the pass continues: a set-down the kernel refuses, a
-    deleted TAP (`LinkAbsent`, as the effect bullet states), a read-back that
-    fails other than with `Connect`, and a TAP read back up, absent, or
-    incompatible (`PostconditionMismatch`). No `unconfirmed` entry carries
-    `NetlinkError::Connect`.
+  - *Host: every failure is one TAP's, and the host returns no `Err`.* Every
+    failure of one TAP's set-down or read-back is that TAP's `unconfirmed`
+    entry, and the pass continues: a set-down the kernel refuses, a deleted TAP
+    (`LinkAbsent`, as the effect bullet states), a failed read-back, a TAP read
+    back up, absent, or incompatible (`PostconditionMismatch`), and a set-down
+    or read-back that could not obtain a netlink session. The last is
+    `NetlinkError::Connect`, which the tree returns when a netlink socket cannot
+    be opened (`overdrive-netlink/src/error.rs:35-42`), and also when the host
+    netlink bridge cannot build its runtime or its worker thread panics
+    (`overdrive-netlink/src/runtime.rs:35-38`, `:61-63`). Its entry is
+    `Netlink { operation: TapSetDown, source }`, with `source` the `Connect`
+    error. The host therefore returns no `Err`, and production reaches the
+    undetermined branch only through a call that misses its bound, the case
+    user ruling 2 of 2026-09-24 names ("the set-down call hangs or times
+    out").
+  - *Why (DR-08 (b)-A).* Ruling 2 kills only the VMs whose TAP could not be
+    confirmed down, and a TAP whose confirmation could not run is one of them.
+    Ending the pass at a `Connect` would instead turn one TAP's failed session
+    (for example, a worker-thread panic on its reply) into a workloads-slice
+    kill and a fail-stop. A netlink failure common to every TAP makes every
+    `Active` TAP unconfirmed, and the supervisor kills each of those VMs, with
+    `VmKillFailed` taking over if a kill write fails (kill-scope table,
+    § *Runtime shared-network supervisor*).
   - Which D12A leaf surfaces a failure is internal structure.
-  - *Proposed refinement, PENDING USER DECISION (DR-08 (b)-A, 2026-09-29).*
-    Classify `Connect` per TAP too: a TAP whose set-down or read-back could not
-    obtain a netlink session is that TAP's `unconfirmed` entry, and the pass
-    continues. The host would then never return `Err`, and production would
-    reach the whole-call branch only through a call that misses its bound, the
-    case user ruling 2 names ("the set-down call hangs or times out"). A
-    failure common to every TAP would make every `Active` TAP unconfirmed and
-    kill each VM, with `VmKillFailed` taking over if a kill write fails. It is
-    recommended: ruling 2 kills only the VMs whose TAP could not be confirmed
-    down, a TAP whose confirmation could not run is one of them, and a
-    worker-thread panic on one TAP's reply would otherwise kill every workload
-    VM and fail-stop the node. It changes the accepted example's recovery
-    path, so it is not in force until the user approves it.
-- **Repeat call while latched.** Activation defers while latched, so no
+- **The bound applies to every adapter** (pinned 2026-09-30 on evidence). The
+  call makes no synchronous blocking wait on the task that awaits it, and it
+  tolerates being dropped at any await (a pass cancelled at its bound), so a
+  call that hangs reaches the supervisor as a bound miss. Under DR-08
+  (b)-A the bound miss is production's only route to the undetermined branch,
+  and a call that blocks inside `poll` would stall the supervisor's race
+  against `clock.sleep` instead of missing its bound (§ *Runtime shared-network
+  supervisor*, *Quiescence*). This makes the accepted race realizable and
+  changes no outcome.
+- **Repeat call while latched** (the owner half of the re-quiescence after a
+  part-way restore, user-approved 2026-09-30; § *Runtime shared-network
+  supervisor*, *Quiescence*). Activation defers while latched, so no
   allocation becomes `Active` under the latch. One stays `Active` only after
   `restore_quiesced_taps` fails part-way (the allocations it already restored
-  are `Active` again), or after a whole-call `Err` or a pass cancelled at its
-  bound, both of which the supervisor answers with the fail-stop. A repeat call
-  sets down, reads back, and reports every allocation still `Active`, as above.
-  With none `Active`, it returns an empty result without I/O.
-- The supervisor treats a call that misses its bound like `Err`: the failing
-  set is undetermined.
-- The staged implementation (`guest_network.rs:4355-4392`) opens a netlink
-  client per TAP and returns at the first failure; it changes to this contract.
+  are `Active` again), or after a pass cancelled at its bound, which the
+  supervisor answers with the fail-stop. A repeat call sets down, reads back,
+  and reports every allocation still `Active`, as above. With none `Active`,
+  it returns an empty result without I/O.
+- **The staged implementation** (`guest_network.rs:4355-4392`) realizes the
+  superseded C-295-G contract (Changed Assumption 24), not this one. It opens a
+  netlink client per TAP and returns the first failure of any kind as `Err`;
+  it returns an empty result without I/O whenever the latch is set
+  (`:4357-4359`); and it blocks the calling task in `block_on_host_netlink`'s
+  thread join (`overdrive-netlink/src/runtime.rs:60-64`). It changes to this
+  contract. No committed code realizes the partition or the repeat clause
+  (`restore_quiesced_taps` is still a scaffold, `:4393-4396`).
 
 `restore_quiesced_taps` contract:
 
@@ -3450,8 +3455,9 @@ It also keeps the typed chain:
   independent causes, each kept as typed structured data.
 
 **`Display`, the text every string consumer carries (amended 2026-09-29 by the
-user's decision DR-06).** The error's `Display` is the one rendering: every
-consumer that turns the error into text reads it, and none re-renders it.
+user's decision DR-06; its `ElementRemoval` clause user-approved 2026-09-30).**
+The error's `Display` is the one rendering: every consumer that turns the error
+into text reads it, and none re-renders it.
 
 - `HandleTeardown` renders `allocation <alloc_id>: enforced-handle teardown
   failed for <n> handle(s): <c1>: <e1>; <c2>: <e2>; …`. `<n>` is
@@ -3490,10 +3496,11 @@ them:
 The user decided on 2026-09-29 that operators lose no diagnostic detail there.
 Rendering on the error's `Display` restores every per-connection cause to both
 consumers with no change to either. `ElementRemoval` gains its cause under the
-same decision: it reaches the same detail, and it is new with R10 (element
-removal could not fail before), so its cause would otherwise be the one
-failure an operator could not read there. Rendering at the consumers instead was
-rejected: `restart_abort_cleanup_detail`, `PriorTeardown`'s `Display`, and any
+same decision, which the user extended to it on 2026-09-30: it reaches the same
+detail, and it is new with R10 (element removal could not fail before), so its
+cause would otherwise be the one failure an operator could not read there.
+Rendering at the consumers instead was rejected:
+`restart_abort_cleanup_detail`, `PriorTeardown`'s `Display`, and any
 later consumer would each have to repeat the walk over `failures`, and they
 would drift. No ADR states the contrary. ADR-0135 says the stop error becomes
 a typed enum replacing its stringified failure list, which still holds: the
@@ -5391,7 +5398,7 @@ never read, and per-TAP problems are reported as Bridge.
   that fails part-way leaves the TAPs it raised up, so the next audit that
   reports a kernel-path component quiesces again, and that call sets down the
   allocations the restore made `Active` (*Repeat call while latched*,
-  § *Driven port — TAP activation gate*). *(Pinned 2026-09-29 on evidence,
+  § *Driven port — TAP activation gate*). *(User-approved 2026-09-30, from the
   DISTILL review iteration 1 re-review: without it, TAPs raised by a partial
   restore stay up through a later kernel-path failure until the deadline,
   contrary to "a TAP is never raised while any owner's component is still
@@ -5408,7 +5415,7 @@ owner's reports decide what is killed:
 | Owner report | Action | Recovery |
 |---|---|---|
 | `Ok(TapQuiescence { unconfirmed })`, `unconfirmed` empty | none | continues |
-| `Ok(TapQuiescence { unconfirmed })`, `unconfirmed` non-empty (a set-down or read-back failed, a deleted TAP included) | For each allocation in `unconfirmed`, in `AllocationId` order: `vm_kill.kill_allocation(alloc)`, then emit `guest_network.shared_owner_vm_killed { alloc, cause: "quiescence_unconfirmed", error }`. | continues for every other allocation, within the same window |
+| `Ok(TapQuiescence { unconfirmed })`, `unconfirmed` non-empty (a set-down or read-back failed, a deleted TAP and a netlink session failure included; DR-08 (b)-A) | For each allocation in `unconfirmed`, in `AllocationId` order: `vm_kill.kill_allocation(alloc)`, then emit `guest_network.shared_owner_vm_killed { alloc, cause: "quiescence_unconfirmed", error }`. | continues for every other allocation, within the same window |
 | `Ok(SharedGuestNetworkAudit { damaged })`, `damaged` non-empty, while Open or during an attempt | For each allocation in `damaged`: `vm_kill.kill_allocation(alloc)`, then emit the same event with `cause: "attachment_damaged"`. | while Open: stays Open; during recovery: the attempt continues to step 3 |
 | a per-VM kill write returns `Ok`, including an absent scope | counted as confirmed; the allocation is `Condemned` and outside every later audit and restore universe | as above |
 | a per-VM kill write fails other than `NotFound` | `vm_kill.kill_workloads_slice()`; then `exec.fail_stop(VmKillFailed)` and send the request. From Open the request carries the existing no-recovery values (component `Supervisor`, zero attempts, zero elapsed); the cause identifies it. | ends |
@@ -5906,18 +5913,19 @@ delegates to, without `run_server`'s cgroup bootstrap and private VM-driver
 composition. The native lane has no case for it, because no
 production-faithful native stimulus exists:
 
-- Production reaches `Err` only when the host cannot obtain a netlink session
-  for a set-down or read-back in the pass (`NetlinkError::Connect`, as the
-  `quiesce_managed_taps` partition pins). The set of `Active` TAPs comes from
-  owner-private state with no I/O, so every such cause is a failure of the
-  host's netlink substrate for the pass, not of one TAP. Starving the serve
-  process of descriptors fails the preceding audit first and then the
-  `cgroup.kill` open the branch exists to show, so it cannot prove the slice
-  kill. (Under the proposed refinement DR-08 (b)-A, pending the user, the host
-  returns no `Err`, and only the bound miss reaches the branch.)
-- Denying the serve process netlink sockets needs a test-installed LSM
-  program. Holding the call past its bound needs RTNL held or the process
-  frozen, and freezing stalls the supervisor as well.
+- The host owner returns no `Err` (the `quiesce_managed_taps` partition,
+  DR-08 (b)-A), so production reaches the branch only through a quiescence
+  call that misses its bound. A netlink failure common to every TAP, the
+  obvious candidate stimulus, makes every `Active` TAP an `unconfirmed` entry,
+  which the per-VM rows of the kill-scope table answer. When that failure is
+  descriptor exhaustion, the first per-VM `cgroup.kill` write fails as well,
+  because `RealCgroupFs::write` opens the file
+  (`overdrive-host/src/cgroup_fs.rs:98-100`): the supervisor then attempts the
+  workloads-slice kill, which fails too while the exhaustion lasts, and
+  fail-stops with `VmKillFailed`. *(A consequence of DR-08 (b)-A, pinned
+  2026-09-30 on evidence; it changes no outcome the kill-scope table states.)*
+- Holding the call past its bound needs RTNL held or the process frozen, and
+  freezing stalls the supervisor as well.
 - A failing owner can enter only through the `SharedGuestNetworkOwner`
   parameter of `run_server_with_obs_and_drivers`. The VM driver composition
   (`compose_vm_driver`) is private to `run_server`, so such a native test
@@ -7029,21 +7037,65 @@ DESIGN created no issue. No other deferral is proposed.
     `observed` the stale members, and S-ND295-61's detections (`:1986-1989`
     there, and the loss table of `shared_intercept_members.rs`) to the exact
     `Intercept { source }` variant.
-  - *Quiescence partition (DR-08 (b)).* The S-ND295-51 whole-call body
-    (`overdrive-control-plane/src/guest_network.rs:9223-9260`) matches the
-    pinned partition (`Err` carrying `Connect`, no allocation condemned or
-    moved); DISTILL may also assert `operation: TapSetDown`, and add the case
-    of a `Connect` after an earlier per-TAP failure in the same pass. The
-    repeat-while-latched clause gains a deterministic case: quiesce, a restore
-    whose second set-up fails, then quiesce again; the restored allocation is
-    set down and reported, and the latch stays set. The supervisor's
-    re-quiescence after a partial restore gains a seeded case in the E11
-    matrix. 06-04 review item: the rustdoc of `quiesce_managed_taps`
-    (`guest_network.rs:160-161`) states the partition and the repeat clause.
-    If the user approves DR-08 (b)-A, the whole-call body is re-authored: its
-    stimulus then yields `Ok(TapQuiescence)` naming both `Active` allocations
-    unconfirmed and condemned, and the whole-call branch keeps only the
-    scripted `Fail`/`Hang` cells (S-ND295-30A (b), S-ND295-29B C6b).
+  - *Quiescence partition (DR-08 (b), with DR-08 (b)-A user-approved
+    2026-09-30).* The host returns no `Err`: a netlink session failure
+    (`NetlinkError::Connect`) is one TAP's `unconfirmed` entry like every other
+    per-TAP failure. DISTILL re-authors the S-ND295-51 whole-call case of
+    `quiescence_reports_every_unconfirmed_tap_and_condemns_it`
+    (`overdrive-control-plane/src/guest_network.rs:9223-9260`), which asserts
+    the `Err` this decision removes:
+    - Its stimulus stays: `kernel.fail_always(AllocationCall::SetTapDown)`
+      (a standing fault, `guest_network.rs:6294-6296`) fails each set-down
+      with the fake's `netlink_failure()` (bound at `:6479`), which is
+      `NetlinkError::Connect` (`:5582-5584`). The pass now returns
+      `Ok(TapQuiescence)` whose `unconfirmed` names exactly `first` and
+      `second`, each with
+      `Netlink { operation: TapSetDown, source: NetlinkError::Connect { .. } }`;
+      the set-down of both was attempted (the pass continued past the first);
+      the `ProvisionedDown` `pending` is untouched; the latch is set.
+    - Its later assertions invert: `first` and `second` are condemned, so
+      `activate` refuses each as the first half of the body refuses `gone` and
+      `stuck` (`:9207-9211`), and a restore raises nothing and clears the
+      latch, after which `pending` activates.
+    - The rustdoc's last sentence (`:9108-9110`, "A whole-call failure (no
+      netlink socket) is `Err` …") and the scenario's fault-stimulus entry
+      "whole-call netlink open failure" (`distill/test-scenarios.md:847`)
+      change to a netlink session failure (`Connect`) on each TAP, classified
+      per TAP.
+    - DISTILL may add a read-back `Connect` (set-down succeeds, read-back
+      fails: unconfirmed and condemned), and a mixed pass in which a `Connect`
+      follows an earlier per-TAP failure: both TAPs are in `unconfirmed`.
+    - `red-classification.md:414` is re-verified for the rewritten body. The
+      RED it records fires in the shared fixture's provision, on the 06-02
+      owner-uid change, before the rewritten section runs, so it is expected
+      to stay a preceding-step-gap RED.
+    - The undetermined branch keeps only the scripted `Fail`/`Hang` cells,
+      S-ND295-30A (b) and S-ND295-29B C6b, unchanged. DISTILL may add a seeded
+      E12 case in which `unconfirmed` names every `Active` allocation (at least
+      two): each scope's `cgroup.kill` is written in `AllocationId` order before
+      the next owner call, no workloads-slice write occurs, and recovery
+      continues. That is the production outcome of a netlink failure common to
+      every TAP.
+
+    The repeat-while-latched clause and the supervisor's re-quiescence
+    (user-approved 2026-09-30) each gain a case: a deterministic S-ND295-51
+    case (quiesce, a restore whose second set-up fails, then quiesce again; the
+    restored allocation is set down and reported, and the latch stays set),
+    and a seeded case in the E11 matrix.
+
+    06-04 review items:
+    - The trait method's rustdoc (`SharedGuestNetworkOwner::quiesce_managed_taps`,
+      `guest_network.rs:160-161`) states the port partition, the bound
+      property, and the repeat clause. The rustdoc of
+      `HostSharedGuestNetworkOwner::quiesce_managed_taps` states that the host
+      classifies every failure, `Connect` included, per TAP and returns no
+      `Err`.
+    - The host call makes no synchronous blocking wait on the awaiting task:
+      the staged body's `block_on_host_netlink` path blocks in its thread join
+      (`overdrive-netlink/src/runtime.rs:60-64`). Which leaf or helper the host
+      uses stays with the crafter. DISTILL decides whether a source-local case
+      pins it, for example a set-down leaf that never completes, raced against
+      a timer.
   - *Close-on-exec gate (DR-10).* DISTILL adds E19's test-only-boundary
     planted rows to S-ND295-46 beside `CFG_TEST_ITEMS`
     (`xtask/src/cloexec_lint.rs:504-537`). 05-04's gate implements the pinned
@@ -12657,7 +12709,7 @@ to infer its mutation universe.
 | `GuestNetworkProvisioner::provision/teardown` (+ `activate`, D-295-R5; egress link and host-side MAC invariant, D-295-R21) | **bounded-change** | The named allocation's TAP/master/up state, endpoint entry, TCX ingress link/pin, TCX egress link/pin, bridge-guard membership, and private state: the recorded `GuestNetworkPlan`, both program ids, and the phase (`ProvisionedDown`, `Active`, `QuiescedActive`, `Condemned`), plus lease-correlated facts. The shared bridge, maps, and rules may change only toward their one desired identity. No bridge-port flag and no TAP MAC is ever written. | The same `SharedGuestNetworkOwner` implements the inherited async completion boundary. Provision's postcondition is the complete protected attachment, both TCX links included, with the TAP exactly down, a debug message mask of 0 (R22), a host-side MAC outside the reserved set (R21), and the recorded plan. Only `activate` performs and reads back down→up, after the event and after re-reading both links, the host-side MAC, and the debug message mask; it refuses a latched quiescence without mutation and a `Condemned` allocation without mutation. Teardown accepts every phase, treats each absent part as removed, sets a present TAP down and reads it back before delete, and proves the empty complement at both attach points. Evidence: the typed operation/error family, allocation-scoped state-delta universes including the absent-part tables, and the real-kernel complement. |
 | `SharedGuestNetworkOwner` startup/sweep/converge | **bounded-change** | Platform bpffs hierarchy, one bridge/gateway, endpoint/counter maps, three guard rules, scratch-probe resources; unrelated host objects preserved. `converge_shared` changes only node-level parts, never a per-allocation part and never a TAP's administrative state | One mandatory owner is also the provisioner. D14A's production-used private validator covers every semantic mismatch/lower source; D5/D12A source-local tables cover owner algorithms. Non-persisted stage/attachment/guard/complement events expose only completed real-boot effects to the tracing subscriber. Public Sim remains composition-only; Lima/native retains kernel authority. |
 | `SharedGuestNetworkOwner::audit_shared` *(PROPOSED D-295-R14)* | **bounded-change** (kernel read-only) | No kernel mutation. The only change is owner-private: each allocation reported in `damaged` moves to `Condemned`. Read universe: every node-level part and every non-`Condemned` allocation's parts; `Condemned` allocations are the complement and are not read | D12A source-local tables: node-level failure returns `Err` before any per-allocation read; each per-allocation part fault yields exactly that allocation in `damaged`; a reported allocation is absent from every later audit; kernel state is byte-equal before and after. |
-| `SharedGuestNetworkOwner::quiesce_managed_taps` *(PROPOSED D-295-R5/R14)* | **bounded-change** | The latch; each `Active` allocation's TAP administrative state (up→down) and phase (`Active`→`QuiescedActive`, or `Condemned` when not confirmed down). `ProvisionedDown`, `QuiescedActive`, and `Condemned` allocations, the bridge, maps, guard, and every non-managed link are the complement | D12A tables: the latch is set before the first mutation; one failed set-down continues the pass; an absent TAP is reported unconfirmed; a repeat call while latched sets down and reports only allocations still `Active` (after a restore that failed part-way) and performs no I/O when none is; a whole-call failure (the host cannot obtain a netlink session, `NetlinkError::Connect`) returns `Err`, and no allocation moves to `Condemned` (allocations confirmed down before it stay `QuiescedActive`) (§ *Driven port — TAP activation gate*, the `quiesce_managed_taps` partition, 2026-09-29). |
+| `SharedGuestNetworkOwner::quiesce_managed_taps` *(PROPOSED D-295-R5/R14)* | **bounded-change** | The latch; each `Active` allocation's TAP administrative state (up→down) and phase (`Active`→`QuiescedActive`, or `Condemned` when not confirmed down). `ProvisionedDown`, `QuiescedActive`, and `Condemned` allocations, the bridge, maps, guard, and every non-managed link are the complement | D12A tables: the latch is set before the first mutation; one failed set-down continues the pass; an absent TAP is reported unconfirmed; a repeat call while latched sets down and reports only allocations still `Active` (after a restore that failed part-way) and performs no I/O when none is; a set-down or read-back that cannot obtain a netlink session (`NetlinkError::Connect`) is that TAP's `unconfirmed` entry and the pass continues, so the host returns no `Err` (§ *Driven port — TAP activation gate*, the `quiesce_managed_taps` partition; DR-08 (b)-A, user-approved 2026-09-30). |
 | `SharedGuestNetworkOwner::restore_quiesced_taps` *(PROPOSED D-295-R13)* | **bounded-change** | Each `QuiescedActive` allocation's TAP administrative state (down→up) and phase (→`Active`), then the latch (cleared only after every restore). `ProvisionedDown`, `Active`, and `Condemned` allocations, the bridge, maps, and guard are the complement | D12A tables: no latch performs no I/O; a failure keeps the latch and the remainder `QuiescedActive`, and a retry resumes; `Condemned` and `ProvisionedDown` TAPs are never raised. |
 | Public `SimSharedGuestNetworkOwner` | **bounded-change** | Adapter-sim universe only: six independent non-audit refusal bits (probe, provision, teardown, sweep, converge, restore), one standing `SimQuiesceOutcome`, one standing damage set, one private condemned set, one latch bit, twelve component audit bits, replaceable/consumable next-probe and next-audit errors, one append-only ordered `GuestNetworkOperation` call log, and optional D13 sweep-call observations over the same injected `SimVmHostState`. No kernel/listener/cleanup implementation exists | Existing method/call-log table remains unchanged. Seeded tests assert the latch, condemned-set, and activation outcomes against the scripted inputs. D13's exact constructor stores one clone of the existing Sim host; each real owner-port sweep atomically records call index plus `VmHostObservation`. Default/test_wiring has no host observation. Composition tests prove application ordering only; D5/D12A source-local and Lima/native tests exclusively prove host effects/cleanup. |
 | `GuestAttachmentView` *(PROPOSED D-295-R8)* and its production implementation over the pool | **bounded-change** (read-only; empty mutation set) | Reads occupancy and the named allocations' leases under one pool-mutex acquisition. Mutates nothing: the lease map, lease states, and every other pool field are complement-equal. The trait has one `&self` read method and no write method | Pool source-local property: `observe` returns exactly the held/retiring counts and leases of the map at the acquisition, and the map is byte-equal after. `SimGuestAttachmentView` is composition-only and preloaded at construction. |
@@ -14853,7 +14905,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-R21 TAP egress guest-MAC control | **ACCEPTED 2026-09-24 (review finding R5-H1, reproduced natively in increment-z); a structural control:** a TCX egress classifier per TAP delivers unicast only to the TAP's registered guest MAC (reusing the ADR-0115 endpoint map) and drops every other unicast, a map miss included; broadcast/multicast always delivered; closes the host-side-MAC FDB-theft path and the unknown-unicast flood leak; `flood off` rejected on evidence (D5); complemented by the ADR-0130 host-side-MAC audit read-back; prevention at the source is the separate D-295-R22 (below), which makes the victim outage and the `TUNSETOWNER` re-grant prevented rather than accepted residuals | [ADR-0142](../../product/architecture/adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md) (Accepted) |
 | D-295-R22 launch seccomp filter | **ACCEPTED 2026-09-24 (user ruling 9; native evidence increment-aa):** every Cloud Hypervisor launch loads, in the forked child before its first exec and as the last effect of the one ADR-0129 hook, a hand-built classic-BPF seccomp deny-list returning `EPERM` for the 13 TAP-mutating ioctl requests (values from `libc`, low 32 bits) on any descriptor, killing the process on a foreign audit architecture or an x32 syscall; every CH thread inherits it. **x86_64 only (user ruling 10, 2026-09-24):** every other target, aarch64 included, has no program; its startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect; aarch64 is GH #302. `seccompiler` not chosen, on evidence; the ADR-0142 egress check and the ADR-0130 read-back (now including the TAP debug message mask) stay as independent layers; resolves Open Questions 8 and 10 by prevention | [ADR-0143](../../product/architecture/adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md) (Accepted) |
 | Managed-link identity independent of host link configuration (fresh-host RCA) | **ACCEPTED (user rulings of 2026-09-28; the bridge contract pinned on evidence 2026-09-26):** a managed bridge is created with its address; a TAP's host-side MAC is judged by the D-295-R21 invariant (not a reserved address: `GUEST_BRIDGE_MAC` or a held allocation's guest MAC outside `Condemned`, the TAP's own included), never against a recorded value; no host link-configuration requirement, host probe, or startup-probe scratch-TAP condition. The reserved set is pinned on evidence, as ruling 2 asked. The `TapHostMac { ifindex, address: TapHostAddress }` fact shape and the set's exclusion of `Condemned` allocations are **USER-APPROVED 2026-09-28** (rulings 6 and 7) | This feature delta § *Managed-link identity independent of host link configuration* and § *Driven port — TAP egress guest-MAC delivery (D-295-R21)*; [ADR-0144](../../product/architecture/adr-0144-managed-link-identity-independent-of-host-link-configuration.md) (Accepted); ADR-0130 read-back set |
-| DISTILL review iteration-1 pins (2026-09-29) | **DR-06 USER-DECIDED 2026-09-29:** operators lose no diagnostic detail; `MtlsInterceptStopError`'s `Display` renders every per-connection cause (`<alloc>#<counter>: <message>`) and the removal cause, an explicit amendment of the phase-B Display. **Pinned on evidence the same day:** `local_route_present` at 07-01, `intercept_mark_guard` `false` before 08-01 (DR-07); `PolicyRouteAbsent`, `InterceptMarkGuardAbsent`, `MembersRemain` as the observation checks' causes (DR-08 (a)); quiescence's whole-call `Err` means per-TAP outcomes cannot be determined, with an adapter-specific variant, and the host realizes the accepted example as a netlink session it cannot obtain (`NetlinkError::Connect`) while every other failure of one TAP is that TAP's `unconfirmed` entry (DR-08 (b)); **PROPOSED, pending the user:** classify `Connect` per TAP too (DR-08 (b)-A); a repeat quiescence while latched sets down allocations a part-way restore left `Active`, and the supervisor re-quiesces after a part-way restore; until 08-01 the `intercept_mark_guard` rustdoc states its not-observed meaning, and the rustdoc of the three new `InterceptError` variants states that no adapter returns them; a `cfg` predicate requiring `test`, including `all(test, …)`, marks a test-only item the close-on-exec gate skips (DR-10); the PORT-295-C listener projection owned by 07-01 (H2); per-IP listener ports (DR-16); emission-counted reclaim attempts (DR-17); the E18 benchmark report as evidence (DR-19); the short-frame egress row guaranteed by the verifier bounds check (DR-20); the E11 latch read as the bit `activate` consults, never derived from a call log (L6); 06-02, and 06-01 as its evidence stands, depend on 05-03 (DR-01). No ADR changes | This feature delta § *Driven port — intercept element release…*, § *Driven port — TAP activation gate*, § *Driven port — VMM TAP queue attachment*, § *C-295-A*, § *Required downstream changes* |
+| DISTILL review iteration-1 pins (2026-09-29) and the user decisions of 2026-09-30 | **DR-06 USER-DECIDED 2026-09-29:** operators lose no diagnostic detail; `MtlsInterceptStopError`'s `Display` renders every per-connection cause (`<alloc>#<counter>: <message>`), an explicit amendment of the phase-B Display; **its extension to `ElementRemoval`, which names its removal cause in the same Failed-row detail, USER-APPROVED 2026-09-30.** **DR-08 (b)-A USER-APPROVED 2026-09-30:** the host classifies every failure of one TAP's set-down or read-back, a netlink session it cannot obtain (`NetlinkError::Connect`) included, as that TAP's `unconfirmed` entry and returns no `Err`, so production reaches the undetermined branch only through a call that misses its bound. **USER-APPROVED 2026-09-30:** a repeat quiescence while latched sets down allocations a part-way restore left `Active`, and the supervisor re-quiesces after a part-way restore. **Pinned on evidence 2026-09-30, changing no outcome:** every adapter's quiescence call makes no synchronous blocking wait on the awaiting task and tolerates being dropped at any await, so a hang is a bound miss; a netlink failure common to every TAP caused by descriptor exhaustion also fails the first per-VM `cgroup.kill` write and ends in `VmKillFailed`. **Pinned on evidence 2026-09-29:** `local_route_present` at 07-01, `intercept_mark_guard` `false` before 08-01 (DR-07); `PolicyRouteAbsent`, `InterceptMarkGuardAbsent`, `MembersRemain` as the observation checks' causes (DR-08 (a)); quiescence's `Err` means per-TAP outcomes cannot be determined, with an adapter-specific variant, and each `unconfirmed` entry is one TAP's own failure (DR-08 (b)); until 08-01 the `intercept_mark_guard` rustdoc states its not-observed meaning, and the rustdoc of the three new `InterceptError` variants states that no adapter returns them; a `cfg` predicate requiring `test`, including `all(test, …)`, marks a test-only item the close-on-exec gate skips (DR-10); the PORT-295-C listener projection owned by 07-01 (H2); per-IP listener ports (DR-16); emission-counted reclaim attempts (DR-17); the E18 benchmark report as evidence (DR-19); the short-frame egress row guaranteed by the verifier bounds check (DR-20); the E11 latch read as the bit `activate` consults, never derived from a call log (L6); 06-02, and 06-01 as its evidence stands, depend on 05-03 (DR-01). No ADR changes | This feature delta § *Driven port — intercept element release…*, § *Driven port — TAP activation gate*, § *Runtime shared-network supervisor* (*Quiescence*), § *Evidence-lane matrix* (*E12 whole-call branch*), § *Driven port — VMM TAP queue attachment*, § *C-295-A*, § *Required downstream changes* |
 | S2-F01 fresh-process target recovery | **USER-APPROVED 2026-09-16:** BootClosed + zero-managed-TAP preconditions; adopt/read owned identity; fresh ephemeral bind; atomic owned target replacement with rollback/full read-back; runtime exact-port/no-rewrite unchanged | This feature delta § *Fresh-process target recovery*; amended ADR-0076 plus current ADR-0120/0125 |
 | S2-F02 signature SSOT | **CLOSED 2026-09-16:** exact seven-argument `VmDriver::new` remains only here; brief and ADR-0082/0083/0090 preserve dependency history without competing signatures | This feature delta § *EXEC-close linearization* |
 | S2-F03 Contract Shape completeness | **CLOSED 2026-09-16:** paired gate claim/write capabilities and shared listener adapter/owner universes each have allowed deltas, complements, and assertions | This feature delta § *Effect isolation and Contract Shape classification* |
