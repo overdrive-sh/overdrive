@@ -1073,3 +1073,87 @@ classified `G4-*-classified.tsv` files).
   § *Completeness Audit*: H14 (a testability boundary returned to DESIGN) and
   B3 (c) / H3 (BLOCKED, held with the user; `intercept_mark_fail_closed.rs` is
   unchanged by run 4).
+
+## Phase G — Run 5: B3 (c) / H3 resolution (2026-10-01)
+
+The B3 (c) and H3 items held with the user are now closed in
+`crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs`. The
+hand-built raw-SYN datapath (the TIME_WAIT guest crafter and the stale-sequence
+controls crafter) is unchanged in shape; the work added assertions, witnesses,
+and guest-side fail-loud exits only.
+
+### B3 (c) — S-ND295-64 guest door (`a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user`)
+
+- The TIME_WAIT guest crafter's source-port read no longer falls back to 0:
+  `let sport = stream.local_addr()` now exits non-zero (29) on a failed read or
+  a zero port, so every crafted reconnect SYN carries the real leg-F TIME_WAIT
+  source port. A port-0 fallback would craft SYNs that never match the 4-tuple,
+  making `!reopened` vacuously true regardless of the sequence gate.
+- The in-run positive witness (landed earlier in `d011f028`) is retained and is
+  now non-vacuous: `witness.drain_newer_seq_syns(TW_CRAFT_SEQ_BASE) >= 1` on the
+  guest's own TAP, guarded by `tap_is_up` at both the fault point (after
+  `kill_serve_owner`) and after the window.
+- The crafter's socket/sendto failures already exit non-zero (21, 22) and the
+  establish path exits non-zero (23–28); the source-port exit (29) completes the
+  fail-loud set.
+
+### H3 — S-ND295-62 (`marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program` and the guard-only control)
+
+- **Positive witness on the peer capture.** A capture on the guest's own TAP of
+  its SERVICE_PORT (peer-dial) SYNs is asserted `>= 1`, so the peer-TAP
+  zero-forwarded oracle is proven non-vacuous (the guest is provably dialing;
+  the forwarding is what is blocked), not merely "peer TAP up".
+- **`PACKET_STATISTICS` accounting.** `SynCapture::packet_drops()` reads
+  `PACKET_STATISTICS.tp_drops` and the oracle asserts the peer capture dropped
+  zero frames, so a zero-forwarded count is a real observation, not a silent
+  socket-buffer overflow.
+- **Capture hygiene.** `SynCapture` is now created with protocol 0 and only
+  `bind` sets `ETH_P_ALL` on the target ifindex — no frame from another
+  interface is queued in the pre-bind window.
+- **`tap_is_up` at the fault point, not only at the end.** Both the guest and
+  peer TAPs are asserted up immediately after the `nft delete`, and `ip_forward`
+  is asserted `== 1` there, so the captures are proven live when the fault lands.
+- **Fault window must not span the repair.** The intercept table is asserted
+  still absent after the whole probe window (the guard-only control asserts the
+  guard table still absent and the intercept program still present). A
+  mid-window supervisor repair would re-arm the door and the fail-closed
+  assertions would test the wrong state.
+
+### L3 — module doc
+
+- The module doc's "fails today for the right reason" sentence now names the
+  actual guest-boot baseline (before the 05-03 fd handoff, the confined VMM
+  opens the TAP by name and CH v53 `Tap::enable` → `SIOCSIFFLAGS` EPERM, so the
+  allocation settles `Failed` / `VmGuestExitUnreported` without reaching
+  Running), replacing the stale "its Running precondition, gap 7" wording.
+
+### Metal runs (kernel 7.0.0-29-generic, virt none, CH v53)
+
+- **G6-N01** — controls body `both_time_wait_controls_prove_the_substate_and_sequence_gates`:
+  **PASS** (1 passed, 2.425 s). Active, door-independent kernel pin; confirms the
+  edits did not disturb it.
+- **G6-N02** — S-ND295-62 `marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_intercept_program`:
+  **RED at the guest-boot baseline** (FAIL, 31.657 s). The body ran its setup
+  (`ip_forward recorded as 1`) and panicked at the Running precondition
+  (`vm_walking_skeleton.rs:586`): row `Failed` / `VmGuestExitUnreported
+  { vmm_exit_code: 1 }`, error "Enabling tap interface failed / Ioctl failed
+  (35092) / Operation not permitted". The added H3 assertions sit past the
+  precondition and are not reached; they encode the 08-01 GREEN contract. Right
+  reason, not a regression.
+- **G6-N03** — S-ND295-64 guest door
+  `a_guest_reconnect_into_its_leg_f_time_wait_entry_is_recorded_and_a_reopen_goes_to_the_user`:
+  **RED at the guest-boot baseline** (FAIL, 31.752 s). Same `Failed` /
+  `VmGuestExitUnreported` (Ioctl 35092 EPERM) at the Running precondition; the
+  `KilledServerResidueGuard` reaped its nft table cleanly on exit. The B3 (c)
+  crafter/witness sit past the precondition and are not reached. Right reason.
+- Metal left clean: no `cloud-hypervisor` processes, no `overdrive-*` nft ip
+  tables, no `ovd-tp-*` TAPs, no allocation scopes, no test netns (only standing
+  node bridge infra `ovd-gbr0` / `ovd-veth-*`).
+
+### Gates
+
+- `cargo fmt -p overdrive-cli`: clean.
+- Lima compile-check `cargo check -p overdrive-cli --all-targets --features
+  integration-tests,kvm-tests` (G6-C01): PASS.
+- Lima clippy `-D warnings` (G6-C02): PASS (one `clippy::borrow_as_ptr` on the
+  `getsockopt` length pointer fixed to `std::ptr::from_mut`).

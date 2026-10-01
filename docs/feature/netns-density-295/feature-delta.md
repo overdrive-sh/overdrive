@@ -16143,17 +16143,19 @@ Falsifier telemetry for this run: `(netns-density-295, C1..C7, findings 1, sever
 over the in-scope set — the one finding is H14 above (C6b, documented gap). The
 audit stays **COMPLETE — 15/15** with that gap documented.
 
-**Open DISTILL items held outside this wave (not DESIGN gaps).** Two review
-findings on `crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs`
-are BLOCKED and held by the orchestrator with the user; the code is left as it
-stands: **B3 (c)** — S-ND295-64's guest crafter falls back to source port 0 on a
-failed read and its witness checks only the destination port and a sequence at
-or above the base, so the guest door's `!reopened` can still pass vacuously;
-**H3** — S-ND295-62's E14 (a) zero-forwarded oracle has no positive witness on
-the peer capture ("peer TAP up" is its only live evidence; the capture socket
-is hooked on every interface before its bind, has no loss accounting, and
-panics on `ENETDOWN`), its fault window spans the supervisor's repair, and the
-TAP's up state is read only at the end. Both bodies are pending 08-01.
+**B3 (c) and H3 — resolved 2026-10-01** (see `red-classification.md` Phase G
+Run 5, logs `G6-N01/N02/N03`). Both review findings on
+`crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs` are now
+fixed: **B3 (c)** — S-ND295-64's guest crafter exits non-zero on a failed
+source-port read (no port-0 fallback), so every crafted reconnect SYN carries
+the real leg-F TIME_WAIT source port, and the door's witness is non-vacuous;
+**H3** — S-ND295-62's E14 (a) zero-forwarded oracle gains a positive peer-dial
+witness and `PACKET_STATISTICS` drop accounting, the capture socket binds with
+`ETH_P_ALL` (no pre-bind contamination), the fault window no longer spans the
+supervisor's repair, and the guest/peer TAP up state plus `ip_forward` are read
+at the fault point. Both bodies are pending 08-01 and RED on the 05-03
+guest-boot baseline (CH `Tap::enable` → SIOCSIFFLAGS EPERM) for the right
+reason; their added assertions encode the 08-01 GREEN contract.
 
 ## Wave: DISTILL / [REF] Outcomes and Verification Separation
 
@@ -16198,7 +16200,7 @@ plan and adopts these IDs.
 | 07-02 | Reclaim action, shim arm, validator rule, View fields | R11 (part 1) | S-ND295-56 (with the out-of-band and admitted-lease bodies; DISTILL review H8), 55 (the validator body: the validator rule lands here; DISTILL review M2) | 07-01 |
 | 07-03 | Placement read-port, `schedule` over held occupancy, restart gating and at-cap recreate ordering, reclaim emission on every path with backoff | R8, R11 (part 2) | S-ND295-05B, 05C, 05D (with the contended-slot block NA-E7-C; DISTILL review H13), 55 (all but the validator body), 57. Review items: record the GREEN run time of S-ND295-57's at-cap body and move its file back to the acceptance binary if it fits the default lane; record S-ND295-05D's two-seed GREEN time against its 25 × 60 s budget | 07-02 |
 | 07-04 | Cleanup-pending status: predicate, `network_cleanup_pending`, `replicas_running`, renderer, OpenAPI regeneration | R20 | S-ND295-58, 59, 60 | 07-01, 07-03 |
-| 08-01 | Intercept-mark fail-closure: E14 native RED first; implement or withdraw R18 (guard table) and R19 (TPROXY-before-mark); stale-table cleanup precondition. If R18 stands, the guard read-back is wired into every `InterceptState` producer (host) and the guard into the sim's model; `InterceptMarkGuardAbsent` is removed if R18 is withdrawn (DR-07, DR-08 (a)). **Precondition:** the two BLOCKED DISTILL items on this step's native bodies (B3 (c), H3; § *Completeness Audit*) are resolved before the RED run that decides R18/R19 | R18, R19 (conditional) | S-ND295-62, 63, 64 (the guest door; its controls body is active; DISTILL review B3, DR-09) | 06-04 |
+| 08-01 | Intercept-mark fail-closure: E14 native RED first; implement or withdraw R18 (guard table) and R19 (TPROXY-before-mark); stale-table cleanup precondition. If R18 stands, the guard read-back is wired into every `InterceptState` producer (host) and the guard into the sim's model; `InterceptMarkGuardAbsent` is removed if R18 is withdrawn (DR-07, DR-08 (a)). The B3 (c)/H3 DISTILL items on this step's native bodies are resolved (2026-10-01; § *Completeness Audit*); the hardened fail-closed oracles encode this step's GREEN contract | R18, R19 (conditional) | S-ND295-62, 63, 64 (the guest door; its controls body is active; DISTILL review B3, DR-09) | 06-04 |
 | 08-02 | Boot member convergence and the killed-mode proof; delete the clear adapter; construct `MembersRemain`, `PolicyRouteAbsent`, and (if R18 stands) `InterceptMarkGuardAbsent` at boot steps 6.2 and 6.6 (DR-08 (a); 08-03 reuses them). Review items: record S-ND295-13A's GREEN run time at the default case count (each case boots `run_server`); S-ND295-13C's V4a–V4c sample the route and guard about every 50 ms | R12 | S-ND295-13A, 13B, 13C, 13D (with the three composed boot-refusal bodies; DISTILL review H6), 71 (the two member-aware equivalence bodies; DISTILL review M2) | 07-01, 08-01 |
 | 08-03 | Member, policy-route, and guard audit and repair; member-tolerant observation; guard handover; `component()` SSOT | R15 | S-ND295-61, 68 (the repaired-loss contrast body) | 08-02 |
 | 08-04 | M-ND295-E18 measurement receipt at T1-BASE/T1-PORT4: raw output under `target/benchmarks/netns-density-295/E18/`, not committed; no value is set or recorded here | E18 | receipt only | 08-03 |

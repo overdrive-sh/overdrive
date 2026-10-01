@@ -30,8 +30,12 @@
 //! Most bodies observe R18/R19 fail-closure, which is not on the production
 //! path until DELIVER step 08-01 decides R18/R19 from this native RED, so each
 //! of those is `#[ignore = "pending DELIVER step 08-01 (S-ND295-xx)"]` and
-//! fails today for the right reason (its Running precondition, gap 7, the 05-03
-//! fd handoff). The one exception is
+//! fails today for the right reason: before the 05-03 fd handoff the confined
+//! VMM opens the guest TAP by name, CH v53's `Tap::enable` (`SIOCSIFFLAGS`)
+//! returns EPERM, and the allocation settles `Failed` /
+//! `VmGuestExitUnreported` without ever reaching the Running precondition each
+//! body polls for (`red-classification.md` Phase G, the guest-boot baseline).
+//! The one exception is
 //! [`both_time_wait_controls_prove_the_substate_and_sequence_gates`]: it is a
 //! door-independent kernel pin on a test-owned veth peer namespace under
 //! `TestCidrLease`, needs no guest and no production change beyond what exists,
@@ -399,12 +403,15 @@ impl SynCapture {
         // SAFETY: `name` is a live NUL-terminated string for this call.
         let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
         assert_ne!(ifindex, 0, "interface {interface} is live");
-        // SAFETY: AF_PACKET raw socket owned by this SynCapture.
+        // SAFETY: AF_PACKET raw socket owned by this SynCapture. Created with
+        // protocol 0 so it receives nothing until the `bind` below sets
+        // `ETH_P_ALL` on the target ifindex — no frame from another interface
+        // is queued in the pre-bind window.
         let fd = unsafe {
             libc::socket(
                 libc::AF_PACKET,
                 libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                i32::from(ETH_P_ALL.to_be()),
+                0,
             )
         };
         assert!(fd >= 0, "open SYN capture on {interface}: {}", std::io::Error::last_os_error());
@@ -567,6 +574,41 @@ impl SynCapture {
             }
             panic!("SYN capture recv failed: {error}");
         }
+    }
+
+    /// The kernel's `PACKET_STATISTICS.tp_drops` for this capture — frames the
+    /// kernel could not enqueue (socket buffer overflow) since the socket was
+    /// opened. A zero-match oracle (e.g. "zero forwarded frames") is vacuous if
+    /// the kernel silently dropped the frames before the drain read them, so the
+    /// caller reads this exactly once after its final drain and asserts it is 0.
+    /// Reading `PACKET_STATISTICS` resets the kernel counter, so call it once.
+    fn packet_drops(&self) -> u64 {
+        // Declared locally rather than reaching for `libc::tpacket_stats`, whose
+        // re-export module differs across libc versions; the layout is stable
+        // kernel UAPI (two `__u32`s, packets then drops).
+        #[repr(C)]
+        #[allow(dead_code)]
+        struct TpacketStats {
+            tp_packets: libc::c_uint,
+            tp_drops: libc::c_uint,
+        }
+        const PACKET_STATISTICS: libc::c_int = 6;
+        let mut stats = TpacketStats { tp_packets: 0, tp_drops: 0 };
+        let mut len = libc::socklen_t::try_from(std::mem::size_of::<TpacketStats>())
+            .expect("TpacketStats length fits socklen_t");
+        // SAFETY: getsockopt into a live, correctly sized TpacketStats on the
+        // AF_PACKET fd this SynCapture owns.
+        let rc = unsafe {
+            libc::getsockopt(
+                self.fd,
+                libc::SOL_PACKET,
+                PACKET_STATISTICS,
+                std::ptr::from_mut(&mut stats).cast(),
+                std::ptr::from_mut(&mut len),
+            )
+        };
+        assert_eq!(rc, 0, "read PACKET_STATISTICS: {}", std::io::Error::last_os_error());
+        u64::from(stats.tp_drops)
     }
 }
 
@@ -1064,11 +1106,40 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
     let intercept_before = intercept_counter();
     let guard_before = bridge_guard_drop_packets();
     let peer_capture = SynCapture::open(&peer_tap, SERVICE_PORT);
+    // Positive witness for the peer-TAP zero-forwarded oracle: a capture on the
+    // GUEST's own TAP counting its SERVICE_PORT (peer-dial) SYNs. If the guest
+    // provably attempts the peer dial yet the peer's TAP sees zero forwarded
+    // SYNs, the forwarding is blocked — the peer capture is not merely dead.
+    let guest_peer_dial = SynCapture::open(&guest.tap, SERVICE_PORT);
     let witness = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
     let synack = SynCapture::open(&guest.tap, HOST_WILDCARD_PORT);
     let accepts_before = listener.accepted();
     overdrive_netlink::nft::delete_table(INTERCEPT_TABLE)
         .expect("external actor deletes the intercept program table");
+    // Fault-point witnesses (not only at the end): the captures bind on TAPs
+    // that read back up, so each is live when the fault lands (never a capture
+    // on a quiesced TAP); host forwarding is on, so a forward COULD happen; and
+    // the nft delete actually removed the intercept table.
+    assert!(
+        tap_is_up(&guest.tap),
+        "the run is void, not GREEN: the guest's TAP {} was down at the fault point",
+        guest.tap
+    );
+    assert!(
+        tap_is_up(&peer_tap),
+        "the run is void, not GREEN: the peer's TAP {peer_tap} was down at the fault point"
+    );
+    assert_eq!(
+        std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward")
+            .expect("read ip_forward at the fault point")
+            .trim(),
+        "1",
+        "host forwarding is enabled at the fault point, so the peer-forward path is live"
+    );
+    assert!(
+        !intercept_ip_tables().contains(INTERCEPT_TABLE),
+        "the nft delete removed the intercept program table at the fault point"
+    );
 
     // The probe keeps dialing across the window; no host listener accepts.
     tokio::time::sleep(PROBE_WINDOW).await;
@@ -1078,13 +1149,33 @@ async fn marked_guest_tcp_is_neither_forwarded_nor_delivered_without_the_interce
         "no host wildcard listener accepts a marked guest SYN without the program"
     );
     listener.assert_healthy();
-    // E14 (a): zero forwarded intercept-marked frames on the peer's TAP; the
-    // peer TAP being up is the live-capture witness (the guest-side ingress
-    // witness below proves the guest is sending).
+    // The fault held for the whole window — no supervisor repaired the intercept
+    // table mid-window (a repair would re-arm the door, and the fail-closed
+    // assertions below would then test the wrong, re-armed state).
+    assert!(
+        !intercept_ip_tables().contains(INTERCEPT_TABLE),
+        "the intercept program table stayed absent across the probe window (no repair spanned it)"
+    );
+    // E14 (a): zero forwarded intercept-marked frames on the peer's TAP, proven
+    // non-vacuous three ways — the peer TAP is up (live-capture witness), the
+    // guest provably attempted the peer dial on its own TAP (positive witness),
+    // and the peer capture dropped no frames (so zero is a real observation, not
+    // a silent queue overflow).
     assert!(tap_is_up(&peer_tap), "E14 (a) live-capture witness: the peer's TAP {peer_tap} is up");
+    let forwarded = peer_capture.drain_forwarded_syns(guest.addr);
+    let peer_drops = peer_capture.packet_drops();
+    let guest_peer_syns = guest_peer_dial.drain_syns();
+    assert!(
+        guest_peer_syns >= 1,
+        "the guest attempts the peer dial on its own TAP (captured {guest_peer_syns} SERVICE_PORT \
+         SYNs); the peer-TAP zero-forwarded oracle is not vacuous"
+    );
     assert_eq!(
-        peer_capture.drain_forwarded_syns(guest.addr),
-        0,
+        peer_drops, 0,
+        "the peer-TAP capture dropped no frames, so its zero-forwarded count is a real observation"
+    );
+    assert_eq!(
+        forwarded, 0,
         "E14 (a): no marked guest SYN is forwarded to the peer's TAP without the program"
     );
     // E14 (b): no SYN-ACK reaches the guest for the gateway or host-address dial.
@@ -1158,6 +1249,22 @@ async fn the_intercept_program_still_catches_marked_tcp_without_the_guard_table(
     // Delete ONLY the guard table; the intercept program stays installed.
     overdrive_netlink::nft::delete_table(GUARD_TABLE)
         .expect("external actor deletes only the guard table");
+    // Fault-point witnesses: the capture binds on a TAP that reads back up
+    // (never a quiesced-TAP capture), the guard table is actually gone, and the
+    // intercept program stays installed — the control's whole premise.
+    assert!(
+        tap_is_up(&guest.tap),
+        "the run is void, not GREEN: the guest's TAP {} was down at the fault point",
+        guest.tap
+    );
+    assert!(
+        !intercept_ip_tables().contains(GUARD_TABLE),
+        "the nft delete removed the guard table at the fault point"
+    );
+    assert!(
+        intercept_ip_tables().contains(INTERCEPT_TABLE),
+        "the intercept program table stays installed after only the guard table is deleted"
+    );
 
     tokio::time::sleep(PROBE_WINDOW).await;
     assert_eq!(
@@ -1166,6 +1273,16 @@ async fn the_intercept_program_still_catches_marked_tcp_without_the_guard_table(
         "the intercept program alone still keeps a marked guest SYN out of any host listener"
     );
     listener.assert_healthy();
+    // No supervisor re-added the guard table or removed the intercept program
+    // across the window (the control would otherwise test a re-armed state).
+    assert!(
+        !intercept_ip_tables().contains(GUARD_TABLE),
+        "the guard table stayed absent across the probe window (no repair spanned it)"
+    );
+    assert!(
+        intercept_ip_tables().contains(INTERCEPT_TABLE),
+        "the intercept program stayed installed across the probe window"
+    );
     assert_syn_entered_host(&guest.tap, &capture, intercept_before, guard_before, 1);
 
     stop_and_await_terminal(&cfg, &guest.workload_id).await;
@@ -1643,7 +1760,15 @@ fn main() {{
     let Ok(mut stream) = TcpStream::connect_timeout(&target, Duration::from_secs(2)) else {{
         std::process::exit(24);
     }};
-    let sport = stream.local_addr().map(|a| a.port()).unwrap_or(0);
+    // Fail loud if the source port cannot be read or is 0: a port-0 fallback
+    // would craft reconnect SYNs that never match the leg-F TIME_WAIT 4-tuple,
+    // so the door could not reopen regardless of the sequence gate and the
+    // `!reopened` oracle would pass vacuously. The crafted SYNs must carry the
+    // real TIME_WAIT source port.
+    let sport = match stream.local_addr() {{
+        Ok(local) if local.port() != 0 => local.port(),
+        _ => std::process::exit(29),
+    }};
     if stream.write_all(b"ND295-TW").is_err() {{ std::process::exit(27); }}
     let mut byte = [0u8; 1];
     // The peer closes without replying: EOF (Ok(0)) is the expected outcome. A
