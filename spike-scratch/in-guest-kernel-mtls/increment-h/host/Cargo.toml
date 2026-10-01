@@ -1,0 +1,22 @@
+# Spike B2 host programs (GH #303 in-guest-kernel-mtls, increment-e), copied into
+# Spike B3 (increment-f); only peer.rs changed (the :6451 HTTP responder). The
+# package name stays igkme-host so the committed Cargo.lock applies unchanged.
+# Throwaway probe code. Its own workspace: NOT a member of the repo workspace.
+[package]
+name = "igkme-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "logging"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+x509-parser = "=0.18.1"
+# Direct use for the hand-rolled post-handshake record layer of the "raw" peer
+# ports (crafted NewSessionTicket / KeyUpdate / unexpected message records).
+ring = "=0.17.14"
+
+[profile.release]
+debug = false
