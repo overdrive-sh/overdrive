@@ -41,10 +41,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use command_fds::{CommandFdExt, FdMapping};
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
-    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
-    VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
+    Result, TapQueueStage, TapQueueViolation, VmControl, VmExitWatch, VmProcess, VmTermination,
+    Vmm, VmmDiagnostics, VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::{DiskAttachment, VmConfig, VmNetworkAttachment};
 use parking_lot::Mutex;
@@ -74,10 +75,9 @@ const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 /// pattern — never a `Clock::sleep` (per `.claude/rules/development.md`
 /// § "Production code is not shaped by simulation").
 const STDERR_DRAIN_MAX_YIELDS: u32 = 16;
-const REQUIRED_LAUNCH_TOOLS: [&str; 3] = ["prlimit", "setpriv", "ip"];
+const REQUIRED_LAUNCH_TOOLS: [&str; 2] = ["prlimit", "setpriv"];
 /// The Cloud Hypervisor child's descriptor for the per-launch TAP queue
 /// (`--net fd=[3]`, D-295-R1/R2/R3; ADR-0127, ADR-0128, ADR-0129).
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-03")]
 pub(crate) const VMM_TAP_QUEUE_FD: std::os::fd::RawFd = 3;
 
 #[async_trait]
@@ -374,8 +374,8 @@ fn network_launch_prefix(
 
 fn cloud_hypervisor_network_arg(attachment: &VmNetworkAttachment) -> String {
     format!(
-        "tap={},mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x},offload_tso=off,offload_ufo=off,offload_csum=off",
-        attachment.tap,
+        "fd=[{}],mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x},offload_tso=off,offload_ufo=off,offload_csum=off",
+        VMM_TAP_QUEUE_FD,
         attachment.mac[0],
         attachment.mac[1],
         attachment.mac[2],
@@ -400,6 +400,49 @@ fn classify_launch_spawn_error(
             "spawning VMM launch executable {} failed: {source}",
             launched_executable.to_string_lossy()
         ))
+    }
+}
+
+fn map_tap_queue_error(tap: &str, error: overdrive_netlink::TapQueueError) -> VmmError {
+    use overdrive_netlink::TapQueueError;
+
+    match error {
+        TapQueueError::Open { source, .. } => {
+            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::Open, source }
+        }
+        TapQueueError::Attach { source, .. } => {
+            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::Attach, source }
+        }
+        TapQueueError::FlagsReadBack { source, .. } => {
+            VmmError::TapQueue { tap: tap.to_owned(), stage: TapQueueStage::FlagsReadBack, source }
+        }
+        TapQueueError::Flags { observed, .. } => VmmError::TapQueuePostcondition {
+            tap: tap.to_owned(),
+            violation: TapQueueViolation::Flags { observed },
+        },
+        TapQueueError::AdminStateReadBack { source, .. } => VmmError::TapQueue {
+            tap: tap.to_owned(),
+            stage: TapQueueStage::AdminStateReadBack,
+            source,
+        },
+        TapQueueError::NotDown { .. } => VmmError::TapQueuePostcondition {
+            tap: tap.to_owned(),
+            violation: TapQueueViolation::NotDown,
+        },
+    }
+}
+
+async fn cleanup_rootfs_clone_after_create_failure(clone_dest: &Path, failure_stage: &'static str) {
+    match tokio::fs::remove_file(clone_dest).await {
+        Ok(()) => {}
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => tracing::error!(
+            clone_dest = %clone_dest.display(),
+            failure_stage,
+            cleanup_error = ?source,
+            cleanup_error_kind = ?source.kind(),
+            "rootfs clone cleanup failed after VMM create failure"
+        ),
     }
 }
 
@@ -469,7 +512,11 @@ impl Vmm for CloudHypervisorVmm {
         // "clone made then removed on failure" contract is preserved) — so
         // `HypervisorAbsent` keeps naming CH's absence, never the wrapper's.
         if !self.hypervisor_present() {
-            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+            cleanup_rootfs_clone_after_create_failure(
+                config.rootfs.clone_dest(),
+                "hypervisor-absent",
+            )
+            .await;
             return Err(VmmError::HypervisorAbsent {
                 searched: self.searched_binary_paths(),
                 source: io::Error::from(io::ErrorKind::NotFound),
@@ -506,7 +553,11 @@ impl Vmm for CloudHypervisorVmm {
             detail: format!("confine-paths task panicked: {join_err}"),
         })?;
         if let Err(source) = prep {
-            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+            cleanup_rootfs_clone_after_create_failure(
+                config.rootfs.clone_dest(),
+                "prepare-confined-paths",
+            )
+            .await;
             // §(d-fix) M1: applying the confined identity to the per-alloc
             // artifacts (chown/copy of the clone or the kernel copy, run-dir
             // chown) failed — a confinement-APPLICATION failure, mapped to
@@ -522,8 +573,26 @@ impl Vmm for CloudHypervisorVmm {
         // wrapper. The persistent TAP is already attached to the shared host
         // bridge; no namespace-exec launcher is required.
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
+        let tap_queue = config
+            .network
+            .as_ref()
+            .map(|attachment| {
+                overdrive_netlink::attach_tap_queue(&attachment.tap)
+                    .map_err(|error| map_tap_queue_error(&attachment.tap, error))
+            })
+            .transpose()?;
         let mut cmd = self.build_confined_command(config, &wrapper);
-        register_launch_child_hook(&mut cmd, 3, launch_filter);
+        if let Some(queue) = tap_queue {
+            let mapping =
+                FdMapping { parent_fd: queue.into_owned_fd(), child_fd: VMM_TAP_QUEUE_FD };
+            if let Err(error) = cmd.fd_mappings(vec![mapping]) {
+                return Err(VmmError::create(format!(
+                    "mapping TAP queue to child descriptor {VMM_TAP_QUEUE_FD} failed: {error}"
+                )));
+            }
+        }
+        let first_closed = if config.network.is_some() { VMM_TAP_QUEUE_FD + 1 } else { 3 };
+        register_launch_child_hook(&mut cmd, first_closed, launch_filter);
         let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
@@ -531,22 +600,33 @@ impl Vmm for CloudHypervisorVmm {
         // extracting it from a `let-else`-failed scrutinee would need an
         // `unwrap_err`-shaped call this workspace's lint profile forbids
         // outside tests.
+        let spawn_result = cmd.spawn();
+        drop(cmd);
+
         #[allow(clippy::manual_let_else, clippy::single_match_else)]
-        let mut child = match cmd.spawn() {
+        let mut child = match spawn_result {
             Ok(child) => child,
             Err(source) => {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
-                let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+                cleanup_rootfs_clone_after_create_failure(
+                    config.rootfs.clone_dest(),
+                    "launch-spawn",
+                )
+                .await;
                 // Attribute a spawn failure to the process actually passed
-                // to `execve`: `ip` for mesh, `prlimit` otherwise. CH's own
-                // absence is still owned by the pre-check above.
+                // to `execve`; CH's own absence is still owned by the
+                // pre-check above.
                 return Err(classify_launch_spawn_error(&launched_executable, &wrapper, &source));
             }
         };
 
         let Some(pid) = child.id() else {
-            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+            cleanup_rootfs_clone_after_create_failure(
+                config.rootfs.clone_dest(),
+                "missing-child-pid",
+            )
+            .await;
             return Err(VmmError::create(
                 "spawned cloud-hypervisor child reported no pid".to_string(),
             ));
@@ -667,8 +747,10 @@ impl Vmm for CloudHypervisorVmm {
 /// `ConfinementUnavailable { UidDrop }` — never a silent operator-dir
 /// widening, never a C-1-defeating full-copy fallback.
 fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
-    if clone_dest.exists() {
-        std::fs::remove_file(clone_dest).map_err(VmmError::Io)?;
+    match std::fs::remove_file(clone_dest) {
+        Ok(()) => {}
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => return Err(VmmError::Io(source)),
     }
     let src = std::fs::File::open(master).map_err(VmmError::Io)?;
     let dst = std::fs::File::options()
@@ -678,8 +760,20 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
         .map_err(VmmError::Io)?;
     if let Err(err) = rustix::fs::ioctl_ficlone(&dst, &src) {
         drop(dst);
-        let _ = std::fs::remove_file(clone_dest);
-        if err == rustix::io::Errno::XDEV {
+        let source = io::Error::from(err);
+        let cross_device = err == rustix::io::Errno::XDEV;
+        if let Err(cleanup_error) = std::fs::remove_file(clone_dest)
+            && cleanup_error.kind() != io::ErrorKind::NotFound
+        {
+            tracing::error!(
+                clone_dest = %clone_dest.display(),
+                ficlone_error = ?source,
+                cleanup_error = ?cleanup_error,
+                cleanup_error_kind = ?cleanup_error.kind(),
+                "rootfs clone cleanup failed after FICLONE failure"
+            );
+        }
+        if cross_device {
             return Err(VmmError::ConfinementUnavailable {
                 control: ConfinementControl::UidDrop,
                 detail: format!(
@@ -688,7 +782,7 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
                 ),
             });
         }
-        return Err(VmmError::Io(err.into()));
+        return Err(VmmError::Io(source));
     }
     Ok(())
 }
@@ -1102,7 +1196,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-03 (S-ND295-44)"]
     async fn vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure() {
         // An injected `ip` execution failure can no longer reject the probe:
         // the launcher needs no `ip`, so the probe never executes it.
@@ -1265,7 +1358,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    #[ignore = "pending DELIVER step 05-03 (S-ND295-40)"]
     fn mesh_and_non_mesh_launches_preserve_shape_and_attribute_the_actual_launcher() {
         let attachment = VmNetworkAttachment {
             tap: "ovd-tap-002a".to_owned(),
@@ -2860,7 +2952,6 @@ mod launch_seccomp_kernel {
     #[cfg(target_arch = "x86_64")]
     #[test]
     #[serial_test::serial(env)]
-    #[ignore = "pending DELIVER step 05-03 (S-ND295-40)"]
     fn a_failed_spawn_releases_the_queue_before_any_cleanup_await() {
         let staging_root = overdrive_testing::vm_fixture::default_staging_root();
         std::fs::create_dir_all(&staging_root).expect("create the VM staging root");

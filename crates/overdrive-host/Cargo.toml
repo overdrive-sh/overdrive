@@ -86,6 +86,9 @@ linux-keyutils.workspace = true
 # `#[allow(unsafe_code)]` (ADR-0129). The FICLONE call still goes through the
 # safe `rustix` wrapper above.
 libc.workspace           = true
+# `command-fds` maps the per-launch TAP queue onto child descriptor 3 on the
+# existing Tokio command (D-295-R2/R3).
+command-fds.workspace    = true
 # `overdrive-netlink` — `attach_tap_queue` (D-295-R2, ADR-0128):
 # `CloudHypervisorVmm::create` attaches the per-launch TAP queue it hands to
 # Cloud Hypervisor at descriptor 3. Path dependency, as every other

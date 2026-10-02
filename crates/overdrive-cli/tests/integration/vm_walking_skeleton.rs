@@ -1446,7 +1446,6 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 05-03 (S-ND295-45)"]
 async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
     let _teardown = TeardownBound::arm();
     let fixture =

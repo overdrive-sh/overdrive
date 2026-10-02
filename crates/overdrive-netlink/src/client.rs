@@ -13,11 +13,14 @@
 //! drops (all in-flight ops have completed by then — the host-netns
 //! `provision` awaits each op before returning).
 
+use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 
 use futures::stream::TryStreamExt;
 use rtnetlink::packet_core::Nla;
@@ -372,10 +375,97 @@ pub enum TapQueueError {
 /// # Errors
 ///
 /// One [`TapQueueError`] variant per failed stage or violated postcondition.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-03")]
+#[cfg(target_os = "linux")]
 pub fn attach_tap_queue(name: &str) -> Result<TapQueue, TapQueueError> {
-    let _ = name;
-    todo!("RED scaffold: D-295-R2 attach_tap_queue — DELIVER step 05-03")
+    const REQUESTED_FLAGS: libc::c_int = libc::IFF_TAP | libc::IFF_NO_PI | libc::IFF_VNET_HDR;
+    const PERSISTENT_FLAGS: u16 = 0x5802;
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open("/dev/net/tun")
+        .map_err(|source| TapQueueError::Open { name: name.to_owned(), source })?;
+    let fd: OwnedFd = file.into();
+
+    let mut attach = tap_request(name).map_err(|source| TapQueueError::Attach {
+        name: name.to_owned(),
+        source: io::Error::other(source),
+    })?;
+    attach.ifr_ifru.ifru_flags =
+        libc::c_short::try_from(REQUESTED_FLAGS).map_err(|source| TapQueueError::Attach {
+            name: name.to_owned(),
+            source: io::Error::new(io::ErrorKind::InvalidInput, source),
+        })?;
+    // SAFETY: `fd` is an open `/dev/net/tun` descriptor and `attach` remains
+    // alive and correctly initialized for the complete ioctl call.
+    let result = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TUNSETIFF, &raw mut attach) };
+    if result == -1 {
+        return Err(TapQueueError::Attach {
+            name: name.to_owned(),
+            source: io::Error::last_os_error(),
+        });
+    }
+
+    // SAFETY: `TUNGETIFF` writes the attached queue's `ifr_ifru.ifru_flags`.
+    let result = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TUNGETIFF, &raw mut attach) };
+    if result == -1 {
+        return Err(TapQueueError::FlagsReadBack {
+            name: name.to_owned(),
+            source: io::Error::last_os_error(),
+        });
+    }
+    // SAFETY: successful `TUNGETIFF` wrote this union field.
+    let observed = unsafe { attach.ifr_ifru.ifru_flags };
+    let observed = u16::from_ne_bytes(observed.to_ne_bytes());
+    if observed != PERSISTENT_FLAGS {
+        return Err(TapQueueError::Flags { name: name.to_owned(), observed });
+    }
+
+    let mut admin_state =
+        tap_request(name).map_err(|source| TapQueueError::AdminStateReadBack {
+            name: name.to_owned(),
+            source: io::Error::other(source),
+        })?;
+    let interface_socket = nix::sys::socket::socket(
+        nix::sys::socket::AddressFamily::Inet,
+        nix::sys::socket::SockType::Datagram,
+        nix::sys::socket::SockFlag::SOCK_CLOEXEC,
+        None,
+    )
+    .map_err(|source| TapQueueError::AdminStateReadBack {
+        name: name.to_owned(),
+        source: source.into(),
+    })?;
+    // SAFETY: `interface_socket` is an open datagram socket and `admin_state`
+    // contains a valid interface name for the complete ioctl call.
+    let result = unsafe {
+        libc::ioctl(interface_socket.as_raw_fd(), libc::SIOCGIFFLAGS, &raw mut admin_state)
+    };
+    if result == -1 {
+        return Err(TapQueueError::AdminStateReadBack {
+            name: name.to_owned(),
+            source: io::Error::last_os_error(),
+        });
+    }
+    // SAFETY: successful `SIOCGIFFLAGS` wrote this union field.
+    let admin_flags = unsafe { admin_state.ifr_ifru.ifru_flags };
+    if i32::from(admin_flags) & libc::IFF_UP != 0 {
+        return Err(TapQueueError::NotDown { name: name.to_owned() });
+    }
+
+    Ok(TapQueue { fd, name: name.to_owned() })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn attach_tap_queue(name: &str) -> Result<TapQueue, TapQueueError> {
+    Err(TapQueueError::Open {
+        name: name.to_owned(),
+        source: io::Error::new(
+            io::ErrorKind::Unsupported,
+            "attaching a TAP queue is supported only on Linux",
+        ),
+    })
 }
 
 /// `ip netns add <name>` via rtnetlink's [`NetworkNamespace::add`].

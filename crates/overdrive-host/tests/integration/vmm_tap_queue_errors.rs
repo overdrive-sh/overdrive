@@ -218,7 +218,6 @@ fn vm_config_for(fixture: &VmFixture, staging: &Path, tag: &str, tap: &str) -> V
 /// producible from a real kernel state (see the module docs) and are not
 /// asserted.
 #[tokio::test]
-#[ignore = "pending DELIVER step 05-03 (S-ND295-40)"]
 async fn every_tap_queue_error_maps_to_its_vmm_queue_error() {
     require_root();
     let staging_root = default_staging_root();

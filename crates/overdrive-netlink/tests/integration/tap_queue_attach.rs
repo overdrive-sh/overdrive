@@ -139,7 +139,6 @@ fn descriptor_flags(queue: BorrowedFd<'_>) -> (libc::c_int, libc::c_int) {
 /// TAP: the success path.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-03 (S-ND295-38)"]
 fn a_down_persistent_tap_hands_over_exactly_one_vnet_header_queue() {
     require_root("a_down_persistent_tap_hands_over_exactly_one_vnet_header_queue");
     let tap = ScratchTap::create("qa");
@@ -176,7 +175,6 @@ fn a_down_persistent_tap_hands_over_exactly_one_vnet_header_queue() {
 /// with its own typed cause, and the attach changes no TAP.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-03 (S-ND295-38)"]
 fn every_attach_precondition_violation_is_refused_with_its_own_typed_cause() {
     require_root("every_attach_precondition_violation_is_refused_with_its_own_typed_cause");
 
@@ -239,7 +237,6 @@ fn every_attach_precondition_violation_is_refused_with_its_own_typed_cause() {
 /// permitted.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-03 (S-ND295-39)"]
 fn a_root_owned_tap_refuses_an_unprivileged_attach_with_eperm() {
     require_root("a_root_owned_tap_refuses_an_unprivileged_attach_with_eperm");
     let tap = ScratchTap::create("qe");

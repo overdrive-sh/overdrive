@@ -60,6 +60,9 @@ tokio-util      = { version = "0.7", features = ["rt"] }
 async-trait     = "0.1"
 futures         = "0.3"
 parking_lot     = "0.12"
+# `command-fds` maps the per-launch TAP queue onto Cloud Hypervisor's child
+# descriptor 3 from the existing Tokio process command (D-295-R2/R3).
+command-fds     = { version = "0.3.3", features = ["tokio"] }
 
 # --- Serialization --------------------------------------------------------
 serde           = { version = "1", features = ["derive"] }
