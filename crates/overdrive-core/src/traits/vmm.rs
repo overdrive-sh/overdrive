@@ -80,10 +80,13 @@ pub trait Vmm: Send + Sync + 'static {
     ///   `ip` — was spawned successfully enough to prove availability.
     ///   The executable's `--version` exit status is not interpreted; a
     ///   successful spawn is the availability proof.
+    /// - An adapter whose launch installs a seccomp filter has spawned one
+    ///   launch executable under that exact filter, and it exited successfully.
     /// - Any probe-scoped scratch artifacts have been removed.
     /// - Probe order is intentional and stable for multi-fault refusal:
     ///   reflink, Cloud Hypervisor/Landlock, launch executables in the
-    ///   order `prlimit` → `setpriv` → `ip`, KVM, then the run root.
+    ///   order `prlimit` → `setpriv` → `ip`, then the launch seccomp filter,
+    ///   KVM, and the run root.
     ///
     /// # Edge cases
     /// - Called twice: idempotent, leaves no probe-scoped residue
@@ -95,8 +98,14 @@ pub trait Vmm: Send + Sync + 'static {
     /// executable returns [`VmmProbeError::LaunchToolUnavailable`] with
     /// the executable name and the original `std::io::Error`; `NotFound`
     /// is reported as PATH absence and all other I/O kinds as an execution
-    /// failure. The composition root emits `health.startup.refused` with
-    /// the structured cause and the process refuses to start.
+    /// failure. A launch seccomp filter that has no program for the target
+    /// architecture, that the kernel refuses, or under which the launch
+    /// executable does not exit successfully returns
+    /// [`VmmProbeError::LaunchSeccompUnsupportedArch`],
+    /// [`VmmProbeError::LaunchSeccompInstall`], or
+    /// [`VmmProbeError::LaunchSeccompProbeExit`] respectively. The composition
+    /// root emits `health.startup.refused` with the structured cause and the
+    /// process refuses to start.
     async fn probe(&self) -> std::result::Result<(), VmmProbeError>;
 
     /// Stage this VM's per-launch rootfs clone and spawn ONE confined

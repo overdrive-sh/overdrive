@@ -12,32 +12,92 @@
 /// The VMM launch seccomp program (D-295-R22, ADR-0143): built in the parent
 /// for the compile target's syscall ABI, installed in the child by
 /// `register_launch_child_hook`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
 pub(super) struct VmmLaunchSeccompFilter {
     program: Vec<libc::sock_filter>,
 }
 
 /// No launch seccomp program exists for the compile target.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LaunchSeccompUnsupportedArch {
     /// `std::env::consts::ARCH`.
     pub(super) target_arch: &'static str,
 }
 
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
 impl VmmLaunchSeccompFilter {
     /// Build the program for the compile target. Pure: no syscall and no I/O.
     /// Guarantees `program().len() <= usize::from(u16::MAX)`.
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-02")]
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "the x86_64 target branch allocates the filter program"
+    )]
     pub(super) fn for_target() -> Result<Self, LaunchSeccompUnsupportedArch> {
-        todo!("RED scaffold: D-295-R22 VmmLaunchSeccompFilter::for_target — DELIVER step 05-02")
+        #[cfg(target_arch = "x86_64")]
+        {
+            Ok(Self { program: x86_64_program() })
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            Err(LaunchSeccompUnsupportedArch { target_arch: std::env::consts::ARCH })
+        }
     }
 
     /// The instructions, for the child hook and for pure evaluation tests.
     pub(super) fn program(&self) -> &[libc::sock_filter] {
         &self.program
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "x86_64 seccomp_data offsets and SYS_ioctl fit their pinned u32 ABI fields"
+)]
+fn x86_64_program() -> Vec<libc::sock_filter> {
+    const LOAD_WORD_ABSOLUTE: u16 = 0x20;
+    const JUMP_EQUAL_CONSTANT: u16 = 0x15;
+    const JUMP_GREATER_EQUAL_CONSTANT: u16 = 0x35;
+    const RETURN_CONSTANT: u16 = 0x06;
+    const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+    const X32_SYSCALL_BIT: u32 = 0x4000_0000;
+    const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
+    const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
+    const SECCOMP_RET_ERRNO_EPERM: u32 = 0x0005_0000 | libc::EPERM as u32;
+
+    let instruction = |code, jt, jf, k| libc::sock_filter { code, jt, jf, k };
+    let mut program = Vec::with_capacity(24);
+    program.extend([
+        instruction(
+            LOAD_WORD_ABSOLUTE,
+            0,
+            0,
+            std::mem::offset_of!(libc::seccomp_data, arch) as u32,
+        ),
+        instruction(JUMP_EQUAL_CONSTANT, 1, 0, AUDIT_ARCH_X86_64),
+        instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_KILL_PROCESS),
+        instruction(LOAD_WORD_ABSOLUTE, 0, 0, std::mem::offset_of!(libc::seccomp_data, nr) as u32),
+        instruction(JUMP_EQUAL_CONSTANT, 17, 0, u32::MAX),
+        instruction(JUMP_GREATER_EQUAL_CONSTANT, 0, 1, X32_SYSCALL_BIT),
+        instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_KILL_PROCESS),
+        instruction(JUMP_EQUAL_CONSTANT, 0, 14, libc::SYS_ioctl as u32),
+        instruction(
+            LOAD_WORD_ABSOLUTE,
+            0,
+            0,
+            (std::mem::offset_of!(libc::seccomp_data, args) + 8) as u32,
+        ),
+    ]);
+
+    for (jump, (_, request)) in (1_u8..=13).rev().zip(VMM_LAUNCH_DENIED_IOCTLS) {
+        program.push(instruction(JUMP_EQUAL_CONSTANT, jump, 0, request));
+    }
+
+    program.extend([
+        instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_ALLOW),
+        instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_ERRNO_EPERM),
+    ]);
+    program
 }
 
 /// The deny-list in table order: `(name, libc::<NAME> as u32)`.
@@ -308,7 +368,6 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-42)"]
     fn the_launch_filter_verdict_partition_is_total() {
         let program = production_program();
 
@@ -411,7 +470,6 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-42)"]
     fn the_deny_list_equals_the_measured_ioctl_numbers_and_the_audit_constants() {
         assert_eq!(
             VMM_LAUNCH_DENIED_IOCTLS, MEASURED_DENIED_IOCTLS,
@@ -466,7 +524,6 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[cfg(not(target_arch = "x86_64"))]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-44)"]
     fn a_target_without_a_program_is_unsupported() {
         match VmmLaunchSeccompFilter::for_target() {
             Err(unsupported) => {

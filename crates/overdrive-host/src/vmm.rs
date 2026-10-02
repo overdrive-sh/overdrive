@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -90,7 +90,6 @@ trait VmmProbeSubstrate: Send + Sync {
     async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()>;
     /// Prove at boot that the kernel accepts the exact VMM launch seccomp
     /// program and that an exec proceeds under it (D-295-R22, ADR-0143).
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
     async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError>;
@@ -115,9 +114,22 @@ impl VmmProbeSubstrate for RealVmmProbeSubstrate {
         Command::new(tool).arg("--version").output().await.map(|_| ())
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-02")]
     async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError> {
-        todo!("RED scaffold: D-295-R22 check_launch_seccomp — DELIVER step 05-02")
+        let filter = launch_seccomp::VmmLaunchSeccompFilter::for_target()
+            .map_err(|error| VmmProbeError::launch_seccomp_unsupported_arch(error.target_arch))?;
+        let mut command = Command::new("prlimit");
+        command.arg("--version").stdout(Stdio::null()).stderr(Stdio::null());
+        register_launch_child_hook(&mut command, 3, filter);
+
+        let status = command.status().await.map_err(VmmProbeError::launch_seccomp_install)?;
+        if status.success() {
+            return Ok(());
+        }
+
+        Err(VmmProbeError::launch_seccomp_probe_exit(
+            status.code(),
+            status.signal().and_then(|signal| u8::try_from(signal).ok()),
+        ))
     }
 
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
@@ -305,16 +317,52 @@ impl CloudHypervisorVmm {
 /// (3) loads `filter`, returning the first step's `io::Error` on failure.
 /// The crate's only production `#[allow(unsafe_code)]`.
 #[allow(unsafe_code)]
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-02")]
-#[allow(clippy::needless_pass_by_value, reason = "RED scaffold — DELIVER step 05-02")]
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-02")]
 fn register_launch_child_hook(
     cmd: &mut tokio::process::Command,
     first_closed: std::os::fd::RawFd,
     filter: launch_seccomp::VmmLaunchSeccompFilter,
 ) {
-    let _ = (cmd, first_closed, filter);
-    todo!("RED scaffold: D-295-R22 register_launch_child_hook — DELIVER step 05-02")
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "the filter builder guarantees its program fits sock_fprog.len"
+    )]
+    let program_len = filter.program().len() as u16;
+
+    unsafe {
+        cmd.as_std_mut().pre_exec(move || {
+            let close_result = libc::syscall(
+                libc::SYS_close_range,
+                first_closed.cast_unsigned(),
+                libc::c_uint::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            );
+            if close_result == -1 {
+                return Err(io::Error::last_os_error());
+            }
+
+            if libc::prctl(
+                libc::PR_SET_NO_NEW_PRIVS,
+                1 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            ) == -1
+            {
+                return Err(io::Error::last_os_error());
+            }
+
+            let program = filter.program();
+            let filter_program =
+                libc::sock_fprog { len: program_len, filter: program.as_ptr().cast_mut() };
+            if libc::syscall(libc::SYS_seccomp, libc::SECCOMP_SET_MODE_FILTER, 0, &filter_program)
+                == -1
+            {
+                return Err(io::Error::last_os_error());
+            }
+
+            Ok(())
+        });
+    }
 }
 
 fn network_launch_prefix(
@@ -368,6 +416,8 @@ impl Vmm for CloudHypervisorVmm {
 
         probe_launch_toolchain(self.probe_substrate.as_ref()).await?;
 
+        self.probe_substrate.check_launch_seccomp().await?;
+
         self.probe_substrate.check_kvm().await?;
 
         self.probe_substrate.check_run_dir(self.run_dir_root.clone()).await?;
@@ -384,6 +434,16 @@ impl Vmm for CloudHypervisorVmm {
     // expansion makes `#[expect]` self-fulfilment unreliable here.
     #[allow(clippy::too_many_lines)]
     async fn create(&self, config: &VmConfig) -> Result<VmProcess> {
+        let launch_filter =
+            launch_seccomp::VmmLaunchSeccompFilter::for_target().map_err(|error| {
+                VmmError::ConfinementUnavailable {
+                    control: ConfinementControl::Seccomp,
+                    detail: format!(
+                        "no VMM launch seccomp program for target architecture {}",
+                        error.target_arch,
+                    ),
+                }
+            })?;
         let master = config.rootfs.master().to_path_buf();
         let clone_dest = config.rootfs.clone_dest().to_path_buf();
         // A configured master that has disappeared is the ONE absence
@@ -463,6 +523,7 @@ impl Vmm for CloudHypervisorVmm {
         // bridge; no namespace-exec launcher is required.
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
         let mut cmd = self.build_confined_command(config, &wrapper);
+        register_launch_child_hook(&mut cmd, 3, launch_filter);
         let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
@@ -1108,7 +1169,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-44)"]
     async fn each_launch_filter_probe_cause_maps_to_its_typed_error() {
         let arch = std::env::consts::ARCH;
 
@@ -2332,7 +2392,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
     fn the_launched_child_inherits_exactly_descriptors_zero_to_three() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
@@ -2470,7 +2529,6 @@ mod launch_seccomp_kernel {
     /// are needed.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
     fn a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::CloseRange);
     }
@@ -2485,7 +2543,6 @@ mod launch_seccomp_kernel {
     /// seccomp filter refusing `prctl(PR_SET_NO_NEW_PRIVS)` with `EPERM`.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
     fn a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::NoNewPrivs);
     }
@@ -2500,7 +2557,6 @@ mod launch_seccomp_kernel {
     /// seccomp filter refusing `seccomp(2)` with `EPERM`.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-41)"]
     fn a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::LoadFilter);
     }
@@ -2511,7 +2567,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-43)"]
     fn every_denied_request_returns_eperm_on_every_thread_under_the_production_hook() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
@@ -2575,7 +2630,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-43)"]
     fn every_filtered_thread_reports_no_new_privs_and_filter_mode() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
@@ -2614,7 +2668,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-43)"]
     async fn the_startup_probe_installs_the_exact_launch_program() {
         use super::VmmProbeSubstrate;
 
@@ -2632,7 +2685,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
     #[test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-43)"]
     fn foreign_syscall_abis_end_the_filtered_process() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
@@ -2890,7 +2942,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(not(target_arch = "x86_64"))]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-02 (S-ND295-44)"]
     async fn launch_on_a_target_without_a_program_is_refused_before_any_effect() {
         use super::{
             ConfinementControl, RealVmmProbeSubstrate, Vmm, VmmError, VmmProbeError,

@@ -435,9 +435,11 @@ jobs:
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: cargo nextest run --workspace --features integration-tests (profile=ci)
-        # Filter `binary(integration)` selects only the integration
-        # entrypoint binaries. `--exclude overdrive-bpf` avoids a
-        # cross-process artifact race (see bpf-unit job).
+        # Filter `binary(integration)` selects the integration entrypoint
+        # binaries; the source-local host and control-plane modules are
+        # selected explicitly because this filter does not include library
+        # tests. `--exclude overdrive-bpf` avoids a cross-process artifact
+        # race (see bpf-unit job).
         run: |
           limactl shell overdrive env \
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
@@ -456,7 +458,7 @@ jobs:
                       cargo nextest run --workspace --locked --profile ci \
                         --features integration-tests \
                         --exclude overdrive-bpf \
-                        -E "binary(integration)"'
+                        -E "binary(integration) | (package(overdrive-host) & kind(lib) & test(/launch_seccomp_kernel/)) | (package(overdrive-control-plane) & kind(lib) & test(/offload_read_failure_propagation/))"'
 
       - name: Show sccache stats
         if: always() && steps.sccache-setup.outcome == 'success'
