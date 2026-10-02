@@ -473,6 +473,10 @@ impl Fixture {
             allocator,
             overdrive_control_plane::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
+            Arc::clone(&worker),
+            Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+            Arc::clone(&gate),
+            Arc::clone(&pool),
         );
         // The production exit observer authors a crashed allocation's Failed
         // row from the driver's exit event.

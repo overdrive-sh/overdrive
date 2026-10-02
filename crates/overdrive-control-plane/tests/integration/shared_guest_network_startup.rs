@@ -462,7 +462,6 @@ fn absent_mesh_name_query() -> Vec<u8> {
 /// the authority section with `MINIMUM == 1`, and the transaction ID
 /// preserved.
 #[tokio::test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-00)"]
 async fn the_shared_gateway_answers_an_absent_mesh_name_with_nxdomain() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     assert_eq!(

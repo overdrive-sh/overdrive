@@ -466,6 +466,10 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::invariants::serve_ports::worker(),
+        crate::invariants::serve_ports::owner(),
+        crate::invariants::serve_ports::exec_gate(),
+        crate::invariants::serve_ports::pool(),
     );
 
     // The svid-lifecycle reconciler ticks against a `workload/<workload>` target —

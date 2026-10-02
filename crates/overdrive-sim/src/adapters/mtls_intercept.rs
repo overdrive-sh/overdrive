@@ -15,12 +15,9 @@
 //! - **Fault arms are PURE** — an armed fault short-circuits before any
 //!   syscall, so a test that drives only fault arms performs ZERO I/O and
 //!   belongs in the DEFAULT lane.
-//! - **The `Ok` arm of `bind_transparent` binds a REAL, PLAIN
-//!   (non-`IP_TRANSPARENT`) loopback listener** (DFS-5). The worker's `Ok` path
-//!   consumes a live listener it accepts on, and there is no way to fabricate a
-//!   [`std::net::TcpListener`] without a syscall. **Any test that drives this
-//!   `Ok` arm binds a socket and is therefore INTEGRATION-lane** per
-//!   `.claude/rules/testing.md` § "Integration vs unit gating".
+//! - **The `Ok` arm of `bind_transparent` returns a socket-free listener.** It
+//!   records a deterministic address and accepts only outcomes scripted by the
+//!   test; it creates no socket, descriptor, thread, task, or timer.
 //! - **The `Ok` arm of the two allocation installs records the dynamic members
 //!   the shared owner's host adapter would add** (one managed-guest and one
 //!   outbound-source member per outbound install; one inbound-destination
@@ -32,10 +29,7 @@
 //!   [`observe_shared_state`](MtlsIntercept::observe_shared_state).
 //! - **The listener surface** ([`SimInterceptListener`], [`SimAcceptScript`])
 //!   opens no socket, descriptor, thread, task, or timer: a fabricated port,
-//!   a weak live-listener table, and scripted accept outcomes. Until the step
-//!   that changes `bind_transparent`'s return type (DELIVER 05-01),
-//!   `bind_transparent`'s `Ok` arm still returns a real socket, so the table
-//!   stays empty and both scripting calls return `false`.
+//!   a weak live-listener table, and scripted accept outcomes.
 //!
 //! # Determinism
 //!
@@ -51,8 +45,8 @@ use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use overdrive_worker::mtls_intercept::{
-    InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
-    InterceptSet, NetlinkError, Result,
+    InterceptElementKey, InterceptElementOperation, InterceptError, InterceptLeg,
+    InterceptPostcondition, InterceptSet, NetlinkError, Result,
 };
 use overdrive_worker::mtls_intercept_port::{
     InterceptAcceptError, InterceptAccepted, InterceptGuard, InterceptListener, InterceptMembers,
@@ -156,7 +150,9 @@ pub struct SimMtlsIntercept {
     /// Standing fault for [`observe_shared`](MtlsIntercept::observe_shared).
     observe_shared_fault: Mutex<Option<SimInterceptFault>>,
     /// The complete shared identity last installed through the sim port.
-    shared_observation: Mutex<Option<InterceptPostcondition>>,
+    shared_observation: Arc<Mutex<Option<InterceptPostcondition>>>,
+    /// Exact listener targets recorded only while a node guard is retained.
+    recorded_targets: Arc<Mutex<Option<(u16, u16)>>>,
     /// Standing fault for [`bind_transparent`](MtlsIntercept::bind_transparent).
     bind_fault: Mutex<Option<SimInterceptFault>>,
     /// Standing fault for [`install_outbound`](MtlsIntercept::install_outbound).
@@ -170,12 +166,26 @@ pub struct SimMtlsIntercept {
     listeners: Mutex<BTreeMap<SocketAddrV4, Weak<SimInterceptListener>>>,
 }
 
-/// The inert guard `converge_shared`'s `Ok` arm returns. No rule was
-/// installed, so `Drop` removes nothing. Private — consumers see only
-/// `Box<dyn InterceptGuard>`.
-struct InertGuard;
+struct SimSharedGuard {
+    observation: Arc<Mutex<Option<InterceptPostcondition>>>,
+    recorded_targets: Arc<Mutex<Option<(u16, u16)>>>,
+    members: Arc<Mutex<SimMemberState>>,
+    requested: InterceptPostcondition,
+}
 
-impl InterceptGuard for InertGuard {}
+impl InterceptGuard for SimSharedGuard {}
+
+impl Drop for SimSharedGuard {
+    fn drop(&mut self) {
+        self.recorded_targets.lock().take();
+        if self.members.lock().members == InterceptMembers::default() {
+            let mut observation = self.observation.lock();
+            if observation.as_ref() == Some(&self.requested) {
+                observation.take();
+            }
+        }
+    }
+}
 
 /// One dynamic member of the owned program's three sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -401,7 +411,8 @@ impl SimMtlsIntercept {
         Self {
             converge_shared_fault: Mutex::new(None),
             observe_shared_fault: Mutex::new(None),
-            shared_observation: Mutex::new(None),
+            shared_observation: Arc::new(Mutex::new(None)),
+            recorded_targets: Arc::new(Mutex::new(None)),
             bind_fault: Mutex::new(None),
             outbound_fault: Mutex::new(None),
             inbound_fault: Mutex::new(None),
@@ -457,11 +468,48 @@ impl SimMtlsIntercept {
         self.listeners.lock().get(&at).and_then(Weak::upgrade)
     }
 
+    fn shared_program(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
+        let encode = |addr: SocketAddrV4| {
+            let mut bytes = Vec::with_capacity(6);
+            bytes.extend_from_slice(&addr.ip().octets());
+            bytes.extend_from_slice(&addr.port().to_be_bytes());
+            bytes
+        };
+        InterceptPostcondition::ConstantRules {
+            table_and_chains: vec![b"sim-shared-table-and-chains".to_vec()],
+            sets: vec![b"sim-shared-sets".to_vec()],
+            prerouting: vec![encode(leg_f)],
+            output: vec![encode(leg_c)],
+        }
+    }
+
+    const fn program_not_published() -> InterceptError {
+        InterceptError::SharedProgramNotConverged
+    }
+
+    #[allow(
+        clippy::result_large_err,
+        reason = "the simulation returns the same typed InterceptError partition as the host port"
+    )]
+    fn check_shared_port(&self, leg: InterceptLeg, actual: u16) -> Result<()> {
+        let targets = *self.recorded_targets.lock();
+        let Some((leg_f, leg_c)) = targets else {
+            return Err(Self::program_not_published());
+        };
+        let expected = match leg {
+            InterceptLeg::F => leg_f,
+            InterceptLeg::C => leg_c,
+        };
+        if actual != expected {
+            return Err(InterceptError::SharedListenerPortMismatch { leg, expected, actual });
+        }
+        Ok(())
+    }
+
     /// Register a socket-free listener: port 0 takes the smallest port ≥ 49152
     /// no live listener of this adapter holds at that IP; a non-zero address is
     /// honoured exactly; an address a live listener holds is refused with
     /// `EADDRINUSE`.
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 05-01 (B-7)")]
     #[allow(
         clippy::result_large_err,
         reason = "returns the exact InterceptError the port's bind_transparent returns"
@@ -497,21 +545,6 @@ impl SimMtlsIntercept {
         let program = self.shared_observation.lock().clone()?;
         let members = self.members.lock().members.clone();
         Some(InterceptState { program, policy_route: true, intercept_mark_guard: true, members })
-    }
-
-    /// The typed refusal for a member effect while no program is published —
-    /// the shape the host adapter returns.
-    fn program_not_published() -> InterceptError {
-        InterceptError::NftRuleInstallFailed {
-            op: "shared-element-owner",
-            source: NetlinkError::nft(
-                "shared-element-owner",
-                std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "shared constant program is not published",
-                ),
-            ),
-        }
     }
 
     /// Arm a STANDING fault on `bind_transparent`. Fires on every subsequent
@@ -643,47 +676,68 @@ fn armed(slot: &Mutex<Option<SimInterceptFault>>) -> Option<SimInterceptFault> {
 }
 
 impl MtlsIntercept for SimMtlsIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<std::net::TcpListener> {
+    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<Arc<dyn InterceptListener>> {
         // The fault arm is PURE — it short-circuits BEFORE the bind below, so a
         // test driving only this arm performs zero I/O and stays default-lane.
         if let Some(fault) = armed(&self.bind_fault) {
             return Err(materialise(fault, addr));
         }
 
-        // DFS-5: the `Ok` arm binds a REAL, PLAIN (non-`IP_TRANSPARENT`)
-        // listener. There is no way to fabricate a `TcpListener` without a
-        // syscall, and the worker's `Ok` path consumes a live listener it
-        // accepts on. Any test reaching here is INTEGRATION-lane.
-        std::net::TcpListener::bind(addr)
-            .map_err(|source| InterceptError::TransparentListener { addr, source })
+        self.register_listener(addr).map(|listener| listener as Arc<dyn InterceptListener>)
     }
 
     fn converge_shared(
         &self,
-        _prior: Option<&InterceptPostcondition>,
+        prior: Option<&InterceptPostcondition>,
         leg_f: SocketAddrV4,
         leg_c: SocketAddrV4,
     ) -> Result<Box<dyn InterceptGuard>> {
+        if leg_f.port() == 0 || leg_c.port() == 0 {
+            return Err(InterceptError::NftRuleInstallFailed {
+                op: "shared-ip-expected",
+                source: NetlinkError::nft(
+                    "shared-ip-identity",
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "shared IP listener ports must be non-zero",
+                    ),
+                ),
+            });
+        }
         if let Some(fault) = armed(&self.converge_shared_fault) {
             return Err(materialise(fault, leg_f));
         }
-
-        // The sim records a stable, complete identity that is deliberately
-        // substrate-neutral: it proves the owner passes both exact listener
-        // targets and later observes the same fact, not the host nft encoding.
-        let encode = |addr: SocketAddrV4| {
-            let mut bytes = Vec::with_capacity(6);
-            bytes.extend_from_slice(&addr.ip().octets());
-            bytes.extend_from_slice(&addr.port().to_be_bytes());
-            bytes
-        };
-        *self.shared_observation.lock() = Some(InterceptPostcondition::ConstantRules {
-            table_and_chains: vec![b"sim-shared-table-and-chains".to_vec()],
-            sets: vec![b"sim-shared-sets".to_vec()],
-            prerouting: vec![encode(leg_f)],
-            output: vec![encode(leg_c)],
-        });
-        Ok(Box::new(InertGuard))
+        let observed = self.shared_observation.lock().clone();
+        let requested = Self::shared_program(leg_f, leg_c);
+        if observed.as_ref() != prior {
+            return Err(InterceptError::PostconditionMismatch {
+                expected: prior.cloned().unwrap_or_else(|| requested.clone()),
+                observed,
+            });
+        }
+        if observed.as_ref().is_some_and(|current| current != &requested)
+            && !self.members.lock().members.eq(&InterceptMembers::default())
+        {
+            return Err(InterceptError::NftSharedReplaceFailed {
+                prior: observed,
+                requested,
+                source: NetlinkError::nft(
+                    "shared-ip-observe",
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "shared program contains dynamic elements",
+                    ),
+                ),
+            });
+        }
+        *self.shared_observation.lock() = Some(requested.clone());
+        *self.recorded_targets.lock() = Some((leg_f.port(), leg_c.port()));
+        Ok(Box::new(SimSharedGuard {
+            observation: Arc::clone(&self.shared_observation),
+            recorded_targets: Arc::clone(&self.recorded_targets),
+            members: Arc::clone(&self.members),
+            requested,
+        }))
     }
 
     fn observe_shared(&self) -> Result<Option<InterceptPostcondition>> {
@@ -696,8 +750,9 @@ impl MtlsIntercept for SimMtlsIntercept {
     fn install_outbound(
         &self,
         source_addr: std::net::Ipv4Addr,
-        _agent_leg_f_port: u16,
+        agent_leg_f_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
+        self.check_shared_port(InterceptLeg::F, agent_leg_f_port)?;
         if let Some(fault) = armed(&self.outbound_fault) {
             // An element-update fault is keyed by the source address, as the
             // host keys it. No socket address is in scope on this method, so a
@@ -719,8 +774,9 @@ impl MtlsIntercept for SimMtlsIntercept {
     fn install_inbound(
         &self,
         virt: SocketAddrV4,
-        _agent_leg_c_port: u16,
+        agent_leg_c_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
+        self.check_shared_port(InterceptLeg::C, agent_leg_c_port)?;
         if let Some(fault) = armed(&self.inbound_fault) {
             return Err(materialise(fault, virt));
         }
@@ -767,7 +823,7 @@ impl MtlsIntercept for SimMtlsIntercept {
                 ),
             });
         }
-        if self.shared_observation.lock().is_none() {
+        if self.recorded_targets.lock().is_none() {
             return Err(Self::program_not_published());
         }
         let requested =
@@ -852,7 +908,6 @@ mod tests {
     /// unchanged modeled program (D15's conditional delete, which the sim
     /// models under DISTILL gap B-8): every observation then reads `Ok(None)`.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn shared_convergence_records_both_exact_targets_for_non_repairing_observation() {
         let sut = SimMtlsIntercept::new();
         let leg_f = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_001);
@@ -904,7 +959,6 @@ mod tests {
     /// withdraws the record, so a later install and a later removal are refused
     /// with `SharedProgramNotConverged` (DISTILL gap B-8).
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn a_node_guard_dropped_while_a_member_exists_keeps_the_program_and_withdraws_the_record() {
         let sut = SimMtlsIntercept::new();
         let node_guard = converge_at_install_ports(&sut);
@@ -986,7 +1040,6 @@ mod tests {
     /// source has the host's strict-observation shape), and it changes neither
     /// the program, the members, nor the record.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn a_program_replacement_is_refused_while_a_member_exists() {
         let sut = SimMtlsIntercept::new();
         let node_guard = converge_at_install_ports(&sut);
@@ -1041,7 +1094,6 @@ mod tests {
     /// prior, or the requested identity when the prior is `None` — and changes
     /// nothing.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
         let sut = SimMtlsIntercept::new();
         let node_guard = converge_at_install_ports(&sut);
@@ -1083,7 +1135,6 @@ mod tests {
     /// armed fault, an armed fault before a stale prior, a stale prior before
     /// the replace-over-members refusal. Each refusal changes no modeled state.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn shared_convergence_refuses_in_the_hosts_order() {
         let sut = SimMtlsIntercept::new();
         let node_guard = converge_at_install_ports(&sut);
@@ -1240,7 +1291,6 @@ mod tests {
     /// actual }`; only a call at the recorded port reaches the armed fault.
     /// No refusal records a member.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
     fn an_armed_install_fault_fires_only_after_the_record_and_port_checks() {
         for (method, fault, leg, recorded, crossed, expected) in [
             (
@@ -1700,11 +1750,7 @@ mod tests {
     // -----------------------------------------------------------------------
     // S-ND295-70 — the socket-free listener surface (B-7, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned contract through the `SimMtlsIntercept` contract)).
     //
-    // Until the DELIVER step that carries B-7 (05-01), `bind_transparent`'s
-    // `Ok` arm returns a real `std::net::TcpListener` and registers nothing,
-    // so every body below is pending that step. The bodies reach the bound
-    // listener only through `LegListener`, so they compile on both sides of
-    // it and that step edits none of them.
+    // These bodies drive the socket-free listener through the accepted port.
     // -----------------------------------------------------------------------
 
     /// Every bounded wait in these bodies: a body that is RED fails instead
@@ -1716,58 +1762,21 @@ mod tests {
         SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
     }
 
-    /// The sim-local copy of the `LegListener` bridge (TS § *Intercept
-    /// listener and stop-error test support*). `bind_transparent`'s `Ok`
-    /// value is a real `std::net::TcpListener` before the B-7 step and an
-    /// `Arc<dyn InterceptListener>` from then on. The `TcpListener`
-    /// implementation is deleted at that step (its test-support line 4).
-    trait LegListener {
-        /// The bound IPv4 address.
-        fn bound_v4(&self) -> std::io::Result<SocketAddrV4>;
-        /// A further holder of the socket-free port listener, or `None` when
-        /// the bind produced a real socket.
-        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>>;
-    }
-
-    impl LegListener for std::net::TcpListener {
-        fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
-            match self.local_addr()? {
-                std::net::SocketAddr::V4(bound) => Ok(bound),
-                std::net::SocketAddr::V6(bound) => {
-                    Err(std::io::Error::other(format!("real listener bound IPv6 {bound}")))
-                }
-            }
-        }
-
-        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>> {
-            None
-        }
-    }
-
-    impl LegListener for Arc<dyn InterceptListener> {
-        fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
-            self.local_addr()
-        }
-
-        fn port_listener(&self) -> Option<Arc<dyn InterceptListener>> {
-            Some(Self::clone(self))
-        }
-    }
-
     /// Bind through the port; return the holder and its bound address.
-    fn bind_live(sut: &SimMtlsIntercept, addr: SocketAddrV4) -> (impl LegListener, SocketAddrV4) {
+    fn bind_live(
+        sut: &SimMtlsIntercept,
+        addr: SocketAddrV4,
+    ) -> (Arc<dyn InterceptListener>, SocketAddrV4) {
         let held = sut
             .bind_transparent(addr)
             .unwrap_or_else(|error| panic!("bind at {addr} must succeed: {error:?}"));
-        let bound = held.bound_v4().expect("a fresh listener reads its bound address");
+        let bound = held.local_addr().expect("a fresh listener reads its bound address");
         (held, bound)
     }
 
     /// A further holder of the socket-free listener `held` holds.
-    fn port_of(held: &impl LegListener) -> Arc<dyn InterceptListener> {
-        held.port_listener().expect(
-            "bind_transparent's Ok arm returns the socket-free sim listener, not a real socket",
-        )
+    fn port_of(held: &Arc<dyn InterceptListener>) -> Arc<dyn InterceptListener> {
+        Arc::clone(held)
     }
 
     /// The error a bind that must be refused returns.
@@ -1823,7 +1832,6 @@ mod tests {
     /// honoured; a released port is handed out again; a fresh adapter repeats
     /// the same sequence (no clock, no entropy).
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn fabricated_ports_are_deterministic_non_zero_and_distinct_among_live_listeners() {
         let sut = SimMtlsIntercept::new();
         let (first, first_at) = bind_live(&sut, LEG_ADDR);
@@ -1876,7 +1884,6 @@ mod tests {
     /// nothing; the address binds again once the last holder drops. The
     /// refusal is per address, not per port.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
         let sut = SimMtlsIntercept::new();
         let (held, at) = bind_live(&sut, LEG_ADDR);
@@ -1913,7 +1920,6 @@ mod tests {
     /// nothing — neither a connection scripted after the drop nor one
     /// scripted while it was parked but not yet re-polled.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     async fn an_unscripted_accept_stays_parked_and_a_cancelled_accept_takes_nothing() {
         let sut = SimMtlsIntercept::new();
         let (held, at) = bind_live(&sut, LEG_ADDR);
@@ -1961,7 +1967,6 @@ mod tests {
     /// `local_addr` failure is standing and leaves `accept` alone, and scripts
     /// die with their listener.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     #[allow(clippy::too_many_lines, reason = "one table plus the FIFO and lifetime rules")]
     async fn each_scripted_outcome_completes_exactly_the_accept_it_names() {
         #[derive(Debug, Clone, Copy)]
@@ -2088,7 +2093,6 @@ mod tests {
     /// consumes no script: the scripted connection is still delivered once a
     /// runtime polls.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn an_accept_polled_without_a_runtime_fails_instead_of_panicking() {
         let sut = SimMtlsIntercept::new();
         let (held, at) = bind_live(&sut, LEG_ADDR);
@@ -2135,7 +2139,6 @@ mod tests {
     /// next `bind_transparent` takes its socket-free `Ok` arm; a second clear
     /// leaves it disarmed.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn clear_faults_also_disarms_the_bind_slot() {
         let sut = SimMtlsIntercept::new();
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
@@ -2169,7 +2172,6 @@ mod tests {
     /// leaks into neither bind, which takes its socket-free `Ok` arm, while
     /// the armed install still refuses.
     #[test]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-70)"]
     fn an_install_fault_leaves_bind_on_its_success_arm() {
         for method in [Method::InstallOutbound, Method::InstallInbound] {
             let sut = SimMtlsIntercept::new();

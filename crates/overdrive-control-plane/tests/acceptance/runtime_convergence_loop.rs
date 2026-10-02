@@ -107,6 +107,10 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     )
 }
 
@@ -341,6 +345,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
@@ -573,6 +581,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     );
 
     // --- Preload IntentStore: one Job. The driver will reject its
@@ -888,6 +900,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     );
 
     // --- Preload a Job that the SimDriver will reject — this drives
@@ -1216,6 +1232,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).

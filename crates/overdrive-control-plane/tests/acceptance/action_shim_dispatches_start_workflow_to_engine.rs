@@ -131,6 +131,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     };
 
     // --- Driving port: the action shim, off which the engine runs -----
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![Action::StartWorkflow { start: spec, correlation }],
         drivers.as_ref(),
@@ -148,8 +149,7 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         Arc::clone(&allocator),
         &broker,
         Some(&engine),
-        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
-        None,
+        &mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),

@@ -230,6 +230,10 @@ mod tests {
             allocator,
             crate::test_empty_listener_facts(),
             std::net::Ipv4Addr::LOCALHOST,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            crate::shared_network_test_ports::guest_pool(),
         );
         state.vm_host_state = vm_host_state;
         state

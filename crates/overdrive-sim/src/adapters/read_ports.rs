@@ -1,9 +1,9 @@
-//! Sim doubles for the four ADR-0086 D5 hydration read-ports.
+//! Sim doubles for the ADR-0086 D5 and node guest-attachment hydration read-ports.
 //!
 //! ADR-0086 (reconcilers own their hydration) moves the intent + observation
 //! hydration onto the `Reconciler::hydrate_*` trait methods, which read every
 //! fact through a `HydrationContext` borrow-bundle of injected ports instead of
-//! concrete `AppState` fields. Four of those ports are NEW narrow read-traits in
+//! concrete `AppState` fields. These five ports are narrow read-traits in
 //! `overdrive-core`:
 //!
 //! | Core trait | Sim double (here) | Production impl (up) |
@@ -14,7 +14,7 @@
 //! | [`HeldSvidView`] | [`SimHeldSvidView`] | `IdentityMgr` (control-plane) |
 //! | [`GuestAttachmentView`] | [`SimGuestAttachmentView`] | the server's guest-address pool (control-plane; D-295-R8, ADR-0134) |
 //!
-//! These four doubles make the hydration boundary **DST-injectable for the first
+//! These five doubles make the hydration boundary **DST-injectable for the first
 //! time** (ADR-0086 D8): a scenario can seed a stale/empty [`SimWorkflowLiveSet`]
 //! (crash-resume convergence), a missing [`SimServiceVipView`] memo (ADR-0049 §4
 //! defer path), a drifted [`SimListenerFacts`] fact (ADR-0060 C3 skip-not-default),
@@ -27,7 +27,7 @@
 //! `.claude/rules/development.md` § "Ordered-collection choice"). There is NO
 //! external substrate (fs / network / subprocess / kernel) that could lie, so an
 //! Earned-Trust `probe()` on these ports is **degenerate** — construction by the
-//! composition root already guarantees presence. Consequently the four core
+//! composition root already guarantees presence. Consequently the five core
 //! read-port traits declare NO `probe()` method, and these doubles add none: the
 //! Earned-Trust value here is the *sim-injectability* of the hydration boundary,
 //! not a substrate probe. The runtime's existing `ViewStore::probe` boot gate

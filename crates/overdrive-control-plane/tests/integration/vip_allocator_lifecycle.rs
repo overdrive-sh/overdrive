@@ -140,6 +140,10 @@ fn build_state_with_range(
         Arc::clone(&allocator),
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
     (state, allocator)
 }
@@ -272,6 +276,7 @@ async fn dispatch_release(
     };
 
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_0 = crate::integration::serve_ports::worker();
     dispatch(
         vec![action],
         drivers.as_ref(),
@@ -289,8 +294,7 @@ async fn dispatch_release(
         Arc::clone(&allocator),
         &test_broker,
         None,
-        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
-        None,
+        &mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
@@ -620,6 +624,10 @@ async fn build_state_with_range_and_reconciler(
         Arc::clone(&allocator),
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
     (state, allocator)
 }

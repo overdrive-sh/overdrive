@@ -174,6 +174,7 @@ async fn dispatch(
 ) {
     let (events, _receiver) = tokio::sync::broadcast::channel(16);
     let now = Instant::now();
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch_with_network_provisioner(
         vec![action],
         drivers,
@@ -199,7 +200,7 @@ async fn dispatch(
         ))),
         &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
         None,
-        None,
+        &mtls_worker_0501_0,
         net_slots,
         network,
         host,

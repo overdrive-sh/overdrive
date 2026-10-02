@@ -467,6 +467,7 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let writer_node = NodeId::new("writer-terminal-contention")
         .map_err(|error| format!("writer node: {error:?}"))?;
     let requested_terminal = TerminalCondition::Stopped { by: StoppedBy::Operator };
+    let mtls_worker = crate::invariants::serve_ports::worker();
 
     {
         let dispatch = dispatch(
@@ -487,7 +488,7 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
             allocator,
             &broker,
             None,
-            None,
+            &mtls_worker,
             &net_slots,
             &host,
         );

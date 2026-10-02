@@ -22,6 +22,57 @@
 )]
 
 mod acceptance {
+    #[allow(dead_code)]
+    pub mod serve_ports {
+        use std::collections::BTreeMap;
+        use std::net::Ipv4Addr;
+        use std::sync::Arc;
+
+        use overdrive_control_plane::guest_network::GuestAddressPool;
+        use overdrive_core::guest_network::{GuestNetworkExecGate, GuestNetworkExecWiring};
+        use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+        use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
+        use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
+        use overdrive_sim::adapters::{SimIdentityRead, SimMtlsIntercept, SimMtlsResolve};
+        use overdrive_worker::mtls_intercept_port::MtlsIntercept;
+        use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+
+        pub fn worker() -> Arc<MtlsInterceptWorker> {
+            let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+                Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
+                MtlsLimits::default(),
+            ));
+            let resolve: Arc<dyn MtlsResolve> =
+                Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
+            let intercept: Arc<dyn MtlsIntercept> = Arc::new(SimMtlsIntercept::new());
+            Arc::new(MtlsInterceptWorker::new(
+                enforcement,
+                resolve,
+                Arc::new(SimClock::new()),
+                intercept,
+            ))
+        }
+
+        pub fn owner() -> Arc<SimSharedGuestNetworkOwner> {
+            Arc::new(SimSharedGuestNetworkOwner::default())
+        }
+
+        pub fn exec_gate() -> Arc<GuestNetworkExecGate> {
+            GuestNetworkExecWiring::new(Arc::new(SimClock::new())).gate()
+        }
+
+        pub fn pool() -> Arc<GuestAddressPool> {
+            Arc::new(GuestAddressPool::new(
+                ipnet::Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 0), 16),
+                "ovd-gbr0".to_owned(),
+                Ipv4Addr::new(100, 95, 0, 1),
+                Ipv4Addr::new(100, 95, 0, 1),
+            ))
+        }
+    }
+
     // netns-density-295 — control-plane-owned scratch complement contract.
     mod netns_density_guest_network;
     // netns-density-295 S-ND295-65 — no optional switch gates protection, DNS,

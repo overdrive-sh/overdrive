@@ -319,6 +319,7 @@ async fn drive_post_assignment_provision_failure(
         deadline: now + Duration::from_secs(2),
     };
 
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     let result = dispatch_with_network_provisioner(
         vec![action],
         &drivers,
@@ -336,7 +337,7 @@ async fn drive_post_assignment_provision_failure(
         allocator,
         &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
         None,
-        None,
+        &mtls_worker_0501_0,
         net_slots.as_ref(),
         &network,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
@@ -454,6 +455,7 @@ async fn drive_rejected_start(
         kind: WorkloadKind::Service,
     };
     let mut dispatches = Vec::with_capacity(dispatch_count);
+    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
     for _ in 0..dispatch_count {
         dispatches.push(
             dispatch_with_network_provisioner(
@@ -473,7 +475,7 @@ async fn drive_rejected_start(
                 Arc::clone(&allocator),
                 &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
                 None,
-                None,
+                &mtls_worker_0501_1,
                 &net_slots,
                 network,
                 &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
@@ -651,6 +653,7 @@ async fn dispatch_with_driver(
         deadline: now + Duration::from_secs(1),
     };
 
+    let mtls_worker_0501_2 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![action],
         drivers.as_ref(),
@@ -668,7 +671,7 @@ async fn dispatch_with_driver(
         Arc::clone(&allocator),
         &test_broker,
         None,
-        None,
+        &mtls_worker_0501_2,
         &net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
@@ -1112,6 +1115,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         deadline: now + Duration::from_secs(2),
     };
 
+    let mtls_worker_0501_3 = crate::acceptance::serve_ports::worker();
     let dispatch = dispatch(
         vec![arm.action(alloc.clone())],
         &drivers,
@@ -1127,7 +1131,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         allocator,
         &broker,
         None,
-        None,
+        &mtls_worker_0501_3,
         &net_slots,
         &host_state,
     );
@@ -1365,6 +1369,7 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         by: overdrive_core::transition_reason::StoppedBy::Operator,
     });
 
+    let mtls_worker_0501_4 = crate::acceptance::serve_ports::worker();
     let dispatch = dispatch(
         vec![Action::StopAllocation { alloc_id: alloc.clone(), terminal: terminal.clone() }],
         &drivers,
@@ -1380,7 +1385,7 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         allocator,
         &broker,
         None,
-        None,
+        &mtls_worker_0501_4,
         &net_slots,
         &host_state,
     );
@@ -1609,6 +1614,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     };
 
     for _ in 0..2 {
+        let mtls_worker_0501_5 = crate::acceptance::serve_ports::worker();
         dispatch_with_network_provisioner(
             vec![action.clone()],
             &drivers,
@@ -1626,7 +1632,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             Arc::clone(&allocator),
             &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
             None,
-            None,
+            &mtls_worker_0501_5,
             &net_slots,
             &network,
             &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),

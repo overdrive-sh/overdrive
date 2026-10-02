@@ -236,7 +236,7 @@ pub struct AppState {
     pub vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     /// The one production shared guest-network owner used by boot and every
     /// allocation action path.
-    pub(crate) shared_guest_network: Option<Arc<dyn guest_network::SharedGuestNetworkOwner>>,
+    pub(crate) shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     /// Alloc → driver-kind routing index (ADR-0083 §D2a(b), GH #42).
     /// `Action::StopAllocation` / `Action::FinalizeFailed` carry no
     /// `AllocationSpec`, so the action shim cannot re-derive which driver
@@ -380,7 +380,19 @@ pub struct AppState {
     /// `IdentityMgr`; `None` for every non-mTLS fixture and the
     /// `SimDataplane`-override boot (no real BPF to intercept on). The
     /// action-shim reads `state.mtls_worker` and fires `if let Some`.
-    pub mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    pub mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    /// The one EXEC gate shared with the VM driver and supervisor.
+    #[allow(
+        dead_code,
+        reason = "threaded into the state now; action helpers consume it in DELIVER 06-04"
+    )]
+    pub(crate) guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
+    /// The one node-wide guest address pool used by dispatch and hydration.
+    #[allow(
+        dead_code,
+        reason = "threaded into the state now; admission consumes it in DELIVER 06-03"
+    )]
+    pub(crate) guest_pool: Arc<guest_network::GuestAddressPool>,
     /// DNS reply-source fallback allocator. It is retained only by the DNS
     /// responder's source-pinning adapter; guest attachment ownership lives in
     /// `SharedGuestNetworkOwner`.
@@ -600,6 +612,10 @@ impl AppState {
         allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
+        mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+        shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+        guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
+        guest_pool: Arc<guest_network::GuestAddressPool>,
     ) -> Self {
         // Default-compose a `WorkflowEngine` with an EMPTY registry over an
         // in-memory journal (ADR-0064 §5). `new` is the broad fixture
@@ -641,7 +657,7 @@ impl AppState {
             listener_facts,
             host_ipv4,
             workflow_engine,
-            None,
+            mtls_worker,
             // Fixture surface: a ripple-free no-op VmHostState (see
             // `NoopVmHostState`'s own doc comment) — fixture callers of this
             // convenience constructor need no change.
@@ -652,6 +668,9 @@ impl AppState {
             // instance and passes it through `new_with_workflow_engine` so it is
             // shared with the re-keyed `MtlsResolve` + the `DnsResponder`.
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
+            shared_guest_network,
+            guest_network_exec,
+            guest_pool,
         )
     }
 
@@ -686,7 +705,7 @@ impl AppState {
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
         workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
-        mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+        mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
         // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
         // brief.md §105a.2, GH #42): composed unconditionally, never
         // gated on `Vm` registry presence. See `AppState::vm_host_state`'s
@@ -694,6 +713,9 @@ impl AppState {
         vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
         frontend_addr_allocator:
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
+        shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
+        guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
+        guest_pool: Arc<guest_network::GuestAddressPool>,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         let tx = Arc::new(tx);
@@ -704,7 +726,7 @@ impl AppState {
             runtime,
             drivers,
             vm_host_state,
-            shared_guest_network: None,
+            shared_guest_network,
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
@@ -720,6 +742,8 @@ impl AppState {
             ca,
             identity,
             mtls_worker,
+            guest_network_exec,
+            guest_pool,
             // Default-construct the per-host slot allocator INSIDE the
             // constructor (transparent-mtls-enrollment D-TME-12 G3, step
             // 04-01) — NOT a constructor parameter. This is the same
@@ -967,19 +991,6 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub mtls_probe_fault: Option<String>,
 
-    /// Test-only fault-injection seam for the dial-by-name `DnsResponder`
-    /// Earned-Trust probe (dial-by-name-responder, step 02-01, S-DBN-BIND-03).
-    /// When `Some(msg)`, the boot path short-circuits `DnsResponder::probe()`
-    /// to `Err(DnsResponderError::Probe { reason: msg })` BEFORE the responder
-    /// is declared usable, so the `run_server` boot-refusal + per-variant
-    /// `health.startup.refused` reason-mapping + `ControlPlaneError::DnsResponderBoot`
-    /// fail-closed branch is exercised without needing a real `:53` bind
-    /// collision or an unreadable store. Mirrors `mtls_probe_fault` above;
-    /// gated behind `#[cfg(feature = "integration-tests")]` on both the field
-    /// and its use site so production builds compile it out entirely.
-    #[cfg(feature = "integration-tests")]
-    pub dns_probe_fault: Option<String>,
-
     /// Test-only whole-port substitution seam for focused transparent-mTLS
     /// adapter tests (transparent-mtls-host-socket, step 06-03, criteria[1]).
     /// When `Some(read)`, boot composes `HostMtlsEnforcement` over THIS
@@ -1059,8 +1070,6 @@ impl std::fmt::Debug for ServerConfig {
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
-        #[cfg(feature = "integration-tests")]
-        dbg.field("dns_probe_fault", &self.dns_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field(
             "mtls_identity_override",
@@ -1158,12 +1167,6 @@ impl ServerConfig {
             // fail-closed branch.
             #[cfg(feature = "integration-tests")]
             mtls_probe_fault: None,
-            // dial-by-name-responder step 02-01 (S-DBN-BIND-03): default no
-            // DNS-probe fault; the `run_server` refusal test sets `Some(..)`
-            // to exercise the `DnsResponderBoot` + reason-mapping fail-closed
-            // branch without a real `:53` bind / store fault.
-            #[cfg(feature = "integration-tests")]
-            dns_probe_fault: None,
             // transparent-mtls-host-socket step 06-03: default no
             // identity override; the criteria[1] e2e sets `Some(..)`
             // to a `TestPki`-rooted `IdentityRead` so the agent's
@@ -1264,11 +1267,11 @@ pub struct ServerHandle {
     /// Both graceful shutdown and abrupt test-owner loss invalidate and join
     /// userspace while leaving active allocation rules in the kernel for the
     /// replacement boot's reclaim-before-sweep boundary.
-    mtls_worker_owner: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    mtls_worker_owner: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
     /// Concrete private owner for the mTLS resolver's List/Watch drain. Kept
     /// outside the `MtlsResolve` domain port so both graceful and abrupt server
     /// boundaries can cancel and await the exact `JoinHandle`.
-    mtls_resolve_owner: Option<Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>>,
+    mtls_resolve_owner: Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>,
     /// Sole retained shared-network supervisor owner. Step 03-03 supplies the
     /// retained task and classification behavior behind this exact field.
     shared_network_supervisor: SharedNetworkSupervisorHandle,
@@ -1823,7 +1826,7 @@ mod shared_network_task_owner_acceptance {
 
     use std::collections::BTreeSet;
     use std::future::Future as _;
-    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+    use std::net::{Ipv4Addr, SocketAddrV4};
     use std::num::NonZeroU16;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1838,9 +1841,9 @@ mod shared_network_task_owner_acceptance {
     use crate::dns_responder::responder::Result as DnsResult;
     use crate::dns_responder::{GuestDns, GuestDnsDeps, GuestDnsFactory};
     use crate::shared_network_test_ports::{
-        LegListener, TestAuditMode, TestAuditOutcome, TestCallOutcome, TestGuestDns,
-        TestGuestDnsFactory, TestGuestDnsServeExit, TestOwnerCall, TestQuiesceOutcome,
-        TestQuiesceScript, TestSharedOwner,
+        TestAuditMode, TestAuditOutcome, TestCallOutcome, TestGuestDns, TestGuestDnsFactory,
+        TestGuestDnsServeExit, TestOwnerCall, TestQuiesceOutcome, TestQuiesceScript,
+        TestSharedOwner,
     };
     use overdrive_core::guest_network::{
         GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
@@ -1863,7 +1866,7 @@ mod shared_network_task_owner_acceptance {
     };
     use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
     use overdrive_worker::mtls_intercept_port::{
-        InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+        InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
     };
     use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
     use parking_lot::Mutex;
@@ -2087,10 +2090,8 @@ mod shared_network_task_owner_acceptance {
     // support*: `S19Intercept` delegates binding to an inner `SimMtlsIntercept`)
     // -----------------------------------------------------------------------
 
-    /// The listener type `bind_transparent` returns. The DELIVER step that
-    /// carries B-7 changes this one line to `Arc<dyn InterceptListener>`
-    /// (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the recording below reads it through `LegListener`.
-    type BoundListener = TcpListener;
+    /// The listener type `bind_transparent` returns.
+    type BoundListener = Arc<dyn InterceptListener>;
 
     struct S19NodeGuard(Arc<AtomicUsize>);
 
@@ -2305,7 +2306,7 @@ mod shared_network_task_owner_acceptance {
             self.record(InterceptCall::Bind { requested: addr });
             let listener = self.sim.bind_transparent(addr)?;
             let bound = listener
-                .bound_v4()
+                .local_addr()
                 .map_err(|source| InterceptError::TransparentListener { addr, source })?;
             self.listener_addresses.lock().push(bound);
             Ok(listener)
@@ -3499,6 +3500,15 @@ mod shared_network_task_owner_acceptance {
         let convergence_shutdown = CancellationToken::new();
         let emit_drain_shutdown = CancellationToken::new();
         let interest_router_shutdown = CancellationToken::new();
+        let sim_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+            NodeId::new("nd295-server-handle").expect("node id"),
+            0,
+        ));
+        let mtls_resolve_owner =
+            Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
+                sim_store,
+                crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
+            ));
         ServerHandle {
             inner: AxumHandle::new(),
             server_task: tokio::spawn(async { Ok::<(), std::io::Error>(()) }),
@@ -3510,8 +3520,8 @@ mod shared_network_task_owner_acceptance {
             exit_observer_shutdown: CancellationToken::new(),
             emit_drain_shutdown,
             interest_router_shutdown,
-            mtls_worker_owner: Some(mtls_worker_owner),
-            mtls_resolve_owner: None,
+            mtls_worker_owner,
+            mtls_resolve_owner,
             shared_network_supervisor,
         }
     }
@@ -6094,16 +6104,6 @@ impl std::fmt::Debug for ServerHandle {
 }
 
 impl ServerHandle {
-    /// Replace the optional worker owner for outer-boundary shutdown tests.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub fn replace_mtls_worker_for_test(
-        &mut self,
-        worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-    ) {
-        self.mtls_worker_owner = Some(worker);
-    }
-
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
     /// ephemeral port the OS chose. Awaits the server's "listening"
@@ -6193,13 +6193,9 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        if let Some(resolve) = mtls_resolve_owner {
-            resolve.shutdown().await;
-        }
+        mtls_resolve_owner.shutdown().await;
         shared_network_supervisor.shutdown().await;
-        if let Some(worker) = mtls_worker_owner {
-            release_killed_worker_without_host_authority(worker).await;
-        }
+        release_killed_worker_without_host_authority(mtls_worker_owner).await;
         AbruptServerResidue
     }
 
@@ -6290,14 +6286,9 @@ impl ServerHandle {
         // not stop workloads or author lifecycle state; it only releases the
         // listeners/connections whose lifetime is this serve owner's lifetime.
         // Active allocation rule guards are relinquished without deletion.
-        let worker_failure = if let Some(worker) = self.mtls_worker_owner {
-            worker.shutdown_owner().await.err().map(ServerShutdownError::new)
-        } else {
-            None
-        };
-        if let Some(resolve) = self.mtls_resolve_owner {
-            resolve.shutdown().await;
-        }
+        let worker_failure =
+            self.mtls_worker_owner.shutdown_owner().await.err().map(ServerShutdownError::new);
+        self.mtls_resolve_owner.shutdown().await;
         self.shared_network_supervisor.shutdown().await;
         worker_failure.map_or(Ok(()), Err)
     }
@@ -7339,38 +7330,8 @@ pub async fn run_server_with_obs_and_drivers(
     let bundle = ca.trust_bundle()?;
     let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
 
-    // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) —
-    // compose the production transparent-mTLS layer HERE, AFTER
-    // `IdentityMgr` (so `HostMtlsEnforcement` can read the held identity)
-    // and BEFORE `AppState`. The mTLS port is not a driver-composition
-    // parameter; instead a separate `MtlsInterceptWorker` is
-    // constructed here with both ports as REQUIRED params and threaded
-    // into `AppState` as the `Option` field the action-shim fires.
-    //
-    // GATED: `Some(worker)` on the production boot
-    // (`dataplane_override.is_none()` — a real `EbpfDataplane` was
-    // constructed above) OR, under `integration-tests`, when the test-only
-    // `mtls_probe_fault` seam opts in. The mTLS BPF load is INDEPENDENT of
-    // the LB `EbpfDataplane` (D-MTLS-17 item 1 — its OWN `aya::Ebpf`), so a
-    // Tier-3 gate test MAY inject `SimDataplane` for the LB path (dodging
-    // the `lo` XDP attach that DRV_MODE rejects under virtio) while STILL
-    // composing the real `MtlsDataplane` to exercise the fail-closed
-    // refusal. The 42 non-mTLS fixtures call `AppState::new` directly
-    // (bypassing this boot path) and are unaffected either way.
-    //
-    // wire → probe → use (fail-closed): construct `HostMtlsEnforcement` +
-    // `HostMtlsEnforcement::probe()`. On probe failure the node REFUSES to
-    // boot with `health.startup.refused` — it does NOT degrade to a cleartext
-    // path (the confidentiality invariant the feature rests on). As of step
-    // 04-01 (ADR-0071 Path A) there is no `MtlsDataplane::load` step: the
-    // OUTBOUND intercept is the per-veth egress nft-TPROXY rule installed
-    // per-alloc by `start_alloc`, NOT a cgroup-attached BPF program, so the
-    // worker holds no BPF object to load at boot. SERVICE_MAP is pinned
-    // independently and earlier by `EbpfDataplane::new_with_pin_dir`.
-    #[cfg(feature = "integration-tests")]
-    let compose_mtls = config.dataplane_override.is_none() || config.mtls_probe_fault.is_some();
-    #[cfg(not(feature = "integration-tests"))]
-    let compose_mtls = config.dataplane_override.is_none();
+    // R16 composes the required mTLS worker on every serve boot, after
+    // `IdentityMgr` exists and before `AppState` is constructed.
 
     // Construct the ONE per-host `FrontendAddrAllocator` (DDN-2 single-owner;
     // dial-by-name-responder step 02-01) BEFORE the `MtlsResolve` so the SAME
@@ -7382,6 +7343,12 @@ pub async fn run_server_with_obs_and_drivers(
     // re-populates it from the declared-Service intent SSOT after `AppState`.
     let frontend_addr_allocator =
         crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new();
+    let guest_pool = Arc::new(guest_network::GuestAddressPool::new(
+        ipnet::Ipv4Net::new_assert(std::net::Ipv4Addr::new(100, 95, 0, 0), 16),
+        "ovd-gbr0".to_owned(),
+        std::net::Ipv4Addr::new(100, 95, 0, 1),
+        std::net::Ipv4Addr::new(100, 95, 0, 1),
+    ));
 
     // Retain the probed resolver through the later converge-on-boot frontend
     // rebuild. Its first List necessarily sees the allocator empty; after the
@@ -7390,139 +7357,130 @@ pub async fn run_server_with_obs_and_drivers(
     // Without this handoff a restart can answer DNS with F while the mTLS
     // resolver permanently lacks F -> backend until an unrelated backend-row
     // write happens.
-    let mut mtls_resolve_after_frontend_rebuild: Option<
-        Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve>,
-    > = None;
-    let mut mtls_resolve_owner = None;
+    let mtls_resolve_after_frontend_rebuild;
+    let mtls_resolve_owner;
+    let mtls_worker = {
+        // (1) construct the enforcement port over the held identity +
+        // the F7 limits. `IdentityMgr` impls `IdentityRead`.
+        //
+        // Focused adapter tests may substitute the whole IdentityRead
+        // port. The normal integration and production paths keep this
+        // unset and therefore prove the real IdentityMgr issuance and
+        // lifecycle path. Production builds compile the override out.
+        #[cfg(feature = "integration-tests")]
+        let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+            config.mtls_identity_override.clone().unwrap_or_else(|| {
+                Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>
+            });
+        #[cfg(not(feature = "integration-tests"))]
+        let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+            Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>;
+        let enforcement: Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> =
+            Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcement::new(
+                mtls_identity,
+                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            ));
 
-    let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
-        if compose_mtls {
-            // (1) construct the enforcement port over the held identity +
-            // the F7 limits. `IdentityMgr` impls `IdentityRead`.
-            //
-            // Focused adapter tests may substitute the whole IdentityRead
-            // port. The normal integration and production paths keep this
-            // unset and therefore prove the real IdentityMgr issuance and
-            // lifecycle path. Production builds compile the override out.
-            #[cfg(feature = "integration-tests")]
-            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
-                config.mtls_identity_override.clone().unwrap_or_else(|| {
-                    Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>
-                });
-            #[cfg(not(feature = "integration-tests"))]
-            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
-                Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>;
-            let enforcement: Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> =
-                Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcement::new(
-                    mtls_identity,
-                    overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                ));
+        // (2) probe (Earned Trust): the test-only `mtls_probe_fault` seam
+        // forces a probe failure so criteria[0] exercises the fail-closed
+        // refusal without a real substrate fault; otherwise the real
+        // `probe()` runs. Either failure → refuse to boot.
+        #[cfg(feature = "integration-tests")]
+        let forced_probe_fault = config.mtls_probe_fault.clone();
+        #[cfg(not(feature = "integration-tests"))]
+        let forced_probe_fault: Option<String> = None;
 
-            // (2) probe (Earned Trust): the test-only `mtls_probe_fault` seam
-            // forces a probe failure so criteria[0] exercises the fail-closed
-            // refusal without a real substrate fault; otherwise the real
-            // `probe()` runs. Either failure → refuse to boot.
-            #[cfg(feature = "integration-tests")]
-            let forced_probe_fault = config.mtls_probe_fault.clone();
-            #[cfg(not(feature = "integration-tests"))]
-            let forced_probe_fault: Option<String> = None;
-
-            if let Some(message) = forced_probe_fault {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "mtls.probe",
-                    error = %message,
-                    "transparent-mTLS proxy probe failed (injected fault); \
-                     refusing to boot (no cleartext fallback)"
-                );
-                return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
-                source:
-                    overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::Probe {
-                        which:
-                            overdrive_core::traits::mtls_enforcement::ProbeSentinel::KtlsArmRoundTrip,
-                        message,
-                    },
+        if let Some(message) = forced_probe_fault {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "mtls.probe",
+                error = %message,
+                "transparent-mTLS proxy probe failed (injected fault); \
+                 refusing to boot (no cleartext fallback)"
+            );
+            return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
+                source: overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::Probe {
+                    which:
+                        overdrive_core::traits::mtls_enforcement::ProbeSentinel::KtlsArmRoundTrip,
+                    message,
+                },
             }));
-            }
-            if let Err(source) = enforcement.probe().await {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "mtls.probe",
-                    error = %source,
-                    "transparent-mTLS proxy probe failed; refusing to boot (no cleartext fallback)"
-                );
-                return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
-                    source,
-                }));
-            }
+        }
+        if let Err(source) = enforcement.probe().await {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "mtls.probe",
+                error = %source,
+                "transparent-mTLS proxy probe failed; refusing to boot (no cleartext fallback)"
+            );
+            return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe { source }));
+        }
 
-            // (3) construct the per-connection enrollment-resolve adapter
-            // (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) over the
-            // `ObservationStore` and run its Earned-Trust probe BEFORE the
-            // worker (and therefore before any connection is resolved). The
-            // List-at-probe leg seeds the in-RAM addr→Backend index from the
-            // authoritative `service_backends` snapshot (capturing rows written
-            // before boot — e.g. on a control-plane restart) and opens the
-            // single-owner watch; on an unreadable store the probe refuses to
-            // boot fail-closed (`health.startup.refused`) rather than serve an
-            // empty-but-trusted index that would degrade to silent cleartext.
-            // wire → probe → use (principle 12).
-            let service_backends_resolve =
-                Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
-                    Arc::clone(&obs),
-                    // The SAME shared allocator the DNS `name_index` answers `F`
-                    // from — so the `by_frontend` `F` is byte-identical to the
-                    // `F` DNS answers (DDN-2 single-owner). The resolve's own
-                    // single-owner drain projects `by_frontend` as a pure reader
-                    // of this allocator's snapshot (REV-3 — never `assign`).
-                    frontend_addr_allocator.clone(),
-                ));
-            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
-                service_backends_resolve.clone();
-            if let Err(source) = resolve.probe().await {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "mtls.resolve.probe",
-                    error = %source,
-                    "transparent-mTLS resolve probe failed; refusing to boot (no cleartext fallback)"
-                );
-                return Err(error::ControlPlaneError::MtlsBoot(
-                    error::MtlsBootError::ResolveProbe { source },
-                ));
-            }
-            mtls_resolve_after_frontend_rebuild = Some(Arc::clone(&resolve));
-            mtls_resolve_owner = Some(service_backends_resolve);
+        // (3) construct the per-connection enrollment-resolve adapter
+        // (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) over the
+        // `ObservationStore` and run its Earned-Trust probe BEFORE the
+        // worker (and therefore before any connection is resolved). The
+        // List-at-probe leg seeds the in-RAM addr→Backend index from the
+        // authoritative `service_backends` snapshot (capturing rows written
+        // before boot — e.g. on a control-plane restart) and opens the
+        // single-owner watch; on an unreadable store the probe refuses to
+        // boot fail-closed (`health.startup.refused`) rather than serve an
+        // empty-but-trusted index that would degrade to silent cleartext.
+        // wire → probe → use (principle 12).
+        let service_backends_resolve =
+            Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
+                Arc::clone(&obs),
+                // The SAME shared allocator the DNS `name_index` answers `F`
+                // from — so the `by_frontend` `F` is byte-identical to the
+                // `F` DNS answers (DDN-2 single-owner). The resolve's own
+                // single-owner drain projects `by_frontend` as a pure reader
+                // of this allocator's snapshot (REV-3 — never `assign`).
+                frontend_addr_allocator.clone(),
+            ));
+        let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+            service_backends_resolve.clone();
+        if let Err(source) = resolve.probe().await {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "mtls.resolve.probe",
+                error = %source,
+                "transparent-mTLS resolve probe failed; refusing to boot (no cleartext fallback)"
+            );
+            return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::ResolveProbe {
+                source,
+            }));
+        }
+        mtls_resolve_after_frontend_rebuild = Arc::clone(&resolve);
+        mtls_resolve_owner = service_backends_resolve;
 
-            // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
-            // stateless and delegates one-for-one to the same
-            // `crate::mtls_intercept` free functions `start_alloc` called
-            // before this port existed, so wiring it changes no production
-            // behaviour. Deliberately NOT probe-gated (ADR-0076 § Decision 4):
-            // `CAP_NET_ADMIN` is already proven per-deploy at the upstream
-            // netns-provision seam, so a boot probe would buy a better
-            // diagnosis, not a new safety property — out of GH #250's scope.
-            let intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept> =
-                Arc::new(overdrive_worker::mtls_intercept_port::HostMtlsIntercept::new());
+        // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
+        // stateless and delegates one-for-one to the same
+        // `crate::mtls_intercept` free functions `start_alloc` called
+        // before this port existed, so wiring it changes no production
+        // behaviour. Deliberately NOT probe-gated (ADR-0076 § Decision 4):
+        // `CAP_NET_ADMIN` is already proven per-deploy at the upstream
+        // netns-provision seam, so a boot probe would buy a better
+        // diagnosis, not a new safety property — out of GH #250's scope.
+        let intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept> =
+            Arc::new(overdrive_worker::mtls_intercept_port::HostMtlsIntercept::new());
 
-            // (4) construct the worker with all four ports as REQUIRED params
-            // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
-            // A) the worker holds no `MtlsDataplane` and no cgroup root — the
-            // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
-            // `start_alloc` against the host-veth NAME carried on
-            // `AllocationSpec.host_veth` (set at the action-shim C3 provision
-            // seam, JOIN-6). As of step 04-02 the worker also holds the
-            // probed-Ok `MtlsResolve` adapter — the outbound accept loop
-            // resolves each captured connection's recovered `orig_dst` through
-            // it (the C1 3-arm decision).
-            Some(Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-                enforcement,
-                resolve,
-                config.clock.clone(),
-                intercept,
-            )))
-        } else {
-            None
-        };
+        // (4) construct the worker with all four ports as REQUIRED params
+        // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
+        // A) the worker holds no `MtlsDataplane` and no cgroup root — the
+        // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
+        // `start_alloc` against the host-veth NAME carried on
+        // `AllocationSpec.host_veth` (set at the action-shim C3 provision
+        // seam, JOIN-6). As of step 04-02 the worker also holds the
+        // probed-Ok `MtlsResolve` adapter — the outbound accept loop
+        // resolves each captured connection's recovered `orig_dst` through
+        // it (the C1 3-arm decision).
+        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            config.clock.clone(),
+            intercept,
+        ))
+    };
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.2, GH #42): `VmHostState` is composed UNCONDITIONALLY — never
@@ -7547,7 +7505,7 @@ pub async fn run_server_with_obs_and_drivers(
     // lives — and because the index is under `data_dir` (never `/run`) it
     // survives a restart that loses the in-memory `RootfsPlan` (S-VM-84
     // ending 3).
-    let mut state: AppState = AppState::new_with_workflow_engine(
+    let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
         obs,
@@ -7574,11 +7532,10 @@ pub async fn run_server_with_obs_and_drivers(
         // are the SAME allocator, and the SAME one already injected into the
         // re-keyed `MtlsResolve` above.
         frontend_addr_allocator.clone(),
+        Arc::clone(&shared_guest_network),
+        guest_network_exec.gate(),
+        Arc::clone(&guest_pool),
     );
-    // Keep the boot owner and the action/reconciler owner as one shared
-    // instance. The field's fixture default is replaced before any action can
-    // be dispatched, so production never constructs a second owner.
-    state.shared_guest_network = Some(Arc::clone(&shared_guest_network));
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.6/§105a.10 AC3, GH #42): the `VmReclamation` boot-epoch drive
@@ -7648,9 +7605,7 @@ pub async fn run_server_with_obs_and_drivers(
     // guest switch has converged. Allocation start_alloc requires this owner;
     // refusing here preserves the accepted boot boundary instead of allowing
     // a Running allocation to discover an absent listener owner later.
-    if let Some(worker) = state.mtls_worker.as_ref()
-        && let Err(source) = worker.start_shared_owner().await
-    {
+    if let Err(source) = state.mtls_worker.start_shared_owner().await {
         tracing::error!(
             name: "health.startup.refused",
             target: "overdrive::health",
@@ -7663,37 +7618,15 @@ pub async fn run_server_with_obs_and_drivers(
         }));
     }
 
-    // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
-    // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a
-    // non-mTLS boot (no responder is composed there — the SAME gate the netns
-    // adopt / frontend rebuild use); `Some(handle)` once the responder probes
-    // Ok and its serve loop is spawned inside the real-dataplane block below.
-    // `let mut … = None` then conditionally `Some(...)` inside the
-    // `mtls_worker.is_some()` block — NOT collapsible to a `let x = if {…} else
-    // {None}` expression because the block contains several `?`-propagating
-    // boot-refusal `return Err(...)` paths (shared-switch sweep, frontend
-    // rebuild, responder probe) that must short-circuit `run_server`, not the
-    // expression. The seq form is the correct shape here.
-    #[allow(
-        clippy::useless_let_if_seq,
-        reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
-                  a let-else-None expression cannot host them"
-    )]
-    let mut dns_responder_owner: Option<DnsServeTaskOwner> = None;
-    #[allow(
-        clippy::useless_let_if_seq,
-        reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
-                  a let-else-None expression cannot host them"
-    )]
-    // Ordinary shared-switch stale cleanup follows the boot-epoch VM
-    // reclamation drive.
-    // Reclamation has already killed every unsupervised non-terminal VM and
-    // committed Platform Reclamation, so this pass does not reconstruct a live
-    // survivor. It adopts any still-valid supervised ownership and garbage-
-    // collects the dead VM's structural netns residue before ordinary
-    // reconciliation can assign that slot again. A correlation conflict still
-    // refuses boot via `health.startup.refused`, reason `netns.adopt`.
-    if state.mtls_worker.is_some() {
+    let (dns_responder_owner, dns_factory, dns_responder_deps) = {
+        // Ordinary shared-switch stale cleanup follows the boot-epoch VM
+        // reclamation drive.
+        // Reclamation has already killed every unsupervised non-terminal VM and
+        // committed Platform Reclamation, so this pass does not reconstruct a live
+        // survivor. It adopts any still-valid supervised ownership and garbage-
+        // collects the dead VM's structural netns residue before ordinary
+        // reconciliation can assign that slot again. A correlation conflict still
+        // refuses boot via `health.startup.refused`, reason `netns.adopt`.
         // After VM reclamation, sweep the original per-workload rules whose
         // mark-first programs remained in the kernel while their serve-owner
         // listeners disappeared. Reclamation has already made the old VM
@@ -7758,18 +7691,14 @@ pub async fn run_server_with_obs_and_drivers(
         {
             return Err(source.into());
         }
-        if let Some(resolve) = mtls_resolve_after_frontend_rebuild.as_ref()
-            && let Err(source) = resolve.probe().await
-        {
+        if let Err(source) = mtls_resolve_after_frontend_rebuild.probe().await {
             tracing::warn!(
                 name: "health.startup.refused",
                 reason = "mtls.resolve.frontend_rebuild",
                 error = %source,
                 "transparent-mTLS resolve refresh after frontend rebuild failed; refusing to boot"
             );
-            if let Some(owner) = mtls_resolve_owner.as_ref() {
-                owner.shutdown().await;
-            }
+            mtls_resolve_owner.shutdown().await;
             return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::ResolveProbe {
                 source,
             }));
@@ -7795,28 +7724,21 @@ pub async fn run_server_with_obs_and_drivers(
         // per-variant `health.startup.refused` reason (a responder that bound
         // lazily could start and THEN fail to answer — the silent-degradation
         // footgun). Mirrors the `MtlsResolve.probe()` refuse-boot block above.
-        let responder = Arc::new(crate::dns_responder::responder::DnsResponder::new(
+        let dns_gateway = std::net::Ipv4Addr::new(100, 95, 0, 1);
+        let dns_factory = Arc::clone(&config.guest_dns);
+        let dns_responder_deps = (
             Arc::clone(&state.obs),
             config.clock.clone(),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            dns_gateway,
             state.frontend_addr_allocator.clone(),
-        ));
-        // The test-only `dns_probe_fault` seam forces the DNS responder probe
-        // to fail with a `DnsResponderError::Probe` so the `run_server`
-        // refusal + reason-mapping path (BIND-03's composition-root half) is
-        // exercised without needing a real bind / store fault. Mirrors the
-        // `mtls_probe_fault` seam above. `None` in production / unset tests →
-        // the real `probe()` runs.
-        #[cfg(feature = "integration-tests")]
-        let dns_probe_result = match config.dns_probe_fault.clone() {
-            Some(message) => {
-                Err(crate::dns_responder::responder::DnsResponderError::Probe { reason: message })
-            }
-            None => responder.probe().await,
-        };
-        #[cfg(not(feature = "integration-tests"))]
-        let dns_probe_result = responder.probe().await;
-        if let Err(source) = dns_probe_result {
+        );
+        let responder = dns_factory.responder(crate::dns_responder::GuestDnsDeps {
+            store: Arc::clone(&dns_responder_deps.0),
+            clock: Arc::clone(&dns_responder_deps.1),
+            gateway: dns_responder_deps.2,
+            frontend: dns_responder_deps.3.clone(),
+        });
+        if let Err(source) = responder.probe().await {
             // Per-variant refusal reason — the enum owns its own vocabulary
             // (`development.md` § "Label enums own their string representation"),
             // so the mapping is tested in-process (`boot_refusal_reason`) rather
@@ -7835,10 +7757,11 @@ pub async fn run_server_with_obs_and_drivers(
         // Probe Ok — spawn the source-pinned serve loop and hold both the task
         // handle AND the responder (so shutdown can `stop()` the SO_RCVTIMEO-
         // bounded serve loop before aborting).
-        let owned_responder: Arc<dyn crate::dns_responder::GuestDns> = responder.clone();
-        dns_responder_owner =
-            Some(DnsServeTaskOwner::new(owned_responder, tokio::spawn(responder.serve())));
-    }
+        let owned_responder = Arc::clone(&responder);
+        let serve_task = tokio::spawn(Arc::clone(&responder).serve());
+        let dns_responder_owner = DnsServeTaskOwner::new(owned_responder, serve_task);
+        (dns_responder_owner, dns_factory, dns_responder_deps)
+    };
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`
@@ -7949,7 +7872,7 @@ pub async fn run_server_with_obs_and_drivers(
     // server. The router and convergence tasks also hold AppState clones, but
     // this handle is the one both shutdown modes use to invalidate and JOIN
     // every worker child before returning.
-    let mtls_worker_owner = state.mtls_worker.clone();
+    let mtls_worker_owner = Arc::clone(&state.mtls_worker);
 
     let supervisor_shutdown = CancellationToken::new();
     let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
@@ -7957,90 +7880,41 @@ pub async fn run_server_with_obs_and_drivers(
     let supervisor_guest_network = Arc::clone(&shared_guest_network);
     let supervisor_clock = config.clock.clone();
     let supervisor_worker = mtls_worker_owner.clone();
-    let dns_responder_factory = dns_responder_owner.as_ref().map(|_| {
-        (
-            Arc::clone(&state.obs),
-            config.clock.clone(),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
-            state.frontend_addr_allocator.clone(),
-        )
-    });
     let supervisor_task_shutdown = supervisor_shutdown.clone();
     let supervisor_task = tokio::spawn(async move {
         let mut dns_owner = dns_responder_owner;
-        let dns_responder_factory = dns_responder_factory;
-        let mtls_shutdown = supervisor_task_shutdown.clone();
-        let no_worker_shutdown = supervisor_task_shutdown.clone();
-        let mut mtls_future = Box::pin(async move {
-            if let Some(worker) = supervisor_worker {
-                SharedNetworkSupervisorHandle::run_mtls_owner(
-                    supervisor_guest_network,
-                    worker,
-                    supervisor_exec,
-                    supervisor_clock,
-                    request_tx,
-                    mtls_shutdown,
-                )
-                .await
-            } else {
-                no_worker_shutdown.cancelled().await;
-                Ok(())
-            }
-        });
+        let mut mtls_future = Box::pin(SharedNetworkSupervisorHandle::run_mtls_owner(
+            supervisor_guest_network,
+            supervisor_worker,
+            supervisor_exec,
+            supervisor_clock,
+            request_tx,
+            supervisor_task_shutdown.clone(),
+        ));
         loop {
             tokio::select! {
                 biased;
                 () = supervisor_task_shutdown.cancelled() => {
                     let result = (&mut mtls_future).await;
-                    if let Some(owner) = dns_owner.as_mut() {
-                        owner.shutdown(Duration::from_secs(1)).await;
-                    }
+                    dns_owner.shutdown(Duration::from_secs(1)).await;
                     break result;
                 }
                 result = &mut mtls_future => {
-                    if let Some(owner) = dns_owner.as_mut() {
-                        owner.shutdown(Duration::from_secs(1)).await;
-                    }
+                    dns_owner.shutdown(Duration::from_secs(1)).await;
                     break result;
                 }
-                exit = async {
-                    match dns_owner.as_mut() {
-                        Some(owner) => Some(owner.wait_failure().await),
-                        None => std::future::pending::<Option<DnsServeTaskExit>>().await,
-                    }
-                } => {
-                    let Some(_exit) = exit else {
-                        break Err(SharedNetworkSupervisorError::Dns(
-                            crate::dns_responder::responder::DnsResponderError::Probe {
-                                reason: "DNS owner exit branch lost its owner".to_owned(),
-                            },
-                        ));
-                    };
-                    let Some((store, clock, gateway, frontend)) = dns_responder_factory.as_ref()
-                    else {
-                        break Err(SharedNetworkSupervisorError::Dns(
-                            crate::dns_responder::responder::DnsResponderError::Probe {
-                                reason: "DNS owner lost its construction dependencies".to_owned(),
-                            },
-                        ));
-                    };
-                    let replacement = Arc::new(crate::dns_responder::responder::DnsResponder::new(
-                        Arc::clone(store),
-                        Arc::clone(clock),
-                        *gateway,
-                        frontend.clone(),
-                    ));
+                _exit = dns_owner.wait_failure() => {
+                    let (store, clock, gateway, frontend) = &dns_responder_deps;
+                    let replacement = dns_factory.responder(crate::dns_responder::GuestDnsDeps {
+                        store: Arc::clone(store),
+                        clock: Arc::clone(clock),
+                        gateway: *gateway,
+                        frontend: frontend.clone(),
+                    });
                     if let Err(source) = replacement.probe().await {
                         break Err(SharedNetworkSupervisorError::Dns(source));
                     }
-                    let Some(owner) = dns_owner.as_mut() else {
-                        break Err(SharedNetworkSupervisorError::Dns(
-                            crate::dns_responder::responder::DnsResponderError::Probe {
-                                reason: "DNS owner disappeared during replacement".to_owned(),
-                            },
-                        ));
-                    };
-                    if let Err(source) = owner
+                    if let Err(source) = dns_owner
                         .replace(replacement, Duration::from_secs(1), |responder| {
                             tokio::spawn(responder.serve())
                         })

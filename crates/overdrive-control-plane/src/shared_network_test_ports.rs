@@ -12,10 +12,6 @@
 //! (`distill/test-scenarios.md` § *Test-local control-plane ports*), not
 //! production API.
 //!
-//! The module also carries the `bound_v4`-only [`LegListener`] bridge through
-//! which source-local intercept doubles record a bound listener address on
-//! both sides of the DELIVER step that changes `bind_transparent`'s return
-//! type (§ *Intercept listener and stop-error test support*).
 
 #![allow(
     dead_code,
@@ -26,17 +22,23 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
+use overdrive_core::guest_network::{GuestNetworkExecGate, GuestNetworkExecWiring};
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimCgroupFs, SimEntry};
-use overdrive_worker::mtls_intercept_port::InterceptListener;
+use overdrive_sim::adapters::{SimIdentityRead, SimMtlsIntercept, SimMtlsResolve};
+use overdrive_worker::mtls_intercept_port::MtlsIntercept;
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 
@@ -682,34 +684,6 @@ impl GuestDns for TestGuestDns {
 }
 
 // ---------------------------------------------------------------------------
-// LegListener bridge (bound_v4 only)
-// ---------------------------------------------------------------------------
-
-/// Reads a bound listener's IPv4 address on both sides of the DELIVER step
-/// that changes `bind_transparent`'s return type.
-pub trait LegListener {
-    fn bound_v4(&self) -> std::io::Result<SocketAddrV4>;
-}
-
-impl LegListener for std::net::TcpListener {
-    fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
-        match self.local_addr()? {
-            std::net::SocketAddr::V4(bound) => Ok(bound),
-            std::net::SocketAddr::V6(bound) => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("listener bound to IPv6 address {bound}"),
-            )),
-        }
-    }
-}
-
-impl LegListener for Arc<dyn InterceptListener> {
-    fn bound_v4(&self) -> std::io::Result<SocketAddrV4> {
-        self.local_addr()
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Self-tests of the test-local shared owner (S-ND295-53)
 // ---------------------------------------------------------------------------
 //
@@ -725,6 +699,34 @@ impl LegListener for Arc<dyn InterceptListener> {
 // latch" has no other coverage, so a double that regressed it would pass the
 // SUT proof silently — that is exactly what these guard against (a fixture
 // must not fail before, or lie to, the SUT).
+
+pub fn mtls_worker() -> Arc<MtlsInterceptWorker> {
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+        Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
+        MtlsLimits::default(),
+    ));
+    let resolve: Arc<dyn MtlsResolve> =
+        Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
+    let intercept: Arc<dyn MtlsIntercept> = Arc::new(SimMtlsIntercept::new());
+    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
+}
+
+pub fn shared_guest_network_owner() -> Arc<TestSharedOwner> {
+    Arc::new(TestSharedOwner::new())
+}
+
+pub fn guest_network_exec_gate() -> Arc<GuestNetworkExecGate> {
+    GuestNetworkExecWiring::new(Arc::new(SimClock::new())).gate()
+}
+
+pub fn guest_pool() -> Arc<crate::guest_network::GuestAddressPool> {
+    Arc::new(crate::guest_network::GuestAddressPool::new(
+        ipnet::Ipv4Net::new_assert(std::net::Ipv4Addr::new(100, 95, 0, 0), 16),
+        "ovd-gbr0".to_owned(),
+        std::net::Ipv4Addr::new(100, 95, 0, 1),
+        std::net::Ipv4Addr::new(100, 95, 0, 1),
+    ))
+}
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]

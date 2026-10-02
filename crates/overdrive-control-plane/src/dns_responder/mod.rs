@@ -113,9 +113,8 @@ impl GuestDns for DnsResponder {
         Self::serve(self).await;
     }
 
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-01")]
     async fn audit(&self) -> Result<()> {
-        todo!("RED scaffold: D-295-R16 DnsResponder::audit — DELIVER step 05-01")
+        Self::audit(self).await
     }
 
     fn stop(&self) {

@@ -75,8 +75,6 @@ use overdrive_control_plane::dns_responder::{
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
-use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -84,14 +82,9 @@ use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationWrite, ServiceBackendRow, TransitionSource,
 };
-use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_store_local::LocalObservationStore;
-use rcgen::string::Ia5String;
-use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
-use rustls::pki_types::CertificateDer;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -517,7 +510,6 @@ fn lose_socket_out_of_band(inode: u64) -> usize {
 /// descriptor that refers to it is replaced, and the kernel is read until it
 /// lists the socket no more. The audit then fails.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-34)"]
 async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
     assert!(is_root(), "S-ND295-34 binds the real :53 socket and must run as root");
     record_kernel();
@@ -740,27 +732,6 @@ impl ObservationStore for FailingListStore {
     }
 }
 
-// ===========================================================================
-// S-DBN-BIND-03 composition-root half (D2) — `run_server` REFUSES boot on a
-// DNS-probe failure, mapping it to the `dns.responder.probe` refusal reason.
-// ===========================================================================
-//
-// The `probe_refuses_*` tests above drive `DnsResponder::probe()` directly and
-// assert the `DnsResponderError` variant — they never boot `run_server`, so the
-// composition-root logic (the reason mapping + the
-// `return Err(ControlPlaneError::DnsResponderBoot(_))` refusal) is untested by
-// them. This test closes that gap: it boots the PRODUCTION composition root
-// in-process (real `EbpfDataplane` + composed mTLS worker via
-// `mtls_identity_override`, mirroring `canonical_address_inbound_walking_skeleton`),
-// arms the test-only `dns_probe_fault` seam so the DNS responder's `probe()`
-// short-circuits to `Err(DnsResponderError::Probe { .. })`, and asserts BOTH:
-//   1. the boot returns `Err(ControlPlaneError::DnsResponderBoot(_))` — kills
-//      the "delete the `return Err(DnsResponderBoot)`" mutant (boot would else
-//      continue);
-//   2. a structured `health.startup.refused` event with `reason =
-//      dns.responder.probe` is emitted — kills the "flatten the reason mapping"
-//      mutant (the wired reason comes from the tested `boot_refusal_reason`).
-
 // ---------------------------------------------------------------------------
 // Tracing capture — minimal layer recording each event's `name:` + visited
 // fields (mirrors `tests/acceptance/probe_runner_boot_gate.rs`).
@@ -812,240 +783,6 @@ where
     }
 }
 
-// ---------------------------------------------------------------------------
-// Minimal test PKI (root → intermediate → server leaf) so the composed mTLS
-// worker's Earned-Trust `probe()` PASSES — the boot must REACH the DNS
-// responder block (it is gated on `mtls_worker.is_some()`) before the armed
-// `dns_probe_fault` refuses it. Trimmed from the keystone's `TestPki` to just
-// the server SVID + trust bundle the inbound leg-C handshake needs.
-// ---------------------------------------------------------------------------
-
-struct ServerPki {
-    ca_cert_pem: String,
-    intermediate_cert_pem: String,
-    server_cert_pem: String,
-    server_cert_der: CertificateDer<'static>,
-    server_key_pem: String,
-    server_spiffe: SpiffeId,
-}
-
-impl ServerPki {
-    fn mint() -> Self {
-        let root = mint_root("overdrive-dns-d2-ROOT-CA");
-        let intermediate = mint_intermediate(&root, "overdrive-dns-d2-INTERMEDIATE-CA");
-        let server_spiffe = "spiffe://overdrive.local/ns/default/sa/server";
-        let (cert_pem, cert_der, key_pem) =
-            mint_server_leaf(&intermediate, server_spiffe, "server.overdrive.local");
-        Self {
-            ca_cert_pem: root.cert_pem,
-            intermediate_cert_pem: intermediate.cert_pem,
-            server_cert_pem: cert_pem,
-            server_cert_der: cert_der,
-            server_key_pem: key_pem,
-            server_spiffe: server_spiffe.parse().expect("valid spiffe id"),
-        }
-    }
-
-    fn identity(&self) -> Arc<dyn IdentityRead> {
-        let not_after = UnixInstant::from_unix_duration(Duration::from_secs(4_102_444_800)); // 2100
-        let svid = SvidMaterial::new(
-            CaCertPem::new(self.server_cert_pem.clone()),
-            CaCertDer::new(self.server_cert_der.as_ref().to_vec()),
-            CertSerial::new("0a0b0c0d").expect("valid serial"),
-            self.server_spiffe.clone(),
-            CaKeyPem::new(self.server_key_pem.clone()),
-            not_after,
-        );
-        let bundle = TrustBundle::new(
-            CaCertPem::new(self.ca_cert_pem.clone()),
-            Some(CaCertPem::new(self.intermediate_cert_pem.clone())),
-        );
-        Arc::new(HeldServerIdentity { svid, bundle })
-    }
-}
-
-use overdrive_core::CertSerial;
-
-struct HeldServerIdentity {
-    svid: SvidMaterial,
-    bundle: TrustBundle,
-}
-
-impl IdentityRead for HeldServerIdentity {
-    fn svid_for(&self, _alloc: &AllocationId) -> Option<SvidMaterial> {
-        Some(self.svid.clone())
-    }
-    fn current_bundle(&self) -> Option<TrustBundle> {
-        Some(self.bundle.clone())
-    }
-}
-
-struct MintedCa {
-    params: CertificateParams,
-    key: KeyPair,
-    cert_pem: String,
-}
-
-fn mint_root(cn: &str) -> MintedCa {
-    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
-    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    params.distinguished_name.push(rcgen::DnType::CommonName, cn);
-    let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let cert = params.self_signed(&key).unwrap();
-    let cert_pem = cert.pem();
-    MintedCa { params, key, cert_pem }
-}
-
-fn mint_intermediate(root: &MintedCa, cn: &str) -> MintedCa {
-    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
-    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
-    params.distinguished_name.push(rcgen::DnType::CommonName, cn);
-    params.use_authority_key_identifier_extension = true;
-    let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let root_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&root.params, &root.key);
-    let cert = params.signed_by(&key, &root_issuer).unwrap();
-    let cert_pem = cert.pem();
-    MintedCa { params, key, cert_pem }
-}
-
-fn mint_server_leaf(
-    intermediate: &MintedCa,
-    spiffe: &str,
-    dns_san: &str,
-) -> (String, CertificateDer<'static>, String) {
-    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
-    let uri = Ia5String::try_from(spiffe).expect("spiffe URI is a valid IA5 string");
-    let dns = Ia5String::try_from(dns_san).expect("dns SAN is a valid IA5 string");
-    params.subject_alt_names = vec![SanType::URI(uri), SanType::DnsName(dns)];
-    params.distinguished_name.push(rcgen::DnType::CommonName, spiffe);
-    params.use_authority_key_identifier_extension = true;
-    params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
-    let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-    let issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&intermediate.params, &intermediate.key);
-    let cert = params.signed_by(&leaf_key, &issuer).unwrap();
-    let cert_pem = cert.pem();
-    let cert_der = CertificateDer::from(cert.der().to_vec());
-    let key_pem = leaf_key.serialize_pem();
-    (cert_pem, cert_der, key_pem)
-}
-
-/// S-DBN-BIND-03 (D2) — boot the production composition root with the DNS-probe
-/// fault armed; the boot must REFUSE with
-/// `Err(ControlPlaneError::DnsResponderBoot(_))` AND emit
-/// `health.startup.refused` with `reason = dns.responder.probe`.
-///
-/// Mirrors the keystone's real-`EbpfDataplane` + `mtls_identity_override` boot
-/// harness (the DNS responder block is gated on `mtls_worker.is_some()`, so the
-/// composed mTLS worker is required to REACH it; the armed `dns_probe_fault`
-/// then refuses the boot at the DNS responder's `probe()`).
-///
-/// DELIVER 05-01 deletes this body together with the `dns_probe_fault` field
-/// it arms; its successor is
-/// `run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
-    if !is_root() {
-        eprintln!(
-            "SKIP run_server_refuses_boot_on_dns_probe_fault_with_probe_reason: not root \
-             (real EbpfDataplane XDP attach + mTLS kTLS-arm probe + netns provision need \
-             CAP_NET_ADMIN/CAP_SYS_ADMIN)"
-        );
-        return;
-    }
-    record_kernel();
-
-    // The composition-root rustls CryptoProvider (installed once per process).
-    let _ = rustls::crypto::ring::default_provider().install_default();
-
-    // Capture the structured boot events so we can assert the refusal reason.
-    let collector = EventCollector::default();
-    let subscriber = tracing_subscriber::registry().with(collector.clone());
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let pki = ServerPki::mint();
-
-    let tmp = TempDir::new().expect("tempdir");
-    let data_dir = tmp.path().join("data");
-    let cfg_dir = tmp.path().join("conf");
-    std::fs::create_dir_all(&data_dir).expect("mkdir data");
-    std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
-
-    let obs_path = data_dir.join("observation.redb");
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(LocalObservationStore::open(&obs_path).expect("open LocalObservationStore"));
-
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir: data_dir.clone(),
-        operator_config_dir: cfg_dir.clone(),
-        dataplane: Some(overdrive_control_plane::dataplane_config::DataplaneConfig {
-            client_iface: overdrive_control_plane::veth_provisioner::DEFAULT_CLIENT_IFACE
-                .to_owned(),
-            backend_iface: overdrive_control_plane::veth_provisioner::DEFAULT_BACKEND_IFACE
-                .to_owned(),
-        }),
-        dataplane_pin_dir: None,
-        // NO dataplane_override → compose_mtls = true → the production mTLS
-        // worker is composed and its Earned-Trust probe runs (so the boot
-        // REACHES the `mtls_worker.is_some()`-gated DNS responder block).
-        dataplane_override: None,
-        // The leg-C/leg-B test PKI so the composed mTLS worker's probe passes.
-        mtls_identity_override: Some(pki.identity()),
-        // THE seam under test: force the DNS responder's `probe()` to fail.
-        dns_probe_fault: Some("injected dns probe fault (D2)".to_owned()),
-        ..ServerConfig::new(
-            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-
-    let wiring =
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
-    let result = run_server_with_obs_and_driver(
-        config,
-        obs.clone(),
-        driver,
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
-        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
-        wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
-    )
-    .await;
-
-    // (1) the boot REFUSED with the typed DnsResponderBoot variant — kills the
-    // "delete the return Err(DnsResponderBoot)" mutant (boot would otherwise
-    // continue and return Ok(ServerHandle)).
-    let Err(err) = result else {
-        panic!(
-            "run_server MUST refuse boot when the DNS responder probe fails; \
-             got Ok(ServerHandle) — the DnsResponderBoot refusal was bypassed"
-        );
-    };
-    assert!(
-        matches!(err, ControlPlaneError::DnsResponderBoot(DnsResponderError::Probe { .. })),
-        "DNS-probe fault → ControlPlaneError::DnsResponderBoot(Probe); got {err:?}",
-    );
-
-    // (2) the structured refusal event names reason = dns.responder.probe —
-    // kills the "flatten the reason mapping" mutant (the wired reason comes
-    // from the tested `boot_refusal_reason`, distinct from the other variants).
-    let events = collector.snapshot();
-    let dns_refusal = events.iter().any(|row| {
-        row.name == "health.startup.refused"
-            && row.fields.get("reason").map(String::as_str) == Some("dns.responder.probe")
-    });
-    assert!(
-        dns_refusal,
-        "expected health.startup.refused with reason=dns.responder.probe; got: {events:?}",
-    );
-}
-
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED; OUT-ND295-SHARED-SWITCH
 /// S-ND295-34 — Shared-gateway DNS stays truthful, and its loss closes new commands until a fresh responder is serving
 /// CONTRACT_SHAPE: bounded-change.
@@ -1062,7 +799,6 @@ async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
 /// BootClosed, the owner made no guest attachment, and the factory built
 /// exactly the one responder whose probe refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-34)"]
 async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port() {
     use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
     use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;

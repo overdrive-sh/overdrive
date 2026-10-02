@@ -138,6 +138,7 @@ async fn dispatch_one_at_tick(
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     let net_slot_allocator = NetSlotAllocator::new();
 
+    let mtls_worker_0501_0 = crate::integration::serve_ports::worker();
     dispatch(
         vec![action],
         drivers.as_ref(),
@@ -155,7 +156,7 @@ async fn dispatch_one_at_tick(
         build_vip_allocator(intent),
         &broker,
         None,
-        None,
+        &mtls_worker_0501_0,
         &net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )

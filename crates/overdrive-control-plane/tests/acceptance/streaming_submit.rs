@@ -101,6 +101,10 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     )
 }
 
@@ -963,6 +967,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
     };
 
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         // ADR-0037 §4: emission sites outside a reconciler tick (here, a
         // direct test-bench dispatch) emit `terminal: None` — the
@@ -981,8 +986,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         std::sync::Arc::clone(&state.allocator),
         &test_broker,
         None,
-        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
-        None,
+        &mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: the AppState-owned per-host
         // slot allocator (this fixture exercises no netns provisioning).
         &state.net_slot_allocator,

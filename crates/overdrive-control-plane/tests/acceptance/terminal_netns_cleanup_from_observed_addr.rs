@@ -125,6 +125,7 @@ async fn terminal_cleanup_recovers_only_exact_unheld_slot_from_prior_running_add
         let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(4);
         let drivers = DriverRegistry::new();
 
+        let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
         dispatch_with_network_provisioner(
             vec![Action::FinalizeFailed { alloc_id: alloc_id.clone(), terminal: None }],
             &drivers,
@@ -140,7 +141,7 @@ async fn terminal_cleanup_recovers_only_exact_unheld_slot_from_prior_running_add
             vip_allocator,
             &parking_lot::Mutex::new(EvaluationBroker::new()),
             None,
-            None,
+            &mtls_worker_0501_0,
             &NetSlotAllocator::new(),
             &provisioner,
             &SimVmHostState::new(),

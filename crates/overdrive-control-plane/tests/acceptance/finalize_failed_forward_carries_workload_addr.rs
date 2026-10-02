@@ -211,6 +211,7 @@ async fn finalize_and_read_successor(
         deadline: now + Duration::from_secs(1),
     };
 
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![Action::FinalizeFailed { alloc_id: alloc.clone(), terminal: Some(terminal) }],
         drivers.as_ref(),
@@ -228,8 +229,7 @@ async fn finalize_and_read_successor(
         Arc::clone(&allocator),
         &test_broker,
         None,
-        // No mTLS worker — the genuine-terminal teardown seam is a no-op.
-        None,
+        &mtls_worker_0501_0,
         &net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )

@@ -70,7 +70,6 @@ async fn production_boot_spawns_the_interest_router() {
         guest_dns: std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
         dataplane_probe_fault: None,
         mtls_probe_fault: None,
-        dns_probe_fault: None,
         mtls_identity_override: None,
         vmm_override: None,
     };

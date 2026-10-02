@@ -142,7 +142,7 @@ use overdrive_worker::mtls_intercept::{
     InterceptSet, NetlinkError, Result as InterceptResult,
 };
 use overdrive_worker::mtls_intercept_port::{
-    InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+    InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
 };
 use parking_lot::Mutex;
 use tokio::sync::Semaphore;
@@ -819,7 +819,7 @@ struct InterceptModel {
 /// step that carries B-7 (05-01 at the latest) changes it to
 /// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
 /// unchanged by that step.
-type BoundListener = std::net::TcpListener;
+type BoundListener = Arc<dyn InterceptListener>;
 
 /// Test-local `MtlsIntercept` delegating `bind_transparent` (and every effect
 /// it does not fault) to an inner `SimMtlsIntercept`.

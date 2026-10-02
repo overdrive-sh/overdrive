@@ -239,6 +239,10 @@ impl World {
             allocator,
             overdrive_control_plane::test_empty_listener_facts(),
             HOST,
+            crate::integration::serve_ports::worker(),
+            crate::integration::serve_ports::owner(),
+            crate::integration::serve_ports::exec_gate(),
+            crate::integration::serve_ports::pool(),
         );
         // Same validated driving ports as submit: allocate frontend/VIP, archive
         // canonical intent, and rebuild listener facts from that real intent.

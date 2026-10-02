@@ -441,6 +441,10 @@ mod tests {
             allocator,
             listener_facts,
             std::net::Ipv4Addr::LOCALHOST,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            crate::shared_network_test_ports::guest_pool(),
         )
     }
 
@@ -947,6 +951,10 @@ mod tests {
             Arc::clone(&state.allocator),
             listener_facts,
             state.host_ipv4,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            crate::shared_network_test_ports::guest_pool(),
         )
     }
 

@@ -267,6 +267,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         deadline: now + Duration::from_secs(1),
     };
 
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![action],
         h.drivers.as_ref(),
@@ -284,9 +285,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         Arc::clone(&allocator),
         &broker,
         None,
-        // No mTLS worker — the genuine-terminal teardown seam is a
-        // clean no-op, keeping this default-lane (no netns, no root).
-        None,
+        &mtls_worker_0501_0,
         &net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )

@@ -619,6 +619,10 @@ async fn build_harness_with_ca_and_clock(
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     let target = TargetResource::new(&format!("workload/{WORKLOAD_NAME}")).expect("valid target");

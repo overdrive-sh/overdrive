@@ -1100,6 +1100,32 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                    std::collections::BTreeMap::new(),
+                    None,
+                )),
+                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            )),
+            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+                std::collections::BTreeMap::new(),
+                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+            )),
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+            overdrive_sim::adapters::clock::SimClock::new(),
+        ))
+        .gate(),
+        Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
+            "100.95.0.0/16".parse().expect("static guest prefix"),
+            "ovd-gbr0".to_owned(),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+        )),
     );
     let name = ReconcilerName::new("workload-lifecycle").unwrap();
     let control = TargetResource::new("workload/control").unwrap();

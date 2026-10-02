@@ -532,6 +532,10 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     );
 
     let (startup, readiness) = vm_probe_descriptors();

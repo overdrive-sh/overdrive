@@ -134,6 +134,7 @@ async fn issue_svid_executor_audits_before_hold() {
     let tick = make_tick(0);
 
     // WHEN the reconciler-emitted IssueSvid is dispatched through the shim.
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![issue_action()],
         drivers.as_ref(),
@@ -149,7 +150,7 @@ async fn issue_svid_executor_audits_before_hold() {
         allocator,
         &broker,
         None,
-        None,
+        &mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
@@ -215,6 +216,7 @@ async fn audit_write_failure_refuses_hold() {
     let tick = make_tick(0);
 
     // WHEN IssueSvid is dispatched against the failing audit store.
+    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
     let result = dispatch(
         vec![issue_action()],
         drivers.as_ref(),
@@ -230,7 +232,7 @@ async fn audit_write_failure_refuses_hold() {
         allocator,
         &broker,
         None,
-        None,
+        &mtls_worker_0501_1,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),

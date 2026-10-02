@@ -198,6 +198,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         );
     let allocator = overdrive_control_plane::test_default_allocator(alloc_store);
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch(
         vec![action],
         drivers.as_ref(),
@@ -215,8 +216,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         allocator,
         &test_broker,
         None,
-        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
-        None,
+        &mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),

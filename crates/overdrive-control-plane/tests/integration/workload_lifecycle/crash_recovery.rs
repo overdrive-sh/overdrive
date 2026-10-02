@@ -95,6 +95,10 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     // Spawn the exit-observer subsystem. In production this is wired

@@ -314,7 +314,7 @@ impl Fixture {
                 Arc::clone(&allocator),
                 &self.broker,
                 None,
-                None,
+                &crate::invariants::serve_ports::worker(),
                 &self.slots,
                 &self.network,
                 &self.host,

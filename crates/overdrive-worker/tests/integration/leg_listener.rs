@@ -2,14 +2,9 @@
 //! production API (`docs/feature/netns-density-295/distill/test-scenarios.md`
 //! § *Intercept listener and stop-error test support*).
 //!
-//! [`MtlsIntercept::bind_transparent`] returns a `std::net::TcpListener` until
-//! the DELIVER step that carries DISTILL gap B-7 (no later than 05-01), and a
-//! port-owned `Arc<dyn InterceptListener>` from then on (feature delta
-//! § *Driven port — intercept listener*). Test code in this integration binary
-//! that reads a bound leg's address, or accepts one connection on it, goes
-//! through [`LegListener`], so every body compiles and keeps its oracle on both
-//! sides of that step. The B-7 step deletes the `std::net::TcpListener`
-//! implementation below, which then has no caller, and changes no body.
+//! [`MtlsIntercept::bind_transparent`] returns the port-owned
+//! `Arc<dyn InterceptListener>`. Test code in this integration binary that
+//! reads a bound leg's address or accepts one connection uses [`LegListener`].
 //!
 //! Consumers: the port equivalence harness (`mtls_intercept_equivalence.rs`),
 //! `MetalSharedIntercept` (`outbound_enforce_substrate_splice.rs`), the
@@ -22,20 +17,16 @@
 //! [`LegListener::accept_leg`] returns an [`io::Error`] whose inner error is
 //! the [`InterceptAcceptError`] the accept produced, so a body can tell the
 //! terminal `Accept` outcome from the connection-scoped `OriginalDestination`
-//! outcome on both sides of the B-7 step ([`accept_failure_of`]). Before that
-//! step the `TcpListener` implementation maps the production accept helper's
-//! `InterceptError::Accept` and `InterceptError::OrigDst` onto those two
-//! outcomes, which is the partition the worker's accept loop applies today.
+//! outcome ([`accept_failure_of`]).
 //!
 //! [`MtlsIntercept::bind_transparent`]: overdrive_worker::mtls_intercept_port::MtlsIntercept::bind_transparent
 
 use std::io;
-use std::net::{SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::net::SocketAddrV4;
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use overdrive_worker::mtls_intercept::{InterceptError, accept_outbound_and_recover_orig_dst};
 use overdrive_worker::mtls_intercept_port::{InterceptAcceptError, InterceptListener};
 
 /// One accepted leg: the owned stream, the peer the accept reported, and the
@@ -43,8 +34,7 @@ use overdrive_worker::mtls_intercept_port::{InterceptAcceptError, InterceptListe
 /// originally dialled).
 pub type AcceptedLeg = (OwnedFd, SocketAddrV4, SocketAddrV4);
 
-/// A bound intercept leg, read and accepted the same way on both sides of the
-/// B-7 step.
+/// A bound intercept leg read and accepted through its port.
 pub trait LegListener {
     /// The leg's bound IPv4 address. A non-IPv4 bind is an
     /// [`io::ErrorKind::InvalidData`] error.
@@ -56,31 +46,8 @@ pub trait LegListener {
     fn accept_leg(&self) -> io::Result<AcceptedLeg>;
 }
 
-/// Today's listener: the accept goes through the production outbound helper
-/// `accept_outbound_and_recover_orig_dst`, and the peer is read from the
-/// accepted socket. Deleted by the B-7 step.
-impl LegListener for TcpListener {
-    fn bound_v4(&self) -> io::Result<SocketAddrV4> {
-        ipv4(self.local_addr()?)
-    }
-
-    fn accept_leg(&self) -> io::Result<AcceptedLeg> {
-        let (stream, local) =
-            accept_outbound_and_recover_orig_dst(self).map_err(helper_accept_failure)?;
-        let stream = TcpStream::from(stream);
-        let peer = ipv4(stream.peer_addr()?)?;
-        Ok((OwnedFd::from(stream), peer, local))
-    }
-}
-
 /// The port-owned listener: the accept is driven on a current-thread Tokio
 /// runtime this call builds.
-#[allow(
-    dead_code,
-    reason = "RED scaffold: no caller until the DELIVER step that carries B-7 (no later than \
-              05-01) changes bind_transparent's return type; that step deletes the TcpListener \
-              impl above and every bridge caller uses this one"
-)]
 impl LegListener for Arc<dyn InterceptListener> {
     fn bound_v4(&self) -> io::Result<SocketAddrV4> {
         InterceptListener::local_addr(self.as_ref())
@@ -142,32 +109,10 @@ where
     }
 }
 
-fn ipv4(address: SocketAddr) -> io::Result<SocketAddrV4> {
-    match address {
-        SocketAddr::V4(address) => Ok(address),
-        SocketAddr::V6(address) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("intercept leg reported an IPv6 address {address}"),
-        )),
-    }
-}
-
 fn accept_failure(error: InterceptAcceptError) -> io::Error {
     let kind = match &error {
         InterceptAcceptError::Accept { source }
         | InterceptAcceptError::OriginalDestination { source } => source.kind(),
     };
     io::Error::new(kind, error)
-}
-
-fn helper_accept_failure(error: InterceptError) -> io::Error {
-    match error {
-        InterceptError::Accept { source, .. } => {
-            accept_failure(InterceptAcceptError::Accept { source })
-        }
-        InterceptError::OrigDst { source } => {
-            accept_failure(InterceptAcceptError::OriginalDestination { source })
-        }
-        other => io::Error::other(other),
-    }
 }

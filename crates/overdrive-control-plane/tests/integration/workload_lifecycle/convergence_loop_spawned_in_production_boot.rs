@@ -178,7 +178,6 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         // dial-by-name-responder step 02-01: this fixture injects
         // `SimDataplane` (no mTLS layer composed, so the DNS responder block is
         // never reached), so the DNS-probe fault is irrelevant — `None`.
-        dns_probe_fault: None,
         // transparent-mtls-host-socket step 06-03 criteria[1]: this fixture
         // injects `SimDataplane` (no mTLS layer composed), so the identity
         // override is irrelevant here — `None` is the production default.

@@ -166,6 +166,7 @@ async fn dispatch_action(
         deadline: now + Duration::from_secs(1),
     };
 
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
     dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
@@ -181,7 +182,7 @@ async fn dispatch_action(
         Arc::clone(&allocator),
         &broker,
         None,
-        None,
+        &mtls_worker_0501_0,
         &net_slot_allocator,
         network_provisioner,
         &SimVmHostState::new(),

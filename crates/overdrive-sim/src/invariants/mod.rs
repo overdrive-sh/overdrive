@@ -22,6 +22,57 @@ use std::str::FromStr;
 use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 
+pub(crate) mod serve_ports {
+    use std::collections::BTreeMap;
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+
+    use overdrive_control_plane::guest_network::GuestAddressPool;
+    use overdrive_core::guest_network::{GuestNetworkExecGate, GuestNetworkExecWiring};
+    use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
+    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+
+    use crate::adapters::clock::SimClock;
+    use crate::adapters::guest_network::SimSharedGuestNetworkOwner;
+    use crate::adapters::mtls_enforcement::SimMtlsEnforcement;
+    use crate::adapters::{SimIdentityRead, SimMtlsIntercept, SimMtlsResolve};
+
+    pub fn worker() -> Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker> {
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+            Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
+            MtlsLimits::default(),
+        ));
+        let resolve: Arc<dyn MtlsResolve> =
+            Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
+        let intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept> =
+            Arc::new(SimMtlsIntercept::new());
+        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            Arc::new(SimClock::new()),
+            intercept,
+        ))
+    }
+
+    pub fn owner() -> Arc<SimSharedGuestNetworkOwner> {
+        Arc::new(SimSharedGuestNetworkOwner::default())
+    }
+
+    pub fn exec_gate() -> Arc<GuestNetworkExecGate> {
+        GuestNetworkExecWiring::new(Arc::new(SimClock::new())).gate()
+    }
+
+    #[allow(clippy::expect_used, reason = "the fixture parses one checked-in static guest prefix")]
+    pub fn pool() -> Arc<GuestAddressPool> {
+        Arc::new(GuestAddressPool::new(
+            "100.95.0.0/16".parse().expect("static guest prefix"),
+            "ovd-gbr0".to_owned(),
+            Ipv4Addr::new(100, 95, 0, 1),
+            Ipv4Addr::new(100, 95, 0, 1),
+        ))
+    }
+}
+
 /// In-memory network adapter for simulator compositions. The production
 /// action shim still receives the complete VM plan; this adapter keeps the
 /// simulator's driven boundary free of host netns I/O.

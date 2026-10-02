@@ -728,7 +728,7 @@ async fn fail_closed_on_mtls_install_with_guest(
 #[allow(clippy::too_many_arguments)]
 async fn fail_closed_on_guest_network_activation(
     driver: &dyn Driver,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: &dyn GuestNetworkProvisioner,
@@ -745,11 +745,7 @@ async fn fail_closed_on_guest_network_activation(
             Err(error) => return Err(error.into()),
         }
     }
-    let mtls_cleanup = if let Some(lifecycle) = mtls_lifecycle {
-        lifecycle.stop_alloc(&running_row.alloc_id).await.err()
-    } else {
-        None
-    };
+    let mtls_cleanup = mtls_lifecycle.stop_alloc(&running_row.alloc_id).await.err();
     let network_cleanup = teardown_for_dispatch(
         &running_row.alloc_id,
         None,
@@ -1020,7 +1016,7 @@ pub async fn dispatch(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
@@ -1077,7 +1073,7 @@ pub async fn dispatch_with_network_provisioner(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     host: &dyn VmHostState,
@@ -1122,7 +1118,7 @@ async fn dispatch_with_network_provisioner_and_guest(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
@@ -1295,8 +1291,7 @@ pub async fn dispatch_with_workflow_intent(
 ) -> Result<(), ShimError> {
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
-    let mtls_lifecycle =
-        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let mtls_lifecycle = &state.mtls_worker as &dyn MtlsInterceptLifecycle;
 
     let dispatch_result =
         dispatch_with_network_owner(dispatchable, state, tick, mtls_lifecycle).await;
@@ -1314,36 +1309,8 @@ async fn dispatch_with_network_owner(
     actions: Vec<Action>,
     state: &crate::AppState,
     tick: &TickContext,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
 ) -> Result<(), ShimError> {
-    #[cfg(any(test, feature = "integration-tests"))]
-    let Some(shared_guest_network) = state.shared_guest_network.as_ref() else {
-        return dispatch(
-            actions,
-            state.drivers.as_ref(),
-            &state.alloc_drivers,
-            state.obs.as_ref(),
-            state.dataplane.as_ref(),
-            state.ca.as_ref(),
-            state.clock.as_ref(),
-            state.identity.as_ref(),
-            state.lifecycle_events.as_ref(),
-            tick,
-            &state.node_id,
-            Arc::clone(&state.allocator),
-            state.runtime.broker_mutex(),
-            Some(state.workflow_engine.as_ref()),
-            mtls_lifecycle,
-            &state.dns_slots,
-            state.vm_host_state.as_ref(),
-        )
-        .await;
-    };
-    #[cfg(not(any(test, feature = "integration-tests")))]
-    let shared_guest_network = state
-        .shared_guest_network
-        .as_ref()
-        .expect("production AppState must carry the shared guest-network owner");
     dispatch_with_network_provisioner_and_guest(
         actions,
         state.drivers.as_ref(),
@@ -1362,7 +1329,7 @@ async fn dispatch_with_network_owner(
         mtls_lifecycle,
         &state.dns_slots,
         &ProductionNetworkGuard,
-        Some(shared_guest_network.as_ref()),
+        Some(state.shared_guest_network.as_ref()),
         state.vm_host_state.as_ref(),
     )
     .await
@@ -1385,8 +1352,7 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
 ) -> Result<(), ShimError> {
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
-    let mtls_lifecycle =
-        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let mtls_lifecycle = &state.mtls_worker as &dyn MtlsInterceptLifecycle;
 
     let dispatch_result = dispatch_with_network_provisioner(
         dispatchable,
@@ -1430,8 +1396,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
 ) -> Result<(), ShimError> {
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
-    let mtls_lifecycle =
-        state.mtls_worker.as_ref().map(|worker| worker as &dyn MtlsInterceptLifecycle);
+    let mtls_lifecycle = &state.mtls_worker as &dyn MtlsInterceptLifecycle;
     let dispatch_result = dispatch_with_network_provisioner_and_guest(
         dispatchable,
         state.drivers.as_ref(),
@@ -1733,7 +1698,7 @@ async fn teardown_for_dispatch(
 /// is addressed by the successor's exact allocation identity.
 async fn cleanup_restart_successor(
     driver: Option<(&dyn Driver, &AllocationHandle)>,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     alloc_id: &AllocationId,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
@@ -1746,9 +1711,7 @@ async fn cleanup_restart_successor(
         }
         driver.release_supervision(&handle.alloc);
     }
-    if let Some(mtls_lifecycle) = mtls_lifecycle {
-        mtls_lifecycle.stop_alloc(alloc_id).await?;
-    }
+    mtls_lifecycle.stop_alloc(alloc_id).await?;
     teardown_for_dispatch(
         alloc_id,
         None,
@@ -1769,7 +1732,7 @@ async fn cleanup_restart_predecessor(
     handle: &AllocationHandle,
     prior_workload_addr: Option<std::net::Ipv4Addr>,
     alloc_drivers: &AllocDriverIndex,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
@@ -1781,9 +1744,7 @@ async fn cleanup_restart_predecessor(
             return Err(error.into());
         }
     }
-    if let Some(mtls_lifecycle) = mtls_lifecycle {
-        mtls_lifecycle.stop_alloc(&handle.alloc).await?;
-    }
+    mtls_lifecycle.stop_alloc(&handle.alloc).await?;
     teardown_for_dispatch(
         &handle.alloc,
         prior_workload_addr,
@@ -1808,7 +1769,7 @@ async fn finish_restart(
     predecessor_handle: &AllocationHandle,
     prior_workload_addr: Option<std::net::Ipv4Addr>,
     alloc_drivers: &AllocDriverIndex,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
@@ -1869,7 +1830,7 @@ async fn dispatch_single(
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_provisioner: Option<&dyn GuestNetworkProvisioner>,
@@ -2150,9 +2111,7 @@ async fn dispatch_single(
             // only the still-owned one. On a process loss those process-local
             // owners die; boot reclamation makes an unsupervised VM terminal
             // before ordinary netns adoption/GC observes its structural residue.
-            if let Some(mtls_lifecycle) = mtls_lifecycle {
-                mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
-            }
+            mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
             teardown_for_dispatch(
                 &row.alloc_id,
                 prior_workload_addr,
@@ -2306,18 +2265,16 @@ async fn dispatch_single(
             // separate, earlier check; this is the dispatch-time
             // fallback for whatever reaches here regardless.
             let driver_kind = spec.driver.driver_type();
-            let intercept_required = mtls_lifecycle.is_some();
-            if intercept_required
-                && let Err(issue_error) = ensure_intercept_identity(
-                    &alloc_id,
-                    &workload_id,
-                    &node_id,
-                    ca,
-                    obs,
-                    clock,
-                    identity,
-                )
-                .await
+            if let Err(issue_error) = ensure_intercept_identity(
+                &alloc_id,
+                &workload_id,
+                &node_id,
+                ca,
+                obs,
+                clock,
+                identity,
+            )
+            .await
             {
                 teardown_for_dispatch(
                     &alloc_id,
@@ -2548,10 +2505,7 @@ async fn dispatch_single(
                         // flagged.
                         driver.release_supervision(&handle.alloc);
                     }
-                    if state == AllocState::Running
-                        && intercept_required
-                        && let Some(mtls_lifecycle) = mtls_lifecycle
-                    {
+                    if state == AllocState::Running {
                         mtls_lifecycle.stop_alloc(&row.alloc_id).await?;
                     }
                     if state == AllocState::Running {
@@ -2581,7 +2535,7 @@ async fn dispatch_single(
                 driver.release_supervision(&row.alloc_id);
             }
             if state == AllocState::Running {
-                let mut stable_exact_rule_baseline = !intercept_required;
+                let stable_exact_rule_baseline;
                 // ADR-0083 §D2a(b) (GH #42): record the alloc→driver-kind
                 // routing entry now, while the payload is in hand — the
                 // stop/terminal Actions (StopAllocation, FinalizeFailed)
@@ -2596,7 +2550,7 @@ async fn dispatch_single(
                          entry for driver_kind"
                     )
                 });
-                if let Some(mtls_lifecycle) = mtls_lifecycle {
+                {
                     if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
                         return fail_closed_on_mtls_install_with_guest(
                             driver.as_ref(),
@@ -2642,11 +2596,8 @@ async fn dispatch_single(
                     )
                     .await;
                 }
-                if guest_command_release_permitted(
-                    true,
-                    intercept_required,
-                    stable_exact_rule_baseline,
-                ) && let Some(handle) = &handle_opt
+                if guest_command_release_permitted(true, true, stable_exact_rule_baseline)
+                    && let Some(handle) = &handle_opt
                 {
                     // For VmDriver this existing hook first releases the
                     // deferred BeaconMessage::Exec reply, then the exit-event
@@ -2696,7 +2647,6 @@ async fn dispatch_single(
             let successor_alloc_id = spec.alloc.clone();
             let prior_state: AllocStateWire = prior_row.state.into();
             let driver_kind = spec.driver.driver_type();
-            let intercept_required = mtls_lifecycle.is_some();
 
             // The successor path is complete before the predecessor cleanup
             // attempt. A failed provision is represented at the successor key
@@ -2763,17 +2713,16 @@ async fn dispatch_single(
                     }
                 }
                 Ok(plan) => {
-                    if intercept_required
-                        && let Err(issue_error) = ensure_intercept_identity(
-                            &successor_alloc_id,
-                            &prior_row.workload_id,
-                            &prior_row.node_id,
-                            ca,
-                            obs,
-                            clock,
-                            identity,
-                        )
-                        .await
+                    if let Err(issue_error) = ensure_intercept_identity(
+                        &successor_alloc_id,
+                        &prior_row.workload_id,
+                        &prior_row.node_id,
+                        ca,
+                        obs,
+                        clock,
+                        identity,
+                    )
+                    .await
                     {
                         if let Err(cleanup_error) = cleanup_restart_successor(
                             None,
@@ -3077,45 +3026,41 @@ async fn dispatch_single(
                     // Running-confirmed index and hooks are released only after
                     // the fresh Running row is accepted.
                     alloc_drivers.lock().insert(successor_alloc_id.clone(), driver_kind);
-                    if let Some(mtls_lifecycle) = mtls_lifecycle
-                        && intercept_required
-                    {
-                        if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
-                            let successor_outcome = fail_closed_on_mtls_install_with_guest(
-                                driver.as_ref(),
-                                mtls_lifecycle,
-                                net_slot_allocator,
-                                network_provisioner,
-                                guest_provisioner,
-                                obs,
-                                bus,
-                                tick,
-                                &row,
-                                prior_state,
-                                Some(handle),
-                                &cause,
-                            )
-                            .await;
-                            return finish_restart(
-                                successor_outcome,
-                                &prior_drivers,
-                                &predecessor_handle,
-                                prior_workload_addr,
-                                alloc_drivers,
-                                Some(mtls_lifecycle),
-                                net_slot_allocator,
-                                network_provisioner,
-                                guest_provisioner,
-                            )
-                            .await;
-                        }
-                        tracing::info!(
-                            name: "mtls.intercept.install.success",
-                            alloc = %successor_alloc_id,
-                            driver = ?driver_kind,
-                            "installed allocation mTLS intercept"
-                        );
+                    if let Err(cause) = mtls_lifecycle.start_alloc(&spec).await {
+                        let successor_outcome = fail_closed_on_mtls_install_with_guest(
+                            driver.as_ref(),
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                            obs,
+                            bus,
+                            tick,
+                            &row,
+                            prior_state,
+                            Some(handle),
+                            &cause,
+                        )
+                        .await;
+                        return finish_restart(
+                            successor_outcome,
+                            &prior_drivers,
+                            &predecessor_handle,
+                            prior_workload_addr,
+                            alloc_drivers,
+                            mtls_lifecycle,
+                            net_slot_allocator,
+                            network_provisioner,
+                            guest_provisioner,
+                        )
+                        .await;
                     }
+                    tracing::info!(
+                        name: "mtls.intercept.install.success",
+                        alloc = %successor_alloc_id,
+                        driver = ?driver_kind,
+                        "installed allocation mTLS intercept"
+                    );
                     if let (Some(plan), Some(guest_provisioner)) =
                         (plan.as_ref(), guest_provisioner)
                         && let Err(activation_error) =
@@ -3206,9 +3151,7 @@ async fn dispatch_single(
             // guarded by its real ownership token and network teardown is
             // guarded by the retained slot. The durable terminal row is
             // written only after all of them have converged.
-            if let Some(mtls_lifecycle) = mtls_lifecycle {
-                mtls_lifecycle.stop_alloc(&alloc_id).await?;
-            }
+            mtls_lifecycle.stop_alloc(&alloc_id).await?;
             teardown_for_dispatch(
                 &alloc_id,
                 prior_row.workload_addr,
@@ -4730,7 +4673,7 @@ mod admission_refusal_acceptance {
         pool: Arc<GuestAddressPool>,
         #[allow(
             dead_code,
-            reason = "passed to AppState by the pinned constructor from DELIVER 05-01; never started"
+            reason = "retained with AppState for this fixture's worker-owner lifecycle"
         )]
         worker: Arc<MtlsInterceptWorker>,
         events: Arc<Mutex<Vec<LeaseEvent>>>,
@@ -4762,6 +4705,7 @@ mod admission_refusal_acceptance {
                 Arc::clone(&clock) as Arc<dyn Clock>,
                 Arc::new(SimMtlsIntercept::new()) as Arc<dyn MtlsIntercept>,
             ));
+            worker.start_shared_owner().await.expect("sim shared mTLS owner starts");
             let driver = Arc::new(SimDriver::new(DriverType::Vm));
 
             let mut runtime =
@@ -4776,9 +4720,7 @@ mod admission_refusal_acceptance {
                 Arc::new(SimObservationStore::single_peer(node_id(), 0));
             let allocator =
                 crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
-            // The constructor call. Until DELIVER 05-01 cuts the pinned
-            // constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)) it passes today's inputs; 05-01
-            // appends the worker, the owner, `wiring.gate()`, and the pool.
+            // The fixture and provisioner share their one owner instance.
             let state = crate::AppState::new(
                 store,
                 store_path,
@@ -4793,6 +4735,10 @@ mod admission_refusal_acceptance {
                 allocator,
                 crate::test_empty_listener_facts(),
                 Ipv4Addr::LOCALHOST,
+                Arc::clone(&worker),
+                Arc::clone(&owner) as Arc<dyn crate::guest_network::SharedGuestNetworkOwner>,
+                wiring.gate(),
+                Arc::clone(&pool),
             );
             let events = Arc::new(Mutex::new(Vec::new()));
             let events_guard =

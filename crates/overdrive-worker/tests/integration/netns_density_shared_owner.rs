@@ -156,7 +156,7 @@ async fn initial_leg_f_bind_refusal_returns_to_absent_without_partial_publicatio
 /// `delete_program`, `replace_shared_observation`). Every knob changes only the
 /// port's state; the worker's reaction is what the bodies observe.
 struct RecordingSharedIntercept {
-    listener_clones: Mutex<Vec<TcpListener>>,
+    listener_clones: Mutex<Vec<Arc<LoopbackInterceptListener>>>,
     listener_addresses: Mutex<Vec<SocketAddrV4>>,
     retain_listener_clones: bool,
     bind_calls: AtomicUsize,
@@ -444,11 +444,7 @@ impl RecordingSharedIntercept {
 
     fn terminate_listener_task(&self, index: usize) {
         let listener = self.listener_clones.lock().remove(index);
-        // SAFETY: `listener` owns a live TCP socket. `shutdown` changes socket
-        // state but does not steal fd ownership; dropping closes it once.
-        let status = unsafe { libc::shutdown(listener.as_raw_fd(), libc::SHUT_RDWR) };
-        let error = std::io::Error::last_os_error();
-        assert_eq!(status, 0, "shutting the listener task's socket down failed: {error}");
+        listener.lose();
         drop(listener);
     }
 
@@ -627,7 +623,7 @@ impl Drop for RecordingNodeGuard {
 /// `RecordingSharedIntercept` and is unchanged by that step; the recording's
 /// own bind then returns a `LoopbackInterceptListener` (TS § "When the port
 /// changes", line 3).
-type BoundListener = std::net::TcpListener;
+type BoundListener = Arc<dyn InterceptListener>;
 
 impl MtlsIntercept for RecordingSharedIntercept {
     fn bind_transparent(
@@ -649,19 +645,18 @@ impl MtlsIntercept for RecordingSharedIntercept {
                 .map_err(|source| InterceptError::TransparentListener { addr, source })?;
             self.blockers.lock().push(blocker);
         }
-        let listener = TcpListener::bind(addr)
+        let listener = Arc::new(
+            LoopbackInterceptListener::bind(addr)
+                .map_err(|source| InterceptError::TransparentListener { addr, source })?,
+        );
+        let bound = listener
+            .local_addr()
             .map_err(|source| InterceptError::TransparentListener { addr, source })?;
-        let bound = match listener.local_addr().expect("listener address") {
-            std::net::SocketAddr::V4(address) => address,
-            std::net::SocketAddr::V6(_) => panic!("fixture binds IPv4"),
-        };
         self.listener_addresses.lock().push(bound);
         if self.retain_listener_clones {
-            self.listener_clones
-                .lock()
-                .push(listener.try_clone().expect("clone listener for real socket-state mutation"));
+            self.listener_clones.lock().push(Arc::clone(&listener));
         }
-        Ok(listener)
+        Ok(listener as BoundListener)
     }
 
     fn converge_shared(
@@ -1568,21 +1563,12 @@ async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capabili
 /// - `lose()` shuts the listening socket down, so a pending or later `accept`
 ///   returns `Accept`.
 ///
-/// The B-7 step makes `RecordingSharedIntercept::bind_transparent` return it
-/// (TS § "When the port changes", line 3); until then nothing constructs it.
-#[allow(
-    dead_code,
-    reason = "wired into RecordingSharedIntercept::bind_transparent by the DELIVER step that carries B-7 (05-01 at the latest), TS § Intercept listener and stop-error test support"
-)]
+/// `RecordingSharedIntercept::bind_transparent` returns this listener.
 struct LoopbackInterceptListener {
     socket: Mutex<LoopbackSocket>,
     lost: AtomicBool,
 }
 
-#[allow(
-    dead_code,
-    reason = "wired into RecordingSharedIntercept::bind_transparent by the DELIVER step that carries B-7 (05-01 at the latest), TS § Intercept listener and stop-error test support"
-)]
 enum LoopbackSocket {
     /// Bound and listening, not yet registered with a Tokio reactor.
     Bound(TcpListener),
@@ -1592,10 +1578,6 @@ enum LoopbackSocket {
     Closed,
 }
 
-#[allow(
-    dead_code,
-    reason = "wired into RecordingSharedIntercept::bind_transparent by the DELIVER step that carries B-7 (05-01 at the latest), TS § Intercept listener and stop-error test support"
-)]
 impl LoopbackInterceptListener {
     fn bind(addr: SocketAddrV4) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr)?;

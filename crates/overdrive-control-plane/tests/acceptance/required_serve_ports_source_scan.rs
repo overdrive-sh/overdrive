@@ -1050,7 +1050,6 @@ fn field_assignments(tokens: &[Token], fields: &BTreeSet<&str>) -> Vec<(usize, S
 /// S-ND295-65 — Protection, DNS, and the supervisor are always composed
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-65)"]
 #[allow(clippy::too_many_lines, reason = "one fail-closed universe report for the whole scan")]
 fn no_optional_switch_gates_protection_dns_or_supervisor_composition() {
     let files = production_files();

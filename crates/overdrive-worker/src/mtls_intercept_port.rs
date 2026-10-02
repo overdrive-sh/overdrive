@@ -18,14 +18,14 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 
 use crate::mtls_intercept::{
     InterceptError, InterceptLeg, InterceptPostcondition, InterceptSharedRollbackOperation,
-    NetlinkError, Result, TproxyInterceptGuard, install_inbound_tproxy, make_transparent_listener,
+    NetlinkError, Result, make_transparent_listener,
 };
 
 /// Module-private effect seam for the shared-program observe/atomic-replace
@@ -59,8 +59,6 @@ trait SharedInterceptProgramIo: Send + Sync {
 /// removes that rule by handle; a simulation adapter acquires nothing and its
 /// `Drop` is a no-op. Both honour the invariant above.
 pub trait InterceptGuard: Send + Sync {}
-
-impl InterceptGuard for TproxyInterceptGuard {}
 
 /// Node-owned guard for the shared constant IP program.
 ///
@@ -288,11 +286,10 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     ///   shape for both legs.
     ///
     /// # Postconditions on `Ok(listener)`
-    /// The returned listener is bound and listening at `addr`.
-    /// `listener.local_addr()` reports the concrete bound address; when `addr`
-    /// carried port 0 the reported port is the kernel-assigned ephemeral port
-    /// and is NON-ZERO. Ownership transfers to the caller — dropping it closes
-    /// the socket.
+    /// The returned listener is bound and listening. `local_addr()` reports
+    /// its exact bound IPv4 address. A port-zero bind returns a non-zero port
+    /// distinct from every other live listener this adapter returned at that
+    /// IP. A non-zero requested address is returned exactly.
     ///
     /// # Edge cases
     /// Every failure — a refused socket option, `EADDRINUSE`, fd exhaustion —
@@ -303,9 +300,9 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// partially-created socket is closed before returning.
     ///
     /// # Observable invariants
-    /// Each call returns a DISTINCT listener; two calls with port 0 bind two
-    /// distinct ephemeral ports. The call installs no `nft` rule and mutates no
-    /// routing state.
+    /// The listener remains bound until its final `Arc` is dropped. Sharing is
+    /// through `Arc`; no descriptor is duplicated. This call installs no
+    /// `nft` rule and changes no routing state.
     ///
     /// # Substrate note (NOT part of this contract)
     /// The PRODUCTION leg semantics require the socket to carry
@@ -317,7 +314,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// contract above with a plain listener. Stating the setopts as a TRAIT
     /// postcondition would make the contract unimplementable by half its
     /// sanctioned implementors.
-    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<std::net::TcpListener>;
+    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<Arc<dyn InterceptListener>>;
 
     /// Converge the one node-scoped shared rule/set program.
     fn converge_shared(
@@ -585,6 +582,113 @@ pub enum InterceptAcceptError {
     },
 }
 
+enum HostListenerState {
+    Bound(std::net::TcpListener),
+    Registered(Arc<tokio::net::TcpListener>),
+    Failed,
+}
+
+struct HostInterceptListener {
+    state: Mutex<HostListenerState>,
+}
+
+impl HostInterceptListener {
+    const fn new(listener: std::net::TcpListener) -> Self {
+        Self { state: Mutex::new(HostListenerState::Bound(listener)) }
+    }
+
+    fn local_addr(&self) -> std::io::Result<SocketAddrV4> {
+        let state = self.state.lock();
+        let address = match &*state {
+            HostListenerState::Bound(listener) => listener.local_addr()?,
+            HostListenerState::Registered(listener) => listener.local_addr()?,
+            HostListenerState::Failed => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "transparent listener registration failed",
+                ));
+            }
+        };
+        drop(state);
+        match address {
+            SocketAddr::V4(address) => Ok(address),
+            SocketAddr::V6(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "transparent listener returned an IPv6 address",
+            )),
+        }
+    }
+
+    fn registered_listener(&self) -> std::io::Result<Arc<tokio::net::TcpListener>> {
+        let mut state = self.state.lock();
+        if let HostListenerState::Registered(listener) = &*state {
+            return Ok(Arc::clone(listener));
+        }
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "transparent listener accept requires a current Tokio runtime",
+            )
+        })?;
+        let HostListenerState::Bound(listener) =
+            std::mem::replace(&mut *state, HostListenerState::Failed)
+        else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "transparent listener is no longer available",
+            ));
+        };
+        let _entered = handle.enter();
+        let listener = Arc::new(tokio::net::TcpListener::from_std(listener)?);
+        *state = HostListenerState::Registered(Arc::clone(&listener));
+        drop(state);
+        Ok(listener)
+    }
+}
+
+#[async_trait::async_trait]
+impl InterceptListener for HostInterceptListener {
+    fn local_addr(&self) -> std::io::Result<SocketAddrV4> {
+        Self::local_addr(self)
+    }
+
+    async fn accept(&self) -> std::result::Result<InterceptAccepted, InterceptAcceptError> {
+        let listener =
+            self.registered_listener().map_err(|source| InterceptAcceptError::Accept { source })?;
+        let (stream, peer) =
+            listener.accept().await.map_err(|source| InterceptAcceptError::Accept { source })?;
+        let peer = match peer {
+            SocketAddr::V4(peer) => peer,
+            SocketAddr::V6(_) => {
+                return Err(InterceptAcceptError::Accept {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "transparent listener accepted an IPv6 peer",
+                    ),
+                });
+            }
+        };
+        let local = stream
+            .local_addr()
+            .map_err(|source| InterceptAcceptError::OriginalDestination { source })?;
+        let local = match local {
+            SocketAddr::V4(local) => local,
+            SocketAddr::V6(_) => {
+                return Err(InterceptAcceptError::OriginalDestination {
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "transparent listener accepted an IPv6 local address",
+                    ),
+                });
+            }
+        };
+        stream.set_nodelay(true).ok();
+        let stream = stream.into_std().map_err(|source| InterceptAcceptError::Accept { source })?;
+        stream.set_nonblocking(false).map_err(|source| InterceptAcceptError::Accept { source })?;
+        Ok(InterceptAccepted { stream: stream.into(), peer, local })
+    }
+}
+
 /// Production [`MtlsIntercept`] binding.
 ///
 /// Listener binding and node-program operations delegate to the existing
@@ -668,18 +772,12 @@ impl HostMtlsIntercept {
     }
 
     fn shared_port(&self, leg: InterceptLeg, actual: u16) -> Result<u16> {
+        if self.program.lock().is_none() {
+            return Err(InterceptError::SharedProgramNotConverged);
+        }
         let targets = *self.targets.lock();
         let Some((leg_f, leg_c)) = targets else {
-            return Err(InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
-                    ),
-                ),
-            });
+            return Err(InterceptError::SharedProgramNotConverged);
         };
         let expected = match leg {
             InterceptLeg::F => leg_f,
@@ -695,16 +793,7 @@ impl HostMtlsIntercept {
     fn acquire_elements(&self, keys: Vec<SharedElementKey>) -> Result<Box<dyn InterceptGuard>> {
         let mut counts = self.elements.counts.lock();
         let expected =
-            self.program.lock().clone().ok_or_else(|| InterceptError::NftRuleInstallFailed {
-                op: "shared-element-owner",
-                source: NetlinkError::nft(
-                    "shared-element-owner",
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotConnected,
-                        "shared constant program is not published",
-                    ),
-                ),
-            })?;
+            self.program.lock().clone().ok_or(InterceptError::SharedProgramNotConverged)?;
         let source_addr = keys.iter().find_map(|key| match key {
             SharedElementKey::Address { set: SharedElementSet::OutboundSources, address } => {
                 Some(*address)
@@ -1034,8 +1123,12 @@ impl Default for HostMtlsIntercept {
 }
 
 impl MtlsIntercept for HostMtlsIntercept {
-    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<std::net::TcpListener> {
-        make_transparent_listener(addr)
+    fn bind_transparent(&self, addr: SocketAddrV4) -> Result<Arc<dyn InterceptListener>> {
+        let listener = make_transparent_listener(addr)?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|source| InterceptError::TransparentListener { addr, source })?;
+        Ok(Arc::new(HostInterceptListener::new(listener)))
     }
 
     fn converge_shared(
@@ -1077,21 +1170,7 @@ impl MtlsIntercept for HostMtlsIntercept {
         source_addr: Ipv4Addr,
         agent_leg_f_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
-        if self.targets.lock().is_some() {
-            return self.shared_outbound(source_addr, agent_leg_f_port);
-        }
-        // The old no-network fixture lane never reaches this branch. The
-        // accepted post-cut port has no textual/per-interface fallback.
-        Err(InterceptError::NftRuleInstallFailed {
-            op: "shared-owner-required",
-            source: NetlinkError::nft(
-                "shared-owner-required",
-                std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "allocation source admission requires the shared owner",
-                ),
-            ),
-        })
+        self.shared_outbound(source_addr, agent_leg_f_port)
     }
 
     fn install_inbound(
@@ -1099,11 +1178,7 @@ impl MtlsIntercept for HostMtlsIntercept {
         virt: SocketAddrV4,
         agent_leg_c_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
-        if self.targets.lock().is_some() {
-            return self.shared_inbound(virt, agent_leg_c_port);
-        }
-        install_inbound_tproxy(virt, agent_leg_c_port)
-            .map(|guard| Box::new(guard) as Box<dyn InterceptGuard>)
+        self.shared_inbound(virt, agent_leg_c_port)
     }
 
     #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 08-02")]

@@ -96,6 +96,10 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::acceptance::serve_ports::worker(),
+        crate::acceptance::serve_ports::owner(),
+        crate::acceptance::serve_ports::exec_gate(),
+        crate::acceptance::serve_ports::pool(),
     )
 }
 

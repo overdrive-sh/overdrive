@@ -114,6 +114,10 @@ async fn bootstrap_async(
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
     let receiver = state.lifecycle_events.subscribe();
     (state, receiver, sim_clock)

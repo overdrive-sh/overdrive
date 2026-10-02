@@ -39,7 +39,7 @@ mod tests {
     use overdrive_worker::cgroup_manager::CgroupManager;
     use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
     use overdrive_worker::mtls_intercept_port::{
-        InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+        InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
     };
     use parking_lot::Mutex;
     use proptest::prelude::*;
@@ -54,7 +54,7 @@ mod tests {
     /// The port's listener type. The DELIVER step that carries B-7 (05-01 at
     /// the latest, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)) changes this one line to
     /// `Arc<dyn InterceptListener>`; nothing here reads the listener.
-    type BoundListener = std::net::TcpListener;
+    type BoundListener = Arc<dyn InterceptListener>;
 
     /// One intercept port call, with its argument or outcome.
     #[derive(Debug, Clone)]

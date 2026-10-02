@@ -340,11 +340,12 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
+            let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
             dispatch_with_network_provisioner(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-                &tx, &tick, &writer_node, allocator, &test_broker, None, None,
+                &tx, &tick, &writer_node, allocator, &test_broker, None,&mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
@@ -421,6 +422,7 @@ async fn run_classifier_scenario(
 
     let (_alloc_tmp, allocator) = fresh_test_allocator();
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
     dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
@@ -438,7 +440,7 @@ async fn run_classifier_scenario(
         allocator,
         &test_broker,
         None,
-        None,
+        &mtls_worker_0501_1,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
@@ -512,6 +514,7 @@ async fn dispatch_cleanup_composition_action(
     let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (_tmp, allocator) = fresh_test_allocator();
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_2 = crate::acceptance::serve_ports::worker();
     dispatch_with_network_provisioner(
         vec![action],
         &drivers,
@@ -529,7 +532,7 @@ async fn dispatch_cleanup_composition_action(
         allocator,
         &broker,
         None,
-        None,
+        &mtls_worker_0501_2,
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
         &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
@@ -708,6 +711,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
     let (_alloc_tmp, allocator) = fresh_test_allocator();
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let mtls_worker_0501_3 = crate::acceptance::serve_ports::worker();
     dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
@@ -725,7 +729,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         allocator,
         &test_broker,
         None,
-        None,
+        &mtls_worker_0501_3,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),

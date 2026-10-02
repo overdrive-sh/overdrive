@@ -45,7 +45,7 @@ use overdrive_worker::mtls_intercept::{
     InterceptSet, NetlinkError,
 };
 use overdrive_worker::mtls_intercept_port::{
-    InterceptGuard, InterceptMembers, InterceptState, MtlsIntercept,
+    InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
 };
 use overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError;
 use parking_lot::Mutex;
@@ -108,7 +108,7 @@ impl<S: Subscriber> Layer<S> for EventCollector {
 /// step that carries B-7 (05-01 at the latest) changes it to
 /// `Arc<dyn InterceptListener>`; the delegation below is unchanged by that
 /// step.
-type BoundListener = std::net::TcpListener;
+type BoundListener = Arc<dyn InterceptListener>;
 
 /// The killed prior process's listener targets, outside the default ephemeral
 /// range so no listener of this process can share them.

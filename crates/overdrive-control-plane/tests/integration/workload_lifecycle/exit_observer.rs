@@ -142,6 +142,10 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     // Spawn the worker-side exit observer. Step 01-02 wires this into
@@ -679,6 +683,10 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     // Wire the runtime into the observer via the SAME production path

@@ -156,7 +156,9 @@ use overdrive_netlink::nft::{SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
-use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, InterceptGuard, MtlsIntercept};
+use overdrive_worker::mtls_intercept_port::{
+    HostMtlsIntercept, InterceptGuard, InterceptListener, MtlsIntercept,
+};
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use async_trait::async_trait;
@@ -1709,14 +1711,8 @@ impl MetalSharedIntercept {
     }
 }
 
-/// The listener type `MtlsIntercept::bind_transparent` returns. The DELIVER
-/// step that carries B-7 (05-01 at the latest) changes it to
-/// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener
-/// (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent`
-/// signature)); `MetalSharedIntercept` delegates to `HostMtlsIntercept` and
-/// reads the bound address through `LegListener`, so that step changes only
-/// this line here.
-type BoundListener = std::net::TcpListener;
+/// Listener type returned by the test-local intercept double.
+type BoundListener = Arc<dyn InterceptListener>;
 
 impl MtlsIntercept for MetalSharedIntercept {
     fn bind_transparent(&self, address: SocketAddrV4) -> InterceptResult<BoundListener> {

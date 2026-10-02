@@ -176,6 +176,32 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                    std::collections::BTreeMap::new(),
+                    None,
+                )),
+                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            )),
+            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+                std::collections::BTreeMap::new(),
+                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+            )),
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+            overdrive_sim::adapters::clock::SimClock::new(),
+        ))
+        .gate(),
+        Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
+            "100.95.0.0/16".parse().expect("static guest prefix"),
+            "ovd-gbr0".to_owned(),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+        )),
     );
     let desired = service_intent(&workload);
     let workload_id = wid(&workload);
@@ -707,7 +733,7 @@ async fn dispatch_one(
     alloc_drivers: &AllocDriverIndex,
     slots: &NetSlotAllocator,
     network: &dyn WorkloadNetworkProvisioner,
-    mtls_lifecycle: Option<&dyn MtlsInterceptLifecycle>,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
 ) -> Result<(), ShimError> {
     let tmp = tempfile::tempdir().expect("temporary intent store");
     let intent: Arc<dyn IntentStore> = Arc::new(
@@ -800,7 +826,7 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
             &alloc_drivers,
             &slots,
             &network,
-            Some(&mtls),
+            &mtls,
         );
         tokio::pin!(dispatch);
 
@@ -949,7 +975,7 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     &index,
                     &slots,
                     &network,
-                    Some(&mtls),
+                    &mtls,
                 )
                 .await;
 
@@ -1140,6 +1166,7 @@ async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
     );
     let index = AllocDriverIndex::default();
     index.lock().insert(predecessor.clone(), DriverType::Vm);
+    let mtls = SimMtlsInterceptLifecycle::new();
 
     dispatch_one(
         Action::RestartAllocation {
@@ -1152,7 +1179,7 @@ async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
         &index,
         &NetSlotAllocator::new(),
         &RecordingNetwork::default(),
-        None,
+        &mtls,
     )
     .await
     .expect("StartRejected is represented as a Failed successor row");
@@ -1321,7 +1348,7 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         &index,
         &slots,
         &network,
-        Some(&mtls),
+        &mtls,
     )
     .await
     .expect("a rejected Running proposal unwinds without a second proposal or action");

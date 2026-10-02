@@ -187,9 +187,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         Arc::clone(&engine),
-        // No transparent-mTLS layer in the workflow e2e (no real
-        // dataplane to intercept on) — step 06-03 `Option` field.
-        None,
+        crate::integration::serve_ports::worker(),
         // microvm-driver-cloud-hypervisor step 02-02: composed
         // unconditionally (`AppState::vm_host_state`'s own doc comment);
         // this suite never seeds VM host state.
@@ -199,6 +197,9 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         // responder; this fixture never exercises dial-by-name).
         overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(
         ),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     // --- The fixture trigger reconciler emits StartWorkflow. The

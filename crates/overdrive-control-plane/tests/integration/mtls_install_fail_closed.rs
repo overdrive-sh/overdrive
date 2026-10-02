@@ -233,7 +233,7 @@ use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError,
 };
-use overdrive_worker::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
+use overdrive_worker::mtls_intercept_port::{InterceptGuard, InterceptListener, MtlsIntercept};
 use overdrive_worker::mtls_intercept_worker::{
     HandleTeardownFailure, MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
 };
@@ -613,7 +613,7 @@ impl Drop for JournalGuard {
 /// step that carries B-7 (05-01 at the latest) changes it to
 /// `Arc<dyn InterceptListener>` (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)); the delegation below is
 /// unchanged by that step.
-type BoundListener = std::net::TcpListener;
+type BoundListener = Arc<dyn InterceptListener>;
 
 /// Test-local intercept over `SimMtlsIntercept` that journals element
 /// installation and release; `bind_transparent` delegates to the sim.
@@ -900,7 +900,7 @@ impl SeamFixture {
             .register(overdrive_control_plane::noop_heartbeat())
             .await
             .expect("register heartbeat");
-        let mut state = overdrive_control_plane::AppState::new(
+        let state = overdrive_control_plane::AppState::new(
             Arc::clone(&store),
             store_path,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
@@ -918,8 +918,11 @@ impl SeamFixture {
             ),
             overdrive_control_plane::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
+            Arc::clone(&worker),
+            Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+            wiring.gate(),
+            Arc::clone(&guest_pool),
         );
-        state.mtls_worker = Some(Arc::clone(&worker));
         Self {
             _tmp: tmp,
             state: Arc::new(state),
@@ -1013,7 +1016,7 @@ async fn dispatch_one(
         build_vip_allocator(store),
         &broker,
         None,
-        Some(worker),
+        worker,
         net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
@@ -1346,8 +1349,7 @@ async fn dispatch_over_network_provisioner(
         build_vip_allocator(store),
         &broker,
         None,
-        // DELIVER 05-01 (R16): this line becomes `mtls_lifecycle`.
-        Some(mtls_lifecycle),
+        mtls_lifecycle,
         net_slots,
         network,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),

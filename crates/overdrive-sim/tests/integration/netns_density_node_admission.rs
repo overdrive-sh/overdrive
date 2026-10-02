@@ -931,6 +931,10 @@ impl SimNode {
             allocator,
             overdrive_control_plane::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
+            Arc::clone(&mtls_worker),
+            Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+            Arc::clone(&exec_gate),
+            Arc::clone(&guest_pool),
         );
         // The production exit observer authors a crashed allocation's
         // `Failed` row from the driver's exit event (production composes it

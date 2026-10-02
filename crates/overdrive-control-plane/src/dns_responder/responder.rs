@@ -52,6 +52,7 @@
 //! reason (`.claude/rules/development.md` § "Never flatten a typed error to
 //! `Internal(String)`"); there is NO `Internal(String)` variant.
 
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
@@ -59,7 +60,7 @@ use std::sync::Arc;
 use nix::sys::socket::sockopt::{Ipv4PacketInfo, ReceiveTimeout, ReuseAddr};
 use nix::sys::socket::{
     AddressFamily, ControlMessage, ControlMessageOwned, MsgFlags, SockFlag, SockProtocol, SockType,
-    SockaddrIn, bind, recvmsg, sendmsg, setsockopt, socket,
+    SockaddrIn, bind, getsockname, recvmsg, sendmsg, setsockopt, socket,
 };
 use nix::sys::time::TimeVal;
 use overdrive_core::traits::clock::Clock;
@@ -198,12 +199,22 @@ pub struct DnsResponder {
     /// fallback holds exactly one. Behind a `Mutex` so the serve loop
     /// can `take()` ownership at start (the loop is `self: Arc<Self>`).
     sockets: Mutex<Vec<OwnedFd>>,
+    /// The exact bound UDP socket identities recorded by `probe`; these stay
+    /// available after `serve` transfers the descriptors to its tasks.
+    socket_identities: Mutex<Vec<DnsSocketIdentity>>,
     /// Stop flag for the serve loop. The `SO_RCVTIMEO`-bounded `recvmsg` wakes
     /// every `recv_poll_timeout()` and re-checks this; set `true` by
     /// [`Self::stop`] (called on `ServerHandle` shutdown / test teardown) so the
     /// blocking loop exits promptly rather than leaking an uncancellable
     /// syscall.
     stop: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct DnsSocketIdentity {
+    address: Ipv4Addr,
+    port: u16,
+    inode: u64,
 }
 
 impl DnsResponder {
@@ -230,6 +241,7 @@ impl DnsResponder {
             gateway,
             name_index,
             sockets: Mutex::new(Vec::new()),
+            socket_identities: Mutex::new(Vec::new()),
             stop: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -276,6 +288,12 @@ impl DnsResponder {
                 });
             }
         };
+        let identities = bound
+            .iter()
+            .map(socket_identity)
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|source| DnsResponderError::Socket { source })?;
+        *self.socket_identities.lock() = identities;
         *self.sockets.lock() = bound;
 
         // (2) List-seed the internal NameIndex (the Earned-Trust List-then-Watch
@@ -285,6 +303,35 @@ impl DnsResponder {
             .await
             .map_err(|source| DnsResponderError::ListSeed { reason: source.to_string() })?;
         Ok(())
+    }
+
+    /// Non-mutating read-back of the exact UDP socket identities recorded by
+    /// [`Self::probe`]. A missing or replaced socket is a typed socket error.
+    #[allow(
+        clippy::unused_async,
+        reason = "the required GuestDns port exposes audit as an async operation"
+    )]
+    pub async fn audit(&self) -> Result<()> {
+        let expected = self.socket_identities.lock().clone();
+        if expected.is_empty() {
+            return Err(DnsResponderError::Socket {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "DNS responder has no probed socket identity",
+                ),
+            });
+        }
+        let observed = kernel_udp_socket_identities()
+            .map_err(|source| DnsResponderError::Socket { source })?;
+        if expected.iter().all(|identity| observed.contains(identity)) {
+            return Ok(());
+        }
+        Err(DnsResponderError::Socket {
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "a probed DNS UDP socket identity is no longer present",
+            ),
+        })
     }
 
     /// Run the `recvmsg`/`sendmsg` `IP_PKTINFO` serve loop: decode each inbound
@@ -429,6 +476,72 @@ fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
     bind(fd.as_raw_fd(), &SockaddrIn::from(SocketAddrV4::new(addr, DNS_PORT)))
         .map_err(std::io::Error::from)?;
     Ok(fd)
+}
+
+fn socket_identity(fd: &OwnedFd) -> std::io::Result<DnsSocketIdentity> {
+    let address = getsockname::<SockaddrIn>(fd.as_raw_fd()).map_err(std::io::Error::from)?;
+    let bound = SocketAddrV4::from(address);
+    let descriptor = fd.as_raw_fd();
+    let link = std::fs::read_link(format!("/proc/self/fd/{descriptor}"))?;
+    let link = link.to_string_lossy();
+    let inode = link
+        .strip_prefix("socket:[")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "DNS probe descriptor does not identify a socket",
+            )
+        })?
+        .parse::<u64>()
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("DNS socket inode is malformed: {error}"),
+            )
+        })?;
+    Ok(DnsSocketIdentity { address: *bound.ip(), port: bound.port(), inode })
+}
+
+fn kernel_udp_socket_identities() -> std::io::Result<BTreeSet<DnsSocketIdentity>> {
+    let table = std::fs::read_to_string("/proc/net/udp")?;
+    let mut identities = BTreeSet::new();
+    for line in table.lines().skip(1) {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let local = fields.get(1).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "malformed /proc/net/udp row")
+        })?;
+        let inode = fields.get(9).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "malformed /proc/net/udp row")
+        })?;
+        let (address, port) = local.split_once(':').ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "malformed UDP local address")
+        })?;
+        let address = u32::from_str_radix(address, 16).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("malformed UDP local IPv4 address: {error}"),
+            )
+        })?;
+        let port = u16::from_str_radix(port, 16).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("malformed UDP local port: {error}"),
+            )
+        })?;
+        let inode = inode.parse::<u64>().map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("malformed UDP socket inode: {error}"),
+            )
+        })?;
+        identities.insert(DnsSocketIdentity {
+            address: Ipv4Addr::from(address.to_ne_bytes()),
+            port,
+            inode,
+        });
+    }
+    Ok(identities)
 }
 
 /// Whether an `io::Error` from `bind` is `EADDRINUSE` (the wildcard-already-held

@@ -359,7 +359,7 @@ async fn dispatch_one(
         build_vip_allocator(store),
         &broker,
         None,
-        Some(worker),
+        worker,
         net_slot_allocator,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )

@@ -570,7 +570,6 @@ fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
 fn an_install_before_convergence_is_refused_and_changes_nothing() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-pre-converge");
@@ -627,7 +626,6 @@ fn an_install_before_convergence_is_refused_and_changes_nothing() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
 fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-port-mismatch");
@@ -687,7 +685,6 @@ fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
 fn a_node_guard_dropped_with_no_members_leaves_no_program() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-no-member-drop");
@@ -728,7 +725,6 @@ fn a_node_guard_dropped_with_no_members_leaves_no_program() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
 fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-stale-prior");
@@ -786,7 +782,6 @@ fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 05-01 (S-ND295-71)"]
 fn a_zero_listener_port_is_refused_before_any_program_change() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-71-zero-port");

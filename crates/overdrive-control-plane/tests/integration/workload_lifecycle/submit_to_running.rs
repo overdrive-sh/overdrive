@@ -78,6 +78,10 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
+        crate::integration::serve_ports::worker(),
+        crate::integration::serve_ports::owner(),
+        crate::integration::serve_ports::exec_gate(),
+        crate::integration::serve_ports::pool(),
     );
 
     // Submit a 1-replica VM job. The simulated VM driver makes the
