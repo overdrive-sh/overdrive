@@ -1404,7 +1404,6 @@ fn is_root() -> bool {
 /// S-ND295-11 — A workload is admitted only after its complete attachment is read back down
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-02 (S-ND295-11)"]
 async fn ordinary_provision_reads_back_the_complete_attachment_down_before_injected_vmm_start() {
     assert!(
         is_root(),
@@ -1468,7 +1467,6 @@ async fn ordinary_provision_reads_back_the_complete_attachment_down_before_injec
 /// S-ND295-12 — Teardown leaves nothing behind and converges on parts already gone
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 06-02 (S-ND295-12)"]
 async fn two_attachment_teardown_releases_last_and_preserves_the_unrelated_attachment_byte_equal() {
     assert!(is_root(), "S-ND295-12 provisions and deletes real TAPs and must run as root");
     let node = VmNode::boot().await;

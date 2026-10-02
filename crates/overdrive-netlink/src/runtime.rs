@@ -49,8 +49,8 @@ pub fn block_on_netlink<T>(
 ///
 /// # Errors
 ///
-/// [`NetlinkError::Connect`] when the worker thread panics; otherwise the
-/// closure's own [`NetlinkError`].
+/// [`NetlinkError::Connect`] when the worker thread cannot be spawned or
+/// panics; otherwise the closure's own [`NetlinkError`].
 pub fn block_on_host_netlink<T, F, Fut>(f: F) -> Result<T, NetlinkError>
 where
     F: FnOnce() -> Fut + Send,
@@ -58,7 +58,10 @@ where
     T: Send,
 {
     std::thread::scope(|scope| {
-        scope.spawn(|| block_on_netlink(f())).join().unwrap_or_else(|_| {
+        let worker = std::thread::Builder::new()
+            .spawn_scoped(scope, move || block_on_netlink(f()))
+            .map_err(NetlinkError::connect)?;
+        worker.join().unwrap_or_else(|_| {
             Err(NetlinkError::connect(std::io::Error::other("host netlink worker thread panicked")))
         })
     })

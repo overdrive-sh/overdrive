@@ -765,6 +765,7 @@ trait GuestTcxInventorySource: Send + Sync {
     fn loaded_links(&self) -> Result<Vec<RawGuestTcxLinkObservation>, GuestTcxError>;
     fn map_by_id(&self, id: u32) -> Result<Option<RawGuestTcxMapObservation>, GuestTcxError>;
     fn endpoint_present_by_id(&self, map_id: u32, ifindex: u32) -> Result<bool, GuestTcxError>;
+    fn endpoint_ifindices_by_id(&self, map_id: u32) -> Result<BTreeSet<u32>, GuestTcxError>;
     fn observe_pin(&self, path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError>;
 }
 
@@ -864,6 +865,20 @@ impl GuestTcxInventorySource for AyaGuestTcxInventorySource {
             aya::maps::MapError::KeyNotFound => Ok(false),
             source => Err(GuestTcxError::Map { source }),
         })
+    }
+    fn endpoint_ifindices_by_id(&self, map_id: u32) -> Result<BTreeSet<u32>, GuestTcxError> {
+        let map_data = match aya::maps::MapData::from_id(map_id) {
+            Ok(map_data) => map_data,
+            Err(aya::maps::MapError::SyscallError(error))
+                if error.io_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(BTreeSet::new());
+            }
+            Err(source) => return Err(GuestTcxError::Map { source }),
+        };
+        let map = aya::maps::HashMap::<_, u32, EndpointAbi>::try_from(Map::HashMap(map_data))
+            .map_err(|source| GuestTcxError::Map { source })?;
+        map.keys().map(|key| key.map_err(|source| GuestTcxError::Map { source })).collect()
     }
     fn observe_pin(&self, path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError> {
         if path.components().any(|component| component.as_os_str() == "links") {
@@ -1586,8 +1601,7 @@ impl GuestTcxInventoryIdentity {
         let candidate_maps = self.source.loaded_maps().map_err(|_| {
             GuestTcxError::InventoryAmbiguous { family: GuestTcxInventoryFamily::EndpointEntry }
         })?;
-        if !endpoint_ifindices.is_empty() {
-            let Some(map_id) = endpoint_map_id else { return Ok(0) };
+        if let Some(map_id) = endpoint_map_id {
             let Some(map) = self.source.map_by_id(map_id)? else { return Ok(0) };
             let observed_schema = project_map_schema(&map);
             let expected_schema = expected_map_schema(true);
@@ -1597,13 +1611,15 @@ impl GuestTcxInventoryIdentity {
                     observed: observed_schema,
                 });
             }
-            let mut count = 0;
-            for ifindex in &endpoint_ifindices {
-                if self.source.endpoint_present_by_id(map_id, *ifindex)? {
-                    count += 1;
-                }
+            let observed = self.source.endpoint_ifindices_by_id(map_id)?;
+            if observed.iter().any(|ifindex| !endpoint_ifindices.contains(ifindex)) {
+                return Err(GuestTcxError::InventoryAmbiguous {
+                    family: GuestTcxInventoryFamily::EndpointEntry,
+                });
             }
-            return Ok(count);
+            return u32::try_from(observed.len()).map_err(|_| GuestTcxError::InventoryAmbiguous {
+                family: GuestTcxInventoryFamily::EndpointEntry,
+            });
         }
         for map in candidate_maps {
             if project_map_schema(&map).kind == GuestTcxMapKind::Hash
@@ -2476,6 +2492,15 @@ mod tests {
 
         fn endpoint_present_by_id(&self, map_id: u32, ifindex: u32) -> Result<bool, GuestTcxError> {
             Ok(self.endpoint_entries.lock().contains(&(map_id, ifindex)))
+        }
+
+        fn endpoint_ifindices_by_id(&self, map_id: u32) -> Result<BTreeSet<u32>, GuestTcxError> {
+            Ok(self
+                .endpoint_entries
+                .lock()
+                .iter()
+                .filter_map(|(entry_map_id, ifindex)| (*entry_map_id == map_id).then_some(*ifindex))
+                .collect())
         }
 
         fn observe_pin(&self, path: &Path) -> Result<RawGuestTcxPinObservation, GuestTcxError> {
