@@ -1974,9 +1974,9 @@ impl GuestNetworkAllocationIo for HostGuestNetworkAllocationIo {
     ) -> std::result::Result<(), NetlinkError> {
         let client = overdrive_netlink::Client::new()?;
         client.set_link_master(&plan.assignment().tap, plan.bridge()).await?;
-        // Linux may adopt the first attached port's address as a bridge's
-        // operational MAC. Reassert the accepted fixed classifier identity
-        // after every membership mutation and before TAP-up/read-back.
+        // The bridge's address is pinned at creation, so Linux does not adopt
+        // this port's address. Keep the fixed classifier identity asserted
+        // before TAP-up/read-back.
         client.set_link_mac(plan.bridge(), overdrive_core::dataplane::GUEST_BRIDGE_MAC).await
     }
     async fn set_tap_up(&self, plan: &GuestNetworkPlan) -> std::result::Result<(), NetlinkError> {
@@ -3996,22 +3996,27 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             client.set_link_down(BRIDGE).await?;
             client.set_link_mac(BRIDGE, overdrive_core::dataplane::GUEST_BRIDGE_MAC).await?;
             client.converge_addr(BRIDGE, GATEWAY, 16).await?;
-            client.set_link_up(BRIDGE).await?;
-            enable_bridge_nf_call_iptables(BRIDGE).map_err(NetlinkError::connect)?;
             Ok(())
         })
         .map_err(|source| GuestNetworkError::Netlink {
             operation: GuestNetworkOperation::BridgeConverge,
             source,
         })?;
-        let bridge_identity = overdrive_netlink::block_on_host_netlink(|| async {
-            let client = overdrive_netlink::Client::new()?;
-            client.observe_link_identity(BRIDGE).await
-        })
-        .map_err(|source| GuestNetworkError::Netlink {
-            operation: GuestNetworkOperation::BridgeObserve,
-            source,
-        })?;
+        let (bridge_identity, gateway_present) =
+            overdrive_netlink::block_on_host_netlink(|| async {
+                let client = overdrive_netlink::Client::new()?;
+                let identity = client.observe_link_identity(BRIDGE).await?;
+                let gateway_present = if identity.is_some() {
+                    client.observe_addr(BRIDGE, GATEWAY, 16).await?
+                } else {
+                    false
+                };
+                Ok((identity, gateway_present))
+            })
+            .map_err(|source| GuestNetworkError::Netlink {
+                operation: GuestNetworkOperation::BridgeObserve,
+                source,
+            })?;
         let Some(bridge_identity) = bridge_identity else {
             return Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::BridgeObserve,
@@ -4032,31 +4037,25 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         };
         if observed_kind != GuestLinkKind::Bridge
             || bridge_identity.mac != Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC)
-            || !bridge_identity.up
+            || bridge_identity.up
+            || !gateway_present
         {
-            return Err(GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::BridgeObserve,
-                expected: GuestNetworkFact::BridgeLinkIdentity {
-                    name: BRIDGE.to_owned(),
-                    ifindex: Some(bridge_identity.ifindex),
-                    link_kind: GuestLinkKind::Bridge,
-                },
-                observed: Some(GuestNetworkFact::BridgeLinkIdentity {
+            let expected_gateway = Ipv4Net::new_assert(GATEWAY, 16);
+            let observed = match bridge_identity.mac {
+                Some(mac) => GuestNetworkFact::Bridge {
                     name: bridge_identity.name,
                     ifindex: Some(bridge_identity.ifindex),
                     link_kind: observed_kind,
-                }),
-            });
-        }
-        let gateway_present = overdrive_netlink::block_on_host_netlink(|| async {
-            let client = overdrive_netlink::Client::new()?;
-            client.observe_addr(BRIDGE, GATEWAY, 16).await
-        })
-        .map_err(|source| GuestNetworkError::Netlink {
-            operation: GuestNetworkOperation::BridgeObserve,
-            source,
-        })?;
-        if !gateway_present {
+                    mac,
+                    up: bridge_identity.up,
+                    gateway: gateway_present.then_some(expected_gateway),
+                },
+                None => GuestNetworkFact::BridgeLinkIdentity {
+                    name: bridge_identity.name,
+                    ifindex: Some(bridge_identity.ifindex),
+                    link_kind: observed_kind,
+                },
+            };
             return Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::BridgeObserve,
                 expected: GuestNetworkFact::Bridge {
@@ -4064,19 +4063,22 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     ifindex: Some(bridge_identity.ifindex),
                     link_kind: GuestLinkKind::Bridge,
                     mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
-                    up: true,
-                    gateway: Some(Ipv4Net::new_assert(GATEWAY, 16)),
+                    up: false,
+                    gateway: Some(expected_gateway),
                 },
-                observed: Some(GuestNetworkFact::Bridge {
-                    name: BRIDGE.to_owned(),
-                    ifindex: Some(bridge_identity.ifindex),
-                    link_kind: GuestLinkKind::Bridge,
-                    mac: bridge_identity.mac.unwrap_or_default(),
-                    up: bridge_identity.up,
-                    gateway: None,
-                }),
+                observed: Some(observed),
             });
         }
+        overdrive_netlink::block_on_host_netlink(|| async {
+            let client = overdrive_netlink::Client::new()?;
+            client.set_link_up(BRIDGE).await?;
+            enable_bridge_nf_call_iptables(BRIDGE).map_err(NetlinkError::connect)?;
+            Ok(())
+        })
+        .map_err(|source| GuestNetworkError::Netlink {
+            operation: GuestNetworkOperation::BridgeConverge,
+            source,
+        })?;
         let guard = overdrive_netlink::nft::bridge::BridgeGuardSpec::new(
             "overdrive-mtls".to_owned(),
             "prerouting".to_owned(),
@@ -4208,10 +4210,18 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
+        const BRIDGE: &str = "ovd-gbr0";
+        const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
         let lifecycle = self.allocation_lifecycle.lock().await;
-        let bridge = overdrive_netlink::block_on_host_netlink(|| async {
+        let (bridge, gateway_present) = overdrive_netlink::block_on_host_netlink(|| async {
             let client = overdrive_netlink::Client::new()?;
-            client.observe_link_identity("ovd-gbr0").await
+            let identity = client.observe_link_identity(BRIDGE).await?;
+            let gateway_present = if identity.is_some() {
+                Some(client.observe_addr(BRIDGE, GATEWAY, 16).await?)
+            } else {
+                None
+            };
+            Ok((identity, gateway_present))
         })
         .map_err(|source| SharedGuestNetworkAuditError {
             component: SharedGuestNetworkComponent::Bridge,
@@ -4224,21 +4234,47 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             matches!(identity.kind, overdrive_netlink::ObservedLinkKind::Bridge)
                 && identity.mac == Some(overdrive_core::dataplane::GUEST_BRIDGE_MAC)
                 && identity.up
+                && gateway_present == Some(true)
         });
         if !bridge_ok {
+            let expected_gateway = Ipv4Net::new_assert(GATEWAY, 16);
+            let observed = bridge.as_ref().map(|identity| {
+                let link_kind = match identity.kind {
+                    overdrive_netlink::ObservedLinkKind::Bridge => GuestLinkKind::Bridge,
+                    overdrive_netlink::ObservedLinkKind::Tap => GuestLinkKind::Tap,
+                    overdrive_netlink::ObservedLinkKind::Tun => GuestLinkKind::Tun,
+                    overdrive_netlink::ObservedLinkKind::Veth
+                    | overdrive_netlink::ObservedLinkKind::Other => GuestLinkKind::Other,
+                };
+                identity.mac.map_or_else(
+                    || GuestNetworkFact::BridgeLinkIdentity {
+                        name: identity.name.clone(),
+                        ifindex: Some(identity.ifindex),
+                        link_kind,
+                    },
+                    |mac| GuestNetworkFact::Bridge {
+                        name: identity.name.clone(),
+                        ifindex: Some(identity.ifindex),
+                        link_kind,
+                        mac,
+                        up: identity.up,
+                        gateway: (gateway_present == Some(true)).then_some(expected_gateway),
+                    },
+                )
+            });
             return Err(SharedGuestNetworkAuditError {
                 component: SharedGuestNetworkComponent::Bridge,
                 source: GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::BridgeObserve,
                     expected: GuestNetworkFact::Bridge {
-                        name: "ovd-gbr0".to_owned(),
+                        name: BRIDGE.to_owned(),
                         ifindex: None,
                         link_kind: GuestLinkKind::Bridge,
                         mac: overdrive_core::dataplane::GUEST_BRIDGE_MAC,
                         up: true,
-                        gateway: Some(Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 1), 16)),
+                        gateway: Some(expected_gateway),
                     },
-                    observed: None,
+                    observed,
                 },
             });
         }
@@ -11011,7 +11047,6 @@ mod shared_owner_link_address_kernel {
     /// fresh node, an out-of-band `down` is reported the same way with
     /// `up: false`.
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
     async fn a_bridge_identity_mismatch_names_the_observed_address_and_up_state() {
         require_root("a_bridge_identity_mismatch_names_the_observed_address_and_up_state");
         for (row, mutation, observed_mac, observed_up) in [

@@ -354,7 +354,6 @@ impl Drop for FreshHostCleanup {
 /// recorded and counts for neither side; at least one boot must reach the
 /// read-back.
 #[tokio::test]
-#[ignore = "pending DELIVER step 05-00 (S-ND295-00)"]
 async fn production_host_owner_boots_only_after_real_shared_identity_is_exact() {
     // SAFETY: `geteuid` has no memory-safety preconditions.
     assert_eq!(

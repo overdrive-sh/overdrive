@@ -446,32 +446,20 @@ impl Client {
         }
     }
 
-    /// Create or adopt a host bridge with the requested name.
-    ///
-    /// The pinned contract (FD § "[REF] Managed-link identity independent of
-    /// host link configuration (fresh-host RCA) — pinned 2026-09-26; user
-    /// rulings of 2026-09-28", *Bridge creation contract*): with no link named
-    /// `name`, one `RTM_NEWLINK` creates the bridge administratively down with
-    /// link-layer address `mac` (`IFLA_ADDRESS`) from creation; a link already
-    /// named `name`, of any kind, is adopted without any write, and the
-    /// caller's read-back decides. Until DELIVER step 05-00 lands that create
-    /// message, `mac` is unused: a created bridge carries a kernel-assigned
-    /// address that the caller then sets. The adopt branch already behaves as
-    /// pinned.
+    /// Create the host bridge `name`, administratively down, with link-layer
+    /// address `mac` (`IFLA_ADDRESS`) from creation, or adopt the link already
+    /// named `name` without writing to it. The caller's read-back decides
+    /// whether an adopted link meets the bridge contract.
     ///
     /// # Errors
     ///
     /// [`NetlinkError::Link`] with `op: "get"` for an `RTM_GETLINK` failure
     /// other than `ENODEV`, and with `op: "add-bridge"` for a refused create.
     pub async fn ensure_bridge(&self, name: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
-        // RED scaffold (FD § "[REF] Managed-link identity independent of host
-        // link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings
-        // of 2026-09-28"): `mac` joins the create message in DELIVER step 05-00.
-        let _ = mac;
         if self.observe_link(name).await?.is_none() {
             self.handle
                 .link()
-                .add(LinkBridge::new(name).build())
+                .add(LinkBridge::new(name).address(mac.to_vec()).down().build())
                 .execute()
                 .await
                 .map_err(|err| NetlinkError::link("add-bridge", err))?;

@@ -141,7 +141,6 @@ fn facts(name: &str) -> LinkFacts {
 /// with no set issued in between — reads kind bridge, address `mac`,
 /// `addr_assign_type` 3, and the link down.
 #[test]
-#[ignore = "pending DELIVER step 05-00 (S-ND295-72)"]
 fn a_created_bridge_carries_its_address_from_creation_and_starts_down() {
     require_root("a_created_bridge_carries_its_address_from_creation_and_starts_down");
     let name = scratch_name("lb");
