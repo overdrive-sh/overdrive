@@ -47,10 +47,8 @@ const NLM_F_REQUEST: u16 = 0x01;
 const NLM_F_ACK: u16 = 0x04;
 const NLMSG_ERROR: u16 = 0x02;
 /// `NLM_F_DUMP` (`NLM_F_ROOT | NLM_F_MATCH`, `include/uapi/linux/netlink.h`).
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const NLM_F_DUMP: u16 = 0x300;
 /// `NLMSG_DONE` (`include/uapi/linux/netlink.h`) — ends a dump.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const NLMSG_DONE: u16 = 0x3;
 const NLA_F_NESTED: u16 = 0x8000;
 
@@ -67,28 +65,20 @@ const ETHTOOL_A_BITSET_BIT_NAME: u16 = 2;
 // ---- ethtool debug message mask (D-295-R22 read-back; pinned from
 // `include/uapi/linux/ethtool_netlink_generated.h`) ---------------------------
 /// `ETHTOOL_MSG_DEBUG_GET`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_MSG_DEBUG_GET: u8 = 7;
 /// `ETHTOOL_A_DEBUG_HEADER`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_DEBUG_HEADER: u16 = 1;
 /// `ETHTOOL_A_DEBUG_MSGMASK`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_DEBUG_MSGMASK: u16 = 2;
 /// `ETHTOOL_A_HEADER_FLAGS`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_HEADER_FLAGS: u16 = 3;
 /// `ETHTOOL_FLAG_COMPACT_BITSETS`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_FLAG_COMPACT_BITSETS: u32 = 1;
 /// `ETHTOOL_A_BITSET_SIZE`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_BITSET_SIZE: u16 = 2;
 /// `ETHTOOL_A_BITSET_VALUE`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_BITSET_VALUE: u16 = 4;
 /// `ETHTOOL_A_HEADER_DEV_INDEX`.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 06-01")]
 const ETHTOOL_A_HEADER_DEV_INDEX: u16 = 1;
 /// `ETHTOOL_A_BITSET_BIT_VALUE` — present ⇒ target value 1 (on). We NEVER
 /// emit it (the "off" invariant); named here only so the encoder test can
@@ -248,13 +238,11 @@ pub async fn tx_offload_on(iface: &str) -> Result<bool, NetlinkError> {
 /// [`NetlinkError::Ethtool`] with `op` `"debug-get-socket"`,
 /// `"resolve-family"`, `"debug-get"` (a kernel NACK, errno preserved),
 /// `"debug-get-decode"` (a reply without the mask), or
-/// `"debug-blocking-join"` (a `spawn_blocking` join failure). No read failure
+/// `"debug-thread"` (the OS refused the worker thread or it ended without a result). No read failure
 /// is absorbed into a default mask.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
-#[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 06-01")]
 pub async fn debug_msg_mask(iface: &str) -> Result<u32, NetlinkError> {
-    let _ = iface;
-    todo!("RED scaffold: D-295-R22 debug_msg_mask — DELIVER step 06-01")
+    let iface = iface.to_owned();
+    run_debug_thread(move || debug_msg_mask_sync(&iface)).await
 }
 
 /// Every host-namespace netdev's ethtool debug message mask, keyed by ifindex.
@@ -270,12 +258,266 @@ pub async fn debug_msg_mask(iface: &str) -> Result<u32, NetlinkError> {
 /// `"resolve-family"`, `"debug-get"` (a kernel NACK, errno preserved),
 /// `"debug-get-decode"` (a reply without the mask or the device index),
 /// `"debug-dump"` (a dump NACK or a multipart read failure), or
-/// `"debug-blocking-join"` (a `spawn_blocking` join failure). No read failure
+/// `"debug-thread"` (the OS refused the worker thread or it ended without a result). No read failure
 /// is absorbed into a default mask.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
-#[allow(clippy::unused_async, reason = "RED scaffold — DELIVER step 06-01")]
 pub async fn debug_msg_masks() -> Result<BTreeMap<u32, u32>, NetlinkError> {
-    todo!("RED scaffold: D-295-R22 debug_msg_masks — DELIVER step 06-01")
+    run_debug_thread(debug_msg_masks_sync).await
+}
+
+async fn run_debug_thread<T, F>(operation: F) -> Result<T, NetlinkError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, NetlinkError> + Send + 'static,
+{
+    let (sender, receiver) = futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("ethtool-debug-read".to_owned())
+        .spawn(move || {
+            let _ = sender.send(operation());
+        })
+        .map_err(|source| NetlinkError::ethtool("debug-thread", source))?;
+    receiver.await.map_err(|_| {
+        NetlinkError::ethtool(
+            "debug-thread",
+            std::io::Error::other("ethtool debug worker ended without a result"),
+        )
+    })?
+}
+
+fn debug_msg_mask_sync(iface: &str) -> Result<u32, NetlinkError> {
+    let mut socket = debug_genl_socket()?;
+    let family = socket
+        .resolve_family("ethtool")
+        .map_err(|source| NetlinkError::ethtool("resolve-family", source))?;
+    let payload = encode_debug_get_payload(Some(iface));
+    let reply = socket
+        .request(family, ETHTOOL_MSG_DEBUG_GET, 1, NLM_F_REQUEST, &payload)
+        .map_err(|source| NetlinkError::ethtool("debug-get", source))?;
+    decode_debug_get_reply(&reply).map_err(|error| match error {
+        DebugReplyError::Kernel(source) => NetlinkError::ethtool("debug-get", source),
+        DebugReplyError::Decode(source) => NetlinkError::ethtool("debug-get-decode", source),
+    })
+}
+
+fn debug_msg_masks_sync() -> Result<BTreeMap<u32, u32>, NetlinkError> {
+    let mut socket = debug_genl_socket()?;
+    let family = socket
+        .resolve_family("ethtool")
+        .map_err(|source| NetlinkError::ethtool("resolve-family", source))?;
+    let payload = encode_debug_get_payload(None);
+    socket
+        .send_request(family, ETHTOOL_MSG_DEBUG_GET, 1, NLM_F_REQUEST | NLM_F_DUMP, &payload)
+        .map_err(|source| NetlinkError::ethtool("debug-dump", source))?;
+
+    let mut masks = BTreeMap::new();
+    loop {
+        let reply =
+            socket.receive().map_err(|source| NetlinkError::ethtool("debug-dump", source))?;
+        if decode_debug_dump_datagram(&reply, &mut masks)? {
+            return Ok(masks);
+        }
+    }
+}
+
+fn debug_genl_socket() -> Result<GenlSock, NetlinkError> {
+    let socket =
+        GenlSock::open().map_err(|source| NetlinkError::ethtool("debug-get-socket", source))?;
+    socket
+        .set_receive_timeout()
+        .map_err(|source| NetlinkError::ethtool("debug-get-socket", source))?;
+    Ok(socket)
+}
+
+fn encode_debug_get_payload(device_name: Option<&str>) -> Vec<u8> {
+    let mut header = Vec::new();
+    if let Some(device_name) = device_name {
+        nla(&mut header, ETHTOOL_A_HEADER_DEV_NAME, &cstr(device_name));
+    }
+    nla(&mut header, ETHTOOL_A_HEADER_FLAGS, &ETHTOOL_FLAG_COMPACT_BITSETS.to_ne_bytes());
+    let mut payload = Vec::new();
+    nla(&mut payload, ETHTOOL_A_DEBUG_HEADER | NLA_F_NESTED, &header);
+    payload
+}
+
+enum DebugReplyError {
+    Kernel(std::io::Error),
+    Decode(std::io::Error),
+}
+
+fn decode_debug_get_reply(reply: &[u8]) -> Result<u32, DebugReplyError> {
+    let (message, _) = next_netlink_message(reply, 0)
+        .map_err(DebugReplyError::Decode)?
+        .ok_or_else(|| DebugReplyError::Decode(std::io::Error::other("empty DEBUG_GET reply")))?;
+    match kernel_error(message).map_err(DebugReplyError::Decode)? {
+        Some(source) => return Err(DebugReplyError::Kernel(source)),
+        None if ne_u16(message, 4) == NLMSG_ERROR => {
+            return Err(DebugReplyError::Decode(std::io::Error::other(
+                "DEBUG_GET returned an ACK without a debug message mask",
+            )));
+        }
+        None => {}
+    }
+    debug_mask_from_message(message).map_err(DebugReplyError::Decode)
+}
+
+fn decode_debug_dump_datagram(
+    datagram: &[u8],
+    masks: &mut BTreeMap<u32, u32>,
+) -> Result<bool, NetlinkError> {
+    let mut offset = 0;
+    while let Some((message, next)) = next_netlink_message(datagram, offset)
+        .map_err(|source| NetlinkError::ethtool("debug-dump", source))?
+    {
+        match ne_u16(message, 4) {
+            NLMSG_DONE => {
+                if message.len() >= 20 {
+                    let error =
+                        i32::from_ne_bytes([message[16], message[17], message[18], message[19]]);
+                    if error != 0 {
+                        let errno = error.checked_abs().ok_or_else(|| {
+                            NetlinkError::ethtool(
+                                "debug-dump",
+                                std::io::Error::other("invalid NLMSG_DONE errno"),
+                            )
+                        })?;
+                        return Err(NetlinkError::ethtool(
+                            "debug-dump",
+                            std::io::Error::from_raw_os_error(errno),
+                        ));
+                    }
+                }
+                return Ok(true);
+            }
+            NLMSG_ERROR => {
+                if let Some(source) = kernel_error(message)
+                    .map_err(|source| NetlinkError::ethtool("debug-dump", source))?
+                {
+                    return Err(NetlinkError::ethtool("debug-dump", source));
+                }
+            }
+            _ => {
+                let mask = debug_mask_from_message(message)
+                    .map_err(|source| NetlinkError::ethtool("debug-get-decode", source))?;
+                let ifindex = debug_ifindex_from_message(message)
+                    .map_err(|source| NetlinkError::ethtool("debug-get-decode", source))?;
+                masks.insert(ifindex, mask);
+            }
+        }
+        offset = next;
+    }
+    Ok(false)
+}
+
+fn debug_mask_from_message(message: &[u8]) -> std::io::Result<u32> {
+    let attributes = debug_message_attributes(message)?;
+    let bitset = find_attribute(attributes, ETHTOOL_A_DEBUG_MSGMASK)?
+        .ok_or_else(|| std::io::Error::other("ETHTOOL_A_DEBUG_MSGMASK is absent"))?;
+    let size = find_attribute(bitset, ETHTOOL_A_BITSET_SIZE)?
+        .ok_or_else(|| std::io::Error::other("ETHTOOL_A_BITSET_SIZE is absent"))?;
+    if size.len() < 4 {
+        return Err(std::io::Error::other("short ETHTOOL_A_BITSET_SIZE"));
+    }
+    let value = find_attribute(bitset, ETHTOOL_A_BITSET_VALUE)?
+        .ok_or_else(|| std::io::Error::other("ETHTOOL_A_BITSET_VALUE is absent"))?;
+    if value.len() < 4 {
+        return Err(std::io::Error::other("short ETHTOOL_A_BITSET_VALUE"));
+    }
+    Ok(ne_u32(value, 0))
+}
+
+fn debug_ifindex_from_message(message: &[u8]) -> std::io::Result<u32> {
+    let attributes = debug_message_attributes(message)?;
+    let header = find_attribute(attributes, ETHTOOL_A_DEBUG_HEADER)?
+        .ok_or_else(|| std::io::Error::other("ETHTOOL_A_DEBUG_HEADER is absent"))?;
+    let index = find_attribute(header, ETHTOOL_A_HEADER_DEV_INDEX)?
+        .ok_or_else(|| std::io::Error::other("ETHTOOL_A_HEADER_DEV_INDEX is absent"))?;
+    if index.len() < 4 {
+        return Err(std::io::Error::other("short ETHTOOL_A_HEADER_DEV_INDEX"));
+    }
+    Ok(ne_u32(index, 0))
+}
+
+fn debug_message_attributes(message: &[u8]) -> std::io::Result<&[u8]> {
+    if message.len() < 20 {
+        return Err(std::io::Error::other("short ethtool DEBUG_GET message"));
+    }
+    Ok(&message[20..])
+}
+
+fn find_attribute(attributes: &[u8], wanted: u16) -> std::io::Result<Option<&[u8]>> {
+    let mut offset = 0;
+    while offset < attributes.len() {
+        if attributes.len() - offset < 4 {
+            return Err(std::io::Error::other("truncated netlink attribute header"));
+        }
+        let length = usize::from(ne_u16(attributes, offset));
+        if length < 4 || length > attributes.len() - offset {
+            return Err(std::io::Error::other("invalid netlink attribute length"));
+        }
+        let kind = ne_u16(attributes, offset + 2) & 0x3fff;
+        let value_start = offset + 4;
+        let value_end = offset + length;
+        if kind == wanted {
+            return Ok(Some(&attributes[value_start..value_end]));
+        }
+        let aligned_length = length
+            .checked_add(3)
+            .map(|aligned| aligned & !3)
+            .ok_or_else(|| std::io::Error::other("netlink attribute length overflow"))?;
+        let next = offset
+            .checked_add(aligned_length)
+            .ok_or_else(|| std::io::Error::other("netlink attribute offset overflow"))?;
+        if next > attributes.len() {
+            if value_end == attributes.len() {
+                break;
+            }
+            return Err(std::io::Error::other("truncated netlink attribute padding"));
+        }
+        offset = next;
+    }
+    Ok(None)
+}
+
+fn next_netlink_message(datagram: &[u8], offset: usize) -> std::io::Result<Option<(&[u8], usize)>> {
+    if offset == datagram.len() {
+        return Ok(None);
+    }
+    if offset > datagram.len() || datagram.len() - offset < 16 {
+        return Err(std::io::Error::other("truncated netlink message header"));
+    }
+    let length = usize::try_from(ne_u32(datagram, offset))
+        .map_err(|_| std::io::Error::other("invalid netlink message length"))?;
+    if length < 16 || length > datagram.len() - offset {
+        return Err(std::io::Error::other("invalid netlink message length"));
+    }
+    let end = offset + length;
+    let aligned_length = length
+        .checked_add(3)
+        .map(|aligned| aligned & !3)
+        .ok_or_else(|| std::io::Error::other("netlink message length overflow"))?;
+    let aligned_end = offset
+        .checked_add(aligned_length)
+        .ok_or_else(|| std::io::Error::other("netlink message offset overflow"))?;
+    if aligned_end > datagram.len() && end != datagram.len() {
+        return Err(std::io::Error::other("truncated netlink message padding"));
+    }
+    Ok(Some((&datagram[offset..end], aligned_end.min(datagram.len()))))
+}
+
+fn kernel_error(message: &[u8]) -> std::io::Result<Option<std::io::Error>> {
+    if ne_u16(message, 4) != NLMSG_ERROR {
+        return Ok(None);
+    }
+    if message.len() < 20 {
+        return Err(std::io::Error::other("short NLMSG_ERROR"));
+    }
+    let code = i32::from_ne_bytes([message[16], message[17], message[18], message[19]]);
+    if code == 0 {
+        return Ok(None);
+    }
+    let errno =
+        code.checked_abs().ok_or_else(|| std::io::Error::other("invalid NLMSG_ERROR errno"))?;
+    Ok(Some(std::io::Error::from_raw_os_error(errno)))
 }
 
 /// `FEATURES_GET` via the `ethtool` crate: `(active-state map, changeable
@@ -327,8 +569,7 @@ async fn feature_snapshot(
     result.map(|()| (active, changeable))
 }
 
-/// A raw `NETLINK_GENERIC` socket for the hand-rolled `FEATURES_SET` request
-/// (spike increment-b's proven `GenlSock`).
+/// A raw `NETLINK_GENERIC` socket for hand-rolled ethtool requests.
 struct GenlSock {
     fd: i32,
     seq: u32,
@@ -364,6 +605,25 @@ impl GenlSock {
         Ok(Self { fd, seq: 1 })
     }
 
+    fn set_receive_timeout(&self) -> std::io::Result<()> {
+        let timeout = libc::timeval { tv_sec: 1, tv_usec: 0 };
+        // SAFETY: `timeout` is a valid initialized timeval and `fd` is an
+        // open socket owned by this value.
+        let result = unsafe {
+            libc::setsockopt(
+                self.fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                std::ptr::from_ref(&timeout).cast::<libc::c_void>(),
+                std::mem::size_of_val(&timeout) as libc::socklen_t,
+            )
+        };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     /// Send a genl request (`nlmsghdr` + `genlmsghdr` + payload) and return
     /// the raw reply bytes.
     fn request(
@@ -374,6 +634,18 @@ impl GenlSock {
         flags: u16,
         payload: &[u8],
     ) -> std::io::Result<Vec<u8>> {
+        self.send_request(family, cmd, version, flags, payload)?;
+        self.receive()
+    }
+
+    fn send_request(
+        &mut self,
+        family: u16,
+        cmd: u8,
+        version: u8,
+        flags: u16,
+        payload: &[u8],
+    ) -> std::io::Result<()> {
         self.seq += 1;
         let mut genl = Vec::new();
         genl.push(cmd);
@@ -407,6 +679,10 @@ impl GenlSock {
         if sent < 0 {
             return Err(std::io::Error::last_os_error());
         }
+        Ok(())
+    }
+
+    fn receive(&self) -> std::io::Result<Vec<u8>> {
         let mut buf = vec![0u8; 16384];
         // SAFETY: `buf` is a valid initialised buffer of `buf.len()`; `self.fd`
         // is open.

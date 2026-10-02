@@ -246,7 +246,6 @@ fn classifier_partitions_return_one_verdict_and_advance_one_exact_counter() {
 /// stays 0 across every row.
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-08)"]
 fn ingress_partitions_leave_the_ninth_egress_slot_untouched() {
     assert_ingress_partitions("guest-tcx-nine", COUNTER_SLOTS, Some(COUNTER_SLOTS));
 }
@@ -593,7 +592,6 @@ const fn endpoint_record(source_ip: [u8; 4], source_mac: [u8; 6]) -> Endpoint {
 #[allow(clippy::too_many_lines, reason = "one closed egress verdict table is audited intact")]
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-47)"]
 fn egress_classifier_delivers_only_registered_unicast_and_every_group_frame() {
     assert_eq!(
         std::fs::read_to_string("/sys/class/net/lo/ifindex")

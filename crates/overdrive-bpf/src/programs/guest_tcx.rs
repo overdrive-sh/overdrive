@@ -20,6 +20,7 @@ const ARP_PASS: u32 = 6;
 const MALFORMED_DROP: u32 = 7;
 const GATEWAY_HOST_PASS: u32 = 0;
 const INTERCEPT: u32 = 1;
+const EGRESS_DESTINATION_DROP: u32 = 8;
 
 #[inline(always)]
 fn bump(index: u32) {
@@ -128,12 +129,26 @@ pub fn gh295c_endpoint(mut ctx: TcContext) -> i32 {
 }
 
 /// TCX egress guest-MAC classifier (D-295-R21, ADR-0142).
-///
-/// RED scaffold: passes every frame. DELIVER step 06-01 replaces the body
-/// with the egress verdict table — deliver unicast only for the egressing
-/// TAP's registered guest MAC, every group frame always — and its
-/// `EgressDestinationDrop` counter slot.
 #[classifier]
-pub fn gh295c_egress(_ctx: TcContext) -> i32 {
-    TC_ACT_OK
+pub fn gh295c_egress(ctx: TcContext) -> i32 {
+    let Ok(ethernet) = ctx.load::<[u8; 14]>(0) else {
+        bump(EGRESS_DESTINATION_DROP);
+        return TC_ACT_SHOT;
+    };
+    let destination =
+        [ethernet[0], ethernet[1], ethernet[2], ethernet[3], ethernet[4], ethernet[5]];
+    if destination[0] & 1 != 0 {
+        return TC_ACT_OK;
+    }
+
+    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+    let Some(endpoint) = (unsafe { ENDPOINTS.get(&ifindex) }) else {
+        bump(EGRESS_DESTINATION_DROP);
+        return TC_ACT_SHOT;
+    };
+    if same(&destination, &endpoint.source_mac) {
+        return TC_ACT_OK;
+    }
+    bump(EGRESS_DESTINATION_DROP);
+    TC_ACT_SHOT
 }

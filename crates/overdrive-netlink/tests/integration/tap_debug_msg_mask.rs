@@ -70,7 +70,6 @@ fn ifindex(iface: &str) -> u32 {
 /// TAP reads zero and a changed level reads back singly and in the dump.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-49)"]
 fn a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump() {
     require_root("a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump");
     let tap = ScratchTap::create("dm");
@@ -106,7 +105,6 @@ fn a_fresh_tap_reads_zero_and_a_changed_level_reads_back_singly_and_in_the_dump(
 /// as a zero mask.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-49)"]
 fn an_absent_device_is_reported_with_its_original_cause() {
     require_root("an_absent_device_is_reported_with_its_original_cause");
     let absent = scratch_name("dx");

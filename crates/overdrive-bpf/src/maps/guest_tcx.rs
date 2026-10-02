@@ -19,4 +19,4 @@ pub struct Endpoint {
 pub static ENDPOINTS: HashMap<u32, Endpoint> = HashMap::with_max_entries(65_536, 0);
 
 #[map]
-pub static COUNTERS: Array<u64> = Array::with_max_entries(8, 0);
+pub static COUNTERS: Array<u64> = Array::with_max_entries(9, 0);

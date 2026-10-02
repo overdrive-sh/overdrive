@@ -331,7 +331,6 @@ enum RetainedMap {
 /// still reports zero after cleanup (D-295-DISTILL-12 real eight families).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
 fn clean_and_receipted_inventory_observes_all_eight_exact_families() {
     let tap = ScratchTap::create('i');
     let pins = PinRoot::create("inventory-clean");
@@ -420,7 +419,6 @@ fn clean_and_receipted_inventory_observes_all_eight_exact_families() {
 /// the unretained egress classifier does not.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
 fn retained_unpinned_maps_programs_and_links_survive_handle_release_and_remain_observable() {
     let tap = ScratchTap::create('r');
     let pins = PinRoot::create("inventory-retained");

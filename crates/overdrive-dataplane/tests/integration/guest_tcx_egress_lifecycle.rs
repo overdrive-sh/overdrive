@@ -85,7 +85,6 @@ fn attached(tap: &ScratchTap, attach_point: TcxAttachPoint) -> Vec<u32> {
 /// and detached at the TAP's egress point like its ingress sibling.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
 fn the_egress_classifier_attaches_pins_queries_and_detaches_at_the_egress_point() {
     let tap = ScratchTap::create('e');
     let pins = PinRoot::create("egress-lifecycle");

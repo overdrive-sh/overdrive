@@ -250,6 +250,7 @@ const fn counter_index(counter: GuestTcxCounter) -> u32 {
 }
 
 const TCX_INGRESS_ATTACH_TYPE: u32 = 46;
+const TCX_EGRESS_ATTACH_TYPE: u32 = 47;
 
 const fn expected_map_schema(endpoint: bool) -> GuestTcxMapSchema {
     if endpoint {
@@ -1005,7 +1006,7 @@ fn project_map_schema(raw: &RawGuestTcxMapObservation) -> GuestTcxMapSchema {
     };
     let capacity = if endpoint && raw.max_entries == 65_536 {
         GuestTcxMapCapacity::EndpointMaximum
-    } else if counter && raw.max_entries == 8 {
+    } else if counter && raw.max_entries == 9 {
         GuestTcxMapCapacity::CounterSlots
     } else {
         GuestTcxMapCapacity::Unsupported(GuestTcxUnsupportedMapProperty(raw.max_entries))
@@ -1055,6 +1056,8 @@ struct GuestTcxInventoryReceipts {
     endpoint_ifindices: BTreeSet<u32>,
     program_id: Option<u32>,
     program_tag: Option<u64>,
+    egress_program_id: Option<u32>,
+    egress_program_tag: Option<u64>,
     link_id: Option<u32>,
     link_program_id: Option<u32>,
     link_target_ifindex: Option<u32>,
@@ -1074,6 +1077,7 @@ pub struct GuestTcxProgram {
     counter_map_pin: Option<PathBuf>,
     endpoints: BTreeMap<u32, GuestTcxEndpoint>,
     program_id: u32,
+    egress_program_id: u32,
 }
 
 #[doc(hidden)]
@@ -1154,9 +1158,20 @@ impl GuestTcxProgram {
         let info = classifier.info().map_err(|source| GuestTcxError::Program { source })?;
         let program_id = info.id();
         let program_tag = info.tag();
+        let program = bpf
+            .program_mut("gh295c_egress")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EgressClassifier })?;
+        let classifier: &mut SchedClassifier =
+            program.try_into().map_err(|source| GuestTcxError::Program { source })?;
+        classifier.load().map_err(|source| GuestTcxError::Program { source })?;
+        let info = classifier.info().map_err(|source| GuestTcxError::Program { source })?;
+        let egress_program_id = info.id();
+        let egress_program_tag = info.tag();
         let mut receipts = inventory.receipts.lock();
         receipts.program_id = Some(program_id);
         receipts.program_tag = Some(program_tag);
+        receipts.egress_program_id = Some(egress_program_id);
+        receipts.egress_program_tag = Some(egress_program_tag);
         drop(receipts);
         Ok(Self {
             inventory: inventory.clone(),
@@ -1167,6 +1182,7 @@ impl GuestTcxProgram {
             counter_map_pin: None,
             endpoints: BTreeMap::new(),
             program_id,
+            egress_program_id,
         })
     }
     pub fn pin_endpoint_map(&mut self, pin: &Path) -> Result<GuestTcxMapSchema, GuestTcxError> {
@@ -1313,11 +1329,36 @@ impl GuestTcxProgram {
     /// egress with first ordering. Sibling of `attach_first_ingress`; the
     /// returned link's `program_id()` is the egress classifier's id and its
     /// attachment type is TCX egress.
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 06-01")]
-    #[allow(clippy::needless_pass_by_ref_mut, reason = "RED scaffold — DELIVER step 06-01")]
     pub fn attach_first_egress(&mut self, interface: &str) -> Result<GuestTcxLink, GuestTcxError> {
-        let _ = interface;
-        todo!("RED scaffold: D-295-R21 attach_first_egress — DELIVER step 06-01")
+        let target_ifindex = std::fs::read_to_string(format!("/sys/class/net/{interface}/ifindex"))
+            .map_err(|source| GuestTcxError::Io { source })?
+            .trim()
+            .parse::<u32>()
+            .map_err(|source| GuestTcxError::Io {
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+            })?;
+        let program = self
+            .bpf
+            .program_mut("gh295c_egress")
+            .ok_or(GuestTcxError::ObjectMissing { object: GuestTcxObject::EgressClassifier })?;
+        let classifier: &mut SchedClassifier =
+            program.try_into().map_err(|source| GuestTcxError::Program { source })?;
+        let id = classifier
+            .attach_with_options(
+                interface,
+                TcAttachType::Egress,
+                TcAttachOptions::TcxOrder(aya::programs::LinkOrder::first()),
+            )
+            .map_err(|source| GuestTcxError::Program { source })?;
+        let link = classifier.take_link(id).map_err(|source| GuestTcxError::Program { source })?;
+        let fd_link: FdLink = link.try_into().map_err(|source| GuestTcxError::Link { source })?;
+        Ok(GuestTcxLink {
+            link: Some(fd_link),
+            program_id: self.egress_program_id,
+            target_ifindex,
+            attach_type: TCX_EGRESS_ATTACH_TYPE,
+            inventory: self.inventory.clone(),
+        })
     }
 }
 
@@ -1493,16 +1534,22 @@ impl GuestTcxAdoptedState {
             inventory: self.inventory.clone(),
         }))
     }
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        reason = "preserve the accepted receiver shape while the adopted map handle remains live until drop"
+    )]
     pub fn unpin_counter_map(&mut self) -> Result<(), GuestTcxError> {
-        let _ = self.counter_map.take();
         match std::fs::remove_file(&self.inventory.counter_map_pin) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(source) => Err(GuestTcxError::Io { source }),
         }
     }
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        reason = "preserve the accepted receiver shape while the adopted map handle remains live until drop"
+    )]
     pub fn unpin_endpoint_map(&mut self) -> Result<(), GuestTcxError> {
-        let _ = self.endpoint_map.take();
         match std::fs::remove_file(&self.inventory.endpoint_map_pin) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1639,41 +1686,43 @@ impl GuestTcxInventoryIdentity {
             .source
             .loaded_programs()
             .map_err(|_| GuestTcxError::InventoryAmbiguous { family })?;
-        let program_receipt = self.receipts.lock().program_id;
-        if let Some(id) = program_receipt {
+        let receipts = self.receipts.lock();
+        let expected_programs = [
+            (receipts.program_id, receipts.program_tag, b"gh295c_endpoint".as_slice()),
+            (receipts.egress_program_id, receipts.egress_program_tag, b"gh295c_egress".as_slice()),
+        ];
+        let endpoint_map_id = receipts.endpoint_map_id;
+        let counter_map_id = receipts.counter_map_id;
+        let receipt_ids: BTreeSet<u32> =
+            expected_programs.iter().filter_map(|(id, _, _)| *id).collect();
+        drop(receipts);
+
+        let mut count = 0;
+        for (id, tag, name) in expected_programs {
+            let Some(id) = id else { continue };
             let Some(program) = programs.iter().find(|program| program.id == id) else {
-                return Ok(0);
-            };
-            let (endpoint_map_id, counter_map_id, program_tag) = {
-                let expected_maps = self.receipts.lock();
-                (
-                    expected_maps.endpoint_map_id,
-                    expected_maps.counter_map_id,
-                    expected_maps.program_tag,
-                )
+                continue;
             };
             let map_ids_match = endpoint_map_id
                 .is_none_or(|map_id| program.map_ids.contains(&map_id))
                 && counter_map_id.is_none_or(|map_id| program.map_ids.contains(&map_id));
-            if !map_ids_match {
-                return Err(GuestTcxError::OwnershipMismatch {
-                    family: GuestTcxInventoryFamily::TcxProgram,
-                });
+            if !map_ids_match
+                || tag != Some(program.tag)
+                || program.name.as_slice() != name
+                || program.program_type != aya::programs::ProgramType::SchedClassifier
+            {
+                return Err(GuestTcxError::OwnershipMismatch { family });
             }
-            if program_tag != Some(program.tag) {
-                return Err(GuestTcxError::OwnershipMismatch {
-                    family: GuestTcxInventoryFamily::TcxProgram,
-                });
-            }
-            return Ok(u32::from(
-                program.name.as_slice() == b"gh295c_endpoint"
-                    && program.program_type == aya::programs::ProgramType::SchedClassifier,
-            ));
+            count += 1;
         }
+
         let baseline = self.baseline.lock();
-        let candidates =
-            programs.iter().filter(|program| !baseline.programs.contains_key(&program.id)).count();
-        if candidates > 0 { Err(GuestTcxError::InventoryAmbiguous { family }) } else { Ok(0) }
+        if programs.iter().any(|program| {
+            !baseline.programs.contains_key(&program.id) && !receipt_ids.contains(&program.id)
+        }) {
+            return Err(GuestTcxError::InventoryAmbiguous { family });
+        }
+        Ok(count)
     }
 
     fn observe_links(&self) -> Result<u32, GuestTcxError> {
@@ -1894,7 +1943,6 @@ mod tests {
     /// counter schema accepts exactly nine slots (eight becomes `Unsupported`).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 06-01 (S-ND295-48)"]
     fn semantic_counter_vocabulary_maps_to_the_exact_private_array_slots() {
         let cases = [
             (GuestTcxCounter::GatewayHostPass, 0),
@@ -2698,6 +2746,8 @@ mod tests {
             endpoint_ifindices: BTreeSet::from([295]),
             program_id: Some(297),
             program_tag: Some(0x295),
+            egress_program_id: None,
+            egress_program_tag: None,
             link_id: Some(298),
             link_program_id: Some(297),
             link_target_ifindex: Some(295),
