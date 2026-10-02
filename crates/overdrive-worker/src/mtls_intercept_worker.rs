@@ -5694,7 +5694,6 @@ mod tests {
     /// over a shared allocation: a late install creates no listener, member, or
     /// child.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 05-01 (S-ND295-20)"]
     async fn shared_allocation_start_after_owner_shutdown_is_rejected_before_install() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);

@@ -1,8 +1,8 @@
-//! Tier-3 acceptance test for the worker's intercept-install + leg-acquire
-//! role (`overdrive_worker::mtls_intercept`, D-MTLS-14 / SD-1(a)).
+//! Tier-3 integration evidence for host mTLS interception kernel effects and
+//! the B-7 shared listener.
 //!
-//! Proves the four production free functions against REAL kernel side
-//! effects on the Lima 6.18 kernel — no mocks, no synthetic ctx:
+//! Proves selected production adapter operations against REAL kernel side
+//! effects on the Lima kernel — no mocks, no synthetic ctx:
 //!
 //!   AC1 `make_transparent_listener` → a listener whose socket has
 //!        `IP_TRANSPARENT` set (proven by `getsockopt(SOL_IP,
@@ -13,23 +13,19 @@
 //!        does NOT raze the first); dropping ONE guard removes ONLY that
 //!        virt's rule by handle, leaving the sibling's rule + the shared
 //!        chain/exemption/ip-rule/route intact.
-//!   AC3 `accept_inbound_leg` on a TPROXY-redirected connection recovers
-//!        orig-dst via `getsockname` and builds
-//!        `Routed::Inbound { orig_dst }` equal to the client's intended
-//!        `virt`.
-//!   AC4 `accept_outbound_leg` builds `Routed::Outbound { peer }` with the
-//!        pre-programmed peer; the owned leg is handed by value.
+//!   S-ND295-70 `HostMtlsIntercept` accepts redirected outbound and inbound
+//!        connections through the shared listener port; each accepted
+//!        connection reports its original destination as `local` and its
+//!        sender as `peer`.
 //!   D3  the F5 `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption is present
 //!        in the shared chain AND ordered BEFORE any tproxy rule; a dial with
 //!        `SO_MARK = MTLS_LEG_S_DIAL_MARK` is NOT redirected to leg C (the
 //!        exemption accepts it, no recursion).
 //!
-//! Port-to-port: every assertion enters through the `mtls_intercept`
-//! module's public driving-port fns and asserts at the kernel boundary
-//! (`getsockopt`, `nft -a list chain`, `ip rule`, a real redirected connect →
-//! `getsockname`). Deleting the body of `accept_inbound_leg` MUST keep
-//! AC3 RED — the orig-dst is recovered by production code, not the
-//! fixture.
+//! The kernel-effect bodies assert at the syscall/kernel boundary
+//! (`getsockopt`, `nft -a list chain`, `ip rule`). The S-ND295-70 bodies drive
+//! `HostMtlsIntercept::bind_transparent` and `InterceptListener::accept` for
+//! the real redirected-connect original-destination evidence.
 //!
 //! Requires root + `CAP_NET_ADMIN` (IP_TRANSPARENT, nft, ip rule/route):
 //! run via `cargo xtask lima run -- cargo nextest run -p overdrive-worker
@@ -94,9 +90,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use overdrive_core::AllocationId;
 use overdrive_core::dataplane::{GUEST_BRIDGE_MAC, MTLS_LEG_S_DIAL_MARK};
-use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_dataplane::DEFAULT_PIN_DIR;
 use overdrive_dataplane::guest_tcx::{
     GuestTcxCounter, GuestTcxEndpoint, GuestTcxInventoryIdentity, GuestTcxProgram, TcxAttachPoint,
@@ -105,8 +99,8 @@ use overdrive_dataplane::guest_tcx::{
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept::{
-    InterceptPostcondition, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
-    install_inbound_tproxy, install_outbound_tproxy, make_transparent_listener,
+    InterceptPostcondition, install_inbound_tproxy, install_outbound_tproxy,
+    make_transparent_listener,
 };
 use overdrive_worker::mtls_intercept_port::{
     HostMtlsIntercept, InterceptAcceptError, InterceptGuard, MtlsIntercept,
@@ -956,80 +950,6 @@ impl ConnectCompat for TcpStream {
     }
 }
 
-fn alloc(name: &str) -> AllocationId {
-    AllocationId::new(name).expect("valid allocation id")
-}
-
-/// AC1–AC4: outbound leg acquire recovers the dialed orig-dst via `getsockname`
-/// (symmetric with `accept_inbound_leg`). `make_transparent_listener` is NOT
-/// used for leg F (leg F is a plain loopback listener — the design states leg F
-/// needs no IP_TRANSPARENT), so this scenario stands up a plain
-/// `std::net::TcpListener` on `127.0.0.1:0`, dials it, and drives
-/// `accept_outbound_and_recover_orig_dst`. The recovered `orig_dst` is the
-/// dialed addr (== the listener's `outbound_target`) and the leg is handed by value
-/// (an OwnedFd) — the worker's resolve consumer (04-02) then classifies
-/// `orig_dst` and stamps the resolved backend addr into `Routed::Outbound` on
-/// the `Mesh` arm; the routing peer is NO LONGER built here.
-#[test]
-fn worker_intercept_install_leg_acquire_outbound() {
-    if !is_root() {
-        eprintln!("SKIP worker_intercept_install_leg_acquire_outbound: not root");
-        return;
-    }
-
-    // leg-F listener: plain loopback, no IP_TRANSPARENT (per D-MTLS-14).
-    let leg_f = std::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("bind leg-F loopback listener");
-    let outbound_target = match leg_f.local_addr().expect("leg-F local_addr") {
-        std::net::SocketAddr::V4(a) => a,
-        other => panic!("expected V4 leg-F addr, got {other}"),
-    };
-
-    // A client thread dials the leg-F listener so the production accept has a
-    // pending connection. The byte exchange proves the returned OwnedFd is the
-    // genuine accepted leg (we write through it and the client reads it back).
-    let client = std::thread::spawn(move || {
-        let mut s = dial(outbound_target, Duration::from_secs(5)).expect("dial leg-F");
-        let mut buf = [0u8; 4];
-        s.read_exact(&mut buf).expect("read leg-F probe byte");
-        buf
-    });
-
-    let (leg, orig_dst) = accept_outbound_and_recover_orig_dst(&leg_f)
-        .expect("accept_outbound_and_recover_orig_dst must recover orig-dst");
-
-    // AC1/AC3: the recovered orig-dst is the dialed addr (== outbound_target) via
-    // getsockname on the accepted socket.
-    assert_eq!(
-        orig_dst, outbound_target,
-        "recovered orig_dst must be the getsockname-recovered dialed addr (outbound_target)"
-    );
-
-    // Prove the owned leg is the genuine accepted socket: write through a dup
-    // of it (an independent fd), the client reads it back byte-exact. We dup
-    // so the production type keeps owning `leg`.
-    {
-        let dup_fd = raw_dup(leg.as_raw_fd());
-        // SAFETY: dup_fd is an independent owned fd over the accepted TCP leg.
-        let mut stream = unsafe { TcpStream::from_raw_fd(dup_fd) };
-        stream.write_all(b"PING").expect("write through owned leg F");
-        stream.flush().ok();
-        // `stream` drops here, closing the dup; `leg` stays owned.
-    }
-    let echoed = client.join().expect("client thread");
-    assert_eq!(&echoed, b"PING", "client must read the byte written through the owned leg");
-    drop(leg);
-}
-
-/// Duplicate a raw fd (so the test can write through a copy without consuming
-/// the OwnedFd the production type owns). Returns the new fd.
-fn raw_dup(fd: i32) -> i32 {
-    // SAFETY: dup of a live fd; the returned fd is owned by the caller.
-    let new = unsafe { libc::dup(fd) };
-    assert!(new >= 0, "dup: {}", std::io::Error::last_os_error());
-    new
-}
-
 /// AC1: `make_transparent_listener` sets IP_TRANSPARENT on the real socket.
 #[test]
 fn worker_make_transparent_listener_sets_ip_transparent() {
@@ -1298,68 +1218,6 @@ fn same_egress_guard_install_twice_adopts_one_rule() {
     post_delete_observer
         .ensure_no_notifications()
         .expect("post-delete observer sees no second teardown");
-    clean_shared_infra();
-}
-
-/// AC3 (the PRIMARY deliverable): a REAL TPROXY-redirected connect to a virt →
-/// `accept_inbound_leg` → `Routed::Inbound { orig_dst }` with `orig_dst ==
-/// virt` (getsockname recovery). Deleting the body of `accept_inbound_leg`
-/// keeps this RED.
-#[test]
-fn worker_inbound_tproxy_redirect_recovers_orig_dst() {
-    if !is_root() {
-        eprintln!("SKIP worker_inbound_tproxy_redirect_recovers_orig_dst: not root");
-        return;
-    }
-    let _kernel_lock = KernelStateLock::acquire();
-    clean_shared_infra();
-
-    let leg_c = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-C");
-    let agent_port = match leg_c.local_addr().expect("leg-C local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-C addr, got {other}"),
-    };
-
-    let virt = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 5), 18555);
-    let guard = install_inbound_tproxy(virt, agent_port)
-        .expect("install_inbound_tproxy must append the per-virt TPROXY rule");
-
-    // AC2 sanity: the rule + companions are live before we drive the connect.
-    let dump = nft_list_chain().expect("nft chain overdrive-mtls prerouting must be present");
-    assert!(chain_has_virt_rule(&dump, virt), "virt's tproxy rule must be installed, got:\n{dump}");
-    assert!(
-        ip_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE),
-        "shared fwmark rule must be present"
-    );
-
-    // AC3: a real TPROXY-redirected connect lands on leg C; production
-    // accept_inbound_leg recovers orig-dst via getsockname == virt.
-    let client = std::thread::spawn(move || {
-        let s = dial(virt, Duration::from_secs(8));
-        if let Ok(mut s) = s {
-            let _ = s.write_all(b"HELLO");
-            std::thread::sleep(Duration::from_millis(200));
-        }
-    });
-
-    let alloc_id = alloc("alloc-inbound-leg");
-    let intercepted = accept_inbound_leg(&leg_c, alloc_id.clone())
-        .expect("accept_inbound_leg must build InterceptedConnection from TPROXY redirect");
-
-    match intercepted.routed {
-        Routed::Inbound { orig_dst } => {
-            assert_eq!(orig_dst, virt, "getsockname orig-dst must equal the client's virt");
-        }
-        Routed::Outbound { peer } => panic!("expected Inbound, got Outbound {{ {peer} }}"),
-    }
-    assert_eq!(intercepted.routed.direction(), Direction::Inbound);
-    assert_eq!(intercepted.alloc, alloc_id, "alloc must round-trip");
-    assert!(intercepted.expected_peer.is_none(), "v1 authn-only: expected_peer is None");
-
-    client.join().expect("inbound client thread");
-
-    drop(guard);
     clean_shared_infra();
 }
 
