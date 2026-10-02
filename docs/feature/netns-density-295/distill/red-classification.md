@@ -1157,3 +1157,171 @@ and guest-side fail-loud exits only.
   integration-tests,kvm-tests` (G6-C01): PASS.
 - Lima clippy `-D warnings` (G6-C02): PASS (one `clippy::borrow_as_ptr` on the
   `getsockopt` length pointer fixed to `std::ptr::from_mut`).
+
+## Phase G — Run 7: decision 1/2/3 follow-ups (2026-10-02)
+
+Authors the DISTILL coverage for the three DESIGN decisions pinned in
+`3d1bce23` — D1 kill loop (runs to its end before any further owner call or
+fail-stop, each write bounded by `SHARED_NETWORK_VM_KILL_CALL_BOUND`), D2 no
+panic on any owner/kill/supervisor path (release is `panic = "abort"`), and D3
+H14 (both nft element-batch outcomes proven over the module-private
+`SharedIpElementIo` seam). All new bodies carry a complete executable body
+under `#[ignore = "pending DELIVER step NN-NN (S-ND295-xx)"]`; no `should_panic`
+scaffolds, no placeholder `panic!`. Logs `target/phase-g-295/G8-*`.
+
+### Substrates
+
+- Seeded-sim + in-process (WI-1 S-ND295-30A, WI-6 S-ND295-32, WI-7 S-ND295-54):
+  Lima default lane, `cargo xtask lima run -- cargo nextest … --lib
+  --run-ignored all`. No kernel object, no leak surface.
+- E23 no-panic lane (WI-5 06-02/06-04/09-01): Lima **root**, real cgroup v2 +
+  real host netlink, the `overdrive-testing::pids_max` `pids.max` thread-refusal
+  guard. `cargo xtask lima run --` (root).
+- Native real-guest (WI-2 S-ND295-30B(f), WI-3 S-ND295-67(4)): metal only, and
+  RED on the 05-03 CH `Tap::enable` `SIOCSIFFLAGS` EPERM guest-boot baseline
+  (Phase G "Guest-boot diagnosis"). Classified against that baseline, **not
+  re-proven per body** (`testing.md` real-guest discipline); no metal run this
+  phase.
+
+### Gate / lint
+
+- `cargo fmt`: clean.
+- Lima compile-check `cargo check --workspace --all-targets --features
+  integration-tests` (G8-C02): PASS; scoped re-checks after each code edit
+  G8-C03 (control-plane), G8-C04 (worker): PASS.
+- Lima clippy `--workspace --all-targets --features integration-tests`
+  (G8-L01 → G8-L06): workspace **clean** at G8-L06. Findings fixed in-scope
+  (not deferred): `redundant_clone` + `items_after_statements`
+  (`overdrive-netlink/src/nft.rs` 4682/4698, WI-7), `missing_fields_in_debug`
+  → `finish_non_exhaustive` (`overdrive-sim/src/adapters/cgroup_fs.rs:145`,
+  WI-1 `clock` field), `too_long_first_doc_paragraph` ×3
+  (`overdrive-testing/src/pids_max.rs` module/struct/`refuse_thread_creation`
+  docs + the `pub mod pids_max` re-export doc in `src/lib.rs`), and a file-level
+  `#![allow(clippy::doc_markdown)]` on `refused_thread_kill.rs` matching the
+  sibling #295 Tier-3 convention (the `CONTRACT_SHAPE` header token carries no
+  backticks).
+
+### D1 — kill loop (WI-1 seeded; WI-2/WI-3 native)
+
+- **WI-1 — S-ND295-30A, three NEW seeded cells (user decision 1 of 2026-09-30).**
+  Source-local `overdrive-control-plane/src/lib.rs::shared_network_task_owner_acceptance`:
+  - `a_per_vm_kill_write_pending_past_its_bound_fails_the_node` — (c2) a per-VM
+    `cgroup.kill` write parked past `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the
+    injected clock is a failed kill: slice kill + one `VmKillFailed`, no owner
+    call between report and slice kill; a late-landing write changes nothing.
+  - `a_kill_loop_running_at_the_deadline_completes_before_the_one_request` — (i)
+    a kill loop straddling the 5 s recovery deadline writes every reported
+    scope's `cgroup.kill` in `AllocationId` order before the one
+    `RecoveryDeadlineExceeded` request; no slice kill (the loop ran to its end,
+    not cut short); no owner repair between report and request.
+  - `an_intentional_shutdown_mid_kill_loop_lets_the_loop_finish_first` — a
+    SIGINT/SIGTERM mid-loop cancels only between loops: every reported kill is
+    written in order, no slice kill, and intentional shutdown is not a fail-stop.
+  - **RED, right reason (G8-R01, seeded-sim Lima default lane).** All three FAIL:
+    the production supervisor `run_shared_network_supervisor`
+    (`lib.rs:1490`) is `todo!("RED scaffold: D-295-R13 run_shared_network_supervisor
+    — DELIVER step 09-01")`, so the `tokio-rt-worker` panics on the `todo!()`
+    and each body's `await_wake` asserts "the supervisor wakes and registers its
+    next wait" (`lib.rs:3057`). MISSING_FUNCTIONALITY — the kill-loop owner is
+    unbuilt; activated GREEN at 09-01. Not a fixture/setup error.
+- **WI-2 — S-ND295-30B(f) survivor oracle** (`overdrive-cli/tests/integration/shared_network_native_faults.rs`,
+  `#[ignore] = 10-02`): the survivor branch gains an explicit *no slice kill /
+  no fail-stop* oracle with the one-write-per-loop rationale. Native real-guest
+  → **RED on the 05-03 CH TAP-enable EPERM baseline**, classified against it
+  (not re-run).
+- **WI-3 — S-ND295-67(4) horizon** (same file, `#[ignore] = 10-02`): adds one
+  per-VM kill write at the 1 s floor (`KILL_WRITE_BOUND_FLOOR` +
+  `KILL_AFTER_CHANGE_BOUND`; oracle 4). Native → **RED on the same baseline**,
+  classified against it.
+
+### D2 — no panic on any owner/kill/supervisor path (WI-5 E23; WI-6)
+
+- **WI-6 — S-ND295-32, kill-write-bound cells** (seeded, source-local
+  `…::shared_network_task_owner_acceptance::{a_hung_audit_is_a_timeout_failure_of_its_owner,
+  a_call_pending_at_the_deadline_is_abandoned_uncounted,
+  a_quiescence_result_after_its_bound_is_ignored}`): **RED, right reason
+  (G8-R01)** — same `run_shared_network_supervisor` `todo!()` at 09-01.
+- **WI-5 — E23 no-panic lane, three NEW Lima-root cells. All RED for the right
+  reason, no leak.**
+  - `06-02` `guest_network.rs::shared_owner_link_address_kernel::block_on_host_netlink_returns_connect_when_a_thread_is_refused`
+    — **RED (G8-R03).** Under the `pids.max` cap the staged
+    `block_on_host_netlink`'s `std::thread::scope` → `scope.spawn` **panics**:
+    `failed to spawn thread: Os { code: 11, kind: WouldBlock, "Resource
+    temporarily unavailable" }` (`std/src/thread/scoped.rs:206`). This IS the
+    no-panic-baseline violation (Changed Assumption 40); DELIVER 06-02 replaces
+    `scope.spawn` with a fallible `Builder::spawn_scoped` returning
+    `NetlinkError::Connect`. `ThreadCreationRefused` Drop restored the process
+    on unwind — no `ovd-e23` scratch leaked.
+  - `06-04` `…::quiesce_managed_taps_never_aborts_when_a_thread_is_refused`
+    — **Run-7 correction, then RED.** As first authored (uncommitted WI-5) the
+    body converged a CLEAN node (zero allocations), so `quiesce_managed_taps`
+    iterated nothing and the refused-thread stimulus never fired: it passed
+    **vacuously** (G8-R04, 1 passed), failing its own stated intent and
+    DR-08 (b)-A (the per-TAP `Connect`→`unconfirmed` mapping needs an `Active`
+    TAP). Strengthened with `kernel_plan` + `owner.provision` + `owner.activate`
+    (existing owner API, used by the sibling S-ND295-72 body — no invented
+    surface) to register one managed `Active` TAP before the cap, and to assert
+    the host returns `Ok` (never `Err`) with that alloc in `unconfirmed` carrying
+    `Connect`. Now **RED (G8-R05):** provision+activate succeed (the pass reaches
+    the TAP), then quiesce's `block_on_host_netlink` `scope.spawn` panics with
+    the same EAGAIN. `_refused` + `NodeSharedStateSweep` Drops cleaned the TAP,
+    bridge, and scratch — leak check clean.
+  - `09-01` `overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs::a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts`
+    — **Run-7 correction, then RED.** As first authored the setup called
+    `CgroupManager::create_workloads_slice_with_controllers()`, which returns
+    `WriteFailed { NotFound }` because the parent `overdrive.slice` controllers
+    are not enrolled first (cgroup boot ordering) — a SETUP-failure *wrong* RED
+    (G8-R06, panic at `refused_thread_kill.rs:59` in setup). `cgroup.kill` is a
+    core cgroup-v2 file needing no controller delegation, so the setup was
+    simplified to `fs.create_dir(scope_dir)` (mkdir -p). Now **RED, right reason
+    (G8-R07):** under the cap the kill write's `tokio::fs` → `spawn_blocking`
+    **panics** `OS can't spawn worker thread: Resource temporarily unavailable
+    (os error 11)` (`tokio-1.52.1/src/fs/mod.rs:317`), exactly the behaviour the
+    DESIGN cites (FD § *quiesce_managed_taps contract*, tokio
+    `runtime/blocking/pool.rs`). DELIVER 09-01 moves the write off `tokio::fs`
+    to a fallible thread primitive returning `io::Error`. `AllocCleanup` +
+    `ThreadCreationRefused` Drops cleaned the scope and scratch; an unconditional
+    `cgroup.kill`/`rmdir` sweep after the run confirmed nothing leaked.
+
+### D3 — H14 element-batch outcomes (WI-7)
+
+- **WI-7 — S-ND295-54, four NEW cells over the module-private `SharedIpElementIo`
+  seam** (`overdrive-netlink/src/nft.rs`, default lane, scripted `ScriptedElementIo`
+  double): `a_rejected_batch_returns_its_error_after_one_send_with_no_observation_or_inverse`,
+  `a_failed_restoration_retains_both_the_primary_and_the_restoration_cause`,
+  `a_failed_or_mismatched_read_back_restores_once_and_returns_the_primary`,
+  `a_matching_read_back_returns_the_new_state_with_no_inverse`.
+  - **GREEN regression-locks (G8-R02, 4 passed).** These drive the
+    behaviour-preserving extraction `mutate_and_readback` directly through the
+    new seam; the R10 convergent-removal contract (a kernel-rejected batch
+    returns after one send with no observation or inverse; a failed/mismatched
+    read-back restores once and returns the primary cause; a matching read-back
+    returns the new state with no inverse) already holds, so they pass today and
+    lock it. They are **not fixture theater** — the real production function is
+    exercised; the `SharedIpElementIo` double stands in only for the netlink I/O
+    (the sanctioned external-port double). `#[ignore]`d until DELIVER 07-01 wires
+    the seam into the production removal path, which is where they activate as
+    the owning step's regression locks. This resolves the former H14 "two R10
+    netlink-failure arms have no real-kernel stimulus / returned to DESIGN"
+    testability boundary: the kernel guarantees a rejected `nft` batch commits
+    nothing, and both batch outcomes are now provable at the seam with no new
+    public surface.
+
+### Observations for DELIVER
+
+- The two Run-7 corrections both turned a false signal into a true one: a
+  vacuous PASS (06-04) and a setup-failure wrong-RED (09-01). Both are now
+  MISSING_FUNCTIONALITY RED against the no-panic baseline, and both encode their
+  DELIVER GREEN contract (06-04 → `Ok` + per-TAP `Connect`/`unconfirmed`; 09-01
+  → a typed `io::Error`, never a panic/abort).
+- `SHARED_NETWORK_VM_KILL_CALL_BOUND` is a `const … = Duration::from_secs(1)`
+  floor today (`lib.rs:1336`); DELIVER 09-01 sets it from the M-ND295-E18
+  receipt's W (largest single kill write) as `max(1 s, 4 × W)`, alongside the
+  AUDIT and QUIESCE bounds (WI-4; TS § *M-ND295-E18* and S-ND295-32 disposition).
+
+### Leak / VM hygiene
+
+- Lima left clean after every E23 run: no `ovd-e23-*` scratch cgroup, no
+  `alloc-e23kill-*.scope`, no `ovd-tp-f2e5`/`ovd-gbr0` or `overdrive-mtls` nft
+  residue (the `_refused`/`_sweep`/`AllocCleanup` Drops ran on unwind; a final
+  unconditional cgroup sweep confirmed it).

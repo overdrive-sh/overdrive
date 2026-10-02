@@ -40,6 +40,10 @@ mod integration {
         mod probe_with_custom_root;
         mod procs_pid_movement;
         mod pseudo_file_synthesis;
+        // GH #295 E23 (user decision 2 of 2026-09-30): a kill write whose
+        // write path cannot get an OS thread returns the refusal as an
+        // `io::Error`, never a panic/abort.
+        mod refused_thread_kill;
         mod rmdir_auto_reap;
         mod subtree_control_ebusy;
     }

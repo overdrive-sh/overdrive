@@ -116,6 +116,19 @@ const FULL_AUDIT_LATENCY_CEILING: Duration = Duration::from_secs(1);
 /// completes within the full-audit latency ceiling.
 const NEXT_AUDIT_BOUND: Duration =
     Duration::from_secs(ONE_AUDIT_PERIOD.as_secs() + FULL_AUDIT_LATENCY_CEILING.as_secs());
+/// The per-VM kill write's bound floor. The supervisor's private
+/// `SHARED_NETWORK_VM_KILL_CALL_BOUND` is `max(1 s, 4 × W)` and holds this 1 s
+/// floor until E18 measures W; this native lane cannot name the private
+/// constant, so it states the write's share as that floor (user decision 1 of
+/// 2026-09-30). DELIVER step 09-01, which sets the bound from E18, re-checks
+/// this horizon.
+const KILL_WRITE_BOUND_FLOOR: Duration = Duration::from_secs(1);
+/// E12 (h) bound (4) horizon, change → kill: the next audit detects the damage
+/// within [`NEXT_AUDIT_BOUND`], then the one per-VM kill write lands within its
+/// own bound (the event follows the write). The kill while Open is a one-write
+/// loop, so the horizon gains exactly one kill-write bound.
+const KILL_AFTER_CHANGE_BOUND: Duration =
+    Duration::from_secs(NEXT_AUDIT_BOUND.as_secs() + KILL_WRITE_BOUND_FLOOR.as_secs());
 /// E12 (h) bound (5): the echo answered and the re-learned entry observed
 /// within 1 s of teardown's complement read-back.
 const RELEARN_BOUND: Duration = Duration::from_secs(1);
@@ -2244,6 +2257,18 @@ async fn a_booting_vms_deleted_tap_stops_only_that_vm() {
         BTreeSet::from([booting.alloc.as_str().to_owned()]),
         "no allocation other than the booting target is killed",
     );
+    // The kill while Open is a one-write loop (user decision 1 of 2026-09-30):
+    // only the booting target's scope is written. No workloads-slice kill and
+    // no fail-stop request occur — a missed kill-write bound would slice-kill
+    // the survivor instead. The one-write loop's time budget is one audit
+    // period plus the full-audit ceiling plus one per-VM kill-write bound, well
+    // within the generous `PER_ALLOCATION_KILL_WAIT` this native lane waits.
+    assert_eq!(
+        events.fail_stops(),
+        0,
+        "the kill while Open never slice-kills or fail-stops\n{}",
+        events.render(),
+    );
     assert!(
         wait_until(TERMINAL_BOUND, || process_has_ended(booting.hypervisor_pid)).await,
         "the target's Cloud Hypervisor process {} ends",
@@ -2663,9 +2688,11 @@ async fn a_launch_that_fails_leaves_no_tap_and_no_queue_holder() {
 /// frames sent; (2) host unicast to A's own guest MAC reaches A's TAP, and a
 /// host broadcast reaches both; (3) V's TAP receives no host unicast while the
 /// entry is poisoned (and did before the change); (4) within one audit period
-/// of the change (plus the full-audit latency ceiling) only A is killed for
-/// attachment damage, EXEC stays Open, V is untouched, and A's teardown by its
-/// ordinary lifecycle is timed from the kill; (5) within 1 s of A's complement
+/// of the change (plus the full-audit latency ceiling plus one per-VM kill
+/// write — the kill while Open is a one-write loop and its event follows the
+/// write, user decision 1 of 2026-09-30) only A is killed for attachment
+/// damage, EXEC stays Open, V is untouched, and A's teardown by its ordinary
+/// lifecycle is timed from the kill; (5) within 1 s of A's complement
 /// read-back, V's MAC is on no port but V's, a host→V ICMP echo is answered,
 /// and V's reply re-learns V's MAC as a learned, non-permanent entry on V's
 /// port.
@@ -2821,9 +2848,11 @@ async fn a_mac_hijack_from_outside_the_vm_steals_nothing_and_the_victim_recovers
     drop(victim_capture);
 
     // Oracle (4): the next audit kills only A, within one audit period of the
-    // change plus the full-audit latency ceiling; EXEC stays Open.
+    // change plus the full-audit latency ceiling plus one per-VM kill write
+    // (the kill while Open is a one-write loop and the event follows the write,
+    // user decision 1 of 2026-09-30); EXEC stays Open.
     assert!(
-        wait_until(NEXT_AUDIT_BOUND, || {
+        wait_until(KILL_AFTER_CHANGE_BOUND, || {
             events.killed(Some("attachment_damaged")).contains(attacker.alloc.as_str())
         })
         .await,
@@ -2836,9 +2865,9 @@ async fn a_mac_hijack_from_outside_the_vm_steals_nothing_and_the_victim_recovers
     assert!(
         killed_at
             .checked_sub(change.changed_at)
-            .is_some_and(|interval| interval <= NEXT_AUDIT_BOUND),
-        "(4) the kill lands within {NEXT_AUDIT_BOUND:?} of the change (change at {:?}, kill at \
-         {killed_at:?})",
+            .is_some_and(|interval| interval <= KILL_AFTER_CHANGE_BOUND),
+        "(4) the kill lands within {KILL_AFTER_CHANGE_BOUND:?} of the change (one audit period, the \
+         full-audit ceiling, and one per-VM kill write) (change at {:?}, kill at {killed_at:?})",
         change.changed_at,
     );
     assert_eq!(

@@ -2018,6 +2018,7 @@ sequenceDiagram
   participant GATE as EXEC gate + recovery snapshot
   participant TAP as Managed TAP inventory
   participant OWN as Exact failed owner
+  participant VMK as VM kill capability
   participant SH as ServerHandle
   participant CLI as CLI serve owner
   participant PS as External supervisor
@@ -2026,8 +2027,18 @@ sequenceDiagram
   GATE-->>AUD: new EXEC release closed
   alt kernel-path mismatch
     AUD->>TAP: set every managed TAP down and read back
-    alt quiesce not confirmed
-      AUD->>OWN: cgroup.kill affected VMM inventory
+    alt quiescence Err or missed its bound (failing set undetermined)
+      AUD->>VMK: kill_workloads_slice (bounded by VM_KILL_CALL_BOUND)
+      AUD->>GATE: lock -> FailStop (TapQuiescenceUndetermined)
+    else TapQuiescence.unconfirmed non-empty (DR-08 (b)-A: a refused netlink thread leaves its TAP unconfirmed, never ends the pass)
+      loop each unconfirmed allocation, AllocationId order (one kill loop; runs to its end before any owner call or fail-stop)
+        AUD->>VMK: kill_allocation (each write bounded by VM_KILL_CALL_BOUND)
+        VMK-->>AUD: Ok within bound = confirmed kill, allocation Condemned
+        alt kill write fails (not NotFound) or misses its bound
+          AUD->>VMK: kill_workloads_slice (bounded)
+          AUD->>GATE: lock -> FailStop (VmKillFailed)
+        end
+      end
     end
   end
   loop every 250 ms, at most five seconds
@@ -2040,8 +2051,8 @@ sequenceDiagram
       GATE-->>AUD: wake waiting EXEC releases
     end
   end
-  alt five-second deadline or abnormal supervisor exit
-    AUD->>GATE: lock -> FailStop, freeze latest snapshot
+  alt five-second deadline (reached only after any kill loop has run to its end) or abnormal supervisor exit
+    AUD->>GATE: lock -> FailStop (RecoveryDeadlineExceeded on the deadline), freeze latest snapshot
     AUD->>SH: typed shutdown request / retained JoinHandle result
     SH->>CLI: return exact fail-stop cause and snapshot
     CLI->>CLI: bound graceful shutdown to ten seconds
@@ -2050,7 +2061,12 @@ sequenceDiagram
   end
 ```
 
-Once `ServerHandle` writes FailStop, no late retry may restore Open. A pure
+Once `ServerHandle` writes FailStop, no late retry may restore Open. A report's
+per-VM kill loop writes each `kill_allocation` in `AllocationId` order and runs
+to its end before any further owner call or fail-stop; every write is capped by
+`SHARED_NETWORK_VM_KILL_CALL_BOUND`, a failed or missed write escalates to the
+workloads-slice kill and `VmKillFailed`, and `RecoveryDeadlineExceeded` is
+checked only after the loop. A pure
 listener/DNS loss does not down TAPs or pause already-written commands; it
 still closes new EXEC and new socket/query admission. External restart is an
 operational precondition, never an in-process recovery service.

@@ -31,4 +31,9 @@
 #[cfg(target_os = "linux")]
 pub mod cidr_lease;
 pub mod netns;
+/// GH #295 E23: force OS thread creation to fail via a cgroup v2 `pids.max` cap.
+///
+/// Exercises the no-panic contract (user decision 2 of 2026-09-30). Linux-only
+/// (the file carries its own `#![cfg(target_os = "linux")]`).
+pub mod pids_max;
 pub mod vm_fixture;

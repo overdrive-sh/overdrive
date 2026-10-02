@@ -1323,6 +1323,18 @@ const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 #[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
 const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
 
+/// Bound on each `cgroup.kill` write — per-VM and workloads-slice — in a
+/// report's kill loop, measured on the injected clock (D-295-R14; kill loop,
+/// user decision 1 of 2026-09-30). A write still pending at it counts as a
+/// failed kill: per-VM, the workloads-slice kill then `VmKillFailed`; slice, its
+/// recorded `vm_kill` outcome then the fail-stop. The recovery deadline does NOT
+/// cap it — a report's kill loop runs to its end before any further owner call
+/// or fail-stop. Rule: `max(1 s, 4 × W)`, W the largest single kill write at
+/// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement sets
+/// it; the step that sets it records the measurement here.
+#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+const SHARED_NETWORK_VM_KILL_CALL_BOUND: Duration = Duration::from_secs(1);
+
 /// The ports the one runtime shared-network supervisor task owns (D-295-R13,
 /// R14, R16). They replace `run_mtls_owner`'s parameters in DELIVER step
 /// 09-01.
@@ -2870,6 +2882,11 @@ mod shared_network_task_owner_acceptance {
         pending_polls: tokio::sync::mpsc::UnboundedReceiver<()>,
         request: Option<ServeShutdownRequest>,
         request_cgroups: Option<CgroupSnapshot>,
+        /// The supervisor's intentional-shutdown token, retained so a cell can
+        /// cancel it mid-kill-loop (S-ND295-30A shutdown-mid-loop, user decision
+        /// 1 of 2026-09-30). `run_shared_network_supervisor` and the handle hold
+        /// their own clones.
+        shutdown: CancellationToken,
     }
 
     /// What survives `Rig::finish` for after-shutdown assertions.
@@ -2988,8 +3005,12 @@ mod shared_network_task_owner_acceptance {
                 }
                 polled
             }));
-            let handle =
-                SharedNetworkSupervisorHandle::new(request_rx, task, Arc::clone(&exec), shutdown);
+            let handle = SharedNetworkSupervisorHandle::new(
+                request_rx,
+                task,
+                Arc::clone(&exec),
+                shutdown.clone(),
+            );
             let server = s19_server_handle(handle, Arc::clone(&worker));
 
             let mut rig = Self {
@@ -3008,6 +3029,7 @@ mod shared_network_task_owner_acceptance {
                 pending_polls,
                 request: None,
                 request_cgroups: None,
+                shutdown,
             };
             rig.await_wake().await;
             rig
@@ -3015,6 +3037,13 @@ mod shared_network_task_owner_acceptance {
 
         fn verdict(&self) -> String {
             self.repro.verdict()
+        }
+
+        /// Request intentional shutdown (SIGINT/SIGTERM): cancel the
+        /// supervisor's token. Under user decision 1 of 2026-09-30 it cancels
+        /// only BETWEEN kill loops — a loop in progress runs to its end first.
+        fn request_intentional_shutdown(&self) {
+            self.shutdown.cancel();
         }
 
         async fn drain(&mut self, quiet: Duration) {
@@ -5116,6 +5145,238 @@ mod shared_network_task_owner_acceptance {
         }
     }
 
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// (c2) A per-VM kill write that stays pending past
+    /// `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the injected clock counts as a
+    /// failed kill: the workloads slice is killed and one `VmKillFailed` request
+    /// is sent, with no owner call between the report and the slice kill (user
+    /// decision 1 of 2026-09-30). A write that lands after its missed bound
+    /// changes no outcome.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
+    async fn a_per_vm_kill_write_pending_past_its_bound_fails_the_node() {
+        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
+        for seed in supervisor_seeds() {
+            let mut rig = Rig::build(
+                seed,
+                "kill-write-bound-miss",
+                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
+            )
+            .await;
+            rig.run_until_first_audit().await;
+            // A's kill write parks past its own bound on the injected clock.
+            rig.fs.park_until(
+                SimOp::Write,
+                scope_kill(&rig.root, VM_A),
+                Arc::clone(&rig.clock) as Arc<dyn Clock>,
+                super::SHARED_NETWORK_VM_KILL_CALL_BOUND * 2,
+            );
+            rig.owner
+                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
+            let detection = rig.detect(bridge, ONE_MS).await;
+            let verdict = rig.verdict();
+            // Not before the kill-write bound: no request yet.
+            rig.advance_quiet(earlier(super::SHARED_NETWORK_VM_KILL_CALL_BOUND, ONE_MS)).await;
+            assert!(rig.poll_request().is_none(), "{verdict}: not before the kill-write bound");
+            rig.advance(ONE_MS).await;
+            let request = rig
+                .poll_request()
+                .cloned()
+                .unwrap_or_else(|| panic!("{verdict}: the missed kill-write bound fail-stops"));
+            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
+            assert_eq!(fail_stop.component, SharedGuestNetworkComponent::Bridge, "{verdict}");
+            assert_eq!(
+                fail_stop.cause,
+                SharedGuestNetworkFailStopCause::VmKillFailed,
+                "{verdict}: a kill-write bound miss is VmKillFailed"
+            );
+            let at_receipt = rig
+                .request_cgroups
+                .clone()
+                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
+            assert!(
+                killed(&at_receipt, &slice_kill(&rig.root)),
+                "{verdict}: every workload VM is killed"
+            );
+            assert_eq!(
+                rig.count_since(detection.owner_calls, is_owner_converge),
+                0,
+                "{verdict}: no owner call between the report and the slice kill"
+            );
+            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
+            rig.finish().await;
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// (i) A report naming at least two allocations whose kill loop is still
+    /// running when the recovery deadline passes completes — every reported
+    /// scope's `cgroup.kill` written, in `AllocationId` order — before the one
+    /// `RecoveryDeadlineExceeded` request, with no owner repair call between the
+    /// report and that request (user decision 1 of 2026-09-30).
+    /// `RecoveryDeadlineExceeded` never cuts the loop short.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
+    async fn a_kill_loop_running_at_the_deadline_completes_before_the_one_request() {
+        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
+        for seed in supervisor_seeds() {
+            let mut rig = Rig::build(
+                seed,
+                "loop-past-deadline",
+                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
+            )
+            .await;
+            rig.run_until_first_audit().await;
+            // A Bridge loss whose repair never succeeds drives recovery to the
+            // 5 s deadline; both reported kill writes park (each within its own
+            // bound) so a damage report near the deadline straddles it.
+            rig.block_repair(bridge, true);
+            let half = super::SHARED_NETWORK_VM_KILL_CALL_BOUND / 2;
+            for alloc in [VM_A, VM_B] {
+                rig.fs.park_until(
+                    SimOp::Write,
+                    scope_kill(&rig.root, alloc),
+                    Arc::clone(&rig.clock) as Arc<dyn Clock>,
+                    half,
+                );
+            }
+            rig.detect(bridge, ONE_MS).await;
+            let verdict = rig.verdict();
+            // Drive failing attempts until one kill-loop budget remains before
+            // the 5 s deadline.
+            loop {
+                let elapsed = rig
+                    .exec
+                    .recovery_progress()
+                    .unwrap_or_else(|| panic!("{verdict}: recovery is running before the deadline"))
+                    .elapsed;
+                if elapsed + super::SHARED_NETWORK_VM_KILL_CALL_BOUND
+                    >= super::SHARED_NETWORK_RECOVERY_DEADLINE
+                {
+                    break;
+                }
+                rig.attempt().await;
+            }
+            // The last attempt's audit before the deadline reports damage for
+            // both A and B; their parked kill loop then straddles the deadline.
+            let mark = rig.mark();
+            rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A), alloc_id(VM_B)]));
+            rig.advance(super::SHARED_NETWORK_RETRY_PERIOD).await;
+            rig.advance_quiet(super::SHARED_NETWORK_VM_KILL_CALL_BOUND).await;
+            let request = rig.poll_request().cloned().unwrap_or_else(|| {
+                panic!("{verdict}: the deadline fail-stops once the kill loop completes")
+            });
+            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
+            assert_eq!(
+                fail_stop.cause,
+                SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                "{verdict}: a kill loop running at the deadline does not change the cause"
+            );
+            let killed_events = rig.vm_killed();
+            let order: Vec<_> = killed_events
+                .iter()
+                .filter_map(|event| named_alloc(event, &[VM_A, VM_B]))
+                .collect();
+            assert_eq!(
+                order,
+                [VM_A, VM_B],
+                "{verdict}: both killed in AllocationId order: {killed_events:?}"
+            );
+            let at_receipt = rig
+                .request_cgroups
+                .clone()
+                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
+            for alloc in [VM_A, VM_B] {
+                assert!(
+                    killed(&at_receipt, &scope_kill(&rig.root, alloc)),
+                    "{verdict}: {alloc}'s kill was written before the request"
+                );
+            }
+            assert!(
+                untouched(&at_receipt, &slice_kill(&rig.root)),
+                "{verdict}: no whole-slice kill — the loop ran to its end, not cut short"
+            );
+            assert!(
+                !rig.calls_since(mark.owner_calls).iter().any(is_owner_converge),
+                "{verdict}: no owner repair call between the report and the request"
+            );
+            rig.finish().await;
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// An intentional shutdown (SIGINT/SIGTERM) that arrives while a kill loop
+    /// is in progress cancels the supervisor only between loops: every reported
+    /// kill is written, in `AllocationId` order, before the supervisor observes
+    /// cancellation — no slice kill, and intentional shutdown is not a fail-stop
+    /// (user decision 1 of 2026-09-30).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
+    async fn an_intentional_shutdown_mid_kill_loop_lets_the_loop_finish_first() {
+        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
+        for seed in supervisor_seeds() {
+            let mut rig = Rig::build(
+                seed,
+                "shutdown-mid-loop",
+                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
+            )
+            .await;
+            rig.run_until_first_audit().await;
+            // Both reported VMs' kill writes park on the injected clock, so the
+            // loop is unambiguously in progress when shutdown is requested.
+            let half = super::SHARED_NETWORK_VM_KILL_CALL_BOUND / 2;
+            for alloc in [VM_A, VM_B] {
+                rig.fs.park_until(
+                    SimOp::Write,
+                    scope_kill(&rig.root, alloc),
+                    Arc::clone(&rig.clock) as Arc<dyn Clock>,
+                    half,
+                );
+            }
+            rig.owner.script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([
+                alloc_id(VM_A),
+                alloc_id(VM_B),
+            ])));
+            rig.detect(bridge, ONE_MS).await;
+            let verdict = rig.verdict();
+            // Shutdown arrives mid-loop.
+            rig.request_intentional_shutdown();
+            rig.advance_quiet(super::SHARED_NETWORK_VM_KILL_CALL_BOUND).await;
+            let killed_events = rig.vm_killed();
+            let order: Vec<_> = killed_events
+                .iter()
+                .filter_map(|event| named_alloc(event, &[VM_A, VM_B]))
+                .collect();
+            assert_eq!(
+                order,
+                [VM_A, VM_B],
+                "{verdict}: the loop runs to its end in AllocationId order: {killed_events:?}"
+            );
+            let snapshot = rig.fs.snapshot();
+            for alloc in [VM_A, VM_B] {
+                assert!(
+                    killed(&snapshot, &scope_kill(&rig.root, alloc)),
+                    "{verdict}: {alloc}'s kill was written before the supervisor observed shutdown"
+                );
+            }
+            assert!(untouched(&snapshot, &slice_kill(&rig.root)), "{verdict}: no whole-slice kill");
+            assert!(
+                rig.poll_request().is_none(),
+                "{verdict}: intentional shutdown is not a fail-stop"
+            );
+            rig.finish().await;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // S-ND295-32
     // -----------------------------------------------------------------------
@@ -5457,6 +5718,61 @@ mod shared_network_task_owner_acceptance {
         SharedNetworkSupervisorHandle::new(request_rx, task, wiring.supervisor(), shutdown)
             .shutdown()
             .await;
+    }
+
+    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
+    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A per-VM `cgroup.kill` write that never answers is a bounded wait: the
+    /// supervisor abandons it at `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the
+    /// injected clock — not before — kills the workloads slice, and sends one
+    /// `VmKillFailed` request (user decision 1 of 2026-09-30). The recovery
+    /// deadline does not cap the write; its own bound does.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "pending DELIVER step 09-01 (S-ND295-32)"]
+    async fn a_per_vm_kill_write_is_bounded_by_its_own_bound() {
+        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
+        for seed in supervisor_seeds() {
+            let mut rig = Rig::build(
+                seed,
+                "kill-write-never-answers",
+                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
+            )
+            .await;
+            rig.run_until_first_audit().await;
+            // A's kill write never answers within the window.
+            rig.fs.park_until(
+                SimOp::Write,
+                scope_kill(&rig.root, VM_A),
+                Arc::clone(&rig.clock) as Arc<dyn Clock>,
+                super::SHARED_NETWORK_RECOVERY_DEADLINE * 4,
+            );
+            rig.owner
+                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
+            rig.detect(bridge, ONE_MS).await;
+            let verdict = rig.verdict();
+            rig.advance_quiet(earlier(super::SHARED_NETWORK_VM_KILL_CALL_BOUND, ONE_MS)).await;
+            assert!(rig.poll_request().is_none(), "{verdict}: the wait is not abandoned early");
+            rig.advance(ONE_MS).await;
+            let request = rig
+                .poll_request()
+                .cloned()
+                .unwrap_or_else(|| panic!("{verdict}: the kill write is abandoned at its bound"));
+            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
+            assert_eq!(
+                fail_stop.cause,
+                SharedGuestNetworkFailStopCause::VmKillFailed,
+                "{verdict}: an abandoned kill write is VmKillFailed"
+            );
+            let at_receipt = rig
+                .request_cgroups
+                .clone()
+                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
+            assert!(killed(&at_receipt, &slice_kill(&rig.root)), "{verdict}: the slice is killed");
+            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
+            rig.finish().await;
+        }
     }
 
     // -----------------------------------------------------------------------

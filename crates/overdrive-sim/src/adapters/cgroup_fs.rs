@@ -41,10 +41,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::{CgroupFs, ProbeError};
 
 /// Filesystem entry shape stored under each path in the in-memory
@@ -100,6 +102,11 @@ impl SimOp {
 /// across runs.
 type State = BTreeMap<PathBuf, (SimEntry, Vec<u8>)>;
 type ErrorSchedule = BTreeMap<(u8, PathBuf), VecDeque<io::ErrorKind>>;
+/// Per-(`SimOp`, `PathBuf`) injectable clock-parking schedule: each scripted
+/// entry makes one matching call await `clock.sleep(after)` on the injected
+/// clock before its normal semantics. `BTreeMap`-keyed for `Ord`-deterministic
+/// iteration, as `ErrorSchedule`.
+type DelaySchedule = BTreeMap<(u8, PathBuf), VecDeque<Duration>>;
 
 /// Sim binding of the [`CgroupFs`] port trait.
 ///
@@ -119,22 +126,47 @@ type ErrorSchedule = BTreeMap<(u8, PathBuf), VecDeque<io::ErrorKind>>;
 /// Mirrors `SimClock` / `SimDataplane` so callers can hand one clone
 /// to the harness and another to the system under test and have both
 /// observe the same mutations.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct SimCgroupFs {
     state: Arc<Mutex<State>>,
     errors: Arc<Mutex<ErrorSchedule>>,
     round_trip_mismatch: Arc<Mutex<bool>>,
+    /// Opt-in injected clock for [`SimCgroupFs::park_until`]. `None` until a
+    /// test parks a write; never set or read by the production composition
+    /// root (`RealCgroupFs` is the production binding).
+    clock: Arc<Mutex<Option<Arc<dyn Clock>>>>,
+    /// Opt-in per-(write, path) parking schedule (see [`DelaySchedule`]).
+    delays: Arc<Mutex<DelaySchedule>>,
+}
+
+// `Arc<dyn Clock>` is not `Debug` (`Clock: Send + Sync + 'static` only), so
+// `SimCgroupFs` carries a hand-written `Debug` that names its live state and
+// schedule sizes rather than deriving it. The injected `clock` has no `Debug`
+// representation, so it is deliberately omitted — `finish_non_exhaustive`
+// renders the trailing `..` that marks it elided.
+impl std::fmt::Debug for SimCgroupFs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SimCgroupFs")
+            .field("entries", &self.state.lock().len())
+            .field("error_schedules", &self.errors.lock().len())
+            .field("round_trip_mismatch", &*self.round_trip_mismatch.lock())
+            .field("parked_writes", &self.delays.lock().values().map(VecDeque::len).sum::<usize>())
+            .finish_non_exhaustive()
+    }
 }
 
 impl SimCgroupFs {
     /// Construct an empty `SimCgroupFs` (empty state, empty schedule,
-    /// no probe round-trip-mismatch injection set).
+    /// no probe round-trip-mismatch injection set, no parking clock).
     #[must_use]
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(BTreeMap::new())),
             errors: Arc::new(Mutex::new(BTreeMap::new())),
             round_trip_mismatch: Arc::new(Mutex::new(false)),
+            clock: Arc::new(Mutex::new(None)),
+            delays: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -148,6 +180,40 @@ impl SimCgroupFs {
         let key = (op.to_byte(), path);
         let mut errors = self.errors.lock();
         errors.entry(key).or_default().push_back(kind);
+    }
+
+    /// **TEST-HOOK-ONLY**. Park the next `op` against `path` on `clock`:
+    /// that call awaits `clock.sleep(after)` before its normal semantics.
+    ///
+    /// Multiple injections for the same `(op, path)` form a queue; each
+    /// matching call pops one. This is the sim parking primitive the
+    /// supervisor's kill-write bound races against: a test scripts a kill
+    /// write to park past `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the injected
+    /// clock, so the supervisor's `clock.sleep(bound)` wins and the write
+    /// counts as a failed kill (GH #295 S-ND295-30A (c2)/(i), user decision 1
+    /// of 2026-09-30). A parked call dropped mid-sleep (its caller lost the
+    /// bounded race) never mutates, so no partial state is produced.
+    ///
+    /// The production composition root never calls this; `clock` is only set
+    /// here.
+    pub fn park_until(&self, op: SimOp, path: PathBuf, clock: Arc<dyn Clock>, after: Duration) {
+        *self.clock.lock() = Some(clock);
+        let key = (op.to_byte(), path);
+        self.delays.lock().entry(key).or_default().push_back(after);
+    }
+
+    /// Take a pending parking delay from the schedule for `(op, path)`, if any.
+    /// Returns `Some(after)` once per matching injection; `None` otherwise.
+    fn take_pending_delay(&self, op: SimOp, path: &Path) -> Option<Duration> {
+        let key = (op.to_byte(), path.to_path_buf());
+        let mut delays = self.delays.lock();
+        let after = delays.get_mut(&key).and_then(VecDeque::pop_front);
+        if let Some(queue) = delays.get(&key)
+            && queue.is_empty()
+        {
+            delays.remove(&key);
+        }
+        after
     }
 
     /// Inject a round-trip mismatch for the NEXT [`CgroupFs::probe`]
@@ -260,6 +326,17 @@ impl CgroupFs for SimCgroupFs {
     }
 
     async fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        // Opt-in parking (S-ND295-30A (c2)/(i)): a scripted write awaits the
+        // injected clock before its normal semantics. The clock handle is
+        // cloned out before the await so no `parking_lot` lock is held across
+        // it; a parked write dropped mid-sleep (its caller lost a bounded race)
+        // never mutates, so the "never partial state" invariant still holds.
+        if let Some(after) = self.take_pending_delay(SimOp::Write, path) {
+            let clock = self.clock.lock().clone();
+            if let Some(clock) = clock {
+                clock.sleep(after).await;
+            }
+        }
         if let Some(kind) = self.take_pending_error(SimOp::Write, path) {
             return Err(io::Error::from(kind));
         }

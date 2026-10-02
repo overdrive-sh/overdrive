@@ -10908,6 +10908,96 @@ mod shared_owner_link_address_kernel {
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// E23 — A refused OS thread is a typed failure, never a panic.
+    /// CONTRACT_SHAPE: unbounded-preservation.
+    ///
+    /// User decision 2 of 2026-09-30: `block_on_host_netlink`, whose host worker
+    /// thread the OS refuses under a `pids.max` cap, returns
+    /// `NetlinkError::Connect` and the process continues — it never aborts. The
+    /// staged bridge uses `Scope::spawn`, which panics on a refused thread
+    /// (Changed Assumption 40); DELIVER step 06-02 replaces it with
+    /// `Builder::spawn_scoped`. RED-against-the-no-panic-baseline: before 06-02
+    /// the refused thread panics/aborts and the body never reaches its assertion.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "pending DELIVER step 06-02 (E23)"]
+    fn block_on_host_netlink_returns_connect_when_a_thread_is_refused() {
+        require_root("block_on_host_netlink_returns_connect_when_a_thread_is_refused");
+        let _refused = overdrive_testing::pids_max::refuse_thread_creation()
+            .expect("the Lima substrate delegates the pids controller to the cgroup root");
+        let result = overdrive_netlink::block_on_host_netlink(|| async move {
+            overdrive_netlink::Client::new()?.observe_link_identity("lo").await
+        });
+        // Reaching here proves no abort/panic (user decision 2 of 2026-09-30). A
+        // refused worker thread is `NetlinkError::Connect`; if a thread was
+        // available the loopback identity is observed — still never a panic.
+        match result {
+            Ok(_) => {}
+            Err(error) => assert!(
+                matches!(error, overdrive_netlink::NetlinkError::Connect { .. }),
+                "a refused host-netlink worker thread is NetlinkError::Connect, got {error:?}",
+            ),
+        }
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
+    /// E23 — A refused OS thread is a typed failure, never a panic.
+    /// CONTRACT_SHAPE: unbounded-preservation.
+    ///
+    /// User decision 2 of 2026-09-30: the host owner's `quiesce_managed_taps`
+    /// under a `pids.max` cap returns a typed result and never aborts — the one
+    /// `Active` TAP whose set-down could not get a netlink session is that TAP's
+    /// `unconfirmed` entry carrying `NetlinkError::Connect` (DR-08 (b)-A), and
+    /// the host still returns `Ok`, never `Err`. The per-TAP Connect→unconfirmed
+    /// mapping over many TAPs is proven in the fake-kernel lane (S-ND295-51);
+    /// this body proves the REAL quiescence composes a refused thread without
+    /// aborting — which requires at least one managed `Active` TAP, so the pass
+    /// has a per-TAP set-down to run. `converge_shared` alone registers no
+    /// allocation, so the TAP is provisioned and activated before the cap;
+    /// otherwise the pass quiesces an empty set and the refused-thread stimulus
+    /// never fires.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "pending DELIVER step 06-04 (E23)"]
+    async fn quiesce_managed_taps_never_aborts_when_a_thread_is_refused() {
+        require_root("quiesce_managed_taps_never_aborts_when_a_thread_is_refused");
+        let _sweep = NodeSharedStateSweep::fresh();
+        let owner = HostSharedGuestNetworkOwner::new();
+        owner.converge_shared().await.expect("the production owner converges a clean node");
+        // One managed `Active` TAP, so the quiescence pass has a real per-TAP
+        // set-down to run and the refused-thread stimulus bites.
+        let plan = kernel_plan("nd295-e23-quiesce", TAP_ADDRESS, TAP);
+        owner.provision(&plan).await.expect("the production owner provisions the managed TAP down");
+        assert_eq!(
+            owner.activate(&plan).await.expect("the production owner raises the managed TAP"),
+            TapActivation::Raised,
+        );
+        let _refused = overdrive_testing::pids_max::refuse_thread_creation()
+            .expect("the Lima substrate delegates the pids controller to the cgroup root");
+        let quiescence = owner.quiesce_managed_taps().await;
+        // Reaching here proves the owner's quiescence did not abort/panic under
+        // thread refusal (user decision 2 of 2026-09-30). Per DR-08 (b)-A the
+        // host returns no `Err`: the one `Active` TAP whose set-down could not
+        // get a netlink worker thread is that allocation's `unconfirmed` entry
+        // carrying `NetlinkError::Connect`, and the pass still returns `Ok`.
+        let quiescence = quiescence.expect("the host returns per-TAP outcomes, never Err");
+        for (alloc, error) in &quiescence.unconfirmed {
+            assert!(
+                matches!(
+                    error,
+                    GuestNetworkError::Netlink { source: NetlinkError::Connect { .. }, .. }
+                ),
+                "{alloc}'s unconfirmed entry is a Connect session failure, got {error:?}",
+            );
+        }
+        assert!(
+            quiescence.unconfirmed.contains_key(plan.alloc()),
+            "the managed TAP whose set-down thread was refused is unconfirmed, got {:?}",
+            quiescence.unconfirmed,
+        );
+    }
+
+    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
     /// S-ND295-72 — A managed link is correct whatever the host's link configuration.
     /// CONTRACT_SHAPE: bounded-change.
     ///

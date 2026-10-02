@@ -4172,6 +4172,44 @@ mod shared_ip {
         payload
     }
 
+    /// Module-private effect seam for the shared-IP element batch and its
+    /// generation-bracketed read-back (GH #295 S-ND295-54; H14, user decision 3
+    /// of 2026-09-30). The host algorithm `mutate_and_readback` stays above this
+    /// boundary; only the element send and the state read cross it, so a
+    /// source-local test can drive the kernel-rejected-batch and the
+    /// failed/mismatched read-back arms over a scripted double with no real nft
+    /// socket. The pre-observation (`state_for`) and the set-id reads stay
+    /// outside the seam, so R10's present-subset removal keeps its Lima real-nft
+    /// evidence. No `pub`, no `pub(crate)`, no re-export: it adds no public
+    /// surface.
+    trait SharedIpElementIo {
+        /// Send one element batch and read its acknowledgements. `Err` is an
+        /// error acknowledgement — the kernel marked the whole batch failed and
+        /// aborted it, so it committed nothing — or a send/receive failure.
+        fn send_element_transaction(
+            &self,
+            mutations: &[ElementMutation],
+        ) -> Result<(), NetlinkError>;
+        /// One generation-bracketed observation of the owned program and members.
+        fn collect_state(&self) -> Result<Option<SharedIpInterceptState>, NetlinkError>;
+    }
+
+    /// The real implementation: today's two module-private functions over `NfSock`.
+    struct NfSharedIpElementIo;
+
+    impl SharedIpElementIo for NfSharedIpElementIo {
+        fn send_element_transaction(
+            &self,
+            mutations: &[ElementMutation],
+        ) -> Result<(), NetlinkError> {
+            send_element_transaction(mutations)
+        }
+
+        fn collect_state(&self) -> Result<Option<SharedIpInterceptState>, NetlinkError> {
+            collect_state()
+        }
+    }
+
     fn send_element_transaction(mutations: &[ElementMutation]) -> Result<(), NetlinkError> {
         if mutations.is_empty() {
             return Ok(());
@@ -4232,6 +4270,7 @@ mod shared_ip {
     }
 
     fn mutate_and_readback(
+        io: &dyn SharedIpElementIo,
         expected: &SharedIpInterceptIdentity,
         before: SharedIpInterceptState,
         mutations: &[ElementMutation],
@@ -4245,8 +4284,8 @@ mod shared_ip {
         if mutations.is_empty() {
             return Ok(before);
         }
-        send_element_transaction(mutations)?;
-        let primary = match collect_state() {
+        io.send_element_transaction(mutations)?;
+        let primary = match io.collect_state() {
             Ok(Some(observed)) if observed == *expected_after => return Ok(observed),
             Ok(Some(_)) => invalid_shared_ip("shared IP element read-back identity mismatch"),
             Ok(None) => invalid_shared_ip("shared IP program disappeared"),
@@ -4262,10 +4301,10 @@ mod shared_ip {
                 add: !mutation.add,
             })
             .collect::<Vec<_>>();
-        if let Err(restore_source) = send_element_transaction(&inverse) {
+        if let Err(restore_source) = io.send_element_transaction(&inverse) {
             return Err(element_restore_error(primary, restore_source));
         }
-        match collect_state() {
+        match io.collect_state() {
             Ok(Some(restored)) if restored == before => Err(primary),
             Ok(Some(_)) => Err(element_restore_error(
                 primary,
@@ -4315,7 +4354,7 @@ mod shared_ip {
         let mut expected_after = before.clone();
         expected_after.managed_guest_ips.insert(source);
         expected_after.outbound_sources.insert(source);
-        mutate_and_readback(expected, before, &mutations, &expected_after)
+        mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 
     pub(super) fn insert_inbound(
@@ -4333,7 +4372,7 @@ mod shared_ip {
         let mutations = member_mutations(&ids, [ElementKey::Destination(destination)], [])?;
         let mut expected_after = before.clone();
         expected_after.inbound_destinations.insert(destination);
-        mutate_and_readback(expected, before, &mutations, &expected_after)
+        mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 
     pub(super) fn delete_elements(
@@ -4390,7 +4429,7 @@ mod shared_ip {
         for destination in inbound {
             expected_after.inbound_destinations.remove(destination);
         }
-        mutate_and_readback(expected, before, &mutations, &expected_after)
+        mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
 
     pub(super) fn clear_elements(
@@ -4422,7 +4461,302 @@ mod shared_ip {
         expected_after.managed_guest_ips.clear();
         expected_after.outbound_sources.clear();
         expected_after.inbound_destinations.clear();
-        mutate_and_readback(expected, before, &mutations, &expected_after)
+        mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
+    }
+
+    #[cfg(test)]
+    #[allow(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::too_many_lines,
+        clippy::doc_markdown,
+        clippy::similar_names,
+        reason = "source-local S-ND295-54 element-batch bodies: each expect()/panic names the scripted precondition or the pinned failure the adapter must produce"
+    )]
+    mod element_seam_tests {
+        //! S-ND295-54 / H14 (user decision 3 of 2026-09-30): the host
+        //! `mutate_and_readback` algorithm's handling of a kernel-rejected
+        //! element batch and of a failed or mismatched post-commit read-back,
+        //! driven source-local over a scripted `SharedIpElementIo` double in
+        //! the default lane — no real nft socket, no root. That a rejected batch
+        //! commits nothing is the kernel's batch abort (feature delta § "Driven
+        //! port — intercept element release…", *Evidence for the two
+        //! element-batch failure rules*), not re-proved here; these bodies pin
+        //! the ADAPTER's handling of both outcomes.
+        use super::{
+            ElementMutation, ElementRestoreError, ElementSet, SharedIpElementIo,
+            mutate_and_readback,
+        };
+        use crate::NetlinkError;
+        use crate::nft::{SharedIpInterceptIdentity, SharedIpInterceptState};
+        use std::cell::RefCell;
+        use std::collections::{BTreeSet, VecDeque};
+        use std::net::Ipv4Addr;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum SeamCall {
+            Send,
+            Collect,
+        }
+
+        /// A scripted [`SharedIpElementIo`]: each call pops the next queued
+        /// result, records itself in call order, and (for sends) records the
+        /// mutation batch, so a body asserts exactly which sends and
+        /// observations the algorithm made and that the inverse batch inverts
+        /// every mutation.
+        struct ScriptedElementIo {
+            sends: RefCell<VecDeque<Result<(), NetlinkError>>>,
+            collects: RefCell<VecDeque<Result<Option<SharedIpInterceptState>, NetlinkError>>>,
+            sent: RefCell<Vec<Vec<ElementMutation>>>,
+            calls: RefCell<Vec<SeamCall>>,
+        }
+
+        impl ScriptedElementIo {
+            fn new(
+                sends: Vec<Result<(), NetlinkError>>,
+                collects: Vec<Result<Option<SharedIpInterceptState>, NetlinkError>>,
+            ) -> Self {
+                Self {
+                    sends: RefCell::new(sends.into()),
+                    collects: RefCell::new(collects.into()),
+                    sent: RefCell::new(Vec::new()),
+                    calls: RefCell::new(Vec::new()),
+                }
+            }
+
+            fn calls(&self) -> Vec<SeamCall> {
+                self.calls.borrow().clone()
+            }
+
+            fn sent(&self) -> Vec<Vec<ElementMutation>> {
+                self.sent.borrow().clone()
+            }
+        }
+
+        impl SharedIpElementIo for ScriptedElementIo {
+            fn send_element_transaction(
+                &self,
+                mutations: &[ElementMutation],
+            ) -> Result<(), NetlinkError> {
+                self.calls.borrow_mut().push(SeamCall::Send);
+                self.sent.borrow_mut().push(mutations.to_vec());
+                self.sends.borrow_mut().pop_front().expect("a scripted send result")
+            }
+
+            fn collect_state(&self) -> Result<Option<SharedIpInterceptState>, NetlinkError> {
+                self.calls.borrow_mut().push(SeamCall::Collect);
+                self.collects.borrow_mut().pop_front().expect("a scripted collect result")
+            }
+        }
+
+        fn identity() -> SharedIpInterceptIdentity {
+            SharedIpInterceptIdentity::for_listener_ports(15_006, 15_001)
+                .expect("a canonical shared-IP identity for two valid listener ports")
+        }
+
+        fn state(id: &SharedIpInterceptIdentity, managed: &[Ipv4Addr]) -> SharedIpInterceptState {
+            SharedIpInterceptState {
+                identity: id.clone(),
+                managed_guest_ips: managed.iter().copied().collect(),
+                outbound_sources: BTreeSet::new(),
+                inbound_destinations: BTreeSet::new(),
+            }
+        }
+
+        /// One non-empty removal batch: drop guest `10.0.0.2` from the managed set.
+        fn removal() -> Vec<ElementMutation> {
+            vec![ElementMutation {
+                set: ElementSet::ManagedGuestIps,
+                set_id: 1,
+                key: Ipv4Addr::new(10, 0, 0, 2).octets().to_vec(),
+                add: false,
+            }]
+        }
+
+        fn op_of(error: &NetlinkError) -> Option<&str> {
+            match error {
+                NetlinkError::Nft { op, .. } => Some(op),
+                _ => None,
+            }
+        }
+
+        fn scripted_nft(op: &'static str) -> NetlinkError {
+            NetlinkError::nft(op, std::io::Error::other("scripted"))
+        }
+
+        /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+        /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// R10 arm 1 (H14): a batch the kernel rejects — an error acknowledgement
+        /// — commits nothing, so the adapter returns that error after exactly one
+        /// send, with no observation and no inverse.
+        #[test]
+        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+        fn a_rejected_batch_returns_its_error_after_one_send_with_no_observation_or_inverse() {
+            let id = identity();
+            let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
+            let expected_after = state(&id, &[]);
+            let io = ScriptedElementIo::new(vec![Err(scripted_nft("batch-rejected"))], vec![]);
+
+            let error = mutate_and_readback(&io, &id, before, &removal(), &expected_after)
+                .expect_err("a rejected batch is a typed error");
+
+            assert_eq!(
+                op_of(&error),
+                Some("batch-rejected"),
+                "the batch rejection is returned verbatim"
+            );
+            assert_eq!(
+                io.calls(),
+                vec![SeamCall::Send],
+                "exactly one send, no observation, no inverse"
+            );
+            assert_eq!(io.sent().len(), 1, "no inverse batch is sent");
+        }
+
+        /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+        /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// R10 arm 2 (H14): a committed batch whose post-commit read-back fails,
+        /// and one whose read-back mismatches, each send exactly one inverse batch
+        /// (every mutation inverted) and one verification, and — when the
+        /// verification reads the pre-state back — return the primary error.
+        #[test]
+        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+        fn a_failed_or_mismatched_read_back_restores_once_and_returns_the_primary() {
+            let id = identity();
+            let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
+            let expected_after = state(&id, &[]);
+            let mismatch = state(&id, &[Ipv4Addr::new(10, 0, 0, 9)]);
+            let primaries: [(&str, Result<Option<SharedIpInterceptState>, NetlinkError>); 2] = [
+                ("read-back-failed", Err(scripted_nft("read-back-failed"))),
+                // a mismatched read-back's primary is the adapter's own observe error.
+                ("shared-ip-observe", Ok(Some(mismatch))),
+            ];
+            for (expected_op, primary_read) in primaries {
+                let io = ScriptedElementIo::new(
+                    vec![Ok(()), Ok(())],
+                    vec![primary_read, Ok(Some(before.clone()))],
+                );
+
+                let error =
+                    mutate_and_readback(&io, &id, before.clone(), &removal(), &expected_after)
+                        .expect_err("a failed or mismatched read-back is a typed error");
+
+                assert_eq!(op_of(&error), Some(expected_op), "the primary error is returned");
+                assert_eq!(
+                    io.calls(),
+                    vec![SeamCall::Send, SeamCall::Collect, SeamCall::Send, SeamCall::Collect],
+                    "one primary send+read, then one inverse send+verification",
+                );
+                let sent = io.sent();
+                assert_eq!(sent.len(), 2, "exactly one inverse batch follows the primary");
+                let primary_batch: Vec<_> =
+                    sent[0].iter().map(|m| (m.set, m.set_id, m.key.clone(), m.add)).collect();
+                let inverse_batch: Vec<_> =
+                    sent[1].iter().map(|m| (m.set, m.set_id, m.key.clone(), m.add)).collect();
+                let inverse_expected: Vec<_> =
+                    sent[0].iter().map(|m| (m.set, m.set_id, m.key.clone(), !m.add)).collect();
+                assert_eq!(inverse_batch, inverse_expected, "the inverse inverts every mutation");
+                assert_ne!(inverse_batch, primary_batch, "the inverse is not the primary batch");
+            }
+        }
+
+        /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+        /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// R10 arm 2 failure modes (H14): when the single restoration fails — its
+        /// inverse send fails, or its verification fails or mismatches — the
+        /// adapter returns an error that retains BOTH causes (the primary
+        /// read-back failure and the restoration failure) as sources.
+        #[test]
+        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+        fn a_failed_restoration_retains_both_the_primary_and_the_restoration_cause() {
+            type Script = (
+                Vec<Result<(), NetlinkError>>,
+                Vec<Result<Option<SharedIpInterceptState>, NetlinkError>>,
+            );
+            let id = identity();
+            let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
+            let expected_after = state(&id, &[]);
+            let other = state(&id, &[Ipv4Addr::new(10, 0, 0, 7)]);
+            // (inverse send fails), (verification fails), (verification mismatches).
+            let cases: [Script; 3] = [
+                (
+                    vec![Ok(()), Err(scripted_nft("inverse-send-failed"))],
+                    vec![Err(scripted_nft("read-back-failed"))],
+                ),
+                (
+                    vec![Ok(()), Ok(())],
+                    vec![Err(scripted_nft("read-back-failed")), Err(scripted_nft("verify-failed"))],
+                ),
+                (
+                    vec![Ok(()), Ok(())],
+                    vec![Err(scripted_nft("read-back-failed")), Ok(Some(other))],
+                ),
+            ];
+            for (sends, collects) in cases {
+                let io = ScriptedElementIo::new(sends, collects);
+
+                let error =
+                    mutate_and_readback(&io, &id, before.clone(), &removal(), &expected_after)
+                        .expect_err("a failed restoration is a typed error");
+
+                assert_eq!(
+                    op_of(&error),
+                    Some("shared-ip-element-restore"),
+                    "a failed restoration is the dedicated restore error",
+                );
+                let restore = match &error {
+                    NetlinkError::Nft { source, .. } => source
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<ElementRestoreError>())
+                        .expect("the restore error wraps ElementRestoreError"),
+                    unexpected => {
+                        panic!("expected a NetlinkError::Nft restore error, got {unexpected:?}")
+                    }
+                };
+                assert_eq!(
+                    op_of(&restore.primary),
+                    Some("read-back-failed"),
+                    "the primary cause is retained",
+                );
+                assert!(
+                    op_of(&restore.restore).is_some(),
+                    "the restoration cause is retained: {:?}",
+                    restore.restore,
+                );
+            }
+        }
+
+        /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
+        /// S-ND295-54 — Protection removal is convergent and its failures are typed.
+        /// CONTRACT_SHAPE: bounded-change.
+        ///
+        /// R10 happy read-back (H14 contrast): a post-commit read-back that equals
+        /// the expected new state returns it with no inverse batch.
+        #[test]
+        #[ignore = "pending DELIVER step 07-01 (S-ND295-54)"]
+        fn a_matching_read_back_returns_the_new_state_with_no_inverse() {
+            let id = identity();
+            let before = state(&id, &[Ipv4Addr::new(10, 0, 0, 2)]);
+            let expected_after = state(&id, &[]);
+            let io = ScriptedElementIo::new(vec![Ok(())], vec![Ok(Some(expected_after.clone()))]);
+
+            let after = mutate_and_readback(&io, &id, before, &removal(), &expected_after)
+                .expect("a matching read-back succeeds");
+
+            assert_eq!(after, expected_after, "the observed new state is returned");
+            assert_eq!(
+                io.calls(),
+                vec![SeamCall::Send, SeamCall::Collect],
+                "one send, one read, no inverse",
+            );
+            assert_eq!(io.sent().len(), 1, "no inverse batch");
+        }
     }
 }
 

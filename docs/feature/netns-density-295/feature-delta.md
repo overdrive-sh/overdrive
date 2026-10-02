@@ -15973,7 +15973,7 @@ ruling 4 of 2026-09-23. Phase B appends the #295 rows above to the policy file
 | `overdrive-netlink` nft member converge/delete and guard effects; `Client::local_route_present` | S-ND295-54, 61 (Lima), 13C (native) | source-local codec/classifier rows |
 | `overdrive-dataplane` egress classifier, counter slot 9, inventory | S-ND295-48 (Lima), 67 (native) | S-ND295-47 (Tier 2) |
 | `HostSharedGuestNetworkOwner` provision/activate/teardown/audit/quiesce/restore | S-ND295-10, 11, 12 (Lima); 01, 30B, 37, 66, 67, 69 (native) | S-ND295-50, 51 (source-local D12A) |
-| `HostMtlsIntercept` observe/converge/remove | S-ND295-54, 61 (Lima), 13C, 69 (native); R10's two netlink-failure arms (a kernel-rejected batch, a post-commit read-back failure) have no real-kernel stimulus and are returned to DESIGN as a testability boundary (H14, § *Completeness Audit*) | S-ND295-13D, 61 (recording double); the worker's handling of both failures, S-ND295-07B |
+| `HostMtlsIntercept` observe/converge/remove | S-ND295-54, 61 (Lima), 13C, 69 (native); R10's two element-batch failure arms (a kernel-rejected batch, a post-commit read-back failure) are asserted source-local, default lane, over the module-private `SharedIpElementIo` seam — a behaviour-preserving extraction of `mutate_and_readback`, no new public surface — resting on the kernel's batch abort (user decision 3 of 2026-09-30; H14 resolved, § *Completeness Audit*) | S-ND295-13D, 61 (recording double); S-ND295-54's four `SharedIpElementIo` seam cells; the worker's handling of both failures, S-ND295-07B |
 | `HostMtlsIntercept` listener (B-7): bind, `local_addr`, `accept` | S-ND295-70 (Lima root: held-address refusal, original destination, destroyed-socket wake, descriptor state) | S-ND295-70 (`SimMtlsIntercept` listener self-tests) |
 | `MtlsInterceptWorker` | S-ND295-20-26 native bodies, 01 | S-ND295-54, 61, 13D, 70 (source-local/acceptance) |
 | `DnsResponder` / `HostGuestDnsFactory` / `GuestDns` | S-ND295-34 (real `:53`; the audit fails after an out-of-band socket loss) | S-ND295-29A (test-local `GuestDns`, source-local), S-ND295-29B (`SimGuestDnsFactory` / `SimGuestDns`), S-ND295-34 (the probe refusal through the required port, in-process) |
@@ -16137,11 +16137,11 @@ classifying the phase-C run (B-8, the fresh-host RCA / N-4):
 | N-4 the fresh-host bridge race (RCA root cause A) — `converge_shared` creates `ovd-gbr0` with no address and sets it after, so ~half of fresh-host boots refuse at `BridgeObserve` and the refusal cannot name its cause | SPECIFICATION_AMBIGUITY (interface contract + platform requirement) | **PINNED** — `Client::ensure_bridge(name, mac)` creates the bridge with its address; the refusal names its cause via `GuestNetworkFact::Bridge`. Re-decided for TAPs by the user rulings of 2026-09-28: no host link-configuration requirement and no startup-probe scratch-TAP condition; a TAP's host-side MAC is judged by the D-295-R21 invariant, reported as `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }` (user-approved 2026-09-28) (FD § "[REF] Managed-link identity independent of host link configuration (fresh-host RCA) — pinned 2026-09-26; user rulings of 2026-09-28"; FD § "[REF] Driven port — TAP egress guest-MAC delivery (D-295-R21) — ACCEPTED 2026-09-24" (the host-side MAC invariant)) |
 
 | DISTILL review iteration-1 gaps DR-01, DR-06, DR-07, DR-08 (a)/(b), DR-10, H2 | SPECIFICATION_AMBIGUITY (interface contract) | **PINNED** 2026-09-29, with the user decisions of 2026-09-30 (FD § "[REF] Decisions Table" (the review iteration-1 pins and the user decisions of 2026-09-30)) |
-| H14 R10's two netlink-failure arms — a delete batch the kernel itself rejects leaves every member unchanged; a post-commit read-back failure performs one inverse transition and keeps both causes — have no deterministic real-kernel stimulus, and the adapter's only private seam (`SharedInterceptProgramIo`) carries the program's observe and replace, not the element batch or its read-back | testability boundary | **RETURNED — open.** DISTILL invents no production API; DESIGN pins a fault seam over the element batch and its read-back, or accepts that these arms rest on review and on the worker-level evidence of S-ND295-07B |
+| H14 R10's two element-batch failure arms — a delete batch the kernel itself rejects leaves every member unchanged; a post-commit read-back failure performs one inverse transition and keeps both causes — had no deterministic real-kernel stimulus, and the adapter's prior private seam (`SharedInterceptProgramIo`) carries the program's observe and replace, not the element batch or its read-back | testability boundary | **RESOLVED — user decision 3 of 2026-09-30.** Both arms rest on the kernel's batch abort and are asserted source-local, default lane, over a NEW module-private `SharedIpElementIo` seam in `overdrive-netlink::nft` (a behaviour-preserving `mutate_and_readback` extraction, no new public surface, its scripted double DISTILL's test support); S-ND295-54's four seam cells are GREEN regression-locks against the extraction, `#[ignore]`d until 07-01 (FD § "[REF] Decisions Table" (user decisions of 2026-09-30, decision 3); FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (Evidence for the two element-batch failure rules)) |
 
-Falsifier telemetry for this run: `(netns-density-295, C1..C7, findings 1, severity medium)`
-over the in-scope set — the one finding is H14 above (C6b, documented gap). The
-audit stays **COMPLETE — 15/15** with that gap documented.
+Falsifier telemetry for this run: `(netns-density-295, C1..C7, findings 0, severity none)`
+over the in-scope set — H14, the last documented gap (C6b), is resolved by user
+decision 3 of 2026-09-30. The audit stays **COMPLETE — 15/15** with no open gap.
 
 **B3 (c) and H3 — resolved 2026-10-01** (see `red-classification.md` Phase G
 Run 5, logs `G6-N01/N02/N03`). Both review findings on
@@ -16156,6 +16156,42 @@ supervisor's repair, and the guest/peer TAP up state plus `ip_forward` are read
 at the fault point. Both bodies are pending 08-01 and RED on the 05-03
 guest-boot baseline (CH `Tap::enable` → SIOCSIFFLAGS EPERM) for the right
 reason; their added assertions encode the 08-01 GREEN contract.
+
+**Decision 1/2/3 follow-ups — authored 2026-10-01/02** (see `red-classification.md`
+§ *Phase G — Run 7*, logs `G8-*`). The three user decisions of 2026-09-30
+pinned by the architect are now covered by DISTILL, every new body carrying a
+complete executable body under `#[ignore = "pending DELIVER step NN-NN
+(S-ND295-xx)"]`. The scenario-ID count is unchanged (84): the follow-ups add
+bodies inside existing scenarios and one new evidence lane (E23), not new IDs.
+
+- **Decision 1 (kill loop).** S-ND295-30A gains three seeded cells
+  (`a_per_vm_kill_write_pending_past_its_bound_fails_the_node`,
+  `a_kill_loop_running_at_the_deadline_completes_before_the_one_request`,
+  `an_intentional_shutdown_mid_kill_loop_lets_the_loop_finish_first`): a
+  per-report kill loop runs to its end before any further owner call or
+  fail-stop, each write bounded by `SHARED_NETWORK_VM_KILL_CALL_BOUND`, a missed
+  bound a failed kill, a late write changing no outcome, and intentional
+  shutdown cancelling only between loops. M-ND295-E18 now also measures the loop
+  time K and the largest single kill write W, and 09-01 sets
+  `SHARED_NETWORK_VM_KILL_CALL_BOUND = max(1 s, 4 × W)` alongside the audit and
+  quiesce bounds (§ *Required Adapter Coverage* unchanged; TS § *M-ND295-E18*,
+  S-ND295-30A, S-ND295-32). RED against the `run_shared_network_supervisor`
+  `todo!()` (DELIVER 09-01); native S-ND295-30B(f)/67(4) RED on the 05-03
+  guest-boot baseline, classified not re-proven.
+- **Decision 2 (no panic — E23).** A new Lima-root-only evidence lane, E23: a
+  refused OS thread (forced by a real cgroup-v2 `pids.max` cap via the
+  `overdrive-testing::pids_max` guard) is a call's typed failure, never a panic
+  or abort (release is `panic = "abort"`). Three cells — `block_on_host_netlink`
+  → `NetlinkError::Connect` (06-02); `quiesce_managed_taps` over one managed
+  `Active` TAP → `Ok` with that TAP's `unconfirmed`/`Connect` under DR-08 (b)-A
+  (06-04); a `cgroup.kill` write → typed `io::Error` (09-01). Each is RED today
+  against the pre-fix paths that panic on a refused thread
+  (`std::thread::scope`'s `scope.spawn`; `tokio::fs`/`spawn_blocking`).
+- **Decision 3 (H14 resolved).** S-ND295-54 gains four cells over the NEW
+  module-private `SharedIpElementIo` seam (§ *Completeness Audit* H14 row, §
+  *Required Adapter Coverage* `HostMtlsIntercept`): the two R10 element-batch
+  failure arms, previously a returned testability boundary, now rest on the
+  kernel's batch abort and the source-local seam.
 
 ## Wave: DISTILL / [REF] Outcomes and Verification Separation
 

@@ -195,6 +195,10 @@ rustix = { workspace = true, features = ["thread"] }
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
 # `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
 overdrive-sim.path       = "../overdrive-sim"
+# `overdrive-testing` — shared real-infra fixtures. GH #295 E23 uses its
+# `pids_max` cgroup v2 thread-refusal guard in the source-local Lima-root
+# `guest_network::shared_owner_link_address_kernel` module. Dev-only.
+overdrive-testing.workspace = true
 # `test-utils` exposes the shared `overdrive_core::testing::workflow`
 # fixtures (`ProvisionRecord`) used by the slice-01 workflow-engine
 # acceptance test (S-WP-01-11). Dev-only; mirrors the same override in

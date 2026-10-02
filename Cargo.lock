@@ -2183,6 +2183,7 @@ dependencies = [
  "overdrive-reconcilers",
  "overdrive-sim",
  "overdrive-store-local",
+ "overdrive-testing",
  "overdrive-worker",
  "parking_lot",
  "proptest",

@@ -361,14 +361,16 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 /// 4. the removal retired the stopping allocation's element tokens: dropping
 ///    its guards changes nothing.
 ///
-/// Not asserted by this body or any other: R10's two netlink-failure arms — a
-/// delete batch the kernel itself rejects leaving every member unchanged, and
-/// a post-commit read-back failure performing one inverse transition and
-/// keeping both causes. Neither has a deterministic real-kernel stimulus, and
-/// the adapter's only private seam (`SharedInterceptProgramIo`) carries the
-/// program's observe and replace, not the element batch or its read-back.
-/// The body keeps its name; its argument-refused rows are the only
-/// "rejection" it proves.
+/// Not asserted by this body (no deterministic real-kernel stimulus): R10's two
+/// netlink-failure arms — a delete batch the kernel itself rejects leaving every
+/// member unchanged, and a post-commit read-back failure performing one inverse
+/// transition and keeping both causes. User decision 3 of 2026-09-30 resolved
+/// the former testability boundary (H14): the adapter's handling of both arms is
+/// proven source-local, default lane, over the module-private `SharedIpElementIo`
+/// seam in `overdrive-netlink::nft::shared_ip::element_seam_tests`, and that a
+/// rejected batch commits nothing rests on the kernel's documented batch abort.
+/// The body keeps its name; its argument-refused rows are the only "rejection"
+/// it proves here.
 ///
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
