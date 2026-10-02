@@ -358,7 +358,7 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
     // partially-created fd is closed before returning, and a successful fd is
     // adopted by `TcpListener::from_raw_fd` (which owns it from then on).
     unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
         // Defensive FFI return-code check; libc::socket() with these constant
         // args cannot be made to fail in a black-box test (only RLIMIT_NOFILE
         // exhaustion would, which is hostile/flaky), so the `< 0 → ==/<=`

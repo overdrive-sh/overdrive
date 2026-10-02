@@ -338,7 +338,9 @@ impl GenlSock {
     fn open() -> std::io::Result<Self> {
         // SAFETY: `socket(2)` with valid domain/type/protocol constants; the
         // returned fd is checked and owned (closed in `Drop`).
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_GENERIC) };
+        let fd = unsafe {
+            libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, NETLINK_GENERIC)
+        };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
         }

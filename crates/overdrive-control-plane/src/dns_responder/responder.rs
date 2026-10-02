@@ -387,7 +387,7 @@ impl DnsResponder {
                     fd.as_raw_fd(),
                     &mut iov,
                     Some(&mut cmsg_space),
-                    MsgFlags::empty(),
+                    MsgFlags::MSG_CMSG_CLOEXEC,
                 ) {
                     Ok(recvd) => {
                         let Some(peer) = recvd.address else { continue };
@@ -458,8 +458,9 @@ impl DnsResponder {
 /// Propagates the underlying `io::Error` — the caller maps `EADDRINUSE` to the
 /// shared-gateway fallback and any other error to [`DnsResponderError::Bind`].
 fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
-    let fd = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), SockProtocol::Udp)
-        .map_err(std::io::Error::from)?;
+    let fd =
+        socket(AddressFamily::Inet, SockType::Datagram, SockFlag::SOCK_CLOEXEC, SockProtocol::Udp)
+            .map_err(std::io::Error::from)?;
     // SO_REUSEADDR — coexist with systemd-resolved's specific 127.0.0.53:53 /
     // 127.0.0.54:53 binds (the spike-validated wildcard coexistence shape).
     setsockopt(&fd, ReuseAddr, &true).map_err(std::io::Error::from)?;

@@ -659,7 +659,7 @@ fn dial_leg(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
 fn dial_leg_s(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
     // Create the socket, set SO_MARK, THEN connect (the mark must be set before the
     // SYN so prerouting sees it on the outgoing packet).
-    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
     if sock < 0 {
         return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
     }

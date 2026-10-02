@@ -1641,7 +1641,9 @@ impl NfSock {
     fn open_with_groups(groups: u32) -> std::io::Result<Self> {
         // SAFETY: `socket(2)` with valid domain/type/protocol constants; the
         // returned fd is checked and owned (closed in `Drop`).
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_NETFILTER) };
+        let fd = unsafe {
+            libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, NETLINK_NETFILTER)
+        };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
         }

@@ -530,7 +530,7 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
 
     let mut fds = [0 as RawFd; 2];
     // SAFETY: `pipe2` writes two fds into the 2-element array.
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK) } != 0 {
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
         mark_exited(state, PumpExit::TransportDeath);
         return;
     }
@@ -627,9 +627,9 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
     }
 
     let mut fds = [0 as RawFd; 2];
-    // SAFETY: `pipe2` writes two fds into the 2-element array. Flags = 0 — a
-    // BLOCKING pipe, per the blocking-splice discipline (no `O_NONBLOCK`).
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), 0) } != 0 {
+    // SAFETY: `pipe2` writes two fds into the 2-element array. Only
+    // `O_CLOEXEC` is set, so this remains a BLOCKING pipe.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         mark_exited(state, PumpExit::TransportDeath);
         return;
     }

@@ -128,7 +128,6 @@ fn located(violations: Vec<CloexecViolation>) -> Vec<Located> {
 /// S-ND295-46 — the `overdrive serve` closure creates no inheritable descriptor
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
 fn the_serve_closure_creates_no_inheritable_descriptor() {
     let manifest = real_workspace_manifest();
     let violations = scan_workspace(&manifest).unwrap_or_else(|err| {
@@ -152,7 +151,6 @@ fn the_serve_closure_creates_no_inheritable_descriptor() {
 /// S-ND295-46 — an unparseable serve source fails the scan instead of being skipped
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
 fn an_unparseable_serve_source_fails_the_scan_instead_of_being_skipped() {
     let fixture = FixtureWorkspace::new(&["crates/overdrive-cli"]);
     fixture.write(
@@ -307,7 +305,6 @@ path = \"src/guest_init.rs\"
 /// S-ND295-46 — auxiliary binaries outside the serve closure are not scanned
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
 fn auxiliary_binaries_outside_the_serve_closure_are_not_scanned() {
     let fixture = FixtureWorkspace::new(CLOSURE_MEMBERS);
     for (path, contents) in CLOSURE_FILES {
@@ -355,7 +352,6 @@ fn auxiliary_binaries_outside_the_serve_closure_are_not_scanned() {
 /// S-ND295-46 — a workspace without the `overdrive-cli` package is an error
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
 fn a_workspace_without_the_cli_package_is_an_error() {
     let fixture = FixtureWorkspace::new(&["crates/overdrive-control-plane"]);
     fixture.write(

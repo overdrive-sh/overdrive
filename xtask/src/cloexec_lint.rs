@@ -14,9 +14,15 @@
 //! Unlike `dst_lint::scan_workspace`, [`scan_workspace`] fails closed: a file
 //! it cannot read or parse is an error, never a skipped file.
 
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::Result;
+use cargo_metadata::{DependencyKind, MetadataCommand, PackageId};
+use color_eyre::eyre::{Result, WrapErr, eyre};
+use syn::spanned::Spanned;
+use syn::visit::Visit;
+use syn::{Attribute, Expr, Item, Meta, UseTree};
 
 /// Why a matched call is rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,12 +60,19 @@ pub struct CloexecViolation {
 /// Parses `source` with `syn`; a parse failure is `Err`, distinct from a clean
 /// file. Applies the call-family table and the `cloexec-lint: ok` marker
 /// (on the line of the call or the line immediately above, suppressing only
-/// that line), skips `#[cfg(test)]` items, and returns violations in source
-/// order.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-04")]
+/// that line), skips test-only items, and returns violations in source order.
 pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<CloexecViolation>> {
-    let _ = (source, file.as_ref());
-    todo!("RED scaffold: OBL-295-CLOEXEC cloexec_lint::scan_source — DELIVER step 05-04")
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source)
+        .wrap_err_with(|| format!("parse Rust source {}", file.display()))?;
+
+    let mut imports = ImportMap::default();
+    ImportCollector { imports: &mut imports }.visit_file(&parsed);
+
+    let mut scanner = SourceScanner { source, file, imports: &imports, violations: Vec::new() };
+    scanner.visit_file(&parsed);
+    scanner.violations.sort_by_key(|violation| (violation.line, violation.column));
+    Ok(scanner.violations)
 }
 
 /// Scan every source file linked into `overdrive serve`.
@@ -70,26 +83,518 @@ pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<CloexecVi
 /// `src/bin/**`. Fails closed: a file it cannot read, or that
 /// [`scan_source`] cannot parse, is `Err` naming that file; metadata without
 /// an `overdrive-cli` package is `Err`.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-04")]
 pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<CloexecViolation>> {
-    let _ = manifest_path;
-    todo!("RED scaffold: OBL-295-CLOEXEC cloexec_lint::scan_workspace — DELIVER step 05-04")
+    let metadata = MetadataCommand::new()
+        .manifest_path(manifest_path)
+        .exec()
+        .wrap_err_with(|| format!("read Cargo metadata for {}", manifest_path.display()))?;
+    let cli = metadata
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == "overdrive-cli" && metadata.workspace_members.contains(&package.id)
+        })
+        .ok_or_else(|| {
+            eyre!("workspace {} has no overdrive-cli package", manifest_path.display())
+        })?;
+    let resolve = metadata.resolve.as_ref().ok_or_else(|| {
+        eyre!("Cargo metadata for {} has no resolved graph", manifest_path.display())
+    })?;
+
+    let workspace_members: HashSet<PackageId> =
+        metadata.workspace_members.iter().cloned().collect();
+    let nodes: HashMap<PackageId, _> =
+        resolve.nodes.iter().map(|node| (node.id.clone(), node)).collect();
+    let mut closure = HashSet::from([cli.id.clone()]);
+    let mut pending = VecDeque::from([cli.id.clone()]);
+
+    while let Some(package_id) = pending.pop_front() {
+        let Some(node) = nodes.get(&package_id) else {
+            return Err(eyre!("Cargo metadata has no node for package {package_id}"));
+        };
+        for dependency in &node.deps {
+            let is_normal =
+                dependency.dep_kinds.iter().any(|kind| kind.kind == DependencyKind::Normal);
+            if is_normal
+                && workspace_members.contains(&dependency.pkg)
+                && closure.insert(dependency.pkg.clone())
+            {
+                pending.push_back(dependency.pkg.clone());
+            }
+        }
+    }
+
+    let mut package_ids: Vec<PackageId> = closure.into_iter().collect();
+    package_ids.sort_by_key(ToString::to_string);
+    let mut source_files = Vec::new();
+    for package_id in package_ids {
+        let package = metadata
+            .packages
+            .iter()
+            .find(|package| package.id == package_id)
+            .ok_or_else(|| eyre!("resolved workspace package {package_id} is missing"))?;
+        let manifest = PathBuf::from(package.manifest_path.as_str());
+        let package_root = manifest
+            .parent()
+            .ok_or_else(|| eyre!("package manifest {} has no parent", manifest.display()))?;
+        let source_root = package_root.join("src");
+        match fs::read_dir(&source_root) {
+            Ok(_) => collect_source_files(&source_root, &source_root, &mut source_files)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .wrap_err_with(|| format!("read source directory {}", source_root.display()));
+            }
+        }
+    }
+
+    source_files.sort();
+    let mut violations = Vec::new();
+    for source_file in source_files {
+        let source = fs::read_to_string(&source_file)
+            .wrap_err_with(|| format!("read source file {}", source_file.display()))?;
+        let mut found = scan_source(&source, &source_file)
+            .wrap_err_with(|| format!("scan source file {}", source_file.display()))?;
+        violations.append(&mut found);
+    }
+    Ok(violations)
 }
 
 /// Render one violation as the block [`run`] writes to stderr.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-04")]
 pub fn render_violation(v: &CloexecViolation) -> String {
-    let _ = v;
-    todo!("RED scaffold: OBL-295-CLOEXEC cloexec_lint::render_violation — DELIVER step 05-04")
+    format!("{}:{}:{}: {}: {:?}", v.file.display(), v.line, v.column, v.call, v.rule)
 }
 
 /// Entry point for `cargo xtask cloexec-lint`: writes each
 /// [`render_violation`] block to stderr and returns `Err` when any violation
 /// exists.
-#[expect(clippy::todo, reason = "RED scaffold — DELIVER step 05-04")]
 pub fn run(manifest_path: &Path) -> Result<()> {
-    let _ = manifest_path;
-    todo!("RED scaffold: OBL-295-CLOEXEC cloexec_lint::run — DELIVER step 05-04")
+    let violations = scan_workspace(manifest_path)?;
+    for violation in &violations {
+        eprintln!("{}", render_violation(violation));
+    }
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(eyre!("close-on-exec source gate found {} violation(s)", violations.len()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CrateRoot {
+    Libc,
+    Nix,
+    Rustix,
+}
+
+impl CrateRoot {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "libc" => Some(Self::Libc),
+            "nix" => Some(Self::Nix),
+            "rustix" => Some(Self::Rustix),
+            _ => None,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Libc => "libc",
+            Self::Nix => "nix",
+            Self::Rustix => "rustix",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ImportedPath {
+    root: CrateRoot,
+    path: Vec<String>,
+}
+
+#[derive(Default)]
+struct ImportMap {
+    names: HashMap<String, ImportedPath>,
+    globs: Vec<CrateRoot>,
+}
+
+impl ImportMap {
+    fn add_name(&mut self, local_name: String, target: &[String]) {
+        if let Some(root) = target.first().and_then(|name| CrateRoot::parse(name)) {
+            self.names.insert(local_name, ImportedPath { root, path: target[1..].to_vec() });
+        }
+    }
+
+    fn add_glob(&mut self, target: &[String]) {
+        if let Some(root) = target.first().and_then(|name| CrateRoot::parse(name)) {
+            self.globs.push(root);
+        }
+    }
+
+    fn resolve_call(&self, path: &syn::Path) -> Option<(CrateRoot, String)> {
+        let segments: Vec<String> =
+            path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+        let first = segments.first()?;
+        if let Some(root) = CrateRoot::parse(first) {
+            return Some((root, segments.last()?.clone()));
+        }
+        if let Some(import) = self.names.get(first) {
+            let name = if segments.len() > 1 {
+                segments.last()?.clone()
+            } else {
+                import.path.last()?.clone()
+            };
+            return Some((import.root, name));
+        }
+        if segments.len() == 1 && is_call_family(first) {
+            return self.globs.iter().copied().next().map(|root| (root, first.clone()));
+        }
+        None
+    }
+
+    fn is_imported_constant(&self, path: &syn::Path) -> bool {
+        let Some(first) = path.segments.first() else { return false };
+        let first = first.ident.to_string();
+        CrateRoot::parse(&first).is_some()
+            || self.names.contains_key(&first)
+            || path.segments.len() > 1
+    }
+}
+
+struct ImportCollector<'a> {
+    imports: &'a mut ImportMap,
+}
+
+impl<'ast> Visit<'ast> for ImportCollector<'_> {
+    fn visit_item(&mut self, item: &'ast Item) {
+        if item_requires_test(item_attributes(item)) {
+            return;
+        }
+        if let Item::Use(item_use) = item {
+            collect_use_tree(&item_use.tree, &[], self.imports);
+        } else {
+            syn::visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if !item_requires_test(impl_item_attributes(item)) {
+            syn::visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        if !item_requires_test(trait_item_attributes(item)) {
+            syn::visit::visit_trait_item(self, item);
+        }
+    }
+}
+
+fn collect_use_tree(tree: &UseTree, prefix: &[String], imports: &mut ImportMap) {
+    match tree {
+        UseTree::Path(path) => {
+            let mut nested = prefix.to_vec();
+            nested.push(path.ident.to_string());
+            collect_use_tree(&path.tree, &nested, imports);
+        }
+        UseTree::Name(name) => {
+            let mut target = prefix.to_vec();
+            target.push(name.ident.to_string());
+            imports.add_name(name.ident.to_string(), &target);
+        }
+        UseTree::Rename(rename) => {
+            let mut target = prefix.to_vec();
+            target.push(rename.ident.to_string());
+            imports.add_name(rename.rename.to_string(), &target);
+        }
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_tree(item, prefix, imports);
+            }
+        }
+        UseTree::Glob(_) => imports.add_glob(prefix),
+    }
+}
+
+fn item_requires_test(attributes: &[Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        attribute.path().is_ident("cfg")
+            && attribute
+                .parse_args::<Meta>()
+                .is_ok_and(|predicate| predicate_requires_test(&predicate))
+    })
+}
+
+fn item_attributes(item: &Item) -> &[Attribute] {
+    match item {
+        Item::Const(item) => &item.attrs,
+        Item::Enum(item) => &item.attrs,
+        Item::ExternCrate(item) => &item.attrs,
+        Item::Fn(item) => &item.attrs,
+        Item::ForeignMod(item) => &item.attrs,
+        Item::Impl(item) => &item.attrs,
+        Item::Macro(item) => &item.attrs,
+        Item::Mod(item) => &item.attrs,
+        Item::Static(item) => &item.attrs,
+        Item::Struct(item) => &item.attrs,
+        Item::Trait(item) => &item.attrs,
+        Item::TraitAlias(item) => &item.attrs,
+        Item::Type(item) => &item.attrs,
+        Item::Union(item) => &item.attrs,
+        Item::Use(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn impl_item_attributes(item: &syn::ImplItem) -> &[Attribute] {
+    match item {
+        syn::ImplItem::Const(item) => &item.attrs,
+        syn::ImplItem::Fn(item) => &item.attrs,
+        syn::ImplItem::Macro(item) => &item.attrs,
+        syn::ImplItem::Type(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn trait_item_attributes(item: &syn::TraitItem) -> &[Attribute] {
+    match item {
+        syn::TraitItem::Const(item) => &item.attrs,
+        syn::TraitItem::Fn(item) => &item.attrs,
+        syn::TraitItem::Macro(item) => &item.attrs,
+        syn::TraitItem::Type(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn foreign_item_attributes(item: &syn::ForeignItem) -> &[Attribute] {
+    match item {
+        syn::ForeignItem::Fn(item) => &item.attrs,
+        syn::ForeignItem::Static(item) => &item.attrs,
+        syn::ForeignItem::Type(item) => &item.attrs,
+        syn::ForeignItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn predicate_requires_test(predicate: &Meta) -> bool {
+    match predicate {
+        Meta::Path(path) => path.is_ident("test"),
+        Meta::List(list) if list.path.is_ident("all") => list
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+            .is_ok_and(|predicates| predicates.iter().any(predicate_requires_test)),
+        Meta::List(_) | Meta::NameValue(_) => false,
+    }
+}
+
+struct SourceScanner<'a> {
+    source: &'a str,
+    file: PathBuf,
+    imports: &'a ImportMap,
+    violations: Vec<CloexecViolation>,
+}
+
+impl<'ast> Visit<'ast> for SourceScanner<'_> {
+    fn visit_item(&mut self, item: &'ast Item) {
+        if !item_requires_test(item_attributes(item)) {
+            syn::visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if !item_requires_test(impl_item_attributes(item)) {
+            syn::visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        if !item_requires_test(trait_item_attributes(item)) {
+            syn::visit::visit_trait_item(self, item);
+        }
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast syn::ForeignItem) {
+        if !item_requires_test(foreign_item_attributes(item)) {
+            syn::visit::visit_foreign_item(self, item);
+        }
+    }
+
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        let arguments: Vec<&Expr> = call.args.iter().collect();
+        if let Expr::Path(function) = call.func.as_ref()
+            && function.qself.is_none()
+            && let Some((root, name)) = self.imports.resolve_call(&function.path)
+            && let Some(rule) = call_violation(root, &name, &arguments, self.imports)
+        {
+            let start = function.span().start();
+            let violation = CloexecViolation {
+                file: self.file.clone(),
+                line: start.line,
+                column: start.column + 1,
+                call: format!("{}::{name}", root.name()),
+                rule,
+            };
+            if !has_exemption_marker(self.source, violation.line) {
+                self.violations.push(violation);
+            }
+        }
+        syn::visit::visit_expr_call(self, call);
+    }
+}
+
+fn is_call_family(name: &str) -> bool {
+    matches!(
+        name,
+        "socket"
+            | "socketpair"
+            | "accept4"
+            | "pipe2"
+            | "open"
+            | "openat"
+            | "openat2"
+            | "dup3"
+            | "fcntl"
+            | "memfd_create"
+            | "eventfd"
+            | "epoll_create"
+            | "epoll_create1"
+            | "timerfd_create"
+            | "signalfd"
+            | "inotify_init1"
+            | "recvmsg"
+            | "recvmmsg"
+            | "accept"
+            | "pipe"
+            | "dup"
+            | "dup2"
+            | "inotify_init"
+    )
+}
+
+fn call_violation(
+    root: CrateRoot,
+    name: &str,
+    arguments: &[&Expr],
+    imports: &ImportMap,
+) -> Option<CloexecRule> {
+    if matches!(name, "accept" | "pipe" | "dup" | "dup2" | "inotify_init" | "epoll_create") {
+        return Some(CloexecRule::AlwaysInheritable);
+    }
+
+    if name == "fcntl" {
+        return arguments
+            .get(1)
+            .filter(|command| expression_has_path_segment(command, "F_DUPFD"))
+            .map(|_| CloexecRule::AlwaysInheritable);
+    }
+
+    let (index, expected_flag) = match name {
+        "socket" | "socketpair" => (if root == CrateRoot::Nix { 2 } else { 1 }, socket_flag(root)),
+        "accept4" => (if root == CrateRoot::Libc { 3 } else { 1 }, socket_flag(root)),
+        "pipe2" => (usize::from(root == CrateRoot::Libc), open_flag(root)),
+        "open" => (1, open_flag(root)),
+        "openat" | "openat2" | "dup3" => (2, open_flag(root)),
+        "memfd_create" => (1, if root == CrateRoot::Rustix { "CLOEXEC" } else { "MFD_CLOEXEC" }),
+        "eventfd" => (1, if root == CrateRoot::Rustix { "CLOEXEC" } else { "EFD_CLOEXEC" }),
+        "epoll_create1" => (0, if root == CrateRoot::Rustix { "CLOEXEC" } else { "EPOLL_CLOEXEC" }),
+        "timerfd_create" => (1, if root == CrateRoot::Rustix { "CLOEXEC" } else { "TFD_CLOEXEC" }),
+        "signalfd" => (2, if root == CrateRoot::Rustix { "CLOEXEC" } else { "SFD_CLOEXEC" }),
+        "inotify_init1" => (0, if root == CrateRoot::Rustix { "CLOEXEC" } else { "IN_CLOEXEC" }),
+        "recvmsg" => (if root == CrateRoot::Libc { 2 } else { 3 }, message_flag(root)),
+        "recvmmsg" => (if root == CrateRoot::Libc { 3 } else { 2 }, message_flag(root)),
+        _ => return None,
+    };
+
+    match arguments.get(index) {
+        None => Some(CloexecRule::AlwaysInheritable),
+        Some(argument) if !is_constant_expression(argument, imports) => {
+            Some(CloexecRule::UnresolvedFlag)
+        }
+        Some(argument) if !expression_has_path_segment(argument, expected_flag) => {
+            Some(CloexecRule::MissingFlag)
+        }
+        Some(_) => None,
+    }
+}
+
+fn socket_flag(root: CrateRoot) -> &'static str {
+    if root == CrateRoot::Rustix { "CLOEXEC" } else { "SOCK_CLOEXEC" }
+}
+
+fn open_flag(root: CrateRoot) -> &'static str {
+    if root == CrateRoot::Rustix { "CLOEXEC" } else { "O_CLOEXEC" }
+}
+
+fn message_flag(root: CrateRoot) -> &'static str {
+    if root == CrateRoot::Rustix { "CMSG_CLOEXEC" } else { "MSG_CMSG_CLOEXEC" }
+}
+
+fn is_constant_expression(expression: &Expr, imports: &ImportMap) -> bool {
+    match expression {
+        Expr::Lit(_) => true,
+        Expr::Path(path) => imports.is_imported_constant(&path.path),
+        Expr::Binary(binary) => {
+            is_constant_expression(&binary.left, imports)
+                && is_constant_expression(&binary.right, imports)
+        }
+        Expr::Unary(unary) => is_constant_expression(&unary.expr, imports),
+        Expr::Paren(paren) => is_constant_expression(&paren.expr, imports),
+        Expr::Group(group) => is_constant_expression(&group.expr, imports),
+        Expr::Cast(cast) => is_constant_expression(&cast.expr, imports),
+        Expr::Call(call) => {
+            call.args.is_empty()
+                && matches!(call.func.as_ref(), Expr::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == "empty"))
+        }
+        _ => false,
+    }
+}
+
+fn expression_has_path_segment(expression: &Expr, expected: &str) -> bool {
+    struct PathFinder<'a> {
+        expected: &'a str,
+        found: bool,
+    }
+    impl<'ast> Visit<'ast> for PathFinder<'_> {
+        fn visit_expr_path(&mut self, path: &'ast syn::ExprPath) {
+            self.found |= path.path.segments.iter().any(|segment| segment.ident == self.expected);
+            syn::visit::visit_expr_path(self, path);
+        }
+    }
+    let mut finder = PathFinder { expected, found: false };
+    finder.visit_expr(expression);
+    finder.found
+}
+
+fn has_exemption_marker(source: &str, line: usize) -> bool {
+    const MARKER: &str = "cloexec-lint: ok";
+    let has_reason = |text: &str| {
+        text.split_once("//")
+            .and_then(|(_, comment)| comment.trim_start().strip_prefix(MARKER))
+            .is_some_and(|reason| !reason.trim().is_empty())
+    };
+    source.lines().nth(line.saturating_sub(1)).is_some_and(has_reason)
+        || line > 1 && source.lines().nth(line - 2).is_some_and(has_reason)
+}
+
+fn collect_source_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    let entries = fs::read_dir(current)
+        .wrap_err_with(|| format!("read source directory {}", current.display()))?;
+    for entry in entries {
+        let entry = entry.wrap_err_with(|| format!("read entry in {}", current.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .wrap_err_with(|| format!("inspect source path {}", path.display()))?;
+        if file_type.is_dir() {
+            if current == root && entry.file_name() == "bin" {
+                continue;
+            }
+            collect_source_files(root, &path, files)?;
+        } else if file_type.is_file() && path.extension().is_some_and(|extension| extension == "rs")
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -609,7 +1114,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — every rejected call family is reported with its rule
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn every_rejected_call_family_is_reported_with_its_rule() {
         assert_scans(&[
             SOCKET_FAMILY,
@@ -630,7 +1134,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — renamed imports and `nix`/`rustix` wrappers resolve to their call
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn renamed_imports_and_nix_or_rustix_wrappers_are_resolved_to_their_call() {
         assert_scans(&[RENAMED_LIBC, NIX_WRAPPERS, RUSTIX_WRAPPERS]);
     }
@@ -639,7 +1142,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — a flag argument held in a variable is rejected as unresolved
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn an_unresolved_flag_argument_is_rejected() {
         assert_scans(&[UNRESOLVED_FLAG]);
     }
@@ -648,7 +1150,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — the exemption marker suppresses only its own line
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn the_exemption_marker_suppresses_only_its_own_line() {
         assert_scans(&[EXEMPTION_MARKER]);
     }
@@ -657,7 +1158,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — `#[cfg(test)]` items are not scanned
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn cfg_test_items_are_not_scanned() {
         assert_scans(&[CFG_TEST_ITEMS]);
     }
@@ -667,7 +1167,6 @@ fn cfg_attr_test(fd: i32) {
     /// item; `any`, `not`, and `cfg_attr` never do
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn only_a_cfg_predicate_that_requires_test_exempts_an_item() {
         assert_scans(&[TEST_ONLY_CFG_PREDICATES]);
     }
@@ -676,7 +1175,6 @@ fn cfg_attr_test(fd: i32) {
     /// S-ND295-46 — an unparseable source is an error, not a clean file
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn an_unparseable_source_is_an_error_not_a_clean_file() {
         let file = "crates/overdrive-planted/src/unparseable.rs";
         let unparseable = "\
@@ -705,7 +1203,6 @@ fn broken( {
     /// S-ND295-46 — a rendered violation names its site, call, and rule
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 05-04 (S-ND295-46)"]
     fn a_rendered_violation_names_its_site_call_and_rule() {
         // The site values are chosen so no one of them occurs inside another:
         // the path carries no digit, and neither number contains the other.
