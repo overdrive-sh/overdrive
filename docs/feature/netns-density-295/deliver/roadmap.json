@@ -3,7 +3,7 @@
     "project_id": "netns-density-295",
     "feature_id": "netns-density-295",
     "created_at": "2026-09-20T12:28:19Z",
-    "goal": "Deliver GH #295 through the accepted shared bridge/classifier/constant-rule/two-listener architecture and S-ND295-00..37 evidence. D-295-DELIVER-04-01 preserves provision-up plus Cloud Hypervisor v53 named-TAP attachment and replaces the falsified zero-all-L2 oracle with an exact request-correlated ARP-reply / zero-payload TCP-reset contract backed by TCX/guard counters, marks, and no-escape capture. S19 closes only at the existing private control-plane supervisor; no worker reverse edge, GuestNetworkProvisioner activation method, fd handoff, VMM/confinement change, or other public API is added.",
+    "goal": "Deliver GH #295 through the accepted correctness-recovery replacement DESIGN D-295-R1..R22 and ADR-0127..0143: Cloud Hypervisor v53 fd handoff from uid-0 persistent TAPs; the audited x86_64 launch hook and seccomp filter with fail-closed non-x86_64 refusal; one node-shared bridge with exact managed-link identity, egress classification, host-side MAC/debug audit, one admission pool, and the TAP activation gate; awaited element cleanup and reclaim; boot member convergence and the bounded runtime shared-network supervisor; and the exact in-process, native-metal, conformance, non-regression, and non-EDD receipt evidence. The accepted public/private surfaces, ownership, lifecycle, state, invariants, and error taxonomy are unchanged and no unapproved API or runtime mechanism is added.",
     "total_steps": 35,
     "total_estimate_hours": 498,
     "estimate_basis": "Phase 01 lands the 8h dependency-neutral API cut. Phase 02 remains 88h: shared-switch owner/classifier/guard (48h), shared-IP adapter/rollback/S19-A no-rewrite (10h), and listener/capability publication (30h). Phase 03's existing 18h/16h/26h slices include S19-B in 03-03's retained supervisor recovery matrix. Phase 04 retains walking skeleton, conformance, non-regression/double-loss, and capacity receipts. Charter-section-6 re-roadmap: phases 05-10 add 284h across 24 dependency-ordered steps (05-00 the fresh-host root through 10-05 the capacity receipts); per-step effort_hours are advisory only, not an enforcement budget.",
@@ -25,12 +25,30 @@
       "docs/product/architecture/adr-0123-node-session-mtls-registration-generation.md",
       "docs/product/architecture/adr-0124-bounded-shared-network-owner-recovery.md",
       "docs/product/architecture/adr-0125-constant-nft-rules-shared-intercept-elements.md",
-      "docs/product/architecture/adr-0126-fixed-node-guest-bridge-mac.md"
+      "docs/product/architecture/adr-0126-fixed-node-guest-bridge-mac.md",
+      "docs/product/architecture/adr-0127-inherited-tap-queue-descriptor-guest-nic-attachment.md",
+      "docs/product/architecture/adr-0128-vmm-adapter-owns-per-launch-tap-queue-descriptor.md",
+      "docs/product/architecture/adr-0129-safe-descriptor-mapping-for-vmm-launch.md",
+      "docs/product/architecture/adr-0130-guest-taps-carry-no-unprivileged-owner-grant.md",
+      "docs/product/architecture/adr-0131-activate-allocation-tap-after-intercept-live.md",
+      "docs/product/architecture/adr-0132-linearize-guest-attachment-admission-at-address-assignment.md",
+      "docs/product/architecture/adr-0133-retiring-guest-attachment-counts-until-cleanup.md",
+      "docs/product/architecture/adr-0134-placement-reads-held-attachment-count-through-read-port.md",
+      "docs/product/architecture/adr-0135-awaited-convergent-intercept-element-release.md",
+      "docs/product/architecture/adr-0136-row-neutral-reclaim-of-non-current-allocation-network.md",
+      "docs/product/architecture/adr-0137-intercept-owner-converges-dynamic-members-at-boot.md",
+      "docs/product/architecture/adr-0138-required-serve-boundary-intercept-and-guest-dns-ports.md",
+      "docs/product/architecture/adr-0139-intercept-mark-fails-closed-without-ip-nft-program.md",
+      "docs/product/architecture/adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md",
+      "docs/product/architecture/adr-0141-cleanup-pending-status-derived-from-live-guest-lease.md",
+      "docs/product/architecture/adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md",
+      "docs/product/architecture/adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md"
     ],
     "delivery_protocol": [
       "Charter section-6 DELIVER re-roadmap: phases 01-04 (steps 01-01..04-04) are FROZEN prior-attempt history cross-referenced by the append-only execution-log.json and are NOT re-executed (phase 04 did not complete: 04-01 ended RED, 04-02's GREEN timed out, 04-03/04-04 never ran; those scenarios are re-planned in phase 10); phases 05-10 (steps 05-00..10-05) are the regenerated forward plan from feature-delta.md section 'Wave: DISTILL / [REF] DELIVER re-roadmap input', derived after the correctness-recovery DISTILL rewrite that both reviewers approved at HEAD 0dce65c8 (2026-10-02). Execution order is dependency-driven per each step's deps (root 05-00 -> serve/VMM-launch boundaries -> attachment owner/admission/activation -> cleanup/reclaim/placement -> intercept fail-closure/boot/audit -> E18 bound -> complete supervisor -> serve lifetime -> native end-to-end/conformance/capacity), not a single fixed linear chain; 05-00 is the root every other phase-05 root step depends on.",
       "Every step activates only the reasoned-#[ignore] bodies its scenario_ids name. D15 layered exceptions are explicit: S14..18 pair 02-02 adapter evidence with 02-03 owner closure. S19-A adapter/no-rewrite is independently approvable in 02-02; 02-03 supplies published-worker prerequisite only; 03-03 exclusively closes S19 through the private control-plane supervisor's cadence/deadline/request body. Repeated IDs record required layers, not premature scenario closure. DELIVER never authors or repairs acceptance bodies.",
-      "The feature delta (feature-delta.md) pins the exact public/private contract, including every doc-hidden port. GuestNetworkProvisioner remains exactly provision/teardown; the VMM remains named tap+mac. Any activation method/phase/error, fd handoff, capability/confinement change, public method/type/port/error/persisted field, or broader control-frame category is a blocker -- surface it, do not improvise a shape (root CLAUDE.md, 'Implement to the design').",
+      "The accepted correctness-recovery feature delta (D-295-R1..R22) and ADR-0127..0143 pin the exact public/private contract, including every doc-hidden port, the fd-handoff VMM boundary, the TAP activation gate, the x86_64 launch filter, the fail-closed non-x86_64 refusal, and the bounded owner/supervisor lifecycle. Any public method/type/port/error/persisted field, ownership/lifecycle/state change, or other mechanism not named there is a blocker -- surface it and do not improvise a shape (root CLAUDE.md, 'Implement to the design').",
+      "Native and measurement evidence are gates, not DELIVER authority to withdraw a decision or choose replacement architecture. Execution may continue only along the already approved standing branch. If a native premise does not reproduce, E14(e) reaches its separately routed outcome, or an E18 fit/threshold premise is contradicted, stop the affected step, leave or return DESIGN and roadmap validation to pending, and resume only after a separate exact DESIGN record, user decision where required, and independent design review. Never weaken the standing security or lifecycle contract in DELIVER.",
       "Each step's crafter runs the Lima-routed compile/clippy/nextest gates named in its verification list before requesting review; each reviewer records deliver/review-<step-id>.md with APPROVED before advancement.",
       "Mutation testing (cargo xtask mutants) is the single final DELIVER gate after every roadmap step and review per .claude/rules/testing.md -- it is never run per step.",
       "Tier-3/native-metal bodies in phases 02-04 run only through cargo xtask metal run -- (or cargo xtask lima run -- for non-KVM Lima-root Tier-2/Tier-3 portions); no Tier-3 evidence is accepted from a virtualized or nested host."
@@ -136,7 +154,7 @@
             "GuestTcxProgram's approved D12 live-loader methods gain only probe_tcp_intercept(&self, GuestTcxTcpProbeInput) -> Result<GuestTcxTcpProbeOutcome, GuestTcxError>. It uses only its owned classifier/counter map, runs one fixed TCP SYN, and returns semantic fields plus all eight before/after pairs. GuestTcxLink and GuestTcxAdoptedState remain exact; HostSharedGuestNetworkOwner::new remains sole constructor; Sim stays high-level. Syscall errors remain Io, counter reads Map, and no new GuestTcxError variant exists.",
             "GuestTcxMapKind is exactly Hash, Array, or Unsupported(opaque token); key/value/capacity are likewise closed semantic shapes with equality-preserving opaque unsupported properties. Tokens have no public constructor/accessor and render no raw/numeric identity. Endpoint schema is exactly Hash/U32/EndpointAbi/EndpointMaximum and counter schema Array/U32/CounterU64/CounterSlots. MapSchemaMismatch carries comparable expected/observed GuestTcxMapSchema and no source; aya kind-decode failure remains sourced Map. Raw sizes/capacity never cross into control-plane.",
             "GuestTcxInventoryIdentity::capture always returns GuestTcxInventoryCapture. into_parts moves an observation-capable identity and one Result disposition: capture exhausts map/program/link domains in fixed order, stores failed-domain flags privately in the identity, and moves the original first Map/Program error directly. Real D5 stores identity before moving disposition into the TcxLoad primary and skips BPF load on Err. The identity never stores/clones/wraps that source; affected later families return source-less CaptureUnavailable, while independent successful domains and exact pin paths remain observable.",
-            "After explicit cleanup and handle release, D5 maps its eight count_tcx families exactly to observe_endpoint_maps/observe_counter_maps/observe_endpoint_entries/observe_tcx_programs/observe_tcx_links/observe_endpoint_map_pins/observe_counter_map_pins/observe_tcx_link_pins. Dataplane uses complete loaded-object enumeration, private by-ID entry lookup, and exact pins. Only a recorded receipt may return an owned nonzero count. With no receipt and a complete baseline, zero candidates is Ok(0), but any candidate—including a unique semantic match—is source-less InventoryAmbiguous; failed baseline is CaptureUnavailable. Every Err becomes Unavailable, first-source retention and later-family continuation remain D5-owned, and pin absence or Drop never implies object absence.",
+            "After explicit cleanup and handle release, D5 maps its eight count_tcx families exactly to observe_endpoint_maps/observe_counter_maps/observe_endpoint_entries/observe_tcx_programs/observe_tcx_links/observe_endpoint_map_pins/observe_counter_map_pins/observe_tcx_link_pins. Dataplane uses complete loaded-object enumeration, private by-ID entry lookup, and exact pins. Only a recorded receipt may return an owned nonzero count. With no receipt and a complete baseline, zero candidates is Ok(0), but any candidate\u2014including a unique semantic match\u2014is source-less InventoryAmbiguous; failed baseline is CaptureUnavailable. Every Err becomes Unavailable, first-source retention and later-family continuation remain D5-owned, and pin absence or Drop never implies object absence.",
             "D12's private inventory source/projections remain exact. D14 raw packet/SKB/syscall/FD projection stays dataplane-private. Its pure table carries `/// CONTRACT_SHAPE: pure-function.` and covers accepted/drop/unexpected values, short output, complete-length wrong EtherType, IPv4 version/IHL, non-TCP, unavailable destination-port boundary, every counter pair, and decrease/wrap. The control-plane validator table independently drives every mismatch and lower source.",
             "The D9 bridge adapter remains the real kernel surface. After link absence, the real D5 adapter uses SO_BINDTODEVICE gateway:0 capture and one persistent-TAP frame, requiring exact DefaultDrop packet +1, positive byte delta, unchanged classifier counters, exact guard, and no delivery. It emits detached completion only after success; no new netlink API, packet owner, monitor, or test timing hook is added.",
             "The shared-switch owner pins maps and per-TAP links only under /sys/fs/bpf/overdrive/mtls-endpoints/{maps/{endpoints,counters},links/<tap>-ingress}; provision orders down TAP -> bridge/master -> guard membership -> endpoint insertion -> TCX first-ingress attach/pin/query and exact program/ifindex/pin/MAC read-back before VMM start. Closing loader handles never detaches a pinned link, and no pin outside that hierarchy is adopted.",
@@ -497,7 +515,7 @@
             "The callee VM Service reports Running with replicas 1/1 and the caller VM Job reports success dependent on receiving the callee's reply, driven entirely through the real overdrive serve + overdrive deploy <SPEC> production entry points -- no test-only wiring installs a rule, binds a socket, programs a map, or supplies an address that production does not install/bind/program/supply itself.",
             "Cloud Hypervisor v53 named-TAP behavior is treated as a fixed external contract: HostGuestNetworkProvisioner completes exact TAP-up/protection read-back before VMM start, and CloudHypervisorVmm continues to render only `--net tap=...,mac=...`. Native run f1a15668 is retained as negative evidence that a down TAP fails before READY at CH's mandatory SIOCSIFFLAGS/EPERM. No GuestNetworkProvisioner::activate, activation state/error, fd-bearing attachment, inherited descriptor, CH CAP_NET_ADMIN grant, delayed hotplug, confinement change, or new VMM method is added.",
             "The exact timing receipt is the existing synchronous `mtls.intercept.install.success` event for the caller allocation, captured by a Layer installed before deploy. Exactly one event carries the exact allocation id; on_event samples CLOCK_REALTIME, the same domain as AF_PACKET SO_TIMESTAMPNS. Production source order remains awaited mtls_lifecycle.start_alloc with exact `2 + P` read-back -> event -> driver.release_for_exit_emission. The event is the intercept-live/workload-traffic barrier, not a zero-all-L2 claim; typed set polling remains semantic-only and kernel handles remain private receipts.",
-            "Every guest-originated caller-TAP frame with timestamp <= the event must have a present timestamp, exact caller TAP ifindex, PACKET_HOST or PACKET_OTHERHOST direction, untagged/nontruncated/non-ambiguous capture, registered guest source MAC, fixed bridge destination MAC, zero application markers, and one of exactly two forms: (1) Ethernet/IPv4 ARP reply with htype=1, ptype=0x0800, hlen=6, plen=4, opcode=2, guest SHA/SPA and bridge/gateway THA/TPA, correlated one-to-one to an earlier exact host ARP request; or (2) valid unfragmented guest-to-gateway TCP RST with zero payload, RST=1, SYN/FIN/PSH/URG=0, and reversed ports correlated to one earlier zero-payload host control segment. For an ACK-bearing trigger, the reset is `<SEQ=SEG.ACK><CTL=RST>`; otherwise `<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>` per RFC 9293 §3.5.2. Trailing ARP padding is zero. Missing timestamp, uncorrelated/duplicate response, third EtherType/protocol/shape, IPv6, ICMP, UDP/DNS, ARP request/gratuitous reply, TCP payload/other flags/endpoints, or marker byte fails closed.",
+            "Every guest-originated caller-TAP frame with timestamp <= the event must have a present timestamp, exact caller TAP ifindex, PACKET_HOST or PACKET_OTHERHOST direction, untagged/nontruncated/non-ambiguous capture, registered guest source MAC, fixed bridge destination MAC, zero application markers, and one of exactly two forms: (1) Ethernet/IPv4 ARP reply with htype=1, ptype=0x0800, hlen=6, plen=4, opcode=2, guest SHA/SPA and bridge/gateway THA/TPA, correlated one-to-one to an earlier exact host ARP request; or (2) valid unfragmented guest-to-gateway TCP RST with zero payload, RST=1, SYN/FIN/PSH/URG=0, and reversed ports correlated to one earlier zero-payload host control segment. For an ACK-bearing trigger, the reset is `<SEQ=SEG.ACK><CTL=RST>`; otherwise `<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>` per RFC 9293 \u00a73.5.2. Trailing ARP padding is zero. Missing timestamp, uncorrelated/duplicate response, third EtherType/protocol/shape, IPv6, ICMP, UDP/DNS, ARP request/gratuitous reply, TCP payload/other flags/endpoints, or marker byte fails closed.",
             "Read all eight typed TCX counters at capture-ready and immediately after the event under one stable node-shared program/map identity. Because counters are node-shared, loss-accounted capture is armed on every managed TAP in the two-workload example and any guest-originated non-caller-TAP frame in the bracket fails rather than being attributed to the caller. Checked deltas are exactly ArpPass = permitted caller ARP reply count and Intercept = permitted caller TCP reset count; GatewayHostPass, EndpointMapMiss, SourceMacSpoof, SourceIpArpSpoof, DirectBypassDrop, and MalformedDrop are zero. Existing semantic classifier evidence proves marks Accepted(0x295b) and Intercept(0x295a) plus TCP bridge-MAC rewrite. The exact D9 guard remains present and its DefaultDrop counter is unchanged. Loss-accounted peer-TAP/all-interface capture observes zero copies on another TAP or physical interface, zero direct caller-to-callee guest tuple, and zero pre-event application markers. Any counter/capture mismatch or loss fails.",
             "The closed pre-event parser and request-response correlator are pure test helpers with exhaustive/table/property coverage for both accepted shapes and every rejected axis (timestamp, direction, interface, VLAN, truncation, source/destination identity, ARP fields/opcode/padding/correlation, IPv4 fragmentation/protocol, TCP flags/header length/payload/ports/sequence correlation, markers, unknown EtherType). Every source-local pure property carries the exact `/// CONTRACT_SHAPE: pure-function.` declaration; every transitioned native body carries `/// CONTRACT_SHAPE: bounded-change.` and names the full capture/counter/guard/event complement.",
             "For this same-node peer, exactly one live `ss -H -n -t -i -e` leg-B record must run from the shared-bridge gateway address to the ServiceBackendsResolve-selected workload address and declared port and contain tcp-ulp-tls, TLS 1.3, txconf, rxconf, and one nonzero inode. /proc/self/fd must map that inode to exactly one in-process fd. After the first request/reply establishes steady state, the existing strace-style thread-group observation must show completed positive splice(2) with that exact fd as destination for the second request and source for its response, followed by the guest's byte-exact second reply. Zero/multiple tuple, inode, or fd matches, a missing splice direction, attribution to another fd, or ambiguous thread ownership fails closed. This exact kTLS state plus same-inode bidirectional splice is the same-node protected-transport proof; no product/test-hook API may be added.",
@@ -641,9 +659,7 @@
       "description": "Lay the fresh-host and launch foundations every later phase depends on: pin the bridge MAC and managed-link identity (05-00, the root); make the serve-boundary ports required and compose the worker/DNS owner/supervisor/pool with the B-7 intercept listener (05-01); land the audited launch hook and seccomp filter (05-02); the Cloud Hypervisor TAP-queue fd handoff (05-03); and creation-time close-on-exec at the eight sites with its lint gate (05-04).",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
-      "depends_on": [
-        "04"
-      ],
+      "depends_on": [],
       "steps": [
         {
           "id": "05-00",
@@ -759,12 +775,13 @@
             "xtask/src/main.rs"
           ],
           "verification": [
+            "cargo xtask metal run -- cargo nextest run -p overdrive-host --lib --features integration-tests -E 'test(/launch_seccomp_kernel/)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-host --lib -E 'test(launch_seccomp)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-host --lib -E 'test(vmm)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R3 (hook), R22. The stage-order body of S-ND295-44 belongs to 05-03 (its precondition is the 05-03 fd handoff). Keep the program builder pure (proptest the deny-list); the hook install is the side-effecting surface. Do not invent VmmProbeError variants beyond the three pinned; surface a gap rather than improvise."
+          "implementation_notes": "R3 (hook), R22. The cargo xtask metal run -- command runs the complete launch_seccomp_kernel selection on the native x86_64 substrate, supplying S-ND295-41 and S-ND295-43's accepted native evidence. It does not run on this host's aarch64 Lima VM. The stage-order body of S-ND295-44 belongs to 05-03 (its precondition is the 05-03 fd handoff). Keep the program builder pure; do not invent VmmProbeError variants beyond the three pinned."
         },
         {
           "id": "05-03",
@@ -800,7 +817,9 @@
           ],
           "verification": [
             "cargo xtask lima run -- cargo nextest run -p overdrive-netlink --test integration --features integration-tests -E 'test(tap_queue_attach)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-host --test integration --features integration-tests -E 'test(vmm_tap_queue_errors)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-host --test integration --features integration-tests,kvm-tests -E 'test(vmm_tap_queue_errors)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-host --lib --features integration-tests -E 'test(a_failed_spawn_releases_the_queue_before_any_cleanup_await)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-host --lib -E 'test(vmm)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
@@ -823,7 +842,7 @@
             "S-ND295-46 (with the compound-cfg body) is activated with no acceptance body weakened, replaced, or re-authored.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests, cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings, and cargo xtask lima run -- cargo xtask cloexec-lint are clean."
           ],
-          "test_file": "crates/overdrive-host/src/vmm/launch_seccomp.rs",
+          "test_file": "xtask/tests/integration/cloexec_lint_workspace.rs",
           "scenario_name": "OBL-295-CLOEXEC creation-time close-on-exec at the eight sites and the xtask::cloexec_lint source gate with its test-only cfg exemption",
           "scenario_ids": [
             "S-ND295-46"
@@ -839,10 +858,11 @@
             "cargo xtask lima run -- cargo xtask cloexec-lint",
             "cargo xtask lima run -- cargo nextest run -p overdrive-host --lib -E 'test(launch_seccomp)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p xtask -E 'test(cloexec_lint)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p xtask --test integration --features integration-tests -E 'test(cloexec_lint_workspace)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "OBL-295-CLOEXEC. NOTE (reported to the re-roadmap reviewer): no '#[ignore = pending DELIVER step 05-04 (S-ND295-46)]' marker currently exists in the tree; S-ND295-46's body (the_serve_closure_creates_no_inheritable_descriptor plus the compound-cfg body) is either already active or authored under a name the grep did not key on - confirm the body exists before activation. The cloexec_lint gate follows gate-then-stop discipline: implement the lint + cargo alias; do not auto-wire it into CI/lefthook unless the step scope says so."
+          "implementation_notes": "OBL-295-CLOEXEC. DISTILL owns and has authored S-ND295-46: its source-local scan_source/render_violation tables live in xtask/src/cloexec_lint.rs, including only_a_cfg_predicate_that_requires_test_exempts_an_item; its scan_workspace cells live in xtask/tests/integration/cloexec_lint_workspace.rs and are registered in the xtask integration target, including the real-workspace, unparseable-workspace, auxiliary-binary, and missing-package cells. DELIVER activates those bodies and does not author or substitute one. The cloexec_lint gate follows gate-then-stop discipline: implement the lint + cargo alias; do not auto-wire it into CI/lefthook unless the step scope says so."
         }
       ]
     },
@@ -916,6 +936,7 @@
             "Teardown converges on absence; the recorded plan replaces pool lookups; per-allocation audit attribution, the host-side MAC invariant, pins, guard, and dump are enforced.",
             "RED-phase (M15): S-ND295-50's bodies, the S-ND295-51 bodies this step reaches, and S-ND295-72 (i1)/(i2) are RED at the fixture owner-uid precondition (4200 vs the pinned 0); once the precondition holds each invariant oracle records its own semantic RED, and (i2)'s no-damage contrasts carry a mutation-kill check a correct precondition cannot show RED.",
             "S-ND295-11, 12, 50 (all but the condemned-universe body owned by 06-04), and 72 ((i1) at provision and in the audit, the unreserved leg of (i2), and (e)) are activated with no acceptance body weakened, replaced, or re-authored.",
+            "E23's DISTILL-authored block_on_host_netlink_returns_connect_when_a_thread_is_refused runs Lima-root under the real pids.max refusal and returns NetlinkError::Connect carrying the spawn io::Error; the process continues without panic or abort.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean."
           ],
           "test_file": "crates/overdrive-control-plane/src/guest_network.rs",
@@ -931,12 +952,14 @@
             "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs"
           ],
           "verification": [
-            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(allocation_owner_acceptance) or test(shared_owner_link_address_kernel)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib --features integration-tests -E 'test(allocation_owner_acceptance) or test(shared_owner_link_address_kernel)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib --features integration-tests -E 'test(block_on_host_netlink_returns_connect_when_a_thread_is_refused)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_guest_network_startup)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --lib --features integration-tests -E 'test(a_tap_host_address_is_judged_by_the_invariant_whatever_the_host_link_manager_wrote)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R4, R21, R22, M2, H1. Step-level depends on 05-03 (R4's uid-0 TAP before the fd handoff makes the uid-4200 named attach fail with EPERM on every VM start; DR-01) and 06-01. NOTE (reported): guest_network.rs carries two E23 pending markers at step 06-02 that are not in the table's 'Scenarios activated' column for this step - confirm their intended owner. Do not record a derived host-side MAC value; the invariant judges by observation."
+          "implementation_notes": "R4, R21, R22, M2, H1, E23. Step-level depends on 05-03 (R4's uid-0 TAP before the fd handoff makes the uid-4200 named attach fail with EPERM on every VM start; DR-01) and 06-01. DISTILL pins the 06-02 E23 owner to shared_owner_link_address_kernel::block_on_host_netlink_returns_connect_when_a_thread_is_refused; activate that authored Lima-root body and do not author a replacement. S-ND295-72(e) runs both on Lima and on the metal host as provisioned. Do not record a derived host-side MAC value; the invariant judges by observation."
         },
         {
           "id": "06-03",
@@ -996,6 +1019,7 @@
             "SharedGuestNetworkOwner::quiesce_managed_taps's rustdoc states the port partition, the bound property, and the repeat clause; the host classifies every failure (Connect included) per TAP and returns no Err; the host call makes no synchronous blocking wait on the awaiting task.",
             "The sim owner surface exposes the activation/quiescence contract (script_quiesce_outcome) for seeded bodies without a cross-crate GuestNetworkPlan constructor.",
             "S-ND295-50 (a_condemned_allocation_leaves_every_later_audit_and_restore_universe), 51 (with the per-TAP Connect, repeat-while-latched, and bound-miss bodies), 52 (the gate-wait and lease bodies, its two retained bodies staying active), 53, and 72 ((i1) at activate and the reserved set's Condemned exclusion) are activated with no body weakened, replaced, or re-authored.",
+            "E23's DISTILL-authored quiesce_managed_taps_never_aborts_when_a_thread_is_refused runs Lima-root over one managed Active TAP under real pids.max refusal and returns Ok with that TAP unconfirmed/Connect, never panic or abort.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean."
           ],
           "test_file": "crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs",
@@ -1019,11 +1043,12 @@
             "cargo xtask lima run -- cargo nextest run -p overdrive-sim --test acceptance -E 'test(netns_density_activation_order)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-sim --lib -E 'test(adapters::guest_network)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(allocation_owner_acceptance) or test(shared_network_test_ports)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib --features integration-tests -E 'test(quiesce_managed_taps_never_aborts_when_a_thread_is_refused)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(mtls_install_fail_closed)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R5, R21 (DISTILL review M2; DR-08 (b)). Activation retires leases, so it follows the pool (06-03). NOTE (reported): guest_network.rs carries two E23 pending markers at step 06-04 not listed in the table's scenario column - confirm owner. The bound-miss body runs on its own thread + current-thread runtime under a 30s watchdog; the quiesce_managed_taps host path never blocks the awaiting task."
+          "implementation_notes": "R5, R21, E23 (DISTILL review M2; DR-08 (b)). Activation retires leases, so it follows the pool (06-03). DISTILL pins the 06-04 E23 owner to shared_owner_link_address_kernel::quiesce_managed_taps_never_aborts_when_a_thread_is_refused; activate that authored Lima-root body and do not author a replacement. The bound-miss body runs on its own thread + current-thread runtime under a 30s watchdog; the quiesce_managed_taps host path never blocks the awaiting task."
         }
       ]
     },
@@ -1221,16 +1246,17 @@
       "steps": [
         {
           "id": "08-01",
-          "name": "Intercept-mark fail-closure: R18/R19 decision and stale-table cleanup",
-          "description": "Intercept-mark fail-closure: E14 native RED first; implement or withdraw R18 (guard table) and R19 (TPROXY-before-mark); stale-table cleanup precondition. If R18 stands, the guard read-back is wired into every InterceptState producer (host) and the guard into the sim's model; InterceptMarkGuardAbsent is removed if R18 is withdrawn (DR-07, DR-08 (a)). The B3 (c)/H3 DISTILL items on this step's native bodies are resolved (2026-10-01); the hardened fail-closed oracles encode this step's GREEN contract.",
+          "name": "Intercept-mark native evidence gate and approved fail-closure branch",
+          "description": "Run E14's native falsifiers before GREEN. Only evidence matching the approved standing R18 guard-table and R19 TPROXY-before-mark branch may proceed to its exact implementation and stale-table cleanup. Any non-reproduction or E14(e) TIME_WAIT outcome stops DELIVER and returns the affected contract through a separate exact DESIGN record and independent review; the crafter cannot withdraw or reshape it.",
           "agent": "nw-software-crafter",
           "deps": [
             "06-04"
           ],
           "estimate_hours": 12,
           "criteria": [
-            "E14 native RED is established first; R18 (guard table) and R19 (TPROXY-before-mark) are implemented or withdrawn as a single decision, and the stale-table cleanup precondition is enforced.",
-            "If R18 stands, the guard read-back is wired into every InterceptState producer (host) and the guard into the sim model; if R18 is withdrawn, InterceptMarkGuardAbsent is removed (DR-07, DR-08 (a)).",
+            "E14 native RED is recorded first for R18's forwarding and host-local table-loss paths, R19's listener-closed and killed-mode listener-absent paths, and separately the TIME_WAIT side-door case (e), with its positive and negative controls.",
+            "If the evidence matches the approved standing branch, R18's exact guard table/read-back in every host InterceptState producer and the sim model, R19's exact TPROXY-before-mark order, and the stale-table cleanup precondition are implemented without changing their API, security, or lifecycle contract.",
+            "If an R18/R19 premise does not reproduce, or E14(e) reproduces, the step stops before GREEN, the affected DESIGN and roadmap validation are pending, and execution resumes only after the exact replacement DESIGN, required user decision, and independent review; DELIVER removes no field, error, effect, or quiescence behavior.",
             "The B3 (c)/H3 DISTILL items on this step's native bodies are resolved and the hardened fail-closed oracles encode the GREEN contract.",
             "S-ND295-62, 63, and 64 (the guest door; its controls body is active) are activated with no acceptance body weakened, replaced, or re-authored.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean; the native bodies run under cargo xtask metal run -- ."
@@ -1255,7 +1281,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R18, R19 (conditional on native RED), DISTILL review B3, DR-09. E14 native RED precedes the R18/R19 decision; do not implement either rule before the native RED is recorded. The guest-door controls body is active (positive control for the fail-closed oracles)."
+          "implementation_notes": "R18, R19 (conditional on native RED), DISTILL review B3, DR-09, and the repository native-falsification gate. E14 precedes implementation. The already approved standing branch may proceed only when its premises reproduce and E14(e) does not reach the separately routed outcome. A contrary result is evidence for a separate DESIGN cycle, never authority for this crafter to withdraw InterceptState.intercept_mark_guard, InterceptMarkGuardAbsent, either netlink effect, R19 ordering, or listener-loss quiescence. The guest-door controls body is active."
         },
         {
           "id": "08-02",
@@ -1271,6 +1297,7 @@
             "Boot member convergence is implemented and the killed-mode boot-clear proof passes; the clear adapter is deleted; MembersRemain, PolicyRouteAbsent, and (if R18 stands) InterceptMarkGuardAbsent are constructed at boot steps 6.2 and 6.6 (reused by 08-03).",
             "S-ND295-13A's GREEN run time at the default case count is recorded (each case boots run_server); S-ND295-13C's V4a-V4c sample the route and guard about every 50ms; S-ND295-13C's killed-mode body absorbs the first-lease and complement obligations of the deleted native placeholder with no reference to the deleted clear adapter.",
             "S-ND295-13D's late-commit body lands its batch after run_server* returns, proving only that no leaked task reacts (a test-shape note).",
+            "DISTILL-authored S-ND295-13B production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts observes exactly vm_reclamation/started, vm_reclamation/completed, stale_sweep/started, stale_sweep/completed in order across ordinary run_server and is activated here.",
             "S-ND295-13A, 13B, 13C, 13D (with the three composed boot-refusal bodies), and 71 (the two member-aware equivalence bodies) are activated with no acceptance body weakened, replaced, or re-authored.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean; the killed-mode native body runs under cargo xtask metal run -- ."
           ],
@@ -1288,19 +1315,21 @@
             "crates/overdrive-worker/src/mtls_intercept_worker.rs",
             "crates/overdrive-sim/src/invariants/netns_density_boot_order.rs",
             "crates/overdrive-cli/tests/integration/serve_killed_restart_boot_clear.rs",
+            "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs",
             "crates/overdrive-control-plane/tests/integration/boot_member_clear_refusal.rs",
             "crates/overdrive-worker/tests/integration/mtls_intercept_equivalence.rs",
             "crates/overdrive-worker/tests/integration/netns_density_shared_owner.rs"
           ],
           "verification": [
             "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(serve_killed_restart_boot_clear)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(boot_member_clear_refusal)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-sim --lib -E 'test(netns_density_boot_order)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(mtls_intercept_equivalence) or test(netns_density_shared_owner)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R12, DISTILL review H6/M2. NOTE (reported): no '#[ignore = pending DELIVER step 08-02 (S-ND295-13B)]' marker exists in the tree (13A/13C/13D/71 are present); confirm S-ND295-13B's body exists before activating it. The killed-mode proof needs a real guest (native); boot_member_clear_refusal is control-plane integration (Lima)."
+          "implementation_notes": "R12, DISTILL review H6/M2. DISTILL records S-ND295-13B as AUTHORED at crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs::production_boot_trace_completes_vm_reclamation_before_stale_sweep_starts and assigns its activation to 08-02; DELIVER activates that body and does not author or substitute one. The killed-mode proof needs a real guest (native); S-ND295-13B and boot_member_clear_refusal are control-plane integration bodies on Lima."
         },
         {
           "id": "08-03",
@@ -1344,18 +1373,18 @@
         {
           "id": "08-04",
           "name": "M-ND295-E18 measurement receipt at T1-BASE/T1-PORT4",
-          "description": "M-ND295-E18 measurement receipt at T1-BASE/T1-PORT4: raw output under target/benchmarks/netns-density-295/E18/, not committed; no value is set or recorded here.",
+          "description": "Capture M-ND295-E18 at T1-BASE and T1-PORT4 through the DISTILL-owned non-EDD benchmark harness: per-owner full-audit latency L; quiesce Q, restore, and last-TAP-down times; worker element_effects hold time; and T1-PORT4 kill-loop K plus largest per-VM/slice write W. Raw output stays under target/; this step sets and records no value.",
           "agent": "nw-software-crafter",
           "deps": [
             "08-03"
           ],
           "estimate_hours": 4,
           "criteria": [
-            "The E18 measurement is captured at both the T1-BASE and T1-PORT4 profiles and its raw output is preserved under target/benchmarks/netns-density-295/E18/; the output is not committed.",
-            "No value is set or recorded into the source constants here; 09-01 sets SHARED_NETWORK_AUDIT_CALL_BOUND / SHARED_NETWORK_QUIESCE_CALL_BOUND from this receipt.",
-            "The receipt is produced through the real production owner on the native metal lease via cargo xtask metal run -- , driving no fixture that manufactures kernel state the production path would not create.",
-            "The receipt is clearly marked non-EDD (not under verification/expectations/, not asserted against in a pass/fail body).",
-            "Measured N/M/port distribution and uname -r are recorded in the raw output."
+            "At T1-BASE and T1-PORT4 every attachment is activated through the real production owner; raw output is preserved uncommitted under target/benchmarks/netns-density-295/E18/ and no fixture manufactures production-owned kernel state.",
+            "The receipt records each owner's full-audit latency (L is the largest T1-PORT4 owner-call latency), quiesce wall time Q, restore wall time, last-TAP-down time, and the worker member audit's element_effects hold time at both populations.",
+            "At T1-PORT4 each allocation scope holds a live process: the receipt records the ordered all-allocation kill-loop time K, every per-VM write, one workloads-slice write, and W as the largest single per-VM or slice write.",
+            "The raw receipt records the method, raw samples, N/M/port distribution, CPU/host description, uname -r, Cloud Hypervisor version, and measured source SHA, never the metal target address.",
+            "The receipt is non-EDD and sets or records no source value; 09-01 derives all three bounds, evaluates both window-fit rules and R15's threshold, writes the sole rustdoc value record, and commits the research report."
           ],
           "test_file": "target/benchmarks/netns-density-295/E18/",
           "scenario_name": "M-ND295-E18 shared-network audit/quiesce call-bound measurement receipt at T1-BASE and T1-PORT4 (raw, uncommitted, no constant set here)",
@@ -1371,7 +1400,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "E18. Receipt-only step: there is no S-ND295 acceptance body (scenario_ids intentionally empty). The benchmark binary path is this roadmap's proposed location (overdrive-control-plane owns the owner it drives); confirm the exact binary/CLI shape with the architect/user before landing new operator-facing surface. 09-01 is the single record home for the bound constants derived from this receipt."
+          "implementation_notes": "E18 receipt-only step; scenario_ids is intentionally empty. DISTILL owns the accepted non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs. This is the accepted test-support shape and is not an operator-facing overdrive command. 09-01 is the later capture/constants step and the sole source-rustdoc record home for values derived from this receipt."
         }
       ]
     },
@@ -1388,7 +1417,7 @@
         {
           "id": "09-01",
           "name": "Complete supervisor: ports struct, run_shared_network_supervisor, vm_kill, call bounds",
-          "description": "Complete supervisor: ports struct, run_shared_network_supervisor, vm_kill over the vm_cgroups parameter, CgroupPath::workloads_slice, component-specific quiescence, restore, bounded calls, per-VM kill scope, two new causes; the section 3.3 proof. As the later of the capture and constants steps it sets SHARED_NETWORK_AUDIT_CALL_BOUND and SHARED_NETWORK_QUIESCE_CALL_BOUND from the 08-04 receipt (re-capturing if it is gone), writes their rustdoc record, and commits the E18 benchmark report, in one commit.",
+          "description": "Complete the accepted supervisor and section-3.3 proof. As the later capture/constants step, derive all three call bounds from M-ND295-E18, evaluate both five-second fit rules and the R15 mutex threshold, restate double-loss exposure with K, write the sole source-rustdoc value record, and commit the raw-sample/method research report in the same commit.",
           "agent": "nw-software-crafter",
           "deps": [
             "05-01",
@@ -1398,8 +1427,11 @@
           "estimate_hours": 24,
           "criteria": [
             "The supervisor ports struct, run_shared_network_supervisor, vm_kill over the vm_cgroups parameter, CgroupPath::workloads_slice, component-specific quiescence, restore, bounded calls, per-VM kill scope, and two new causes are implemented; the section 3.3 proof passes.",
-            "As the later of the capture and constants steps, this step sets SHARED_NETWORK_AUDIT_CALL_BOUND and SHARED_NETWORK_QUIESCE_CALL_BOUND from the 08-04 receipt (re-capturing if gone), writes their rustdoc record, and commits the E18 benchmark report, in one commit.",
+            "From the 08-04 receipt (re-captured if absent), set SHARED_NETWORK_AUDIT_CALL_BOUND = max(1 s, 4 \u00d7 L), SHARED_NETWORK_QUIESCE_CALL_BOUND = max(1 s, 4 \u00d7 Q), and SHARED_NETWORK_VM_KILL_CALL_BOUND = max(1 s, 4 \u00d7 W), rounded up to whole milliseconds.",
+            "The sole value record is source rustdoc beside the three constants and worker element_effects field, naming each rule/maximum, K and hold time, M-ND295-E18, host/CPU, uname -r, Cloud Hypervisor version, and measured SHA; the committed docs/research/benchmarks/netns-density-295-m-nd295-e18/ report contains only method/raw samples/substrate, no bound, rule, derived maximum, or verdict.",
+            "Verify the applicable bound plus one complete measured recovery attempt and quiescence bound plus K plus one attempt each fit 5s; restate double-loss using last-TAP-down and, for unconfirmed TAPs, quiescence time plus K. If full audit exceeds 1s or either fit fails, stop for user/DESIGN; if element_effects hold exceeds 100ms, stop and reopen R15 in favour of its pinned epoch alternative before GREEN, otherwise retain the accepted mutex branch.",
             "S-ND295-29B's C6 is split into C6a (per-TAP kill with recovery), C6b (undetermined -> TapQuiescenceUndetermined), and C6c (damage while Open), each with its snapshot oracle; ADR-0124's cadence is asserted as contract, never the private constants.",
+            "E23's DISTILL-authored a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts runs Lima-root under real pids.max refusal and returns a typed io::Error, never panic or abort.",
             "S-ND295-10 (the supervisor's per-allocation kill), 19, 29A (with the re-quiescence cell), 29B (with C4b and C9), 30A (with the every-Active cell), 32 (with the late-result cell), and 34 (EXEC closure) are activated with no acceptance body weakened, replaced, or re-authored.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean; the in-process supervisor suite runs Lima-root (real enforcement probe after R16)."
           ],
@@ -1420,17 +1452,18 @@
             "crates/overdrive-worker/src/mtls_intercept_worker.rs",
             "crates/overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs",
             "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs",
-            "crates/overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs"
+            "crates/overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs",
+            "docs/research/benchmarks/netns-density-295-m-nd295-e18/"
           ],
           "verification": [
             "cargo xtask lima run -- env OVERDRIVE_SUPERVISOR_PROOF_SEEDS='0x2953300000000001,0x295330005eed0002' cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_network_supervisor_recovery)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --lib -E 'test(shared_network_task_owner_acceptance)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test integration --features integration-tests -E 'test(shared_guest_network_startup)' --no-fail-fast",
-            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(refused_thread_kill)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R13, R14 (R14 kill scope user ruling), DISTILL review H1/M8. VmKillCapability::new is a const fn where the pin shows fn (DR-21). NOTE (reported): the table lists S-ND295-34 (EXEC closure) and S-ND295-10 here, but no '09-01 (S-ND295-34)' marker exists and the S-ND295-10 marker is in shared_guest_network_startup.rs - these are layered IDs recording the supervisor's participation, not distinct new bodies; also an E23 marker maps to 09-01 (refused_thread_kill.rs) that is not in the table's scenario column. Assert ADR-0124 cadence as contract, never the private constants."
+          "implementation_notes": "R13, R14 (R14 kill scope user ruling), R15, E18, E23, DISTILL review H1/M8. VmKillCapability::new is a const fn where the pin shows fn (DR-21). S-ND295-34 and S-ND295-10 are layered IDs recording supervisor participation, not new bodies. DISTILL pins the 09-01 E23 owner to overdrive-worker/tests/integration/real_cgroup_fs/refused_thread_kill.rs; activate that authored Lima-root body and do not author a replacement. Assert ADR-0124 cadence as contract, never private constant values. A failed E18 threshold or fit is a native-falsification stop, not permission for DELIVER to change timing, security, kill, or R15 ownership."
         },
         {
           "id": "09-02",
@@ -1485,14 +1518,14 @@
           ],
           "estimate_hours": 20,
           "criteria": [
-            "Two checked-in VM workloads dial by name over the shared bridge through real overdrive serve + overdrive deploy <SPEC> on a canonical native x86_64 metal lease, with provision installing protection, raising/reading-back the TAP, and Cloud Hypervisor attaching it by name (--net tap=...,mac=...) before READY - no test-only wiring installs/binds/programs/supplies what production does not.",
+            "Two checked-in VM workloads dial by name over the shared bridge on a canonical native x86_64 metal lease; the in-process Rust journey drives production composition through serve::run_with_kek plus the public deploy handler, with provision installing protection, raising/reading back the TAP, and Cloud Hypervisor receiving its queue as fd 3 (--net fd=[3],mac=...) before READY.",
             "The launch topology (fd handoff, TAP activation, shared bridge, no per-workload namespaces) runs end-to-end on the production path; teardown is total with no leftover Overdrive-owned kernel object.",
-            "S-ND295-01 and 35 are activated with no acceptance body weakened, replaced, or re-authored; the Rust walking skeleton does not spawn the overdrive binary and emits no EDD evidence.",
+            "S-ND295-01 and 35 are activated with no acceptance body weakened, replaced, or re-authored; overdrive deploy <SPEC> is stakeholder journey language, while the Rust walking skeleton spawns no product binary or subprocess SUT and emits no EDD evidence.",
             "The test runs only through cargo xtask metal run --  against a native lease with usable KVM and no virtualization/nesting (substrate probes fail closed on a nested/virtualized host).",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests (with kvm-tests) and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings (with kvm-tests) are clean."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
-          "scenario_name": "native-metal walking skeleton: two VM workloads dial by name over the shared bridge through real serve + deploy, with the full launch topology",
+          "scenario_name": "native-metal in-process walking skeleton: two VM workloads dial by name over the shared bridge through serve::run_with_kek plus the public deploy handler, with the full launch topology",
           "scenario_ids": [
             "S-ND295-01",
             "S-ND295-35"
@@ -1507,7 +1540,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings"
           ],
-          "implementation_notes": "R1-R5, R21, R22. Native x86_64 metal only (cargo xtask metal run --); no Tier-3 evidence from a virtualized or nested host. Confirm no fixture installs anything run_server/start_alloc does not install itself before marking complete (vertical-slice discipline)."
+          "implementation_notes": "R1-R5, R21, R22. The accepted driving ports are exactly the in-process serve::run_with_kek composition and public deploy handler; do not spawn the built overdrive binary or add a verification expectation. Native x86_64 metal only (cargo xtask metal run --); no Tier-3 evidence from a virtualized or nested host. Confirm no fixture installs anything run_server/start_alloc does not install itself before marking complete."
         },
         {
           "id": "10-02",
@@ -1589,7 +1622,7 @@
           "estimate_hours": 10,
           "criteria": [
             "Every S-ND295-36 mapped existing body (guest_stack_mtls_egress peer-wire mTLS, service_kind_vm_workloads, the VM cgroup/accounting equivalence suite, mtls_resolve_rekey, and the Service dataplane selection suite) remains green and unmodified in its assertions - no #295 duplicate body is created, and the shared switch is proven never to select a Service backend.",
-            "S-ND295-31A and 31B (the two distinct actual-socket-state DNS bodies) are re-verified against the complete composition.",
+            "S-ND295-31A and 31B (the two distinct actual-socket-state listener/capability bodies) are re-verified against the complete composition.",
             "No new PBT amplification is added to the debt-paid legacy suites (S-ND295-36 is Stage-1-completed legacy surface).",
             "The VM cgroup/accounting equivalence suite and the Service dataplane selection suite both remain green under this step's verification.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests (with kvm-tests) and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings (with kvm-tests) are clean."
@@ -1606,13 +1639,17 @@
             "crates/overdrive-control-plane/src/lib.rs"
           ],
           "verification": [
-            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(guest_stack_mtls_egress) or test(service_kind_vm_workloads) or test(mtls_resolve_rekey)' --no-fail-fast",
+            "cargo xtask metal run -- cargo nextest run -p overdrive-cli --test integration --features integration-tests,kvm-tests -E 'test(guest_stack_mtls_egress)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-cli --test acceptance -E 'test(service_kind_vm_workloads)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(service_kind_vm_workloads) or test(mtls_resolve_rekey)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test acceptance -E 'test(service_kind_vm_workloads)' --no-fail-fast",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-worker --test integration --features integration-tests -E 'test(netns_density_shared_owner)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-host --test integration --features integration-tests -E 'test(cgroup_accounting_equivalence)' --no-fail-fast",
             "cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --test integration --features integration-tests -E 'test(ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth)' --no-fail-fast",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings"
           ],
-          "implementation_notes": "Non-regression. NOTE (reported): S-ND295-36, 31A, and 31B have no 'pending DELIVER step 10-04' markers in the tree - they are re-verification of existing/mapped bodies (S-ND295-31A/31B are activated at 03-03/09-01 era bodies; 36 maps pre-existing suites), consistent with the table's 're-verified' wording, not orphan scenario_ids. Do not create #295 duplicate bodies for behavior these suites already cover."
+          "implementation_notes": "Non-regression. S-ND295-36 maps the CLI integration guest_stack_mtls_egress family; CLI, control-plane, and worker acceptance service_kind_vm_workloads families; control-plane acceptance mtls_resolve_rekey; host integration cgroup_accounting_equivalence; and dataplane integration service_map_forward. S-ND295-31A/31B map the overdrive-worker integration netns_density_shared_owner family. The commands target those actual package/test binaries. These are re-verifications, so they need no pending marker and no duplicate #295 body."
         },
         {
           "id": "10-05",
@@ -1647,7 +1684,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "CAP-295-A. Receipt-only step (benchmark ids, not S-ND295 bodies) - mirrors the prior 04-04 capacity receipts. The benchmark binary path is proposed by this roadmap, not design-pinned; confirm the exact CLI/crate shape with the architect/user before landing new operator-facing surface. Non-EDD: never under verification/expectations/, never a pass/fail body."
+          "implementation_notes": "CAP-295-A receipt-only step (benchmark ids, not S-ND295 bodies), mirroring the prior 04-04 capacity receipts. DISTILL owns the accepted shared non-EDD test-support harness at crates/overdrive-control-plane/bin/netns_density_benchmark.rs; this is the accepted test-support shape and is not an operator-facing overdrive command. Never place it under verification/expectations/ or turn it into a pass/fail body."
         }
       ]
     }
@@ -1687,8 +1724,8 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "Charter section-6 DELIVER re-roadmap after the correctness-recovery DISTILL rewrite; both the acceptance-designer reviewer and the software-crafter reviewer APPROVED the rewritten DISTILL at HEAD 0dce65c8 (2026-10-02). The prior 2026-09-23 roadmap approval is SUPERSEDED and this regenerated forward plan (phases 05-10) awaits independent roadmap review.",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "Independent nw-acceptance-designer-reviewer; GPT 6.1 Sol (gpt-6.1-sol), extra-high (xhigh) reasoning; regenerated roadmap review iteration 3",
+    "approved_at": "2026-10-02T17:11:27+02:00"
   }
 }
