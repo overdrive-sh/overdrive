@@ -11742,8 +11742,9 @@ mod shared_owner_link_address_kernel {
     ///
     /// User decision 2 of 2026-09-30: `block_on_host_netlink`, whose host worker
     /// thread the OS refuses under a `pids.max` cap, returns
-    /// `NetlinkError::Connect` and the process continues — it never aborts. The
-    /// staged bridge uses `Scope::spawn`, which panics on a refused thread
+    /// `NetlinkError::Connect` carrying the spawn's `io::Error`, and the process
+    /// continues — it never aborts. The staged bridge uses `Scope::spawn`, which
+    /// panics on a refused thread
     /// (Changed Assumption 40); DELIVER step 06-02 replaces it with
     /// `Builder::spawn_scoped`. RED-against-the-no-panic-baseline: before 06-02
     /// the refused thread panics/aborts and the body never reaches its assertion.
@@ -11751,21 +11752,39 @@ mod shared_owner_link_address_kernel {
     #[test]
     fn block_on_host_netlink_returns_connect_when_a_thread_is_refused() {
         require_root("block_on_host_netlink_returns_connect_when_a_thread_is_refused");
+        let closure_entries = std::sync::atomic::AtomicUsize::new(0);
         let _refused = overdrive_testing::pids_max::refuse_thread_creation()
             .expect("the Lima substrate delegates the pids controller to the cgroup root");
-        let result = overdrive_netlink::block_on_host_netlink(|| async move {
-            overdrive_netlink::Client::new()?.observe_link_identity("lo").await
+        let result = overdrive_netlink::block_on_host_netlink(|| {
+            closure_entries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { overdrive_netlink::Client::new()?.observe_link_identity("lo").await }
         });
-        // Reaching here proves no abort/panic (user decision 2 of 2026-09-30). A
-        // refused worker thread is `NetlinkError::Connect`; if a thread was
-        // available the loopback identity is observed — still never a panic.
-        match result {
-            Ok(_) => {}
-            Err(error) => assert!(
-                matches!(error, overdrive_netlink::NetlinkError::Connect { .. }),
-                "a refused host-netlink worker thread is NetlinkError::Connect, got {error:?}",
-            ),
-        }
+        eprintln!(
+            "[E23] result={result:?}; closure_entries={}",
+            closure_entries.load(std::sync::atomic::Ordering::SeqCst),
+        );
+        // Reaching these assertions proves the process continued without
+        // panic/abort. The zero closure-entry count proves the refusal preceded
+        // construction of the closure's runtime and netlink client.
+        let error = result.expect_err("pids.max must refuse the host-netlink worker thread");
+        let overdrive_netlink::NetlinkError::Connect { source } = error else {
+            panic!("a refused host-netlink worker thread is NetlinkError::Connect, got {error:?}");
+        };
+        assert_eq!(
+            closure_entries.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the refused worker never enters the supplied closure",
+        );
+        assert_eq!(
+            source.raw_os_error(),
+            Some(libc::EAGAIN),
+            "Connect preserves the real pids.max spawn-refusal errno: {source:?}",
+        );
+        assert_eq!(
+            source.kind(),
+            std::io::ErrorKind::WouldBlock,
+            "Connect preserves the observed spawn-refusal error kind: {source:?}",
+        );
     }
 
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
