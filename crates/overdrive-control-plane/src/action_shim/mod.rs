@@ -1673,6 +1673,51 @@ async fn teardown_guest_network(
     Ok(())
 }
 
+async fn reclaim_guest_network(
+    alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
+    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
+    net_slot_allocator: &NetSlotAllocator,
+    network_provisioner: &dyn WorkloadNetworkProvisioner,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
+) -> Result<(), ShimError> {
+    let Some((guest_provisioner, guest_pool)) = guest_network else {
+        return Ok(());
+    };
+    if !guest_pool.observe(std::slice::from_ref(alloc_id)).leases.contains_key(alloc_id) {
+        return Ok(());
+    }
+
+    retire_guest_network_lease(alloc_id, Some((guest_provisioner, guest_pool)));
+
+    let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
+    for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, alloc_id) {
+        if let Err(error) = driver.stop(&handle).await
+            && !matches!(error, DriverError::NotFound { .. })
+        {
+            return Err(error.into());
+        }
+    }
+    let terminal_driver =
+        alloc_drivers.lock().get(alloc_id).copied().and_then(|kind| drivers.get(kind));
+    if let Some(driver) = terminal_driver {
+        driver.release_supervision(alloc_id);
+    }
+
+    mtls_lifecycle.stop_alloc(alloc_id).await?;
+    teardown_for_dispatch(
+        alloc_id,
+        None,
+        net_slot_allocator,
+        network_provisioner,
+        Some((guest_provisioner, guest_pool)),
+    )
+    .await?;
+    alloc_drivers.lock().remove(alloc_id);
+    Ok(())
+}
+
 async fn activate_guest_network(
     plan: &crate::guest_network::GuestNetworkPlan,
     guest_provisioner: &dyn GuestNetworkProvisioner,
@@ -3506,12 +3551,18 @@ async fn dispatch_single(
         // evaluations); a refused race
         // returns `Ok(())` by design, never a `ShimError`.
         // D-295-R11: reclaim a leased, unowned, finished allocation's guest
-        // network. Dispatch lands in DELIVER step 07-02; no reconciler emits
-        // the variant before step 07-03.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 07-02")]
+        // network without changing its row or lifecycle event stream.
         Action::ReclaimAllocationNetwork { alloc_id } => {
-            let _ = alloc_id;
-            todo!("RED scaffold: D-295-R11 ReclaimAllocationNetwork dispatch — DELIVER step 07-02")
+            reclaim_guest_network(
+                &alloc_id,
+                drivers,
+                alloc_drivers,
+                mtls_lifecycle,
+                net_slot_allocator,
+                network_provisioner,
+                guest_network,
+            )
+            .await
         }
         Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
             &alloc_id,

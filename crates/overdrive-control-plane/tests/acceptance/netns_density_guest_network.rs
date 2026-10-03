@@ -460,22 +460,6 @@ impl RecordingIntercept {
             .expect("the shared program is in the intercept model")
             .members
     }
-
-    /// Another actor deletes `source`'s members and the inbound
-    /// `destinations` from the double's model, out of band: the model changes
-    /// directly, with no port call of the production path and no trace entry.
-    fn remove_members_out_of_band(&self, source: Ipv4Addr, destinations: &BTreeSet<SocketAddrV4>) {
-        let mut members = self.members();
-        members.managed_guest_ips.remove(&source);
-        members.outbound_sources.remove(&source);
-        for destination in destinations {
-            members.inbound_destinations.remove(destination);
-        }
-        self.inner
-            .converge_allocation_elements(&members)
-            .expect("the out-of-band delete lands in the intercept model")
-            .expect("the shared program is in the intercept model");
-    }
 }
 
 impl MtlsIntercept for RecordingIntercept {
@@ -1107,14 +1091,15 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
 
 impl SeamFixture<ActivationFaultOwner> {
     /// Precondition through the production path (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the activation failure projection)): `alloc`
-    /// starts, its activation is refused, and its protection removal fails, so
-    /// the action owner confirms the VMM gone, retires the lease, withholds
-    /// teardown and release, and writes the allocation's Failed row. The
+    /// starts, its activation is refused, and both protection removal and the
+    /// owner's teardown fail, so the action owner confirms the VMM gone,
+    /// retires the lease, withholds release, and writes the allocation's Failed row. The
     /// worker keeps the allocation's retirement for a retry (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the worker's retirement outcomes)).
     async fn finished_allocation_with_a_retiring_lease(&self, alloc: &str) -> Ipv4Addr {
         self.start_protection_and_open_exec().await;
         self.owner.script_activation_failure(true);
         self.intercept.script_removal_failure(true);
+        self.sim_owner.script_teardown_failure(true);
         let start = self.trace.mark();
         // The start's own result is the activation projection's (S-ND295-52);
         // this precondition requires only the state it leaves.
@@ -1133,6 +1118,7 @@ impl SeamFixture<ActivationFaultOwner> {
         );
         self.owner.script_activation_failure(false);
         self.intercept.script_removal_failure(false);
+        self.sim_owner.script_teardown_failure(false);
         self.started_assignment(0).address
     }
 }
@@ -1141,7 +1127,6 @@ impl SeamFixture<ActivationFaultOwner> {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
 async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
     const FINISHED: &str = "nd295-reclaim-finished";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1174,7 +1159,6 @@ async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
 async fn reclaim_without_a_lease_does_nothing() {
     const NEVER_LEASED: &str = "nd295-reclaim-never-leased";
     const RELEASED: &str = "nd295-reclaim-released";
@@ -1217,7 +1201,6 @@ async fn reclaim_without_a_lease_does_nothing() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
 async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
     const FINISHED: &str = "nd295-reclaim-failing";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1315,7 +1298,6 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
 /// band. The reclaim's element removal and teardown converge on that absence,
 /// and the lease is released last.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
 async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
     const FINISHED: &str = "nd295-reclaim-out-of-band";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1327,22 +1309,26 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
         fixture.owner.remove_parts_out_of_band(&alloc_id(FINISHED)),
         "precondition: the finished allocation's attachment parts were present"
     );
+    let destinations = destinations(address);
     let members_before = fixture.intercept.members();
     assert!(
         members_before.managed_guest_ips.contains(&address)
             && members_before.outbound_sources.contains(&address)
-            && destinations(address)
+            && destinations
                 .iter()
                 .all(|destination| members_before.inbound_destinations.contains(destination)),
         "precondition: the failed removal left the allocation's members in place: \
          {members_before:?}"
     );
-    fixture.intercept.remove_members_out_of_band(address, &destinations(address));
+    fixture
+        .intercept
+        .remove_allocation_elements(address, &destinations.iter().copied().collect::<Vec<_>>())
+        .expect("the out-of-band removal reaches the intercept port");
     let members_after = fixture.intercept.members();
     assert!(
         !members_after.managed_guest_ips.contains(&address)
             && !members_after.outbound_sources.contains(&address)
-            && destinations(address)
+            && destinations
                 .iter()
                 .all(|destination| !members_after.inbound_destinations.contains(destination)),
         "the out-of-band delete removed the allocation's members: {members_after:?}"
@@ -1360,7 +1346,7 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
             Step::DriverStop { alloc: FINISHED.to_owned(), outcome: StopOutcome::NotFound },
             Step::ElementRemoval {
                 source: address,
-                destinations: destinations(address),
+                destinations,
                 outcome: RemovalOutcome::Removed,
             },
             Step::Owner(GuestNetworkOperation::TapDelete),
@@ -1386,7 +1372,6 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
 /// reclaim records `lease_retired` before the element removal and the owner's
 /// teardown, and `lease_released` after them.
 #[tokio::test]
-#[ignore = "pending DELIVER step 07-02 (S-ND295-56)"]
 async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it_after() {
     const CRASHED: &str = "nd295-reclaim-crashed";
     let fixture = SeamFixture::with_sim_owner().await;

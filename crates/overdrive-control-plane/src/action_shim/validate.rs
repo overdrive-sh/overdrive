@@ -103,7 +103,7 @@
 //! is deterministic across runs — the FIRST conflicting pair surfaced
 //! does not depend on `HashSet` iteration order.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 
 use overdrive_core::dataplane::backend_key::Proto;
@@ -127,10 +127,7 @@ pub enum WriteRoute {
 /// The allocation action a `ReclaimAllocationNetwork` conflicted with in one
 /// `reconcile()` return: the other action names the same `alloc_id`.
 ///
-/// GH #295 D-295-R11 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the reclaim action, shim arm, and validator rule)). RED
-/// scaffold — no reconciler emits `Action::ReclaimAllocationNetwork` before
-/// DELIVER step 07-03, and the validator rule that constructs
-/// [`ReconcilerOutputViolation::ConflictingAllocationReclaim`] lands in 07-02.
+/// GH #295 D-295-R11 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the reclaim action, shim arm, and validator rule)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReclaimConflictAction {
     /// `Action::StartAllocation` for the same `alloc_id`.
@@ -193,9 +190,7 @@ pub enum ReconcilerOutputViolation {
         second_route: WriteRoute,
     },
     /// A `ReclaimAllocationNetwork` and another allocation action name the
-    /// same allocation in one `reconcile()` return (GH #295 D-295-R11). RED
-    /// scaffold — constructed by the validator rule that lands in DELIVER
-    /// step 07-02; no reconciler emits the reclaim action before 07-03.
+    /// same allocation in one `reconcile()` return (GH #295 D-295-R11).
     #[error(
         "conflicting allocation reclaim at alloc={alloc_id}: {other:?} names the same allocation"
     )]
@@ -205,6 +200,25 @@ pub enum ReconcilerOutputViolation {
         /// The action that names it beside the reclaim.
         other: ReclaimConflictAction,
     },
+}
+
+// Returns the action's allocation key and conflict category for the R11 pair rule.
+fn reclaim_owner(action: &Action) -> Option<(&AllocationId, ReclaimConflictAction)> {
+    match action {
+        Action::StartAllocation { alloc_id, .. } => {
+            Some((alloc_id, ReclaimConflictAction::StartAllocation))
+        }
+        Action::RestartAllocation { alloc_id, .. } => {
+            Some((alloc_id, ReclaimConflictAction::RestartAllocation))
+        }
+        Action::StopAllocation { alloc_id, .. } => {
+            Some((alloc_id, ReclaimConflictAction::StopAllocation))
+        }
+        Action::FinalizeFailed { alloc_id, .. } => {
+            Some((alloc_id, ReclaimConflictAction::FinalizeFailed))
+        }
+        _ => None,
+    }
 }
 
 /// Walk `actions` in emission order; return `Err` on the first
@@ -222,7 +236,11 @@ pub enum ReconcilerOutputViolation {
 /// slot — two XDP writes to one `(vip, port, proto)` `SERVICE_MAP`
 /// slot, or two cgroup writes to one `(vip, vip_port, proto)`
 /// `LOCAL_BACKEND_MAP` slot. Cross-route (XDP + cgroup) co-residence on
-/// one VIP is the ADR-0053 § 4 dual-path and is accepted.
+/// one VIP is the ADR-0053 § 4 dual-path and is accepted. Returns
+/// [`ReconcilerOutputViolation::ConflictingAllocationReclaim`] when a
+/// `ReclaimAllocationNetwork` and one of `StartAllocation`,
+/// `RestartAllocation`, `StopAllocation`, or `FinalizeFailed` name the
+/// same allocation.
 pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOutputViolation> {
     // BTreeSet per `.claude/rules/development.md` § "Ordered-collection
     // choice" — error reproducibility requires deterministic
@@ -246,8 +264,28 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
     // never the shared VIP.
     let mut xdp_keys: BTreeSet<(Ipv4Addr, u16, Proto)> = BTreeSet::new();
     let mut cgroup_keys: BTreeSet<(Ipv4Addr, u16, Proto)> = BTreeSet::new();
+    let mut reclaim_keys = BTreeSet::new();
+    let mut reclaim_owners = BTreeMap::new();
 
     for action in actions {
+        if let Action::ReclaimAllocationNetwork { alloc_id } = action {
+            if let Some(other) = reclaim_owners.get(alloc_id) {
+                return Err(ReconcilerOutputViolation::ConflictingAllocationReclaim {
+                    alloc_id: alloc_id.clone(),
+                    other: *other,
+                });
+            }
+            reclaim_keys.insert(alloc_id.clone());
+        } else if let Some((alloc_id, other)) = reclaim_owner(action) {
+            if reclaim_keys.contains(alloc_id) {
+                return Err(ReconcilerOutputViolation::ConflictingAllocationReclaim {
+                    alloc_id: alloc_id.clone(),
+                    other,
+                });
+            }
+            reclaim_owners.entry(alloc_id.clone()).or_insert(other);
+        }
+
         let Some(WriteKey { service_id, vip, port_opt, proto_opt, route }) =
             service_write_key(action)
         else {
@@ -689,7 +727,6 @@ mod tests {
     /// beside the same actions for another allocation, alone, or beside a
     /// reclaim of another allocation, it is accepted (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the validator)).
     #[test]
-    #[ignore = "pending DELIVER step 07-02 (S-ND295-55)"]
     fn a_reclaim_beside_another_action_for_the_same_allocation_is_rejected() {
         use super::ReclaimConflictAction;
         let reclaim = |name: &str| Action::ReclaimAllocationNetwork { alloc_id: alloc(name) };

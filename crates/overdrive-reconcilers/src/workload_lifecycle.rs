@@ -1887,12 +1887,10 @@ pub struct WorkloadLifecycleView {
     /// Network-reclaim attempts per allocation (D-295-R11). Persisted input
     /// of the reclaim backoff; the deadline is recomputed every tick from
     /// this and [`Self::reclaim_emitted_at`] against the live backoff policy.
-    // RED scaffold (D-295-R11): consumed in DELIVER step 07-02.
     #[serde(default)]
     pub reclaim_attempts: BTreeMap<AllocationId, u32>,
     /// Wall-clock time the last `ReclaimAllocationNetwork` was emitted per
     /// allocation (D-295-R11). Persisted input of the reclaim backoff.
-    // RED scaffold (D-295-R11): consumed in DELIVER step 07-02.
     #[serde(default)]
     pub reclaim_emitted_at: BTreeMap<AllocationId, UnixInstant>,
 }
