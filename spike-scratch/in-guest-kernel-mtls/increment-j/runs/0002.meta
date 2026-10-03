@@ -1,0 +1,10 @@
+run_id=0002
+label=inventory
+started_utc=2026-10-03T15:26:28Z
+ended_utc=2026-10-03T15:27:16Z
+exit_code=0
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run --no-sudo -- spike-scratch/in-guest-kernel-mtls/increment-j/host-inventory.sh
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=6eb1d0725daccf4a08eb781739d081a901a0fc5f62f90bb5e7f336efd2d3f405
+stderr_sha256=c7e0f0bcf174f90f7d2bd1f195059235785fc999a1152cad77c8d2945e953c7e

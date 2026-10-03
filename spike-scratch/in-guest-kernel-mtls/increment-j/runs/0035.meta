@@ -1,0 +1,11 @@
+run_id=0035
+label=nbaccept-boot
+started_utc=2026-10-03T16:29:29Z
+ended_utc=2026-10-03T16:30:36Z
+exit_code=0
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- spike-scratch/in-guest-kernel-mtls/increment-j/run-fc.sh nbaccept
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=71c8761da295f5db1b7fbbc593c4f56f0202b4eea57f128771663bbe419e0d2e
+stderr_sha256=4c417e7481223fb01ba0c262229a3e63ee6d9abe7e0504453a3c788a2c1622d6
+tap_pcap_sha256=5049117ca91080d21503b2c1037eb6e9a8c7ae1ac2859e78567def18c1602b9a

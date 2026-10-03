@@ -1,0 +1,20 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/xtask metal run --no-sudo -- spike-scratch/in-guest-kernel-mtls/increment-j/build-all.sh`
+xtask: running metal run (one bootstrap lease session)
+FATAL: timed out after 120s acquiring /run/lock/overdrive-metal-shared.lock
+current lease owner:
+  pid=568805
+  started_at=2026-10-03T15:41:50Z
+  action=run
+  scenario=unspecified
+  workspace=/Users/marcus/conductor/workspaces/helios/wellington-v2
+  commit=8c918578701932b70f936ada5a0f9c92d724198b
+  token=9e0baca6a87a694d1badb02a
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 75[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1261[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

@@ -1,0 +1,11 @@
+run_id=0020
+label=accept-boot
+started_utc=2026-10-03T16:14:53Z
+ended_utc=2026-10-03T16:16:46Z
+exit_code=0
+local_commit=f3b2ae745aae2251496f1395c5c5ca35adca13f1
+command=OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4 cargo xtask metal run  -- spike-scratch/in-guest-kernel-mtls/increment-j/run-fc.sh accept
+security_redaction=metal target, host and login home replaced in stdout/stderr
+stdout_sha256=0660647a1d40535bb7d6ed3ec5d788e700aff60f5e55eb21df1665fad812bf65
+stderr_sha256=5389c1b286db9dd22c543353728d3f178027638f83f185859c81e79c62eede2b
+tap_pcap_sha256=3d3265e07bb3c0d4432259ca214c5998cae2d7657195aec9f6abbb421fc3b3f0
