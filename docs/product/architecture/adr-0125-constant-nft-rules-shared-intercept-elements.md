@@ -28,9 +28,10 @@ retained; these accepted decisions amend it:
   intercept-owned guard table, so intercept-marked TCP fails closed without this
   program. It adds one IP rule, in its own table, to the constant cardinality
   below (nine IP rules and twelve #295 rules in total).
-- ADR-0140 (accepted conditional on its native RED): both TPROXY rules order
-  TPROXY, then the policy-route mark, then accept. It changes no rule count,
-  set, port, or ownership recorded here.
+- ADR-0140 (withdrawn 2026-10-03 under its native condition): the reorder of the
+  two TPROXY rules' tail is withdrawn; both rules keep their existing
+  mark → TPROXY → accept order. It changes no rule count, set, port, ownership,
+  or canonical identity recorded here.
 
 When #295 lands, this program, its boot convergence, and its one-second audit
 supersede [GH #234](https://github.com/overdrive-sh/overdrive/issues/234), the
@@ -38,13 +39,14 @@ shared inbound-TPROXY routing reconciler.
 
 ## Context
 
-**Current validation — 2026-10-03:** the ADR-0140 ordering-amendment pointer
-above is **PENDING**, because native E14(c)/(d) fail closed under the existing
-mark-before-TPROXY order and its required R19 exposure does not reproduce.
-Only that order change and its R19-induced canonical-identity consequence
-are invalidated. This ADR's eight-rule/three-set ownership, R10/R12/R15
-contracts, and the independently reproduced R18 guard decision remain
-accepted. See the #295 feature delta's *Native falsification register* and
+**Current validation — 2026-10-03 (RECORDED):** the ADR-0140 ordering-amendment
+pointer above is **withdrawn**, because native E14(c)/(d) fail closed under the
+existing mark-before-TPROXY order and the required R19 exposure does not
+reproduce. The reorder is withdrawn under its accepted native condition, so the
+constant program keeps its existing order and there is no R19-induced
+canonical-identity change. This ADR's eight-rule/three-set ownership, R10/R12/R15
+contracts, and the independently reproduced R18 guard decision remain accepted.
+See the #295 feature delta's *Native falsification register* and
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
 Valid Services carry an unbounded listener vector. The current intercept appends

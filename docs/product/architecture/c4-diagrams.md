@@ -1596,8 +1596,9 @@ the replacement governs:
 
 ### Correctness-recovery replacement — accepted 2026-09-24
 
-**Status: ACCEPTED by the user on 2026-09-24 (D-295-R1 to R22; R18 and R19
-conditional on their native REDs).** D-295-R7 (held counting, no slot
+**Status: ACCEPTED by the user on 2026-09-24 (D-295-R1 to R22; R18 stands on its
+reproduced native RED; R19's rule-order change is withdrawn under its accepted
+native condition).** D-295-R7 (held counting, no slot
 reservation), D-295-R9, the D-295-R11 retry-forever reclaim, the D-295-R14 kill
 scope (unconfirmed TAPs and damaged per-VM parts), the D-295-R20
 cleanup-pending status, and the D-295-R22 launch seccomp filter are user
@@ -1648,7 +1649,7 @@ C4Container
     Container(shim, "Action shim", "overdrive-control-plane", "Assigns, provisions down, starts VM, writes Running, installs intercept, waits on the EXEC gate while recovering, activates, releases EXEC; retires before cleanup")
     Container(sw, "Shared guest-network owner", "overdrive-control-plane", "Creates persistent TAPs down, owned by uid 0; activates after intercept-live; per-TAP TCX ingress + egress guest-MAC classifiers (egress delivers unicast only to the registered guest MAC and drops it on a map miss, ADR-0142) over the shared endpoint map; reports per-TAP quiescence and per-allocation damage, including a debug-mask change or a host-side MAC that is missing or a reserved address (the bridge MAC or a held guest MAC, judged by invariant and never against a recorded value, ADR-0144); excludes condemned allocations; restores quiesced TAPs only when asked after a clean audit")
     Container(vmm, "VmDriver + CloudHypervisorVmm", "overdrive-worker + overdrive-host", "Attaches one TAP queue, verifies flags and down-state, maps it to fd 3; in one child hook marks every other descriptor close-on-exec, then loads the launch seccomp filter (TAP-mutating ioctls never reach the tun ioctl handler on any CH thread: EPERM, or CH's own stricter action; a foreign syscall ABI is killed); drops the queue before any await")
-    Container(mtls, "Node-shared intercept owner", "overdrive-worker", "Awaited convergent element removal; boot member clear; TPROXY-before-mark rules (ADR-0140, conditional on native RED); audits and repairs program, policy route, guard table, and members with live allocations")
+    Container(mtls, "Node-shared intercept owner", "overdrive-worker", "Awaited convergent element removal; boot member clear; mark-before-TPROXY rules retained (ADR-0140 reorder withdrawn on native E14 fail-closed); audits and repairs program, policy route, guard table, and members with live allocations")
     Container(dns, "Guest DNS owner", "overdrive-control-plane", "Built through the required GuestDns port; replacement only after EXEC is closed")
     Container(sup, "Shared-network supervisor", "overdrive-control-plane", "Audits all three owners every second; converges failing owners, re-audits, kills audited damage, then restores TAPs; through a kill-only capability kills only VMs whose TAP could not be confirmed down or whose parts are damaged, or the whole slice if that set is undetermined or a kill fails")
     Container(api, "Allocation status handler", "overdrive-control-plane", "Serves GET /v1/allocs; derives CleanupPending from the live lease and row state")

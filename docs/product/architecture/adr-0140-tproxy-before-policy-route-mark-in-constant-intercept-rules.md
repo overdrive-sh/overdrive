@@ -2,26 +2,38 @@
 
 ## Status
 
-**Pending (2026-10-03) — native falsification of the R19 exposure premise.**
-The reproduced physical-native E14(c)/(d) results are fail-closed with the
-existing mark-before-TPROXY order, with valid positive controls, live guest
-SYNs, unchanged program/members, policy route, and complete captures. The
-rule-order decision and its dependent listener-loss rationale cannot authorize
-DELIVER until an exact replacement DESIGN and independent review are recorded.
-The mark-before-TPROXY alternative is reopened. E14(e) remains unproved; no
-security outcome or listener-loss behavior is changed by this status record.
-See the feature delta's 2026-10-03 native falsification register and
-`.context/distill-native-08-01.md` for the primary receipts.
+**Withdrawn (2026-10-03) under this ADR's own accepted native condition.** The
+conditional acceptance recorded below carried the self-withdrawal clause *"If
+native evidence shows that outbound guest TCP to an absent transparent listener
+is already dropped under the current order, this decision is withdrawn."* That
+condition is met: physical-native E14(c) (external leg-F destruction) and
+E14(d) (killed `serve` owner, guest alive) reproduce the fail-closed outcome
+under the existing mark-before-TPROXY order — valid positive controls, live
+guest SYNs, unchanged program/members and policy route, complete captures, and
+zero correlated SYN-ACKs or wildcard accepts. The reorder is therefore
+withdrawn and is never adopted; the constant program's two TPROXY rules keep
+their existing tail (the policy-route mark `0x1`, then `tproxy`, then `accept`).
 
-The pending scope includes this ADR's ordinary outbound-exposure assertion,
-its order change, the rejection of mark-before-TPROXY, listener-only
-non-quiescence rationale, and R19-induced canonical-identity/cleanup consequence.
-Those premises cannot remain accepted through pointers in ADR-0088, ADR-0089,
-ADR-0124, ADR-0125, or the architecture brief. The independent TIME_WAIT
-hypothesis still needs E14(e); ordinary R19 passes neither prove nor disprove it.
-The accepted single-loss fail-closed outcome is preserved. See
-[the bounded replacement proposal](../../../.context/r19-replacement-design.md)
-for the exact proposed contract and prior conditional-withdrawal provenance.
+The listener-loss classification that rested on this ADR is resolved on native
+evidence rather than on the reorder. A pure leg-F or leg-C listener failure
+does not quiesce managed TAPs, because the ordinary absent-listener outbound
+path already fails closed (E14(c)/(d)) and the `TIME_WAIT` side door fails
+closed on the 2026-10-03 named-Service E14(e) result (a true `TIME_WAIT` on the
+original Service-VIP destination tuple, `serve` owner killed, guest TAP up and
+the entry surviving: crafted newer-sequence guest reconnects answered with no
+SYN-ACK, `reopened=false`, host wildcard listener `accepts=0`). The accepted
+single-loss fail-closed security outcome — no SYN-ACK, no wildcard accept, no
+reopen to the user — is preserved; nothing here relaxes it. This is recorded on
+that bounded native evidence and is not extrapolated to untested kernels or
+host configurations. Exact rule, helper, and evidence detail live only in the
+#295 feature delta (§ *Intercept-mark fail-closure* and its *Native
+falsification register*). ADR-0088, ADR-0089, ADR-0124, ADR-0125, and the
+architecture brief record the same withdrawal through their pointers. The
+independent intercept-mark guard (ADR-0139, D-295-R18) is unaffected: its
+IP-program-loss exposure independently reproduces and its decision stands.
+
+Roadmap revalidation of the #295 08-01 step and DELIVER resumption remain a
+separate downstream gate.
 
 Historical conditional acceptance, retained as provenance rather than current
 execution authority:
@@ -86,57 +98,63 @@ research lists as a gap in the documentation.)
 
 ## Decision
 
-Both TPROXY rules order their tail as `tproxy`, then the policy-route mark,
-then `accept`. When no transparent listener matches, `NFT_BREAK` ends the rule
-before the mark is set. An outbound packet therefore keeps `0x295a` and falls
-through to the unhandled-intercept drop. The healthy path is unchanged: TPROXY
-succeeds, the mark is set, and the packet is accepted. The inbound rule shares
-the tail helper and changes with it; nothing inbound depends on the change.
+This decision is withdrawn. The constant program's two TPROXY rules keep their
+existing tail: the policy-route mark `0x1`, then `tproxy`, then `accept`. The
+reorder is not adopted, so the canonical program identity does not change and no
+rule, set, port, helper, or ownership is altered.
 
-This is what allows ADR-0124 to leave leg-F and leg-C loss without TAP
-quiescence. If this decision is withdrawn and native evidence does not show the
-outbound path already failing closed, listener loss must quiesce TAPs instead.
+Native evidence settles what the reorder was meant to address. E14(c) and
+E14(d) show that outbound guest TCP to an absent transparent listener already
+fails closed under the existing order, so ADR-0124 leaves leg-F and leg-C loss
+without TAP quiescence on that native evidence, not on a reorder. The exact
+retained rule tail and its native receipts live in the #295 feature delta.
 
 ## Alternatives considered
 
 ### Keep the mark before TPROXY
 
-Rejected. With no transparent listener the mark survives, the
-unhandled-intercept drop no longer matches, and outbound guest TCP reaches any
-host wildcard listener.
+Selected. Native E14(c)/(d) show that with the existing mark-before-TPROXY order
+outbound guest TCP to an absent transparent listener already fails closed — zero
+correlated SYN-ACKs and zero wildcard accepts under valid positive controls. The
+source-reasoned exposure in the Context does not reproduce in production on the
+tested native composition, so the reorder is unnecessary and is withdrawn.
 
 ### Quiesce managed TAPs on every listener loss
 
-Not chosen while this decision stands. It closes the runtime path, but it takes
-every guest off the network for a listener repair that the ordering makes
-unnecessary, and it does nothing for a crashed process, where no supervisor
-runs to quiesce anything. It is the stated fallback if this decision is
-withdrawn, or if the `TIME_WAIT` case below reproduces.
+Reopened and not selected. Native evidence shows listener loss already fails
+closed: the ordinary outbound path (E14(c)/(d)) and the `TIME_WAIT` side door
+(E14(e), 2026-10-03, door-closed in killed mode with the guest TAP up). Taking
+every guest off the network for a listener repair is therefore not needed, and
+it would do nothing for a crashed process where no supervisor runs to quiesce
+anything. The kernel path preserves the single-loss security outcome without it.
 
 ### Rely on the independent intercept-mark guard table (ADR-0139)
 
-Rejected as a substitute. That guard drops TCP still marked `0x295a`, and with
-today's order the listener-absent packet carries `0x1`.
+Rejected as a substitute for listener loss. That guard drops TCP still marked
+`0x295a`, and a listener-absent packet under the retained order is handled by
+the unhandled-intercept drop. The guard's own decision (ADR-0139, D-295-R18) is
+unaffected and stands for IP-program loss.
 
 ## Consequences
 
-Positive: outbound guest TCP fails closed when its transparent listener is
-absent, including after a crash that leaves microVMs running. The rule count,
-sets, ports, and ownership are unchanged.
+Positive: the constant program is unchanged — no canonical-identity change, no
+schema conflict, and no one-time stale-table cleanup is introduced by this
+decision. Outbound guest TCP to an absent transparent listener fails closed
+under the retained order, confirmed on native evidence (E14(c)/(d)), including
+after a crash that leaves microVMs running (E14(d), killed `serve` owner).
 
-Negative:
+Neutral:
 
-- The canonical program identity changes. A host whose kernel still holds the
-  old order refuses fresh boot on it as a schema-conflicting owned table. No
-  released build ever produced that order, so only development or test hosts
-  can hold it; they clear the stale table once. No compatibility recognizer is
-  added.
-- The ordering does not cover one path, reasoned from kernel source and not
-  executed. A SYN that matches a transparent `TIME_WAIT` socket left by an
-  earlier leg-F connection is assigned to that socket while leg F is absent, so
-  TPROXY succeeds and local delivery can reach a wildcard listener on the
-  packet's own destination port. The #295 feature delta makes this a separate
-  native RED. If it reproduces, listener loss becomes a TAP-quiescing
-  component, and the remaining crash-window exposure goes to the user.
+- The `TIME_WAIT` side door — a SYN matching a transparent `TIME_WAIT` socket
+  left by an earlier leg-F connection while leg F is absent — was reasoned from
+  kernel source as a possible exposure. The 2026-10-03 named-Service E14(e)
+  native result shows it fails closed: a true `TIME_WAIT` on the original
+  Service-VIP destination tuple, `serve` owner killed, guest TAP up and the
+  entry surviving, crafted newer-sequence guest reconnects answered with no
+  SYN-ACK (`reopened=false`) and no wildcard accept (`accepts=0`). The
+  crash-window residual that would have gone to the user does not arise, because
+  the kernel path fails the reopen closed with no live owner. This is recorded
+  on that bounded native evidence and is not extrapolated to untested kernels or
+  host configurations.
 - Correctness rests on native evidence, because no simulation can observe
   kernel TPROXY and routing.

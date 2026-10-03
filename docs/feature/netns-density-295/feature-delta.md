@@ -5,44 +5,85 @@
 correctness-recovery replacement DESIGN (application/components scope, Propose
 mode, all priorities) was **accepted by the user on 2026-09-24**.
 **Interaction mode:** Propose
-**Current validation (2026-10-03): R19-dependent DESIGN and DELIVER roadmap PENDING.**
+**Recorded decision (2026-10-03): D-295-R19 ordering change withdrawn under its accepted native condition; LegF/LegC listener-loss no-quiescence classification resolved on the named-Service E14(e) native result. Roadmap revalidation and DELIVER remain a separate downstream gate.**
 Native E14(c) and E14(d) reproduce healthy controls and fail-closed behavior
-with the existing mark-before-TPROXY implementation, contrary to D-295-R19's
-required exposure premise. Every validation or rejection that depends on that
-premise is non-operative pending a separate exact replacement DESIGN and
-independent review. This includes the R19 rule-order amendment and the
-listener-loss classification rationale derived from it; unrelated accepted
-outcomes and independently supported R18 are not weakened. DELIVER is stopped
-before 08-01 GREEN. E14(e)'s guest TIME_WAIT setup remains unresolved and is
-not evidence for either outcome.
+with the existing mark-before-TPROXY implementation, so D-295-R19's required
+ordinary absent-listener exposure does not reproduce. Its accepted self-withdrawal
+condition is met, and the rule-order change is withdrawn under the pre-approved
+conditional branch (user acceptance 2026-09-24); the bounded ordinary-flow
+withdrawal was independently reviewed
+(`arch_rev_20261003_netns295_r19_native_falsification`, APPROVED). Both constant
+TPROXY rules retain their existing `meta mark set 0x1`, `tproxy to
+127.0.0.1:<leg port>`, `accept` tail; no alternate-order recognizer is added.
+The LegF/LegC listener-loss classification is resolved on the 2026-10-03
+named-Service E14(e) native result (nextest
+`f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`, 2 passed): the guest leg-F `TIME_WAIT`
+door fails closed (`reopened=false`, wildcard `accepts=0`) with the `serve`
+owner killed and the guest TAP up, so a pure LegF/LegC listener failure does not
+quiesce managed TAPs and the original single-loss security outcome — no SYN-ACK,
+no wildcard accept, no reopen to the user — is preserved by the kernel path, on
+that bounded native evidence and not extrapolated further. No security outcome
+is relaxed; the independently reproduced R18 stands exactly. This record covers
+the R19-dependent DESIGN only: independent review of the listener-loss
+classification and roadmap revalidation of step 08-01 are the remaining
+downstream gates, and DELIVER/08-01 is not authorized by this record.
 
 ### Native falsification register — 2026-10-03
 
 - Evidence: [.context/distill-native-08-01.md](../../../.context/distill-native-08-01.md),
-  final physical-native receipt `5e43658a-438a-40b8-ae5e-3a27a1875bfa`.
-- R19 closed-listener: 36 post-fault guest SYNs, Intercept delta 42, complete
-  capture through real quiescence, zero matching SYN-ACKs and wildcard accepts.
-- R19 killed mode: 3942 post-kill guest SYNs, Intercept delta 3982, TAP live,
-  unchanged program/members and policy route, zero matching SYN-ACKs and accepts.
-- R18 table loss: 1972 forwarded SYNs with zero capture drops; the table-loss
-  exposure reproduces. No R18 production implementation is approved by this
-  status update.
-- Reopened alternatives: retaining mark-before-TPROXY and the listener-loss
-  choices rejected or not chosen on R19's exposure premise. No alternative is
-  selected here. No field, error, effect, rule order, quiescence, or security
-  outcome is removed or relaxed.
-- Required next gate: map all affected validations, record an exact replacement
-  DESIGN with any required user decision, independently review it, then resume
-  the original 08-01 evidence gate. Preserve frozen phases 01-04 and the
-  append-only execution log.
+  final ordinary-flow receipt `5e43658a-438a-40b8-ae5e-3a27a1875bfa`; the
+  named-Service E14(e) receipt `f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`.
+- R19 closed-listener (E14(c)): 36 post-fault guest SYNs, Intercept delta 42,
+  complete capture through real quiescence, zero matching SYN-ACKs and wildcard
+  accepts.
+- R19 killed mode (E14(d)): 3942 post-kill guest SYNs, Intercept delta 3982, TAP
+  live, unchanged program/members and policy route, zero matching SYN-ACKs and
+  accepts.
+- R18 table loss (E14(a)/(b)): 1972 forwarded SYNs with zero capture drops; the
+  table-loss exposure reproduces. R18 stands under its reproduced premise; its
+  guard decision, field, error, effects, and zero outcomes are unchanged.
+- E14(e), named-Service guest `TIME_WAIT` door — RESOLVED fail-closed
+  (2026-10-03). The two independent `TIME_WAIT` controls completed first
+  (`negative=BareAck`, `positive=SynAck`), proving the substate and sequence
+  gates and a non-vacuous oracle. The earlier completed direct-peer variant was
+  negative only for its concrete direct-peer tuple and did not settle the gate.
+  The original named-Service journey now runs on real `serve::run_with_kek` +
+  Cloud Hypervisor: the guest resolves `server.svc.overdrive.local` to the
+  Service VIP and establishes a true `TIME_WAIT` on the original-destination
+  tuple `10.98.0.1:18951 <- 100.95.0.3:60366`; the fault lands before the first
+  crafted reconnect (`pre_fault_crafted=0`); the R19 owned-program prerequisites
+  are all present (managed, outbound, fwmark rule, local route). With the `serve`
+  owner killed and the guest TAP up and the entry surviving, crafted
+  newer-sequence reconnects into the leg-F `TIME_WAIT` entry are answered with no
+  SYN-ACK (`reopened=false`) and the host wildcard listener accepts nothing
+  (`accepts=0`). The door fails closed; the reopen hazard does not reproduce.
+- Recorded decisions: D-295-R19's rule-order change is withdrawn under its
+  accepted native condition, so both constant TPROXY rules retain
+  mark → TPROXY → accept; mark-before-TPROXY is the selected retained order. The
+  LegF/LegC listener-loss classification is the no-quiescence branch, preserving
+  the original single-loss security outcome, recorded on the bounded E14(e)
+  door-closed native evidence and not extrapolated to untested kernels/hosts.
+  The killed-mode residual is closed, because the E14(e) door test is itself a
+  killed-mode scenario and the kernel path fails the reopen closed with no live
+  owner. No field, error, effect, rule order, quiescence, or security outcome is
+  removed or relaxed.
+- Remaining downstream gates: independent review of the recorded listener-loss
+  classification, and roadmap revalidation of step 08-01 through its required
+  review/approval gate, before DELIVER resumes. Frozen phases 01-04 and the
+  append-only execution log are preserved.
 
 #### R19-dependent validation scope
 
-The following approvals, assertions, and rejections are **PENDING / non-operative**
-for their R19-dependent portion. The quotations identify the exact clauses;
-historical text elsewhere is retained as provenance. This register does not
-select a replacement or broaden invalidation to an entire component or ADR.
-The bounded replacement proposal is
+The R19-dependent portions below are now **RECORDED as resolved (2026-10-03)**.
+D-295-R19's rule-order change is withdrawn under its accepted native condition
+(E14(c)/(d) do not reproduce the ordinary exposure); both constant TPROXY rules
+retain mark → TPROXY → accept. The LegF/LegC listener-loss classification is the
+no-quiescence branch, resolved on the named-Service E14(e) door-closed native
+result, with the original single-loss security outcome preserved. The quotations
+identify the exact clauses; historical text elsewhere is retained as provenance.
+The third column states each row's recorded disposition. No component or ADR is
+invalidated beyond the mapped clause, and no security outcome is relaxed. The
+bounded replacement proposal and its provenance are
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
 | Dependent clause / projection | Exact affected assertion or decision | Validation scope |
@@ -50,26 +91,27 @@ The bounded replacement proposal is
 | D-295-R19 in the replacement decision list and Decisions Table; ADR-0140 Decision | "Both TPROXY rules order their tail as" TPROXY, policy-route mark, accept | Rule-order acceptance only; the eight-rule program, three sets, target ports, and owner remain accepted |
 | Driven port — intercept element release…: Hazard 2, healthy-path explanation, R19 contract | "the `0x1` policy route delivers it to any host listener bound to `0.0.0.0`"; "This is the path R19 closes" | The claimed ordinary outbound exposure and the remedy's justification; native E14(c)/(d) disprove the required premise under the reproduced conditions |
 | Same section: `observe_shared_state`; Boot ordering step 6.5; `IpRules` matrix row; startup-boundary ordering | "including the D-295-R19 rule order"; "in the R19 rule order" | The canonical-order value only; generation-bracketed observation, atomic target replacement/rollback, policy route, R18 guard, zero-member checks, and typed failure shapes stay accepted |
-| Runtime shared-network supervisor: `LegF` / `LegC` matrix row and Quiescence; ADR-0124 listener clauses | "**no**, only because R19 makes a missing listener fail closed"; "Pure `LegF`, `LegC`, or `Dns` failures never quiesce" | The LegF/LegC non-quiescence decision and its R19 rationale await a replacement and the independent E14(e) result. The Dns portion, detection, exact-port repair, EXEC closure, bounds, restore gate, and kill scope stay accepted |
+| Runtime shared-network supervisor: `LegF` / `LegC` matrix row and Quiescence; ADR-0124 listener clauses | "**no**, only because R19 makes a missing listener fail closed"; "Pure `LegF`, `LegC`, or `Dns` failures never quiesce" | RECORDED: the LegF/LegC non-quiescence decision is resolved as the no-quiescence branch on the named-Service E14(e) door-closed native result; its rationale is native evidence, not the withdrawn reorder, and the original single-loss outcome is preserved. The "never quiesce" clause is unchanged. The Dns portion, detection, exact-port repair, EXEC closure, bounds, restore gate, and kill scope stay accepted |
 | ADR-0124 amendment's ADR-0140 pointer, Decision, and FD Changed Assumptions 22 | "new connects or DNS queries fail while their socket owner is absent"; "A pure listener failure does not quiesce TAPs or existing commands" | The outbound ordinary-listener explanation and listener-only non-quiescence validation; the security outcome is preserved, not relaxed |
 | ADR-0088/0089 accepted amendment 2026-09-24, item 2; FD Changed Assumptions 23; Freeze/inventory pointer registers | "socket lookup delivers guest TCP to any host listener bound to the wildcard address" and the ADR-0140 replacement pointer | Only the #295 listener-loss correction and conditional ordering amendment. The zero-frame contract, queue/fd attachment, lifecycle, and independent B-6/B-7 pins stay accepted; no general claim about the historical per-netns topology is inferred |
 | ADR-0125 amendment's ADR-0140 pointer; FD Changed Assumptions 17 | "both TPROXY rules order TPROXY, then the policy-route mark, then accept" | The order-only amendment. Constant cardinality, R10 removal, R12 member convergence, R15 audit/repair, and R18 guard remain accepted |
 | ADR-0140 Alternatives considered | "Keep the mark before TPROXY" rejected; quiesce on every listener loss "Not chosen while this decision stands"; independent R18 guard rejected "as a substitute" | Reopened where the rejection rests on the ordinary R19 exposure. R18 is still required for reproduced IP-program loss; its guard is not newly claimed to solve listener loss |
 | ADR-0140 Consequences; FD Fresh boot that finds the old rule order, Required downstream changes, environment matrix, and 08-01 planning row | "The canonical program identity changes"; "pre-R19 order" schema conflict and one-time cleanup | R19-induced identity change, old-order refusal rationale, and cleanup precondition only. Existing exact-identity refusal for genuine foreign/noncanonical state remains accepted |
-| FD Reuse Analysis and application/security/evidence projections; brief shared-bridge sections and ADR index; `c4-diagrams.md` correctness-recovery L2 and supervisor narrative | "**EXTEND** by reordering its expressions"; "a missing TPROXY listener fails closed through the PROPOSED D-295-R19 rule order"; "TPROXY-before-mark rules"; "listener/DNS loss does not down TAPs" | Reordering classification, R19 threat/remedy assertions, and accepted-summary/C4 projections are PENDING under this register. The listener portion of the C4 narrative is pending; DNS is independent. No new component, port, runtime, or evidence lane is authorized |
+| FD Reuse Analysis and application/security/evidence projections; brief shared-bridge sections and ADR index; `c4-diagrams.md` correctness-recovery L2 and supervisor narrative | "**EXTEND** by reordering its expressions"; "a missing TPROXY listener fails closed through the PROPOSED D-295-R19 rule order"; "TPROXY-before-mark rules"; "listener/DNS loss does not down TAPs" | RECORDED: the reordering classification and R19 threat/remedy assertions are withdrawn (the retained order already fails closed on native evidence), and the brief summaries/index are reconciled. The `c4-diagrams.md` L2 order/listener prose is reconciled (c4-diagrams.md:1600, :1652, :2071 record the withdrawal and the no-quiescence classification, 2026-10-03). DNS is independent. No new component, port, runtime, or evidence lane is authorized |
 | ADR-0139 Context and Consequences (R19 cross-reference only) | "the TPROXY-before-mark rule order of ADR-0140 (D-295-R19) keeps that true for outbound TCP"; "covers that path" | Only the claim that R19 covers ordinary missing-listener traffic. The reproduced R18 premise, independent guard mechanism, exact field/error/effects, cardinality, and zero outcomes are not invalidated |
-| FD Evidence Classification source-derived R19 exposure; R19 ordinary RED-first declarations and E14 row; DISTILL requirement/scenario/step projections | "each is withdrawn if its RED does not reproduce" | E14(c)/(d)'s exposure prerequisite has not reproduced and the no-change withdrawal branch must be recorded before DELIVER. Their no-SYN-ACK/no-accept oracles remain required; genuine R18 RED remains valid |
-| ADR-0140 TIME_WAIT consequence; FD TIME_WAIT side door, E14(e), Open Question 2, and boundary scenario 5 | "E14 case (e), the `TIME_WAIT` side door, is judged separately" | Independent native gate remains unresolved. Neither ordinary R19 pass decides the guest TIME_WAIT door, its listener-loss classification, nor any killed-mode residual acceptance |
+| FD Evidence Classification source-derived R19 exposure; R19 ordinary RED-first declarations and E14 row; DISTILL requirement/scenario/step projections | "each is withdrawn if its RED does not reproduce" | RECORDED: E14(c)/(d)'s exposure prerequisite did not reproduce and the no-change withdrawal branch is recorded. Their no-SYN-ACK/no-accept oracles remain required; genuine R18 RED remains valid. The DISTILL requirement/scenario/step projections reconcile to this record through the downstream DISTILL/roadmap gate |
+| ADR-0140 TIME_WAIT consequence; FD TIME_WAIT side door, E14(e), Open Question 2, and boundary scenario 5 | "E14 case (e), the `TIME_WAIT` side door, is judged separately" | RECORDED: the named-Service E14(e) door fails closed (`reopened=false`, wildcard `accepts=0`) in a killed-mode scenario with the guest TAP up; the listener-loss classification is the no-quiescence branch and the killed-mode residual is closed. No killed-mode security residual is accepted; the original single-loss outcome is preserved |
 
 **Independent contracts preserved.** R18's field, error, two doc-hidden
 effects, guard identity, boot/runtime obligations, and forwarding/host-local
 zero outcomes remain accepted under their now-reproduced premise. R14's
 per-TAP/per-VM kill partition, R15's complete bounded audit and repair,
 Clock-owned deadlines, the held-lease cap, zero pre-event frames, no-cleartext
-escape, and every other independent decision remain operative. Pending
-listener classification never permits traffic that an accepted security
-outcome forbids. E14(e) is an unresolved hypothesis gate, not a reproduced
-exception to that outcome.
+escape, and every other independent decision remain operative. The recorded
+listener classification permits no traffic that an accepted security outcome
+forbids: the named-Service E14(e) door fails closed and the original single-loss
+outcome is preserved. R19's withdrawal cannot erase or weaken any of these
+independent invariants.
 
 **Historical status (2026-09-24; superseded for R19-dependent validation): REPLACEMENT DESIGN ACCEPTED (D-295-R1 to
 D-295-R22, ADR-0127 to ADR-0143). DELIVER remains stopped until DISTILL is
@@ -313,7 +355,13 @@ contract, and the E21 aarch64 runner case is removed.
 
 D-295-R18 and D-295-R19 are accepted as conditional decisions: each stands only
 if its native RED (E14) reproduces, and is withdrawn otherwise, exactly as its
-ADR states. The pre-existing ADRs the replacement amends or supersedes (ADR-0072,
+ADR states. **Recorded 2026-10-03:** R18's native RED reproduced (E14(a)/(b)
+table loss), so R18 stands exactly; R19's required ordinary absent-listener
+exposure did not reproduce (E14(c)/(d)), so R19's rule-order change is withdrawn
+under its accepted native condition and both constant TPROXY rules retain
+mark → TPROXY → accept. The named-Service E14(e) `TIME_WAIT` door fails closed,
+so the LegF/LegC listener-loss classification is the no-quiescence branch with
+the original single-loss outcome preserved. The pre-existing ADRs the replacement amends or supersedes (ADR-0072,
 0088, 0089, 0114, 0115, 0117, 0118, 0121, 0122, 0124, 0125) now state their
 amendment explicitly with a pointer to the accepted ADR (see § *Freeze and
 inventory* for why they are operative).
@@ -695,7 +743,7 @@ rejection:
 | D-295-R16 | `ServerConfig` requires intercept and guest-DNS ports; the mTLS worker, DNS owner, and supervisor are always composed. | Serve composition | ADR-0138 | 2 |
 | D-295-R17 | The serve lifetime port is pinned as built (user-approved). | CLI | — (ruling) | 4 |
 | D-295-R18 | An independent intercept-owned guard table drops TCP still carrying the TCX intercept mark after the intercept chain, so intercept-marked TCP fails closed without the IP nft program (option R18-B, chosen on evidence). Conditional on a native RED. | Worker (intercept owner) | ADR-0139 | 3 |
-| D-295-R19 | The constant program's two TPROXY rules order TPROXY, then the policy-route mark, then accept, so an outbound TPROXY without a transparent listener falls through to the unhandled-intercept drop. Conditional on a native RED. | Worker (intercept owner) | ADR-0140 | 3 |
+| D-295-R19 | **Withdrawn 2026-10-03 under its accepted native condition** (E14(c)/(d) do not reproduce the ordinary absent-listener exposure). The constant program's two TPROXY rules retain their existing mark → TPROXY → accept tail; no reorder and no alternate-order recognizer. Listener loss stays un-quiesced because native evidence shows an absent listener already fails closed. | Worker (intercept owner) | ADR-0140 | 3 |
 | D-295-R20 | **Operator behaviour user-approved 2026-09-24 (ruling 6).** `overdrive workload describe` shows an allocation whose network cleanup has not finished as cleanup-pending, never Running. The status is derived at read time from the live guest-attachment lease and the row state, and is not persisted. | Control-plane `alloc_status` handler, CLI renderer | ADR-0141 | — (operator visibility) |
 | D-295-R21 | A TAP egress classifier delivers unicast to a guest only for that TAP's registered guest MAC, dropping every other unicast, including when the TAP has no endpoint entry (broadcast/multicast always delivered), so a host-side MAC change cannot redirect another guest's host-to-guest plaintext and flooded unknown unicast reaches only its registered target (review finding R5-H1). A structural control; no user decision. | Shared guest-network owner (TCX egress), reusing the ADR-0115 endpoint map | ADR-0142 | 7 |
 | D-295-R22 | **User-approved 2026-09-24 (ruling 9); x86_64 only (ruling 10).** Every Cloud Hypervisor launch installs, in the forked child before its first exec, a seccomp filter that returns `EPERM` (or lets CH's own stricter action apply) for the 13 TAP-mutating ioctl requests on any descriptor and kills the process on a foreign syscall ABI, so every Cloud Hypervisor thread inherits it; a launch never proceeds without it. The filter exists for x86_64 only, so no microVM starts on any other target, aarch64 included (GH #302). | `overdrive-host` VMM adapter (the one ADR-0129 launch hook and its startup probe) | ADR-0143 | 7 |
@@ -3343,7 +3391,8 @@ pub struct InterceptState {
 covering:
 
 - the owned table, both chains, the three sets, and the eight rules, including
-  the D-295-R19 rule order;
+  the canonical mark → TPROXY → accept order recorded by the R19 conditional
+  withdrawal;
 - every member;
 - the target-table foreign complement;
 - the policy route: the fwmark rule and the table-100 local route;
@@ -3911,12 +3960,16 @@ is not added (*Conditional parts* below). ADR-0137's "Clear failure refuses
 startup with a distinct typed cause" and ADR-0122 already state this shape, so
 no ADR changes.
 
-**Intercept-mark fail-closure (R18 and R19, both conditional on native RED).**
-**Current validation 2026-10-03:** Hazard 2, the R19 ordering contract, and
-their dependent validations below are PENDING under the native falsification
-register. R18's table-loss exposure independently reproduces. The conditional
-without-R19 shape and the separate TIME_WAIT gate are retained for replacement
-review; no withdrawal is applied by this annotation.
+**Intercept-mark fail-closure (R18 reproduced and stands; R19 rule-order change withdrawn 2026-10-03 under its native condition).**
+**Current validation 2026-10-03 — RECORDED:** Hazard 2 and the R19 ordering
+change are **withdrawn** under D-295-R19's accepted native condition: native
+E14(c)/(d) do not reproduce the ordinary outbound absent-listener exposure, so
+both constant TPROXY rules retain their existing mark → TPROXY → accept tail (the
+exact replacement contract is in *R19 contract (withdrawn)* below). R18's
+table-loss exposure independently reproduces and R18 stands exactly. The
+`TIME_WAIT` side door is resolved fail-closed on the named-Service E14(e) native
+result, so the LegF/LegC listener-loss classification is the no-quiescence branch
+with the original single-loss outcome preserved.
 The mechanism is chosen on evidence, below; it is not a user decision (review
 finding F4).
 
@@ -3956,7 +4009,10 @@ document does not describe this case (research F9.1, gap 5); the source does.
   matches, and the `0x1` policy route delivers it to any host listener bound to
   `0.0.0.0` on its destination port. That reaches guest TCP whose destination
   is not even a host address, because table 100 makes every address local.
-  This is the path R19 closes.
+  This path was reasoned from source as the exposure the R19 reorder would
+  close. Native E14(c)/(d) do not reproduce it on the production composition, so
+  the R19 reorder is withdrawn and the existing mark → TPROXY → accept order
+  already fails this path closed (see *R19 contract (withdrawn)* below).
 - **Inbound (rule 3 → rule 4).** Already fail-closed with today's order. Rule 4
   drops any TCP whose destination is in `managed_guest_ips`, without testing the
   mark (`nft.rs:773-779`). Every registered inbound destination is a managed
@@ -3998,24 +4054,35 @@ because only then can the forwarding leak occur.
 **Why the healthy path never carries the mark past prerouting.** Every TCP
 packet carrying `0x295a` meets the owned mangle-priority prerouting chain:
 
-- rule 1 TPROXYs it and, under R19, only then sets the mark to `0x1`;
+- rule 1 sets the mark to `0x1` and TPROXYs it to the transparent listener (the
+  retained mark → TPROXY → accept order);
 - rule 2 drops it (`nft.rs:747-781`).
 
 The leg-S dial mark is `0x2` (`MTLS_LEG_S_DIAL_MARK`). Any control placed after
 that chain therefore matches nothing in healthy operation.
 
-**R19 contract (proposed ADR-0140).** Both TPROXY rules order their tail as
-`tproxy to 127.0.0.1:<port>`, then `meta mark set 0x1`, then `accept`. On
-`NFT_BREAK` the rest of the rule does not run, so an outbound packet keeps
-`0x295a` and falls through to rule 2's unhandled-intercept drop. The healthy
-path is unchanged: TPROXY succeeds, then the mark, then accept. The shared tail
-helper changes its expression order, and the normalized program identity that
-`observe_shared_state` compares changes with it. No port, rule, or set is
-added. The per-allocation #222 rules that share the helper leave in the #295
-single cut. **Leg-F and leg-C losses stay un-quiesced only because R19 closes
-the outbound path** (or, if E14's listener RED does not reproduce, because
-native evidence shows the path already fails closed). Without either, a
-listener loss would have to quiesce TAPs.
+**R19 contract (withdrawn 2026-10-03, ADR-0140).** D-295-R19's ordering change is
+withdrawn under its accepted native condition. Native E14(c) and E14(d) do not
+reproduce the required ordinary outbound absent-transparent-listener exposure on
+the current production implementation. Both constant TPROXY rules therefore
+retain their existing exact tail: `meta mark set 0x1`, `tproxy to
+127.0.0.1:<the rule's leg port>`, `accept`. Rule 1 continues to match
+`0x295a`-marked TCP whose source is in `outbound_sources`, targeting leg F; rule
+3 continues to match the registered IPv4/TCP-port destination, targeting leg C.
+Their existing preceding selection expressions, the other six IP rules, the three
+typed sets, userdata, chains, counts, ports, and intercept-owner boundary are
+unchanged. The helper (`tproxy_and_mark_and_accept`, `nft.rs:674-691`) and the
+normalized canonical identity continue to encode this one current order; the
+normalized program identity that `observe_shared_state` compares is unchanged. No
+alternate-order recognizer is added, and no port, rule, or set is added or
+removed. The per-allocation #222 rules that share the helper are unaffected.
+Native fail-closed evidence is the justification for this withdrawal; no causal
+kernel explanation is asserted. The no-SYN-ACK / no-wildcard-accept and
+healthy-operation / single-owned-component catch-or-drop outcomes remain
+required. **Leg-F and leg-C losses stay un-quiesced because native evidence
+shows guest TCP to an absent listener already fails closed under the retained
+order** (E14(c)/(d) ordinary; the named-Service E14(e) `TIME_WAIT` door), not
+because of a reorder.
 
 **The TIME_WAIT side door (review finding L3).** `nft_tproxy` looks up an
 established socket first. For a SYN that matches a `TIME_WAIT` socket, it
@@ -4048,37 +4115,48 @@ one of these preconditions, refined from kernel source (research addendum A2):
   `TCP_TW_SYN` handoff.
 
 A malicious guest controls its source port. `TIME_WAIT` sockets are kernel
-objects that outlive a crashed `serve` process. **A killed `serve` closes every
-leg-F socket from the host side at once**, so every open intercepted flow whose
-guest side also completed its close then sits in true `TIME_WAIT` for about 60 s
-— the door is open, per flow, for that interval. This amplifies the killed-mode
-residue case beyond a single flow. This is reasoned from source and not
-executed. E14 adds it as native case (e), with a **positive control** (a probe
-that meets every precondition above receives the SYN-ACK) beside the negative
-control (the same probe with a stale ISN gets an RST/ACK, proving the substate
-and sequence gates). If it reproduces, R19 alone does not make an absent
-listener fail closed, and the design responds on that evidence:
+objects that outlive a crashed `serve` process. A killed `serve` closes every
+leg-F socket from the host side at once, so every open intercepted flow whose
+guest side also completed its close then sits in true `TIME_WAIT` for about 60 s.
+This was reasoned from source as a potential per-flow killed-mode exposure and
+added as native case (e), with a **positive control** (a probe that meets every
+precondition above receives the SYN-ACK) beside the negative control (the same
+probe with a stale ISN gets an RST/ACK, proving the substate and sequence gates).
 
-1. `LegF` and `LegC` become kernel-path components, so listener loss quiesces
-   managed TAPs, which closes the runtime path.
-2. The killed-mode residue exposure (no in-process owner after a crash; every
-   leg-F socket closed at once, so every qualifying flow's door open for about
-   60 s; bounded by the `TIME_WAIT` interval and the preconditions above) is an
-   accepted single-loss outcome that would change. It is surfaced to the user,
-   not absorbed. This routing to the user is kept exactly as before; E14 (e)'s
-   reproduction is what triggers it.
+**Recorded 2026-10-03 — the door fails closed.** The named-Service E14(e) ran on
+real `serve::run_with_kek` + Cloud Hypervisor (nextest
+`f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`). The guest resolved its Service name to
+the Service VIP and established a true `TIME_WAIT` on the original-destination
+tuple; the two independent controls completed first (`negative=BareAck`,
+`positive=SynAck`), proving the oracle non-vacuous. The `serve` owner was then
+killed (so no owner remains to quiesce anything), the guest TAP stayed up, and
+the true `TIME_WAIT` entry survived the kill; the owned program, members, and
+policy route were unchanged. Crafted newer-sequence guest reconnects into the
+leg-F `TIME_WAIT` entry — released only after the fault (`pre_fault_crafted=0`) —
+were answered with no SYN-ACK (`reopened=false`), and the host wildcard listener
+accepted nothing (`accepts=0`). The reopen hazard does not reproduce.
 
-**Fresh boot that finds the old rule order (review finding L7).** R19 changes
-the canonical program identity. A node whose kernel still holds a program in
-the pre-R19 order (only a development or test host that ran an earlier #295
-build, because no #295 build has shipped or merged) is handled by the existing
-fresh-boot rule. `from_normalized_parts` accepts only the canonical owned shape,
-so the old program is a schema-conflicting owned table. Boot refuses with the
-existing typed error, mutates nothing, and emits `health.startup.refused`. No
-compatibility recognizer for the old order is added (single-cut greenfield).
-Such a host clears the stale `ip overdrive-mtls` table once, like any other
-leaked node-global nft state (`.claude/rules/testing.md`), before running the
-R19 build.
+Because the door fails closed, neither contingency the design reserved for a
+reproduction is triggered:
+
+1. `LegF` and `LegC` do **not** become kernel-path TAP-quiescing components: a
+   pure LegF/LegC listener failure does not quiesce managed TAPs. The kernel
+   path preserves the outcome without quiescence.
+2. The killed-mode residual is **closed**, not surfaced as an accepted residual.
+   The E14(e) result is itself a killed-mode scenario (owner killed, TAP up,
+   entry surviving), and the kernel path fails the reopen closed with no live
+   owner, so no accepted single-loss outcome changes and nothing is routed to the
+   user as a new residual. This is recorded on the bounded E14(e) native evidence
+   and is not extrapolated to untested kernels or host configurations.
+
+**Fresh boot and canonical identity (review finding L7; R19 withdrawn).** Because
+the R19 reorder is withdrawn, the canonical program identity does not change and
+there is no R19-induced schema conflict or one-time stale-table cleanup
+obligation. The existing fresh-boot rule is unchanged: `from_normalized_parts`
+accepts only the canonical owned shape, so a genuinely foreign, malformed,
+partial, or noncanonical owned table still refuses startup with the existing
+typed error, mutates nothing, and emits `health.startup.refused`. No
+compatibility recognizer is added (single-cut greenfield).
 
 **R18 options, compared on evidence:**
 
@@ -4175,11 +4253,14 @@ ruling that technical decisions are settled on evidence.)*
 | The two netlink guard effects | Not added. | Unchanged |
 | The TPROXY-rule tail order | Unchanged | Stays mark → TPROXY → accept, which E14's listener RED showed already fails closed |
 
-DISTILL must first reproduce each hazard as a native-metal RED (E14). R18 is
-withdrawn if neither table-loss path (forwarding, host-local) reproduces; R19
-is withdrawn if neither outbound listener-absent case (listener closed with the
-TAP up; killed-mode residue with Cloud Hypervisor alive) reproduces. E14 case
-(e), the `TIME_WAIT` side door, is judged separately, as stated above.
+DISTILL reproduced each hazard as a native-metal RED (E14). **Recorded
+2026-10-03:** R18's RED reproduced (table loss, forwarding and host-local), so
+R18 stands and the "Shape without R18" column does **not** apply. R19's RED did
+**not** reproduce (neither the listener-closed-with-TAP-up case E14(c) nor the
+killed-mode case E14(d)), so R19's ordering change is withdrawn and the "Shape
+without R19" column — the retained mark → TPROXY → accept tail — is the recorded
+shape. E14 case (e), the `TIME_WAIT` side door, is resolved fail-closed on the
+named-Service E14(e) native result, as stated above.
 
 ### [REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25
 
@@ -5232,7 +5313,8 @@ This replaces the accepted boot sequence row:
       already proved the sets empty, and step 6 proves them empty again.
    4. Bind fresh F and C listeners. Port 0 is legal only here.
    5. `converge_shared(prior, F, C)`: atomic target replacement with rollback,
-      in the R19 rule order, plus the policy route and the R18 guard table.
+      in the canonical mark → TPROXY → accept order recorded by the R19
+      conditional withdrawal, plus the policy route and the R18 guard table.
    6. Full read-back through `observe_shared_state()`: the exact program, the
       policy route, the guard table, and zero members, each failure with the
       typed cause that same table pins.
@@ -5256,11 +5338,13 @@ hitless restore follows from #295's no-adoption rule, not from this ordering.
 
 ### [REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)
 
-**Current validation 2026-10-03:** the `LegF`/`LegC` non-quiescence row and
-its R19 rationale are PENDING. Only the R19 canonical-order value in the
-`IpRules` row is PENDING. Every independent component, call, Clock bound,
-owner, restore condition, and kill rule remains accepted; E14(e) must finish
-before a listener classification is selected.
+**Current validation 2026-10-03 — RECORDED:** the `LegF`/`LegC` non-quiescence
+row is resolved as the no-quiescence branch on the named-Service E14(e)
+door-closed native result, preserving the original single-loss outcome; its
+rationale is native evidence, not the withdrawn R19 reorder. The `IpRules` row's
+canonical order is the retained mark → TPROXY → accept order (the R19 reorder is
+withdrawn). Every independent component, call, Clock bound, owner, restore
+condition, and kill rule remains accepted.
 
 | Component | Owner (repair) | Detection | TAP quiescence | Repair call per attempt |
 |---|---|---|---|---|
@@ -5271,9 +5355,9 @@ before a listener classification is selected.
 | `BpffsPin` (endpoint and counter map pins) | shared owner | audit (pins now observed) | yes | `converge_shared()` |
 | `BridgeGuard` (table, chains, three rules; members naming unmanaged TAPs) | shared owner | audit (no longer reported as Bridge) | yes | `converge_shared()` |
 | *Per-allocation damage* (one allocation's TAP existence/persistence/owner-uid/**host-side MAC in the reserved set or missing** (D-295-R21)/admin-state, TCX attachment, link pin, endpoint entry, or guard member) — not a component | shared owner reports it; nobody repairs it | audit `Ok(SharedGuestNetworkAudit { damaged })` | **no** | none: that VM is killed (user ruling 8 of 2026-09-24) and its lifecycle replaces it |
-| `IpRules` (constant program in R19 order; policy route: the `fwmark 0x1 lookup 100` rule and table 100's `local 0.0.0.0/0 dev lo` route; R18 guard table) | worker | audit through `observe_shared_state` | yes | `converge_shared_owner()` |
+| `IpRules` (constant program in the canonical mark → TPROXY → accept order recorded by the R19 conditional withdrawal; policy route: the `fwmark 0x1 lookup 100` rule and table 100's `local 0.0.0.0/0 dev lo` route; R18 guard table) | worker | audit through `observe_shared_state` | yes | `converge_shared_owner()` |
 | `IpSets` (dynamic members versus registry) | worker | audit | yes | `converge_shared_owner()` |
-| `LegF` / `LegC` | worker | immediate (`wait_shared_owner_failure`) plus audit | **no**, only because R19 makes a missing listener fail closed | `converge_shared_owner()` (exact-port rebind) |
+| `LegF` / `LegC` | worker | immediate (`wait_shared_owner_failure`) plus audit | **no**, because native evidence (E14(c)/(d) ordinary; the named-Service E14(e) `TIME_WAIT` door) shows a missing listener already fails closed under the retained order | `converge_shared_owner()` (exact-port rebind) |
 | `Dns` | DNS task owner | immediate (`DnsServeTaskOwner::wait_failure`) plus audit | **no** | `DnsServeTaskOwner::replace` with a freshly built and probed responder |
 | `Supervisor` | `ServerHandle` | join or channel classification (D8) | n/a | immediate fail-stop, unchanged |
 
@@ -5576,8 +5660,9 @@ never read, and per-TAP problems are reported as Bridge.
   contrary to "a TAP is never raised while any owner's component is still
   failing".)*
 - Pure `LegF`, `LegC`, or `Dns` failures never quiesce. For leg F and leg C that
-  is safe only because R19 makes guest TCP to an absent listener fail closed;
-  DNS carries no guest TCP.
+  is safe because native evidence (E14(c)/(d) ordinary; the named-Service E14(e)
+  `TIME_WAIT` door) shows guest TCP to an absent listener already fails closed
+  under the retained rule order; DNS carries no guest TCP.
 - A later attempt whose audit first reveals a kernel-path component quiesces at
   that point.
 
@@ -6425,12 +6510,15 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     present tense.
 22. **ADR-0124, listener loss.** It says: *"new connects or DNS queries fail
     while their socket owner is absent."*
-    For outbound guest TCP this is false under the current mark-before-TPROXY
-    order (review findings F3 and M1): the connect reaches a host wildcard
-    listener. Inbound TCP already fails closed through rule 4. The sentence
-    becomes true for outbound under R19 (ADR-0140, accepted conditional on its
-    native RED), subject to the `TIME_WAIT` case in E14 (e). ADR-0124's sentence
-    is unchanged; its 2026-09-24 amendment records the dependency on ADR-0140.
+    Source reasoning (review findings F3 and M1) suspected this was false for
+    outbound guest TCP under the current mark-before-TPROXY order — that the
+    connect would reach a host wildcard listener. **Recorded 2026-10-03:** native
+    E14(c)/(d) do not reproduce that exposure; outbound guest TCP to an absent
+    transparent listener already fails closed under the current order, and the
+    named-Service E14(e) `TIME_WAIT` door fails closed too. Inbound TCP already
+    fails closed through rule 4. The sentence therefore holds for outbound on
+    native evidence, the R19 reorder is withdrawn, and ADR-0124's sentence is
+    unchanged.
 23. **ADR-0089 §1 and ADR-0088 status (2026-08-31 amendment).** ADR-0089 said
     (`:194-198`): *"The inbound prerouting rule also orders its existing mark
     before TPROXY. With a live transparent listener, redirect semantics are
@@ -6439,11 +6527,13 @@ Each superseded contract is quoted verbatim, followed by its replacement.
     instead of restoring its original cleartext route."* ADR-0088's status said
     the amendment was *"to keep listener-loss fail-closed by ordering the
     existing fwmark before TPROXY."*
-    Conditionally replaced by R19 (TPROXY, then mark, then accept; ADR-0140,
-    accepted conditional on its native RED), if E14's outbound listener-absent
-    RED reproduces. Keeping the flow on the host is not fail-closed. Both
-    operative ADRs record the correction in an explicit 2026-09-24 amendment;
-    the #222 per-allocation rules leave in the #295 single cut.
+    **Recorded 2026-10-03:** R19's reorder is withdrawn under its accepted native
+    condition — E14(c)/(d) do not reproduce the outbound listener-absent exposure,
+    so the 2026-08-31 mark-before-TPROXY order is retained and is not replaced.
+    Native evidence shows that order already fails an absent-listener outbound
+    flow closed, so the earlier "keeping the flow on the host is not fail-closed"
+    concern does not reproduce. Both operative ADRs record the withdrawal; the
+    #222 per-allocation rules are unaffected.
 24. **C-295-G.** It says: *"The complete port is:"*, followed by five methods
     with `async fn quiesce_managed_taps(&self) -> Result<()>;` and `async fn
     audit_shared(&self) -> std::result::Result<(),
@@ -6672,7 +6762,7 @@ Each superseded contract is quoted verbatim, followed by its replacement.
 | Required serve ports | The `kek` pattern | **EXTEND** `ServerConfig::new` |
 | Serve lifetime | `serve_lifetime.rs` (built) | **REUSE** as built |
 | Fail-closure that does not depend on the intercept table (R18-B) | The owned shared IP program and its DESIGN-02-03 codec; FIB helpers `add_fib_rule_fwmark` / `fib_rule_fwmark_present` (`client.rs:819-856`) | **EXTEND** the nft codec with one independent guard table and two doc-hidden effects. A FIB rule is rejected: the kernel's `pref 0 lookup local` rule precedes it, so host-local delivery escapes (R18-A). Moving the local rule is a node-global routing change (R18-C). |
-| Listener-absent fail-closure (R19) | The existing `tproxy_and_mark_and_accept` tail (`nft.rs:674-691`) | **EXTEND** by reordering its expressions; no rule, set, or port is added. |
+| Listener-absent fail-closure (R19) | The existing `tproxy_and_mark_and_accept` tail (`nft.rs:674-691`) | **REUSE** unchanged. R19's reorder is withdrawn 2026-10-03 under its native condition (E14(c)/(d) show the existing mark → TPROXY → accept order already fails an absent listener closed); no rule, set, port, or expression order is changed. |
 | Restart slot handover | `GuestAddressPool::assign` plus a separate `retire` | **NOT NEEDED.** Under R7 a retiring predecessor still counts, so a handover at retirement frees nothing; the earlier `replace` is withdrawn. |
 | Runtime TAP restore | `converge_shared` (structural repair) | **EXTEND** the owner port with `restore_quiesced_taps`. Restoring inside `converge_shared` is rejected: it raises TAPs before other owners are repaired, and it never runs after a worker-only repair. |
 
@@ -6807,10 +6897,13 @@ DESIGN created no issue. No other deferral is proposed.
   docs that describe the crate as `forbid(unsafe_code)`: `vmm.rs:29-31`,
   `vmm.rs:800`, `ca/keyring.rs:56-61`, and the `Cargo.toml` comments that say
   production code never names `libc`.
-- **Development and test hosts** that ran an earlier #295 build hold an
-  `ip overdrive-mtls` table in the pre-R19 rule order. A fresh boot of the R19
-  build refuses on it by design (L7). DELIVER clears it once, like any leaked
-  node-global nft state, before running R19-build suites on such a host.
+- **Development and test hosts: no R19 reorder cleanup.** R19's reorder is
+  withdrawn (2026-10-03), so the canonical program identity does not change and
+  no host needs to clear a "pre-R19 order" table before #295 suites. A fresh
+  boot still refuses a genuinely foreign, malformed, partial, or noncanonical
+  owned table by design (L7); clearing any such leaked node-global nft state
+  follows the ordinary `.claude/rules/testing.md` discipline, not an
+  R19-specific precondition.
 - **E18-derived bounds (B-5).** The later of two DELIVER steps sets
   `SHARED_NETWORK_AUDIT_CALL_BOUND`, `SHARED_NETWORK_QUIESCE_CALL_BOUND`, and
   `SHARED_NETWORK_VM_KILL_CALL_BOUND` and records the M-ND295-E18 measurement,
@@ -7676,7 +7769,9 @@ concurrent-flow capacity claim.
    activates it after that event (PROPOSED D-295-R1 and R5; the zero-frame
    outcome itself is the accepted ADR-0088 contract). Intercept-marked TCP must
    also fail closed if the IP nft program is lost (PROPOSED D-295-R18) or a
-   TPROXY target listener is absent (PROPOSED D-295-R19).
+   TPROXY target listener is absent (listener-absent fail-closure recorded under
+   the retained mark → TPROXY → accept order on native E14(c)/(d)/(e); D-295-R19
+   reorder withdrawn 2026-10-03).
 3. One in-agent DNS responder answers on the shared bridge gateway. The guest
    kernel token continues to carry address, prefix, gateway, and DNS; no host
    `/etc/netns/*/resolv.conf` exists.
@@ -7710,7 +7805,7 @@ prescribes either contract.
 
 | Rank | Attribute | Required response |
 |---:|---|---|
-| 1 | Security / confidentiality | Healthy operation and any single owned classifier/guard/listener/map/route loss catch or drop TCP. Loss of the IP nft program also fails closed, for both forwarding and host-local delivery, through the PROPOSED D-295-R18 independent guard table (option R18-B, chosen on evidence), and a missing TPROXY listener fails closed through the PROPOSED D-295-R19 rule order; both conditional on native RED. Before intercept-live, the exact host TAP stays administratively down (PROPOSED D-295-R1 and R5), so no guest frame can enter the bridge; this is the unweakened ADR-0088 zero-frame outcome. Accepted downside: arbitrary near-simultaneous external deletion of both a TAP's TCX entrypoint and the independent bridge guard can expose ordinary forwarding for at most the one-second audit window before TAP quiescence. |
+| 1 | Security / confidentiality | Healthy operation and any single owned classifier/guard/listener/map/route loss catch or drop TCP. Loss of the IP nft program also fails closed, for both forwarding and host-local delivery, through the D-295-R18 independent guard table (option R18-B, chosen on evidence), which stands on its reproduced native RED, and a missing TPROXY listener fails closed under the retained mark → TPROXY → accept order, with the D-295-R19 reorder withdrawn 2026-10-03 on native E14 evidence. Before intercept-live, the exact host TAP stays administratively down (PROPOSED D-295-R1 and R5), so no guest frame can enter the bridge; this is the unweakened ADR-0088 zero-frame outcome. Accepted downside: arbitrary near-simultaneous external deletion of both a TAP's TCX entrypoint and the independent bridge guard can expose ordinary forwarding for at most the one-second audit window before TAP quiescence. |
 | 2 | Performance efficiency | O(1)-expected ifindex endpoint-map lookup at TCX ingress; no per-packet userspace proxy, AF_XDP, or ring-buffer forwarding; existing kTLS/splice core remains the steady-state path. |
 | 3 | Capacity | 16,384 is a fixed placeholder cap on held guest network attachments per node, Admitted and Retiring alike (D-295-R7, user-approved 2026-09-24). It has no capacity basis and promises no density; real per-node capacity is GH #299 and GH #261. The T1 profiles below measure attachment-state cost and size runtime bounds at that population. No end-to-end VM density claim exists (D-295-R9). |
 | 4 | Reliability / recoverability | Teardown is effect-first and lease-release-last; boot reclaims VMMs before sweeping old TAP/rule state. |
@@ -12586,8 +12681,9 @@ changes meaning.
   → production bridge/guard convergence → **(PROPOSED D-295-R12) dynamic
   intercept members converged to empty and read back empty** → read owned
   constant-rule identity → fresh F/C bind → atomic target
-  replacement/rollback discipline in the TPROXY-before-mark order (PROPOSED
-  D-295-R19), plus the policy route and the intercept-mark guard table (PROPOSED
+  replacement/rollback discipline in the canonical mark → TPROXY → accept order
+  (the D-295-R19 reorder is withdrawn 2026-10-03 under its native condition),
+  plus the policy route and the intercept-mark guard table (PROPOSED
   D-295-R18) → complete listener/rule/set/route/guard/zero-element read-back →
   DNS probe →
   supervisor retained → `open_after_boot` → production use. Port zero and target
@@ -12968,7 +13064,9 @@ queue ownership, the VMM child's descriptor set, the TAP owner, the activation
 gate, admission linearization, the held population (user ruling, D-295-R7),
 the placement read-port, element release, reclaim (retry-forever user ruling,
 D-295-R11), boot member convergence, required serve ports, intercept-mark
-fail-closure, the TPROXY-before-mark order (D-295-R19, ADR-0140), the
+fail-closure, the TPROXY-before-mark order (D-295-R19, ADR-0140; withdrawn
+2026-10-03 under its native condition, so the existing mark → TPROXY → accept
+order is retained), the
 cleanup-pending status (operator behaviour by user ruling, D-295-R20,
 ADR-0141), and TAP egress guest-MAC delivery (D-295-R21, ADR-0142). The kill
 scope, including the damaged per-VM parts ruling (D-295-R14), is written into
@@ -13236,7 +13334,7 @@ not gain write methods.
 | A compromised queue holder rewriting its own TAP *(D-295-R4/R14/R21/R22; review findings L8, R5-H1, D7; user ruling 9)* | Cloud Hypervisor holding its TAP's queue → any ioctl on that queue: every arm of `__tun_chr_ioctl`, listed and verified from `drivers/net/tun.c` in ADR-0130 | The kernel runs no capability or owner check for these ioctls on an attached queue (`__tun_chr_ioctl`, the only gate is attachment), so the uid-0 owner does not bind the holder. **Prevention (D-295-R22, ADR-0143):** a seccomp filter loaded in the launcher child before its first exec, and inherited by every Cloud Hypervisor thread including the leader, returns `EPERM` for `SIOCSIFHWADDR`, `TUNSETOWNER`, `TUNSETGROUP`, `TUNSETPERSIST`, `TUNSETCARRIER`, `TUNSETDEBUG`, `TUNSETLINK`, `TUNSETTXFILTER`, `TUNATTACHFILTER`, `TUNDETACHFILTER`, `TUNSETSTEERINGEBPF`, `TUNSETFILTEREBPF`, and `TUNSETQUEUE`, on any descriptor, and kills the process on a foreign syscall ABI (i386 compat, x32). The filter exists for x86_64 only, and no microVM starts on any other target, so no unfiltered VMM ever holds a queue (user ruling 10; aarch64 is GH #302). It therefore prevents the bridge-FDB poisoning (R5-H1, reproduced in increment-z) and with it the victim outage, the `TUNSETOWNER` re-grant, and the `TUNSETDEBUG` host-log flood. **Allowed arms (ADR-0130):** `TUNSETOFFLOAD`, `TUNSETSNDBUF`, and `TUNSETVNETHDRSZ`/`TUNSETVNETLE`/`TUNSETVNETBE` configure only the holder's own TAP and queue; `TUNSETNOCSUM` is a no-op; Cloud Hypervisor itself issues `TUNSETIFF`, `TUNSETOFFLOAD`, and `TUNSETVNETHDRSZ` on the `fd=` path; the read-only arms have no effect; and the kernel refuses `TUNSETIFF` (`EEXIST`), `TUNSETIFINDEX`, `SIOCGSKNS`, `TUNGETDEVNETNS`, and every other request including `SIOCSIFFLAGS` on an attached single-queue TAP. **Independent layers, for a change made through a gap in the filter or by another process:** the D-295-R21 TAP egress guest-MAC classifier (ADR-0142) keeps redirected frames and flooded unknown unicast from every non-target TAP, and the flood leak needs no ioctl at all; the audit read-back of owner uid 0, persistence, debug message mask 0, and a host-side MAC outside the reserved set (the D-295-R21 invariant: no guest MAC of an allocation held outside `Condemned`, the TAP's own included, and not `GUEST_BRIDGE_MAC`) reports any violation as per-allocation damage, so the next audit kills that VM (≤ one audit period), its teardown removes the port and any poisoned entry, and the victim's delivery resumes and re-learns. `TUNSETGROUP` would grant nothing while the owner is uid 0 in any case (the owner-mismatch disjunct in `tun_not_capable`, mainline `tun.c:516-524`, always holds — this corrects research A1's group claim, which holds only for an ownerless TAP). CH v53's own Landlock grants `/dev/net/tun` `rw` whenever `--net` is present (research A5), so no layer here relies on Landlock. |
 | Descriptor leak into the VMM *(PROPOSED D-295-R3)* | Leg-F/leg-C listeners, leg-S sockets, netlink sockets, the DNS socket, or splice pipes inherited by Cloud Hypervisor | The in-child `close_range` hook leaves exactly descriptors 0–3; the OBL-295-CLOEXEC source gate makes every first-party raw descriptor close-on-exec; the native scan checks the complete descriptor table. |
 | Loss of the IP nft program *(PROPOSED D-295-R18, conditional; option R18-B, chosen on evidence)* | Intercept-marked TCP → host IP routing: local delivery to host wildcard listeners, and forwarding to a peer TAP when host `ip_forward` is on | An independent intercept-owned guard table drops TCP still marked `0x295a` at filter priority after the intercept chain. It survives deletion of `ip overdrive-mtls`, and it matches nothing while that table is healthy. Native RED first. |
-| Absent TPROXY listener *(PROPOSED D-295-R19, conditional)* | Outbound guest TCP after listener loss, a crashed `serve` with VMs alive, or an abandoned fail-stop → the `0x1` policy route → host wildcard listeners | TPROXY runs before the mark, so a failed outbound TPROXY leaves `0x295a` and rule 2 drops the packet; inbound already fails closed at rule 4. Native RED first. The `TIME_WAIT` side door (E14 (e)) is judged on its own RED. |
+| Absent TPROXY listener *(D-295-R19 reorder withdrawn 2026-10-03 under its native condition)* | Outbound guest TCP after listener loss, a crashed `serve` with VMs alive, or an abandoned fail-stop → the `0x1` policy route → host wildcard listeners | Native E14(c)/(d) show the existing mark → TPROXY → accept order already fails this path closed (zero correlated SYN-ACKs, zero wildcard accepts); inbound already fails closed at rule 4. The named-Service `TIME_WAIT` side door (E14(e)) is resolved fail-closed (`reopened=false`, `accepts=0`) in killed mode with the guest TAP up. |
 | Cleanup failure / address reuse *(PROPOSED D-295-R10/R11)* | Element removal → lease release | A removal failure keeps the Retiring record, guards, and lease; no successor can reuse the address; a level-triggered owner retries. |
 | Classifier entrypoint removal | TCX link → bridge guard | Unmarked managed-TAP frames drop at the independent bridge guard. Arbitrary near-simultaneous external loss of both controls retains only the explicitly accepted one-second detection/TAP-quiesce exposure. |
 | Cleartext escape or wrong peer identity | IP TPROXY → shared F/C listeners → enforcement | Constant fallback-drop rules, exact source/destination membership, immutable generation/SPIFFE capability, existing guest-mesh resolution, and TLS 1.3/kTLS publish fencing fail closed. On the distinct public-ingress path, the existing selected-`BackendId` receipt remains the exact-peer identity source. |
@@ -15376,7 +15474,7 @@ measured outcome. System-design acceptance does not itself authorize registry mu
 | D-295-R16 required serve ports | **ACCEPTED 2026-09-24 (shape class fixed by user ruling):** `ServerConfig::new(kek, mtls_intercept, guest_dns)`; unconditional composition | [ADR-0138](../../product/architecture/adr-0138-required-serve-boundary-intercept-and-guest-dns-ports.md) (Accepted) |
 | D-295-R17 serve lifetime port | **USER-APPROVED 2026-09-23 (as built):** `ServeLifetime`, SIGINT/SIGTERM, 10 s bound, exit 1, killed mode | This feature delta § *Serve lifetime port* |
 | D-295-R18 intercept-mark fail-closure | **ACCEPTED 2026-09-24, conditional on native RED:** R18-B, chosen on evidence from four options, an independent guard table dropping TCP still marked `0x295a` | [ADR-0139](../../product/architecture/adr-0139-intercept-mark-fails-closed-without-ip-nft-program.md) (Accepted, conditional) |
-| D-295-R19 TPROXY-before-mark order | **ACCEPTED 2026-09-24, conditional on native RED:** both TPROXY rules order TPROXY, then the mark, then accept, so an absent outbound listener falls through to rule 2's drop (inbound already fails closed at rule 4); the `TIME_WAIT` side door is a separate native RED | [ADR-0140](../../product/architecture/adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md) (Accepted, conditional); ADR-0088/0089/0124/0125 state the amendment explicitly |
+| D-295-R19 TPROXY-before-mark order | **WITHDRAWN 2026-10-03 under its accepted native condition:** native E14(c)/(d) do not reproduce the ordinary absent-listener exposure, so the reorder is withdrawn and both TPROXY rules retain mark → TPROXY → accept; listener loss stays un-quiesced because native evidence shows an absent listener already fails closed; the named-Service `TIME_WAIT` side door (E14(e)) is resolved fail-closed | [ADR-0140](../../product/architecture/adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md) (Withdrawn under its native condition); ADR-0088/0089/0124/0125 record the withdrawal |
 | D-295-R20 cleanup-pending status | **ACCEPTED 2026-09-24; operator behaviour by user ruling 6 of the same date:** `describe` shows `CleanupPending`, never `Running`, for an allocation whose network cleanup has not finished; derived at read time from the live lease and row state; not persisted; one additive wire field | [ADR-0141](../../product/architecture/adr-0141-cleanup-pending-status-derived-from-live-guest-lease.md) (Accepted) |
 | D-295-R21 TAP egress guest-MAC control | **ACCEPTED 2026-09-24 (review finding R5-H1, reproduced natively in increment-z); a structural control:** a TCX egress classifier per TAP delivers unicast only to the TAP's registered guest MAC (reusing the ADR-0115 endpoint map) and drops every other unicast, a map miss included; broadcast/multicast always delivered; closes the host-side-MAC FDB-theft path and the unknown-unicast flood leak; `flood off` rejected on evidence (D5); complemented by the ADR-0130 host-side-MAC audit read-back; prevention at the source is the separate D-295-R22 (below), which makes the victim outage and the `TUNSETOWNER` re-grant prevented rather than accepted residuals | [ADR-0142](../../product/architecture/adr-0142-guest-tap-egress-drops-frames-to-foreign-destination-mac.md) (Accepted) |
 | D-295-R22 launch seccomp filter | **ACCEPTED 2026-09-24 (user ruling 9; native evidence increment-aa):** every Cloud Hypervisor launch loads, in the forked child before its first exec and as the last effect of the one ADR-0129 hook, a hand-built classic-BPF seccomp deny-list returning `EPERM` for the 13 TAP-mutating ioctl requests (values from `libc`, low 32 bits) on any descriptor, killing the process on a foreign audit architecture or an x32 syscall; every CH thread inherits it. **x86_64 only (user ruling 10, 2026-09-24):** every other target, aarch64 included, has no program; its startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect; aarch64 is GH #302. `seccompiler` not chosen, on evidence; the ADR-0142 egress check and the ADR-0130 read-back (now including the TAP debug message mask) stay as independent layers; resolves Open Questions 8 and 10 by prevention | [ADR-0143](../../product/architecture/adr-0143-vmm-launch-seccomp-filter-denies-tap-mutating-ioctls.md) (Accepted) |
@@ -15404,12 +15502,15 @@ measured outcome. System-design acceptance does not itself authorize registry mu
    ADR-0106's requirement. D-295-R22 was approved by the user the same day
    (ruling 9) on the increment-aa native evidence, and scoped to x86_64
    (ruling 10; aarch64 is GH #302).
-2. **Native REDs gate two conditional decisions.** E14 must reproduce the
-   IP-program-loss exposure (R18) and the outbound listener-absent exposure
-   (R19) before either stands; each is withdrawn if its RED does not reproduce.
-   E14 (e), the `TIME_WAIT` side door, is judged separately; if it reproduces,
-   listener loss becomes kernel-path (quiesces TAPs), and the killed-mode
-   residue exposure is surfaced to the user.
+2. **Native REDs gated two conditional decisions — RESOLVED 2026-10-03.** E14
+   reproduced the IP-program-loss exposure (R18), which therefore stands, and
+   did **not** reproduce the outbound listener-absent exposure (R19), which is
+   therefore withdrawn under its accepted native condition (both TPROXY rules
+   retain mark → TPROXY → accept). E14(e), the named-Service `TIME_WAIT` side
+   door, is resolved fail-closed (`reopened=false`, wildcard `accepts=0`) in a
+   killed-mode scenario with the guest TAP up, so listener loss does not become a
+   TAP-quiescing kernel-path component and the killed-mode residual is closed; no
+   killed-mode residual is surfaced to the user as an accepted exposure.
 3. **Latency at the placeholder population (E18).** The audit, quiescence, and
    kill-write call bounds, the recovery-window fit (quiescence bound + kill-loop
    time K + one attempt ≤ 5 s), the double-loss exposure statement, and R15's
@@ -16162,7 +16263,7 @@ parallel, file-disjoint body packages.
 | Lima root, aarch64 | `integration-tests`; whole-binary `host-kernel-shared` for `overdrive-{cli,control-plane,worker,dataplane,netlink,host}` integration, control-plane acceptance, and the whole `overdrive-control-plane` library test binary (DISTILL review B5, M4; verified on 2026-09-30 for the `default` and `ci` profiles with `cargo xtask lima run -- cargo nextest show-config test-groups`, runs G4-L09 and G4-L10) | lima-kernel and in-process bodies; the **only** authority for S-ND295-44's refusal arm |
 | x86_64 Lima (CI runner) | same | S-ND295-41, 42, 43 |
 | Native x86_64 metal | `cargo xtask metal run --` preflight (no virtualization, usable KVM), `.env` `OVERDRIVE_METAL_TARGET`, the shipped Cloud Hypervisor build (audited v53.0; OBL-295-SECCOMP-REVERIFY re-audits a change of build — no version is gated), guest artifacts incl. a probe guest that emits scripted SYNs (S-ND295-62-64), and the delayed-READY and power-off-before-READY guests (S-ND295-30B (f), 66), which `delayed_ready_guest.rs` stages from the checked-in guest image; `integration-tests,kvm-tests` | native bodies; S-ND295-40's spawn-failure body, S-ND295-41's hook steps, and S-ND295-43 (f) via `cargo xtask metal run -- cargo nextest run -p overdrive-host --lib --features integration-tests -E 'test(/launch_seccomp_kernel/)'`. Until 05-03 no guest reaches Running: Cloud Hypervisor, launched as the confined uid, opens the TAP by name and cannot raise it (`Tap::enable` → `SIOCSIFFLAGS` → `EPERM`), so every guest-dependent body fails on that preceding-step gap (`red-classification.md` Phase G) |
-| Hosts that ran an earlier #295 build | clear the stale `ip overdrive-mtls` table once before R19-build suites (FD § "[REF] Required downstream changes (not edited by DESIGN)" (development and test hosts)) | 08-01 onward |
+| Hosts that ran an earlier #295 build | No R19-specific cleanup: R19's reorder is withdrawn (2026-10-03), so there is no "pre-R19 order" table to clear; clear any genuinely foreign/leaked `ip overdrive-mtls` state per ordinary `.claude/rules/testing.md` discipline (FD § "[REF] Required downstream changes (not edited by DESIGN)") | 08-01 onward |
 
 **CI lane selection (E21; DEVOPS/DISTILL).** The CI integration job selects
 `-E "binary(integration)"` (`.github/workflows/ci.yml:459`), which does not

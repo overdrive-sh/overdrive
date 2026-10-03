@@ -22,12 +22,14 @@ neither `rp_filter=0` nor `ethtool tx off`).
 
 ## Context
 
-**Current validation — 2026-10-03:** item 2 of the *Accepted amendment
-2026-09-24* is **PENDING** only for its #295 ordinary-listener exposure claim
-and ADR-0140 ordering replacement. Native E14(c)/(d) fail closed in the current
-#295 mark-before-TPROXY program. This result does not decide the historical
-per-workload-netns topology. The zero-frame contract and item 1's inherited
-queue/activation realization remain accepted. E14(e) is still unresolved.
+**Current validation — 2026-10-03 (RECORDED):** item 2 of the *Accepted amendment
+2026-09-24* is recorded on native evidence for its #295 ordinary-listener
+exposure claim and ADR-0140 ordering pointer: native E14(c)/(d) fail closed in
+the current #295 mark-before-TPROXY program, so the ADR-0140 reorder is withdrawn
+under its accepted native condition and the existing order is retained (the
+named-Service E14(e) `TIME_WAIT` door is resolved fail-closed too). This result
+does not decide the historical per-workload-netns topology. The zero-frame
+contract and item 1's inherited queue/activation realization remain accepted.
 See the #295 feature delta's *Native falsification register* and
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
@@ -419,16 +421,16 @@ recorded; the two changes below are stated here rather than rewritten into it.
    shared guest-network owner raises the TAP only after the mTLS
    install-success event and before EXEC). The guest-sysctl realization above
    remains the one for this ADR's per-workload netns topology.
-2. **The 2026-08-31 listener-loss claim is corrected (D-295-R19).** The
-   ordering section above says the mark-before-TPROXY order keeps the packet
-   "on the host local stack instead of allowing the original route to reach a VM
-   or external peer". That is true, but it is not fail-closed: with no
-   transparent listener the mark survives `NFT_BREAK`, the `fwmark 1 lookup 100`
-   route selects the `local` route, and socket lookup delivers guest TCP to any
-   host listener bound to the wildcard address. For the #295 constant program's
-   outbound rule,
-   [ADR-0140](adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md)
-   orders TPROXY, then the mark, then accept, so a failed outbound TPROXY falls
-   through to the unhandled-intercept drop; it is accepted conditional on its
-   native RED. This ADR's per-allocation rules leave with the #295 single cut;
-   until then they keep the order recorded above.
+2. **The 2026-08-31 listener-loss reasoning, recorded on native evidence
+   (D-295-R19 withdrawn 2026-10-03).** The ordering section above says the
+   mark-before-TPROXY order keeps the packet "on the host local stack instead of
+   allowing the original route to reach a VM or external peer". A source-reasoned
+   exposure — that with no transparent listener the mark survives `NFT_BREAK`,
+   the `fwmark 1 lookup 100` route selects the `local` route, and socket lookup
+   delivers guest TCP to a host wildcard listener — was the basis for the #295
+   ADR-0140 reorder. Native E14(c)/(d) do not reproduce it: outbound guest TCP to
+   an absent transparent listener already fails closed under the existing
+   mark-before-TPROXY order (the named-Service E14(e) `TIME_WAIT` door is resolved
+   fail-closed too). ADR-0140's reorder is therefore withdrawn under its accepted
+   native condition, and the #295 constant program keeps its existing order; the
+   per-allocation rules are unchanged.

@@ -25,11 +25,13 @@ live in the #295 feature delta:
 - D-295-R15: audit and repair of the program, the policy route, the guard
   table, and the members;
 - ADR-0138: required composition ports;
-- ADR-0140 (accepted conditional on its native RED): TPROXY before the
-  policy-route mark. The listener-loss sentence of the Decision depends on it
-  for outbound guest TCP, subject to the `TIME_WAIT` side door E14 (e): if that
-  native RED reproduces, leg-F/leg-C loss becomes a TAP-quiescing kernel-path
-  component and the killed-`serve` residue exposure goes to the user;
+- ADR-0140 (withdrawn 2026-10-03 under its native condition): the TPROXY-before-mark
+  reorder is withdrawn; the existing mark → TPROXY → accept order is retained.
+  The listener-loss sentence of the Decision holds for outbound guest TCP on
+  native evidence (E14(c)/(d) ordinary; the named-Service E14(e) `TIME_WAIT`
+  door, resolved fail-closed in killed mode with the TAP up), so leg-F/leg-C loss
+  does not become a TAP-quiescing kernel-path component and no killed-`serve`
+  residue exposure is surfaced to the user;
 - ADR-0131: the action shim waits on the release claim before raising a TAP;
   it gains no recovery, reopen, or fail-stop authority.
 
@@ -56,16 +58,19 @@ Three parts of the Decision below are rewritten to user rulings:
 
 ## Context
 
-**Current validation — 2026-10-03:** only the ADR-0140-dependent listener-loss
-rationale and the Decision's pure-listener non-quiescence validation are
-**PENDING**. Native E14(c)/(d) fail closed under the current mark-before-TPROXY
-order; the required R19 ordinary exposure does not reproduce. E14(e)'s guest
-TIME_WAIT gate remains independent and unresolved. This annotation preserves
-the single-loss confidentiality outcome, DNS classification, EXEC closure,
+**Current validation — 2026-10-03 (RECORDED):** the ADR-0140-dependent
+listener-loss rationale and the Decision's pure-listener non-quiescence are
+recorded on native evidence. Native E14(c)/(d) fail closed under the current
+mark-before-TPROXY order, so the R19 reorder is withdrawn under its accepted
+native condition; the named-Service E14(e) guest `TIME_WAIT` door is resolved
+fail-closed (`reopened=false`, wildcard `accepts=0`) in killed mode with the
+guest TAP up. A pure listener failure therefore does not quiesce TAPs, justified
+by native evidence rather than by a reorder, and the single-loss confidentiality
+outcome is preserved. This preserves the DNS classification, EXEC closure,
 exact-port repair, Clock bounds, full audit/restore condition, and every
-per-TAP/per-VM kill rule. It selects no new quiescence behavior. The complete
-dependency map is the #295 feature delta's *Native falsification register*;
-the proposed replacement is
+per-TAP/per-VM kill rule, and selects no new quiescence behavior. The complete
+dependency map is the #295 feature delta's *Native falsification register*; the
+recorded replacement and its provenance are
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
 The shared bridge, leg-F/leg-C listeners, DNS loop, TCX links/maps/pins, and nft

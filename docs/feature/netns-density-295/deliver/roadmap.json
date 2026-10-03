@@ -1237,7 +1237,7 @@
     {
       "id": "08",
       "name": "F-08 Intercept-mark fail-closure, boot member convergence, audit/repair, and the E18 receipt",
-      "description": "Enforce fail-closure and boot-time convergence: the intercept-mark fail-closure with the R18/R19 decision (08-01); boot member convergence and the killed-mode proof (08-02); member/policy-route/guard audit and repair with the component() SSOT (08-03); and the non-committed E18 call-bound measurement receipt (08-04).",
+      "description": "Enforce fail-closure and boot-time convergence: the intercept-mark fail-closure with the R18 guard-table and the retained mark -> TPROXY -> accept order (D-295-R19 reorder withdrawn) (08-01); boot member convergence and the killed-mode proof (08-02); member/policy-route/guard audit and repair with the component() SSOT (08-03); and the non-committed E18 call-bound measurement receipt (08-04).",
       "default_agent": "nw-software-crafter",
       "default_deps_strategy": "sequential",
       "depends_on": [
@@ -1246,23 +1246,23 @@
       "steps": [
         {
           "id": "08-01",
-          "name": "Intercept-mark native evidence gate and approved fail-closure branch",
-          "description": "Run E14's native falsifiers before GREEN. Only evidence matching the approved standing R18 guard-table and R19 TPROXY-before-mark branch may proceed to its exact implementation and stale-table cleanup. Any non-reproduction or E14(e) TIME_WAIT outcome stops DELIVER and returns the affected contract through a separate exact DESIGN record and independent review; the crafter cannot withdraw or reshape it.",
+          "name": "Intercept-mark R18 guard-table and native E14 fail-closed evidence under the retained rule order",
+          "description": "Implement R18's guard-table/read-back in every host InterceptState producer and the sim model (R18 stands -- its IP-program-loss exposure reproduced natively), and activate the native E14 fail-closed evidence proving a missing TPROXY listener / TIME_WAIT reopen already fails closed under the retained mark -> TPROXY -> accept order. The D-295-R19 reorder is withdrawn (native E14(c)/(d)/(e) fail closed under the existing order), so there is no rule-order change to implement and no R19-only stale-table cleanup; the listener-loss no-quiescence fail-closed classification is preserved. The crafter neither withdraws R18's contract nor reshapes the retained order.",
           "agent": "nw-software-crafter",
           "deps": [
             "06-04"
           ],
           "estimate_hours": 12,
           "criteria": [
-            "E14 native RED is recorded first for R18's forwarding and host-local table-loss paths, R19's listener-closed and killed-mode listener-absent paths, and separately the TIME_WAIT side-door case (e), with its positive and negative controls.",
-            "If the evidence matches the approved standing branch, R18's exact guard table/read-back in every host InterceptState producer and the sim model, R19's exact TPROXY-before-mark order, and the stale-table cleanup precondition are implemented without changing their API, security, or lifecycle contract.",
-            "If an R18/R19 premise does not reproduce, or E14(e) reproduces, the step stops before GREEN, the affected DESIGN and roadmap validation are pending, and execution resumes only after the exact replacement DESIGN, required user decision, and independent review; DELIVER removes no field, error, effect, or quiescence behavior.",
+            "The native E14 bodies record, on native metal, that R18's forwarding and host-local table-loss paths, the missing-TPROXY-listener (listener-closed and killed-mode listener-absent) paths, and the TIME_WAIT side-door case (e) all fail closed under the retained mark -> TPROXY -> accept order, each with its positive and negative controls (E14(c)/(d)/(e) recorded fail-closed; the E14(e) killed-mode door returns reopened=false, accepts=0).",
+            "R18's exact guard table/read-back is implemented in every host InterceptState producer and the sim model without changing its API, security, or lifecycle contract; the existing mark -> TPROXY -> accept rule order is retained unchanged (D-295-R19 reorder withdrawn 2026-10-03 on native E14 evidence, so no rule-order production code is written) and no R19-only stale-table cleanup precondition is added.",
+            "The native E14 falsification is resolved: R18 stands (its exposure reproduced natively) and the D-295-R19 reorder is withdrawn through the completed separate DESIGN record and independent review (deliver/review-design-r19-finalization.md), with E14(e) closing the killed-mode residual by evidence. DELIVER removes no field, error, effect, or quiescence behavior beyond the sanctioned R19-only canonical-identity change and R19-only stale-table cleanup, and preserves the listener-loss no-quiescence fail-closed classification and the single-loss outcome (no SYN-ACK, no wildcard accept, no reopen).",
             "The B3 (c)/H3 DISTILL items on this step's native bodies are resolved and the hardened fail-closed oracles encode the GREEN contract.",
             "S-ND295-62, 63, and 64 (the guest door; its controls body is active) are activated with no acceptance body weakened, replaced, or re-authored.",
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests and cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings are clean; the native bodies run under cargo xtask metal run -- ."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/intercept_mark_fail_closed.rs",
-          "scenario_name": "intercept-mark fail-closure (E14 native RED, the R18 guard-table / R19 TPROXY-before-mark decision, stale-table cleanup precondition, hardened fail-closed oracles)",
+          "scenario_name": "intercept-mark fail-closure (native E14 fail-closed evidence, the R18 guard-table implementation, the retained mark -> TPROXY -> accept order with the D-295-R19 reorder withdrawn, hardened fail-closed oracles)",
           "scenario_ids": [
             "S-ND295-62",
             "S-ND295-63",
@@ -1281,7 +1281,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "R18, R19 (conditional on native RED), DISTILL review B3, DR-09, and the repository native-falsification gate. E14 precedes implementation. The already approved standing branch may proceed only when its premises reproduce and E14(e) does not reach the separately routed outcome. A contrary result is evidence for a separate DESIGN cycle, never authority for this crafter to withdraw InterceptState.intercept_mark_guard, InterceptMarkGuardAbsent, either netlink effect, R19 ordering, or listener-loss quiescence. The guest-door controls body is active."
+          "implementation_notes": "R18 (stands; its IP-program-loss exposure reproduced natively), D-295-R19 reorder withdrawn 2026-10-03 on native E14 evidence (deliver/review-design-r19-finalization.md), DISTILL review B3, DR-09, and the repository native-falsification gate. The native E14 evidence is already recorded (E14(c)/(d)/(e) fail closed under the retained order; the E14(e) killed-mode door is closed). This crafter may not withdraw InterceptState.intercept_mark_guard, InterceptMarkGuardAbsent, or either netlink effect, may not reshape the retained mark -> TPROXY -> accept order, and may not relax the listener-loss no-quiescence fail-closed classification. The guest-door controls body is active."
         },
         {
           "id": "08-02",
@@ -1724,8 +1724,8 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "Native falsification 2026-10-03: E14(c)/(d) fail closed under existing mark-before-TPROXY, contradicting R19 exposure premise. Pending exact R19-dependent replacement DESIGN and independent review; original08-01 remains before GREEN. Evidence .context/distill-native-08-01.md, receipt5e43658a-438a-40b8-ae5e-3a27a1875bfa.",
-    "approved_at": null
+    "status": "approved",
+    "reviewer": "R19-dependent replacement DESIGN finalized and independently reviewed 2026-10-03 (docs/feature/netns-density-295/deliver/review-design-r19-finalization.md; prior review-design-r19-native-falsification.md approved the ordinary withdrawal). R19 reorder withdrawn on native E14 evidence; R18 stands; roadmap reconciled and approved.",
+    "approved_at": "2026-10-03T00:00:00Z"
   }
 }

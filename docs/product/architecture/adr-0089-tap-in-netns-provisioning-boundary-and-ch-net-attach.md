@@ -39,13 +39,15 @@ netns/attach/lifecycle ownership.
 
 ## Context
 
-**Current validation — 2026-10-03:** item 2 of the *Accepted amendment
-2026-09-24* is **PENDING** only for its #295 ordinary-listener exposure claim
-and ADR-0140 ordering replacement. Native E14(c)/(d) fail closed in the current
-#295 mark-before-TPROXY program. This result does not decide the historical
-per-workload-netns topology. Item 1's inherited queue/fd attachment, the
-zero-frame contract, lifecycle, and independent B-6/B-7 pins remain accepted.
-E14(e) is still unresolved. See the #295 feature delta's *Native falsification
+**Current validation — 2026-10-03 (RECORDED):** item 2 of the *Accepted amendment
+2026-09-24* is recorded on native evidence for its #295 ordinary-listener
+exposure claim and ADR-0140 ordering pointer: native E14(c)/(d) fail closed in
+the current #295 mark-before-TPROXY program, so the ADR-0140 reorder is withdrawn
+under its accepted native condition and the existing order is retained (the
+named-Service E14(e) `TIME_WAIT` door is resolved fail-closed too). This result
+does not decide the historical per-workload-netns topology. Item 1's inherited
+queue/fd attachment, the zero-frame contract, lifecycle, and independent B-6/B-7
+pins remain accepted. See the #295 feature delta's *Native falsification
 register* and
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
@@ -864,17 +866,17 @@ stated here.
    the tenant namespace, a cross-namespace `setns` helper, reboot-fragile fd
    state); none of those reasons applies to a host-netns bridge, and Cloud
    Hypervisor v53 duplicates the inherited descriptor.
-2. **The 2026-08-31 listener-loss claim is corrected (D-295-R19).** §1's
-   mark-before-TPROXY paragraph says a missing listener keeps the flow "on the
-   host instead of restoring its original cleartext route". That is true but not
-   fail-closed: the surviving mark selects the table-100 local route, and socket
-   lookup then delivers guest TCP to any host listener bound to the wildcard
-   address. For the #295 constant program,
-   [ADR-0140](adr-0140-tproxy-before-policy-route-mark-in-constant-intercept-rules.md)
-   orders TPROXY, then the mark, then accept, so a failed outbound TPROXY falls
-   through to the drop; it is accepted conditional on its native RED. This ADR's
-   per-allocation rules leave with the #295 single cut and keep their recorded
-   order until then.
+2. **The 2026-08-31 listener-loss reasoning, recorded on native evidence
+   (D-295-R19 withdrawn 2026-10-03).** §1's mark-before-TPROXY paragraph says a
+   missing listener keeps the flow "on the host instead of restoring its original
+   cleartext route". A source-reasoned exposure — the surviving mark selecting the
+   table-100 local route and socket lookup delivering guest TCP to a host wildcard
+   listener — was the basis for the #295 ADR-0140 reorder. Native E14(c)/(d) do
+   not reproduce it: outbound guest TCP to an absent transparent listener already
+   fails closed under the existing mark-before-TPROXY order (the named-Service
+   E14(e) `TIME_WAIT` door is resolved fail-closed too). ADR-0140's reorder is
+   therefore withdrawn under its accepted native condition, and the #295 constant
+   program keeps its existing order; the per-allocation rules are unchanged.
 
 ## Amendment 2026-09-25 — #295 interface-contract pins B-6 and B-7
 

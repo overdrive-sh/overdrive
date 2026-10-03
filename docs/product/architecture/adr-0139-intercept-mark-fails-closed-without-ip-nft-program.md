@@ -51,8 +51,9 @@ they measured fail-stop timing, not leakage.
 While the IP program is present, no packet leaves its prerouting chain still
 carrying the intercept mark on the healthy path: the chain either replaces the
 mark as it assigns the transparent socket, or drops the packet. When a
-transparent listener is absent, the TPROXY-before-mark rule order of ADR-0140
-(D-295-R19) keeps that true for outbound TCP.
+transparent listener is absent, native evidence (ADR-0140, D-295-R19 reorder
+withdrawn 2026-10-03) shows the existing mark → TPROXY → accept order already
+keeps that true for outbound TCP.
 
 The leak class is real in prior art: Istio reports ambient pods whose
 redirection rules were lost sending traffic that bypasses the proxy, caught only
@@ -119,13 +120,14 @@ charter forbids.
 
 ## Consequences
 
-**R19 cross-reference validation — 2026-10-03:** this ADR's statements that
-ADR-0140's TPROXY-before-mark order covers the present-program/absent-listener
-path are **PENDING** under the #295 native falsification register. Native
-E14(c)/(d) fail closed with the existing order. This annotation changes no
-R18 decision, field, error, effect, guard rule, outcome, or ownership: its
-IP-program-loss exposure independently reproduces. E14(e) remains unresolved;
-the guard is not claimed to solve that hypothesis. See
+**R19 cross-reference validation — 2026-10-03 (RECORDED):** this ADR's statements
+that ADR-0140's TPROXY-before-mark reorder covers the present-program/absent-listener
+path are superseded by the recorded R19 withdrawal: the reorder is withdrawn
+under its accepted native condition, and native E14(c)/(d) show the existing
+mark → TPROXY → accept order already fails that path closed (the named-Service
+E14(e) `TIME_WAIT` door is resolved fail-closed too). This changes no R18
+decision, field, error, effect, guard rule, outcome, or ownership: R18's
+IP-program-loss exposure independently reproduces and its decision stands. See
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
 Positive: single-loss fail-closure holds for the IP program, for both
@@ -136,6 +138,6 @@ Negative: the intercept owner gains one more owned table, chain, and rule. That
 raises ADR-0125's constant IP rule count to nine, and the audit, repair, and
 fresh-boot convergence must all cover it. Every host packet traverses one more
 prerouting chain. The guard does not cover a present program whose TPROXY target
-listener is absent; the TPROXY-before-mark order of ADR-0140 (D-295-R19)
-covers that path. Correctness rests on native evidence, because no simulation can observe
-kernel routing.
+listener is absent; native evidence shows the existing rule order already fails
+that path closed (ADR-0140, D-295-R19 reorder withdrawn 2026-10-03). Correctness
+rests on native evidence, because no simulation can observe kernel routing.

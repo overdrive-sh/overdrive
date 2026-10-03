@@ -941,14 +941,19 @@ resync**, not merely under edge-triggering. #265 remains a separate track.
 
 ### Accepted shared-bridge microVM network (GH #295)
 
-**Current validation — 2026-10-03:** the R19 rule-order acceptance, its
-ordinary-listener exposure explanation, listener-only non-quiescence rationale,
-and dependent ADR-summary/index projections below are **PENDING**. The native
-E14(c)/(d) results fail closed under the existing mark-before-TPROXY program;
-E14(e) remains unresolved. This annotation does not invalidate independent
-R18/R14/R15 contracts or relax any security outcome. The exact dependency map
-is the #295 feature delta's *Native falsification register*; the proposed
-replacement is
+**Current validation — 2026-10-03 (RECORDED):** the R19 rule-order change is
+withdrawn under its accepted native condition — native E14(c)/(d) fail closed
+under the existing mark-before-TPROXY program, so both TPROXY rules retain
+mark → TPROXY → accept — and the named-Service E14(e) `TIME_WAIT` door is
+resolved fail-closed, so the listener-only non-quiescence rationale is recorded
+on native evidence with the original single-loss security outcome preserved. The
+dependent ADR-summary/index projections below read against this record; the C4
+L2 order/listener prose in `c4-diagrams.md` is reconciled (c4-diagrams.md:1600,
+:1652, :2071 record the withdrawal and the no-quiescence classification,
+2026-10-03). This invalidates no independent
+R18/R14/R15 contract and relaxes no security outcome. The exact dependency map is
+the #295 feature delta's *Native falsification register*; the recorded
+replacement and its provenance are
 [R19 replacement DESIGN](../../../.context/r19-replacement-design.md).
 
 **Status: Accepted baseline — user-ratified and approved by system design
@@ -970,8 +975,9 @@ approved by the user the same day, on native evidence from spike increment-aa.
 By a further user ruling that day, the filter ships for x86_64 only. No
 microVM starts on any other architecture, aarch64 included, and aarch64
 support is [GH #302](https://github.com/overdrive-sh/overdrive/issues/302).
-D-295-R18 and R19 stand only if their native REDs
-reproduce. Both 2026-09-23 TAP-order revisions are withdrawn: attaching a down
+D-295-R18 stands on its reproduced native RED; D-295-R19's rule-order change is
+withdrawn 2026-10-03 under its accepted native condition (its native RED did not
+reproduce), so both TPROXY rules retain mark → TPROXY → accept. Both 2026-09-23 TAP-order revisions are withdrawn: attaching a down
 TAP by name, and admitting closed pre-event control frames. Where the accepted
 baseline below conflicts with the replacement, the replacement governs. Nothing
 here is DELIVER authority: DELIVER stays stopped until DISTILL is rewritten and
@@ -1242,9 +1248,11 @@ closing EXEC. The accepted replacement pins the complete component matrix;
 program, policy-route, guard, and member audit and repair that runs with live
 allocations; required serve-boundary ports; a TAP restore that runs only after
 a clean full audit; one independent guard table that keeps intercept-marked TCP
-fail-closed if the IP nft program is lost; and a TPROXY-before-mark rule order
-that keeps outbound TCP fail-closed when a listener is absent (ADR-0138,
-ADR-0139, ADR-0140, and #295 D-295-R13 to R15 and R19). When quiescence cannot
+fail-closed if the IP nft program is lost; and the retained mark → TPROXY → accept
+rule order, under which native evidence shows outbound TCP already fails closed
+when a listener is absent (the ADR-0140 reorder is withdrawn 2026-10-03 under its
+native condition) (ADR-0138, ADR-0139, ADR-0140, and #295 D-295-R13 to R15 and
+R19). When quiescence cannot
 confirm a TAP down, or a VM's own network parts are damaged, only that VM is
 killed, its parts leave the audit, and repair continues; the whole workloads
 slice is killed and the process fail-stops only when the failing set cannot be
@@ -11458,13 +11466,16 @@ The L1/L2 diagrams are in
 
 ## Shared-bridge microVM application architecture (GH #295; stage 3)
 
-**Current validation — 2026-10-03:** only the R19 ordering and its dependent
-listener-loss/canonical-identity assertions in this section are **PENDING**
-under the #295 feature delta's *Native falsification register*. The intercept
-owner row's R18 guard, R10/R12/R15 responsibilities, existing C4 topology,
-component boundaries, public shapes, and security outcomes remain accepted.
-No listener quiescence classification is selected before E14(e) completes and
-the bounded replacement receives independent review.
+**Current validation — 2026-10-03 (RECORDED):** the R19 ordering change is
+withdrawn under its accepted native condition (native E14(c)/(d) fail closed
+under the existing order), so both TPROXY rules retain mark → TPROXY → accept and
+there is no R19-induced canonical-identity change. The listener-loss
+classification is the no-quiescence branch, resolved on the named-Service E14(e)
+door-closed native result with the original single-loss security outcome
+preserved. The intercept owner row's R18 guard, R10/R12/R15 responsibilities,
+existing C4 topology, component boundaries, public shapes, and security outcomes
+remain accepted. Independent review of the recorded listener-loss classification
+and roadmap revalidation remain downstream gates before DELIVER.
 
 ### Correctness-recovery replacement (accepted 2026-09-24)
 
@@ -11478,8 +11489,10 @@ review, and D-295-R22 by user ruling on native evidence the same day), change
 the responsibilities of these nine components. D-295-R7 (with no slot reservation),
 D-295-R9, the D-295-R11 retry-forever reclaim, the D-295-R14 kill scope
 (including damaged per-VM parts), and the D-295-R20 operator status are user
-rulings of 2026-09-24. D-295-R18 and R19 stand only if their native REDs
-reproduce. Prior art for each choice is in
+rulings of 2026-09-24. D-295-R18 stands on its reproduced native RED; D-295-R19's
+rule-order change is withdrawn 2026-10-03 under its accepted native condition (its
+native RED did not reproduce), so both TPROXY rules retain mark → TPROXY → accept.
+Prior art for each choice is in
 `docs/research/networking/netns-density-295-replacement-design-prior-art-comprehensive-research.md`.
 
 | Component | Change | Decisions / ADR |
@@ -11487,7 +11500,7 @@ reproduce. Prior art for each choice is in
 | VMM adapter (`CloudHypervisorVmm`) | Owns a per-launch TAP queue descriptor. It attaches one `IFF_VNET_HDR` queue to the down persistent TAP, verifying flags and down state; maps it to child fd 3 through `command-fds`; in one audited `pre_exec` hook it marks every other descriptor close-on-exec and then loads the launch seccomp filter, which denies every Cloud Hypervisor thread the TAP-mutating ioctls and fails closed on a foreign syscall ABI; renders `--net fd=[3],mac=…`; drops its copy before any await. The filter exists for x86_64 only: on any other target, aarch64 included, the startup probe fails, so the node composes no microVM driver, and `create` refuses before any effect (aarch64 is GH #302). On x86_64 the startup probe proves the kernel accepts the filter. The value types and the `Vmm` trait are unchanged. Creating first-party raw descriptors close-on-exec under a source gate is a separate implementation obligation. | D-295-R1 to R3, R22; ADR-0127, 0128, 0129, 0143 |
 | Shared guest-switch owner | TAPs are owned by uid 0, so no unprivileged process without the queue can attach one. Provision ends with the TAP down and records the plan. A new `activate` raises it only after the allocation's install-success event and before EXEC, serialized with runtime quiescence; a latched quiescence defers it instead of failing the allocation. Quiescence reports per-TAP outcomes; the audit reports per-allocation damage separately from node-level failures; a reported allocation is condemned, its VM is killed, and its parts leave the audit and restore universes. A new `restore_quiesced_taps` is the only runtime restore, and the supervisor calls it only after a clean full audit. Teardown treats an absent part as removed. Each managed TAP also carries a TCX egress guest-MAC classifier over the shared endpoint map: it delivers unicast only to the TAP's registered guest MAC, drops every other unicast (a map miss included), and always delivers broadcast and multicast. Provision, activation, and the audit read back the TAP's debug message mask (expected 0) and its host-side MAC, which must not be a reserved address (the bridge MAC, or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included). A violation of either is per-allocation damage. No host-side MAC is recorded, so a host link manager's rewrite to any other address is harmless. | D-295-R4, R5, R13, R14, R21, R22; ADR-0130, 0131, 0142, 0144 |
 | Guest-address pool | One pool per server becomes the node-wide admission linearization point. Admitted and Retiring leases both count against the placeholder cap until cleanup finishes (user-approved D-295-R7); at the cap a replacement's predecessor is reclaimed first. A fifth hydration read-port gives placement one consistent occupancy snapshot (held, retiring, leases). | D-295-R6 to R8; ADR-0132, 0133, 0134 |
-| Intercept owner (`MtlsIntercept`, worker) | Three port methods: grouped, awaited, convergent, retry-retaining element release; member convergence, used for the fresh-boot clear and runtime repair; state observation with members, the policy route, and the guard. A typed stop error. Runtime repair observes the program identity without regard to dynamic members and hands over the node guard without dropping it, so repair runs with live allocations. One independent guard table (R18-B, chosen on evidence) drops TCP still carrying the TCX intercept mark, keeping intercept-marked TCP fail-closed without the IP program for both forwarding and host-local delivery. Both TPROXY rules order TPROXY before the mark, so an absent outbound listener falls through to the drop. Both conditional on a native RED. | D-295-R10, R12, R15, R18, R19; ADR-0135, 0137, 0139, 0140 |
+| Intercept owner (`MtlsIntercept`, worker) | Three port methods: grouped, awaited, convergent, retry-retaining element release; member convergence, used for the fresh-boot clear and runtime repair; state observation with members, the policy route, and the guard. A typed stop error. Runtime repair observes the program identity without regard to dynamic members and hands over the node guard without dropping it, so repair runs with live allocations. One independent guard table (R18-B, chosen on evidence) drops TCP still carrying the TCX intercept mark, keeping intercept-marked TCP fail-closed without the IP program for both forwarding and host-local delivery. Both TPROXY rules retain their mark → TPROXY → accept order; native evidence shows an absent outbound listener already fails closed (the R19 reorder is withdrawn 2026-10-03 under its native condition). R18 stands on its reproduced native RED. | D-295-R10, R12, R15, R18, R19; ADR-0135, 0137, 0139, 0140 |
 | `WorkloadLifecycle` and action shim | Retirement points; admission refusal writes no row; the shim waits on the EXEC gate during recovery before activation; row-neutral `ReclaimAllocationNetwork` for every leased Failed/Terminated allocation no other action owns, computed on every reconcile path, retried forever at a constant one second until GH #137. | D-295-R5, R7, R11; ADR-0131, 0136 |
 | Shared-network supervisor | A full audit across the shared owner, worker, and DNS; component-specific quiescence with per-TAP outcomes; evidence-derived bounds on owner calls; DNS loss closes EXEC; through a kill-only capability, a per-VM kill for each unconfirmed TAP or damaged VM with repair continuing (an already-removed scope counts as killed), and a workloads-slice kill plus fail-stop only when the failing set is undetermined or a known VM cannot be killed. Each attempt converges the failing owners, runs a full audit, kills audited damage, and restores TAPs only when that audit is clean. The 1 s audit is a security detection bound, not drift correction. | D-295-R13, R14 (under ADR-0124) |
 | Allocation status (`alloc_status` handler, `workload describe`) | An allocation whose network cleanup has not finished shows as `CleanupPending`, never `Running`: derived at read time from its live pool lease and row state, not persisted, and excluded from running replicas. One additive wire field. | D-295-R20; ADR-0141 |
@@ -11955,6 +11968,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-10-03 | **netns-density-295 D-295-R19 ordering change WITHDRAWN under its accepted native condition; LegF/LegC listener-loss no-quiescence recorded on the named-Service E14(e) native result.** Native E14(c)/(d) fail closed under the existing mark-before-TPROXY program, so the R19 reorder does not reproduce its required ordinary absent-listener exposure; under the pre-approved conditional branch (user acceptance 2026-09-24) it is withdrawn and both constant TPROXY rules retain mark → TPROXY → accept, with no alternate-order recognizer and no canonical-identity change. The bounded ordinary-flow withdrawal was independently reviewed (`arch_rev_20261003_netns295_r19_native_falsification`, APPROVED). The named-Service E14(e) guest `TIME_WAIT` door (nextest `f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`) fails closed — `reopened=false`, wildcard `accepts=0` — with the `serve` owner killed and the guest TAP up and the entry surviving, so a pure LegF/LegC listener failure does not quiesce managed TAPs, the killed-mode residual is closed, and the original single-loss security outcome (no SYN-ACK, no wildcard accept, no reopen to the user) is preserved by the kernel path, on that bounded native evidence and not extrapolated. D-295-R18 stands on its reproduced native RED, unchanged. ADR-0140 is Withdrawn; ADR-0088/0089/0124/0125/0139, this brief, and the #295 feature delta record the withdrawal. The `c4-diagrams.md` L2 order/listener prose, independent review of the listener-loss classification, and roadmap revalidation of step 08-01 remain downstream gates; DELIVER is not authorized by this record. — Morgan. |
 | 2026-09-28 | **netns-density-295: the `TapHostMac` fact shape and the reserved set's `Condemned` exclusion are user-approved, and the remaining host-side MAC wording is corrected (user approval of 2026-09-28).** `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }`, with `TapHostAddress` = `Unreserved \| Reserved([u8; 6]) \| Missing`, replaces the in-tree `{ ifindex, mac }`. The reserved set leaves out `Condemned` allocations. ADR-0122's amendment list, ADR-0124's Decision, ADR-0142's *Detection only* alternative and Consequences bound, ADR-0143's Consequences, and `c4-diagrams.md`'s shared-owner container and allocation sequence now describe the host-side MAC read-back by the invariant: a reserved or absent address is damage, a change to an unreserved address is not, and nothing is recorded. Code committed on the feature branch counts as landed, because the repository merges with linear history (the user, 2026-09-28: "we merge commit with linear history"), so the 2026-09-24 amendment blocks of ADR-0114, 0115, 0117, 0118, 0121, 0122, 0124, and 0125 stand as written. The host-side MAC clause revised here is not implemented even on the feature branch (`GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` code), so it has no operative contract to amend, and each of the four ADRs states it in present tense with no amendment narrative. The allocation sequence's messages no longer contain `;`, which ends a Mermaid sequence message. — Morgan. |
 | 2026-09-28 | **netns-density-295 ADR-0144: managed-link identity is independent of host link configuration (user rulings of 2026-09-28).** The bridge is still created with its address. A TAP's host-side MAC is judged by an invariant instead of a recorded value: it must not be the bridge MAC or the guest MAC of an allocation the owner holds outside `Condemned`, the TAP's own included. The fact a violation reports (`TapHostMac { ifindex, address: TapHostAddress }`) was proposed here; the user approved it later the same day (entry above). A host link manager's rewrite to any other address is harmless, and a reserved address costs that one VM. No host `.link` file is required, no substrate installs one, and the startup probe does not read its scratch TAP's address. A narrow `.link` stays optional image hygiene for the Image Factory (GH #75). ADR-0144 is rewritten in present tense and renamed `adr-0144-managed-link-identity-independent-of-host-link-configuration.md`, and ADR-0130's read-back set states the invariant. GH #304 covers the node runtime's systemd dependence in general. — Morgan. |
 | 2026-09-26 | **SUPERSEDED IN PART by the 2026-09-28 entries above:** the host `.link` requirement, the reliance on a recorded TAP host-side MAC, and the startup-probe refusal over the scratch TAP's address are withdrawn; creating the bridge with its address stands. **netns-density-295 ADR-0144 (REQ-295-LINKMAC): managed host links are protected from udev's MAC policy.** Comes from the fresh-host RCA's root cause A. systemd-udevd's default persistent-MAC policy rewrote a new `ovd-gbr0` after the owner's set, which refused about half of the fresh-host boots that create the bridge. A TAP cannot be created with an address, and the RCA predicts that a rewrite landing after its host-side MAC is recorded would read as audit damage. The shared owner creates the bridge with its fixed address in the same `RTM_NEWLINK`. A host that runs systemd-udevd carries an Overdrive `.link` file that exempts the managed bridge and TAP names from udev's MAC policy. The startup probe refuses boot when its scratch TAP's address changes. This change adds the appliance-image DEVOPS handoff annotation (Image Factory MVP, GH #75); ADR-0068 is not amended. Accepted under the user's appliance-OS ruling of 2026-09-25 and the ruling that technical decisions are settled on evidence. — Morgan. |
