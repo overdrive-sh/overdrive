@@ -4,12 +4,13 @@
 
 - Feature: `netns-density-295`
 - Step: `05-01` — Required serve-boundary ports and the shared intercept listener
-- Iterations: 1 and 2
+- Iterations: 1, 2, and 3
 - Reviewer: `nw-software-crafter-reviewer`
 - Reviewer model: GPT-6 Luna, maximum reasoning
-- Reviewed commits: `bb48b90283d55c42b974639eee2504745dda4a77`, `0b1d20d2fa56f74ceef3ab8da2e0ccbd351339d4`, `e7b5fee53031ab688010647fc7973bb2ff6dc5ad`, and `b0e000b1e2f179ebcc2ed3e7848518017bfa6bfa`
+- Reviewed commits: `bb48b90283d55c42b974639eee2504745dda4a77`, `0b1d20d2fa56f74ceef3ab8da2e0ccbd351339d4`, `e7b5fee53031ab688010647fc7973bb2ff6dc5ad`, `b0e000b1e2f179ebcc2ed3e7848518017bfa6bfa`, and `3c8c65d4c62ea008243d4384581fd2449aa7a098`
 - Iteration 1 verdict: **NEEDS_REVISION**
-- Final verdict after iteration 2: **APPROVED**
+- Iteration 2 verdict: **APPROVED** (reopened after independent required-port reproduction)
+- Final verdict after iteration 3: **APPROVED**
 - Authority: approved `deliver/roadmap.json` step 05-01; accepted R16, B-1, B-7, and B-8 contracts in `feature-delta.md`; ADR-0138; DISTILL S-ND295-65, S-ND295-34, the DNS leg of S-ND295-00, S-ND295-70, S-ND295-71, and the S-ND295-20 worker twins; `red-classification.md`.
 
 ## Scope and evidence
@@ -141,6 +142,56 @@ The root/orchestrator reports these remediation checks passed:
 
 The remediation execution log appends RED, GREEN, and COMMIT as `EXECUTED` / `PASS` in order at `execution-log.json:677-697`. The RED record does not claim a failure for D1 because its existing body already passes. Commit attribution and bounded scope were checked by the orchestrator; `AGENTS.md` remains the only pre-existing dirty file. No mutation test was run; it remains the final DELIVER-wave gate.
 
-## Final verdict
+## Iteration 2 verdict
 
 **APPROVED.** D1 and D2 are resolved. The previously active S-ND295-20 owner-shutdown test remains active, the obsolete accept helpers and helper-only tests are removed, and the S-ND295-70 host listener evidence still covers inbound and outbound original-destination behavior. The accepted R16, B-1, B-7, B-8, and C-295-L contracts are satisfied for step 05-01.
+
+## Iteration 3
+
+### Reopened finding and prior review miss
+
+The independent DISTILL fixture audit in `.context/distill-fixture-06-03.md` reproduced a required R16 port-consumption gap after iteration 2. Iteration 2 approved the required `ServerConfig` field and the unconditional worker composition without tracing the field value through the composition root into `MtlsInterceptWorker::new`. That approval was premature. The accepted R16 contract requires `ServerConfig.mtls_intercept` to be consumed by the worker; the existence of the required field alone did not satisfy it.
+
+### Reproduced production path and correction
+
+Before the correction, the S-ND295-05A fixture supplied `SimMtlsIntercept` through `ServerConfig::new` and called production `run_server_with_obs_and_driver`. The actual composition root constructed `HostMtlsIntercept::new()` directly instead of reading `config.mtls_intercept`. The worker then started its node-shared owner, whose first host `observe_shared()` saw existing dynamic nft members and refused boot with the typed shared-owner error. The failure occurred before the S-ND295-05A pool oracle. The independent report records the concrete caller/owner path and the original filtered Lima result; it also records that no host state was cleared and does not claim ownership of the pre-existing kernel state (`.context/distill-fixture-06-03.md:30-77`).
+
+Commit `3c8c65d4` replaces that hardwired adapter with `config.mtls_intercept.clone()` in the existing worker constructor ([`lib.rs`](/Users/marcus/conductor/workspaces/helios/wellington-v2/crates/overdrive-control-plane/src/lib.rs:7467)). This is the exact R16 contract: production `ServerConfig` supplies `HostMtlsIntercept`; in-process compositions supply `SimMtlsIntercept` through the same required port. No type, method, parameter, error variant, or composition root signature was added.
+
+In the isolated after-fix S-ND295-05A verification overlay, production boot passed the shared-owner observation and reached the later pool-address oracle. That oracle observed `100.95.0.3` where the S-ND295-05A contract expects `100.95.0.2`. This is evidence that the required intercept port is now consumed. The remaining address-selection result belongs to 06-03 and is outside this review; no 06-03 pool implementation or behavior was reviewed or approved here.
+
+### B-7 test disposition and preserved evidence
+
+The same bounded commit removes the four S-MIF-04/05 bodies whose armed `leg_f_bind` failure depended on allocation-time listener binding, together with their helper-only dispatch/fault-driving support. Under accepted B-7, `start_alloc` no longer binds listeners; bind happens at the node-shared owner start/repair boundary, so those allocation-time `leg_f_bind` stimuli have no production caller. The deletion is the explicit accepted disposition for the retired per-allocation listener branch and its driving tests (`feature-delta.md:4328-4334`), not a weakening of a current fail-closed invariant. The RED classification had already recorded those legacy stage expectations as baseline mismatches: the actual shared-owner path returns the `shared_owner` stage, not `leg_f_bind` (`red-classification.md:282,1022-1025`).
+
+The bounded diff removes only those four S-MIF-04/05 bodies and their now-unused local helpers from `mtls_install_fail_closed.rs`. The source-local S-MIF-01 action-shim test remains in `action_shim/mod.rs:4386-4417`, retaining the fail-closed row, driver stop, and no-exit-gate-release assertions for typed intercept-install errors. The S-ND295-70 host listener evidence for shared-port inbound/outbound original-destination behavior remains in `mtls_intercept_install.rs`; the S-ND295-70 listener/lifecycle tests and S-ND295-71 recorded-program/refusal tests remain active. No unrelated outcome or assertion was deleted.
+
+### Iteration 3 contract review
+
+| Review area | Result | Evidence |
+|---|---|---|
+| R16 required intercept-port consumption | **RESOLVED** | The worker is now constructed with `config.mtls_intercept.clone()`; the independently reproduced S-ND295-05A boot path advances past the host observation failure. |
+| B-7 shared listener and owner composition | PASS | The same configured adapter reaches the worker's node-shared listener owner. No allocation listener branch or additional public surface was restored. |
+| Retired S-MIF-04/05 tests | PASS | Their `leg_f_bind` allocation-time stimulus is outside the accepted shared-owner boundary. The explicit B-7 branch-and-tests deletion is applied; source-local S-MIF-01 and shared listener/fail-closed evidence remain. |
+| R16 API shape | PASS | The existing three-argument `ServerConfig::new` and worker constructor are unchanged. The required config port is now consumed. |
+| Scope boundary | PASS | No pool logic, network membership, or 06-03 acceptance behavior is included in commit `3c8c65d4`. The after-fix `.3`/`.2` pool result remains assigned to 06-03. |
+| Earlier findings D1 and D2 | RESOLVED | D1's active S-ND295-20 test is restored. D2's old accept helpers and helper-only tests remain deleted. |
+
+### Verification and phase record
+
+The root/orchestrator reports these isolated checks passed:
+
+1. Required serve-port scan — 2 passed.
+2. DNS responder and shared-startup integration selectors — 16 passed.
+3. Worker mTLS intercept unit selector — 31 passed.
+4. Intercept equivalence integration selector — 10 passed.
+5. Host listener original-destination tests — 2 passed.
+6. Sim mTLS intercept unit selector — 20 passed.
+7. Source-local S-MIF-01 — 1 passed.
+8. Workspace check, workspace Clippy with `-D warnings`, and `git diff --check` passed.
+
+The original crafter's RED, GREEN, and COMMIT records are present in the live `execution-log.json` at lines 846-871; the orchestrator confirms no root-authored phase events. The source commit is authored by Marcus, has exactly one `Co-Authored-By: Codex <codex@openai.com>` trailer and `Step-Id: 05-01`, and is isolated from the protected dirty 06-03 work. No host state was cleaned. The reviewer made no source, test, design, or DES-log changes; no mutation test was run.
+
+## Final verdict
+
+**APPROVED.** The R16 required intercept port is consumed by the production worker composition, the B-7 per-allocation listener branch and its obsolete bind-driving bodies are retired as designed, and the source-local fail-closed and shared-listener evidence remains. Iteration 2's D1/D2 corrections also remain intact. The later S-ND295-05A pool-address oracle is still 06-03 work and is not part of this approval.
