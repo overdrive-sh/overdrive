@@ -70,7 +70,8 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// # Errors
 ///
 /// Returns [`PlacementError::NoCapacity`] when no input node has
-/// sufficient free capacity for the `needed` resource envelope; the error
+/// sufficient free capacity for the `needed` resource envelope or the
+/// node's held guest-attachment occupancy has reached the cap; the error
 /// carries `needed` (the requested envelope) and `max_free`
 /// (the largest free envelope across the input nodes after subtracting
 /// running allocations) for actionable diagnostics.
@@ -87,8 +88,6 @@ pub fn schedule(
     current_allocs: &[AllocStatusRow],
     guest_attachments: GuestAttachmentOccupancy,
 ) -> Result<NodeId, PlacementError> {
-    // RED scaffold (D-295-R8): consumed in DELIVER step 07-03.
-    let _ = guest_attachments;
     // Empty-set guard. Phase-1 single-node never produces this branch
     // operationally; the variant exists so the pure function has a
     // total signature (proptest exercises it via `arb_node_map` lower
@@ -105,22 +104,15 @@ pub fn schedule(
     let mut max_free = Resources { cpu_milli: 0, memory_bytes: 0 };
 
     // First-fit: walk in BTreeMap order. The first node whose free
-    // capacity covers the `needed` requested envelope wins. The
+    // capacity covers the `needed` requested envelope wins when the
+    // node-wide held population is below the attachment cap. The
     // `for (node_id, node) in nodes` form drives BTreeMap's in-order
     // iterator — Ord on NodeId, deterministic across any insertion
     // permutation that yields the same set.
     for (node_id, node) in nodes {
-        let active_allocations = current_allocs
-            .iter()
-            .filter(|alloc| alloc.node_id == *node_id && alloc.state == AllocState::Running)
-            .count();
-        if active_allocations >= MAX_GUEST_NETWORK_ATTACHMENTS as usize {
-            continue;
-        }
-
         let free = free_capacity(node, current_allocs, needed);
 
-        if covers(&free, needed) {
+        if guest_attachments.held < MAX_GUEST_NETWORK_ATTACHMENTS && covers(&free, needed) {
             return Ok(node_id.clone());
         }
 

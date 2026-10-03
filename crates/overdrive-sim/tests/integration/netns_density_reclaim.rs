@@ -1190,7 +1190,6 @@ async fn not_yet_due_restart_at_the_cap(seed: u64) {
 /// S-ND295-57 — Leftover networks are reclaimed until released, across stopped and deleted workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 07-03 (S-ND295-57)"]
 async fn leftover_networks_are_reclaimed_until_released_on_every_path() {
     for seed in seeds() {
         eprintln!("seed={seed} body=leftover_networks_are_reclaimed_until_released_on_every_path");
@@ -1202,7 +1201,6 @@ async fn leftover_networks_are_reclaimed_until_released_on_every_path() {
 /// S-ND295-57 — Leftover networks are reclaimed until released, across stopped and deleted workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 07-03 (S-ND295-57)"]
 async fn a_not_yet_due_restart_keeps_its_predecessor_at_the_cap() {
     for seed in seeds() {
         eprintln!("seed={seed} body=a_not_yet_due_restart_keeps_its_predecessor_at_the_cap");

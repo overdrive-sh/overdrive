@@ -214,18 +214,19 @@ test-group = 'host-kernel-shared'
 # The body runs both default seeds (`186055177052160001`, `295032`), each on a
 # fresh node, so the budget covers two fills. One seed's fill ran 186.6 s on the
 # Lima VM in the phase-C run and about 280 s in the fix-pass run (G4-L06, both
-# before their RED verdict), so two fills plus five blocks need up to ~10 min
-# on a loaded VM; DELIVER 07-03 records the GREEN time.
+# before their RED verdict). DELIVER 07-03 passed both default seeds in 650.222 s
+# on Lima, within this existing 25 × 60 s budget; do not reduce either seed or
+# the 16,384 cap.
 [[profile.default.overrides]]
 filter = 'package(overdrive-sim) & binary(integration) & test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)'
 slow-timeout = { period = "60s", terminate-after = 25 }
 
 # netns-density-295 S-ND295-57: the at-cap reclaim proof fills one simulated
 # node to the fixed 16,384 cap per seed through batched action-shim dispatch.
-# At RED the whole body takes 0.8 s (G4-L05); its GREEN cost (the at-cap reconcile
-# evaluations DELIVER 07-03 enables) is unmeasured, so it moved with its
-# every-path sibling into the `overdrive-sim` integration binary with a widened
-# budget until 07-03 records that time (DISTILL review M16). No kernel state.
+# DELIVER 07-03 measured the at-cap body at 177.361 s across its three default
+# seeds, above the default profile's 120 s timeout. It stays with its every-path
+# sibling in the `overdrive-sim` integration binary with this widened budget
+# (DISTILL review M16). No kernel state.
 [[profile.default.overrides]]
 filter = 'package(overdrive-sim) & binary(integration) & test(a_not_yet_due_restart_keeps_its_predecessor_at_the_cap)'
 slow-timeout = { period = "60s", terminate-after = 10 }

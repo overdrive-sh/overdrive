@@ -1300,7 +1300,6 @@ enum Block {
 /// S-ND295-05D — Across a whole node, held attachments never exceed the cap.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER step 07-03 (S-ND295-05D)"]
 async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads() {
     for seed in seeds() {
         eprintln!(

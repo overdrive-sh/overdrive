@@ -876,7 +876,7 @@ their new home.
 |---|---|---|---|---|---|---|---|
 | S-ND295-00 | active | `guest_tcx.rs::bpf_test_run_attribute_ends_in_an_explicit_zeroed_tail` | + | G4-L07 | PASS | PASS (active) — layout pin of the phase-B defect fix `e496722c` | — |
 | S-ND295-01 | active | `guest_stack_mtls_egress.rs::a_capture_bound_to_a_down_tap_reads_every_frame_after_the_up_transition_and_none_before` | + | G4-N01 | PASS | PASS (active) — harness self-test | `S-ND295-01 capture self-test (link-layer): 19 frames (3 host-originated), PacketStatistics { packets: 19, drops: 0 }`; datagram the same |
-| S-ND295-05D | 07-03 | `netns_density_node_admission.rs::node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads` | ~ | G4-L06 | FAIL | RED — preceding-step gap (06-03) | `seed=186055177052160001: harness precondition failed (not a contract verdict): f14823's lease was never released after stop: no guest_network.lease_released { alloc } event … within 6 evaluations` (fill of 16,384 completed first, ~280 s); NA-VIEW/NA-E7/NA-E7-C not reached |
+| S-ND295-05D | 07-03 | `netns_density_node_admission.rs::node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads` | ~ | G4-L06 | FAIL | RED — MISSING_FUNCTIONALITY (own step, after 06-03) | `seed=186055177052160001: after the 16,384 fill, NA-E7-C's immediate re-evaluation emitted a second admission refusal and NA-VIEW saw refusals inside at-cap placement windows` (319.468 s) |
 | S-ND295-05E | 06-03 | `mod.rs::a_refused_restart_successor_still_cleans_up_its_predecessor_once` | ~ | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `guest_network.rs:622:9 :: not yet implemented: RED scaffold: D-295-R7 GuestAddressPool::retire — DELIVER step 06-03` |
 | S-ND295-06 | 06-03 | `mtls_install_fail_closed.rs::restart_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:1546:9 :: assertion `left == right` failed: restart: exactly one LeaseRetired for running-write-reject-restart-successor; journal [Provision, DriverStart, DriverStop, Teardown] left: 0 right: 1` |
 | S-ND295-06 | 06-03 | `mtls_install_fail_closed.rs::start_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last` | + | G4-L03 | FAIL | RED — MISSING_FUNCTIONALITY (own step) | `mtls_install_fail_closed.rs:1546:9 :: assertion `left == right` failed: fresh start: exactly one LeaseRetired for running-write-reject-start; journal [Provision, DriverStart, DriverStop, Teardown] left: 0 right: 1` |
@@ -1045,12 +1045,14 @@ classified `G4-*-classified.tsv` files).
 
 ### Observations for DELIVER
 
-- S-ND295-05D: one seed's fill of 16,384 took about 280 s on the loaded Lima VM
-  (Phase C: 186.6 s); the nextest budget is now 25 × 60 s for two seeds. The body
-  reached no NA verdict at RED (the 06-03 lease events are its precondition), so
-  NA-VIEW, NA-E7, and the contended-slot NA-E7-C are first observed at 07-03.
-- S-ND295-57's at-cap body reaches RED in 0.836 s and S-ND295-13A in 0.91 s (the
-  first case fails); both GREEN times are 07-03 / 08-02 review items.
+- S-ND295-05D: the post-06-03 RED run filled 16,384 and reached the placement
+  oracles in 319.468 s. GREEN passed in 324.884 s for seed
+  `186055177052160001`, and in 650.222 s for both default seeds
+  (`186055177052160001`, `295032`), within the existing 25 × 60 s budget.
+- S-ND295-57's at-cap body passed GREEN in 177.361 s across its three default
+  seeds, above the default profile's 120 s timeout; it remains in the sim
+  integration binary with its existing widened budget. S-ND295-13A's GREEN time
+  remains an 08-02 review item.
 - `--run-ignored all` over pending proptests writes `proptest-regressions`
   files that only seed RED cases; the fix pass deleted them and a DELIVER step
   should not commit them.

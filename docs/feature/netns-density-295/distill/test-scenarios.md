@@ -1052,13 +1052,13 @@ AND at the cap a predecessor whose restart is not yet due is left to its restart
 |---|---|
 | Discharges | E9 seeded; G0/r3; D-295-R11 |
 | Contract shape | bounded-change |
-| Lane | seeded-sim (`overdrive-sim` integration binary behind `integration-tests`: the at-cap body fills one node to 16,384 per seed, and its GREEN cost is unmeasured until 07-03, so it carries a nextest budget override; its every-path sibling shares the file's fixture; DISTILL review M16) |
+| Lane | seeded-sim (`overdrive-sim` integration binary behind `integration-tests`: the at-cap body fills one node to 16,384 per seed; DELIVER 07-03 measured 177.361 s across three default seeds, above the default profile's 120 s timeout, so it retains the nextest budget override; its every-path sibling shares the file's fixture; DISTILL review M16) |
 | Driving port | convergence-tick + dispatch seams over sim adapters (as S-ND295-05D) |
 | Fault stimulus | `SimSharedGuestNetworkOwner::script_teardown_failure` armed for N seeded attempts |
 | Oracle | re-dispatch instants at least one second apart per allocation; `guest_network.lease_released { alloc }` after disarm; no row write from reclaim; not-yet-due-at-cap predecessor gets no reclaim until due |
-| Seed / isolation | `OVERDRIVE_ND295_RECLAIM_SEEDS`, printed per verdict; no wall time (only `SimClock`; DISTILL review DR-14). At RED the at-cap body reaches its verdict in 0.8 s (`red-classification.md` Phase G) |
+| Seed / isolation | `OVERDRIVE_ND295_RECLAIM_SEEDS`, printed per verdict; no wall time (only `SimClock`; DISTILL review DR-14). The at-cap GREEN body took 177.361 s across three default seeds (`red-classification.md` DELIVER observations) |
 | Rust home | NEW `crates/overdrive-sim/tests/integration/netns_density_reclaim.rs::{leftover_networks_are_reclaimed_until_released_on_every_path, a_not_yet_due_restart_keeps_its_predecessor_at_the_cap}` (MOVED from `tests/acceptance/`) |
-| Disposition / step | NEW + MOVED — 07-03 (a 07-03 review item: record the GREEN run time and move the file back to the acceptance binary if it fits the default lane) |
+| Disposition / step | NEW + MOVED — 07-03 (the at-cap GREEN duration exceeds the default lane, so the file stays in the integration binary) |
 
 ### Group F — Cleanup-pending operator status (R20, user ruling 6)
 

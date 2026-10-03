@@ -11,7 +11,7 @@ use overdrive_core::aggregate::{
     IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
     WorkloadKind,
 };
-use overdrive_core::guest_network::GuestAttachmentOccupancy;
+use overdrive_core::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::GuestAttachmentObservation;
@@ -223,6 +223,7 @@ impl Reconciler for WorkloadLifecycle {
         let release_pair = service_vip_release_emission(desired, view);
 
         let (mut actions, mut next_view) = Self::reconcile_inner(desired, actual, view, tick);
+        append_reclaim_actions(&mut actions, &mut next_view, desired, actual, view, tick);
         if let Some((release_action, released_digest)) = release_pair {
             actions.push(release_action);
             next_view.released_for_deletion.insert(released_digest);
@@ -308,9 +309,7 @@ impl Reconciler for WorkloadLifecycle {
         hydrate_workload_lifecycle_actual(ctx, &workload_id).await
     }
 
-    /// Return the future restart boundary for the candidate selected by the
-    /// current Run branch, when that candidate is suppressed only by its
-    /// persisted backoff inputs.
+    /// Return the earliest future restart or reclaim retry boundary.
     fn next_evaluation_at(
         &self,
         desired: &Self::State,
@@ -318,59 +317,215 @@ impl Reconciler for WorkloadLifecycle {
         view: &Self::View,
         tick: &TickContext,
     ) -> Option<UnixInstant> {
-        if desired.desired_to_stop && desired.job.is_some() {
-            return None;
-        }
-        let _job = desired.job.as_ref()?;
-        let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
-        let restart_pending = view.observed_generation < desired.generation;
-
-        if desired.workload_kind == WorkloadKind::Job
-            && !restart_pending
-            && current_alloc(&allocs).is_some_and(|row| {
-                matches!(
-                    row.terminal,
-                    Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
-                )
-            })
-        {
-            return None;
-        }
-
-        let active_allocs: Vec<&AllocStatusRow> =
-            allocs.iter().filter(|row| !is_intentionally_stopped(row)).copied().collect();
-        if active_allocs.iter().any(|row| row.state == AllocState::Running) {
-            return None;
-        }
-        let current = current_alloc(&allocs);
-        if current.is_some_and(|row| row.state == AllocState::Draining) {
-            return None;
-        }
-        if !restart_pending && current.is_some_and(is_operator_stopped) {
-            return None;
-        }
-
-        if desired.workload_kind == WorkloadKind::Job
-            && let Some(row) = active_allocs.iter().find(|row| is_natural_exit(row))
-        {
-            if matches!(
-                row.terminal,
-                Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
-            ) {
+        let restart_boundary = (|| {
+            if desired.desired_to_stop && desired.job.is_some() {
                 return None;
             }
-            return None;
+            let _job = desired.job.as_ref()?;
+            let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
+            let restart_pending = view.observed_generation < desired.generation;
+
+            if desired.workload_kind == WorkloadKind::Job
+                && !restart_pending
+                && current_alloc(&allocs).is_some_and(|row| {
+                    matches!(
+                        row.terminal,
+                        Some(
+                            TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. }
+                        )
+                    )
+                })
+            {
+                return None;
+            }
+
+            let active_allocs: Vec<&AllocStatusRow> =
+                allocs.iter().filter(|row| !is_intentionally_stopped(row)).copied().collect();
+            if active_allocs.iter().any(|row| row.state == AllocState::Running) {
+                return None;
+            }
+            let current = current_alloc(&allocs);
+            if current.is_some_and(|row| row.state == AllocState::Draining) {
+                return None;
+            }
+            if !restart_pending && current.is_some_and(is_operator_stopped) {
+                return None;
+            }
+
+            if desired.workload_kind == WorkloadKind::Job
+                && let Some(row) = active_allocs.iter().find(|row| is_natural_exit(row))
+            {
+                if matches!(
+                    row.terminal,
+                    Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
+                ) {
+                    return None;
+                }
+                return None;
+            }
+
+            let failed = current.filter(|row| is_restartable(row))?;
+            let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+            if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
+                return None;
+            }
+            let seen_at = view.last_failure_seen_at.get(&failed.alloc_id)?;
+            let deadline = restart_retry_deadline(*seen_at, attempts);
+            (tick.now_unix < deadline).then_some(deadline)
+        })();
+
+        let (actions, _) = Self::reconcile_inner(desired, actual, view, tick);
+        let reclaim_boundary = next_reclaim_evaluation_at(desired, actual, view, tick, &actions);
+        [restart_boundary, reclaim_boundary].into_iter().flatten().min()
+    }
+}
+
+/// Allocations named by a non-reclaim action whose cleanup it owns.
+fn reclaim_action_owners(actions: &[Action]) -> BTreeSet<AllocationId> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::StartAllocation { alloc_id, .. }
+            | Action::RestartAllocation { alloc_id, .. }
+            | Action::StopAllocation { alloc_id, .. }
+            | Action::FinalizeFailed { alloc_id, .. } => Some(alloc_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Return the current allocation whose pending restart still owns its one-shot
+/// predecessor cleanup, unless it is due at the attachment cap.
+fn pending_restart_owner<'a>(
+    desired: &WorkloadLifecycleState,
+    actual: &'a WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+    tick: &TickContext,
+) -> Option<&'a AllocationId> {
+    if desired.desired_to_stop || desired.job.is_none() {
+        return None;
+    }
+
+    let allocations: Vec<&AllocStatusRow> = actual.allocations.values().collect();
+    let current = current_alloc(&allocations)?;
+    let generation_replacement = view.observed_generation < desired.generation;
+    if desired.workload_kind == WorkloadKind::Job
+        && !generation_replacement
+        && matches!(
+            current.terminal,
+            Some(TerminalCondition::Completed { .. } | TerminalCondition::Failed { .. })
+        )
+    {
+        return None;
+    }
+    if !(is_restartable(current) || generation_replacement && is_operator_stopped(current)) {
+        return None;
+    }
+
+    let attempts = view.restart_counts.get(&current.alloc_id).copied().unwrap_or(0);
+    if attempts >= RESTART_BACKOFF_CEILING
+        && !is_platform_reclaimed(current)
+        && !generation_replacement
+    {
+        return None;
+    }
+
+    let restart_not_due = !generation_replacement
+        && view
+            .last_failure_seen_at
+            .get(&current.alloc_id)
+            .is_some_and(|seen_at| tick.now_unix < restart_retry_deadline(*seen_at, attempts));
+    if restart_not_due || actual.guest_attachments.occupancy.held < MAX_GUEST_NETWORK_ATTACHMENTS {
+        return Some(&current.alloc_id);
+    }
+    None
+}
+
+/// Finished rows with a lease and no other cleanup owner, in allocation-id
+/// order. A due restart predecessor is reclaimable only at the node cap.
+fn reclaimable_allocations(
+    desired: &WorkloadLifecycleState,
+    actual: &WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+    tick: &TickContext,
+    actions: &[Action],
+) -> Vec<AllocationId> {
+    let owned = reclaim_action_owners(actions);
+    let already_reclaimed: BTreeSet<AllocationId> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::ReclaimAllocationNetwork { alloc_id } => Some(alloc_id.clone()),
+            _ => None,
+        })
+        .collect();
+    let pending_restart = pending_restart_owner(desired, actual, view, tick);
+
+    actual
+        .allocations
+        .iter()
+        .filter_map(|(alloc_id, row)| {
+            if !matches!(row.state, AllocState::Failed | AllocState::Terminated)
+                || !actual.guest_attachments.leases.contains_key(alloc_id)
+                || owned.contains(alloc_id)
+                || already_reclaimed.contains(alloc_id)
+                || pending_restart == Some(alloc_id)
+            {
+                return None;
+            }
+            Some(alloc_id.clone())
+        })
+        .collect()
+}
+
+/// Append due row-neutral reclaims and persist only their retry inputs.
+fn append_reclaim_actions(
+    actions: &mut Vec<Action>,
+    next_view: &mut WorkloadLifecycleView,
+    desired: &WorkloadLifecycleState,
+    actual: &WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+    tick: &TickContext,
+) {
+    let candidates = reclaimable_allocations(desired, actual, view, tick, actions);
+    let mut reclaim_attempts = next_view.reclaim_attempts.clone();
+    let mut reclaim_emitted_at = next_view.reclaim_emitted_at.clone();
+    reclaim_attempts.retain(|alloc_id, _| actual.guest_attachments.leases.contains_key(alloc_id));
+    reclaim_emitted_at.retain(|alloc_id, _| actual.guest_attachments.leases.contains_key(alloc_id));
+
+    for alloc_id in candidates {
+        let prior_attempts = view.reclaim_attempts.get(&alloc_id).copied().unwrap_or(0);
+        if view.reclaim_emitted_at.get(&alloc_id).is_some_and(|last_emitted| {
+            tick.now_unix < *last_emitted + backoff_for_attempt(prior_attempts)
+        }) {
+            continue;
         }
 
-        let failed = current.filter(|row| is_restartable(row))?;
-        let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-        if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
-            return None;
-        }
-        let seen_at = view.last_failure_seen_at.get(&failed.alloc_id)?;
-        let deadline = restart_retry_deadline(*seen_at, attempts);
-        (tick.now_unix < deadline).then_some(deadline)
+        actions.push(Action::ReclaimAllocationNetwork { alloc_id: alloc_id.clone() });
+        reclaim_attempts.insert(alloc_id.clone(), prior_attempts.saturating_add(1));
+        reclaim_emitted_at.insert(alloc_id, tick.now_unix);
     }
+
+    next_view.reclaim_attempts = reclaim_attempts;
+    next_view.reclaim_emitted_at = reclaim_emitted_at;
+}
+
+/// Earliest future retry deadline for an otherwise-unowned reclaim candidate.
+fn next_reclaim_evaluation_at(
+    desired: &WorkloadLifecycleState,
+    actual: &WorkloadLifecycleState,
+    view: &WorkloadLifecycleView,
+    tick: &TickContext,
+    actions: &[Action],
+) -> Option<UnixInstant> {
+    reclaimable_allocations(desired, actual, view, tick, actions)
+        .into_iter()
+        .filter_map(|alloc_id| {
+            let last_emitted = view.reclaim_emitted_at.get(&alloc_id)?;
+            let attempts = view.reclaim_attempts.get(&alloc_id).copied().unwrap_or(0);
+            let deadline = *last_emitted + backoff_for_attempt(attempts);
+            (tick.now_unix < deadline).then_some(deadline)
+        })
+        .min()
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +682,8 @@ async fn hydrate_workload_lifecycle_actual(
     for row in rows.into_iter().filter(|r| &r.workload_id == workload_id) {
         allocations.insert(row.alloc_id.clone(), row);
     }
+    let allocation_ids = allocations.keys().cloned().collect::<Vec<_>>();
+    let guest_attachments = ctx.guest_attachments.observe(&allocation_ids);
     let nodes = baseline_nodes_phase1();
     let workload_kind = read_workload_kind(ctx, workload_id).await?;
     let (_, intent_digest, _, _) = read_job(ctx, workload_id).await?;
@@ -543,14 +700,12 @@ async fn hydrate_workload_lifecycle_actual(
         service_spec_digest,
         probe_descriptors: Vec::new(),
         service_ports: Vec::new(),
-        guest_attachments: unobserved_guest_attachments(),
+        guest_attachments,
     })
 }
 
-/// The guest-attachment observation hydration supplies until the read-port
-/// read lands.
-// RED scaffold (D-295-R8): consumed in DELIVER step 07-03, which replaces this
-// with `ctx.guest_attachments.observe(<this workload's row allocation ids>)`.
+/// The desired projection has no allocation rows to request from the
+/// guest-attachment read-port.
 const fn unobserved_guest_attachments() -> GuestAttachmentObservation {
     GuestAttachmentObservation {
         occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
@@ -1038,6 +1193,12 @@ impl WorkloadLifecycle {
                         && tick.now_unix < restart_retry_deadline(*seen_at, attempts)
                     {
                         // Backoff window not yet elapsed.
+                        return (Vec::new(), view.clone());
+                    }
+                    // At the node cap, the row-neutral reclaim pass below
+                    // owns a leased predecessor. Without a lease, placement
+                    // waits for a later occupancy change.
+                    if actual.guest_attachments.occupancy.held >= MAX_GUEST_NETWORK_ATTACHMENTS {
                         return (Vec::new(), view.clone());
                     }
                     let Some(attempt) = next_allocation_attempt(&allocs_vec, view) else {
@@ -3025,7 +3186,6 @@ mod restart_gating_acceptance {
         /// the predecessor is cleaned up first.
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-05C)"]
         fn a_due_restart_counts_its_predecessor_and_reclaims_it_first_at_the_cap(
             held in held_strategy(),
             lease in lease_strategy(),
@@ -3124,7 +3284,6 @@ mod restart_gating_acceptance {
         /// budget and never reuses the reserved successor id.
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-05C)"]
         fn a_raced_restart_refusal_consumes_no_restart_budget(
             attempts in 0..RESTART_BACKOFF_CEILING,
             raced_refusals in 1_u32..=(RESTART_BACKOFF_CEILING + 3),
@@ -3446,7 +3605,6 @@ mod reclaim_emission_acceptance {
         /// from every reconcile path.
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
         fn every_return_path_reclaims_leased_unowned_finished_allocations(
             (path, leftovers, current_lease) in scenario_strategy(),
             other_workloads_held in 0_u32..=64,
@@ -3529,7 +3687,6 @@ mod reclaim_emission_acceptance {
         /// at the cap; superseded leftovers are reclaimed meanwhile.
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
         fn a_pending_restart_owns_its_predecessor_until_due_at_the_cap(
             held in prop_oneof![2..CAP - 1, (CAP - 1)..=(CAP + 1), (CAP + 2)..=u32::MAX],
             predecessor_lease in prop::sample::select(vec![
@@ -3594,7 +3751,6 @@ mod reclaim_emission_acceptance {
         /// S-ND295-55 — A failing reclaim backs off one second and never stops.
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-55)"]
         fn a_failing_reclaim_backs_off_one_second_and_never_stops(
             failures in 1_u32..=(RESTART_BACKOFF_CEILING * 3),
             early_ms in 1_u64..=999,

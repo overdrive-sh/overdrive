@@ -11712,7 +11712,6 @@ mod pool_acceptance {
         /// unrequested allocation are omitted), and it changes nothing:
         /// `snapshot` is equal before and after and a second read is equal.
         #[test]
-        #[ignore = "pending DELIVER step 07-03 (S-ND295-05B)"]
         fn observe_reads_occupancy_and_requested_leases_in_one_snapshot_and_changes_nothing(
             operations in prop::collection::vec(lease_op(), 0..128),
             requested in prop::collection::vec(0_u16..KEYS + 16, 0..24),

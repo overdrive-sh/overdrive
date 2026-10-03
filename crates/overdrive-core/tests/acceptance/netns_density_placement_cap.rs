@@ -116,7 +116,6 @@ proptest! {
     /// workload's rows.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 07-03 (S-ND295-05B)"]
     fn placement_refuses_exactly_when_held_attachments_reach_the_cap(
         (held, retiring) in held_strategy().prop_flat_map(|held| (Just(held), 0..=held)),
         own_row_count in own_row_count_strategy(),
